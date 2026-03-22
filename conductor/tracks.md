@@ -4,5 +4,5 @@ This file tracks all major tracks for the project. Each track has its own detail
 
 ---
 
-- [~] **Track: Implement core ordered key-value storage engine with ACID guarantees**
+- [x] **Track: Implement core ordered key-value storage engine with ACID guarantees**
   *Link: [./tracks/storage_engine_20260322/](./tracks/storage_engine_20260322/)*
