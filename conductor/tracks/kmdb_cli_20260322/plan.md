@@ -14,7 +14,7 @@
 
 ## Phase 3: Metadata & Maintenance Commands
 -   [x] Task: Implement metadata commands: `list-dbs`, `list-namespaces`, `list-indexes`. 0c7d6dc
--   [~] Task: Implement maintenance commands: `compact`, `check-integrity`, `backup`.
+-   [x] Task: Implement maintenance commands: `compact`, `check-integrity`, `backup`. c325edd
 -   [ ] Task: Conductor - User Manual Verification 'Phase 3: Metadata & Maintenance Commands' (Protocol in workflow.md)
 
 ## Phase 4: Batch & Interactive Modes
