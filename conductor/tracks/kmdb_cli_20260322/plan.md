@@ -13,7 +13,7 @@
 -   [x] Task: Conductor - User Manual Verification 'Phase 2: CLI Core Foundation & DB Creation' (Protocol in workflow.md)
 
 ## Phase 3: Metadata & Maintenance Commands
--   [ ] Task: Implement metadata commands: `list-dbs`, `list-namespaces`, `list-indexes`.
+-   [~] Task: Implement metadata commands: `list-dbs`, `list-namespaces`, `list-indexes`.
 -   [ ] Task: Implement maintenance commands: `compact`, `check-integrity`, `backup`.
 -   [ ] Task: Conductor - User Manual Verification 'Phase 3: Metadata & Maintenance Commands' (Protocol in workflow.md)
 

@@ -26,5 +26,23 @@ void main() {
       final result = parser.parse(['mydb.db', '--file', 'script.kmd']);
       expect(result.isInteractive, isFalse);
     });
+
+    test('parses list-dbs subcommand', () {
+      final parser = CommandLineParser();
+      final result = parser.parse(['list-dbs']);
+      expect(result.subcommand, equals('list-dbs'));
+    });
+
+    test('parses list-namespaces subcommand', () {
+      final parser = CommandLineParser();
+      final result = parser.parse(['mydb.db', 'list-namespaces']);
+      expect(result.subcommand, equals('list-namespaces'));
+    });
+
+    test('parses list-indexes subcommand', () {
+      final parser = CommandLineParser();
+      final result = parser.parse(['mydb.db', 'list-indexes']);
+      expect(result.subcommand, equals('list-indexes'));
+    });
   });
 }
