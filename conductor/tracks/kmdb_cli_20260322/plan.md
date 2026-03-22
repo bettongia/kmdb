@@ -7,7 +7,7 @@
 -   [x] Task: Conductor - User Manual Verification 'Phase 1: Workspace Restructuring' (Protocol in workflow.md)
 
 ## Phase 2: CLI Core Foundation & DB Creation
--   [ ] Task: Implement command-line argument parsing structure for the CLI.
+-   [~] Task: Implement command-line argument parsing structure for the CLI.
 -   [ ] Task: Implement automatic database file creation logic for non-existent database paths.
 -   [ ] Task: Add desktop platform checks to the CLI initialization.
 -   [ ] Task: Conductor - User Manual Verification 'Phase 2: CLI Core Foundation & DB Creation' (Protocol in workflow.md)
