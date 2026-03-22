@@ -16,7 +16,6 @@ class StorageEngine {
   final String path;
   RandomAccessFile? _file;
   
-  // Use SplayTreeMap for ordered storage in memory
   final SplayTreeMap<Uint8List, Uint8List> _memTable = 
       SplayTreeMap<Uint8List, Uint8List>(compareUint8Lists);
 
@@ -28,10 +27,7 @@ class StorageEngine {
       await file.create(recursive: true);
     }
     
-    // Read existing data first
     await _loadFromDisk();
-
-    // Open for appending new data
     _file = await file.open(mode: FileMode.append);
   }
 
@@ -43,35 +39,42 @@ class StorageEngine {
     var offset = 0;
     while (offset < bytes.length) {
       try {
+        if (offset + 4 > bytes.length) break;
         final byteData = ByteData.view(bytes.buffer, bytes.offsetInBytes + offset);
         
         // Key length
         final keyLen = byteData.getUint32(0);
         final keyOffset = offset + 4;
+        if (keyOffset + keyLen > bytes.length) break;
         final key = bytes.sublist(keyOffset, keyOffset + keyLen);
         
         // Value length
         final valLenOffset = keyOffset + keyLen;
+        if (valLenOffset + 4 > bytes.length) break;
         final valLen = byteData.getUint32(valLenOffset - offset);
         final valOffset = valLenOffset + 4;
+        if (valOffset + valLen > bytes.length) break;
         final value = bytes.sublist(valOffset, valOffset + valLen);
         
         _memTable[key] = value;
         offset = valOffset + valLen;
       } catch (e) {
-        // Stop on corruption or EOF
         break;
       }
     }
   }
 
+  /// Puts a key-value pair and ensures it is durable (ACID: Durability).
   Future<void> put(Uint8List key, Uint8List value) async {
     _memTable[key] = value;
     
     if (_file != null) {
       final encoded = StorageFormat.encodeEntry(key, value);
+      // ACID: Atomicity and Durability - Ensure write is flushed to OS buffer and synced to disk
       await _file!.writeFrom(encoded);
       await _file!.flush();
+      // On most modern OSs, flush() on RandomAccessFile calls fsync/FlushFileBuffers
+      // which satisfies the Durability requirement of ACID.
     }
   }
 
@@ -79,22 +82,44 @@ class StorageEngine {
     return _memTable[key];
   }
 
-  /// Returns all entries in lexicographical order.
   Future<List<StorageEntry>> getAll() async {
     return _memTable.entries
         .map((e) => StorageEntry(e.key, e.value))
         .toList();
   }
 
-  /// Returns entries within the given range [start, end] inclusive.
   Future<List<StorageEntry>> getRange(Uint8List start, Uint8List end) async {
-    // SplayTreeMap doesn't have a built-in range method like some other languages,
-    // so we use skipWhile and takeWhile on the entries.
     return _memTable.entries
         .where((e) => compareUint8Lists(e.key, start) >= 0 && 
                      compareUint8Lists(e.key, end) <= 0)
         .map((e) => StorageEntry(e.key, e.value))
         .toList();
+  }
+
+  /// Rewrites the entire database file to reclaim space and ensure a clean state.
+  /// Uses an atomic rename for safety (ACID: Atomicity).
+  Future<void> compact() async {
+    final tempPath = '$path.tmp';
+    final tempFile = File(tempPath);
+    if (await tempFile.exists()) await tempFile.delete();
+    
+    final raf = await tempFile.open(mode: FileMode.write);
+    try {
+      for (final entry in _memTable.entries) {
+        final encoded = StorageFormat.encodeEntry(entry.key, entry.value);
+        await raf.writeFrom(encoded);
+      }
+      await raf.flush();
+    } finally {
+      await raf.close();
+    }
+
+    // Atomic rename
+    await _file?.close();
+    await tempFile.rename(path);
+    
+    // Re-open for append
+    _file = await File(path).open(mode: FileMode.append);
   }
 
   Future<void> close() async {

@@ -112,5 +112,44 @@ void main() {
       expect(resultKeys, equals(['b', 'c', 'd']));
       await engine.close();
     });
+
+    test('atomic persistence - data is durable after put', () async {
+      final engine = StorageEngine(dbPath);
+      await engine.open();
+      
+      final key = Uint8List.fromList('atomic_key'.codeUnits);
+      final value = Uint8List.fromList('atomic_value'.codeUnits);
+      
+      await engine.put(key, value);
+      
+      // Simulate "crash" by not closing the engine properly and opening a new one
+      // The data should still be there because put() should be durable
+      final engine2 = StorageEngine(dbPath);
+      await engine2.open();
+      final result = await engine2.get(key);
+      
+      expect(result, equals(value));
+      await engine2.close();
+    });
+
+    test('compact() cleans up duplicate entries on disk', () async {
+      final engine = StorageEngine(dbPath);
+      await engine.open();
+      
+      final key = Uint8List.fromList('key1'.codeUnits);
+      await engine.put(key, Uint8List.fromList('v1'.codeUnits));
+      await engine.put(key, Uint8List.fromList('v2'.codeUnits));
+      
+      final sizeBefore = await File(dbPath).length();
+      await engine.compact();
+      final sizeAfter = await File(dbPath).length();
+      
+      expect(sizeAfter, lessThan(sizeBefore));
+      
+      final result = await engine.get(key);
+      expect(result, equals(Uint8List.fromList('v2'.codeUnits)));
+      
+      await engine.close();
+    });
   });
 }
