@@ -6,11 +6,11 @@
 -   [x] Task: Update dependencies and imports across the workspace to reflect the new structure. 8e144ff
 -   [x] Task: Conductor - User Manual Verification 'Phase 1: Workspace Restructuring' (Protocol in workflow.md)
 
-## Phase 2: CLI Core Foundation & DB Creation
+## Phase 2: CLI Core Foundation & DB Creation [checkpoint: 2bacc3e]
 -   [x] Task: Implement command-line argument parsing structure for the CLI. b96816f
 -   [x] Task: Implement automatic database file creation logic for non-existent database paths. 6d58623
 -   [x] Task: Add desktop platform checks to the CLI initialization. dcaa1f2
--   [ ] Task: Conductor - User Manual Verification 'Phase 2: CLI Core Foundation & DB Creation' (Protocol in workflow.md)
+-   [x] Task: Conductor - User Manual Verification 'Phase 2: CLI Core Foundation & DB Creation' (Protocol in workflow.md)
 
 ## Phase 3: Metadata & Maintenance Commands
 -   [ ] Task: Implement metadata commands: `list-dbs`, `list-namespaces`, `list-indexes`.
