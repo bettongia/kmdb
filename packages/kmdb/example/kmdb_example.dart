@@ -1,5 +1,5 @@
 import 'dart:typed_data';
-import 'package:aurochs_kmdb/kmdb.dart';
+import 'package:kmdb/kmdb.dart';
 import 'package:path/path.dart' as p;
 import 'dart:io';
 

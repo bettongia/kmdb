@@ -1,13 +1,14 @@
 name: kmdb_cli
 description: CLI for kmdb database.
 version: 1.0.0
+publish_to: none
 resolution: workspace
 
 environment:
   sdk: ^3.10.8
 
 dependencies:
-  aurochs_kmdb:
+  kmdb:
     path: ../kmdb
   args: ^2.4.2
   path: ^1.9.1

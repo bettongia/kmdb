@@ -1,6 +1,6 @@
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:aurochs_kmdb/src/storage_engine.dart';
+import 'package:kmdb/src/storage_engine.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 

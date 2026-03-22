@@ -1,5 +1,5 @@
 import 'dart:typed_data';
-import 'package:aurochs_kmdb/src/storage_format.dart';
+import 'package:kmdb/src/storage_format.dart';
 import 'package:test/test.dart';
 
 void main() {
