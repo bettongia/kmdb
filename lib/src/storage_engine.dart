@@ -39,42 +39,27 @@ class StorageEngine {
     var offset = 0;
     while (offset < bytes.length) {
       try {
-        if (offset + 4 > bytes.length) break;
-        final byteData = ByteData.view(bytes.buffer, bytes.offsetInBytes + offset);
+        final remainingData = bytes.sublist(offset);
+        final entry = StorageFormat.decodeEntry(remainingData);
         
-        // Key length
-        final keyLen = byteData.getUint32(0);
-        final keyOffset = offset + 4;
-        if (keyOffset + keyLen > bytes.length) break;
-        final key = bytes.sublist(keyOffset, keyOffset + keyLen);
-        
-        // Value length
-        final valLenOffset = keyOffset + keyLen;
-        if (valLenOffset + 4 > bytes.length) break;
-        final valLen = byteData.getUint32(valLenOffset - offset);
-        final valOffset = valLenOffset + 4;
-        if (valOffset + valLen > bytes.length) break;
-        final value = bytes.sublist(valOffset, valOffset + valLen);
-        
-        _memTable[key] = value;
-        offset = valOffset + valLen;
+        _memTable[entry.key] = entry.value;
+        // Format: checksum (1) + keyLen (4) + key + valLen (4) + value
+        offset += 1 + 4 + entry.key.length + 4 + entry.value.length;
       } catch (e) {
+        // If corruption is detected, we stop loading from this file.
+        // In a more complex engine, we could attempt to skip the corrupted block.
         break;
       }
     }
   }
 
-  /// Puts a key-value pair and ensures it is durable (ACID: Durability).
   Future<void> put(Uint8List key, Uint8List value) async {
     _memTable[key] = value;
     
     if (_file != null) {
       final encoded = StorageFormat.encodeEntry(key, value);
-      // ACID: Atomicity and Durability - Ensure write is flushed to OS buffer and synced to disk
       await _file!.writeFrom(encoded);
       await _file!.flush();
-      // On most modern OSs, flush() on RandomAccessFile calls fsync/FlushFileBuffers
-      // which satisfies the Durability requirement of ACID.
     }
   }
 
@@ -96,8 +81,6 @@ class StorageEngine {
         .toList();
   }
 
-  /// Rewrites the entire database file to reclaim space and ensure a clean state.
-  /// Uses an atomic rename for safety (ACID: Atomicity).
   Future<void> compact() async {
     final tempPath = '$path.tmp';
     final tempFile = File(tempPath);
@@ -114,11 +97,8 @@ class StorageEngine {
       await raf.close();
     }
 
-    // Atomic rename
     await _file?.close();
     await tempFile.rename(path);
-    
-    // Re-open for append
     _file = await File(path).open(mode: FileMode.append);
   }
 

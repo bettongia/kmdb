@@ -151,5 +151,27 @@ void main() {
       
       await engine.close();
     });
+
+    test('corruption detection - ignores corrupted entries', () async {
+      final engine = StorageEngine(dbPath);
+      await engine.open();
+      
+      final key = Uint8List.fromList('safe_key'.codeUnits);
+      await engine.put(key, Uint8List.fromList('safe_value'.codeUnits));
+      await engine.close();
+      
+      // Manually corrupt the file by flipping a bit in the data
+      final file = File(dbPath);
+      final bytes = await file.readAsBytes();
+      bytes[bytes.length - 1] ^= 0xFF; 
+      await file.writeAsBytes(bytes);
+      
+      final engine2 = StorageEngine(dbPath);
+      await engine2.open();
+      // The corrupted entry should be ignored
+      final result = await engine2.get(key);
+      expect(result, isNull);
+      await engine2.close();
+    });
   });
 }

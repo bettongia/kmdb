@@ -15,6 +15,17 @@ void main() {
       expect(decoded.value, equals(value));
     });
 
+    test('detects corruption', () {
+      final key = Uint8List.fromList('key1'.codeUnits);
+      final value = Uint8List.fromList('value1'.codeUnits);
+      final encoded = StorageFormat.encodeEntry(key, value);
+      
+      // Corrupt the data
+      encoded[encoded.length - 1] ^= 0xFF;
+      
+      expect(() => StorageFormat.decodeEntry(encoded), throwsException);
+    });
+
     test('serializes and deserializes multiple entries', () {
       final entries = [
         MapEntry(Uint8List.fromList('k1'.codeUnits), Uint8List.fromList('v1'.codeUnits)),
