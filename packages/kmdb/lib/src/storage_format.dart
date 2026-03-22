@@ -1,13 +1,65 @@
+/*
+ Copyright 2026 The Aurochs KMesh Authors
+
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+      https://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+ */
+
+import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:collection/collection.dart';
+
+/// Represents a single key-value entry in the storage.
 class StorageEntry {
+  /// The key associated with this entry.
   final Uint8List key;
+  
+  /// The value associated with this entry.
   final Uint8List value;
+  
+  /// The checksum of the key and value for data integrity.
   final int checksum;
 
+  /// Creates a new [StorageEntry] with the given [key], [value], and optional [checksum].
   StorageEntry(this.key, this.value, {this.checksum = 0});
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is StorageEntry &&
+          runtimeType == other.runtimeType &&
+          const ListEquality().equals(key, other.key) &&
+          const ListEquality().equals(value, other.value) &&
+          checksum == other.checksum;
+
+  @override
+  int get hashCode =>
+      const ListEquality().hash(key) ^
+      const ListEquality().hash(value) ^
+      checksum.hashCode;
+
+  @override
+  String toString() => json.encode(toMap());
+
+  /// Returns a [Map] representation of this instance.
+  Map<String, dynamic> toMap() => {
+        'key': base64Encode(key),
+        'value': base64Encode(value),
+        'checksum': checksum,
+      };
 }
 
+/// A utility class for encoding and decoding the kmdb storage format.
 class StorageFormat {
   /// Simple XOR checksum for data integrity.
   static int computeChecksum(Uint8List key, Uint8List value) {
@@ -71,7 +123,7 @@ class StorageFormat {
     return StorageEntry(key, value, checksum: storedChecksum);
   }
 
-  /// Encodes multiple entries.
+  /// Encodes multiple entries into a single byte array.
   static Uint8List encodeEntries(List<MapEntry<Uint8List, Uint8List>> entries) {
     final builder = BytesBuilder();
     
@@ -85,7 +137,7 @@ class StorageFormat {
     return builder.toBytes();
   }
 
-  /// Decodes multiple entries.
+  /// Decodes multiple entries from a byte array.
   static List<StorageEntry> decodeEntries(Uint8List data) {
     final byteData = ByteData.view(data.buffer, data.offsetInBytes, data.length);
     var offset = 0;
@@ -108,4 +160,18 @@ class StorageFormat {
     
     return result;
   }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is StorageFormat && runtimeType == other.runtimeType;
+
+  @override
+  int get hashCode => runtimeType.hashCode;
+
+  @override
+  String toString() => json.encode(toMap());
+
+  /// Returns a [Map] representation of this instance.
+  Map<String, dynamic> toMap() => {};
 }
