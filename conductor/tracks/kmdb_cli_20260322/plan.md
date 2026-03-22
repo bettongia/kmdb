@@ -8,7 +8,7 @@
 
 ## Phase 2: CLI Core Foundation & DB Creation
 -   [x] Task: Implement command-line argument parsing structure for the CLI. b96816f
--   [ ] Task: Implement automatic database file creation logic for non-existent database paths.
+-   [~] Task: Implement automatic database file creation logic for non-existent database paths.
 -   [ ] Task: Add desktop platform checks to the CLI initialization.
 -   [ ] Task: Conductor - User Manual Verification 'Phase 2: CLI Core Foundation & DB Creation' (Protocol in workflow.md)
 
