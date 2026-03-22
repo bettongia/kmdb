@@ -12,10 +12,10 @@
 -   [x] Task: Add desktop platform checks to the CLI initialization. dcaa1f2
 -   [x] Task: Conductor - User Manual Verification 'Phase 2: CLI Core Foundation & DB Creation' (Protocol in workflow.md)
 
-## Phase 3: Metadata & Maintenance Commands
+## Phase 3: Metadata & Maintenance Commands [checkpoint: 89e22f0]
 -   [x] Task: Implement metadata commands: `list-dbs`, `list-namespaces`, `list-indexes`. 0c7d6dc
 -   [x] Task: Implement maintenance commands: `compact`, `check-integrity`, `backup`. c325edd
--   [ ] Task: Conductor - User Manual Verification 'Phase 3: Metadata & Maintenance Commands' (Protocol in workflow.md)
+-   [x] Task: Conductor - User Manual Verification 'Phase 3: Metadata & Maintenance Commands' (Protocol in workflow.md)
 
 ## Phase 4: Batch & Interactive Modes
 -   [ ] Task: Implement Interactive Mode (REPL) with command history and basic auto-completion.
