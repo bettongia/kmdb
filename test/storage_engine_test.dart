@@ -77,5 +77,40 @@ void main() {
       expect(result, isNull);
       await engine.close();
     });
+
+    test('retrieves keys in lexicographical order', () async {
+      final engine = StorageEngine(dbPath);
+      await engine.open();
+      
+      final keys = ['c', 'a', 'b'].map((k) => Uint8List.fromList(k.codeUnits)).toList();
+      for (final key in keys) {
+        await engine.put(key, key); // value same as key for simplicity
+      }
+      
+      final result = await engine.getAll();
+      final resultKeys = result.map((e) => String.fromCharCodes(e.key)).toList();
+      
+      expect(resultKeys, equals(['a', 'b', 'c']));
+      await engine.close();
+    });
+
+    test('performs range queries', () async {
+      final engine = StorageEngine(dbPath);
+      await engine.open();
+      
+      final keys = ['a', 'b', 'c', 'd', 'e'].map((k) => Uint8List.fromList(k.codeUnits)).toList();
+      for (final key in keys) {
+        await engine.put(key, key);
+      }
+      
+      // Range [b, d]
+      final start = Uint8List.fromList('b'.codeUnits);
+      final end = Uint8List.fromList('d'.codeUnits);
+      final result = await engine.getRange(start, end);
+      
+      final resultKeys = result.map((e) => String.fromCharCodes(e.key)).toList();
+      expect(resultKeys, equals(['b', 'c', 'd']));
+      await engine.close();
+    });
   });
 }

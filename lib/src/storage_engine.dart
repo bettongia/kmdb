@@ -1,12 +1,24 @@
+import 'dart:collection';
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:collection/collection.dart';
 import 'storage_format.dart';
+
+int compareUint8Lists(Uint8List a, Uint8List b) {
+  final len = a.length < b.length ? a.length : b.length;
+  for (var i = 0; i < len; i++) {
+    if (a[i] < b[i]) return -1;
+    if (a[i] > b[i]) return 1;
+  }
+  return a.length.compareTo(b.length);
+}
 
 class StorageEngine {
   final String path;
   RandomAccessFile? _file;
-  final Map<Uint8List, Uint8List> _memTable = <Uint8List, Uint8List>{};
+  
+  // Use SplayTreeMap for ordered storage in memory
+  final SplayTreeMap<Uint8List, Uint8List> _memTable = 
+      SplayTreeMap<Uint8List, Uint8List>(compareUint8Lists);
 
   StorageEngine(this.path);
 
@@ -44,7 +56,7 @@ class StorageEngine {
         final valOffset = valLenOffset + 4;
         final value = bytes.sublist(valOffset, valOffset + valLen);
         
-        _putInMemory(key, value);
+        _memTable[key] = value;
         offset = valOffset + valLen;
       } catch (e) {
         // Stop on corruption or EOF
@@ -53,19 +65,8 @@ class StorageEngine {
     }
   }
 
-  void _putInMemory(Uint8List key, Uint8List value) {
-    final existingKey = _memTable.keys.firstWhereOrNull(
-      (k) => const ListEquality().equals(k, key)
-    );
-    if (existingKey != null) {
-      _memTable[existingKey] = value;
-    } else {
-      _memTable[key] = value;
-    }
-  }
-
   Future<void> put(Uint8List key, Uint8List value) async {
-    _putInMemory(key, value);
+    _memTable[key] = value;
     
     if (_file != null) {
       final encoded = StorageFormat.encodeEntry(key, value);
@@ -75,10 +76,25 @@ class StorageEngine {
   }
 
   Future<Uint8List?> get(Uint8List key) async {
-    final existingKey = _memTable.keys.firstWhereOrNull(
-      (k) => const ListEquality().equals(k, key)
-    );
-    return existingKey != null ? _memTable[existingKey] : null;
+    return _memTable[key];
+  }
+
+  /// Returns all entries in lexicographical order.
+  Future<List<StorageEntry>> getAll() async {
+    return _memTable.entries
+        .map((e) => StorageEntry(e.key, e.value))
+        .toList();
+  }
+
+  /// Returns entries within the given range [start, end] inclusive.
+  Future<List<StorageEntry>> getRange(Uint8List start, Uint8List end) async {
+    // SplayTreeMap doesn't have a built-in range method like some other languages,
+    // so we use skipWhile and takeWhile on the entries.
+    return _memTable.entries
+        .where((e) => compareUint8Lists(e.key, start) >= 0 && 
+                     compareUint8Lists(e.key, end) <= 0)
+        .map((e) => StorageEntry(e.key, e.value))
+        .toList();
   }
 
   Future<void> close() async {
