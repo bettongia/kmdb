@@ -1,5 +1,5 @@
 import 'dart:typed_data';
-import 'package:kmdb/kmdb.dart';
+import 'package:aurochs_kmdb/kmdb.dart';
 import 'package:path/path.dart' as p;
 import 'dart:io';
 
@@ -29,9 +29,10 @@ void main() async {
     print('Retrieving all entries:');
     final all = await engine.getAll();
     for (final entry in all) {
-      print('  ${String.fromCharCodes(entry.key)}: ${String.fromCharCodes(entry.value)}');
+      print(
+        '  ${String.fromCharCodes(entry.key)}: ${String.fromCharCodes(entry.value)}',
+      );
     }
-
   } finally {
     await engine.close();
     print('Database closed.');

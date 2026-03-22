@@ -1,7 +1,7 @@
 # Implementation Plan: kmdb CLI (kmdb_cli_20260322)
 
 ## Phase 1: Workspace Restructuring
--   [ ] Task: Move existing `kmdb` core library to `packages/kmdb` and update root `pubspec.yaml` to workspace format.
+-   [~] Task: Move existing `kmdb` core library to `packages/kmdb` and update root `pubspec.yaml` to workspace format.
 -   [ ] Task: Initialize `packages/kmdb_cli` as a new Dart package within the workspace.
 -   [ ] Task: Update dependencies and imports across the workspace to reflect the new structure.
 -   [ ] Task: Conductor - User Manual Verification 'Phase 1: Workspace Restructuring' (Protocol in workflow.md)
