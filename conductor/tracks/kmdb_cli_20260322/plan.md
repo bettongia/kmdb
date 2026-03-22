@@ -20,5 +20,5 @@
 ## Phase 4: Batch & Interactive Modes
 -   [x] Task: Implement Interactive Mode (REPL) with command history and basic auto-completion. 902328f
 -   [x] Task: Implement Batch Mode with standard input (stdin) support. cbefd5c
--   [~] Task: Implement Batch Mode with script file support.
+-   [x] Task: Implement Batch Mode with script file support. 6481502
 -   [ ] Task: Conductor - User Manual Verification 'Phase 4: Batch & Interactive Modes' (Protocol in workflow.md)
