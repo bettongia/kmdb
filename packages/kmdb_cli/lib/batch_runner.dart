@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:convert';
 
 typedef LineHandler = void Function(String line);
 
@@ -15,5 +17,15 @@ class BatchRunner {
         onLine('Executing: $trimmedLine');
       }
     }
+  }
+
+  /// Runs the batch process from a script file at the specified [path].
+  Future<void> runFromFile(String path) async {
+    final file = File(path);
+    if (!await file.exists()) {
+      throw FileSystemException('Script file not found', path);
+    }
+    final stream = file.openRead().transform(utf8.decoder).transform(const LineSplitter());
+    await run(stream);
   }
 }
