@@ -1,0 +1,2030 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>KMDB Design and Specification</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+    /* CSS for syntax highlighting */
+    html { -webkit-text-size-adjust: 100%; }
+    pre > code.sourceCode { white-space: pre; position: relative; }
+    pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+    pre > code.sourceCode > span:empty { height: 1.2em; }
+    .sourceCode { overflow: visible; }
+    code.sourceCode > span { color: inherit; text-decoration: inherit; }
+    div.sourceCode { margin: 1em 0; }
+    pre.sourceCode { margin: 0; }
+    @media screen {
+    div.sourceCode { overflow: auto; }
+    }
+    @media print {
+    pre > code.sourceCode { white-space: pre-wrap; }
+    pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+    }
+    pre.numberSource code
+      { counter-reset: source-line 0; }
+    pre.numberSource code > span
+      { position: relative; left: -4em; counter-increment: source-line; }
+    pre.numberSource code > span > a:first-child::before
+      { content: counter(source-line);
+        position: relative; left: -1em; text-align: right; vertical-align: baseline;
+        border: none; display: inline-block;
+        -webkit-touch-callout: none; -webkit-user-select: none;
+        -khtml-user-select: none; -moz-user-select: none;
+        -ms-user-select: none; user-select: none;
+        padding: 0 4px; width: 4em;
+        color: #aaaaaa;
+      }
+    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+    div.sourceCode
+      {   }
+    @media screen {
+    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+    }
+    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+    code span.at { color: #7d9029; } /* Attribute */
+    code span.bn { color: #40a070; } /* BaseN */
+    code span.bu { color: #008000; } /* BuiltIn */
+    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+    code span.ch { color: #4070a0; } /* Char */
+    code span.cn { color: #880000; } /* Constant */
+    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+    code span.dt { color: #902000; } /* DataType */
+    code span.dv { color: #40a070; } /* DecVal */
+    code span.er { color: #ff0000; font-weight: bold; } /* Error */
+    code span.ex { } /* Extension */
+    code span.fl { color: #40a070; } /* Float */
+    code span.fu { color: #06287e; } /* Function */
+    code span.im { color: #008000; font-weight: bold; } /* Import */
+    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+    code span.op { color: #666666; } /* Operator */
+    code span.ot { color: #007020; } /* Other */
+    code span.pp { color: #bc7a00; } /* Preprocessor */
+    code span.sc { color: #4070a0; } /* SpecialChar */
+    code span.ss { color: #bb6688; } /* SpecialString */
+    code span.st { color: #4070a0; } /* String */
+    code span.va { color: #19177c; } /* Variable */
+    code span.vs { color: #4070a0; } /* VerbatimString */
+    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+  </style>
+  <link rel="stylesheet" href="styles/styles.css" />
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">KMDB Design and Specification</h1>
+<p class="subtitle">A Local-First Document Database for Dart &amp;
+Flutter</p>
+<div class="abstract">
+<div class="abstract-title">Abstract</div>
+<p>This document consolidates the full KMDB design: storage engine
+(LSM-based KV store), query API, sync protocol, and platform adaptation
+layer. It supersedes all previous separate design documents and
+incorporates findings from a comprehensive architectural review. Major
+revisions in v2.0: Revised scale targets (100K–500K documents), updated
+sync protocol with per-device WAL and SSTable-based primary sync,
+per-device high-water mark files, Dart platform modernisation
+(dart:js_interop, build hooks, WASM), and specific technical
+recommendations (XXH64 checksums, Zstd dictionary compression, Xor
+filters).</p>
+</div>
+</header>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#overview" id="toc-overview"><span
+class="toc-section-number">1</span> Overview</a>
+<ul>
+<li><a href="#open-questions" id="toc-open-questions"><span
+class="toc-section-number">1.1</span> Open Questions</a></li>
+</ul></li>
+<li><a href="#target-workload-profile"
+id="toc-target-workload-profile"><span
+class="toc-section-number">2</span> Target Workload Profile</a>
+<ul>
+<li><a href="#design-boundary" id="toc-design-boundary"><span
+class="toc-section-number">2.1</span> Design boundary</a></li>
+</ul></li>
+<li><a href="#architecture-overview"
+id="toc-architecture-overview"><span class="toc-section-number">3</span>
+Architecture Overview</a>
+<ul>
+<li><a href="#layer-stack" id="toc-layer-stack"><span
+class="toc-section-number">3.1</span> Layer Stack</a></li>
+<li><a href="#why-lsm-not-sqlite" id="toc-why-lsm-not-sqlite"><span
+class="toc-section-number">3.2</span> Why LSM, Not SQLite?</a></li>
+<li><a href="#architectural-decision-record"
+id="toc-architectural-decision-record"><span
+class="toc-section-number">3.3</span> Architectural Decision
+Record</a></li>
+</ul></li>
+<li><a href="#storage-engine-lsm" id="toc-storage-engine-lsm"><span
+class="toc-section-number">4</span> Storage Engine (LSM)</a>
+<ul>
+<li><a href="#write-path" id="toc-write-path"><span
+class="toc-section-number">4.1</span> Write Path</a></li>
+<li><a href="#read-path" id="toc-read-path"><span
+class="toc-section-number">4.2</span> Read Path</a></li>
+<li><a href="#lsm-tier-constants" id="toc-lsm-tier-constants"><span
+class="toc-section-number">4.3</span> LSM Tier Constants</a></li>
+<li><a href="#compaction-at-scale" id="toc-compaction-at-scale"><span
+class="toc-section-number">4.4</span> Compaction At Scale</a></li>
+</ul></li>
+<li><a href="#write-ahead-log" id="toc-write-ahead-log"><span
+class="toc-section-number">5</span> Write-Ahead Log</a>
+<ul>
+<li><a href="#wal-record-format" id="toc-wal-record-format"><span
+class="toc-section-number">5.1</span> WAL Record Format</a></li>
+<li><a href="#sequence-number-layout-hlc"
+id="toc-sequence-number-layout-hlc"><span
+class="toc-section-number">5.2</span> Sequence Number Layout
+(HLC)</a></li>
+</ul></li>
+<li><a href="#sstable-format" id="toc-sstable-format"><span
+class="toc-section-number">6</span> SSTable Format</a>
+<ul>
+<li><a href="#file-structure" id="toc-file-structure"><span
+class="toc-section-number">6.1</span> File Structure</a></li>
+<li><a href="#sstable-naming-convention"
+id="toc-sstable-naming-convention"><span
+class="toc-section-number">6.2</span> SSTable Naming Convention</a></li>
+<li><a href="#value-level-compression"
+id="toc-value-level-compression"><span
+class="toc-section-number">6.3</span> Value-Level Compression</a></li>
+<li><a href="#recommendations" id="toc-recommendations"><span
+class="toc-section-number">6.4</span> Recommendations</a>
+<ul>
+<li><a href="#zstd-dictionary-compression"
+id="toc-zstd-dictionary-compression"><span
+class="toc-section-number">6.4.1</span> Zstd Dictionary
+Compression</a></li>
+</ul></li>
+</ul></li>
+<li><a href="#sync-protocol" id="toc-sync-protocol"><span
+class="toc-section-number">7</span> Sync Protocol</a>
+<ul>
+<li><a href="#design-principles" id="toc-design-principles"><span
+class="toc-section-number">7.1</span> Design Principles</a></li>
+<li><a href="#sync-folder-structure"
+id="toc-sync-folder-structure"><span
+class="toc-section-number">7.2</span> Sync Folder Structure</a></li>
+<li><a href="#per-device-high-water-mark-files"
+id="toc-per-device-high-water-mark-files"><span
+class="toc-section-number">7.3</span> Per-Device High-Water Mark
+Files</a></li>
+<li><a href="#sync-cycle-primary-path"
+id="toc-sync-cycle-primary-path"><span
+class="toc-section-number">7.4</span> Sync Cycle (Primary Path)</a></li>
+<li><a href="#conflict-resolution" id="toc-conflict-resolution"><span
+class="toc-section-number">7.5</span> Conflict Resolution</a></li>
+<li><a href="#tombstone-retention-garbage-collection"
+id="toc-tombstone-retention-garbage-collection"><span
+class="toc-section-number">7.6</span> Tombstone Retention &amp; Garbage
+Collection</a></li>
+<li><a href="#namespace-scoped-sync"
+id="toc-namespace-scoped-sync"><span
+class="toc-section-number">7.7</span> Namespace-Scoped Sync</a></li>
+<li><a href="#cross-device-compaction-coordinator"
+id="toc-cross-device-compaction-coordinator"><span
+class="toc-section-number">7.8</span> Cross-Device Compaction
+Coordinator</a>
+<ul>
+<li><a href="#lease-file-protocol" id="toc-lease-file-protocol"><span
+class="toc-section-number">7.8.1</span> Lease File Protocol</a></li>
+<li><a href="#acquiring-the-lease" id="toc-acquiring-the-lease"><span
+class="toc-section-number">7.8.2</span> Acquiring the Lease</a></li>
+<li><a href="#state-machine" id="toc-state-machine"><span
+class="toc-section-number">7.8.3</span> State Machine</a></li>
+<li><a href="#consolidation-manifest"
+id="toc-consolidation-manifest"><span
+class="toc-section-number">7.8.4</span> Consolidation Manifest</a></li>
+<li><a href="#cross-device-sequence-number-ordering"
+id="toc-cross-device-sequence-number-ordering"><span
+class="toc-section-number">7.8.5</span> Cross-Device Sequence Number
+Ordering</a></li>
+<li><a href="#lease-renewal" id="toc-lease-renewal"><span
+class="toc-section-number">7.8.6</span> Lease Renewal</a></li>
+<li><a href="#platform-atomic-write-strategies"
+id="toc-platform-atomic-write-strategies"><span
+class="toc-section-number">7.8.7</span> Platform Atomic Write
+Strategies</a></li>
+<li><a href="#failure-scenarios-and-recovery"
+id="toc-failure-scenarios-and-recovery"><span
+class="toc-section-number">7.8.8</span> Failure Scenarios and
+Recovery</a></li>
+<li><a href="#triggering-consolidation"
+id="toc-triggering-consolidation"><span
+class="toc-section-number">7.8.9</span> Triggering
+Consolidation</a></li>
+<li><a href="#dart-class-outline" id="toc-dart-class-outline"><span
+class="toc-section-number">7.8.10</span> Dart Class Outline</a></li>
+</ul></li>
+</ul></li>
+<li><a href="#query-api" id="toc-query-api"><span
+class="toc-section-number">8</span> Query API</a>
+<ul>
+<li><a href="#kmdbdatabase" id="toc-kmdbdatabase"><span
+class="toc-section-number">8.1</span> <code>KmdbDatabase</code></a></li>
+<li><a href="#kmdbcodect" id="toc-kmdbcodect"><span
+class="toc-section-number">8.2</span>
+<code>KmdbCodec&lt;T&gt;</code></a></li>
+<li><a href="#kmdbcollectiont" id="toc-kmdbcollectiont"><span
+class="toc-section-number">8.3</span>
+<code>KmdbCollection&lt;T&gt;</code></a></li>
+<li><a href="#kmdbqueryt-lazy-builder"
+id="toc-kmdbqueryt-lazy-builder"><span
+class="toc-section-number">8.4</span> <code>KmdbQuery&lt;T&gt;</code>
+(Lazy Builder)</a></li>
+<li><a href="#filter-dsl" id="toc-filter-dsl"><span
+class="toc-section-number">8.5</span> Filter DSL</a>
+<ul>
+<li><a href="#missing-vs-null-semantics"
+id="toc-missing-vs-null-semantics"><span
+class="toc-section-number">8.5.1</span> Missing vs Null
+Semantics</a></li>
+</ul></li>
+</ul></li>
+<li><a href="#watch-reactivity" id="toc-watch-reactivity"><span
+class="toc-section-number">9</span> Watch / Reactivity</a>
+<ul>
+<li><a href="#scaling-watch-at-100k-documents"
+id="toc-scaling-watch-at-100k-documents"><span
+class="toc-section-number">9.1</span> Scaling Watch at 100K+
+Documents</a></li>
+</ul></li>
+<li><a href="#keys-identifiers" id="toc-keys-identifiers"><span
+class="toc-section-number">10</span> Keys &amp; Identifiers</a>
+<ul>
+<li><a href="#uuidv7-document-keys" id="toc-uuidv7-document-keys"><span
+class="toc-section-number">10.1</span> UUIDv7 Document Keys</a>
+<ul>
+<li><a href="#cross-device-monotonicity"
+id="toc-cross-device-monotonicity"><span
+class="toc-section-number">10.1.1</span> Cross-Device
+Monotonicity</a></li>
+</ul></li>
+<li><a href="#device-identity" id="toc-device-identity"><span
+class="toc-section-number">10.2</span> Device Identity</a></li>
+</ul></li>
+<li><a href="#integrity-compression"
+id="toc-integrity-compression"><span
+class="toc-section-number">11</span> Integrity &amp; Compression</a>
+<ul>
+<li><a href="#checksum-strategy" id="toc-checksum-strategy"><span
+class="toc-section-number">11.1</span> Checksum Strategy</a></li>
+<li><a href="#compression" id="toc-compression"><span
+class="toc-section-number">11.2</span> Compression</a></li>
+<li><a href="#bloom-filter-migration-path"
+id="toc-bloom-filter-migration-path"><span
+class="toc-section-number">11.3</span> Bloom Filter Migration
+Path</a></li>
+</ul></li>
+<li><a href="#platform-adaptation" id="toc-platform-adaptation"><span
+class="toc-section-number">12</span> Platform Adaptation</a>
+<ul>
+<li><a href="#conditional-exports" id="toc-conditional-exports"><span
+class="toc-section-number">12.1</span> Conditional Exports</a></li>
+<li><a href="#native-platforms-ios-android-macos-windows-linux"
+id="toc-native-platforms-ios-android-macos-windows-linux"><span
+class="toc-section-number">12.2</span> Native Platforms (iOS, Android,
+macOS, Windows, Linux)</a></li>
+<li><a href="#web-opfs" id="toc-web-opfs"><span
+class="toc-section-number">12.3</span> Web (OPFS)</a>
+<ul>
+<li><a href="#opfs-at-scale" id="toc-opfs-at-scale"><span
+class="toc-section-number">12.3.1</span> Opfs At Scale</a></li>
+</ul></li>
+<li><a href="#package-structure" id="toc-package-structure"><span
+class="toc-section-number">12.4</span> Package Structure</a></li>
+</ul></li>
+<li><a href="#concurrency-performance"
+id="toc-concurrency-performance"><span
+class="toc-section-number">13</span> Concurrency &amp; Performance</a>
+<ul>
+<li><a href="#synchronous-path-typical-scale"
+id="toc-synchronous-path-typical-scale"><span
+class="toc-section-number">13.1</span> Synchronous Path (Typical
+Scale)</a></li>
+<li><a href="#background-isolate-upper-bound-scale"
+id="toc-background-isolate-upper-bound-scale"><span
+class="toc-section-number">13.2</span> Background Isolate (Upper Bound
+Scale)</a></li>
+<li><a href="#performance-targets" id="toc-performance-targets"><span
+class="toc-section-number">13.3</span> Performance Targets</a></li>
+</ul></li>
+<li><a href="#crash-recovery" id="toc-crash-recovery"><span
+class="toc-section-number">14</span> Crash Recovery</a>
+<ul>
+<li><a href="#recovery-sequence-on-open"
+id="toc-recovery-sequence-on-open"><span
+class="toc-section-number">14.1</span> Recovery Sequence on
+Open</a></li>
+</ul></li>
+</ul>
+</nav>
+<h1 data-number="1" id="overview"><span
+class="header-section-number">1</span> Overview</h1>
+<p>KMDB is a local-first document database for Dart and Flutter
+applications targeting mobile, desktop, and web platforms. It provides a
+typed, reactive query API over a key-value storage engine, with
+multi-device sync via commodity cloud storage (Google Drive, iCloud)
+without requiring a central server.</p>
+<p>The storage layer is a Log-Structured Merge Tree (LSM) with a
+write-ahead log (WAL), in-memory memtable, and immutable Sorted String
+Table (SSTable) files. This architecture was chosen specifically because
+immutable SSTables serve as the natural sync unit for cloud storage —
+file creation is atomic in cloud storage, file mutation is not. This
+sync-safety property is a first-class architectural requirement, not an
+incidental benefit.</p>
+<p>The query layer provides a typed collection API with lazy evaluation,
+a composable filter DSL supporting nested field paths, and reactive
+watch() streams with debounced re-execution. Documents are serialized
+via a thin codec bridge to freezed/json_serializable, with UUIDv7 keys
+providing time-ordered insertion and index locality.</p>
+<h2 data-number="1.1" id="open-questions"><span
+class="header-section-number">1.1</span> Open Questions</h2>
+<p>There’s a number of areas for further
+investigation/clarification:</p>
+<table>
+<colgroup>
+<col style="width: 14%" />
+<col style="width: 43%" />
+<col style="width: 41%" />
+</colgroup>
+<thead>
+<tr>
+<th style="text-align: left;">Question</th>
+<th style="text-align: left;">Context</th>
+<th style="text-align: left;">Options</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Pagination cursors</td>
+<td style="text-align: left;">offset() is fragile. Should KmdbQuery
+support cursor-based pagination using the last-seen key?</td>
+<td style="text-align: left;">Key-based cursors are more robust but
+require orderBy to be on the key or an indexed field.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Type-safe field paths</td>
+<td style="text-align: left;">Could field paths be compile-time safe via
+code generation?</td>
+<td style="text-align: left;">Generate Note_.id, Note_.address.city as
+typed FieldPath constants from freezed models.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Full-text search</td>
+<td style="text-align: left;">containsSubstring() is O(n) on document
+count. Need tokenised FTS?</td>
+<td style="text-align: left;">Defer to v2. FTS requires an inverted
+index, which is a significant addition.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Array root documents</td>
+<td style="text-align: left;">Should a document value be allowed to be a
+JSON array at the root level?</td>
+<td style="text-align: left;">Currently root-level documents are always
+objects. Arrays would complicate keyOf().</td>
+</tr>
+<tr>
+<td style="text-align: left;">iCloud CloudKit integration</td>
+<td style="text-align: left;">CloudKit offers atomic batch operations
+and push notifications. Worth a dedicated adapter?</td>
+<td style="text-align: left;">Yes, as a v2 cloud adapter alongside
+Google Drive. Different API but same sync protocol.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Stale device tombstone threshold</td>
+<td style="text-align: left;">How long to retain tombstones for devices
+that may have gone offline permanently?</td>
+<td style="text-align: left;">90 days proposed. Configurable at
+SyncConfig level. Stale devices require full re-sync.</td>
+</tr>
+</tbody>
+</table>
+<h1 data-number="2" id="target-workload-profile"><span
+class="header-section-number">2</span> Target Workload Profile</h1>
+<p>Every architectural constant in this document is derived from the
+following workload assumptions. If actual deployment diverges
+significantly, the tier constants in <a href="#lsm-tier-constants">LSM
+Tier Constants</a> should be revisited.</p>
+<table>
+<colgroup>
+<col style="width: 26%" />
+<col style="width: 16%" />
+<col style="width: 11%" />
+<col style="width: 45%" />
+</colgroup>
+<thead>
+<tr>
+<th style="text-align: left;">Parameter</th>
+<th style="text-align: left;">Typical</th>
+<th style="text-align: left;">Upper Bound</th>
+<th style="text-align: left;">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Documents per namespace</td>
+<td style="text-align: left;">500–5,000</td>
+<td style="text-align: left;">50,000</td>
+<td style="text-align: left;">A namespace maps to a document
+collection.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Namespaces per database</td>
+<td style="text-align: left;">3–10</td>
+<td style="text-align: left;">50</td>
+<td style="text-align: left;">e.g. contacts, notes, tasks,
+settings.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Total documents per user</td>
+<td style="text-align: left;">2,000–20,000</td>
+<td style="text-align: left;">500,000</td>
+<td style="text-align: left;">Across all namespaces.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Average document size</td>
+<td style="text-align: left;">1–4 KB</td>
+<td style="text-align: left;">64 KB</td>
+<td style="text-align: left;">JSON-encoded application documents.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Total working set</td>
+<td style="text-align: left;">5–80 MB</td>
+<td style="text-align: left;">500 MB</td>
+<td style="text-align: left;">Sum of all live document bytes.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Write rate</td>
+<td style="text-align: left;">1–10 puts/sec</td>
+<td style="text-align: left;">100/sec</td>
+<td style="text-align: left;">User-driven interactions, not bulk
+import.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Read rate</td>
+<td style="text-align: left;">10–100 gets/sec</td>
+<td style="text-align: left;">500/sec</td>
+<td style="text-align: left;">UI rendering of document lists.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Devices per user</td>
+<td style="text-align: left;">1–3</td>
+<td style="text-align: left;">5</td>
+<td style="text-align: left;">Phone + tablet + desktop.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Sync frequency</td>
+<td style="text-align: left;">On focus/resume</td>
+<td style="text-align: left;">Continuous</td>
+<td style="text-align: left;">Triggered on app foreground.</td>
+</tr>
+</tbody>
+</table>
+<h2 data-number="2.1" id="design-boundary"><span
+class="header-section-number">2.1</span> Design boundary</h2>
+<p>This engine is not designed for bulk import (tens of thousands of
+documents in a single session), streaming time-series data, or shared
+multi-user write access. The design boundary is the single-user personal
+document store operating across multiple devices.</p>
+<h1 data-number="3" id="architecture-overview"><span
+class="header-section-number">3</span> Architecture Overview</h1>
+<h2 data-number="3.1" id="layer-stack"><span
+class="header-section-number">3.1</span> Layer Stack</h2>
+<pre><code>┌───────────────────────────────────────────────────────────────┐
+│         Application Code                    │                 │
+├───────────────────────────────────────────────────────────────┤
+│  KmdbCollection&lt;T&gt;  │  KmdbQuery&lt;T&gt;         │  Query Layer    │
+├───────────────────────────────────────────────────────────────┤
+│  KmdbCodec&lt;T&gt;       (freezed + json_ser)    │  Codec Layer    │
+├───────────────────────────────────────────────────────────────┤
+│  KvStore             (LSM engine)           │  Storage Layer  │
+├───────────────────────────────────────────────────────────────┤
+│  SyncEngine          (SSTable exchange)     │  Sync Layer     │
+├───────────────────────────────────────────────────────────────┤
+│  StorageAdapter      (native / web / test)  │  Platform Layer │
+└───────────────────────────────────────────────────────────────┘</code></pre>
+<p>The query layer never touches the LSM directly — it always operates
+through the KvStore public API. The sync layer operates on immutable
+SSTable files produced by the storage layer. The platform layer
+abstracts file I/O, compression, and file locking across native
+(dart:io/dart:ffi), web (OPFS via dart:js_interop), and test (in-memory)
+targets.</p>
+<h2 data-number="3.2" id="why-lsm-not-sqlite"><span
+class="header-section-number">3.2</span> Why LSM, Not SQLite?</h2>
+<p>SQLite is the industry default for embedded local-first databases.
+The decision to use a custom LSM engine instead is driven by a single
+constraint: multi-device sync via commodity cloud storage without a
+central server.</p>
+<p>SQLite files cannot be safely shared via cloud sync. SQLite in WAL
+mode uses two files (the database and the -wal journal) that must be in
+transactional lockstep; cloud services sync them independently.
+File-region locking (fcntl/LockFileEx) is not replicated by cloud sync
+clients. Two devices opening the same SQLite file will both believe they
+hold exclusive locks, producing divergent states. Google Drive responds
+by creating conflict copies (database (1).db), forking state with no
+automated merge path.</p>
+<p>The LSM architecture avoids this entirely. SSTables are immutable
+once written — a receiving device either sees the complete file or does
+not see it at all. File creation is the atomic primitive in cloud
+storage, and SSTables map directly onto that primitive. The WAL remains
+a local implementation detail for crash recovery, never exposed to the
+sync layer.</p>
+<h2 data-number="3.3" id="architectural-decision-record"><span
+class="header-section-number">3.3</span> Architectural Decision
+Record</h2>
+<p><strong>Decision</strong>: Use custom LSM storage engine instead of
+SQLite.</p>
+<p><strong>Context</strong>: Multi-device sync via Google Drive / iCloud
+without a central server.</p>
+<p><strong>Rationale</strong>: Immutable SSTables are safe for
+cloud-folder sync; SQLite files are not. This sync-safety property is a
+first-class requirement.</p>
+<p><strong>Trade-off</strong>: Higher implementation cost and risk
+vs. battle-tested SQLite. Must build query engine, indexing, and ACID
+semantics from scratch.</p>
+<h1 data-number="4" id="storage-engine-lsm"><span
+class="header-section-number">4</span> Storage Engine (LSM)</h1>
+<h2 data-number="4.1" id="write-path"><span
+class="header-section-number">4.1</span> Write Path</h2>
+<ol type="1">
+<li><p>Client calls Put(namespace, key, value) or Delete(namespace,
+key).</p></li>
+<li><p>The HLC clock advances and produces a sequence number.</p></li>
+<li><p>The operation is appended to the WAL with CRC-guarded
+framing.</p></li>
+<li><p>The operation is inserted into the active memtable (skip
+list).</p></li>
+<li><p>When the memtable reaches the flush threshold, it is frozen and a
+new active memtable is created.</p></li>
+<li><p>The frozen memtable is flushed to a new L0 SSTable. The WAL is
+rotated.</p></li>
+<li><p>If L0 file count exceeds the trigger threshold, synchronous
+compaction merges L0 into L1.</p></li>
+</ol>
+<p>All operations are synchronous on the calling isolate. At the target
+scale (10–20K typical documents), flush and compaction complete in
+single-digit milliseconds. At the upper bound (500K documents),
+compaction of large levels should be moved to a background isolate to
+avoid UI jank (see <a href="#concurrency-performance">Concurrency &amp;
+Performance</a>).</p>
+<h2 data-number="4.2" id="read-path"><span
+class="header-section-number">4.2</span> Read Path</h2>
+<ol type="1">
+<li><p>Check the active memtable (in-memory, O(log n) skip list
+lookup).</p></li>
+<li><p>If a flush is in progress, check the immutable memtable
+snapshot.</p></li>
+<li><p>Check L0 SSTables newest-first. Each check: Bloom/Xor filter
+query → if positive, binary search.</p></li>
+<li><p>Check L1 and L2 SSTables using range metadata to identify
+candidates.</p></li>
+</ol>
+<p>Point lookups are dominated by the filter check. At the target scale,
+Bloom filters with 10 bits/key give a 0.8% false positive rate, meaning
+fewer than 1 in 100 point lookups requires an unnecessary file read.</p>
+<h2 data-number="4.3" id="lsm-tier-constants"><span
+class="header-section-number">4.3</span> LSM Tier Constants</h2>
+<p>The following constants are derived from the <a
+href="#target-workload-profile">workload profile</a>. They replace the
+original small-scale constants.</p>
+<table>
+<colgroup>
+<col style="width: 15%" />
+<col style="width: 18%" />
+<col style="width: 66%" />
+</colgroup>
+<thead>
+<tr>
+<th style="text-align: left;">Parameter</th>
+<th style="text-align: left;">Value</th>
+<th style="text-align: left;">Derivation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Memtable flush threshold</td>
+<td style="text-align: left;">256 KB</td>
+<td style="text-align: left;">Approx. 128 docs at 2KB avg. Triggers
+flush roughly every 10–15 seconds at typical write rates.</td>
+</tr>
+<tr>
+<td style="text-align: left;">L0 file count trigger</td>
+<td style="text-align: left;">4 files</td>
+<td style="text-align: left;">At 256KB each = 1MB total L0 before
+compaction. Balances write stall avoidance against read
+amplification.</td>
+</tr>
+<tr>
+<td style="text-align: left;">L1 max size</td>
+<td style="text-align: left;">10 MB</td>
+<td style="text-align: left;">~10x L0 total. Covers 5K–10K documents
+comfortably.</td>
+</tr>
+<tr>
+<td style="text-align: left;">L2 max size</td>
+<td style="text-align: left;">100 MB</td>
+<td style="text-align: left;">~10x L1. Covers up to 100K documents.</td>
+</tr>
+<tr>
+<td style="text-align: left;">L3 max size</td>
+<td style="text-align: left;">1 GB</td>
+<td style="text-align: left;">~10x L2. Covers full upper bound of 500K
+documents.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Size ratio</td>
+<td style="text-align: left;">10</td>
+<td style="text-align: left;">Standard LevelDB/RocksDB ratio. Bounds
+read amplification at O(levels).</td>
+</tr>
+<tr>
+<td style="text-align: left;">Bloom filter bits/key</td>
+<td style="text-align: left;">10</td>
+<td style="text-align: left;">0.8% FPR. At 500K keys: ~625KB total
+filter memory.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Max SSTable file size</td>
+<td style="text-align: left;">2 MB (L1), doubling per level</td>
+<td style="text-align: left;">Bounds individual compaction I/O and sync
+upload size.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Single-file shortcut</td>
+<td style="text-align: left;">Removed</td>
+<td style="text-align: left;">No longer applicable at &gt;10K documents.
+Was 512KB threshold.</td>
+</tr>
+</tbody>
+</table>
+<h2 data-number="4.4" id="compaction-at-scale"><span
+class="header-section-number">4.4</span> Compaction At Scale</h2>
+<p>At the upper bound (500K documents, ~500MB), L2→L3 compaction may
+read and write 100MB+ of data. This must not happen synchronously on the
+UI isolate. Section 13.2 specifies the background isolate strategy.</p>
+<h1 data-number="5" id="write-ahead-log"><span
+class="header-section-number">5</span> Write-Ahead Log</h1>
+<h2 data-number="5.1" id="wal-record-format"><span
+class="header-section-number">5.1</span> WAL Record Format</h2>
+<table>
+<colgroup>
+<col style="width: 13%" />
+<col style="width: 4%" />
+<col style="width: 82%" />
+</colgroup>
+<thead>
+<tr>
+<th style="text-align: left;">Field</th>
+<th style="text-align: left;">Size</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Checksum</td>
+<td style="text-align: left;">8B</td>
+<td style="text-align: left;">XXH64 of all subsequent fields. Truncation
+detected by checksum failure.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Record type</td>
+<td style="text-align: left;">1B</td>
+<td style="text-align: left;">0x01 = Put, 0x02 = Delete, 0x03 = Flush
+marker.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Sequence</td>
+<td style="text-align: left;">8B</td>
+<td style="text-align: left;">HLC-encoded: upper 48 bits = physical ms,
+lower 16 bits = logical counter.</td>
+</tr>
+<tr>
+<td style="text-align: left;">NS length</td>
+<td style="text-align: left;">1B</td>
+<td style="text-align: left;">Namespace name byte length (max 255).</td>
+</tr>
+<tr>
+<td style="text-align: left;">Namespace</td>
+<td style="text-align: left;">NB</td>
+<td style="text-align: left;">UTF-8 namespace name.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Key length</td>
+<td style="text-align: left;">2B</td>
+<td style="text-align: left;">Big-endian uint16.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Key</td>
+<td style="text-align: left;">KB</td>
+<td style="text-align: left;">Raw key bytes (UUIDv7, 16 bytes
+binary).</td>
+</tr>
+<tr>
+<td style="text-align: left;">Value length</td>
+<td style="text-align: left;">4B</td>
+<td style="text-align: left;">Big-endian uint32. Zero for Delete
+records.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Value</td>
+<td style="text-align: left;">VB</td>
+<td style="text-align: left;">Zstd-compressed JSON bytes. Absent for
+Delete.</td>
+</tr>
+</tbody>
+</table>
+<p>XXH64 provides 64-bit output (collision probability ~1 in 10¹⁹) and
+runs faster than CRC32 on ARM processors lacking CRC32C hardware
+acceleration. The additional 4 bytes per record is negligible overhead
+for dramatically improved integrity guarantees.</p>
+<h2 data-number="5.2" id="sequence-number-layout-hlc"><span
+class="header-section-number">5.2</span> Sequence Number Layout
+(HLC)</h2>
+<p>Sequence number bit layout (64 bits total):</p>
+<pre><code>┌───────────────────────────────────┬──────────────────┐
+│  Physical time (ms since epoch)   │  Logical counter │
+│  Upper 48 bits                    │  Lower 16 bits   │
+└───────────────────────────────────┴──────────────────┘</code></pre>
+<p>Higher sequence = newer write, regardless of device of origin. This
+is the sole conflict resolution key for LWW semantics.</p>
+<p>The HLC combines wall-clock time with a logical counter, preserving
+human-readable timestamps while guaranteeing causal ordering across
+devices. The maxOffset clamp (60 seconds) prevents a broken device clock
+from permanently corrupting the clock state.</p>
+<h1 data-number="6" id="sstable-format"><span
+class="header-section-number">6</span> SSTable Format</h1>
+<p>SSTables are immutable files containing sorted key-value entries with
+prefix-compressed keys, a Bloom/Xor filter block, and a footer for
+metadata. Once written, an SSTable is never modified — this immutability
+is the foundation of both crash safety and sync safety.</p>
+<h2 data-number="6.1" id="file-structure"><span
+class="header-section-number">6.1</span> File Structure</h2>
+<table>
+<colgroup>
+<col style="width: 11%" />
+<col style="width: 88%" />
+</colgroup>
+<thead>
+<tr>
+<th style="text-align: left;">Block</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Data blocks</td>
+<td style="text-align: left;">Sorted key-value entries with prefix
+compression and restart points. Block size: 4KB.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Filter block</td>
+<td style="text-align: left;">Bloom filter (current) or Xor filter
+(planned migration) for all keys in the file.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Index block</td>
+<td style="text-align: left;">One entry per data block: (last key, block
+offset, block size).</td>
+</tr>
+<tr>
+<td style="text-align: left;">Footer (48B)</td>
+<td style="text-align: left;">Filter block offset/size, index block
+offset/size, entry count, min/max key, XXH64 checksum.</td>
+</tr>
+</tbody>
+</table>
+<h2 data-number="6.2" id="sstable-naming-convention"><span
+class="header-section-number">6.2</span> SSTable Naming Convention</h2>
+<p>Each SSTable filename encodes its origin device and HLC range for
+sync identification:</p>
+<pre><code>{deviceId}-{minHlc}-{maxHlc}.sst</code></pre>
+<p>Examples:</p>
+<pre><code>a1b2c3d4-017F8A0B1C00-017F8A0B2FFF.sst
+f9e8d7c6-017F8B0C0000-017F8B0C3FFF.sst</code></pre>
+<p>The device ID is a stable per-installation UUID generated on first
+launch and persisted in platform-specific secure storage (Keychain on
+iOS, SharedPreferences on Android, localStorage on web). It must not be
+stored inside the database itself to avoid circular dependency during
+bootstrap.</p>
+<h2 data-number="6.3" id="value-level-compression"><span
+class="header-section-number">6.3</span> Value-Level Compression</h2>
+<table>
+<colgroup>
+<col style="width: 6%" />
+<col style="width: 13%" />
+<col style="width: 12%" />
+<col style="width: 67%" />
+</colgroup>
+<thead>
+<tr>
+<th style="text-align: left;">Flag</th>
+<th style="text-align: left;">Algorithm</th>
+<th style="text-align: left;">Platform</th>
+<th style="text-align: left;">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">0x00</td>
+<td style="text-align: left;">None</td>
+<td style="text-align: left;">All</td>
+<td style="text-align: left;">When value is small or already
+compressed.</td>
+</tr>
+<tr>
+<td style="text-align: left;">0x01</td>
+<td style="text-align: left;">Zstd</td>
+<td style="text-align: left;">Native</td>
+<td style="text-align: left;">Level 1 (fastest). Via dart:ffi to
+libzstd.</td>
+</tr>
+<tr>
+<td style="text-align: left;">0x02</td>
+<td style="text-align: left;">Deflate</td>
+<td style="text-align: left;">Web</td>
+<td style="text-align: left;">Fallback for WASM builds. ~10% worse
+ratio.</td>
+</tr>
+</tbody>
+</table>
+<h2 data-number="6.4" id="recommendations"><span
+class="header-section-number">6.4</span> Recommendations</h2>
+<h3 data-number="6.4.1" id="zstd-dictionary-compression"><span
+class="header-section-number">6.4.1</span> Zstd Dictionary
+Compression</h3>
+<p>Without a dictionary, Zstd achieves only 10–30% reduction on
+individual 1–10KB JSON documents. With a trained dictionary, compression
+improves to 70–90% reduction, and decompression runs 2–2.4x faster due
+to pre-seeded FSE tables. Strategy: compress without dictionary
+initially, train a dictionary after accumulating ~100 documents per
+namespace, recompress during idle. Store the 64–100KB dictionary
+alongside namespace metadata.</p>
+<h1 data-number="7" id="sync-protocol"><span
+class="header-section-number">7</span> Sync Protocol</h1>
+<p>KMDB syncs across devices using a peer-to-peer protocol with no
+central server. The sync transport is a shared cloud storage folder
+(Google Drive, iCloud, or equivalent). The primary sync unit is the
+immutable SSTable file.</p>
+<h2 data-number="7.1" id="design-principles"><span
+class="header-section-number">7.1</span> Design Principles</h2>
+<ul>
+<li><p><strong>File creation is the atomic primitive.</strong> Never
+mutate a synced file after writing it. Cloud sync achieves consistency
+by making file existence binary: a file either exists completely or not
+at all.</p></li>
+<li><p><strong>SSTable-based primary sync.</strong> For a single-user
+application, one device is typically active at a time. SSTable exchange
+provides efficient catch-up sync when switching devices.</p></li>
+<li><p><strong>WAL segment fast-path (future v2).</strong> For the rare
+scenario of near-simultaneous multi-device use, WAL segment exchange can
+provide lower-latency sync. This is deferrable without architectural
+compromise.</p></li>
+<li><p><strong>Per-field last-write-wins.</strong> Conflict resolution
+uses HLC timestamps at the document level. The entry with the higher HLC
+wins. CRDTs are reserved for specific data types that demand merge
+semantics.</p></li>
+<li><p><strong>Idempotent ingestion.</strong> Replaying a
+previously-ingested SSTable produces identical results. This makes the
+protocol tolerant of interrupted sync cycles.</p></li>
+</ul>
+<h2 data-number="7.2" id="sync-folder-structure"><span
+class="header-section-number">7.2</span> Sync Folder Structure</h2>
+<pre><code>/sync/
+ highwater/
+  {deviceA-id}.hwm              # Device A&#39;s sync progress
+  {deviceB-id}.hwm              # Device B&#39;s sync progress
+  {deviceC-id}.hwm              # Device C&#39;s sync progress
+ sstables/
+  {deviceA-id}-{minHlc}-{maxHlc}.sst
+  {deviceB-id}-{minHlc}-{maxHlc}.sst
+  ...</code></pre>
+<p>Each device writes only to its own files. No two devices ever write
+to the same file. This eliminates all conflict-on-write scenarios at the
+file level.</p>
+<h2 data-number="7.3" id="per-device-high-water-mark-files"><span
+class="header-section-number">7.3</span> Per-Device High-Water Mark
+Files</h2>
+<p>Each device maintains a .hwm file recording the highest HLC timestamp
+it has fully processed from every peer. This file is the one file each
+device mutates repeatedly, but since only one device writes to its own
+.hwm file, cloud sync will never produce a conflict.</p>
+<p>Example: <code>deviceA.hwm</code>:</p>
+<pre class="jsonc"><code>{
+  &quot;deviceId&quot;: &quot;a1b2c3d4&quot;,
+  &quot;currentHlc&quot;: &quot;017F8A0B3000&quot;,
+  &quot;lastUpdated&quot;: &quot;2026-03-27T10:30:00Z&quot;,
+  &quot;peers&quot;: {
+    &quot;f9e8d7c6&quot;: &quot;017F8A0B2FFF&quot;,
+    // highest HLC processed from device B
+    &quot;1a2b3c4d&quot;: &quot;017F8A0A0000&quot;,
+    // highest HLC processed from device C
+  },
+}</code></pre>
+<p>The <code>.hwm</code> file also contains the device’s own current HLC
+timestamp and a wall-clock last-updated time. This enables stale device
+detection for the <a
+href="#tombstone-retention-garbage-collection">tombstone retention
+policy</a>.</p>
+<h2 data-number="7.4" id="sync-cycle-primary-path"><span
+class="header-section-number">7.4</span> Sync Cycle (Primary Path)</h2>
+<p>When a device comes online or returns to foreground:</p>
+<ol type="1">
+<li><p>Read all .hwm files in the highwater/ directory to understand
+overall sync state.</p></li>
+<li><p>Read own .hwm file to determine what has already been processed
+from each peer.</p></li>
+<li><p>Scan the sstables/ directory for files from other devices with
+minHlc greater than the recorded high-water mark for that
+device.</p></li>
+<li><p>Download and ingest each new SSTable at L0. Verify the footer
+XXH64 checksum before use.</p></li>
+<li><p>If L0 count exceeds the trigger threshold after ingestion, run
+compaction.</p></li>
+<li><p>Update own .hwm file with the new high-water marks for each
+peer.</p></li>
+<li><p>Upload any locally-produced SSTables that have not yet been
+uploaded.</p></li>
+<li><p>Upload own updated .hwm file.</p></li>
+</ol>
+<p>Remote SSTables always enter at L0 A file at L2 on the originating
+device cannot be placed at L2 locally without violating the
+non-overlapping range invariant. Ingesting at L0 ensures the local
+compaction path runs with full visibility of the local key history.</p>
+<h2 data-number="7.5" id="conflict-resolution"><span
+class="header-section-number">7.5</span> Conflict Resolution</h2>
+<p>Conflicts arise when two devices write to the same key while offline.
+Resolution occurs during compaction merge:</p>
+<ul>
+<li><p><strong>Default: Last Write Wins by HLC.</strong> The entry with
+the higher HLC timestamp (sequence number) is retained.</p></li>
+<li><p><strong>Same-HLC tiebreaker:</strong> If two entries have
+identical HLC timestamps (rare but possible), the device ID with the
+higher lexicographic value wins. This guarantees a total ordering so
+merge is deterministic regardless of which device performs it.</p></li>
+<li><p><strong>Tombstone vs Put:</strong> A Delete tombstone wins over
+an older Put. A Put wins over an older Delete. At equal HLC, Put wins as
+a conservative choice.</p></li>
+<li><p><strong>Application-level merge (optional):</strong> A
+MergeOperator callback can be registered at engine open time. When two
+versions of the same key from different devices are encountered during
+compaction, the callback receives both values and returns a merged
+result. This enables CRDT-style merge without changes to the storage
+layer.</p></li>
+</ul>
+<h2 data-number="7.6" id="tombstone-retention-garbage-collection"><span
+class="header-section-number">7.6</span> Tombstone Retention &amp;
+Garbage Collection</h2>
+<p>Tombstones cannot be dropped during compaction until every known
+device has processed past the tombstone’s HLC timestamp. The protocol
+uses .hwm files to track this:</p>
+<ul>
+<li><p><strong>Safe to drop:</strong> A tombstone with HLC T can be
+dropped when every device’s .hwm file shows a peer entry for this device
+≥ T.</p></li>
+<li><p><strong>Stale device policy:</strong> If a device’s .hwm file has
+not been updated for 90 days (configurable), it is considered stale.
+Tombstones are retained for stale devices up to the policy limit, after
+which they are dropped. A stale device returning online must perform a
+full re-sync rather than incremental catch-up.</p></li>
+<li><p><strong>SSTable garbage collection:</strong> An SSTable can be
+deleted from the sync folder when every device’s .hwm file shows
+processing past that SSTable’s maxHlc. The device that produced the
+SSTable is responsible for deleting it, avoiding race conditions on
+deletion.</p></li>
+</ul>
+<h2 data-number="7.7" id="namespace-scoped-sync"><span
+class="header-section-number">7.7</span> Namespace-Scoped Sync</h2>
+<p>Not all namespaces should sync. A local_cache or settings namespace
+typically contains device-specific data. The sync layer supports opt-in
+per namespace:</p>
+<div class="sourceCode" id="cb7"><pre
+class="sourceCode dart"><code class="sourceCode dart"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="at">final</span> db <span class="op">=</span> KmdbDatabase(</span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>  store<span class="op">:</span> kvStore<span class="op">,</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>  syncConfig<span class="op">:</span> SyncConfig(</span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>    cloudAdapter<span class="op">:</span> GoogleDriveAdapter(<span class="op">...</span>)<span class="op">,</span></span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>    syncNamespaces<span class="op">:</span> <span class="op">{</span><span class="st">&#39;notes&#39;</span><span class="op">,</span> <span class="st">&#39;contacts&#39;</span><span class="op">,</span> <span class="st">&#39;tasks&#39;</span><span class="op">},</span></span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>    <span class="co">// &#39;settings&#39; and &#39;cache&#39; excluded</span></span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a>  )<span class="op">,</span></span>
+<span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a>);</span></code></pre></div>
+<p>During SSTable upload, the sync layer filters to include only entries
+for sync-enabled namespaces. This avoids uploading megabytes of
+device-local cache data.</p>
+<h2 data-number="7.8" id="cross-device-compaction-coordinator"><span
+class="header-section-number">7.8</span> Cross-Device Compaction
+Coordinator</h2>
+<p>Each device produces SSTables independently and flushes them to the
+shared sync folder. Periodically, the set of on-disk SSTables must be
+consolidated — redundant versions merged, tombstones dropped, file count
+reduced — so that read performance and storage consumption remain
+bounded regardless of how many devices are actively writing.</p>
+<p>Because there is no designated primary device, any client may
+initiate consolidation. The coordinator design must therefore satisfy
+three invariants:</p>
+<ul>
+<li><p><strong>Safety:</strong> at most one client executes
+consolidation at any time. Concurrent merges of overlapping SSTables
+produce incorrect output.</p></li>
+<li><p><strong>Liveness:</strong> a crashed or network-partitioned
+coordinator does not permanently block consolidation. Any surviving
+client can take over after the lease expires.</p></li>
+<li><p><strong>Observability:</strong> in-progress, completed, and
+abandoned consolidation states are distinguishable without opening any
+SSTable. Recovery logic must not require the original
+coordinator.</p></li>
+</ul>
+<h3 data-number="7.8.1" id="lease-file-protocol"><span
+class="header-section-number">7.8.1</span> Lease File Protocol</h3>
+<p>Coordination is mediated by a single well-known file in the shared
+sync folder:</p>
+<pre><code>&lt;sync-root&gt;/
+  &lt;device-id&gt;-N-NNNNNN-&lt;hash&gt;-&lt;hash&gt;.sst     ← per-device SSTables
+  .consolidation-lease                       ← coordinator lock (this section)
+  .consolidation-manifest                    ← output record</code></pre>
+<p>The lease file is a UTF-8 JSON document written atomically via a
+write-to-temp-then-rename sequence. Its presence means consolidation is
+claimed; its absence means no client holds the lock. The lease file is
+never appended to — it is always replaced wholesale.</p>
+<h4 data-number="7.8.1.1" id="lease-file-schema"><span
+class="header-section-number">7.8.1.1</span> Lease file schema</h4>
+<pre class="jsonc"><code>{
+  &quot;version&quot;: 1,
+  &quot;coordinatorId&quot;: &quot;a3f2b1c9&quot;, // deviceId of the claiming client
+  &quot;epoch&quot;: 7, // monotonically increasing per coordinatorId
+  &quot;acquiredAtMs&quot;: 1743724800000, // wall-clock ms at acquisition (HLC physical)
+  &quot;ttlMs&quot;: 120000, // lease duration; coordinator must renew before expiry
+  &quot;inputFiles&quot;: [
+    // SSTables in scope at acquisition time
+    &quot;a3f2b1c9-0-000007-1a2b3c4d-9e8f7a6b.sst&quot;,
+    &quot;b7e10f44-0-000003-aabbccdd-11223344.sst&quot;,
+  ],
+  &quot;fencingToken&quot;: &quot;a3f2b1c9-7&quot;, // coordinatorId + epoch; written to output files
+}</code></pre>
+<p><em>Why epoch rather than a UUID?</em></p>
+<p>An ever-increasing epoch per device gives the fencing token a total
+order for the same coordinator. If device “a3f2b1c9” crashes and
+re-acquires, its epoch increments and any output files from the previous
+attempt carry a stale token that is trivially detectable. A random UUID
+would require a separate registry to establish ordering.</p>
+<h3 data-number="7.8.2" id="acquiring-the-lease"><span
+class="header-section-number">7.8.2</span> Acquiring the Lease</h3>
+<p>A client wishing to consolidate executes the following steps. The
+sequence is designed so that the only non-atomic operation — the rename
+— is the commit point.</p>
+<ol type="1">
+<li><p><strong>Check for an existing lease.</strong> Read
+.consolidation-lease if present. If absent, proceed to step 2. If
+present, verify the lease has expired (currentTimeMs &gt; acquiredAtMs +
+ttlMs). If not expired, abort — another coordinator is active.</p></li>
+<li><p><strong>Validate the incumbent’s output.</strong> If the lease is
+expired, check whether .consolidation-manifest records a completed
+consolidation whose output files all exist on disk. If so, the previous
+coordinator finished but failed to clean up. Adopt the output (§8.6.5)
+rather than re-consolidating.</p></li>
+<li><p><strong>Write a candidate lease to a temp file.</strong> Name it
+.consolidation-lease.&lt;deviceId&gt;.tmp. Populate all fields. Set
+epoch = (previous epoch for this deviceId) + 1, or 0 if first
+acquisition.</p></li>
+<li><p><strong>Rename the temp file to .consolidation-lease.</strong> On
+POSIX filesystems and cloud object stores that support atomic
+conditional-PUT (GCS, S3 via if-none-match), this is the linearisation
+point. On platforms without atomic rename, use the compare-and-swap
+write pattern described in §8.6.7.</p></li>
+<li><p><strong>Re-read the lease file.</strong> Confirm that
+coordinatorId and epoch match what was just written. If another client
+won the race, its data will appear instead. In that case,
+abort.</p></li>
+</ol>
+<h4 data-number="7.8.2.1" id="clock-skew-and-ttl-selection"><span
+class="header-section-number">7.8.2.1</span> ⚠ Clock skew and TTL
+selection</h4>
+<p>The TTL must be long enough to survive the slowest expected
+consolidation plus a renewal cycle, but short enough that a crashed
+coordinator does not hold the lease for an operationally significant
+period. The recommended default is 120 seconds. At the target data scale
+(≤ 20MB total), a full consolidation completes well under 10 seconds on
+any supported device, leaving ample headroom for renewal. Clock skew
+between devices is bounded at 60 seconds (§Appendix A), so the effective
+detection window after a crash is at most 120 + 60 = 180 seconds.</p>
+<h3 data-number="7.8.3" id="state-machine"><span
+class="header-section-number">7.8.3</span> State Machine</h3>
+<p>The coordinator transitions through five states. Every state is
+durable — a client recovering from a crash can reconstruct the current
+state entirely from the lease file and the files present in the sync
+folder.</p>
+<table>
+<colgroup>
+<col style="width: 9%" />
+<col style="width: 62%" />
+<col style="width: 28%" />
+</colgroup>
+<thead>
+<tr>
+<th style="text-align: left;">State</th>
+<th style="text-align: left;">Observable condition</th>
+<th style="text-align: left;">Valid next states</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">IDLE</td>
+<td style="text-align: left;">No .consolidation-lease file exists</td>
+<td style="text-align: left;">LEASE_ACQUIRED</td>
+</tr>
+<tr>
+<td style="text-align: left;">LEASE_ACQUIRED</td>
+<td style="text-align: left;">Lease file present; no output files with
+matching fencingToken exist yet</td>
+<td style="text-align: left;">CONSOLIDATING, IDLE (on abort)</td>
+</tr>
+<tr>
+<td style="text-align: left;">CONSOLIDATING</td>
+<td style="text-align: left;">Lease file present and valid; partial or
+complete output files with fencingToken exist on disk</td>
+<td style="text-align: left;">VERIFYING, LEASE_EXPIRED</td>
+</tr>
+<tr>
+<td style="text-align: left;">VERIFYING</td>
+<td style="text-align: left;">All expected output files present;
+.consolidation-manifest written; lease still valid</td>
+<td style="text-align: left;">COMPLETE, LEASE_EXPIRED</td>
+</tr>
+<tr>
+<td style="text-align: left;">COMPLETE</td>
+<td style="text-align: left;">.consolidation-manifest records success;
+all input files deleted; lease file deleted</td>
+<td style="text-align: left;">IDLE</td>
+</tr>
+<tr>
+<td style="text-align: left;">LEASE_EXPIRED</td>
+<td style="text-align: left;">Lease present but currentTimeMs &gt;
+acquiredAtMs + ttlMs</td>
+<td style="text-align: left;">LEASE_ACQUIRED (new coordinator takes
+over)</td>
+</tr>
+</tbody>
+</table>
+<p>The state machine is intentionally asymmetric: transitions into
+COMPLETE require all three cleanup steps (manifest written, input files
+deleted, lease deleted) to have succeeded. A client that completes the
+merge but crashes before deleting the lease leaves the system in a
+recoverable VERIFYING-like state that the next coordinator can detect
+and resolve without re-merging.</p>
+<h3 data-number="7.8.4" id="consolidation-manifest"><span
+class="header-section-number">7.8.4</span> Consolidation Manifest</h3>
+<p>Before deleting any input file, the coordinator writes a
+consolidation manifest. This file records what was merged and what the
+output is, so that any client — including one that did not perform the
+merge — can validate and adopt the result.</p>
+<pre class="jsonc"><code>{
+  &quot;version&quot;: 1,
+  &quot;fencingToken&quot;: &quot;a3f2b1c9-7&quot;,
+  &quot;completedAtMs&quot;: 1743724812345,
+  &quot;inputFiles&quot;: [
+    &quot;a3f2b1c9-0-000007-1a2b3c4d-9e8f7a6b.sst&quot;,
+    &quot;b7e10f44-0-000003-aabbccdd-11223344.sst&quot;,
+  ],
+  &quot;outputFiles&quot;: [&quot;a3f2b1c9-2-000009-00000000-ffffffff.sst&quot;],
+  &quot;inputEntryCount&quot;: 1840,
+  &quot;outputEntryCount&quot;: 1203, // &lt;= inputEntryCount after dedup + tombstone drop
+  &quot;status&quot;: &quot;complete&quot;, // &quot;complete&quot; | &quot;partial&quot;
+}</code></pre>
+<h4 data-number="7.8.4.1" id="outputentrycount-as-a-sanity-check"><span
+class="header-section-number">7.8.4.1</span> outputEntryCount as a
+sanity check</h4>
+<p>The coordinator verifies outputEntryCount &lt;= inputEntryCount
+before committing. If this invariant is violated, the merge produced
+more entries than it consumed — a certain sign of a bug in the
+deduplication or tombstone-dropping logic. The coordinator must abort,
+delete its output files, release the lease, and log a diagnostic rather
+than committing corrupt output.</p>
+<h3 data-number="7.8.5" id="cross-device-sequence-number-ordering"><span
+class="header-section-number">7.8.5</span> Cross-Device Sequence Number
+Ordering</h3>
+<p>Within a single device, the HLC sequence number is monotonically
+increasing. Across devices it is not — two devices may produce identical
+or inverted HLC timestamps after a clock adjustment, or simply because
+they have never communicated.</p>
+<p>The consolidation merge iterator therefore uses a compound sort key
+rather than sequence number alone:</p>
+<div class="sourceCode" id="cb11"><pre
+class="sourceCode dart"><code class="sourceCode dart"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="co">// Internal key ordering for cross-device merge (ascending)</span></span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a><span class="co">//</span></span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a><span class="co">// Primary:   userKey ASC</span></span>
+<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a><span class="co">// Secondary: sequenceNumber DESC   (higher seq = more recent, within one device)</span></span>
+<span id="cb11-5"><a href="#cb11-5" aria-hidden="true" tabindex="-1"></a><span class="co">// Tertiary:  deviceId DESC         (arbitrary but stable tiebreaker across devices)</span></span>
+<span id="cb11-6"><a href="#cb11-6" aria-hidden="true" tabindex="-1"></a><span class="co">//</span></span>
+<span id="cb11-7"><a href="#cb11-7" aria-hidden="true" tabindex="-1"></a><span class="co">// The tertiary sort ensures deterministic output when two devices write the same</span></span>
+<span id="cb11-8"><a href="#cb11-8" aria-hidden="true" tabindex="-1"></a><span class="co">// key at the same HLC timestamp — a rare but theoretically possible event.</span></span>
+<span id="cb11-9"><a href="#cb11-9" aria-hidden="true" tabindex="-1"></a><span class="dt">int</span> compareInternalKeys(InternalKey a<span class="op">,</span> InternalKey b) <span class="op">{</span></span>
+<span id="cb11-10"><a href="#cb11-10" aria-hidden="true" tabindex="-1"></a>  <span class="at">final</span> keyOrd <span class="op">=</span> a<span class="op">.</span>userKey<span class="op">.</span>compareTo(b<span class="op">.</span>userKey);</span>
+<span id="cb11-11"><a href="#cb11-11" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (keyOrd <span class="op">!=</span> <span class="dv">0</span>) <span class="kw">return</span> keyOrd;</span>
+<span id="cb11-12"><a href="#cb11-12" aria-hidden="true" tabindex="-1"></a>  <span class="at">final</span> seqOrd <span class="op">=</span> b<span class="op">.</span>sequenceNumber<span class="op">.</span>compareTo(a<span class="op">.</span>sequenceNumber); <span class="co">// DESC</span></span>
+<span id="cb11-13"><a href="#cb11-13" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (seqOrd <span class="op">!=</span> <span class="dv">0</span>) <span class="kw">return</span> seqOrd;</span>
+<span id="cb11-14"><a href="#cb11-14" aria-hidden="true" tabindex="-1"></a>  <span class="kw">return</span> b<span class="op">.</span>deviceId<span class="op">.</span>compareTo(a<span class="op">.</span>deviceId);                     <span class="co">// DESC, stable</span></span>
+<span id="cb11-15"><a href="#cb11-15" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<h4 data-number="7.8.5.1"
+id="application-level-conflict-semantics"><span
+class="header-section-number">7.8.5.1</span> ⚠ Application-level
+conflict semantics</h4>
+<p>The tiebreaker above makes the merge deterministic and safe, but it
+does not implement application-level conflict resolution. If two devices
+write different values for the same key at the same HLC timestamp, the
+higher deviceId wins silently. Applications requiring last-write-wins
+with user-visible conflict notification must record both versions and
+surface the conflict at read time — this is out of scope for the storage
+layer and must be handled by the sync layer above it.</p>
+<h3 data-number="7.8.6" id="lease-renewal"><span
+class="header-section-number">7.8.6</span> Lease Renewal</h3>
+<p>For consolidations that approach the TTL boundary — possible if the
+sync folder is on a slow network mount or if the device is under load —
+the coordinator must renew the lease before it expires. Renewal rewrites
+the lease file with an updated acquiredAtMs while keeping the same epoch
+and fencingToken.</p>
+<div class="sourceCode" id="cb12"><pre
+class="sourceCode dart"><code class="sourceCode dart"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="co">// Renewal is a conditional write: only proceed if the lease on disk</span></span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a><span class="co">// still matches our fencingToken. If it does not, a competing client</span></span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a><span class="co">// has taken over and we must abort our merge immediately.</span></span>
+<span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a><span class="dt">Future</span><span class="op">&lt;</span><span class="dt">bool</span><span class="op">&gt;</span> renewLease(ConsolidationLease current) <span class="at">async</span> <span class="op">{</span></span>
+<span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">final</span> onDisk <span class="op">=</span> <span class="at">await</span> readLease();</span>
+<span id="cb12-7"><a href="#cb12-7" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (onDisk <span class="op">==</span> <span class="cn">null</span> <span class="op">||</span> onDisk<span class="op">.</span>fencingToken <span class="op">!=</span> current<span class="op">.</span>fencingToken) <span class="op">{</span></span>
+<span id="cb12-8"><a href="#cb12-8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">return</span> <span class="cn">false</span>; <span class="co">// preempted — abort merge</span></span>
+<span id="cb12-9"><a href="#cb12-9" aria-hidden="true" tabindex="-1"></a>  <span class="op">}</span></span>
+<span id="cb12-10"><a href="#cb12-10" aria-hidden="true" tabindex="-1"></a>  <span class="at">final</span> renewed <span class="op">=</span> current<span class="op">.</span>copyWith(acquiredAtMs<span class="op">:</span> DateTime<span class="op">.</span>now()<span class="op">.</span>millisecondsSinceEpoch);</span>
+<span id="cb12-11"><a href="#cb12-11" aria-hidden="true" tabindex="-1"></a>  <span class="at">await</span> writeLease(renewed); <span class="co">// atomic rename</span></span>
+<span id="cb12-12"><a href="#cb12-12" aria-hidden="true" tabindex="-1"></a>  <span class="kw">return</span> <span class="cn">true</span>;</span>
+<span id="cb12-13"><a href="#cb12-13" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>The coordinator should schedule renewal at 50% of TTL elapsed (60
+seconds with the default 120s TTL). If renewal fails — either because
+the write fails or because the on-disk fencing token does not match —
+the coordinator must stop writing output immediately, discard any
+partial output files it has written, and exit the CONSOLIDATING state.
+It must not delete any input files.</p>
+<h3 data-number="7.8.7" id="platform-atomic-write-strategies"><span
+class="header-section-number">7.8.7</span> Platform Atomic Write
+Strategies</h3>
+<p>The lease file write-then-rename sequence requires platform support
+to be safe. The behaviour differs across the deployment targets:</p>
+<table>
+<colgroup>
+<col style="width: 13%" />
+<col style="width: 26%" />
+<col style="width: 59%" />
+</colgroup>
+<thead>
+<tr>
+<th style="text-align: left;">Platform</th>
+<th style="text-align: left;">Atomic primitive</th>
+<th style="text-align: left;">Implementation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">POSIX (Linux / macOS desktop)</td>
+<td style="text-align: left;">rename(2) is atomic within a
+filesystem</td>
+<td style="text-align: left;">Write to .tmp file on same volume, then
+rename. Guaranteed atomic by POSIX.</td>
+</tr>
+<tr>
+<td style="text-align: left;">iOS / Android (local storage)</td>
+<td style="text-align: left;">Same as POSIX — app sandbox is a single
+filesystem</td>
+<td style="text-align: left;">Identical to POSIX path. No special
+handling required.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Cloud object storage (GCS)</td>
+<td style="text-align: left;">Conditional PUT with if-none-match /
+if-generation-match</td>
+<td style="text-align: left;">Upload lease JSON with
+if-generation-match: &lt;expected-generation&gt;. HTTP 412 means another
+client won the race.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Cloud object storage (S3)</td>
+<td style="text-align: left;">No native CAS. Use DynamoDB conditional
+writes as a lock</td>
+<td style="text-align: left;">Acquire a DynamoDB item with a condition
+expression before writing to S3. Release on completion.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Web (OPFS)</td>
+<td style="text-align: left;">createSyncAccessHandle is exclusive
+per-file per-origin</td>
+<td style="text-align: left;">Acquire a sync access handle on
+.consolidation-lease. Only one handle can be open at once per origin —
+enforced by the browser.</td>
+</tr>
+</tbody>
+</table>
+<h4 data-number="7.8.7.1" id="opfs-limitation"><span
+class="header-section-number">7.8.7.1</span> OPFS limitation</h4>
+<p>The OPFS exclusive handle approach only prevents concurrent
+consolidation within the same browser origin on the same device.
+Cross-device coordination still relies on the cloud storage primitive —
+OPFS provides only local mutual exclusion, not distributed mutual
+exclusion.</p>
+<h3 data-number="7.8.8" id="failure-scenarios-and-recovery"><span
+class="header-section-number">7.8.8</span> Failure Scenarios and
+Recovery</h3>
+<p>Every failure scenario is recoverable without data loss. The recovery
+action is determined by reading the lease file and the manifest file,
+then inspecting which files exist on disk.</p>
+<table>
+<colgroup>
+<col style="width: 19%" />
+<col style="width: 32%" />
+<col style="width: 48%" />
+</colgroup>
+<thead>
+<tr>
+<th style="text-align: left;">Failure point</th>
+<th style="text-align: left;">Observable state</th>
+<th style="text-align: left;">Recovery action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Crash after lease write, before any output
+files written</td>
+<td style="text-align: left;">Lease present; no output files with
+fencingToken; lease expired</td>
+<td style="text-align: left;">New coordinator acquires lease (epoch +1).
+All input files intact — perform full consolidation.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Crash mid-merge (partial output files on
+disk)</td>
+<td style="text-align: left;">Lease expired; partial output files with
+stale fencingToken exist; no manifest</td>
+<td style="text-align: left;">New coordinator deletes stale output
+files, acquires fresh lease, re-merges from original input files.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Crash after merge complete, before
+manifest written</td>
+<td style="text-align: left;">Lease expired; all output files present
+with fencingToken; no manifest</td>
+<td style="text-align: left;">New coordinator can detect output file
+coverage matches input files. Write manifest, delete inputs, delete
+lease. No re-merge needed.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Crash after manifest written, before input
+files deleted</td>
+<td style="text-align: left;">Manifest present with status=complete;
+input and output files both present; lease expired or absent</td>
+<td style="text-align: left;">New coordinator reads manifest, verifies
+output files exist, deletes input files, deletes lease. Safe because
+manifest is the commit record.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Crash after inputs deleted, before lease
+deleted</td>
+<td style="text-align: left;">Manifest present; only output files
+remain; lease present (expired)</td>
+<td style="text-align: left;">New coordinator reads manifest, confirms
+output files exist, deletes lease. IDLE state restored.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Coordinator alive but partitioned from
+sync folder for &gt; TTL</td>
+<td style="text-align: left;">Lease expired on disk; coordinator still
+running and writing output</td>
+<td style="text-align: left;">Coordinator must detect renewal failure
+(§8.6.6) and abort. Output files not yet committed are discarded. A
+second coordinator may safely take over.</td>
+</tr>
+</tbody>
+</table>
+<h3 data-number="7.8.9" id="triggering-consolidation"><span
+class="header-section-number">7.8.9</span> Triggering Consolidation</h3>
+<p>Consolidation is triggered by any client that observes the SSTable
+count in the shared sync folder exceeding the threshold, subject to a
+per-device backoff to reduce contention on the lease:</p>
+<div class="sourceCode" id="cb13"><pre
+class="sourceCode dart"><code class="sourceCode dart"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="dt">bool</span> shouldAttemptConsolidation(<span class="op">{</span></span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a>  required <span class="dt">int</span> sharedSstCount<span class="op">,</span></span>
+<span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a>  required <span class="dt">int</span> consolidationThreshold<span class="op">,</span>   <span class="co">// default: 8 cross-device SSTables</span></span>
+<span id="cb13-4"><a href="#cb13-4" aria-hidden="true" tabindex="-1"></a>  required Duration timeSinceLastAttempt<span class="op">,</span></span>
+<span id="cb13-5"><a href="#cb13-5" aria-hidden="true" tabindex="-1"></a>  required Duration backoffDuration<span class="op">,</span>     <span class="co">// default: 5 minutes per device</span></span>
+<span id="cb13-6"><a href="#cb13-6" aria-hidden="true" tabindex="-1"></a><span class="op">}</span>) <span class="op">{</span></span>
+<span id="cb13-7"><a href="#cb13-7" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (sharedSstCount <span class="op">&lt;</span> consolidationThreshold) <span class="kw">return</span> <span class="cn">false</span>;</span>
+<span id="cb13-8"><a href="#cb13-8" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (timeSinceLastAttempt <span class="op">&lt;</span> backoffDuration) <span class="kw">return</span> <span class="cn">false</span>; <span class="kw">return</span> <span class="cn">true</span>;</span>
+<span id="cb13-9"><a href="#cb13-9" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>The backoff is per-device and is not coordinated. It exists solely to
+reduce the probability of multiple clients attempting lease acquisition
+simultaneously. Because lease acquisition is safe under concurrency — at
+most one client succeeds — the backoff affects efficiency only, not
+correctness.</p>
+<h4 data-number="7.8.9.1"
+id="why-8-sstables-as-the-default-threshold"><span
+class="header-section-number">7.8.9.1</span> Why 8 SSTables as the
+default threshold?</h4>
+<p>At the target write rate of 1–10 puts/second and flush threshold of
+64KB (roughly 30 documents), a single device produces at most one new L0
+file every 3–30 seconds under sustained load. With four devices writing
+concurrently, the shared folder accumulates 8 L0 files in approximately
+6–60 seconds. Triggering consolidation at 8 files keeps the cross-device
+file count in the same order of magnitude as the per-device L0 cap (2
+files), preventing unbounded read amplification when reading across all
+devices.</p>
+<h3 data-number="7.8.10" id="dart-class-outline"><span
+class="header-section-number">7.8.10</span> Dart Class Outline</h3>
+<p>The coordinator is a single Dart class with no persistent state of
+its own — all state is derived from the lease file and the manifest on
+each call:</p>
+<div class="sourceCode" id="cb14"><pre
+class="sourceCode dart"><code class="sourceCode dart"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="co">/// Coordinates cross-device SSTable consolidation using a lease file</span></span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a><span class="co">/// in the shared sync folder. All methods are idempotent and safe to</span></span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a><span class="co">/// call concurrently from multiple devices.</span></span>
+<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a><span class="kw">class</span> ConsolidationCoordinator <span class="op">{</span></span>
+<span id="cb14-5"><a href="#cb14-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">final</span> SyncFolderAdapter _folder; <span class="co">// abstracts POSIX / OPFS / GCS / S3</span></span>
+<span id="cb14-6"><a href="#cb14-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">final</span> <span class="dt">String</span> deviceId;</span>
+<span id="cb14-7"><a href="#cb14-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">final</span> ConsolidationConfig config;</span>
+<span id="cb14-8"><a href="#cb14-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-9"><a href="#cb14-9" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// Entry point. Returns ConsolidationResult indicating whether this</span></span>
+<span id="cb14-10"><a href="#cb14-10" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// device performed consolidation, adopted a prior result, or yielded</span></span>
+<span id="cb14-11"><a href="#cb14-11" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// to another coordinator.</span></span>
+<span id="cb14-12"><a href="#cb14-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-13"><a href="#cb14-13" aria-hidden="true" tabindex="-1"></a>  <span class="dt">Future</span><span class="op">&lt;</span>ConsolidationResult<span class="op">&gt;</span> runIfNeeded() <span class="at">async</span> <span class="op">{}</span></span>
+<span id="cb14-14"><a href="#cb14-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-15"><a href="#cb14-15" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// Attempts to acquire the lease. Returns the acquired lease on</span></span>
+<span id="cb14-16"><a href="#cb14-16" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// success, null if another coordinator holds a valid lease.</span></span>
+<span id="cb14-17"><a href="#cb14-17" aria-hidden="true" tabindex="-1"></a>  <span class="dt">Future</span><span class="op">&lt;</span>ConsolidationLease<span class="op">?&gt;</span> acquireLease() <span class="at">async</span> <span class="op">{}</span></span>
+<span id="cb14-18"><a href="#cb14-18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-19"><a href="#cb14-19" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// Performs the N-way merge over inputFiles, writing output files</span></span>
+<span id="cb14-20"><a href="#cb14-20" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// with the fencingToken embedded in their names. Calls renewLease()</span></span>
+<span id="cb14-21"><a href="#cb14-21" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// periodically. Returns null if preempted.</span></span>
+<span id="cb14-22"><a href="#cb14-22" aria-hidden="true" tabindex="-1"></a>  <span class="dt">Future</span><span class="op">&lt;</span><span class="dt">List</span><span class="op">&lt;</span>SstFile<span class="op">&gt;?&gt;</span> consolidate(ConsolidationLease lease) <span class="at">async</span> <span class="op">{}</span></span>
+<span id="cb14-23"><a href="#cb14-23" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-24"><a href="#cb14-24" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// Writes the manifest, deletes input files, deletes the lease.</span></span>
+<span id="cb14-25"><a href="#cb14-25" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// Each step is individually retryable — partial completion is safe.</span></span>
+<span id="cb14-26"><a href="#cb14-26" aria-hidden="true" tabindex="-1"></a>  <span class="dt">Future</span><span class="op">&lt;</span><span class="dt">void</span><span class="op">&gt;</span> commit(ConsolidationLease lease<span class="op">,</span> <span class="dt">List</span><span class="op">&lt;</span>SstFile<span class="op">&gt;</span> output) <span class="at">async</span> <span class="op">{}</span></span>
+<span id="cb14-27"><a href="#cb14-27" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-28"><a href="#cb14-28" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// Inspects current sync folder state and returns a RecoveryAction</span></span>
+<span id="cb14-29"><a href="#cb14-29" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// describing what, if anything, needs to be cleaned up.</span></span>
+<span id="cb14-30"><a href="#cb14-30" aria-hidden="true" tabindex="-1"></a>  <span class="dt">Future</span><span class="op">&lt;</span>RecoveryAction<span class="op">&gt;</span> assessRecoveryState() <span class="at">async</span> <span class="op">{}</span></span>
+<span id="cb14-31"><a href="#cb14-31" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb14-32"><a href="#cb14-32" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-33"><a href="#cb14-33" aria-hidden="true" tabindex="-1"></a><span class="kw">class</span> ConsolidationConfig <span class="op">{</span></span>
+<span id="cb14-34"><a href="#cb14-34" aria-hidden="true" tabindex="-1"></a>  <span class="at">final</span> <span class="dt">int</span> thresholdFileCount; <span class="co">// default: 8</span></span>
+<span id="cb14-35"><a href="#cb14-35" aria-hidden="true" tabindex="-1"></a>  <span class="at">final</span> <span class="dt">int</span> ttlMs; <span class="co">// default: 120 000</span></span>
+<span id="cb14-36"><a href="#cb14-36" aria-hidden="true" tabindex="-1"></a>  <span class="at">final</span> <span class="dt">int</span> renewalIntervalMs; <span class="co">// default: 60 000 (50% of TTL)</span></span>
+<span id="cb14-37"><a href="#cb14-37" aria-hidden="true" tabindex="-1"></a>  <span class="at">final</span> Duration perDeviceBackoff; <span class="co">// default: 5 minutes</span></span>
+<span id="cb14-38"><a href="#cb14-38" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-39"><a href="#cb14-39" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// Config suitable for unit tests: tiny threshold, short TTL,</span></span>
+<span id="cb14-40"><a href="#cb14-40" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// zero backoff — forces every code path with a handful of writes.</span></span>
+<span id="cb14-41"><a href="#cb14-41" aria-hidden="true" tabindex="-1"></a>  <span class="kw">factory</span> ConsolidationConfig<span class="op">.</span>forTesting() <span class="op">=&gt;</span> ConsolidationConfig(</span>
+<span id="cb14-42"><a href="#cb14-42" aria-hidden="true" tabindex="-1"></a>    thresholdFileCount<span class="op">:</span> <span class="dv">2</span><span class="op">,</span></span>
+<span id="cb14-43"><a href="#cb14-43" aria-hidden="true" tabindex="-1"></a>    ttlMs<span class="op">:</span> <span class="dv">5000</span><span class="op">,</span></span>
+<span id="cb14-44"><a href="#cb14-44" aria-hidden="true" tabindex="-1"></a>    renewalIntervalMs<span class="op">:</span> <span class="dv">2000</span><span class="op">,</span></span>
+<span id="cb14-45"><a href="#cb14-45" aria-hidden="true" tabindex="-1"></a>    perDeviceBackoff<span class="op">:</span> Duration<span class="op">.</span>zero<span class="op">,</span></span>
+<span id="cb14-46"><a href="#cb14-46" aria-hidden="true" tabindex="-1"></a>  );</span>
+<span id="cb14-47"><a href="#cb14-47" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<h1 data-number="8" id="query-api"><span
+class="header-section-number">8</span> Query API</h1>
+<h2 data-number="8.1" id="kmdbdatabase"><span
+class="header-section-number">8.1</span> <code>KmdbDatabase</code></h2>
+<div class="sourceCode" id="cb15"><pre
+class="sourceCode dart"><code class="sourceCode dart"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="at">final</span> <span class="kw">class</span> KmdbDatabase <span class="op">{</span></span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">final</span> KvStore _store;</span>
+<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">final</span> KeyGenerator _keyGenerator;</span>
+<span id="cb15-4"><a href="#cb15-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">final</span> Duration watchDebounce;</span>
+<span id="cb15-5"><a href="#cb15-5" aria-hidden="true" tabindex="-1"></a>  KmdbDatabase(<span class="op">{</span></span>
+<span id="cb15-6"><a href="#cb15-6" aria-hidden="true" tabindex="-1"></a>    required KvStore store<span class="op">,</span></span>
+<span id="cb15-7"><a href="#cb15-7" aria-hidden="true" tabindex="-1"></a>    KeyGenerator<span class="op">?</span> keyGenerator<span class="op">,</span> <span class="co">// defaults to UUIDv7</span></span>
+<span id="cb15-8"><a href="#cb15-8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">this</span><span class="op">.</span>watchDebounce <span class="op">=</span> <span class="at">const</span> Duration(milliseconds<span class="op">:</span> <span class="dv">50</span>)<span class="op">,</span></span>
+<span id="cb15-9"><a href="#cb15-9" aria-hidden="true" tabindex="-1"></a>  <span class="op">}</span>);</span>
+<span id="cb15-10"><a href="#cb15-10" aria-hidden="true" tabindex="-1"></a>  KmdbCollection<span class="op">&lt;</span>T<span class="op">&gt;</span> collection<span class="op">&lt;</span>T<span class="op">&gt;</span>(<span class="op">{</span></span>
+<span id="cb15-11"><a href="#cb15-11" aria-hidden="true" tabindex="-1"></a>    required <span class="dt">String</span> namespace<span class="op">,</span></span>
+<span id="cb15-12"><a href="#cb15-12" aria-hidden="true" tabindex="-1"></a>    required KmdbCodec<span class="op">&lt;</span>T<span class="op">&gt;</span> codec<span class="op">,</span></span>
+<span id="cb15-13"><a href="#cb15-13" aria-hidden="true" tabindex="-1"></a>  <span class="op">}</span>);</span>
+<span id="cb15-14"><a href="#cb15-14" aria-hidden="true" tabindex="-1"></a>  <span class="dt">Future</span><span class="op">&lt;</span><span class="dt">void</span><span class="op">&gt;</span> close();</span>
+<span id="cb15-15"><a href="#cb15-15" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<h2 data-number="8.2" id="kmdbcodect"><span
+class="header-section-number">8.2</span>
+<code>KmdbCodec&lt;T&gt;</code></h2>
+<p>Thin bridge between a freezed/json_serializable type and KMDB.
+Implementors delegate encode/decode to generated code:</p>
+<div class="sourceCode" id="cb16"><pre
+class="sourceCode dart"><code class="sourceCode dart"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="kw">abstract</span> <span class="kw">interface</span> <span class="kw">class</span> KmdbCodec<span class="op">&lt;</span>T<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// Read the key from a persisted document.</span></span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// Key was generated at insert() time.</span></span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">String</span> keyOf(T value);</span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">Map</span><span class="op">&lt;</span><span class="dt">String</span><span class="op">,</span> <span class="at">dynamic</span><span class="op">&gt;</span> encode(T value);</span>
+<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a>  T decode(<span class="dt">Map</span><span class="op">&lt;</span><span class="dt">String</span><span class="op">,</span> <span class="at">dynamic</span><span class="op">&gt;</span> json);</span>
+<span id="cb16-7"><a href="#cb16-7" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>No key parameter on decode — the key is already inside the JSON
+document (via id or equivalent), so passing it separately would be
+redundant and create a consistency hazard.</p>
+<h2 data-number="8.3" id="kmdbcollectiont"><span
+class="header-section-number">8.3</span>
+<code>KmdbCollection&lt;T&gt;</code></h2>
+<div class="sourceCode" id="cb17"><pre
+class="sourceCode dart"><code class="sourceCode dart"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a> <span class="at">final</span> <span class="kw">class</span> KmdbCollection<span class="op">&lt;</span>T<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// Generate a new UUIDv7 key for a new document.</span></span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">String</span> generateKey();</span>
+<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-5"><a href="#cb17-5" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// Insert a new document. Throws if key already exists.</span></span>
+<span id="cb17-6"><a href="#cb17-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">Future</span><span class="op">&lt;</span><span class="dt">void</span><span class="op">&gt;</span> insert(T value);</span>
+<span id="cb17-7"><a href="#cb17-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-8"><a href="#cb17-8" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// Replace an existing document. Throws if key does not exist.</span></span>
+<span id="cb17-9"><a href="#cb17-9" aria-hidden="true" tabindex="-1"></a>  <span class="dt">Future</span><span class="op">&lt;</span><span class="dt">void</span><span class="op">&gt;</span> replace(T value);</span>
+<span id="cb17-10"><a href="#cb17-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-11"><a href="#cb17-11" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// Upsert — insert or replace regardless.</span></span>
+<span id="cb17-12"><a href="#cb17-12" aria-hidden="true" tabindex="-1"></a>  <span class="dt">Future</span><span class="op">&lt;</span><span class="dt">void</span><span class="op">&gt;</span> put(T value);</span>
+<span id="cb17-13"><a href="#cb17-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-14"><a href="#cb17-14" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// Batch upsert.</span></span>
+<span id="cb17-15"><a href="#cb17-15" aria-hidden="true" tabindex="-1"></a>  <span class="dt">Future</span><span class="op">&lt;</span><span class="dt">void</span><span class="op">&gt;</span> putMany(<span class="dt">List</span><span class="op">&lt;</span>T<span class="op">&gt;</span> values);</span>
+<span id="cb17-16"><a href="#cb17-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-17"><a href="#cb17-17" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// Delete by key. Returns true if the key existed.</span></span>
+<span id="cb17-18"><a href="#cb17-18" aria-hidden="true" tabindex="-1"></a>  <span class="dt">Future</span><span class="op">&lt;</span><span class="dt">bool</span><span class="op">&gt;</span> delete(<span class="dt">String</span> key);</span>
+<span id="cb17-19"><a href="#cb17-19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-20"><a href="#cb17-20" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// Read-modify-write. NOT SAFE ACROSS DEVICE SYNC.</span></span>
+<span id="cb17-21"><a href="#cb17-21" aria-hidden="true" tabindex="-1"></a>  <span class="dt">Future</span><span class="op">&lt;</span><span class="dt">void</span><span class="op">&gt;</span> update(<span class="dt">String</span> key<span class="op">,</span> T <span class="kw">Function</span>(T current) updater);</span>
+<span id="cb17-22"><a href="#cb17-22" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-23"><a href="#cb17-23" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// Get a single document by key.</span></span>
+<span id="cb17-24"><a href="#cb17-24" aria-hidden="true" tabindex="-1"></a>  <span class="dt">Future</span><span class="op">&lt;</span>T<span class="op">?&gt;</span> <span class="kw">get</span>(<span class="dt">String</span> key);</span>
+<span id="cb17-25"><a href="#cb17-25" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-26"><a href="#cb17-26" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// Start building a query.</span></span>
+<span id="cb17-27"><a href="#cb17-27" aria-hidden="true" tabindex="-1"></a>  KmdbQuery<span class="op">&lt;</span>T<span class="op">&gt;</span> all();</span>
+<span id="cb17-28"><a href="#cb17-28" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-29"><a href="#cb17-29" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// Reactive stream of query results.</span></span>
+<span id="cb17-30"><a href="#cb17-30" aria-hidden="true" tabindex="-1"></a>  <span class="dt">Stream</span><span class="op">&lt;</span><span class="dt">List</span><span class="op">&lt;</span>T<span class="op">&gt;&gt;</span> watch();</span>
+<span id="cb17-31"><a href="#cb17-31" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<h2 data-number="8.4" id="kmdbqueryt-lazy-builder"><span
+class="header-section-number">8.4</span> <code>KmdbQuery&lt;T&gt;</code>
+(Lazy Builder)</h2>
+<div class="sourceCode" id="cb18"><pre
+class="sourceCode dart"><code class="sourceCode dart"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="at">final</span> <span class="kw">class</span> KmdbQuery<span class="op">&lt;</span>T<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a>  KmdbQuery<span class="op">&lt;</span>T<span class="op">&gt;</span> where(Filter filter);</span>
+<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a>  KmdbQuery<span class="op">&lt;</span>T<span class="op">&gt;</span> orderBy(<span class="dt">String</span> field<span class="op">,</span> <span class="op">{</span><span class="dt">bool</span> descending <span class="op">=</span> <span class="cn">false</span><span class="op">}</span>);</span>
+<span id="cb18-4"><a href="#cb18-4" aria-hidden="true" tabindex="-1"></a>  KmdbQuery<span class="op">&lt;</span>T<span class="op">&gt;</span> limit(<span class="dt">int</span> count);</span>
+<span id="cb18-5"><a href="#cb18-5" aria-hidden="true" tabindex="-1"></a>  KmdbQuery<span class="op">&lt;</span>T<span class="op">&gt;</span> offset(<span class="dt">int</span> count);</span>
+<span id="cb18-6"><a href="#cb18-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-7"><a href="#cb18-7" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// Terminal: execute and return results.</span></span>
+<span id="cb18-8"><a href="#cb18-8" aria-hidden="true" tabindex="-1"></a>  <span class="dt">Future</span><span class="op">&lt;</span><span class="dt">List</span><span class="op">&lt;</span>T<span class="op">&gt;&gt;</span> <span class="kw">get</span>();</span>
+<span id="cb18-9"><a href="#cb18-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-10"><a href="#cb18-10" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// Terminal: count matching documents.</span></span>
+<span id="cb18-11"><a href="#cb18-11" aria-hidden="true" tabindex="-1"></a>  <span class="dt">Future</span><span class="op">&lt;</span><span class="dt">int</span><span class="op">&gt;</span> count();</span>
+<span id="cb18-12"><a href="#cb18-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-13"><a href="#cb18-13" aria-hidden="true" tabindex="-1"></a>  <span class="co">/// Terminal: reactive stream, re-emits on relevant writes.</span></span>
+<span id="cb18-14"><a href="#cb18-14" aria-hidden="true" tabindex="-1"></a>  <span class="dt">Stream</span><span class="op">&lt;</span><span class="dt">List</span><span class="op">&lt;</span>T<span class="op">&gt;&gt;</span> watch();</span>
+<span id="cb18-15"><a href="#cb18-15" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<h2 data-number="8.5" id="filter-dsl"><span
+class="header-section-number">8.5</span> Filter DSL</h2>
+<p>Filters compose via and/or/not and support nested field paths with
+dot notation:</p>
+<div class="sourceCode" id="cb19"><pre
+class="sourceCode dart"><code class="sourceCode dart"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a><span class="co">// Comparison</span></span>
+<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a>filter<span class="op">.</span>eq(<span class="st">&#39;status&#39;</span><span class="op">,</span> <span class="st">&#39;active&#39;</span>);</span>
+<span id="cb19-3"><a href="#cb19-3" aria-hidden="true" tabindex="-1"></a>filter<span class="op">.</span>gt(<span class="st">&#39;createdAt&#39;</span><span class="op">,</span> cutoffDate);</span>
+<span id="cb19-4"><a href="#cb19-4" aria-hidden="true" tabindex="-1"></a>filter<span class="op">.</span>inList(<span class="st">&#39;priority&#39;</span><span class="op">,</span> [<span class="dv">1</span><span class="op">,</span> <span class="dv">2</span><span class="op">,</span> <span class="dv">3</span>]);</span>
+<span id="cb19-5"><a href="#cb19-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb19-6"><a href="#cb19-6" aria-hidden="true" tabindex="-1"></a><span class="co">// Nested fields</span></span>
+<span id="cb19-7"><a href="#cb19-7" aria-hidden="true" tabindex="-1"></a>filter<span class="op">.</span>eq(<span class="st">&#39;address.city&#39;</span><span class="op">,</span> <span class="st">&#39;London&#39;</span>);</span>
+<span id="cb19-8"><a href="#cb19-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb19-9"><a href="#cb19-9" aria-hidden="true" tabindex="-1"></a><span class="co">// String operations</span></span>
+<span id="cb19-10"><a href="#cb19-10" aria-hidden="true" tabindex="-1"></a>filter<span class="op">.</span>startsWith(<span class="st">&#39;title&#39;</span><span class="op">,</span> <span class="st">&#39;Project&#39;</span>);</span>
+<span id="cb19-11"><a href="#cb19-11" aria-hidden="true" tabindex="-1"></a>filter<span class="op">.</span>containsSubstring(<span class="st">&#39;body&#39;</span><span class="op">,</span> <span class="st">&#39;urgent&#39;</span>); <span class="co">// string only</span></span>
+<span id="cb19-12"><a href="#cb19-12" aria-hidden="true" tabindex="-1"></a>filter<span class="op">.</span>containsElement(<span class="st">&#39;tags&#39;</span><span class="op">,</span> <span class="st">&#39;flutter&#39;</span>); <span class="co">// array only</span></span>
+<span id="cb19-13"><a href="#cb19-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb19-14"><a href="#cb19-14" aria-hidden="true" tabindex="-1"></a><span class="co">// Null / existence</span></span>
+<span id="cb19-15"><a href="#cb19-15" aria-hidden="true" tabindex="-1"></a>filter<span class="op">.</span>isNull(<span class="st">&#39;deletedAt&#39;</span>);</span>
+<span id="cb19-16"><a href="#cb19-16" aria-hidden="true" tabindex="-1"></a>filter<span class="op">.</span>isNotNull(<span class="st">&#39;assignee&#39;</span>);</span>
+<span id="cb19-17"><a href="#cb19-17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb19-18"><a href="#cb19-18" aria-hidden="true" tabindex="-1"></a><span class="co">// Composition</span></span>
+<span id="cb19-19"><a href="#cb19-19" aria-hidden="true" tabindex="-1"></a>filter<span class="op">.</span>and([</span>
+<span id="cb19-20"><a href="#cb19-20" aria-hidden="true" tabindex="-1"></a>  filter<span class="op">.</span>eq(<span class="st">&#39;status&#39;</span><span class="op">,</span> <span class="st">&#39;active&#39;</span>)<span class="op">,</span></span>
+<span id="cb19-21"><a href="#cb19-21" aria-hidden="true" tabindex="-1"></a>  filter<span class="op">.</span>or([filter<span class="op">.</span>gt(<span class="st">&#39;priority&#39;</span><span class="op">,</span> <span class="dv">3</span>)<span class="op">,</span> filter<span class="op">.</span>isNotNull(<span class="st">&#39;dueDate&#39;</span>)])<span class="op">,</span></span>
+<span id="cb19-22"><a href="#cb19-22" aria-hidden="true" tabindex="-1"></a>]);</span></code></pre></div>
+<h3 data-number="8.5.1" id="missing-vs-null-semantics"><span
+class="header-section-number">8.5.1</span> Missing vs Null
+Semantics</h3>
+<p>FieldPath resolution returns a Missing sentinel for fields that do
+not exist on a document. This allows <code>isNull()</code> and
+<code>isNotNull()</code> to distinguish between
+<code>{ archived: null }</code> (field present, value null) and
+<code>{ }</code> (field absent). Without this sentinel, the two cases
+are indistinguishable, breaking filter correctness.</p>
+<h1 data-number="9" id="watch-reactivity"><span
+class="header-section-number">9</span> Watch / Reactivity</h1>
+<p>watch() returns a broadcast Stream that re-emits query results when
+relevant writes occur. The implementation uses debounced
+re-execution:</p>
+<ul>
+<li><p><strong>On any write to the watched namespace:</strong> schedule
+a re-query after the debounce window (default 50ms).</p></li>
+<li><p><strong>Debouncing:</strong> A putMany of 10 documents triggers
+one re-query, not 10.</p></li>
+<li><p><strong>Namespace scoping:</strong> A write to the “tasks”
+namespace does not trigger re-query on a “notes” watcher.</p></li>
+</ul>
+<h2 data-number="9.1" id="scaling-watch-at-100k-documents"><span
+class="header-section-number">9.1</span> Scaling Watch at 100K+
+Documents</h2>
+<p>At the revised scale, re-running a filtered query over 100K documents
+on every write (even debounced) can consume meaningful CPU.
+Mitigations:</p>
+<ul>
+<li><p><strong>Namespace-level dirty tracking:</strong> If the write
+does not touch the namespace being watched, skip the re-query
+entirely.</p></li>
+<li><p><strong>Key-range filtering:</strong> If the write’s key falls
+outside the watched query’s key range (for range-bounded queries),
+skip.</p></li>
+<li><p><strong>Future: field-level indexing.</strong> For
+commonly-watched fields, a lightweight in-memory index can answer
+orderBy and equality filters without full-scan. The query API is
+designed so orderBy is clearly separated from the scan path, making
+index slot-in straightforward.</p></li>
+</ul>
+<h1 data-number="10" id="keys-identifiers"><span
+class="header-section-number">10</span> Keys &amp; Identifiers</h1>
+<h2 data-number="10.1" id="uuidv7-document-keys"><span
+class="header-section-number">10.1</span> UUIDv7 Document Keys</h2>
+<p>Document keys are UUIDv7 values generated at insert time. UUIDv7
+embeds a millisecond-precision timestamp in the most significant bits,
+providing:</p>
+<ul>
+<li><p><strong>Index locality:</strong> Sequential inserts land at the
+SSTable tail, avoiding page splits. Measurable performance win at 100K+
+documents.</p></li>
+<li><p><strong>Implicit insertion order:</strong> A scan over a
+namespace returns documents roughly in creation order without explicit
+orderBy.</p></li>
+<li><p><strong>No coordination required:</strong> Each device can
+generate keys independently while maintaining global
+uniqueness.</p></li>
+<li><p><strong>Timestamp extraction:</strong> The creation timestamp can
+be read directly from the key without storing a separate createdAt
+field.</p></li>
+</ul>
+<p>Keys are stored as 16-byte binary internally, not 36-character
+strings. The uuid Dart package (v4.5+) provides UUIDv7 generation. A
+KeyGenerator interface allows injection of deterministic generators for
+testing.</p>
+<h3 data-number="10.1.1" id="cross-device-monotonicity"><span
+class="header-section-number">10.1.1</span> Cross-Device
+Monotonicity</h3>
+<p>If two devices insert in the same millisecond, their UUIDv7s
+interleave by random suffix rather than device. “Insertion order within
+a device” is the contract. “Global insertion order across devices” would
+require a coordination mechanism. Make orderBy(‘id’) the explicit way to
+get time-order; do not guarantee ordering from all() with no
+orderBy.</p>
+<h2 data-number="10.2" id="device-identity"><span
+class="header-section-number">10.2</span> Device Identity</h2>
+<p>Each device installation generates a stable UUID on first launch.
+This ID is used in SSTable filenames, .hwm filenames, and as the HLC
+tiebreaker for conflict resolution. It must be persisted outside the
+database:</p>
+<ul>
+<li><p>iOS/macOS: Keychain (survives app reinstall).</p></li>
+<li><p>Android: SharedPreferences with backup rules (or Keystore for
+higher security).</p></li>
+<li><p>Web: localStorage (per-origin, survives page reload).</p></li>
+<li><p>Desktop: Platform-specific app data directory.</p></li>
+</ul>
+<h1 data-number="11" id="integrity-compression"><span
+class="header-section-number">11</span> Integrity &amp; Compression</h1>
+<h2 data-number="11.1" id="checksum-strategy"><span
+class="header-section-number">11.1</span> Checksum Strategy</h2>
+<table>
+<colgroup>
+<col style="width: 16%" />
+<col style="width: 7%" />
+<col style="width: 75%" />
+</colgroup>
+<thead>
+<tr>
+<th style="text-align: left;">Component</th>
+<th style="text-align: left;">Algorithm</th>
+<th style="text-align: left;">Rationale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">WAL record header</td>
+<td style="text-align: left;">XXH64</td>
+<td style="text-align: left;">Fast, 64-bit output. Computed on every
+write. Speed matters at high write rates.</td>
+</tr>
+<tr>
+<td style="text-align: left;">SSTable footer</td>
+<td style="text-align: left;">XXH64</td>
+<td style="text-align: left;">Verified once on SSTable open and on sync
+ingestion.</td>
+</tr>
+<tr>
+<td style="text-align: left;">SSTable data blocks</td>
+<td style="text-align: left;">XXH64</td>
+<td style="text-align: left;">Per-block checksum. Verified on read.
+Detects partial corruption without full-file scan.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Sync file transfer</td>
+<td style="text-align: left;">XXH64</td>
+<td style="text-align: left;">Verified after download, before ingestion.
+Catches corrupted transfers.</td>
+</tr>
+</tbody>
+</table>
+<p>XXH64 was chosen over CRC32 for three reasons: 64-bit output provides
+dramatically better collision resistance (~10¹⁹ vs ~10⁹), it runs faster
+on ARM processors without CRC32C hardware acceleration, and the 4-byte
+per-record overhead is negligible at all scales.</p>
+<h2 data-number="11.2" id="compression"><span
+class="header-section-number">11.2</span> Compression</h2>
+<p>Compression is applied at the value level, not the block level. This
+preserves fixed-size block arithmetic and keeps the compression choice
+self-describing via a 1-byte flag stored with each value.</p>
+<p>The decompressor reads the per-value flag and dispatches to the
+correct algorithm, enabling cross-platform databases where some values
+were compressed with Zstd (native) and others with Deflate (web).</p>
+<p>The <code>zstandard</code> Dart package (v1.5+) provides full
+cross-platform support: FFI on native platforms, WASM on web. Dictionary
+compression is recommended after accumulating <a
+href="#zstd-dictionary-compression">sufficient documents per
+namespace</a>.</p>
+<h2 data-number="11.3" id="bloom-filter-migration-path"><span
+class="header-section-number">11.3</span> Bloom Filter Migration
+Path</h2>
+<p>The current design uses Bloom filters (10 bits/key, double hashing).
+At 500K keys, total filter memory is ~625KB. For future optimisation,
+Xor filters offer 30% less space and 25% faster lookups, at the cost of
+immutability (must rebuild on set changes). Since SSTable filters are
+inherently immutable (built once at flush time), Xor filters are a
+natural fit and should be considered for a future version.</p>
+<h1 data-number="12" id="platform-adaptation"><span
+class="header-section-number">12</span> Platform Adaptation</h1>
+<h2 data-number="12.1" id="conditional-exports"><span
+class="header-section-number">12.1</span> Conditional Exports</h2>
+<p>The package uses Dart conditional exports to select the correct
+platform adapter at compile time. The dart.library.js_interop condition
+is required for WASM compatibility (dart.library.html is
+deprecated):</p>
+<p>dart // lib/src/io/storage_adapter.dart export
+‘storage_adapter_stub.dart’ if (dart.library.io)
+‘storage_adapter_native.dart’ if (dart.library.js_interop)
+‘storage_adapter_web.dart’;</p>
+<h2 data-number="12.2"
+id="native-platforms-ios-android-macos-windows-linux"><span
+class="header-section-number">12.2</span> Native Platforms (iOS,
+Android, macOS, Windows, Linux)</h2>
+<ul>
+<li><p><strong>File I/O:</strong> dart:io RandomAccessFile for
+reads/writes, with fsync for durability.</p></li>
+<li><p><strong>Compression:</strong> Zstd via dart:ffi to libzstd. Build
+hooks (Dart 3.10+) handle native compilation via hook/build.dart with
+native_toolchain_c.</p></li>
+<li><p><strong>File locking:</strong> flock() / LockFileEx() on database
+directory to prevent dual-process access.</p></li>
+<li><p><strong>Background isolate:</strong> Dedicated isolate for
+compaction at scale. FFI pointers passed as raw int addresses via
+SendPort.</p></li>
+</ul>
+<h2 data-number="12.3" id="web-opfs"><span
+class="header-section-number">12.3</span> Web (OPFS)</h2>
+<ul>
+<li><p><strong>File I/O:</strong> Origin Private File System via
+dart:js_interop. SAHPool VFS pattern for 3–4x better I/O
+performance.</p></li>
+<li><p><strong>Compression:</strong> Zstd via WASM (zstandard package),
+falling back to Deflate for older browsers.</p></li>
+<li><p><strong>No file locking:</strong> OPFS sync access handles are
+exclusively locked by design (one handle per file). Multi-tab requires a
+SharedWorker or BroadcastChannel coordination.</p></li>
+<li><p><strong>No dart:isolate on web:</strong> Use Web Workers via
+isolate_manager (v5+) for background compaction.</p></li>
+</ul>
+<h3 data-number="12.3.1" id="opfs-at-scale"><span
+class="header-section-number">12.3.1</span> Opfs At Scale</h3>
+<p>At 100MB+ database sizes, OPFS write latency (~10x native) becomes a
+bottleneck. Dedicate a Web Worker to I/O operations, with the query
+layer communicating via message passing. Use journal_mode=truncate
+semantics (faster than WAL on OPFS) and increase page cache to
+8–16MB.</p>
+<h2 data-number="12.4" id="package-structure"><span
+class="header-section-number">12.4</span> Package Structure</h2>
+<pre><code>kmdb/
+
+ lib/
+  kmdb.dart                    # Public export
+  src/
+   engine/                     # Platform-agnostic
+    btree/
+    storage/
+     page_manager.dart
+     superblock.dart
+     compressor.dart
+    transaction/
+     commit.dart
+     recovery.dart
+    memtable/
+     skip_list.dart
+    sstable/
+     writer.dart
+     reader.dart
+     bloom_filter.dart
+    compaction/
+     merge_iterator.dart
+     compaction_job.dart
+    sync/
+     hlc.dart
+     sync_engine.dart
+     highwater.dart
+    api/
+     kv_store.dart
+  query/                      # Query layer
+   collection.dart
+   query.dart
+   filter.dart
+   field_path.dart
+   codec.dart
+   watcher.dart
+  io/                          # Platform adapters storage_adapter.dart
+   storage_adapter_native.dart # Abstract + conditional export
+   storage_adapter_web.dart
+   storage_adapter_stub.dart
+   cloud/
+    cloud_adapter.dart      # Abstract google_drive_adapter.dart icloud_adapter.dart
+hook/
+ build.dart                    # Native build hooks</code></pre>
+<h1 data-number="13" id="concurrency-performance"><span
+class="header-section-number">13</span> Concurrency &amp;
+Performance</h1>
+<h2 data-number="13.1" id="synchronous-path-typical-scale"><span
+class="header-section-number">13.1</span> Synchronous Path (Typical
+Scale)</h2>
+<p>At the typical workload (2K–20K documents), all operations run
+synchronously on the calling isolate. Flush (256KB memtable to SSTable)
+completes in low single-digit milliseconds. L0→L1 compaction (merging
+four 256KB files) completes well under 50ms on any device capable of
+running Flutter.</p>
+<h2 data-number="13.2" id="background-isolate-upper-bound-scale"><span
+class="header-section-number">13.2</span> Background Isolate (Upper
+Bound Scale)</h2>
+<p>At 100K+ documents, L2→L3 compaction may involve tens of megabytes of
+I/O. This must not block the UI thread. The strategy follows the Drift
+model:</p>
+<ul>
+<li><p><strong>Dedicated background isolate:</strong> A single
+long-lived isolate owns all compaction work.</p></li>
+<li><p><strong>RPC via SendPort:</strong> The main isolate sends
+compaction requests and receives completion notifications.</p></li>
+<li><p><strong>FFI pointer transfer:</strong> DynamicLibrary and Pointer
+objects cannot cross isolate boundaries. Pass raw int addresses via
+Pointer.fromAddress() on the receiving side.</p></li>
+<li><p><strong>Compaction threshold:</strong> Background compaction is
+enabled when total database size exceeds 10MB. Below this, synchronous
+compaction is used.</p></li>
+</ul>
+<h2 data-number="13.3" id="performance-targets"><span
+class="header-section-number">13.3</span> Performance Targets</h2>
+<table>
+<colgroup>
+<col style="width: 30%" />
+<col style="width: 26%" />
+<col style="width: 43%" />
+</colgroup>
+<thead>
+<tr>
+<th style="text-align: left;">Operation</th>
+<th style="text-align: left;">Typical (20K docs)</th>
+<th style="text-align: left;">Upper Bound (500K docs)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Point lookup (get)</td>
+<td style="text-align: left;">&lt; 1ms</td>
+<td style="text-align: left;">&lt; 5ms (2–3 filter checks)</td>
+</tr>
+<tr>
+<td style="text-align: left;">Insert (single)</td>
+<td style="text-align: left;">&lt; 1ms</td>
+<td style="text-align: left;">&lt; 2ms</td>
+</tr>
+<tr>
+<td style="text-align: left;">Scan (full namespace)</td>
+<td style="text-align: left;">&lt; 50ms</td>
+<td style="text-align: left;">&lt; 500ms</td>
+</tr>
+<tr>
+<td style="text-align: left;">Filtered query</td>
+<td style="text-align: left;">&lt; 20ms</td>
+<td style="text-align: left;">&lt; 200ms (full scan + filter)</td>
+</tr>
+<tr>
+<td style="text-align: left;">Memtable flush</td>
+<td style="text-align: left;">&lt; 5ms</td>
+<td style="text-align: left;">&lt; 10ms</td>
+</tr>
+<tr>
+<td style="text-align: left;">L0→L1 compaction</td>
+<td style="text-align: left;">&lt; 50ms</td>
+<td style="text-align: left;">&lt; 200ms</td>
+</tr>
+<tr>
+<td style="text-align: left;">L2→L3 compaction</td>
+<td style="text-align: left;">N/A</td>
+<td style="text-align: left;">&lt; 5s (background isolate)</td>
+</tr>
+</tbody>
+</table>
+<h1 data-number="14" id="crash-recovery"><span
+class="header-section-number">14</span> Crash Recovery</h1>
+<h2 data-number="14.1" id="recovery-sequence-on-open"><span
+class="header-section-number">14.1</span> Recovery Sequence on Open</h2>
+<ol type="1">
+<li><p>Acquire exclusive file lock on the database directory.</p></li>
+<li><p>Detect and delete orphan files: SSTables on disk not referenced
+in the Manifest.</p></li>
+<li><p>Read and replay the Manifest to reconstruct the current level
+structure.</p></li>
+<li><p>If a WAL file exists, replay it from the last flush marker to
+recover uncommitted writes.</p></li>
+<li><p>If the WAL is truncated (CRC failure mid-record), stop replay at
+the last valid record. Acknowledge data loss of at most one memtable
+window.</p></li>
+<li><p>Resume normal operation.</p></li>
+</ol>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 52%" />
+<col style="width: 21%" />
+</colgroup>
+<thead>
+<tr>
+<th style="text-align: left;">Crash Point</th>
+<th style="text-align: left;">State on Recovery</th>
+<th style="text-align: left;">Data Loss</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">During WAL append</td>
+<td style="text-align: left;">WAL truncated at last valid record.</td>
+<td style="text-align: left;">At most one write.</td>
+</tr>
+<tr>
+<td style="text-align: left;">During memtable flush</td>
+<td style="text-align: left;">WAL intact. Replay recovers all
+writes.</td>
+<td style="text-align: left;">None.</td>
+</tr>
+<tr>
+<td style="text-align: left;">During SSTable write</td>
+<td style="text-align: left;">Orphan SSTable detected and deleted.</td>
+<td style="text-align: left;">None (WAL replays).</td>
+</tr>
+<tr>
+<td style="text-align: left;">During Manifest update</td>
+<td style="text-align: left;">Old Manifest valid. Orphan SSTable
+deleted.</td>
+<td style="text-align: left;">None (WAL replays).</td>
+</tr>
+<tr>
+<td style="text-align: left;">During compaction</td>
+<td style="text-align: left;">Input SSTables intact. Partial output
+deleted.</td>
+<td style="text-align: left;">None.</td>
+</tr>
+<tr>
+<td style="text-align: left;">During sync upload</td>
+<td style="text-align: left;">Local state intact. Re-upload on next
+sync.</td>
+<td style="text-align: left;">None locally.</td>
+</tr>
+</tbody>
+</table>
+</body>
+</html>

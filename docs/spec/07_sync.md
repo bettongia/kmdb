@@ -1,0 +1,508 @@
+# Sync Protocol
+
+KMDB syncs across devices using a peer-to-peer protocol with no central server.
+The sync transport is a shared cloud storage folder (Google Drive, iCloud, or
+equivalent). The primary sync unit is the immutable SSTable file.
+
+## Design Principles
+
+- **File creation is the atomic primitive.** Never mutate a synced file after
+  writing it. Cloud sync achieves consistency by making file existence binary: a
+  file either exists completely or not at all.
+
+- **SSTable-based primary sync.** For a single-user application, one device is
+  typically active at a time. SSTable exchange provides efficient catch-up sync
+  when switching devices.
+
+- **WAL segment fast-path (future v2).** For the rare scenario of
+  near-simultaneous multi-device use, WAL segment exchange can provide
+  lower-latency sync. This is deferrable without architectural compromise.
+
+- **Per-field last-write-wins.** Conflict resolution uses HLC timestamps at the
+  document level. The entry with the higher HLC wins. CRDTs are reserved for
+  specific data types that demand merge semantics.
+
+- **Idempotent ingestion.** Replaying a previously-ingested SSTable produces
+  identical results. This makes the protocol tolerant of interrupted sync
+  cycles.
+
+## Sync Folder Structure
+
+```
+/sync/
+ highwater/
+  {deviceA-id}.hwm              # Device A's sync progress
+  {deviceB-id}.hwm              # Device B's sync progress
+  {deviceC-id}.hwm              # Device C's sync progress
+ sstables/
+  {deviceA-id}-{minHlc}-{maxHlc}.sst
+  {deviceB-id}-{minHlc}-{maxHlc}.sst
+  ...
+```
+
+Each device writes only to its own files. No two devices ever write to the same
+file. This eliminates all conflict-on-write scenarios at the file level.
+
+## Per-Device High-Water Mark Files
+
+Each device maintains a .hwm file recording the highest HLC timestamp it has
+fully processed from every peer. This file is the one file each device mutates
+repeatedly, but since only one device writes to its own .hwm file, cloud sync
+will never produce a conflict.
+
+Example: `deviceA.hwm`:
+
+```jsonc
+{
+  "deviceId": "a1b2c3d4",
+  "currentHlc": "017F8A0B3000",
+  "lastUpdated": "2026-03-27T10:30:00Z",
+  "peers": {
+    "f9e8d7c6": "017F8A0B2FFF",
+    // highest HLC processed from device B
+    "1a2b3c4d": "017F8A0A0000",
+    // highest HLC processed from device C
+  },
+}
+```
+
+The `.hwm` file also contains the device's own current HLC timestamp and a
+wall-clock last-updated time. This enables stale device detection for the
+[tombstone retention policy](#tombstone-retention-garbage-collection).
+
+## Sync Cycle (Primary Path)
+
+When a device comes online or returns to foreground:
+
+1. Read all .hwm files in the highwater/ directory to understand overall sync
+   state.
+
+1. Read own .hwm file to determine what has already been processed from each
+   peer.
+
+1. Scan the sstables/ directory for files from other devices with minHlc greater
+   than the recorded high-water mark for that device.
+
+1. Download and ingest each new SSTable at L0. Verify the footer XXH64 checksum
+   before use.
+
+1. If L0 count exceeds the trigger threshold after ingestion, run compaction.
+
+1. Update own .hwm file with the new high-water marks for each peer.
+
+1. Upload any locally-produced SSTables that have not yet been uploaded.
+
+1. Upload own updated .hwm file.
+
+Remote SSTables always enter at L0 A file at L2 on the originating device cannot
+be placed at L2 locally without violating the non-overlapping range invariant.
+Ingesting at L0 ensures the local compaction path runs with full visibility of
+the local key history.
+
+## Conflict Resolution
+
+Conflicts arise when two devices write to the same key while offline. Resolution
+occurs during compaction merge:
+
+- **Default: Last Write Wins by HLC.** The entry with the higher HLC timestamp
+  (sequence number) is retained.
+
+- **Same-HLC tiebreaker:** If two entries have identical HLC timestamps (rare
+  but possible), the device ID with the higher lexicographic value wins. This
+  guarantees a total ordering so merge is deterministic regardless of which
+  device performs it.
+
+- **Tombstone vs Put:** A Delete tombstone wins over an older Put. A Put wins
+  over an older Delete. At equal HLC, Put wins as a conservative choice.
+
+- **Application-level merge (optional):** A MergeOperator callback can be
+  registered at engine open time. When two versions of the same key from
+  different devices are encountered during compaction, the callback receives
+  both values and returns a merged result. This enables CRDT-style merge without
+  changes to the storage layer.
+
+## Tombstone Retention & Garbage Collection
+
+Tombstones cannot be dropped during compaction until every known device has
+processed past the tombstone's HLC timestamp. The protocol uses .hwm files to
+track this:
+
+- **Safe to drop:** A tombstone with HLC T can be dropped when every device's
+  .hwm file shows a peer entry for this device ≥ T.
+
+- **Stale device policy:** If a device's .hwm file has not been updated for 90
+  days (configurable), it is considered stale. Tombstones are retained for stale
+  devices up to the policy limit, after which they are dropped. A stale device
+  returning online must perform a full re-sync rather than incremental catch-up.
+
+- **SSTable garbage collection:** An SSTable can be deleted from the sync folder
+  when every device's .hwm file shows processing past that SSTable's maxHlc. The
+  device that produced the SSTable is responsible for deleting it, avoiding race
+  conditions on deletion.
+
+## Namespace-Scoped Sync
+
+Not all namespaces should sync. A local_cache or settings namespace typically
+contains device-specific data. The sync layer supports opt-in per namespace:
+
+```dart
+final db = KmdbDatabase(
+  store: kvStore,
+  syncConfig: SyncConfig(
+    cloudAdapter: GoogleDriveAdapter(...),
+    syncNamespaces: {'notes', 'contacts', 'tasks'},
+    // 'settings' and 'cache' excluded
+  ),
+);
+```
+
+During SSTable upload, the sync layer filters to include only entries for
+sync-enabled namespaces. This avoids uploading megabytes of device-local cache
+data.
+
+## Cross-Device Compaction Coordinator
+
+Each device produces SSTables independently and flushes them to the shared sync
+folder. Periodically, the set of on-disk SSTables must be consolidated —
+redundant versions merged, tombstones dropped, file count reduced — so that read
+performance and storage consumption remain bounded regardless of how many
+devices are actively writing.
+
+Because there is no designated primary device, any client may initiate
+consolidation. The coordinator design must therefore satisfy three invariants:
+
+- **Safety:** at most one client executes consolidation at any time. Concurrent
+  merges of overlapping SSTables produce incorrect output.
+
+- **Liveness:** a crashed or network-partitioned coordinator does not
+  permanently block consolidation. Any surviving client can take over after the
+  lease expires.
+
+- **Observability:** in-progress, completed, and abandoned consolidation states
+  are distinguishable without opening any SSTable. Recovery logic must not
+  require the original coordinator.
+
+### Lease File Protocol
+
+Coordination is mediated by a single well-known file in the shared sync folder:
+
+```
+<sync-root>/
+  <device-id>-N-NNNNNN-<hash>-<hash>.sst     ← per-device SSTables
+  .consolidation-lease                       ← coordinator lock (this section)
+  .consolidation-manifest                    ← output record
+```
+
+The lease file is a UTF-8 JSON document written atomically via a
+write-to-temp-then-rename sequence. Its presence means consolidation is claimed;
+its absence means no client holds the lock. The lease file is never appended to
+— it is always replaced wholesale.
+
+#### Lease file schema
+
+```jsonc
+{
+  "version": 1,
+  "coordinatorId": "a3f2b1c9", // deviceId of the claiming client
+  "epoch": 7, // monotonically increasing per coordinatorId
+  "acquiredAtMs": 1743724800000, // wall-clock ms at acquisition (HLC physical)
+  "ttlMs": 120000, // lease duration; coordinator must renew before expiry
+  "inputFiles": [
+    // SSTables in scope at acquisition time
+    "a3f2b1c9-0-000007-1a2b3c4d-9e8f7a6b.sst",
+    "b7e10f44-0-000003-aabbccdd-11223344.sst",
+  ],
+  "fencingToken": "a3f2b1c9-7", // coordinatorId + epoch; written to output files
+}
+```
+
+_Why epoch rather than a UUID?_
+
+An ever-increasing epoch per device gives the fencing token a total order for
+the same coordinator. If device "a3f2b1c9" crashes and re-acquires, its epoch
+increments and any output files from the previous attempt carry a stale token
+that is trivially detectable. A random UUID would require a separate registry to
+establish ordering.
+
+### Acquiring the Lease
+
+A client wishing to consolidate executes the following steps. The sequence is
+designed so that the only non-atomic operation — the rename — is the commit
+point.
+
+1. **Check for an existing lease.** Read .consolidation-lease if present. If
+   absent, proceed to step 2\. If present, verify the lease has expired
+   (currentTimeMs \> acquiredAtMs \+ ttlMs). If not expired, abort — another
+   coordinator is active.
+
+2. **Validate the incumbent's output.** If the lease is expired, check whether
+   .consolidation-manifest records a completed consolidation whose output files
+   all exist on disk. If so, the previous coordinator finished but failed to
+   clean up. Adopt the output (§8.6.5) rather than re-consolidating.
+
+3. **Write a candidate lease to a temp file.** Name it
+   .consolidation-lease.\<deviceId\>.tmp. Populate all fields. Set epoch \=
+   (previous epoch for this deviceId) \+ 1, or 0 if first acquisition.
+
+4. **Rename the temp file to .consolidation-lease.** On POSIX filesystems and
+   cloud object stores that support atomic conditional-PUT (GCS, S3 via
+   if-none-match), this is the linearisation point. On platforms without atomic
+   rename, use the compare-and-swap write pattern described in §8.6.7.
+
+5. **Re-read the lease file.** Confirm that coordinatorId and epoch match what
+   was just written. If another client won the race, its data will appear
+   instead. In that case, abort.
+
+#### ⚠ Clock skew and TTL selection
+
+The TTL must be long enough to survive the slowest expected consolidation plus a
+renewal cycle, but short enough that a crashed coordinator does not hold the
+lease for an operationally significant period. The recommended default is 120
+seconds. At the target data scale (≤ 20MB total), a full consolidation completes
+well under 10 seconds on any supported device, leaving ample headroom for
+renewal. Clock skew between devices is bounded at 60 seconds (§Appendix A), so
+the effective detection window after a crash is at most 120 \+ 60 \= 180
+seconds.
+
+### State Machine
+
+The coordinator transitions through five states. Every state is durable — a
+client recovering from a crash can reconstruct the current state entirely from
+the lease file and the files present in the sync folder.
+
+| State          | Observable condition                                                                           | Valid next states                           |
+| :------------- | :--------------------------------------------------------------------------------------------- | :------------------------------------------ |
+| IDLE           | No .consolidation-lease file exists                                                            | LEASE_ACQUIRED                              |
+| LEASE_ACQUIRED | Lease file present; no output files with matching fencingToken exist yet                       | CONSOLIDATING, IDLE (on abort)              |
+| CONSOLIDATING  | Lease file present and valid; partial or complete output files with fencingToken exist on disk | VERIFYING, LEASE_EXPIRED                    |
+| VERIFYING      | All expected output files present; .consolidation-manifest written; lease still valid          | COMPLETE, LEASE_EXPIRED                     |
+| COMPLETE       | .consolidation-manifest records success; all input files deleted; lease file deleted           | IDLE                                        |
+| LEASE_EXPIRED  | Lease present but currentTimeMs \> acquiredAtMs \+ ttlMs                                       | LEASE_ACQUIRED (new coordinator takes over) |
+
+The state machine is intentionally asymmetric: transitions into COMPLETE require
+all three cleanup steps (manifest written, input files deleted, lease deleted)
+to have succeeded. A client that completes the merge but crashes before deleting
+the lease leaves the system in a recoverable VERIFYING-like state that the next
+coordinator can detect and resolve without re-merging.
+
+### Consolidation Manifest
+
+Before deleting any input file, the coordinator writes a consolidation manifest.
+This file records what was merged and what the output is, so that any client —
+including one that did not perform the merge — can validate and adopt the
+result.
+
+```jsonc
+{
+  "version": 1,
+  "fencingToken": "a3f2b1c9-7",
+  "completedAtMs": 1743724812345,
+  "inputFiles": [
+    "a3f2b1c9-0-000007-1a2b3c4d-9e8f7a6b.sst",
+    "b7e10f44-0-000003-aabbccdd-11223344.sst",
+  ],
+  "outputFiles": ["a3f2b1c9-2-000009-00000000-ffffffff.sst"],
+  "inputEntryCount": 1840,
+  "outputEntryCount": 1203, // <= inputEntryCount after dedup + tombstone drop
+  "status": "complete", // "complete" | "partial"
+}
+```
+
+#### outputEntryCount as a sanity check
+
+The coordinator verifies outputEntryCount \<= inputEntryCount before committing.
+If this invariant is violated, the merge produced more entries than it consumed
+— a certain sign of a bug in the deduplication or tombstone-dropping logic. The
+coordinator must abort, delete its output files, release the lease, and log a
+diagnostic rather than committing corrupt output.
+
+### Cross-Device Sequence Number Ordering
+
+Within a single device, the HLC sequence number is monotonically increasing.
+Across devices it is not — two devices may produce identical or inverted HLC
+timestamps after a clock adjustment, or simply because they have never
+communicated.
+
+The consolidation merge iterator therefore uses a compound sort key rather than
+sequence number alone:
+
+```dart
+// Internal key ordering for cross-device merge (ascending)
+//
+// Primary:   userKey ASC
+// Secondary: sequenceNumber DESC   (higher seq = more recent, within one device)
+// Tertiary:  deviceId DESC         (arbitrary but stable tiebreaker across devices)
+//
+// The tertiary sort ensures deterministic output when two devices write the same
+// key at the same HLC timestamp — a rare but theoretically possible event.
+int compareInternalKeys(InternalKey a, InternalKey b) {
+  final keyOrd = a.userKey.compareTo(b.userKey);
+  if (keyOrd != 0) return keyOrd;
+  final seqOrd = b.sequenceNumber.compareTo(a.sequenceNumber); // DESC
+  if (seqOrd != 0) return seqOrd;
+  return b.deviceId.compareTo(a.deviceId);                     // DESC, stable
+}
+```
+
+#### ⚠ Application-level conflict semantics
+
+The tiebreaker above makes the merge deterministic and safe, but it does not
+implement application-level conflict resolution. If two devices write different
+values for the same key at the same HLC timestamp, the higher deviceId wins
+silently. Applications requiring last-write-wins with user-visible conflict
+notification must record both versions and surface the conflict at read time —
+this is out of scope for the storage layer and must be handled by the sync layer
+above it.
+
+### Lease Renewal
+
+For consolidations that approach the TTL boundary — possible if the sync folder
+is on a slow network mount or if the device is under load — the coordinator must
+renew the lease before it expires. Renewal rewrites the lease file with an
+updated acquiredAtMs while keeping the same epoch and fencingToken.
+
+```dart
+// Renewal is a conditional write: only proceed if the lease on disk
+// still matches our fencingToken. If it does not, a competing client
+// has taken over and we must abort our merge immediately.
+
+Future<bool> renewLease(ConsolidationLease current) async {
+  final onDisk = await readLease();
+  if (onDisk == null || onDisk.fencingToken != current.fencingToken) {
+    return false; // preempted — abort merge
+  }
+  final renewed = current.copyWith(acquiredAtMs: DateTime.now().millisecondsSinceEpoch);
+  await writeLease(renewed); // atomic rename
+  return true;
+}
+```
+
+The coordinator should schedule renewal at 50% of TTL elapsed (60 seconds with
+the default 120s TTL). If renewal fails — either because the write fails or
+because the on-disk fencing token does not match — the coordinator must stop
+writing output immediately, discard any partial output files it has written, and
+exit the CONSOLIDATING state. It must not delete any input files.
+
+### Platform Atomic Write Strategies
+
+The lease file write-then-rename sequence requires platform support to be safe.
+The behaviour differs across the deployment targets:
+
+| Platform                      | Atomic primitive                                         | Implementation                                                                                                                  |
+| :---------------------------- | :------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------ |
+| POSIX (Linux / macOS desktop) | rename(2) is atomic within a filesystem                  | Write to .tmp file on same volume, then rename. Guaranteed atomic by POSIX.                                                     |
+| iOS / Android (local storage) | Same as POSIX — app sandbox is a single filesystem       | Identical to POSIX path. No special handling required.                                                                          |
+| Cloud object storage (GCS)    | Conditional PUT with if-none-match / if-generation-match | Upload lease JSON with if-generation-match: \<expected-generation\>. HTTP 412 means another client won the race.                |
+| Cloud object storage (S3)     | No native CAS. Use DynamoDB conditional writes as a lock | Acquire a DynamoDB item with a condition expression before writing to S3. Release on completion.                                |
+| Web (OPFS)                    | createSyncAccessHandle is exclusive per-file per-origin  | Acquire a sync access handle on .consolidation-lease. Only one handle can be open at once per origin — enforced by the browser. |
+
+#### OPFS limitation
+
+The OPFS exclusive handle approach only prevents concurrent consolidation within
+the same browser origin on the same device. Cross-device coordination still
+relies on the cloud storage primitive — OPFS provides only local mutual
+exclusion, not distributed mutual exclusion.
+
+### Failure Scenarios and Recovery
+
+Every failure scenario is recoverable without data loss. The recovery action is
+determined by reading the lease file and the manifest file, then inspecting
+which files exist on disk.
+
+| Failure point                                                 | Observable state                                                                                    | Recovery action                                                                                                                                      |
+| :------------------------------------------------------------ | :-------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Crash after lease write, before any output files written      | Lease present; no output files with fencingToken; lease expired                                     | New coordinator acquires lease (epoch \+1). All input files intact — perform full consolidation.                                                     |
+| Crash mid-merge (partial output files on disk)                | Lease expired; partial output files with stale fencingToken exist; no manifest                      | New coordinator deletes stale output files, acquires fresh lease, re-merges from original input files.                                               |
+| Crash after merge complete, before manifest written           | Lease expired; all output files present with fencingToken; no manifest                              | New coordinator can detect output file coverage matches input files. Write manifest, delete inputs, delete lease. No re-merge needed.                |
+| Crash after manifest written, before input files deleted      | Manifest present with status=complete; input and output files both present; lease expired or absent | New coordinator reads manifest, verifies output files exist, deletes input files, deletes lease. Safe because manifest is the commit record.         |
+| Crash after inputs deleted, before lease deleted              | Manifest present; only output files remain; lease present (expired)                                 | New coordinator reads manifest, confirms output files exist, deletes lease. IDLE state restored.                                                     |
+| Coordinator alive but partitioned from sync folder for \> TTL | Lease expired on disk; coordinator still running and writing output                                 | Coordinator must detect renewal failure (§8.6.6) and abort. Output files not yet committed are discarded. A second coordinator may safely take over. |
+
+### Triggering Consolidation
+
+Consolidation is triggered by any client that observes the SSTable count in the
+shared sync folder exceeding the threshold, subject to a per-device backoff to
+reduce contention on the lease:
+
+```dart
+bool shouldAttemptConsolidation({
+  required int sharedSstCount,
+  required int consolidationThreshold,   // default: 8 cross-device SSTables
+  required Duration timeSinceLastAttempt,
+  required Duration backoffDuration,     // default: 5 minutes per device
+}) {
+  if (sharedSstCount < consolidationThreshold) return false;
+  if (timeSinceLastAttempt < backoffDuration) return false; return true;
+}
+```
+
+The backoff is per-device and is not coordinated. It exists solely to reduce the
+probability of multiple clients attempting lease acquisition simultaneously.
+Because lease acquisition is safe under concurrency — at most one client
+succeeds — the backoff affects efficiency only, not correctness.
+
+#### Why 8 SSTables as the default threshold?
+
+At the target write rate of 1–10 puts/second and flush threshold of 64KB
+(roughly 30 documents), a single device produces at most one new L0 file every
+3–30 seconds under sustained load. With four devices writing concurrently, the
+shared folder accumulates 8 L0 files in approximately 6–60 seconds. Triggering
+consolidation at 8 files keeps the cross-device file count in the same order of
+magnitude as the per-device L0 cap (2 files), preventing unbounded read
+amplification when reading across all devices.
+
+### Dart Class Outline
+
+The coordinator is a single Dart class with no persistent state of its own — all
+state is derived from the lease file and the manifest on each call:
+
+```dart
+/// Coordinates cross-device SSTable consolidation using a lease file
+/// in the shared sync folder. All methods are idempotent and safe to
+/// call concurrently from multiple devices.
+class ConsolidationCoordinator {
+  final SyncFolderAdapter _folder; // abstracts POSIX / OPFS / GCS / S3
+  final String deviceId;
+  final ConsolidationConfig config;
+
+  /// Entry point. Returns ConsolidationResult indicating whether this
+  /// device performed consolidation, adopted a prior result, or yielded
+  /// to another coordinator.
+
+  Future<ConsolidationResult> runIfNeeded() async {}
+
+  /// Attempts to acquire the lease. Returns the acquired lease on
+  /// success, null if another coordinator holds a valid lease.
+  Future<ConsolidationLease?> acquireLease() async {}
+
+  /// Performs the N-way merge over inputFiles, writing output files
+  /// with the fencingToken embedded in their names. Calls renewLease()
+  /// periodically. Returns null if preempted.
+  Future<List<SstFile>?> consolidate(ConsolidationLease lease) async {}
+
+  /// Writes the manifest, deletes input files, deletes the lease.
+  /// Each step is individually retryable — partial completion is safe.
+  Future<void> commit(ConsolidationLease lease, List<SstFile> output) async {}
+
+  /// Inspects current sync folder state and returns a RecoveryAction
+  /// describing what, if anything, needs to be cleaned up.
+  Future<RecoveryAction> assessRecoveryState() async {}
+}
+
+class ConsolidationConfig {
+  final int thresholdFileCount; // default: 8
+  final int ttlMs; // default: 120 000
+  final int renewalIntervalMs; // default: 60 000 (50% of TTL)
+  final Duration perDeviceBackoff; // default: 5 minutes
+
+  /// Config suitable for unit tests: tiny threshold, short TTL,
+  /// zero backoff — forces every code path with a handful of writes.
+  factory ConsolidationConfig.forTesting() => ConsolidationConfig(
+    thresholdFileCount: 2,
+    ttlMs: 5000,
+    renewalIntervalMs: 2000,
+    perDeviceBackoff: Duration.zero,
+  );
+}
+
+```

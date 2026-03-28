@@ -1,0 +1,8 @@
+toc: true
+file-scope: true
+standalone: true
+list-of-tables: true
+list-of-figures: true
+number-sections: true
+css:
+  - styles/styles.css
