@@ -6,20 +6,4 @@
 # https://dart.dev/guides/libraries/private-files#pubspeclock.
 pubspec.lock
 
-# But commit for applications:
-!apps/*/pubspec.lock
-
-build/
-
-# melos will generate these
-pubspec_overrides.yaml
-
-coverage/
-
-.idea/
-*.iml
-
-doc/
-.DS_Store
-
 sandbox/
