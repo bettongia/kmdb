@@ -100,6 +100,12 @@ final class LsmEngine {
   /// Broadcast stream that emits a namespace string after each successful write.
   Stream<String> get writeEvents => _writeEventsController.stream;
 
+  /// The SSTable directory path. Exposed for [KvStoreImpl.ingestSstable].
+  String get sstDir => _sstDir;
+
+  /// The storage adapter. Exposed for [KvStoreImpl.ingestSstable].
+  StorageAdapter get adapter => _adapter;
+
   // ── Factory ───────────────────────────────────────────────────────────────
 
   /// Creates an [LsmEngine] from the result of crash recovery.
@@ -649,6 +655,61 @@ final class LsmEngine {
     await _adapter.deleteFile(_manifestWriter.path);
 
     _manifestWriter = newWriter;
+  }
+
+  // ── SSTable ingestion ─────────────────────────────────────────────────────
+
+  /// Registers [filename] as an L0 SSTable and persists a [VersionEdit].
+  ///
+  /// The file must already be written to `[_sstDir]/[filename]`. This method:
+  ///
+  /// 1. Opens the SSTable reader to validate the footer checksum and read
+  ///    entry metadata.
+  /// 2. Advances the local HLC clock to be at least as recent as the
+  ///    SSTable's max HLC (causal consistency).
+  /// 3. Appends a [VersionEdit] to the Manifest.
+  /// 4. Adds the file to the L0 level list.
+  /// 5. Runs compaction if triggered.
+  ///
+  /// Throws [CorruptedSstableException] if the footer checksum is invalid.
+  Future<void> ingestAt0(String filename) async {
+    final path = '$_sstDir/$filename';
+    // Open the reader — validates footer checksum and loads index/filter.
+    final reader = await SstableReader.open(path, _adapter);
+    final entryCount = reader.entryCount;
+
+    // Determine HLC range from the filename, then advance the local clock.
+    // This ensures subsequent local writes are causally after the ingested data.
+    final info = SstableInfo.parse(filename);
+    advanceClock(info.maxHlc);
+
+    final hlc = _tick();
+
+    final meta = SstableMeta(
+      level: 0,
+      filename: filename,
+      // minKey/maxKey are not available without a full scan; use empty strings.
+      // The Manifest uses these only for diagnostics, not for correctness.
+      minKey: '',
+      maxKey: '',
+      entryCount: entryCount,
+      // walSequence is null for peer-ingested files (they don't retire a WAL).
+    );
+
+    await _manifestWriter.append(VersionEdit(
+      logNumber: _walWriter.activeSequence,
+      nextSeq: hlc.encoded,
+      added: [meta],
+    ));
+
+    (_levels[0] ??= []).add(filename);
+
+    // Notify listeners that new data is available (use '$sync' namespace to
+    // signal sync-sourced data without targeting a specific user namespace).
+    _writeEventsController.add(r'$sync');
+
+    await _rotateManifestIfNeeded();
+    await _compactIfNeeded();
   }
 
   // ── Close ─────────────────────────────────────────────────────────────────

@@ -82,6 +82,26 @@ abstract interface class KvStore {
   /// emits one event per unique namespace.
   Stream<String> get writeEvents;
 
+  /// Ingests an externally-provided SSTable into the local database at L0.
+  ///
+  /// [filename] is the bare SSTable filename
+  /// (e.g. `a1b2c3d4-017F8A0A00000000-017F8A0AFFFF0000.sst`). [bytes] is the
+  /// complete file content. The method:
+  ///
+  /// 1. Validates the SSTable footer checksum.
+  /// 2. Writes the bytes to the local `sst/` directory.
+  /// 3. Appends a [VersionEdit] to the Manifest recording the new L0 file.
+  /// 4. Triggers compaction if needed.
+  ///
+  /// Throws [CorruptedSstableException] if the footer checksum fails. Throws
+  /// [FormatException] if [filename] does not match the SSTable naming
+  /// convention.
+  ///
+  /// This method is called by [SyncEngine.pull] after downloading a remote
+  /// SSTable. The HLC clock is advanced to the SSTable's max HLC so locally
+  /// generated timestamps remain causally after ingested ones.
+  Future<void> ingestSstable(String filename, Uint8List bytes);
+
   /// Closes the store, flushing the active memtable and releasing the LOCK.
   ///
   /// After [close] returns the instance must not be used again. A new

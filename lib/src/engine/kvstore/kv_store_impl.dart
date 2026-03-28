@@ -54,7 +54,8 @@ import 'meta_store.dart';
 /// await store.close();
 /// ```
 final class KvStoreImpl implements KvStore {
-  KvStoreImpl._(this._engine, this._meta);
+  KvStoreImpl._(this._engine, this._meta, {required bool dirtyFlagPresent})
+      : _dirtyFlagPresent = dirtyFlagPresent;
 
   final LsmEngine _engine;
   final MetaStore _meta;
@@ -64,6 +65,17 @@ final class KvStoreImpl implements KvStore {
   /// The flag is written lazily on the first user write so read-only sessions
   /// never mark the database dirty.
   bool _sessionDirtyMarked = false;
+
+  /// Whether the dirty-open flag currently exists in `$meta`.
+  ///
+  /// Set to true when:
+  /// - [hadUnclosedSession] was true at open time (flag left by a crash), or
+  /// - [_maybeMarkDirty] writes the flag this session.
+  ///
+  /// Only when this is true does [close] need to write a tombstone to clear the
+  /// flag. Avoids an unnecessary memtable write (and flush + compaction) for
+  /// sessions that never write.
+  bool _dirtyFlagPresent;
 
   // ── Factory ───────────────────────────────────────────────────────────────
 
@@ -94,7 +106,7 @@ final class KvStoreImpl implements KvStore {
       hadUnclosedSession: hadUnclosedSession,
     );
 
-    return (KvStoreImpl._(engine, meta), openResult);
+    return (KvStoreImpl._(engine, meta, dirtyFlagPresent: hadUnclosedSession), openResult);
   }
 
   // ── KvStore implementation ────────────────────────────────────────────────
@@ -148,13 +160,29 @@ final class KvStoreImpl implements KvStore {
   Future<void> compactAll() => _engine.compactAll();
 
   @override
+  Future<void> ingestSstable(String filename, Uint8List bytes) async {
+    // Write the SSTable bytes to the local sst/ directory first, then
+    // register it in the manifest via the engine. The engine validates
+    // the footer checksum during open() inside ingestAt0().
+    final sstPath = '${_engine.sstDir}/$filename';
+    await _engine.adapter.writeFile(sstPath, bytes);
+    await _engine.adapter.syncFile(sstPath);
+    await _engine.ingestAt0(filename);
+  }
+
+  @override
   Stream<String> get writeEvents => _engine.writeEvents;
 
   @override
   Future<void> close() async {
-    // Clear the dirty-open flag before flushing so the flag is absent on the
-    // next open even if we crash immediately after (the delete is in the WAL).
-    await _meta.clearDirty();
+    // Only write a tombstone to clear the dirty flag if the flag actually exists
+    // in $meta. Writing an unnecessary tombstone would cause a memtable write,
+    // which triggers a flush and potentially a compaction — both wasteful for
+    // read-only sessions and dangerous if L0 contains externally-ingested files
+    // that may have been overwritten in tests.
+    if (_dirtyFlagPresent) {
+      await _meta.clearDirty();
+    }
     await _engine.close();
   }
 
@@ -173,6 +201,7 @@ final class KvStoreImpl implements KvStore {
     if (_sessionDirtyMarked) return;
     await _meta.setDirty();
     _sessionDirtyMarked = true;
+    _dirtyFlagPresent = true;
   }
 
   /// Throws [ArgumentError] when [namespace] begins with `$`.
