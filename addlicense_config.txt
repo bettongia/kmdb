@@ -15,6 +15,7 @@
 --ignore="**/.dart_tool/**"
 --ignore="**/lib/src/generated/**"
 --ignore="**/coverage/**"
---ignore="**/doc/**"
+--ignore="site/**"
 --ignore="vendor/**"
+--ignore=".claude"
 .

@@ -10,3 +10,4 @@ sandbox/
 .claude/settings.local.json
 
 coverage
+site

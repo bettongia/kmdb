@@ -1,22 +1,34 @@
 .DEFAULT_GOAL := default
 
-.PHONY: docs dart_doc test default checks coverage license_check license_add
+.PHONY: site dart_doc test default checks coverage license_check license_add styles clean
 
 COVERAGE_DIR=coverage
 
 ADDLICENSE_CONFIG=addlicense_config.txt
 
-default: test checks docs
+default: test docs checks
 
-docs: site/index.html site/spec.html dart_doc
+site: site/ styles site/index.html site/spec.html site/api/index.html site/roadmap.html
 
-site/spec.html: docs/spec/*.md docs/spec/.pandoc
-	pandoc --defaults="docs/spec/.pandoc" docs/spec/*.md -o "site/spec.html"; \
+site/:
+	mkdir -p site
 
-site/index.html: docs/index.md docs/.pandoc
-	pandoc --defaults="docs/.pandoc" docs/index.md -o "site/index.html"; \
+styles: site/styles/styles.css
 
-dart_doc:
+site/styles/styles.css: docs/styles/styles.css
+	mkdir -p site/styles/
+	cp docs/styles/styles.css site/styles/styles.css
+
+site/spec.html: site/ docs/spec/*.md docs/spec/.pandoc docs/template/header.html
+	pandoc --defaults="docs/spec/.pandoc" docs/spec/*.md -o "site/spec.html";
+
+site/index.html: site/ docs/index.md docs/.pandoc docs/template/header.html
+	pandoc --defaults="docs/.pandoc" docs/index.md -o "site/index.html";
+
+site/roadmap.html: site/ docs/roadmap.md docs/.pandoc docs/template/header.html
+	pandoc --defaults="docs/.pandoc" docs/roadmap.md -o "site/roadmap.html";
+
+site/api/index.html: lib/*.dart lib/**/*.dart
 	dart doc -o site/api
 
 checks: coverage license_check
@@ -35,3 +47,7 @@ license_check:
 
 license_add:
 	cat $(ADDLICENSE_CONFIG) | xargs addlicense
+
+clean:
+	rm -rf site
+	rm -rf coverage
