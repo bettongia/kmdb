@@ -1,5 +1,42 @@
 # Feature roadmap
 
+## Document version history & conflict resolution
+
+KMDB currently uses Last-Write-Wins (LWW) via HLC timestamps to resolve
+conflicts during sync compaction. This is correct and deterministic, but silent:
+when two devices independently edit the same document, the lower-timestamp write
+is discarded without the application being informed.
+
+A future version could maintain a lightweight version lineage per document —
+similar to CouchDB's revision model — so that a "fork" (two writes both
+descended from the same base version) is detectable rather than silently
+resolved. This would enable:
+
+- **Conflict surfacing:** an `onConflict` callback or `conflicts()` query that
+  exposes document pairs where LWW had to choose, letting the application decide
+  whether the outcome is correct.
+- **Version inspection:** access to the discarded version for a configurable
+  retention window, so the user or application can cherry-pick fields from the
+  losing write.
+- **Guided merge UI:** for applications like note-taking or contact management,
+  the ability to present both versions to the user and let them accept, reject,
+  or hand-merge changes field by field.
+
+The implementation would likely store a compact ancestry token (e.g. a
+`{deviceId, hlc}` pair) alongside each document write. The merge iterator during
+compaction could detect a fork when two entries for the same key have ancestry
+tokens that share a common ancestor but diverge, rather than one being a direct
+descendant of the other.
+
+This is complementary to (not a replacement for) the `MergeOperator` escape
+hatch, which is better suited to programmable CRDT-style merges (counters,
+sets).
+
+References:
+
+- [CouchDB conflict model](https://docs.couchdb.org/en/stable/replication/conflicts.html)
+- [Vector clocks (Lamport)](https://en.wikipedia.org/wiki/Vector_clock)
+
 ## Full-text search
 
 Support traditional full-text search and vector-based searches.

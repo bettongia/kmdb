@@ -31,7 +31,7 @@ Dart object (T)
 Map<String, dynamic>
     ↓  cbor.encode()              // ~20–30% smaller than JSON; native Uint8List support
 Uint8List (CBOR bytes)
-    ↓  Zstd (native) or Deflate (web)   // further 30–50% reduction on typical documents
+    ↓  Zstd (preferred) or Deflate (web fallback)   // further 30–50% reduction on typical documents
 Uint8List (compressed, if ratio > 1.1×)
     ↓  1-byte compression flag    // prepended: 0x00 = raw, 0x01 = Zstd, 0x02 = Deflate
 SSTable slot value
@@ -41,11 +41,11 @@ SSTable slot value
 
 Each stored value is prefixed with a 1-byte compression flag:
 
-| Flag   | Algorithm | Platform       | Notes                                              |
-| :----- | :-------- | :------------- | :------------------------------------------------- |
-| `0x00` | None      | All            | Used when value is small or already compressed.    |
-| `0x01` | Zstd      | Native         | Level 1 (fastest). Via `dart:ffi` to libzstd.      |
-| `0x02` | Deflate   | Web / WASM     | Pure Dart via `archive` package. ~10% worse ratio. |
+| Flag   | Algorithm | Platform                    | Notes                                                          |
+| :----- | :-------- | :-------------------------- | :------------------------------------------------------------- |
+| `0x00` | None      | All                         | Used when value is small or already compressed.                |
+| `0x01` | Zstd      | Native (FFI) + Web (WASM)   | Level 1 (fastest). Preferred on all platforms via `zstandard`. |
+| `0x02` | Deflate   | Web — WASM unavailable only | Pure Dart via `archive` package. ~10% worse ratio. Fallback.  |
 
 The 1.1× threshold means compression is only applied when the compressed form
 is at least 9% smaller than the original. Values that do not compress well —
@@ -58,17 +58,20 @@ decompressed by a web client because the flag identifies the algorithm.
 
 ## Cross-Platform Transparency
 
-A value compressed with Zstd on a native device and uploaded to the sync folder
-is correctly decompressed by a web client:
+All platforms prefer Zstd. On native, this is `dart:ffi` to libzstd. On web, this
+is the `zstandard` WASM module. Both produce identical output for the same input,
+so cross-device reads are transparent:
 
-1. Web client downloads the SSTable
-2. Reads the 1-byte flag: `0x01` (Zstd)
-3. Decompresses using the WASM Zstd module
-4. Decodes the CBOR bytes
-5. Passes the `Map<String, dynamic>` to `codec.decode()`
+1. Native client writes a value → Zstd (flag `0x01`) → uploaded to sync folder
+2. Web client downloads the SSTable
+3. Reads the 1-byte flag: `0x01` (Zstd)
+4. Decompresses using the WASM Zstd module (identical algorithm, identical output)
+5. Decodes the CBOR bytes → passes `Map<String, dynamic>` to `codec.decode()`
 
-The web client writes new values with Deflate (`0x02`). A native client reading
-those values sees the `0x02` flag and uses libzstd's Deflate decompressor.
+The Deflate fallback (`0x02`) is used only on web browsers where WASM is
+unavailable. Native clients reading a `0x02` value use `archive`'s Inflate
+decompressor. This path should be rare in practice — all modern browsers support
+WASM.
 
 ## CBOR Boundary
 

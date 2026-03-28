@@ -7,3 +7,4 @@
 pubspec.lock
 
 sandbox/
+.claude/settings.local.json

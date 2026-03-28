@@ -54,6 +54,21 @@ abstract interface class KmdbCodec<T> {
 
 Obtained via `db.collection(namespace: '...', codec: ...)`.
 
+### Conflict Semantics
+
+All writes use **Last-Write-Wins (LWW)** conflict resolution. When two devices
+independently write to the same document key and their SSTables are later merged
+during sync compaction, the entry with the higher HLC timestamp is kept and the
+other is silently discarded. This applies to every write method — `put`,
+`insert`, `replace`, `update`, `delete` — without exception.
+
+This is not a limitation of any specific method; it is a property of the sync
+model. Any pattern where two devices concurrently write to the same document
+field can produce a discarded write. Applications that require field-level merge
+semantics (e.g. incrementing a counter, appending to a list) should use the
+`MergeOperator` callback on the sync engine (§12), which enables CRDT-style
+resolution during compaction.
+
 ### Point-Lookup Methods
 
 ```dart
@@ -83,8 +98,9 @@ Future<void> putMany(Iterable<T> values);
 Future<void> delete(String key);
 
 // update: read-modify-write. Returns null if the document does not exist.
-// NOT SAFE ACROSS DEVICE SYNC — concurrent writes from another device may
-// be silently overwritten by LWW conflict resolution during compaction.
+// Safe on a single device (synchronous single-isolate model prevents
+// interleaving). Subject to LWW conflict resolution during sync — see
+// Conflict Semantics above.
 Future<T?> update(String key, T Function(T current) updater);
 ```
 
@@ -122,10 +138,12 @@ Future<int>       count();   // avoids decoding documents
 Future<bool>      any();
 ```
 
-**`stream()` snapshot lifetime:** `stream()` holds an LSM snapshot open for the
-duration of the stream. For UI lists, prefer `get()` (snapshot closed
-immediately) or `watch()` (fresh snapshot per re-run). Do not hold a `stream()`
-open across user interactions.
+**`stream()` implementation:** `stream()` is eagerly evaluated — identical to
+`get()` internally, but the result is emitted as a `Stream<T>` rather than
+returned as a `Future<List<T>>`. No LSM snapshot is held open. This is
+sufficient at KMDB's target scale (≤100K documents); a lazy cursor with
+ref-counted SSTable retention can be introduced if larger scale demands it.
+Prefer `watch()` for reactive UI lists.
 
 **`orderBy('id')`** maps directly to `KvStore.scan(descending:)` and avoids an
 in-memory sort — the only `orderBy` with this optimisation. All other fields
