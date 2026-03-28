@@ -14,10 +14,13 @@
 
 import 'dart:typed_data';
 
+import 'package:meta/meta.dart';
+
 import '../platform/storage_adapter_interface.dart';
 import 'crash_recovery.dart';
 import 'kv_store.dart';
 import 'lsm_engine.dart';
+import 'meta_store.dart';
 
 /// Concrete [KvStore] implementation backed by [LsmEngine].
 ///
@@ -29,6 +32,19 @@ import 'lsm_engine.dart';
 /// metadata, secondary indexes). Writing to a `$` namespace via the public
 /// [put] / [delete] / [writeBatch] methods throws [ArgumentError].
 ///
+/// ## Dirty-open flag
+///
+/// On the first user write after open, [KvStoreImpl] writes a dirty-open flag
+/// to `$meta` (§17, step 8). The flag is cleared on [close]. If the process
+/// is killed before [close] is called, the flag remains set and the next
+/// [OpenResult.hadUnclosedSession] will be `true`.
+///
+/// ## Generation counters
+///
+/// After every user write, [KvStoreImpl] increments the generation counter for
+/// the affected namespace(s) in `$meta`. The Cache Layer (Phase 6) reads these
+/// counters to detect stale cached query results.
+///
 /// ## Example
 ///
 /// ```dart
@@ -38,9 +54,16 @@ import 'lsm_engine.dart';
 /// await store.close();
 /// ```
 final class KvStoreImpl implements KvStore {
-  KvStoreImpl._(this._engine);
+  KvStoreImpl._(this._engine, this._meta);
 
   final LsmEngine _engine;
+  final MetaStore _meta;
+
+  /// Whether the dirty-open flag has been written this session.
+  ///
+  /// The flag is written lazily on the first user write so read-only sessions
+  /// never mark the database dirty.
+  bool _sessionDirtyMarked = false;
 
   // ── Factory ───────────────────────────────────────────────────────────────
 
@@ -48,7 +71,7 @@ final class KvStoreImpl implements KvStore {
   ///
   /// [deviceId] must be an 8-character lowercase hex string used to name
   /// SSTable files. Defaults to `'00000000'` for tests; production code
-  /// should supply a stable per-device UUID prefix (Phase 4).
+  /// should supply a stable per-device UUID prefix via [DeviceId.load].
   ///
   /// Throws [LockException] if another process holds the database lock.
   static Future<(KvStoreImpl, OpenResult)> open(
@@ -58,24 +81,38 @@ final class KvStoreImpl implements KvStore {
     String deviceId = '00000000',
   }) async {
     final recovery = CrashRecovery(adapter: adapter, config: config);
-    final (engine, result) = await recovery.open(dbDir, deviceId: deviceId);
-    return (KvStoreImpl._(engine), result);
+    final (engine, recoveryResult) =
+        await recovery.open(dbDir, deviceId: deviceId);
+    final meta = MetaStore(engine);
+
+    // Check for the dirty-open flag written by the previous session.
+    final hadUnclosedSession = await meta.getDirtyFlag();
+
+    final openResult = OpenResult(
+      hadInterruptedWrites: recoveryResult.hadInterruptedWrites,
+      affectedNamespaces: recoveryResult.affectedNamespaces,
+      hadUnclosedSession: hadUnclosedSession,
+    );
+
+    return (KvStoreImpl._(engine, meta), openResult);
   }
 
   // ── KvStore implementation ────────────────────────────────────────────────
 
   @override
   Future<void> put(String namespace, String key, Uint8List value) async {
-    // Guard is called inside async so the ArgumentError is wrapped in a
-    // rejected Future rather than thrown synchronously.
     _guardNamespace(namespace);
+    await _maybeMarkDirty();
     await _engine.put(namespace, key, value);
+    await _meta.incrementGenerationCounter(namespace);
   }
 
   @override
   Future<void> delete(String namespace, String key) async {
     _guardNamespace(namespace);
+    await _maybeMarkDirty();
     await _engine.delete(namespace, key);
+    await _meta.incrementGenerationCounter(namespace);
   }
 
   @override
@@ -83,7 +120,13 @@ final class KvStoreImpl implements KvStore {
     for (final entry in batch.entries) {
       _guardNamespace(entry.namespace);
     }
+    await _maybeMarkDirty();
     await _engine.writeBatch(batch);
+    // Increment the generation counter for each affected namespace.
+    final namespaces = batch.entries.map((e) => e.namespace).toSet();
+    for (final ns in namespaces) {
+      await _meta.incrementGenerationCounter(ns);
+    }
   }
 
   @override
@@ -108,9 +151,29 @@ final class KvStoreImpl implements KvStore {
   Stream<String> get writeEvents => _engine.writeEvents;
 
   @override
-  Future<void> close() => _engine.close();
+  Future<void> close() async {
+    // Clear the dirty-open flag before flushing so the flag is absent on the
+    // next open even if we crash immediately after (the delete is in the WAL).
+    await _meta.clearDirty();
+    await _engine.close();
+  }
+
+  // ── Internal access (tests only) ─────────────────────────────────────────
+
+  /// Direct access to the [MetaStore] for use in tests.
+  ///
+  /// External production code should not use this.
+  @visibleForTesting
+  MetaStore get meta => _meta;
 
   // ── Helpers ───────────────────────────────────────────────────────────────
+
+  /// Writes the dirty-open flag on the first user write of the session.
+  Future<void> _maybeMarkDirty() async {
+    if (_sessionDirtyMarked) return;
+    await _meta.setDirty();
+    _sessionDirtyMarked = true;
+  }
 
   /// Throws [ArgumentError] when [namespace] begins with `$`.
   static void _guardNamespace(String namespace) {

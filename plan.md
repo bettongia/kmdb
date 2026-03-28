@@ -10,6 +10,7 @@ Once each phase is completed:
 - Review instructions in CLAUDE.md and ensure quality assurance requirements
   (tests, code documentation etc) have been followed.
 - Commit code
+- Update the "Progress" section below
 
 ## Progress
 
@@ -20,9 +21,11 @@ Once each phase is completed:
   writer/reader, varint)
 - ✅ Phase 3 complete (Manifest, MergeIterator, CompactionJob, LsmEngine,
   CrashRecovery, KvStoreImpl — 286 tests pass)
-- Phases 4–8: not started
+- ✅ Phase 4 complete (MetaStore, DeviceId, dirty-open flag, generation
+  counters, hadUnclosedSession — 310 tests pass)
+- Phases 5–8: not started
 
-All 286 tests pass.
+All 310 tests pass.
 
 ---
 
