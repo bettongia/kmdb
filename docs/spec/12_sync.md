@@ -226,8 +226,8 @@ its absence means no client holds the lock. The lease file is never appended to
   "ttlMs": 120000, // lease duration; coordinator must renew before expiry
   "inputFiles": [
     // SSTables in scope at acquisition time (regular flush format — 3 segments)
-    "a3f2b1c9-017F8A0A0000-017F8A0AFFFF.sst",
-    "b7e10f44-017F8A090000-017F8A09FFFF.sst",
+    "a3f2b1c9-017F8A0A00000000-017F8A0AFFFF0000.sst",
+    "b7e10f44-017F8A0900000000-017F8A09FFFF0000.sst",
   ],
   "fencingToken": "a3f2b1c9-7", // coordinatorId + epoch; embedded in output filenames
 }
@@ -315,8 +315,8 @@ result.
   "fencingToken": "a3f2b1c9-7",
   "completedAtMs": 1743724812345,
   "inputFiles": [
-    "a3f2b1c9-017F8A0A0000-017F8A0AFFFF.sst",
-    "b7e10f44-017F8A090000-017F8A09FFFF.sst",
+    "a3f2b1c9-017F8A0A00000000-017F8A0AFFFF0000.sst",
+    "b7e10f44-017F8A0900000000-017F8A09FFFF0000.sst",
   ],
   "outputFiles": ["a3f2b1c9-7-017F8A090000-017F8A0AFFFF.sst"],
   "inputEntryCount": 1840,

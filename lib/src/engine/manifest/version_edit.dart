@@ -14,6 +14,16 @@
 
 import 'package:cbor/cbor.dart';
 
+/// Converts a CBOR-decoded numeric value to a Dart [int].
+///
+/// The `cbor` package's `toObject()` may return [BigInt] for integer values
+/// that exceed 32 bits. This helper handles both cases transparently.
+int _toInt(dynamic v) {
+  if (v is int) return v;
+  if (v is BigInt) return v.toInt();
+  return (v as num).toInt();
+}
+
 /// Metadata for one SSTable file referenced in a [VersionEdit].
 final class SstableMeta {
   const SstableMeta({
@@ -56,12 +66,12 @@ final class SstableMeta {
       };
 
   static SstableMeta fromMap(Map<dynamic, dynamic> m) => SstableMeta(
-        level: (m['level'] as int),
+        level: _toInt(m['level']),
         filename: m['filename'] as String,
         minKey: m['minKey'] as String,
         maxKey: m['maxKey'] as String,
-        entryCount: m['entryCount'] as int,
-        walSequence: m['walSequence'] as int?,
+        entryCount: _toInt(m['entryCount']),
+        walSequence: m['walSequence'] != null ? _toInt(m['walSequence']) : null,
       );
 }
 
@@ -75,7 +85,7 @@ final class SstableRef {
   Map<String, dynamic> toMap() => {'level': level, 'filename': filename};
 
   static SstableRef fromMap(Map<dynamic, dynamic> m) => SstableRef(
-        level: m['level'] as int,
+        level: _toInt(m['level']),
         filename: m['filename'] as String,
       );
 }
@@ -148,8 +158,8 @@ final class VersionEdit {
         .map(SstableRef.fromMap)
         .toList();
     return VersionEdit(
-      logNumber: m['logNumber'] as int,
-      nextSeq: m['nextSeq'] as int,
+      logNumber: _toInt(m['logNumber']),
+      nextSeq: _toInt(m['nextSeq']),
       added: addList,
       removed: removeList,
     );

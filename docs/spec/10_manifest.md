@@ -54,7 +54,7 @@ Each `VersionEdit` is a CBOR map describing one atomic file-set transition:
   "remove": [              // SSTables removed in this transition
     {
       "level": 0,
-      "filename": "a1b2c3d4-017F8A0A0000-017F8A0AFFFF.sst"
+      "filename": "a1b2c3d4-017F8A0A00000000-017F8A0AFFFF0000.sst"
     }
   ]
 }

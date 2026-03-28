@@ -21,8 +21,12 @@ import '../util/hlc.dart';
 ///
 /// **Regular flush (3 segments):**
 /// ```
-/// {deviceId}-{minHlc}-{maxHlc}.sst
+/// {deviceId}-{minHlc16}-{maxHlc16}.sst
 /// ```
+/// where `{minHlc16}` and `{maxHlc16}` are the full 64-bit HLC encoded as
+/// 16 uppercase hex characters (physical + logical). Using the full HLC
+/// prevents filename collisions when multiple flushes occur within the same
+/// physical millisecond.
 ///
 /// **Consolidation output (4 segments):**
 /// ```
@@ -39,7 +43,7 @@ final class SstableInfo {
     this.epoch,
   });
 
-  /// The bare filename (no directory path), e.g. `a1b2c3d4-017F8A0A0000-017F8A0AFFFF.sst`.
+  /// The bare filename (no directory path), e.g. `a1b2c3d4-017F8A0A00000000-017F8A0AFFFF0000.sst`.
   final String filename;
 
   /// The 8-character device identifier (truncated UUID hex, no hyphens).
@@ -106,11 +110,14 @@ final class SstableInfo {
 
   /// Constructs a regular flush filename.
   ///
+  /// Uses the full 16-character HLC hex (physical + logical) so that multiple
+  /// flushes within the same physical millisecond produce distinct filenames.
+  ///
   /// ```
   /// {deviceId}-{minHlc}-{maxHlc}.sst
   /// ```
   static String flushName(String deviceId, Hlc minHlc, Hlc maxHlc) =>
-      '$deviceId-${minHlc.toPhysicalHex()}-${maxHlc.toPhysicalHex()}.sst';
+      '$deviceId-${minHlc.toHex()}-${maxHlc.toHex()}.sst';
 
   /// Constructs a consolidation output filename.
   ///
