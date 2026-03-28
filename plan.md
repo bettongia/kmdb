@@ -1,7 +1,14 @@
 # KMDB Implementation Plan
 
 Status as of 2026-03-28. Spec is complete and frozen for implementation.
-The codebase contains only stubs — everything below is greenfield.
+
+**Progress as of 2026-03-28:**
+- ✅ Phase 1 complete (all primitives + platform layer)
+- ✅ Phase 2 complete (skip list, memtable, WAL, Bloom filter, SSTable writer/reader, varint)
+- 🔄 Phase 3 in progress: Manifest ✅, MergeIterator ✅, CompactionJob ✅, KvStore (started — `kv_store.dart` done, `lsm_engine.dart` / `crash_recovery.dart` / `kv_store_impl.dart` pending)
+- Phases 4–8: not started
+
+All 165 tests pass.
 
 ---
 
