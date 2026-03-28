@@ -19,6 +19,10 @@ developer.
 Any complex segments of code should be commented so as to describe the process
 and rationale for the approach.
 
+All code files must have a license at the top. The template file is
+@header_template.txt. You must add the comment syntax appropriate to the
+programming language. Also replace `{{.Year}}` to match the current year.
+
 ## Commands
 
 ```bash
@@ -66,11 +70,12 @@ incidental benefit.
 
 ### Storage Engine (LSM)
 
-- **Write path:** WAL append + fsync → memtable insert → flush at 64KB → L0 SSTable
-- **Levels:** L0 (2-file trigger), L1 (2MB), L2 (20MB). Single-file shortcut:
-  if total data ≤512KB, compact everything to one L2 file (common case).
-- **Compaction:** synchronous on the write path — no background isolate.
-  Fires before the triggering `put()` returns. Roughly every ~30 writes.
+- **Write path:** WAL append + fsync → memtable insert → flush at 64KB → L0
+  SSTable
+- **Levels:** L0 (2-file trigger), L1 (2MB), L2 (20MB). Single-file shortcut: if
+  total data ≤512KB, compact everything to one L2 file (common case).
+- **Compaction:** synchronous on the write path — no background isolate. Fires
+  before the triggering `put()` returns. Roughly every ~30 writes.
 - **Manifest:** append-only VersionEdit log (`MANIFEST-NNNNN`). Each record is
   `[XXH64 8B][length 4B][CBOR VersionEdit]`. `CURRENT` file names the active
   manifest. Rotated when >1MB.
@@ -88,7 +93,8 @@ incidental benefit.
 Two formats — both live under `sst/`:
 
 - **Regular flush:** `{deviceId}-{minHlc}-{maxHlc}.sst` (3 segments)
-- **Consolidation output:** `{deviceId}-{epoch}-{minHlc}-{maxHlc}.sst` (4 segments)
+- **Consolidation output:** `{deviceId}-{epoch}-{minHlc}-{maxHlc}.sst` (4
+  segments)
 
 The `epoch` field is a fencing token (sequence number from the lease file) that
 identifies which consolidation round produced the file.
@@ -115,16 +121,17 @@ Sits between KvStore and the Query Layer. Two caches:
 2. **Materialised view cache** (`$cache` namespace) — persisted scan results
    required on mobile/web where processes are killed silently.
 
-Invalidation uses **namespace generation counters** in `$meta` (`gen:{namespace}`),
-incremented atomically on every `WriteBatch`. The Cache Layer subscribes to
-`KvStore.writeEvents` to evict stale entries.
+Invalidation uses **namespace generation counters** in `$meta`
+(`gen:{namespace}`), incremented atomically on every `WriteBatch`. The Cache
+Layer subscribes to `KvStore.writeEvents` to evict stale entries.
 
 ### Query API (§13)
 
 Core types: `KmdbDatabase`, `KmdbCodec<T>`, `KmdbCollection<T>`, `KmdbQuery<T>`
 
 Filter DSL: comparisons, nested dot-paths, string ops (`startsWith`, `endsWith`,
-`contains`), array ops (`containsAll`, `containsAny`), null semantics, `Filter.not()`.
+`contains`), array ops (`containsAll`, `containsAny`), null semantics,
+`Filter.not()`.
 
 Query pipeline: `where` → `orderBy` → `limit` / `offset` → terminals (`get()`,
 `stream()`, `watch()`, `first()`, `count()`, `any()`).
@@ -151,9 +158,9 @@ fan-out (`tags[]`).
 
 ### Crash Recovery (§17)
 
-On `open()`: acquire exclusive lock → read `CURRENT` → replay Manifest →
-delete orphan SSTables → replay WAL files above highest `logNumber` → set
-dirty-open flag on first write.
+On `open()`: acquire exclusive lock → read `CURRENT` → replay Manifest → delete
+orphan SSTables → replay WAL files above highest `logNumber` → set dirty-open
+flag on first write.
 
 ## Documentation
 

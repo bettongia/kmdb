@@ -2,10 +2,25 @@
 
 Status as of 2026-03-28. Spec is complete and frozen for implementation.
 
+## Instructions
+
+Once each phase is completed:
+
+- Ensure all documentation matches the implementation
+- Review instructions in CLAUDE.md and ensure quality assurance requirements
+  (tests, code documentation etc) have been followed.
+- Commit code
+
+## Progress
+
 **Progress as of 2026-03-28:**
+
 - ✅ Phase 1 complete (all primitives + platform layer)
-- ✅ Phase 2 complete (skip list, memtable, WAL, Bloom filter, SSTable writer/reader, varint)
-- 🔄 Phase 3 in progress: Manifest ✅, MergeIterator ✅, CompactionJob ✅, KvStore (started — `kv_store.dart` done, `lsm_engine.dart` / `crash_recovery.dart` / `kv_store_impl.dart` pending)
+- ✅ Phase 2 complete (skip list, memtable, WAL, Bloom filter, SSTable
+  writer/reader, varint)
+- 🔄 Phase 3 in progress: Manifest ✅, MergeIterator ✅, CompactionJob ✅,
+  KvStore (started — `kv_store.dart` done, `lsm_engine.dart` /
+  `crash_recovery.dart` / `kv_store_impl.dart` pending)
 - Phases 4–8: not started
 
 All 165 tests pass.
@@ -16,23 +31,23 @@ All 165 tests pass.
 
 ```yaml
 dependencies:
-  cbor: ^6.3.0          # CBOR encoding/decoding
-  uuid: ^4.5.0          # UUIDv7 generation
-  zstandard: ^1.5.0     # Zstd (FFI native + WASM fallback)
-  archive: ^4.0.0       # Deflate for web (fallback)
-  meta: ^1.16.0         # @internal, @visibleForTesting
+  cbor: ^6.3.0 # CBOR encoding/decoding
+  uuid: ^4.5.0 # UUIDv7 generation
+  zstandard: ^1.5.0 # Zstd (FFI native + WASM fallback)
+  archive: ^4.0.0 # Deflate for web (fallback)
+  meta: ^1.16.0 # @internal, @visibleForTesting
 
 dev_dependencies:
-  test: ^1.25.6         # (already present)
-  lints: ^6.0.0         # (already present)
-  mockito: ^5.4.0       # mock StorageAdapter in unit tests
-  build_runner: ^2.4.0  # mockito codegen
+  test: ^1.25.6 # (already present)
+  lints: ^6.0.0 # (already present)
+  mockito: ^5.4.0 # mock StorageAdapter in unit tests
+  build_runner: ^2.4.0 # mockito codegen
 ```
 
 > **XXH64:** No suitable pub.dev package exists. Implement as a pure-Dart class
-> (`lib/src/engine/util/xxhash.dart`) using the published algorithm spec.
-> **LRU cache:** Implement as a `_LruMap<K, V>` in the cache layer — not worth
-> a dependency for one data structure.
+> (`lib/src/engine/util/xxhash.dart`) using the published algorithm spec. **LRU
+> cache:** Implement as a `_LruMap<K, V>` in the cache layer — not worth a
+> dependency for one data structure.
 
 ---
 
@@ -174,16 +189,21 @@ test/
 
 ## Phase 1 — Primitives & Platform Layer
 
-**Goal:** Everything that has no KMDB dependencies itself. Establishes the foundation all other phases build on.
+**Goal:** Everything that has no KMDB dependencies itself. Establishes the
+foundation all other phases build on.
 
 ### 1.1 Package setup
-- Replace `lib/kmdb.dart` and `lib/src/kmdb_base.dart` with the real package skeleton
+
+- Replace `lib/kmdb.dart` and `lib/src/kmdb_base.dart` with the real package
+  skeleton
 - Configure `pubspec.yaml` with dependencies above
 - Set up `analysis_options.yaml` (already present; verify strict lints)
 - Create `hook/build.dart` for native Zstd compilation
 
 ### 1.2 StorageAdapter (conditional exports)
-**Files:** `storage_adapter.dart`, `*_native.dart`, `*_web.dart`, `*_memory.dart`
+
+**Files:** `storage_adapter.dart`, `*_native.dart`, `*_web.dart`,
+`*_memory.dart`
 
 ```dart
 abstract interface class StorageAdapter {
@@ -202,19 +222,24 @@ abstract interface class StorageAdapter {
 ```
 
 - Native: `dart:io` `RandomAccessFile` for append; `FileLock.exclusive` for lock
-- Memory: `Map<String, Uint8List>` — used in all unit tests via `KvStoreConfig.forTesting()`
+- Memory: `Map<String, Uint8List>` — used in all unit tests via
+  `KvStoreConfig.forTesting()`
 - Web: OPFS stub for now (defer full implementation to Phase 8)
 
-**Tests:** Read/write/append/delete/rename round-trips on memory adapter. Lock exclusivity test.
+**Tests:** Read/write/append/delete/rename round-trips on memory adapter. Lock
+exclusivity test.
 
 ### 1.3 XXH64
+
 **File:** `util/xxhash.dart`
 
-Implement the published XXH64 algorithm (seed=0 default). Pure Dart. Use Dart `Int64` or manual 64-bit arithmetic with two `int`s if needed.
+Implement the published XXH64 algorithm (seed=0 default). Pure Dart. Use Dart
+`Int64` or manual 64-bit arithmetic with two `int`s if needed.
 
 **Tests:** Verify against published test vectors from the xxHash repository.
 
 ### 1.4 Hybrid Logical Clock (HLC)
+
 **Files:** `util/hlc.dart`, `sync/hlc_clock.dart`
 
 ```dart
@@ -232,22 +257,31 @@ final class Hlc implements Comparable<Hlc> {
 }
 ```
 
-`HlcClock` is a process-singleton wrapping a mutable `Hlc`, with a `maxClockSkew` clamp (default 60s). Receives external HLC values on WAL replay and SSTable ingestion.
+`HlcClock` is a process-singleton wrapping a mutable `Hlc`, with a
+`maxClockSkew` clamp (default 60s). Receives external HLC values on WAL replay
+and SSTable ingestion.
 
-**Tests:** tick() monotonicity, maxOffset clamping, hex encoding round-trip, comparison ordering.
+**Tests:** tick() monotonicity, maxOffset clamping, hex encoding round-trip,
+comparison ordering.
 
 ### 1.5 Key codec
+
 **File:** `util/key_codec.dart`
 
 - `keyToBytes(String hexKey)` → 16-byte `Uint8List`
 - `bytesToKey(Uint8List bytes)` → hex string
-- `namespacePrefix(String namespace)` → length-prefixed bytes for internal SSTable key
-- `internalKey(String namespace, String key, Hlc seq)` → composite key for SSTable
-- `KeyGenerator` interface with `UuidV7KeyGenerator` and `SequentialKeyGenerator` (tests)
+- `namespacePrefix(String namespace)` → length-prefixed bytes for internal
+  SSTable key
+- `internalKey(String namespace, String key, Hlc seq)` → composite key for
+  SSTable
+- `KeyGenerator` interface with `UuidV7KeyGenerator` and
+  `SequentialKeyGenerator` (tests)
 
-**Tests:** Round-trip encode/decode. Namespace prefix ordering. Internal key sort order.
+**Tests:** Round-trip encode/decode. Namespace prefix ordering. Internal key
+sort order.
 
 ### 1.6 Value encoding
+
 **Files:** `encoding/value_codec.dart`, `encoding/compression_flag.dart`
 
 ```
@@ -256,51 +290,72 @@ decode: [flag|bytes] → decompress → cbor.decode() → Map<String,dynamic>
 ```
 
 - Flag 0x00: uncompressed CBOR
-- Flag 0x01: Zstd — primary on all platforms. Native: `dart:ffi` to libzstd. Web: WASM via `zstandard` package. (Defer FFI/WASM wiring to Phase 8; stub returning raw CBOR for now.)
-- Flag 0x02: Deflate — web fallback only, for browsers without WASM support. Use `archive` package.
+- Flag 0x01: Zstd — primary on all platforms. Native: `dart:ffi` to libzstd.
+  Web: WASM via `zstandard` package. (Defer FFI/WASM wiring to Phase 8; stub
+  returning raw CBOR for now.)
+- Flag 0x02: Deflate — web fallback only, for browsers without WASM support. Use
+  `archive` package.
 
-Compression is applied to the CBOR output, not individual fields. Decision threshold: compressed size < original × (1/1.1).
+Compression is applied to the CBOR output, not individual fields. Decision
+threshold: compressed size < original × (1/1.1).
 
-**Tests:** Round-trip all CBOR-compatible types. Compression threshold logic. Cross-flag decode (simulate native-encoded value decoded on web path). Null/missing field handling.
+**Tests:** Round-trip all CBOR-compatible types. Compression threshold logic.
+Cross-flag decode (simulate native-encoded value decoded on web path).
+Null/missing field handling.
 
 ---
 
 ## Phase 2 — Storage Engine: Core Components
 
-**Goal:** The individual building blocks of the LSM engine, each independently testable.
+**Goal:** The individual building blocks of the LSM engine, each independently
+testable.
 
 ### 2.1 Skip List (memtable)
+
 **Files:** `memtable/skip_list.dart`, `memtable/memtable.dart`
 
 - Ordered by internal key: `(userKey ASC, sequenceNumber DESC, deviceId DESC)`
-- `put(InternalKey, Uint8List)`, `get(String namespace, String userKey)` → newest visible entry
-- `scan(String namespace, {String? start, String? end, bool descending})` → `Iterable<KvEntry>`
+- `put(InternalKey, Uint8List)`, `get(String namespace, String userKey)` →
+  newest visible entry
+- `scan(String namespace, {String? start, String? end, bool descending})` →
+  `Iterable<KvEntry>`
 - Size tracking in bytes (key bytes + value bytes). Flush threshold: 64KB.
-- `freeze()` → immutable snapshot (for concurrent read during flush); `Memtable` wraps active + optional frozen
+- `freeze()` → immutable snapshot (for concurrent read during flush); `Memtable`
+  wraps active + optional frozen
 
-**Tests:** Ordering invariant. Tombstone visibility (get on deleted key returns null). Byte-size accuracy. freeze/thaw round-trip.
+**Tests:** Ordering invariant. Tombstone visibility (get on deleted key returns
+null). Byte-size accuracy. freeze/thaw round-trip.
 
 ### 2.2 WAL Writer & Reader
+
 **Files:** `wal/wal_record.dart`, `wal/wal_writer.dart`, `wal/wal_reader.dart`
 
 **Record format** (from §7):
+
 ```
 [XXH64 8B][type 1B][seq 8B][nsLen 1B][ns NB][keyLen 2B][key KB][valLen 4B][val VB]
 ```
+
 Types: `0x01` Put, `0x02` Delete, `0x03` FlushMarker, `0x04` WriteBatch
 
 `WalWriter`:
-- `append(WalRecord)` → encode → `StorageAdapter.appendFile` → `syncFile` (when `fsyncOnWrite`)
+
+- `append(WalRecord)` → encode → `StorageAdapter.appendFile` → `syncFile` (when
+  `fsyncOnWrite`)
 - `rotate()` → increment sequence, start new file, write FlushMarker to old
 - `activeSequence` getter
 
 `WalReader`:
+
 - `replay(String path, {int fromSeq})` → `Iterable<WalRecord>`
 - Stops at first checksum failure; does not throw (truncation is expected)
 
-**Tests:** Append/replay round-trip all record types. Checksum corruption stops replay cleanly. FlushMarker seek. WriteBatch atomicity (partial batch with bad checksum drops entire batch). WAL rotation sequence numbering.
+**Tests:** Append/replay round-trip all record types. Checksum corruption stops
+replay cleanly. FlushMarker seek. WriteBatch atomicity (partial batch with bad
+checksum drops entire batch). WAL rotation sequence numbering.
 
 ### 2.3 Bloom Filter
+
 **File:** `sstable/bloom_filter.dart`
 
 - Configurable bits/key (default 10 → ~0.8% FPR)
@@ -308,69 +363,102 @@ Types: `0x01` Put, `0x02` Delete, `0x03` FlushMarker, `0x04` WriteBatch
 - `build(Iterable<Uint8List> keys)` → `Uint8List filterBytes`
 - `mayContain(Uint8List key, Uint8List filterBytes)` → `bool`
 
-**Tests:** Zero false negatives. FPR within spec at 10 bits/key over 10K keys. Serialisation round-trip.
+**Tests:** Zero false negatives. FPR within spec at 10 bits/key over 10K keys.
+Serialisation round-trip.
 
 ### 2.4 SSTable Writer
+
 **File:** `sstable/sstable_writer.dart`
 
 Writes one complete SSTable:
-1. Accumulate entries into 4KB data blocks (prefix compression, restart every 16 keys)
+
+1. Accumulate entries into 4KB data blocks (prefix compression, restart every 16
+   keys)
 2. Write Bloom filter block
 3. Write index block (one entry per data block: last key + offset + size)
-4. Write 48-byte footer: filter offset/size, index offset/size, entry count, minKey, maxKey, XXH64 of all preceding bytes
+4. Write 48-byte footer: filter offset/size, index offset/size, entry count,
+   minKey, maxKey, XXH64 of all preceding bytes
 
 `SSTableWriter`:
+
 - `add(InternalKey key, Uint8List value)` — entries must arrive in key order
 - `finish()` → `Uint8List` complete file bytes (or streams to adapter)
 
-**Tests:** Produces readable file (reader integration). Footer checksum. Block boundary correctness. Restart interval. Prefix compression round-trip.
+**Tests:** Produces readable file (reader integration). Footer checksum. Block
+boundary correctness. Restart interval. Prefix compression round-trip.
 
 ### 2.5 SSTable Reader
+
 **File:** `sstable/sstable_reader.dart`, `sstable/sstable_info.dart`
 
 `SSTableReader`:
-- `open(String path, StorageAdapter)` → validates footer XXH64 → loads filter + index blocks
-- `get(String namespace, String key)` → Bloom check → binary search index → read one block → linear scan
-- `scan(String namespace, {String? start, String? end, bool descending})` → `Stream<KvEntry>`
+
+- `open(String path, StorageAdapter)` → validates footer XXH64 → loads filter +
+  index blocks
+- `get(String namespace, String key)` → Bloom check → binary search index → read
+  one block → linear scan
+- `scan(String namespace, {String? start, String? end, bool descending})` →
+  `Stream<KvEntry>`
 - `close()`
 
-`SstableInfo`: parses 3-segment and 4-segment filename formats → `deviceId`, `epoch?`, `minHlc`, `maxHlc`.
+`SstableInfo`: parses 3-segment and 4-segment filename formats → `deviceId`,
+`epoch?`, `minHlc`, `maxHlc`.
 
-**Tests:** Get present/absent key. Bloom filter skips false positives correctly (count file reads). Scan order ascending and descending. Footer corruption throws `CorruptedSstableException`. Cross-namespace isolation. Stale consolidation detection (4-segment epoch validation).
+**Tests:** Get present/absent key. Bloom filter skips false positives correctly
+(count file reads). Scan order ascending and descending. Footer corruption
+throws `CorruptedSstableException`. Cross-namespace isolation. Stale
+consolidation detection (4-segment epoch validation).
 
 ---
 
 ## Phase 3 — Storage Engine: LSM Orchestration
 
-**Goal:** Assemble the components into a working `KvStore`. This phase produces the first integration-testable unit.
+**Goal:** Assemble the components into a working `KvStore`. This phase produces
+the first integration-testable unit.
 
 ### 3.1 Manifest
-**Files:** `manifest/version_edit.dart`, `manifest/manifest_writer.dart`, `manifest/manifest_reader.dart`, `manifest/current_file.dart`
 
-**VersionEdit CBOR schema** (from §10): `logNumber`, `nextSeq`, `add[]`, `remove[]`
+**Files:** `manifest/version_edit.dart`, `manifest/manifest_writer.dart`,
+`manifest/manifest_reader.dart`, `manifest/current_file.dart`
+
+**VersionEdit CBOR schema** (from §10): `logNumber`, `nextSeq`, `add[]`,
+`remove[]`
 
 `ManifestWriter`:
+
 - `append(VersionEdit)` → `[XXH64 8B][len 4B][CBOR]` → `appendFile` → `syncFile`
-- `rotate(List<SstFileInfo> liveFiles)` → write snapshot VersionEdit, atomically update `CURRENT`, delete old manifest
+- `rotate(List<SstFileInfo> liveFiles)` → write snapshot VersionEdit, atomically
+  update `CURRENT`, delete old manifest
 
 `ManifestReader`:
-- `replay(String manifestPath)` → `ManifestState` (levels map, highest logNumber, nextSeq)
+
+- `replay(String manifestPath)` → `ManifestState` (levels map, highest
+  logNumber, nextSeq)
 - Stops at first checksum failure
 
 `CurrentFile`:
+
 - `read(String dbPath)` → `String manifestName`
 - `write(String dbPath, String manifestName)` → atomic write-then-rename
 
-**Tests:** Append/replay round-trip. Rotation produces consistent snapshot. CURRENT update atomicity. Checksum failure mid-replay returns partial state. Orphan detection (add then implicit remove).
+**Tests:** Append/replay round-trip. Rotation produces consistent snapshot.
+CURRENT update atomicity. Checksum failure mid-replay returns partial state.
+Orphan detection (add then implicit remove).
 
 ### 3.2 Merge Iterator
+
 **File:** `compaction/merge_iterator.dart`
 
-N-way sorted merge over multiple `SSTableReader.scan()` streams. Internal key ordering: `(userKey ASC, seq DESC, deviceId DESC)`. Deduplicate: for each user key, emit only the highest-sequence entry; drop tombstones at L2 when all peer HWMs are past tombstone HLC.
+N-way sorted merge over multiple `SSTableReader.scan()` streams. Internal key
+ordering: `(userKey ASC, seq DESC, deviceId DESC)`. Deduplicate: for each user
+key, emit only the highest-sequence entry; drop tombstones at L2 when all peer
+HWMs are past tombstone HLC.
 
-**Tests:** Two-file merge preserves order. Tombstone shadowing. Duplicate key deduplication. Empty source streams. Descending merge.
+**Tests:** Two-file merge preserves order. Tombstone shadowing. Duplicate key
+deduplication. Empty source streams. Descending merge.
 
 ### 3.3 Compaction
+
 **File:** `compaction/compaction_job.dart`
 
 ```dart
@@ -383,17 +471,23 @@ final class CompactionJob {
 ```
 
 Triggers (checked synchronously after every flush):
+
 - L0 file count ≥ 2 → L0→L1 (merge all L0 + existing L1)
 - L1 size > 2MB → L1→L2
 - Single-file shortcut: total live bytes ≤ 512KB → collapse all to one L2 file
-- All compaction is N-way merge → new SSTable → append VersionEdit → delete inputs
+- All compaction is N-way merge → new SSTable → append VersionEdit → delete
+  inputs
 
-**Tests:** L0→L1 trigger. L1→L2 trigger. Single-file shortcut activates and deactivates correctly. Tombstone dropped at L2 when safe. Orphan detection if crash before VersionEdit (simulate via memory adapter).
+**Tests:** L0→L1 trigger. L1→L2 trigger. Single-file shortcut activates and
+deactivates correctly. Tombstone dropped at L2 when safe. Orphan detection if
+crash before VersionEdit (simulate via memory adapter).
 
 ### 3.4 Crash Recovery
+
 **File:** `kvstore/crash_recovery.dart`
 
 Implements the 9-step `open()` recovery sequence (§17):
+
 1. Acquire `LOCK` file (exclusive)
 2. Read `CURRENT` → identify active manifest
 3. Replay manifest → reconstruct levels + highest logNumber + nextSeq
@@ -404,24 +498,32 @@ Implements the 9-step `open()` recovery sequence (§17):
 8. Prepare dirty-open flag (written on first WriteBatch, not now)
 9. Return `OpenResult`
 
-**Tests:** Clean open. WAL truncation recovery (data loss bounded to one write). Orphan SSTable deletion. Dirty-open flag set/cleared. All 9 failure scenarios from the spec table (use memory adapter with injected faults).
+**Tests:** Clean open. WAL truncation recovery (data loss bounded to one write).
+Orphan SSTable deletion. Dirty-open flag set/cleared. All 9 failure scenarios
+from the spec table (use memory adapter with injected faults).
 
 ### 3.5 LSM Engine & KvStore
-**Files:** `kvstore/lsm_engine.dart`, `kvstore/kv_store_impl.dart`, `kvstore/kv_store.dart`
+
+**Files:** `kvstore/lsm_engine.dart`, `kvstore/kv_store_impl.dart`,
+`kvstore/kv_store.dart`
 
 `LsmEngine` holds:
+
 - Active `Memtable` (+ optional frozen snapshot during flush)
 - Level map: `Map<int, List<SstFileInfo>>` (rebuilt from manifest on open)
 - `ManifestWriter`, `WalWriter`, `HlcClock`
 
 `KvStoreImpl` implements the public `KvStore` interface:
+
 - `put`/`delete`/`writeBatch` → WAL append → memtable insert → flush check
 - `get` → memtable → L0 newest-first → L1 → L2
 - `scan` → merge iterator over memtable + all levels (range-filtered)
 - `flush()` / `compactAll()` as explicit control methods
-- `writeEvents` stream (broadcast, fires namespace string after each successful write)
+- `writeEvents` stream (broadcast, fires namespace string after each successful
+  write)
 
 **Integration tests** (`kv_store_test.dart`):
+
 - Full write → read → delete → scan round-trip
 - WriteBatch atomicity
 - Flush triggers at 64KB
@@ -436,30 +538,41 @@ Implements the 9-step `open()` recovery sequence (§17):
 
 ## Phase 4 — Value Encoding Integration & `$meta`
 
-**Goal:** Wire CBOR/compression into KvStore path; establish system namespace primitives used by all upper layers.
+**Goal:** Wire CBOR/compression into KvStore path; establish system namespace
+primitives used by all upper layers.
 
-- Connect `ValueCodec` to `KvStore.put/get` (encoding on write, decoding only at Query Layer — KvStore stores raw bytes; this phase just ensures the codec works end-to-end)
-- Implement `$meta` read/write helpers: `generation counter` (`gen:{ns}`), `dirty-open flag`, `device ID` storage
-- Write `device_id.dart`: read/write stable device UUID from `$meta` (in-scope) and platform secure storage (stub; full per-platform implementation in Phase 8)
+- Connect `ValueCodec` to `KvStore.put/get` (encoding on write, decoding only at
+  Query Layer — KvStore stores raw bytes; this phase just ensures the codec
+  works end-to-end)
+- Implement `$meta` read/write helpers: `generation counter` (`gen:{ns}`),
+  `dirty-open flag`, `device ID` storage
+- Write `device_id.dart`: read/write stable device UUID from `$meta` (in-scope)
+  and platform secure storage (stub; full per-platform implementation in
+  Phase 8)
 
-**Tests:** Round-trip CBOR+Zstd through KvStore. Generation counter increments atomically with WriteBatch. Device ID persistence across close/open.
+**Tests:** Round-trip CBOR+Zstd through KvStore. Generation counter increments
+atomically with WriteBatch. Device ID persistence across close/open.
 
 ---
 
 ## Phase 5 — Sync Protocol
 
-**Goal:** SSTable-based multi-device sync. Can be developed largely independently of the Query Layer.
+**Goal:** SSTable-based multi-device sync. Can be developed largely
+independently of the Query Layer.
 
 ### 5.1 High-Water Mark
+
 **File:** `sync/highwater.dart`
 
 - `HighwaterMark`: read/write `.hwm` JSON file
 - `peerHighwaters`: `Map<String, Hlc>` — highest processed HLC per peer device
 - `markProcessed(String peerId, Hlc hlc)`
 
-**Tests:** Read/write round-trip. Peer map merging. Stale device detection (90-day threshold).
+**Tests:** Read/write round-trip. Peer map merging. Stale device detection
+(90-day threshold).
 
 ### 5.2 Sync Folder Adapter Interface
+
 **File:** `sync/cloud/cloud_adapter.dart`
 
 ```dart
@@ -475,95 +588,141 @@ abstract interface class CloudAdapter {
 
 **Local adapters** (`sync/local/`):
 
-- `MemorySyncAdapter` — in-memory map, used in all unit/integration tests. Simulates concurrent access for lease tests.
-- `LocalDirectoryAdapter` — `dart:io`-backed, desktop-only (guarded by `!kIsWeb`). Targets a local filesystem path: a shared network volume (NAS, SMB/NFS mount), or any locally-synced cloud folder (iCloud Drive, Dropbox, Synology Drive) without needing their native SDKs. `compareAndSwap` is implemented via write-to-temp + `File.renameSync` (atomic on POSIX); throws `LockConflictException` if the file already exists and no `ifMatchEtag` is supplied (`if-none-match: *` semantics).
+- `MemorySyncAdapter` — in-memory map, used in all unit/integration tests.
+  Simulates concurrent access for lease tests.
+- `LocalDirectoryAdapter` — `dart:io`-backed, desktop-only (guarded by
+  `!kIsWeb`). Targets a local filesystem path: a shared network volume (NAS,
+  SMB/NFS mount), or any locally-synced cloud folder (iCloud Drive, Dropbox,
+  Synology Drive) without needing their native SDKs. `compareAndSwap` is
+  implemented via write-to-temp + `File.renameSync` (atomic on POSIX); throws
+  `LockConflictException` if the file already exists and no `ifMatchEtag` is
+  supplied (`if-none-match: *` semantics).
 
 **Cloud adapters** (`sync/cloud/`, Phase 8):
 
-- `GoogleDriveAdapter` — Google Drive REST API; `compareAndSwap` via Drive's `If-Match` ETag header.
-- `ICloudAdapter` — CloudKit / iCloud Drive; `compareAndSwap` via CloudKit record change tags.
-- `S3Adapter` — AWS S3; `compareAndSwap` via `If-None-Match: *` on PutObject (supported since 2024). No DynamoDB dependency required for new buckets.
-- `GcsAdapter` — Google Cloud Storage; `compareAndSwap` via `if-generation-match` precondition on upload.
+- `GoogleDriveAdapter` — Google Drive REST API; `compareAndSwap` via Drive's
+  `If-Match` ETag header.
+- `ICloudAdapter` — CloudKit / iCloud Drive; `compareAndSwap` via CloudKit
+  record change tags.
+- `S3Adapter` — AWS S3; `compareAndSwap` via `If-None-Match: *` on PutObject
+  (supported since 2024). No DynamoDB dependency required for new buckets.
+- `GcsAdapter` — Google Cloud Storage; `compareAndSwap` via
+  `if-generation-match` precondition on upload.
 
 ### 5.3 Sync Engine
+
 **File:** `sync/sync_engine.dart`
 
-- `push()`: flush local KvStore → upload new SSTables (those not yet in cloud) → upload `.hwm`
-- `pull()`: list remote sstables → download files with minHlc > our peer HWM → verify XXH64 → ingest at L0 via `KvStore` → update `.hwm`
+- `push()`: flush local KvStore → upload new SSTables (those not yet in cloud) →
+  upload `.hwm`
+- `pull()`: list remote sstables → download files with minHlc > our peer HWM →
+  verify XXH64 → ingest at L0 via `KvStore` → update `.hwm`
 - `sync()`: push then pull
 
 Namespace-scoped: only upload SSTables containing sync-enabled namespaces.
 
-**Tests:** Push uploads new SSTables, skips already-uploaded. Pull ingests remote SSTables in HLC order. Corrupted SSTable (bad footer checksum) rejected on ingestion. HWM updated correctly. Idempotent re-ingestion.
+**Tests:** Push uploads new SSTables, skips already-uploaded. Pull ingests
+remote SSTables in HLC order. Corrupted SSTable (bad footer checksum) rejected
+on ingestion. HWM updated correctly. Idempotent re-ingestion.
 
 ### 5.4 Consolidation Coordinator
+
 **File:** `sync/consolidation_coordinator.dart`
 
 Implements the lease file protocol (§12):
-- `runIfNeeded()`: check threshold (default 8 shared SSTables) → attempt consolidation
+
+- `runIfNeeded()`: check threshold (default 8 shared SSTables) → attempt
+  consolidation
 - `acquireLease()`: write tmp → rename → re-read (verify won the race)
-- `consolidate()`: N-way merge of input SSTables → write 4-segment output SSTable
-- `commit()`: write consolidation manifest → delete input SSTables → delete lease
+- `consolidate()`: N-way merge of input SSTables → write 4-segment output
+  SSTable
+- `commit()`: write consolidation manifest → delete input SSTables → delete
+  lease
 - `assessRecoveryState()`: handle expired lease from previous coordinator
 
 State machine: `IDLE → LEASE_ACQUIRED → CONSOLIDATING → VERIFYING → COMPLETE`
 
-**Tests:** Happy path consolidation. Lease expiry (simulate clock advance). Two concurrent coordinators (one wins, one aborts). Partial output recovery (previous coordinator crashed after writing outputs but before manifest). Fencing token validation prevents stale write.
+**Tests:** Happy path consolidation. Lease expiry (simulate clock advance). Two
+concurrent coordinators (one wins, one aborts). Partial output recovery
+(previous coordinator crashed after writing outputs but before manifest).
+Fencing token validation prevents stale write.
 
 ---
 
 ## Phase 6 — Cache Layer
 
-**Files:** `cache/lru_map.dart`, `cache/session_cache.dart`, `cache/cache_layer.dart`, `cache/cache_tier.dart`
+**Files:** `cache/lru_map.dart`, `cache/session_cache.dart`,
+`cache/cache_layer.dart`, `cache/cache_tier.dart`
 
 `CacheLayer` wraps `KvStore`:
+
 - Delegates all writes to `KvStore`; subscribes to `writeEvents`
-- On write event: read new generation from `$meta`; evict session entries for namespace with old generation; mark `$cache` entries stale
+- On write event: read new generation from `$meta`; evict session entries for
+  namespace with old generation; mark `$cache` entries stale
 - `get()`: check session cache → KvStore → decode → cache decoded object
-- `scan()`: check `$cache` for materialised results → if stale: mobile/web return stale + recompute background; desktop recompute synchronously
+- `scan()`: check `$cache` for materialised results → if stale: mobile/web
+  return stale + recompute background; desktop recompute synchronously
 
-Platform tier auto-detection: check `Platform.isAndroid || Platform.isIOS` etc. (native); `kIsWeb` (web); else desktop.
+Platform tier auto-detection: check `Platform.isAndroid || Platform.isIOS` etc.
+(native); `kIsWeb` (web); else desktop.
 
-**Tests:** Cache hit on second read (no KvStore.get called). Session eviction on write. Generation counter invalidation. Materialised view stale-then-fresh cycle. `onResume()` triggers generation check. Platform tier selection. LRU eviction when capacity exceeded.
+**Tests:** Cache hit on second read (no KvStore.get called). Session eviction on
+write. Generation counter invalidation. Materialised view stale-then-fresh
+cycle. `onResume()` triggers generation check. Platform tier selection. LRU
+eviction when capacity exceeded.
 
 ---
 
 ## Phase 7 — Query Layer
 
-**Goal:** The user-facing API. Depends on Cache Layer and KvStore (via Cache Layer).
+**Goal:** The user-facing API. Depends on Cache Layer and KvStore (via Cache
+Layer).
 
 ### 7.1 KmdbCodec & KmdbDatabase
+
 **Files:** `query/kmdb_codec.dart`, `query/kmdb_database.dart`
 
 `KmdbDatabase.open()`:
+
 - Opens KvStore, wraps in CacheLayer
 - Registers index definitions (no build yet)
-- Inspects `OpenResult.hadUnclosedSession` → calls `onIndexRebuildRequired` if any index was `building`
+- Inspects `OpenResult.hadUnclosedSession` → calls `onIndexRebuildRequired` if
+  any index was `building`
 - Returns `KmdbDatabase`
 
 ### 7.2 Filter DSL
-**Files:** `query/filter/filter.dart`, `query/filter/field_filter.dart`, `query/filter/field_path.dart`
+
+**Files:** `query/filter/filter.dart`, `query/filter/field_filter.dart`,
+`query/filter/field_path.dart`
 
 All filter types from §13. Field path resolution handles:
+
 - Top-level: `doc['city']`
 - Nested: `doc['address']['city']` via dot splitting
 - Indexed array: `doc['tags'][0]`
 - Fan-out: `doc['tags']` (returns `List`)
 
-Null vs missing: resolve to `_Missing` sentinel; `isNull()` matches both; `isNotNull()` requires presence AND non-null.
+Null vs missing: resolve to `_Missing` sentinel; `isNull()` matches both;
+`isNotNull()` requires presence AND non-null.
 
-**Tests:** Every filter type. Dot-path resolution (nested, array, missing). `Filter.and/or/not` composition. Null/missing semantics. Short-circuit evaluation in `Filter.and`.
+**Tests:** Every filter type. Dot-path resolution (nested, array, missing).
+`Filter.and/or/not` composition. Null/missing semantics. Short-circuit
+evaluation in `Filter.and`.
 
 ### 7.3 KmdbCollection & KmdbQuery
+
 **Files:** `query/kmdb_collection.dart`, `query/kmdb_query.dart`
 
 `KmdbCollection<T>`:
+
 - All write methods wrap in WriteBatch with write interception (Phase 7.4)
 - `all()` and `where()` return `KmdbQuery<T>` (no I/O yet)
 
 `KmdbQuery<T>`:
+
 - Pipeline methods return new `KmdbQuery` (immutable builder)
-- `orderBy('id')` → sets `descending` flag for `KvStore.scan`; all other fields → in-memory sort
+- `orderBy('id')` → sets `descending` flag for `KvStore.scan`; all other fields
+  → in-memory sort
 - Terminals execute the pipeline:
   - `get()` → scan → decode → filter → sort → limit/offset
   - `stream()` → same but lazy, holds snapshot
@@ -572,38 +731,53 @@ Null vs missing: resolve to `_Missing` sentinel; `isNull()` matches both; `isNot
   - `any()` → count > 0
   - `watch()` → reactive stream (Phase 7.5)
 
-**Tests:** All terminal methods. `orderBy('id')` uses scan descending (no in-memory sort). Pipeline immutability (each `where()` returns new instance). `keyPrefix` filter. `limit`/`offset`. Empty namespace. Decode errors surface correctly.
+**Tests:** All terminal methods. `orderBy('id')` uses scan descending (no
+in-memory sort). Pipeline immutability (each `where()` returns new instance).
+`keyPrefix` filter. `limit`/`offset`. Empty namespace. Decode errors surface
+correctly.
 
 ### 7.4 Write Interception (Indexes)
-**Files:** `query/index/index_manager.dart`, `query/index/index_writer.dart`, `query/index/index_reader.dart`
+
+**Files:** `query/index/index_manager.dart`, `query/index/index_writer.dart`,
+`query/index/index_reader.dart`
 
 Write interception sequence (every `put`/`delete` via `KmdbCollection`):
+
 1. Fetch current document from CacheLayer (for old index entry removal)
 2. Begin `WriteBatch`
-3. For each index in `current` or `building`: remove old entries, add new entries
+3. For each index in `current` or `building`: remove old entries, add new
+   entries
 4. Add document put/delete
 5. Increment `gen:{namespace}` counter
 6. Commit atomically
 
 Lazy index build on first query:
+
 1. Set `status = building` in `$meta`
 2. Record current generation
 3. Scan namespace in batches of 200 → write index entries
 4. On completion: compare generation; set `current` or `stale`
 5. Fire `onIndexReady`
 
-**Tests:** Index entries consistent with document (no partial state). Tombstone removes old index entries. Concurrent write during build results in `stale` not `corrupt`. Interrupted build shows `building` on next open. Full round-trip: build → query via index → filter remaining.
+**Tests:** Index entries consistent with document (no partial state). Tombstone
+removes old index entries. Concurrent write during build results in `stale` not
+`corrupt`. Interrupted build shows `building` on next open. Full round-trip:
+build → query via index → filter remaining.
 
 ### 7.5 Reactivity
+
 **File:** `query/watcher.dart`
 
 `watch()` implementation:
+
 - Subscribe to `KvStore.writeEvents`
 - On matching namespace emit: schedule re-execution after debounce window (50ms)
 - A subsequent write within window resets the timer (one re-query per burst)
 - Namespace-level scoping: write to "tasks" does not trigger "notes" watcher
 
-**Tests:** Debounce: 10 rapid writes produce one re-emit. Namespace isolation. Watcher disposes cleanly on stream cancel. Error in re-query propagates to stream.
+**Tests:** Debounce: 10 rapid writes produce one re-emit. Namespace isolation.
+Watcher disposes cleanly on stream cancel. Error in re-query propagates to
+stream.
 
 ---
 
@@ -611,38 +785,76 @@ Lazy index build on first query:
 
 **Goal:** Production-ready on all targets.
 
-- **Web StorageAdapter:** Full OPFS implementation via `dart:js_interop`; SAHPool pattern
+- **Web StorageAdapter:** Full OPFS implementation via `dart:js_interop`;
+  SAHPool pattern
 - **Web compression:** Zstd WASM via `zstandard` package; fallback to Deflate
-- **Platform device ID:** Per-platform secure storage (Keychain, SharedPreferences, localStorage, app data dir)
-- **Native Zstd FFI:** Wire `hook/build.dart` with `native_toolchain_c` for libzstd compilation
-- **Cloud adapters:** Google Drive, iCloud, S3, and GCS `CloudAdapter` implementations
-- **`KvStoreConfig.forTesting()`:** Tiny thresholds, no fsync, memory adapter — used throughout test suite
-- **Performance benchmarks:** Validate P99 targets from §18 (write, read, scan, open, compaction)
-- **Error types:** Define KMDB-specific exceptions (`CorruptedWalException`, `CorruptedSstableException`, `LockConflictException`, `ClockSkewException`, `StaleIndexException`)
+- **Platform device ID:** Per-platform secure storage (Keychain,
+  SharedPreferences, localStorage, app data dir)
+- **Native Zstd FFI:** Wire `hook/build.dart` with `native_toolchain_c` for
+  libzstd compilation
+- **Cloud adapters:** Google Drive, iCloud, S3, and GCS `CloudAdapter`
+  implementations
+- **`KvStoreConfig.forTesting()`:** Tiny thresholds, no fsync, memory adapter —
+  used throughout test suite
+- **Performance benchmarks:** Validate P99 targets from §18 (write, read, scan,
+  open, compaction)
+- **Error types:** Define KMDB-specific exceptions (`CorruptedWalException`,
+  `CorruptedSstableException`, `LockConflictException`, `ClockSkewException`,
+  `StaleIndexException`)
 
 ---
 
 ## Implementation Constraints (from spec & CLAUDE.md)
 
-- **≥ 90% test coverage at all times.** Do not merge a phase until coverage is met.
-- **All public APIs must have doc comments.** Include examples on complex methods.
-- **Complex code segments must have inline comments** explaining the approach and rationale.
-- **Test edge cases, not just golden paths.** Crash scenarios, corrupted files, concurrent access, boundary sizes.
-- **Never use `dart test` with `--no-sound-null-safety`** or any flag that bypasses the type system.
-- **`fsyncOnWrite: false`** only in tests via `KvStoreConfig.forTesting()`. Never in production paths.
-- **Synchronous compaction only.** No `dart:isolate` for compaction. All operations on the calling isolate.
-- **All writes go through WAL before memtable.** No exceptions, including index writes and `$meta` updates.
+- **≥ 90% test coverage at all times.** Do not merge a phase until coverage is
+  met.
+- **All public APIs must have doc comments.** Include examples on complex
+  methods.
+- **Complex code segments must have inline comments** explaining the approach
+  and rationale.
+- **Test edge cases, not just golden paths.** Crash scenarios, corrupted files,
+  concurrent access, boundary sizes.
+- **Never use `dart test` with `--no-sound-null-safety`** or any flag that
+  bypasses the type system.
+- **`fsyncOnWrite: false`** only in tests via `KvStoreConfig.forTesting()`.
+  Never in production paths.
+- **Synchronous compaction only.** No `dart:isolate` for compaction. All
+  operations on the calling isolate.
+- **All writes go through WAL before memtable.** No exceptions, including index
+  writes and `$meta` updates.
 
 ---
 
 ## Open Questions Before Implementation
 
-These do not block Phase 1 but should be resolved before Phase 5 (Sync) or Phase 7 (Query):
+These do not block Phase 1 but should be resolved before Phase 5 (Sync) or Phase
+7 (Query):
 
-1. ~~**`update()` cross-device safety:**~~ ✅ **Resolved.** The conflict is not specific to `update()` — it occurs whenever two devices independently write to the same key and their SSTables are merged during compaction. LWW picks the higher HLC timestamp and silently discards the other. The warning has been moved from the `update()` doc comment to a `### Conflict Semantics` section on `KmdbCollection`, applying equally to all write methods. `update()` comment updated to note single-device safety and point to that section. Applications needing field-level merge should use `MergeOperator` (§12).
+1. ~~**`update()` cross-device safety:**~~ ✅ **Resolved.** The conflict is not
+   specific to `update()` — it occurs whenever two devices independently write
+   to the same key and their SSTables are merged during compaction. LWW picks
+   the higher HLC timestamp and silently discards the other. The warning has
+   been moved from the `update()` doc comment to a `### Conflict Semantics`
+   section on `KmdbCollection`, applying equally to all write methods.
+   `update()` comment updated to note single-device safety and point to that
+   section. Applications needing field-level merge should use `MergeOperator`
+   (§12).
 
-2. ~~**Zstd package choice:**~~ ✅ **Resolved.** Use `zstandard` on all platforms: FFI (native) + WASM (web). Deflate (`0x02`) is web-only fallback for browsers without WASM. Spec updated.
+2. ~~**Zstd package choice:**~~ ✅ **Resolved.** Use `zstandard` on all
+   platforms: FFI (native) + WASM (web). Deflate (`0x02`) is web-only fallback
+   for browsers without WASM. Spec updated.
 
-3. ~~**`stream()` snapshot implementation:**~~ ✅ **Resolved.** `stream()` is implemented eagerly — same execution as `get()`, result emitted as `Stream<T>`. No LSM snapshot held, no ref-counting needed. Sufficient at target scale (≤100K docs). Spec updated. Lazy cursor with SSTable ref-counting deferred to roadmap if ever needed.
+3. ~~**`stream()` snapshot implementation:**~~ ✅ **Resolved.** `stream()` is
+   implemented eagerly — same execution as `get()`, result emitted as
+   `Stream<T>`. No LSM snapshot held, no ref-counting needed. Sufficient at
+   target scale (≤100K docs). Spec updated. Lazy cursor with SSTable
+   ref-counting deferred to roadmap if ever needed.
 
-4. ~~**`keyPrefix` filter:**~~ ✅ **Resolved.** Unrelated to namespace — namespace is always the collection's fixed scope. `keyPrefix` filters on the document key (UUIDv7 hex string). Since UUIDv7 embeds a millisecond timestamp in its MSBs, a key prefix is a time-window query without a secondary index. Maps to `KvStore.scan(namespace, startKey: prefix, endKey: nextPrefix(prefix))` where `nextPrefix` increments the final hex character. Handled natively by the LSM range scan — no additional work required.
+4. ~~**`keyPrefix` filter:**~~ ✅ **Resolved.** Unrelated to namespace —
+   namespace is always the collection's fixed scope. `keyPrefix` filters on the
+   document key (UUIDv7 hex string). Since UUIDv7 embeds a millisecond timestamp
+   in its MSBs, a key prefix is a time-window query without a secondary index.
+   Maps to
+   `KvStore.scan(namespace, startKey: prefix, endKey: nextPrefix(prefix))` where
+   `nextPrefix` increments the final hex character. Handled natively by the LSM
+   range scan — no additional work required.
