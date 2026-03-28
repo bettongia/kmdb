@@ -151,12 +151,23 @@ Not all namespaces should sync. A local_cache or settings namespace typically
 contains device-specific data. The sync layer supports opt-in per namespace:
 
 ```dart
+// Cloud-backed sync (mobile / web)
 final db = KmdbDatabase(
   store: kvStore,
   syncConfig: SyncConfig(
-    cloudAdapter: GoogleDriveAdapter(...),
+    adapter: GoogleDriveAdapter(...),
     syncNamespaces: {'notes', 'contacts', 'tasks'},
     // 'settings' and 'cache' excluded
+  ),
+);
+
+// Local folder sync (desktop) — shared NAS volume, SMB mount,
+// or a locally-synced cloud folder such as iCloud Drive or Dropbox
+final db = KmdbDatabase(
+  store: kvStore,
+  syncConfig: SyncConfig(
+    adapter: LocalDirectoryAdapter('/Volumes/NAS/MyApp/sync'),
+    syncNamespaces: {'notes', 'contacts', 'tasks'},
   ),
 );
 ```
@@ -394,13 +405,13 @@ exit the CONSOLIDATING state. It must not delete any input files.
 The lease file write-then-rename sequence requires platform support to be safe.
 The behaviour differs across the deployment targets:
 
-| Platform                      | Atomic primitive                                         | Implementation                                                                                                                  |
-| :---------------------------- | :------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------ |
-| POSIX (Linux / macOS desktop) | rename(2) is atomic within a filesystem                  | Write to .tmp file on same volume, then rename. Guaranteed atomic by POSIX.                                                     |
-| iOS / Android (local storage) | Same as POSIX — app sandbox is a single filesystem       | Identical to POSIX path. No special handling required.                                                                          |
-| Cloud object storage (GCS)    | Conditional PUT with if-none-match / if-generation-match | Upload lease JSON with if-generation-match: \<expected-generation\>. HTTP 412 means another client won the race.                |
-| Cloud object storage (S3)     | No native CAS. Use DynamoDB conditional writes as a lock | Acquire a DynamoDB item with a condition expression before writing to S3. Release on completion.                                |
-| Web (OPFS)                    | createSyncAccessHandle is exclusive per-file per-origin  | Acquire a sync access handle on .consolidation-lease. Only one handle can be open at once per origin — enforced by the browser. |
+| Platform                                        | Atomic primitive                                         | Implementation                                                                                                                  |
+| :---------------------------------------------- | :------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------ |
+| POSIX local / network volume (desktop)          | rename(2) is atomic within a filesystem                  | `LocalDirectoryAdapter`: write to .tmp file on same volume, then `File.renameSync`. Covers local paths, NAS/SMB mounts, and locally-synced cloud folders (iCloud Drive, Dropbox). |
+| iOS / Android (local storage)                   | Same as POSIX — app sandbox is a single filesystem       | Identical to POSIX path. No special handling required.                                                                          |
+| Cloud object storage (GCS)                      | Conditional PUT with if-none-match / if-generation-match | Upload lease JSON with if-generation-match: \<expected-generation\>. HTTP 412 means another client won the race.                |
+| Cloud object storage (S3)                       | No native CAS. Use DynamoDB conditional writes as a lock | Acquire a DynamoDB item with a condition expression before writing to S3. Release on completion.                                |
+| Web (OPFS)                                      | createSyncAccessHandle is exclusive per-file per-origin  | Acquire a sync access handle on .consolidation-lease. Only one handle can be open at once per origin — enforced by the browser. |
 
 #### OPFS limitation
 

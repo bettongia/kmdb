@@ -392,12 +392,14 @@ class="toc-section-number">13.2</span>
 class="toc-section-number">13.3</span>
 <code>KmdbCollection&lt;T&gt;</code></a>
 <ul>
+<li><a href="#conflict-semantics" id="toc-conflict-semantics"><span
+class="toc-section-number">13.3.1</span> Conflict Semantics</a></li>
 <li><a href="#point-lookup-methods" id="toc-point-lookup-methods"><span
-class="toc-section-number">13.3.1</span> Point-Lookup Methods</a></li>
+class="toc-section-number">13.3.2</span> Point-Lookup Methods</a></li>
 <li><a href="#write-methods" id="toc-write-methods"><span
-class="toc-section-number">13.3.2</span> Write Methods</a></li>
+class="toc-section-number">13.3.3</span> Write Methods</a></li>
 <li><a href="#query-builder" id="toc-query-builder"><span
-class="toc-section-number">13.3.3</span> Query Builder</a></li>
+class="toc-section-number">13.3.4</span> Query Builder</a></li>
 </ul></li>
 <li><a href="#kmdbqueryt-pipeline-methods"
 id="toc-kmdbqueryt-pipeline-methods"><span
@@ -1022,7 +1024,7 @@ class="header-section-number">5.3</span> Encoding Pipeline</h2>
 Map&lt;String, dynamic&gt;
     ↓  cbor.encode()              // ~20–30% smaller than JSON; native Uint8List support
 Uint8List (CBOR bytes)
-    ↓  Zstd (native) or Deflate (web)   // further 30–50% reduction on typical documents
+    ↓  Zstd (preferred) or Deflate (web fallback)   // further 30–50% reduction on typical documents
 Uint8List (compressed, if ratio &gt; 1.1×)
     ↓  1-byte compression flag    // prepended: 0x00 = raw, 0x01 = Zstd, 0x02 = Deflate
 SSTable slot value</code></pre>
@@ -1031,10 +1033,10 @@ class="header-section-number">5.4</span> Compression Flag</h2>
 <p>Each stored value is prefixed with a 1-byte compression flag:</p>
 <table>
 <colgroup>
-<col style="width: 7%" />
-<col style="width: 11%" />
-<col style="width: 17%" />
-<col style="width: 63%" />
+<col style="width: 5%" />
+<col style="width: 8%" />
+<col style="width: 25%" />
+<col style="width: 59%" />
 </colgroup>
 <thead>
 <tr>
@@ -1055,16 +1057,16 @@ compressed.</td>
 <tr>
 <td style="text-align: left;"><code>0x01</code></td>
 <td style="text-align: left;">Zstd</td>
-<td style="text-align: left;">Native</td>
-<td style="text-align: left;">Level 1 (fastest). Via
-<code>dart:ffi</code> to libzstd.</td>
+<td style="text-align: left;">Native (FFI) + Web (WASM)</td>
+<td style="text-align: left;">Level 1 (fastest). Preferred on all
+platforms via <code>zstandard</code>.</td>
 </tr>
 <tr>
 <td style="text-align: left;"><code>0x02</code></td>
 <td style="text-align: left;">Deflate</td>
-<td style="text-align: left;">Web / WASM</td>
+<td style="text-align: left;">Web — WASM unavailable only</td>
 <td style="text-align: left;">Pure Dart via <code>archive</code>
-package. ~10% worse ratio.</td>
+package. ~10% worse ratio. Fallback.</td>
 </tr>
 </tbody>
 </table>
@@ -1080,19 +1082,25 @@ identifies the algorithm.</p>
 <h2 data-number="5.5" id="cross-platform-transparency"><span
 class="header-section-number">5.5</span> Cross-Platform
 Transparency</h2>
-<p>A value compressed with Zstd on a native device and uploaded to the
-sync folder is correctly decompressed by a web client:</p>
+<p>All platforms prefer Zstd. On native, this is <code>dart:ffi</code>
+to libzstd. On web, this is the <code>zstandard</code> WASM module. Both
+produce identical output for the same input, so cross-device reads are
+transparent:</p>
 <ol type="1">
+<li>Native client writes a value → Zstd (flag <code>0x01</code>) →
+uploaded to sync folder</li>
 <li>Web client downloads the SSTable</li>
 <li>Reads the 1-byte flag: <code>0x01</code> (Zstd)</li>
-<li>Decompresses using the WASM Zstd module</li>
-<li>Decodes the CBOR bytes</li>
-<li>Passes the <code>Map&lt;String, dynamic&gt;</code> to
+<li>Decompresses using the WASM Zstd module (identical algorithm,
+identical output)</li>
+<li>Decodes the CBOR bytes → passes
+<code>Map&lt;String, dynamic&gt;</code> to
 <code>codec.decode()</code></li>
 </ol>
-<p>The web client writes new values with Deflate (<code>0x02</code>). A
-native client reading those values sees the <code>0x02</code> flag and
-uses libzstd’s Deflate decompressor.</p>
+<p>The Deflate fallback (<code>0x02</code>) is used only on web browsers
+where WASM is unavailable. Native clients reading a <code>0x02</code>
+value use <code>archive</code>’s Inflate decompressor. This path should
+be rare in practice — all modern browsers support WASM.</p>
 <h2 data-number="5.6" id="cbor-boundary"><span
 class="header-section-number">5.6</span> CBOR Boundary</h2>
 <p>CBOR encoding occurs <strong>only at the Query Layer</strong>:</p>
@@ -2247,14 +2255,25 @@ class="header-section-number">12.7</span> Namespace-Scoped Sync</h2>
 typically contains device-specific data. The sync layer supports opt-in
 per namespace:</p>
 <div class="sourceCode" id="cb20"><pre
-class="sourceCode dart"><code class="sourceCode dart"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="at">final</span> db <span class="op">=</span> KmdbDatabase(</span>
-<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a>  store<span class="op">:</span> kvStore<span class="op">,</span></span>
-<span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a>  syncConfig<span class="op">:</span> SyncConfig(</span>
-<span id="cb20-4"><a href="#cb20-4" aria-hidden="true" tabindex="-1"></a>    cloudAdapter<span class="op">:</span> GoogleDriveAdapter(<span class="op">...</span>)<span class="op">,</span></span>
-<span id="cb20-5"><a href="#cb20-5" aria-hidden="true" tabindex="-1"></a>    syncNamespaces<span class="op">:</span> <span class="op">{</span><span class="st">&#39;notes&#39;</span><span class="op">,</span> <span class="st">&#39;contacts&#39;</span><span class="op">,</span> <span class="st">&#39;tasks&#39;</span><span class="op">},</span></span>
-<span id="cb20-6"><a href="#cb20-6" aria-hidden="true" tabindex="-1"></a>    <span class="co">// &#39;settings&#39; and &#39;cache&#39; excluded</span></span>
-<span id="cb20-7"><a href="#cb20-7" aria-hidden="true" tabindex="-1"></a>  )<span class="op">,</span></span>
-<span id="cb20-8"><a href="#cb20-8" aria-hidden="true" tabindex="-1"></a>);</span></code></pre></div>
+class="sourceCode dart"><code class="sourceCode dart"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="co">// Cloud-backed sync (mobile / web)</span></span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a><span class="at">final</span> db <span class="op">=</span> KmdbDatabase(</span>
+<span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a>  store<span class="op">:</span> kvStore<span class="op">,</span></span>
+<span id="cb20-4"><a href="#cb20-4" aria-hidden="true" tabindex="-1"></a>  syncConfig<span class="op">:</span> SyncConfig(</span>
+<span id="cb20-5"><a href="#cb20-5" aria-hidden="true" tabindex="-1"></a>    adapter<span class="op">:</span> GoogleDriveAdapter(<span class="op">...</span>)<span class="op">,</span></span>
+<span id="cb20-6"><a href="#cb20-6" aria-hidden="true" tabindex="-1"></a>    syncNamespaces<span class="op">:</span> <span class="op">{</span><span class="st">&#39;notes&#39;</span><span class="op">,</span> <span class="st">&#39;contacts&#39;</span><span class="op">,</span> <span class="st">&#39;tasks&#39;</span><span class="op">},</span></span>
+<span id="cb20-7"><a href="#cb20-7" aria-hidden="true" tabindex="-1"></a>    <span class="co">// &#39;settings&#39; and &#39;cache&#39; excluded</span></span>
+<span id="cb20-8"><a href="#cb20-8" aria-hidden="true" tabindex="-1"></a>  )<span class="op">,</span></span>
+<span id="cb20-9"><a href="#cb20-9" aria-hidden="true" tabindex="-1"></a>);</span>
+<span id="cb20-10"><a href="#cb20-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb20-11"><a href="#cb20-11" aria-hidden="true" tabindex="-1"></a><span class="co">// Local folder sync (desktop) — shared NAS volume, SMB mount,</span></span>
+<span id="cb20-12"><a href="#cb20-12" aria-hidden="true" tabindex="-1"></a><span class="co">// or a locally-synced cloud folder such as iCloud Drive or Dropbox</span></span>
+<span id="cb20-13"><a href="#cb20-13" aria-hidden="true" tabindex="-1"></a><span class="at">final</span> db <span class="op">=</span> KmdbDatabase(</span>
+<span id="cb20-14"><a href="#cb20-14" aria-hidden="true" tabindex="-1"></a>  store<span class="op">:</span> kvStore<span class="op">,</span></span>
+<span id="cb20-15"><a href="#cb20-15" aria-hidden="true" tabindex="-1"></a>  syncConfig<span class="op">:</span> SyncConfig(</span>
+<span id="cb20-16"><a href="#cb20-16" aria-hidden="true" tabindex="-1"></a>    adapter<span class="op">:</span> LocalDirectoryAdapter(<span class="st">&#39;/Volumes/NAS/MyApp/sync&#39;</span>)<span class="op">,</span></span>
+<span id="cb20-17"><a href="#cb20-17" aria-hidden="true" tabindex="-1"></a>    syncNamespaces<span class="op">:</span> <span class="op">{</span><span class="st">&#39;notes&#39;</span><span class="op">,</span> <span class="st">&#39;contacts&#39;</span><span class="op">,</span> <span class="st">&#39;tasks&#39;</span><span class="op">},</span></span>
+<span id="cb20-18"><a href="#cb20-18" aria-hidden="true" tabindex="-1"></a>  )<span class="op">,</span></span>
+<span id="cb20-19"><a href="#cb20-19" aria-hidden="true" tabindex="-1"></a>);</span></code></pre></div>
 <p>During SSTable upload, the sync layer filters to include only entries
 for sync-enabled namespaces. This avoids uploading megabytes of
 device-local cache data.</p>
@@ -2518,9 +2537,9 @@ Strategies</h3>
 to be safe. The behaviour differs across the deployment targets:</p>
 <table>
 <colgroup>
-<col style="width: 13%" />
-<col style="width: 26%" />
-<col style="width: 59%" />
+<col style="width: 20%" />
+<col style="width: 24%" />
+<col style="width: 55%" />
 </colgroup>
 <thead>
 <tr>
@@ -2531,11 +2550,14 @@ to be safe. The behaviour differs across the deployment targets:</p>
 </thead>
 <tbody>
 <tr>
-<td style="text-align: left;">POSIX (Linux / macOS desktop)</td>
+<td style="text-align: left;">POSIX local / network volume
+(desktop)</td>
 <td style="text-align: left;">rename(2) is atomic within a
 filesystem</td>
-<td style="text-align: left;">Write to .tmp file on same volume, then
-rename. Guaranteed atomic by POSIX.</td>
+<td style="text-align: left;"><code>LocalDirectoryAdapter</code>: write
+to .tmp file on same volume, then <code>File.renameSync</code>. Covers
+local paths, NAS/SMB mounts, and locally-synced cloud folders (iCloud
+Drive, Dropbox).</td>
 </tr>
 <tr>
 <td style="text-align: left;">iOS / Android (local storage)</td>
@@ -2789,16 +2811,32 @@ class="header-section-number">13.3</span>
 <code>KmdbCollection&lt;T&gt;</code></h2>
 <p>Obtained via
 <code>db.collection(namespace: '...', codec: ...)</code>.</p>
-<h3 data-number="13.3.1" id="point-lookup-methods"><span
-class="header-section-number">13.3.1</span> Point-Lookup Methods</h3>
+<h3 data-number="13.3.1" id="conflict-semantics"><span
+class="header-section-number">13.3.1</span> Conflict Semantics</h3>
+<p>All writes use <strong>Last-Write-Wins (LWW)</strong> conflict
+resolution. When two devices independently write to the same document
+key and their SSTables are later merged during sync compaction, the
+entry with the higher HLC timestamp is kept and the other is silently
+discarded. This applies to every write method — <code>put</code>,
+<code>insert</code>, <code>replace</code>, <code>update</code>,
+<code>delete</code> — without exception.</p>
+<p>This is not a limitation of any specific method; it is a property of
+the sync model. Any pattern where two devices concurrently write to the
+same document field can produce a discarded write. Applications that
+require field-level merge semantics (e.g. incrementing a counter,
+appending to a list) should use the <code>MergeOperator</code> callback
+on the sync engine (§12), which enables CRDT-style resolution during
+compaction.</p>
+<h3 data-number="13.3.2" id="point-lookup-methods"><span
+class="header-section-number">13.3.2</span> Point-Lookup Methods</h3>
 <div class="sourceCode" id="cb30"><pre
 class="sourceCode dart"><code class="sourceCode dart"><span id="cb30-1"><a href="#cb30-1" aria-hidden="true" tabindex="-1"></a><span class="co">// Direct KvStore access via Cache Layer — bypasses the query pipeline.</span></span>
 <span id="cb30-2"><a href="#cb30-2" aria-hidden="true" tabindex="-1"></a><span class="dt">Future</span><span class="op">&lt;</span>T<span class="op">?&gt;</span>               <span class="kw">get</span>(<span class="dt">String</span> key);</span>
 <span id="cb30-3"><a href="#cb30-3" aria-hidden="true" tabindex="-1"></a><span class="dt">Future</span><span class="op">&lt;</span><span class="dt">Map</span><span class="op">&lt;</span><span class="dt">String</span><span class="op">,</span> T<span class="op">?&gt;&gt;</span>  getMany(<span class="dt">Iterable</span><span class="op">&lt;</span><span class="dt">String</span><span class="op">&gt;</span> keys);</span>
 <span id="cb30-4"><a href="#cb30-4" aria-hidden="true" tabindex="-1"></a><span class="dt">Future</span><span class="op">&lt;</span><span class="dt">bool</span><span class="op">&gt;</span>             exists(<span class="dt">String</span> key);</span>
 <span id="cb30-5"><a href="#cb30-5" aria-hidden="true" tabindex="-1"></a><span class="dt">Stream</span><span class="op">&lt;</span>T<span class="op">?&gt;</span>               watchKey(<span class="dt">String</span> key);  <span class="co">// re-emits on put or delete</span></span></code></pre></div>
-<h3 data-number="13.3.2" id="write-methods"><span
-class="header-section-number">13.3.2</span> Write Methods</h3>
+<h3 data-number="13.3.3" id="write-methods"><span
+class="header-section-number">13.3.3</span> Write Methods</h3>
 <div class="sourceCode" id="cb31"><pre
 class="sourceCode dart"><code class="sourceCode dart"><span id="cb31-1"><a href="#cb31-1" aria-hidden="true" tabindex="-1"></a><span class="co">// insert: throws DocumentAlreadyExistsException if key exists.</span></span>
 <span id="cb31-2"><a href="#cb31-2" aria-hidden="true" tabindex="-1"></a><span class="dt">Future</span><span class="op">&lt;</span><span class="dt">void</span><span class="op">&gt;</span> insert(T value);</span>
@@ -2816,11 +2854,12 @@ class="sourceCode dart"><code class="sourceCode dart"><span id="cb31-1"><a href=
 <span id="cb31-14"><a href="#cb31-14" aria-hidden="true" tabindex="-1"></a><span class="dt">Future</span><span class="op">&lt;</span><span class="dt">void</span><span class="op">&gt;</span> delete(<span class="dt">String</span> key);</span>
 <span id="cb31-15"><a href="#cb31-15" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb31-16"><a href="#cb31-16" aria-hidden="true" tabindex="-1"></a><span class="co">// update: read-modify-write. Returns null if the document does not exist.</span></span>
-<span id="cb31-17"><a href="#cb31-17" aria-hidden="true" tabindex="-1"></a><span class="co">// NOT SAFE ACROSS DEVICE SYNC — concurrent writes from another device may</span></span>
-<span id="cb31-18"><a href="#cb31-18" aria-hidden="true" tabindex="-1"></a><span class="co">// be silently overwritten by LWW conflict resolution during compaction.</span></span>
-<span id="cb31-19"><a href="#cb31-19" aria-hidden="true" tabindex="-1"></a><span class="dt">Future</span><span class="op">&lt;</span>T<span class="op">?&gt;</span> update(<span class="dt">String</span> key<span class="op">,</span> T <span class="kw">Function</span>(T current) updater);</span></code></pre></div>
-<h3 data-number="13.3.3" id="query-builder"><span
-class="header-section-number">13.3.3</span> Query Builder</h3>
+<span id="cb31-17"><a href="#cb31-17" aria-hidden="true" tabindex="-1"></a><span class="co">// Safe on a single device (synchronous single-isolate model prevents</span></span>
+<span id="cb31-18"><a href="#cb31-18" aria-hidden="true" tabindex="-1"></a><span class="co">// interleaving). Subject to LWW conflict resolution during sync — see</span></span>
+<span id="cb31-19"><a href="#cb31-19" aria-hidden="true" tabindex="-1"></a><span class="co">// Conflict Semantics above.</span></span>
+<span id="cb31-20"><a href="#cb31-20" aria-hidden="true" tabindex="-1"></a><span class="dt">Future</span><span class="op">&lt;</span>T<span class="op">?&gt;</span> update(<span class="dt">String</span> key<span class="op">,</span> T <span class="kw">Function</span>(T current) updater);</span></code></pre></div>
+<h3 data-number="13.3.4" id="query-builder"><span
+class="header-section-number">13.3.4</span> Query Builder</h3>
 <div class="sourceCode" id="cb32"><pre
 class="sourceCode dart"><code class="sourceCode dart"><span id="cb32-1"><a href="#cb32-1" aria-hidden="true" tabindex="-1"></a><span class="co">// Start building a query. No I/O occurs until a terminal method is called.</span></span>
 <span id="cb32-2"><a href="#cb32-2" aria-hidden="true" tabindex="-1"></a>KmdbQuery<span class="op">&lt;</span>T<span class="op">&gt;</span> all();</span>
@@ -2849,11 +2888,14 @@ class="sourceCode dart"><code class="sourceCode dart"><span id="cb34-1"><a href=
 <span id="cb34-4"><a href="#cb34-4" aria-hidden="true" tabindex="-1"></a><span class="dt">Future</span><span class="op">&lt;</span>T<span class="op">?&gt;</span>        first();</span>
 <span id="cb34-5"><a href="#cb34-5" aria-hidden="true" tabindex="-1"></a><span class="dt">Future</span><span class="op">&lt;</span><span class="dt">int</span><span class="op">&gt;</span>       count();   <span class="co">// avoids decoding documents</span></span>
 <span id="cb34-6"><a href="#cb34-6" aria-hidden="true" tabindex="-1"></a><span class="dt">Future</span><span class="op">&lt;</span><span class="dt">bool</span><span class="op">&gt;</span>      any();</span></code></pre></div>
-<p><strong><code>stream()</code> snapshot lifetime:</strong>
-<code>stream()</code> holds an LSM snapshot open for the duration of the
-stream. For UI lists, prefer <code>get()</code> (snapshot closed
-immediately) or <code>watch()</code> (fresh snapshot per re-run). Do not
-hold a <code>stream()</code> open across user interactions.</p>
+<p><strong><code>stream()</code> implementation:</strong>
+<code>stream()</code> is eagerly evaluated — identical to
+<code>get()</code> internally, but the result is emitted as a
+<code>Stream&lt;T&gt;</code> rather than returned as a
+<code>Future&lt;List&lt;T&gt;&gt;</code>. No LSM snapshot is held open.
+This is sufficient at KMDB’s target scale (≤100K documents); a lazy
+cursor with ref-counted SSTable retention can be introduced if larger
+scale demands it. Prefer <code>watch()</code> for reactive UI lists.</p>
 <p><strong><code>orderBy('id')</code></strong> maps directly to
 <code>KvStore.scan(descending:)</code> and avoids an in-memory sort —
 the only <code>orderBy</code> with this optimisation. All other fields

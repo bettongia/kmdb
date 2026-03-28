@@ -91,10 +91,15 @@ lib/
       sync_engine.dart                 # Push/pull SSTables, ingest at L0
       consolidation_coordinator.dart   # Lease protocol, state machine
       consolidation_config.dart        # ConsolidationConfig with .forTesting()
+      local/
+        local_directory_adapter.dart   # dart:io POSIX adapter (network volume, locally-synced cloud folder)
+        memory_sync_adapter.dart       # In-memory adapter for tests (simulates concurrent access)
       cloud/
-        cloud_adapter.dart             # Abstract cloud folder interface
+        cloud_adapter.dart             # Abstract sync folder interface
         google_drive_adapter.dart
         icloud_adapter.dart
+        s3_adapter.dart                # AWS S3 (conditional PUT via if-none-match)
+        gcs_adapter.dart               # Google Cloud Storage (if-generation-match)
 
     cache/
       lru_map.dart                     # Simple LRU linked-hash map
@@ -447,7 +452,7 @@ Implements the 9-step `open()` recovery sequence (§17):
 
 **Tests:** Read/write round-trip. Peer map merging. Stale device detection (90-day threshold).
 
-### 5.2 Cloud Adapter Interface
+### 5.2 Sync Folder Adapter Interface
 **File:** `sync/cloud/cloud_adapter.dart`
 
 ```dart
@@ -461,7 +466,17 @@ abstract interface class CloudAdapter {
 }
 ```
 
-`MemoryCloudAdapter` for tests (simulates concurrent access for lease tests).
+**Local adapters** (`sync/local/`):
+
+- `MemorySyncAdapter` — in-memory map, used in all unit/integration tests. Simulates concurrent access for lease tests.
+- `LocalDirectoryAdapter` — `dart:io`-backed, desktop-only (guarded by `!kIsWeb`). Targets a local filesystem path: a shared network volume (NAS, SMB/NFS mount), or any locally-synced cloud folder (iCloud Drive, Dropbox, Synology Drive) without needing their native SDKs. `compareAndSwap` is implemented via write-to-temp + `File.renameSync` (atomic on POSIX); throws `LockConflictException` if the file already exists and no `ifMatchEtag` is supplied (`if-none-match: *` semantics).
+
+**Cloud adapters** (`sync/cloud/`, Phase 8):
+
+- `GoogleDriveAdapter` — Google Drive REST API; `compareAndSwap` via Drive's `If-Match` ETag header.
+- `ICloudAdapter` — CloudKit / iCloud Drive; `compareAndSwap` via CloudKit record change tags.
+- `S3Adapter` — AWS S3; `compareAndSwap` via `If-None-Match: *` on PutObject (supported since 2024). No DynamoDB dependency required for new buckets.
+- `GcsAdapter` — Google Cloud Storage; `compareAndSwap` via `if-generation-match` precondition on upload.
 
 ### 5.3 Sync Engine
 **File:** `sync/sync_engine.dart`
@@ -593,7 +608,7 @@ Lazy index build on first query:
 - **Web compression:** Zstd WASM via `zstandard` package; fallback to Deflate
 - **Platform device ID:** Per-platform secure storage (Keychain, SharedPreferences, localStorage, app data dir)
 - **Native Zstd FFI:** Wire `hook/build.dart` with `native_toolchain_c` for libzstd compilation
-- **Cloud adapters:** Google Drive and iCloud `CloudAdapter` implementations
+- **Cloud adapters:** Google Drive, iCloud, S3, and GCS `CloudAdapter` implementations
 - **`KvStoreConfig.forTesting()`:** Tiny thresholds, no fsync, memory adapter — used throughout test suite
 - **Performance benchmarks:** Validate P99 targets from §18 (write, read, scan, open, compaction)
 - **Error types:** Define KMDB-specific exceptions (`CorruptedWalException`, `CorruptedSstableException`, `LockConflictException`, `ClockSkewException`, `StaleIndexException`)
