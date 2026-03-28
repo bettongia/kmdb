@@ -81,8 +81,8 @@ final class Hlc implements Comparable<Hlc> {
   /// Formats only the 48-bit physical component as a 12-character uppercase
   /// hex string.
   ///
-  /// Used in SSTable filenames (`{deviceId}-{minHlc}-{maxHlc}.sst`), where
-  /// the logical counter is not needed for sync ordering.
+  /// Used in consolidation SSTable filenames, where cross-device ordering
+  /// relies solely on wall-clock time and the logical counter is not needed.
   String toPhysicalHex() =>
       physicalMs.toRadixString(16).toUpperCase().padLeft(12, '0');
 

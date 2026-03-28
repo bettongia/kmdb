@@ -14,6 +14,81 @@
 
 import 'dart:typed_data';
 
+// ── KvStore interface ─────────────────────────────────────────────────────────
+
+/// The primary key-value storage interface.
+///
+/// Abstracts the LSM engine so upper layers (Cache Layer, Query Layer) do not
+/// depend on the concrete implementation. Obtain an instance via
+/// [KvStoreImpl.open].
+///
+/// ## System namespaces
+///
+/// Namespaces prefixed with `$` are reserved for internal use (e.g. `$meta`,
+/// `$index:...`). Client code must not read or write these directly.
+///
+/// ## Thread safety
+///
+/// All methods are safe to call from a single isolate. KMDB does not use
+/// background isolates; callers must not issue concurrent writes.
+abstract interface class KvStore {
+  /// Writes [value] under [key] in [namespace].
+  ///
+  /// [key] must be a 32-character lowercase hex string (binary UUIDv7).
+  Future<void> put(String namespace, String key, Uint8List value);
+
+  /// Writes a delete tombstone for [key] in [namespace].
+  ///
+  /// Subsequent [get] calls return `null` until a new value is written.
+  Future<void> delete(String namespace, String key);
+
+  /// Commits all entries in [batch] atomically.
+  ///
+  /// Either all entries land in the WAL and memtable, or none do.
+  Future<void> writeBatch(WriteBatch batch);
+
+  /// Returns the raw value bytes for [key] in [namespace], or `null` if
+  /// the key does not exist or has been deleted.
+  Future<Uint8List?> get(String namespace, String key);
+
+  /// Returns a stream of entries in [namespace] in ascending key order.
+  ///
+  /// [startKey] and [endKey] are optional 32-character hex strings.
+  /// [startKey] is inclusive; [endKey] is exclusive. Pass `null` for an
+  /// unbounded scan.
+  Stream<KvEntry> scan(
+    String namespace, {
+    String? startKey,
+    String? endKey,
+  });
+
+  /// Explicitly flushes the active memtable to an SSTable on disk.
+  ///
+  /// Normally the engine flushes automatically when the memtable reaches
+  /// [KvStoreConfig.memtableSizeBytes]. This method is provided for tests and
+  /// explicit durability checkpoints.
+  Future<void> flush();
+
+  /// Runs compaction until no further compaction is needed.
+  ///
+  /// Blocks the calling isolate. Only for tests and maintenance tooling.
+  Future<void> compactAll();
+
+  /// A broadcast stream that emits a namespace string after each successful
+  /// write ([put], [delete], [writeBatch]).
+  ///
+  /// The Cache Layer and reactivity watcher subscribe to this stream to
+  /// invalidate stale entries. Each write that touches multiple namespaces
+  /// emits one event per unique namespace.
+  Stream<String> get writeEvents;
+
+  /// Closes the store, flushing the active memtable and releasing the LOCK.
+  ///
+  /// After [close] returns the instance must not be used again. A new
+  /// instance can be opened on the same path.
+  Future<void> close();
+}
+
 // ── Public types ──────────────────────────────────────────────────────────────
 
 /// A raw key-value entry returned by [KvStore.scan].

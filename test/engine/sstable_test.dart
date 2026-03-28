@@ -230,7 +230,7 @@ void main() {
         const Hlc(0x017F8A0A0000, 0),
         const Hlc(0x017F8A0AFFFF, 0),
       );
-      expect(name, equals('a1b2c3d4-017F8A0A0000-017F8A0AFFFF.sst'));
+      expect(name, equals('a1b2c3d4-017F8A0A00000000-017F8A0AFFFF0000.sst'));
     });
 
     test('consolidationName generates correct filename', () {

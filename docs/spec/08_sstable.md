@@ -40,12 +40,19 @@ output to be identified and deleted without opening any file:
 
 ### Field encoding
 
-| Field      | Encoding                              | Width       |
-| :--------- | :------------------------------------ | :---------- |
-| `deviceId` | Truncated UUID hex (no hyphens)       | 8 chars     |
-| `epoch`    | Decimal integer, no padding           | Variable    |
-| `minHlc`   | Uppercase hex, 48-bit HLC timestamp   | 12 chars    |
-| `maxHlc`   | Uppercase hex, 48-bit HLC timestamp   | 12 chars    |
+| Field      | Encoding                                      | Width    |
+| :--------- | :-------------------------------------------- | :------- |
+| `deviceId` | Truncated UUID hex (no hyphens)               | 8 chars  |
+| `epoch`    | Decimal integer, no padding                   | Variable |
+| `minHlc`   | Regular flush: full 64-bit HLC (physical + logical), uppercase hex | 16 chars |
+| `maxHlc`   | Regular flush: full 64-bit HLC (physical + logical), uppercase hex | 16 chars |
+| `minHlc`   | Consolidation: 48-bit physical component only, uppercase hex | 12 chars |
+| `maxHlc`   | Consolidation: 48-bit physical component only, uppercase hex | 12 chars |
+
+Regular flush files embed the full 64-bit HLC (including the 16-bit logical
+counter) to guarantee unique filenames even when multiple flushes occur within
+the same physical millisecond. Consolidation files use the 48-bit physical
+component only, since cross-device ordering relies solely on wall-clock time.
 
 No field contains a `-`, so splitting on `-` and counting segments is
 unambiguous.
@@ -53,9 +60,9 @@ unambiguous.
 ### Examples
 
 ```
-a1b2c3d4-017F8A0A0000-017F8A0AFFFF.sst      ← regular flush
-f9e8d7c6-017F8B0C0000-017F8B0C3FFF.sst      ← regular flush
-a3f2b1c9-7-017F8A090000-017F8A0AFFFF.sst   ← consolidation, epoch 7
+a1b2c3d4-017F8A0A00000000-017F8A0AFFFF0000.sst      ← regular flush
+f9e8d7c6-017F8B0C00000000-017F8B0C3FFF0000.sst      ← regular flush
+a3f2b1c9-7-017F8A090000-017F8A0AFFFF.sst            ← consolidation, epoch 7
 ```
 
 The device ID is a stable per-installation UUID generated on first launch and
