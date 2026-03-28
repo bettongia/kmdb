@@ -1,8 +1,7 @@
-/// Support for doing something awesome.
+/// KMDB — a local-first document database for Dart and Flutter.
 ///
-/// More dartdocs go here.
+/// Provides a typed, reactive query API over an LSM storage engine with
+/// multi-device sync via commodity cloud storage.
 library;
 
-export 'src/kmdb_base.dart';
-
-// TODO: Export any libraries intended for clients of this package.
+// Public API exports are added as layers are implemented.
