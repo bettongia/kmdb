@@ -1,7 +1,11 @@
 ---
 title: KMDB
 subtitle: A Local-First Document Database for Dart & Flutter
+toc-title: "Contents"
 ...
 
-- [Specification](spec/00_index.md)
-- [Roadmap](roadmap.md)
+- [Specification](spec.html)
+- [Roadmap](roadmap.html)
+- [API](api/index.html)
+
+---

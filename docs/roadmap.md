@@ -1,6 +1,10 @@
-# Feature roadmap
+---
+title: KMDB Feature Roadmap
+subtitle: Ideas, unfilfilled
+toc-title: "Contents"
+...
 
-## Document version history & conflict resolution
+# Document version history & conflict resolution
 
 KMDB currently uses Last-Write-Wins (LWW) via HLC timestamps to resolve
 conflicts during sync compaction. This is correct and deterministic, but silent:
@@ -37,7 +41,7 @@ References:
 - [CouchDB conflict model](https://docs.couchdb.org/en/stable/replication/conflicts.html)
 - [Vector clocks (Lamport)](https://en.wikipedia.org/wiki/Vector_clock)
 
-## Full-text search
+# Full-text search
 
 Support traditional full-text search and vector-based searches.
 
@@ -45,3 +49,12 @@ References:
 
 - [SQLite FTS5](https://www.sqlite.org/fts5.html)
 - [Postgres Full Text Search](https://www.postgresql.org/docs/current/textsearch.html)
+
+---
+
+<!-- prettier-ignore-start -->
+KMDB Documentation © 2026 by The KMDB Authors is licensed under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+![](https://mirrors.creativecommons.org/presskit/icons/cc.svg){width=1em height=1em}
+![](https://mirrors.creativecommons.org/presskit/icons/by.svg){width=1em height=1em}
+<!-- prettier-ignore-end -->

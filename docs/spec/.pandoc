@@ -4,5 +4,6 @@ standalone: true
 list-of-tables: true
 list-of-figures: true
 number-sections: true
+include-before-body: docs/template/header.html
 css:
   - styles/styles.css

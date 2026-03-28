@@ -14,8 +14,6 @@ Once each phase is completed:
 
 ## Progress
 
-**Progress as of 2026-03-28:**
-
 - ✅ Phase 1 complete (all primitives + platform layer)
 - ✅ Phase 2 complete (skip list, memtable, WAL, Bloom filter, SSTable
   writer/reader, varint)
