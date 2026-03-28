@@ -14,6 +14,10 @@ equivalent). The primary sync unit is the immutable SSTable file.
   typically active at a time. SSTable exchange provides efficient catch-up sync
   when switching devices.
 
+- **WAL files are never synced.** WAL files are a local crash-recovery mechanism
+  and are never written to or read from shared cloud storage. The sync layer
+  operates exclusively on immutable SSTables.
+
 - **WAL segment fast-path (future v2).** For the rare scenario of
   near-simultaneous multi-device use, WAL segment exchange can provide
   lower-latency sync. This is deferrable without architectural compromise.
@@ -30,14 +34,15 @@ equivalent). The primary sync unit is the immutable SSTable file.
 
 ```
 /sync/
- highwater/
-  {deviceA-id}.hwm              # Device A's sync progress
-  {deviceB-id}.hwm              # Device B's sync progress
-  {deviceC-id}.hwm              # Device C's sync progress
- sstables/
-  {deviceA-id}-{minHlc}-{maxHlc}.sst
-  {deviceB-id}-{minHlc}-{maxHlc}.sst
-  ...
+  highwater/
+    {deviceA-id}.hwm                                    # Device A's sync progress
+    {deviceB-id}.hwm                                    # Device B's sync progress
+  sstables/
+    {deviceA-id}-{minHlc}-{maxHlc}.sst                 # Regular flush (3 segments)
+    {deviceB-id}-{minHlc}-{maxHlc}.sst                 # Regular flush (3 segments)
+    {deviceA-id}-{epoch}-{minHlc}-{maxHlc}.sst         # Consolidation output (4 segments)
+  .consolidation-lease                                  # Coordinator lock
+  .consolidation-manifest                               # Coordinator output record
 ```
 
 Each device writes only to its own files. No two devices ever write to the same
@@ -188,9 +193,10 @@ Coordination is mediated by a single well-known file in the shared sync folder:
 
 ```
 <sync-root>/
-  <device-id>-N-NNNNNN-<hash>-<hash>.sst     ← per-device SSTables
-  .consolidation-lease                       ← coordinator lock (this section)
-  .consolidation-manifest                    ← output record
+  {deviceId}-{minHlc}-{maxHlc}.sst           ← regular flush SSTables (3 segments)
+  {deviceId}-{epoch}-{minHlc}-{maxHlc}.sst   ← consolidation output (4 segments)
+  .consolidation-lease                        ← coordinator lock (this section)
+  .consolidation-manifest                     ← output record
 ```
 
 The lease file is a UTF-8 JSON document written atomically via a
@@ -208,11 +214,11 @@ its absence means no client holds the lock. The lease file is never appended to
   "acquiredAtMs": 1743724800000, // wall-clock ms at acquisition (HLC physical)
   "ttlMs": 120000, // lease duration; coordinator must renew before expiry
   "inputFiles": [
-    // SSTables in scope at acquisition time
-    "a3f2b1c9-0-000007-1a2b3c4d-9e8f7a6b.sst",
-    "b7e10f44-0-000003-aabbccdd-11223344.sst",
+    // SSTables in scope at acquisition time (regular flush format — 3 segments)
+    "a3f2b1c9-017F8A0A0000-017F8A0AFFFF.sst",
+    "b7e10f44-017F8A090000-017F8A09FFFF.sst",
   ],
-  "fencingToken": "a3f2b1c9-7", // coordinatorId + epoch; written to output files
+  "fencingToken": "a3f2b1c9-7", // coordinatorId + epoch; embedded in output filenames
 }
 ```
 
@@ -238,7 +244,7 @@ point.
 2. **Validate the incumbent's output.** If the lease is expired, check whether
    .consolidation-manifest records a completed consolidation whose output files
    all exist on disk. If so, the previous coordinator finished but failed to
-   clean up. Adopt the output (§8.6.5) rather than re-consolidating.
+   clean up. Adopt the output (§12.6.5) rather than re-consolidating.
 
 3. **Write a candidate lease to a temp file.** Name it
    .consolidation-lease.\<deviceId\>.tmp. Populate all fields. Set epoch \=
@@ -247,7 +253,7 @@ point.
 4. **Rename the temp file to .consolidation-lease.** On POSIX filesystems and
    cloud object stores that support atomic conditional-PUT (GCS, S3 via
    if-none-match), this is the linearisation point. On platforms without atomic
-   rename, use the compare-and-swap write pattern described in §8.6.7.
+   rename, use the compare-and-swap write pattern described in §12.6.7.
 
 5. **Re-read the lease file.** Confirm that coordinatorId and epoch match what
    was just written. If another client won the race, its data will appear
@@ -298,10 +304,10 @@ result.
   "fencingToken": "a3f2b1c9-7",
   "completedAtMs": 1743724812345,
   "inputFiles": [
-    "a3f2b1c9-0-000007-1a2b3c4d-9e8f7a6b.sst",
-    "b7e10f44-0-000003-aabbccdd-11223344.sst",
+    "a3f2b1c9-017F8A0A0000-017F8A0AFFFF.sst",
+    "b7e10f44-017F8A090000-017F8A09FFFF.sst",
   ],
-  "outputFiles": ["a3f2b1c9-2-000009-00000000-ffffffff.sst"],
+  "outputFiles": ["a3f2b1c9-7-017F8A090000-017F8A0AFFFF.sst"],
   "inputEntryCount": 1840,
   "outputEntryCount": 1203, // <= inputEntryCount after dedup + tombstone drop
   "status": "complete", // "complete" | "partial"
@@ -416,7 +422,7 @@ which files exist on disk.
 | Crash after merge complete, before manifest written           | Lease expired; all output files present with fencingToken; no manifest                              | New coordinator can detect output file coverage matches input files. Write manifest, delete inputs, delete lease. No re-merge needed.                |
 | Crash after manifest written, before input files deleted      | Manifest present with status=complete; input and output files both present; lease expired or absent | New coordinator reads manifest, verifies output files exist, deletes input files, deletes lease. Safe because manifest is the commit record.         |
 | Crash after inputs deleted, before lease deleted              | Manifest present; only output files remain; lease present (expired)                                 | New coordinator reads manifest, confirms output files exist, deletes lease. IDLE state restored.                                                     |
-| Coordinator alive but partitioned from sync folder for \> TTL | Lease expired on disk; coordinator still running and writing output                                 | Coordinator must detect renewal failure (§8.6.6) and abort. Output files not yet committed are discarded. A second coordinator may safely take over. |
+| Coordinator alive but partitioned from sync folder for \> TTL | Lease expired on disk; coordinator still running and writing output                                 | Coordinator must detect renewal failure (§12.6.6) and abort. Output files not yet committed are discarded. A second coordinator may safely take over. |
 
 ### Triggering Consolidation
 

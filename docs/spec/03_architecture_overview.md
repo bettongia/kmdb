@@ -3,26 +3,102 @@
 ## Layer Stack
 
 ```
-┌───────────────────────────────────────────────────────────────┐
-│         Application Code                    │                 │
-├───────────────────────────────────────────────────────────────┤
-│  KmdbCollection<T>  │  KmdbQuery<T>         │  Query Layer    │
-├───────────────────────────────────────────────────────────────┤
-│  KmdbCodec<T>       (freezed + json_ser)    │  Codec Layer    │
-├───────────────────────────────────────────────────────────────┤
-│  KvStore             (LSM engine)           │  Storage Layer  │
-├───────────────────────────────────────────────────────────────┤
-│  SyncEngine          (SSTable exchange)     │  Sync Layer     │
-├───────────────────────────────────────────────────────────────┤
-│  StorageAdapter      (native / web / test)  │  Platform Layer │
-└───────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│  Application Code                                                  │
+├────────────────────────────────────────────────────────────────────┤
+│  Query Layer    KmdbCollection<T> · KmdbQuery<T> · Filter DSL      │
+│                 Index definitions · Write interception             │
+├────────────────────────────────────────────────────────────────────┤
+│  Cache Layer    Session object cache · $cache materialised views   │
+│                 Platform-aware sizing · Generation counter reads   │
+├────────────────────────────────────────────────────────────────────┤
+│  KvStore        put · get · delete · scan · writeBatch · open      │
+│  (Public API)   System namespaces · Namespace generation counters  │
+├────────────────────────────────────────────────────────────────────┤
+│  LSM Engine     WAL · Memtable (skip list) · SSTable files         │
+│                 Bloom filters · 3-level compaction · Manifest      │
+├────────────────────────────────────────────────────────────────────┤
+│  Sync Layer     SyncEngine (SSTable exchange) · ConsolidationCoord │
+├────────────────────────────────────────────────────────────────────┤
+│  Platform Layer StorageAdapter: native (dart:io+FFI) / web (OPFS)  │
+│                 / memory (tests)                                   │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
-The query layer never touches the LSM directly — it always operates through the
-KvStore public API. The sync layer operates on immutable SSTable files produced
-by the storage layer. The platform layer abstracts file I/O, compression, and
-file locking across native (dart:io/dart:ffi), web (OPFS via dart:js_interop),
-and test (in-memory) targets.
+**CBOR encoding and decoding** occurs at the Query Layer boundary on writes
+(before `KvStore.writeBatch`) and at the Cache Layer boundary on reads (after
+`KvStore.get`, before populating the session cache). The LSM engine stores and
+retrieves opaque `Uint8List` — it has no knowledge of document structure at any
+point. See §5 for the full value encoding pipeline.
+
+**The Query Layer** never touches the LSM directly — it always operates through
+the KvStore public API. It is also the only layer that maintains secondary
+indexes, intercepting writes to keep index entries consistent (§16).
+
+**The Cache Layer** sits between the Query Layer and KvStore, providing a
+platform-tiered session object cache and a persistent materialised view cache.
+See §15.
+
+**The Sync Layer** operates on immutable SSTable files produced by the storage
+layer. The platform layer abstracts file I/O, compression, and file locking
+across native (dart:io/dart:ffi), web (OPFS via dart:js_interop), and test
+(in-memory) targets.
+
+## Storage Tiers
+
+KMDB uses two completely separate storage locations. Understanding the boundary
+between them is essential to understanding the sync design.
+
+### Tier 1 — Local Database Directory
+
+Device-local storage only. Never shared with any other device. Contains:
+
+```
+{local-db-dir}/
+  LOCK                        ← zero-byte file; flock / LockFileEx target
+  CURRENT                     ← name of the active MANIFEST file (see §10)
+  MANIFEST-00001              ← append-only VersionEdit log (see §10)
+  wal-00001.log               ← retired WAL files awaiting deletion
+  wal-00002.log               ← active WAL
+  sst/
+    {deviceId}-{minHlc}-{maxHlc}.sst        ← locally-produced SSTables
+    {otherDeviceId}-{minHlc}-{maxHlc}.sst   ← SSTables ingested from peers
+  sync/
+    outbox/                   ← SSTables staged for upload
+    inbox/                    ← downloaded remote SSTables awaiting ingestion
+```
+
+The local database directory is protected by an exclusive file lock
+(`flock()`/`LockFileEx()`) at open time. Only one process on one device ever
+writes to it.
+
+### Tier 2 — Sync Folder
+
+A shared folder in cloud storage (Google Drive, iCloud, or equivalent). No
+device ever stores its WAL files or Manifest here. The only files written to
+the sync folder are:
+
+```
+{sync-root}/
+  highwater/
+    {deviceId}.hwm                               ← each device writes only its own
+  sstables/
+    {deviceId}-{minHlc}-{maxHlc}.sst            ← regular flush (3 segments)
+    {deviceId}-{epoch}-{minHlc}-{maxHlc}.sst    ← consolidation output (4 segments)
+  .consolidation-lease                           ← coordinator lock (§12)
+  .consolidation-manifest                        ← coordinator output record (§12)
+```
+
+**Each device writes only to files it owns.** No two devices ever write to the
+same file in the sync folder. This eliminates all write-conflict scenarios at
+the file level and is the reason the sync protocol needs no central server.
+
+### The Boundary
+
+The sync engine's job is to move immutable SSTables from Tier 1 into Tier 2
+(upload) and from Tier 2 into Tier 1 (download and ingest at L0). Everything
+else — WAL files, the Manifest, in-progress compaction output — stays in Tier 1
+and is invisible to the sync layer.
 
 ## Why LSM, Not SQLite?
 
