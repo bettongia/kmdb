@@ -1,5 +1,52 @@
 # Write-Ahead Log
 
+## File Lifecycle
+
+**WAL files are local to each device and are never written to or read from
+shared cloud storage.** They exist solely as a crash-recovery mechanism for the
+local storage engine. The sync layer operates exclusively on immutable SSTable
+files — the WAL is an implementation detail that the sync layer never sees.
+
+The WAL uses multiple sequentially-numbered files. A new WAL file is created
+when the active memtable is frozen for flushing (at the 64KB threshold). The
+old file is retained until the corresponding SSTable is confirmed durable on
+disk (fsync'd and referenced in the Manifest), at which point it is deleted.
+
+```
+wal-00001.log   ← retired, safe to delete once L0 SSTable confirmed
+wal-00002.log   ← active
+```
+
+### Naming Convention
+
+```
+wal-{sequence}.log
+```
+
+The sequence number is a zero-padded 5-digit decimal integer, monotonically
+increasing. It is stored in the Manifest alongside the SSTable it corresponds to,
+so recovery knows which WAL files are still needed.
+
+### Rotation
+
+1. The active memtable is frozen. A new active memtable is created.
+2. A new WAL file `wal-{N+1}.log` is opened and becomes the active WAL.
+3. The frozen memtable is flushed to an L0 SSTable.
+4. The new SSTable is fsync'd and added to the Manifest (atomic write-then-rename).
+5. `wal-{N}.log` is deleted — it is no longer needed for recovery.
+
+If the process crashes between steps 3 and 5, `wal-{N}.log` still exists on
+recovery. The recovery sequence replays it from the last flush marker, which is
+safe because SSTable ingestion is idempotent under LWW semantics.
+
+### Multiple WAL Files on Recovery
+
+On `open()`, recovery collects all `wal-*.log` files present, sorts them by
+sequence number, and replays each in order from its last flush marker. This
+handles the case where multiple flushes were in flight before a crash. Sequence
+numbers in the WAL records maintain the correct causal order across files via
+the HLC.
+
 ## WAL Record Format
 
 | Field        | Size | Description                                                                  |
@@ -12,7 +59,7 @@
 | Key length   | 2B   | Big-endian uint16.                                                           |
 | Key          | KB   | Raw key bytes (UUIDv7, 16 bytes binary).                                     |
 | Value length | 4B   | Big-endian uint32. Zero for Delete records.                                  |
-| Value        | VB   | Zstd-compressed JSON bytes. Absent for Delete.                               |
+| Value        | VB   | Compression-flag byte + compressed CBOR bytes. Absent for Delete. See §5.   |
 
 XXH64 provides 64-bit output (collision probability \~1 in 10¹⁹) and runs faster
 than CRC32 on ARM processors lacking CRC32C hardware acceleration. The

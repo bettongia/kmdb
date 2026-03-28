@@ -18,6 +18,21 @@ streams with debounced re-execution. Documents are serialized via a thin codec
 bridge to freezed/json_serializable, with UUIDv7 keys providing time-ordered
 insertion and index locality.
 
+## Key Design Decisions
+
+| Decision | Choice | Rationale |
+| :------- | :----- | :-------- |
+| Storage engine | Custom LSM, not SQLite | Immutable SSTables map directly onto the atomic primitive in cloud storage (file creation). SQLite files cannot be safely shared via cloud sync — two devices believe they hold exclusive locks, producing divergent state. See §3. |
+| Manifest format | Append-only VersionEdit log, not atomic JSON rewrite | An atomic rewrite requires a temp-file rename, which is unsafe across cloud-synced paths. The append-only log survives a crash mid-record (replay stops at the first checksum failure) and never produces a partial manifest. See §10. |
+| Compaction model | Synchronous on the write path, no background isolate | At the target scale (200–2,000 typical docs, 100K upper bound) L1→L2 compaction reads/writes ≤20MB and completes in under 200ms. A background isolate adds FFI pointer-transfer complexity for no meaningful gain at this scale. See §18. |
+| Value encoding | CBOR + optional compression, not JSON | CBOR is 20–30% smaller than JSON, handles binary values natively (no Base64), and is language-agnostic. Applied at the Query Layer boundary; the LSM engine stores opaque bytes. See §5. |
+| Storage tiers | Two separate locations (local DB dir + cloud sync folder) | WAL files and the Manifest are device-local implementation details. Only immutable SSTables enter the sync folder. This eliminates all file-level write conflicts without requiring a central server or lock service. See §3. |
+| Conflict resolution | Last-Write-Wins via HLC timestamps | Hybrid Logical Clocks (48-bit physical + 16-bit logical) preserve causality across devices without a central coordinator. LWW is sufficient for the personal-app document model targeted by KMDB. See §4. |
+| Document keys | UUIDv7, not random UUIDv4 | UUIDv7 is time-ordered at millisecond precision. This gives documents implicit insertion order, improves SSTable key locality during compaction, and makes key-order scans meaningful without a secondary index. |
+| Index build strategy | Lazy on first query, not eager at open() | Indexes are declared at open time but entries are not written until the index is first queried. This keeps `open()` fast and avoids unnecessary work for indexes that are never used. See §16. |
+| Cache invalidation | Namespace generation counters in `$meta` | A single integer per namespace that increments on every `WriteBatch` provides a universal staleness signal for both the in-memory session cache and the persisted `$cache` materialised views, without tracking individual key versions. See §15. |
+| Index consistency | All index writes in the same `WriteBatch` as the document | Atomic writes ensure there is never a window where a document exists without its index entries (or vice versa), even if the process is killed mid-write. See §16. |
+
 ## Open Questions
 
 There's a number of areas for further investigation/clarification:
