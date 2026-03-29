@@ -1,0 +1,346 @@
+// Copyright 2026 The KMDB Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+import 'dart:async';
+
+import '../encoding/value_codec.dart';
+import 'filter/field_path.dart';
+import 'filter/filter.dart';
+import 'kmdb_collection.dart';
+
+/// An immutable, lazy query pipeline over a [KmdbCollection].
+///
+/// Obtain a [KmdbQuery] from [KmdbCollection.all] or [KmdbCollection.where].
+/// Chain pipeline methods to refine the query — each call returns a **new**
+/// instance and leaves the original unchanged. No I/O occurs until a terminal
+/// method is called.
+///
+/// ## Pipeline methods
+///
+/// ```dart
+/// tasks
+///   .where(Field('status').equals('active'))
+///   .orderBy('priority', descending: true)
+///   .limit(20)
+///   .offset(0);
+/// ```
+///
+/// ## Terminal methods
+///
+/// ```dart
+/// final list  = await query.get();    // eager List<T>
+/// final first = await query.first();  // T? or null
+/// final count = await query.count();  // int (no decode)
+/// final any   = await query.any();    // bool
+/// final items = query.stream();       // Stream<T>
+/// final live  = query.watch();        // Stream<List<T>> — reactive
+/// ```
+final class KmdbQuery<T> {
+  KmdbQuery.fromCollection({
+    required KmdbCollection<T> collection,
+    List<Filter>? filters,
+    String? orderByField,
+    bool orderByDescending = false,
+    int? limitCount,
+    int? offsetCount,
+    String? keyPrefixValue,
+  })  : _collection = collection,
+        _filters = filters ?? const [],
+        _orderByField = orderByField,
+        _orderByDescending = orderByDescending,
+        _limitCount = limitCount,
+        _offsetCount = offsetCount,
+        _keyPrefixValue = keyPrefixValue;
+
+  final KmdbCollection<T> _collection;
+  final List<Filter> _filters;
+  final String? _orderByField;
+  final bool _orderByDescending;
+  final int? _limitCount;
+  final int? _offsetCount;
+  final String? _keyPrefixValue;
+
+  // ── Pipeline methods ────────────────────────────────────────────────────────
+
+  /// Adds [filter] to the pipeline, AND-ed with any existing filters.
+  ///
+  /// Returns a new [KmdbQuery] — the original is unchanged.
+  KmdbQuery<T> where(Filter filter) => KmdbQuery.fromCollection(
+        collection: _collection,
+        filters: [..._filters, filter],
+        orderByField: _orderByField,
+        orderByDescending: _orderByDescending,
+        limitCount: _limitCount,
+        offsetCount: _offsetCount,
+        keyPrefixValue: _keyPrefixValue,
+      );
+
+  /// Orders results by [field].
+  ///
+  /// When [field] is `'id'`, the ordering uses the natural LSM scan order
+  /// (ascending by document key). For all other fields, documents are sorted
+  /// in memory after the scan.
+  ///
+  /// Returns a new [KmdbQuery] — the original is unchanged.
+  KmdbQuery<T> orderBy(String field, {bool descending = false}) =>
+      KmdbQuery.fromCollection(
+        collection: _collection,
+        filters: _filters,
+        orderByField: field,
+        orderByDescending: descending,
+        limitCount: _limitCount,
+        offsetCount: _offsetCount,
+        keyPrefixValue: _keyPrefixValue,
+      );
+
+  /// Limits the result to [count] documents.
+  ///
+  /// Applied after filtering and sorting. Returns a new [KmdbQuery].
+  KmdbQuery<T> limit(int count) => KmdbQuery.fromCollection(
+        collection: _collection,
+        filters: _filters,
+        orderByField: _orderByField,
+        orderByDescending: _orderByDescending,
+        limitCount: count,
+        offsetCount: _offsetCount,
+        keyPrefixValue: _keyPrefixValue,
+      );
+
+  /// Skips the first [count] documents from the result.
+  ///
+  /// Applied after filtering and sorting. Use with [orderBy] for stable
+  /// pagination. Returns a new [KmdbQuery].
+  KmdbQuery<T> offset(int count) => KmdbQuery.fromCollection(
+        collection: _collection,
+        filters: _filters,
+        orderByField: _orderByField,
+        orderByDescending: _orderByDescending,
+        limitCount: _limitCount,
+        offsetCount: count,
+        keyPrefixValue: _keyPrefixValue,
+      );
+
+  /// Narrows the underlying LSM scan to keys that start with [prefix].
+  ///
+  /// Since document keys are UUIDv7 hex strings, a key prefix is effectively a
+  /// time-window query: UUIDv7 embeds a millisecond timestamp in its MSBs, so
+  /// keys with a common prefix were generated within the same time window.
+  ///
+  /// Maps to `KvStore.scan(startKey: prefix, endKey: _nextPrefix(prefix))`.
+  /// Returns a new [KmdbQuery].
+  KmdbQuery<T> keyPrefix(String prefix) => KmdbQuery.fromCollection(
+        collection: _collection,
+        filters: _filters,
+        orderByField: _orderByField,
+        orderByDescending: _orderByDescending,
+        limitCount: _limitCount,
+        offsetCount: _offsetCount,
+        keyPrefixValue: prefix,
+      );
+
+  // ── Terminal methods ────────────────────────────────────────────────────────
+
+  /// Executes the query and returns all matching documents as a [List].
+  ///
+  /// The LSM snapshot is released immediately after the scan completes.
+  Future<List<T>> get() => _execute();
+
+  /// Executes the query and returns results as a [Stream].
+  ///
+  /// Eagerly evaluated — identical to [get] internally, but emits each
+  /// document as a `Stream<T>`. No LSM snapshot is held open. Prefer [watch]
+  /// for reactive UI lists.
+  Stream<T> stream() => Stream.fromFuture(_execute()).asyncExpand(
+        (list) => Stream.fromIterable(list),
+      );
+
+  /// Returns the first matching document, or `null` if none match.
+  Future<T?> first() async {
+    final results = await limit(1).get();
+    return results.isEmpty ? null : results.first;
+  }
+
+  /// Returns the number of matching documents.
+  ///
+  /// When no filters are set, the scan avoids decoding document values.
+  Future<int> count() async {
+    if (_filters.isEmpty && _orderByField == null &&
+        _limitCount == null && _offsetCount == null) {
+      // Fast path: count without decoding.
+      var n = 0;
+      final (startKey, endKey) = _scanRange();
+      await for (final _ in _collection.database.cache.scan(
+        _collection.namespace,
+        startKey: startKey,
+        endKey: endKey,
+      )) {
+        n++;
+      }
+      return n;
+    }
+    // General path: decode and filter.
+    final results = await _execute();
+    return results.length;
+  }
+
+  /// Returns `true` if at least one document matches the query.
+  Future<bool> any() async {
+    final result = await first();
+    return result != null;
+  }
+
+  /// Returns a [Stream] that re-emits the full result list whenever the
+  /// collection changes (debounced at 50 ms).
+  ///
+  /// The stream emits immediately on subscription with the current results,
+  /// then re-emits after each debounce window that saw at least one write to
+  /// the collection's namespace.
+  ///
+  /// Cancel the stream subscription to stop watching.
+  Stream<List<T>> watch() {
+    late StreamController<List<T>> controller;
+    late StreamSubscription<String> sub;
+    Timer? debounceTimer;
+
+    Future<void> emitCurrent() async {
+      try {
+        final results = await _execute();
+        if (!controller.isClosed) controller.add(results);
+      } catch (e, st) {
+        if (!controller.isClosed) controller.addError(e, st);
+      }
+    }
+
+    controller = StreamController<List<T>>(
+      onListen: () {
+        emitCurrent();
+        sub = _collection.database.cache.writeEvents.listen((ns) {
+          if (ns != _collection.namespace) return;
+          debounceTimer?.cancel();
+          debounceTimer = Timer(
+            const Duration(milliseconds: 50),
+            emitCurrent,
+          );
+        });
+      },
+      onCancel: () {
+        debounceTimer?.cancel();
+        sub.cancel();
+      },
+    );
+
+    return controller.stream;
+  }
+
+  // ── Execution ───────────────────────────────────────────────────────────────
+
+  Future<List<T>> _execute() async {
+    final (startKey, endKey) = _scanRange();
+    final raw = <(String key, Map<String, dynamic> doc)>[];
+
+    // Scan and decode all candidate documents.
+    await for (final entry in _collection.database.cache.scan(
+      _collection.namespace,
+      startKey: startKey,
+      endKey: endKey,
+    )) {
+      final Map<String, dynamic> doc;
+      try {
+        doc = ValueCodec.decode(entry.value);
+      } catch (_) {
+        continue; // skip corrupt values
+      }
+
+      // Apply all filters (AND-ed).
+      if (_filters.isNotEmpty) {
+        if (!_filters.every((f) => f.evaluate(doc))) continue;
+      }
+
+      raw.add((entry.key, doc));
+    }
+
+    // Sort.
+    final orderField = _orderByField;
+    if (orderField != null) {
+      raw.sort((a, b) {
+        final va = FieldPath.resolve(orderField, a.$2);
+        final vb = FieldPath.resolve(orderField, b.$2);
+        final cmp = _compareValues(va, vb);
+        return _orderByDescending ? -cmp : cmp;
+      });
+    }
+
+    // Offset and limit.
+    var results = raw;
+    final off = _offsetCount;
+    if (off != null && off > 0) {
+      results = results.length <= off ? [] : results.sublist(off);
+    }
+    final lim = _limitCount;
+    if (lim != null && results.length > lim) {
+      results = results.sublist(0, lim);
+    }
+
+    // Decode to typed T.
+    return results
+        .map((pair) => _collection.codec.decode(pair.$2))
+        .toList();
+  }
+
+  /// Computes the [startKey, endKey) range for the LSM scan from [_keyPrefixValue].
+  ///
+  /// Document keys are 32-char hex strings, so the prefix is padded with `'0'`
+  /// to produce valid 32-char startKey/endKey bounds for the LSM scan.
+  (String? startKey, String? endKey) _scanRange() {
+    final prefix = _keyPrefixValue;
+    if (prefix == null) return (null, null);
+    final start = prefix.padRight(32, '0');
+    final next = _nextPrefix(prefix);
+    final end = next?.padRight(32, '0');
+    return (start, end);
+  }
+
+  /// Returns the exclusive upper bound for a lexicographic prefix scan.
+  ///
+  /// Increments the last character that can be incremented. Returns `null`
+  /// when the prefix ends in the maximum character and has no upper bound.
+  static String? _nextPrefix(String prefix) {
+    for (var i = prefix.length - 1; i >= 0; i--) {
+      final code = prefix.codeUnitAt(i);
+      if (code < 0x7E) {
+        // Increment this character and truncate.
+        return prefix.substring(0, i) + String.fromCharCode(code + 1);
+      }
+    }
+    return null; // all chars at max — no upper bound
+  }
+
+  /// Compares two resolved field values for sorting.
+  ///
+  /// Handles `null`, [missing], numeric coercion, and strings. Values that
+  /// cannot be compared (e.g. different types) are treated as equal (0).
+  static int _compareValues(Object? a, Object? b) {
+    // missing / null sort last.
+    final aMissing = a == missing || a == null;
+    final bMissing = b == missing || b == null;
+    if (aMissing && bMissing) return 0;
+    if (aMissing) return 1;
+    if (bMissing) return -1;
+
+    if (a is num && b is num) return a.compareTo(b);
+    if (a is String && b is String) return a.compareTo(b);
+    if (a is bool && b is bool) return a == b ? 0 : (a ? 1 : -1);
+    return 0;
+  }
+}

@@ -26,7 +26,10 @@ Once each phase is completed:
   ConsolidationCoordinator lease protocol — tests pass)
 - ✅ Phase 6 complete (LruMap, SessionCache, CacheTier, CacheLayer with
   generation-counter invalidation and onResume lifecycle — tests pass)
-- Phases 7–8: not started
+- ✅ Phase 7 complete (KmdbCodec, KmdbDatabase, KmdbCollection, KmdbQuery,
+  Filter DSL, secondary indexes with write interception and lazy build,
+  reactivity via watch() — 584 tests pass as of 2026-03-29)
+- Phase 8: not started
 
 ---
 

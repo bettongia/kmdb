@@ -123,6 +123,28 @@ final class MetaStore {
         Uint8List.fromList(deviceId.codeUnits),
       );
 
+  // ── Index state ────────────────────────────────────────────────────────────
+
+  /// Returns the `$meta` key for the index state entry of [namespace]/[path].
+  ///
+  /// Exposed so the Query Layer can locate the raw bytes without going through
+  /// the full index-state helpers when that is sufficient.
+  static String indexKey(String namespace, String path) =>
+      _nameToKey('index:$namespace:$path');
+
+  /// Reads the raw bytes stored under the symbolic [name] in `$meta`.
+  ///
+  /// Used by the Query Layer to persist and retrieve index state without
+  /// accessing the engine's private fields directly.
+  Future<Uint8List?> getRawByName(String name) =>
+      _engine.get(kNamespace, _nameToKey(name));
+
+  /// Writes [bytes] under the symbolic [name] in `$meta`.
+  ///
+  /// Used by the Query Layer to persist index state atomically.
+  Future<void> putRawByName(String name, Uint8List bytes) =>
+      _engine.put(kNamespace, _nameToKey(name), bytes);
+
   // ── Key encoding ───────────────────────────────────────────────────────────
 
   /// Encodes a symbolic [name] as a deterministic 32-character hex key.

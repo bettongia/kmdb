@@ -33,10 +33,19 @@ site/api/index.html: lib/*.dart lib/**/*.dart
 	dart doc -o site/api
 
 site/spec.epub: site/ docs/spec/*.md
-	pandoc docs/spec/*.md -o site/spec.epub
+	pandoc docs/spec/*.md -o site/spec.epub \
+		--include-before-body docs/template/preface.md
 
+# To get PDFs building on a Mac:
+# brew install --cask mactex
+# sudo tlmgr update --self --all
+# sudo tlmgr paper a4
+# brew install --cask font-dejavu
 site/spec.pdf: site/ docs/spec/*.md
-	pandoc docs/spec/*.md -o site/spec.pdf
+	pandoc docs/spec/*.md --pdf-engine=xelatex -o site/spec.pdf \
+		-V mainfont="DejaVu Sans" \
+  		-V monofont="DejaVu Sans Mono" \
+		-H docs/template/header.tex
 
 checks: coverage license_check
 

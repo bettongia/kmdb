@@ -14,7 +14,7 @@
 
 import 'dart:typed_data';
 
-import 'package:meta/meta.dart';
+import 'package:meta/meta.dart' show internal;
 
 import '../platform/storage_adapter_interface.dart';
 import 'crash_recovery.dart';
@@ -186,13 +186,40 @@ final class KvStoreImpl implements KvStore {
     await _engine.close();
   }
 
-  // ── Internal access (tests only) ─────────────────────────────────────────
+  // ── Internal access (query layer + tests) ────────────────────────────────
 
-  /// Direct access to the [MetaStore] for use in tests.
+  /// Direct access to the [MetaStore] for use by the Query Layer and tests.
   ///
-  /// External production code should not use this.
-  @visibleForTesting
+  /// External application code should not use this.
+  @internal
   MetaStore get meta => _meta;
+
+  /// Performs an atomic write batch that may include system namespace entries.
+  ///
+  /// Unlike [writeBatch], this method does not reject entries whose namespace
+  /// begins with `$`. It is used by the Query Layer to write secondary index
+  /// entries (`$index:…`) atomically with the document they index, in a single
+  /// [WriteBatch] that cannot be observed in a partial state.
+  ///
+  /// Generation counters are incremented only for user (non-`$`) namespaces so
+  /// that cache invalidation stays tied to document writes, not index writes.
+  /// The dirty-open flag is set on the first call, identical to [writeBatch].
+  @internal
+  Future<void> writeBatchInternal(WriteBatch batch) async {
+    await _maybeMarkDirty();
+    // Increment generation counters BEFORE the engine write so that when the
+    // engine emits write events (synchronously during writeBatch), any
+    // subscribers that immediately re-read via the CacheLayer will see the
+    // updated generation and bypass the stale cache entry.
+    final namespaces = batch.entries
+        .where((e) => !e.namespace.startsWith(r'$'))
+        .map((e) => e.namespace)
+        .toSet();
+    for (final ns in namespaces) {
+      await _meta.incrementGenerationCounter(ns);
+    }
+    await _engine.writeBatch(batch);
+  }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
