@@ -18,15 +18,23 @@ import 'lru_map.dart';
 
 /// In-memory LRU cache of raw KvStore values for a single process session.
 ///
-/// Keyed by `(namespace, key, generation)`. The generation counter is the
-/// universal invalidation token: when a namespace is written its counter
-/// increments, and any cached entry that carries the old generation will no
-/// longer match on the next [get] call — it simply ages out of the LRU
-/// without ever being served again.
+/// ## Cache key
+///
+/// Entries are keyed by `(namespace, key, generation)` where `generation` is
+/// the namespace-level generation counter stored in `$meta` under `gen:{ns}`
+/// (spec §15). This is sometimes called "sequenceNumber" in the spec to
+/// emphasise its role as an ordered invalidation token, but it is a
+/// per-namespace counter — not a per-entry HLC sequence number.
+///
+/// When a namespace is written, its generation counter increments. Any cached
+/// entry that carries the old generation will no longer match on the next
+/// [get] call — it simply ages out of the LRU without ever being served again.
 ///
 /// Proactive eviction is also performed via [evictNamespace] when a write
 /// event fires for the namespace, keeping memory usage bounded even for
 /// write-heavy workloads.
+///
+/// ## Capacity
 ///
 /// The [maxObjects] capacity is controlled by [CacheTier]:
 /// - Desktop: 2,000 objects
@@ -72,9 +80,12 @@ final class SessionCache {
 
   /// Evicts all entries for [namespace] regardless of generation.
   ///
-  /// Used when a namespace has been completely invalidated (e.g. after
-  /// [KmdbDatabase.onResume] detects the generation has advanced while the
-  /// app was suspended).
+  /// Used when a namespace should be completely flushed — for example, after
+  /// [CacheLayer.onResume] detects that the generation counter has advanced
+  /// while the app was suspended (e.g. a background sync ran). On mobile/web,
+  /// [CacheLayer.onResume] calls [evictNamespace] (not this method) for a
+  /// generation-discriminating eviction, but callers needing a full flush can
+  /// use this method directly.
   void evictNamespaceAll(String namespace) {
     final prefix = '$namespace\x00';
     _lru.removeWhere((k, _) => k.startsWith(prefix));

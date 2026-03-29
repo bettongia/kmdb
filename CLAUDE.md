@@ -45,6 +45,21 @@ dart format .
 make docs
 ```
 
+## Implementation Status
+
+| Phase | Scope | Status |
+| :---- | :---- | :----- |
+| 1 | Primitives & platform layer (XXH64, HLC, KeyCodec, ValueCodec, StorageAdapter) | ✅ Complete |
+| 2 | Storage engine core (SkipList, Memtable, WAL, Bloom filter, SSTable writer/reader) | ✅ Complete |
+| 3 | LSM orchestration (Manifest, MergeIterator, CompactionJob, LsmEngine, CrashRecovery, KvStore) | ✅ Complete |
+| 4 | Value encoding integration & `$meta` (MetaStore, DeviceId, generation counters) | ✅ Complete |
+| 5 | Sync protocol (HighwaterMark, CloudAdapter, SyncEngine push/pull, ConsolidationCoordinator) | ✅ Complete |
+| 6 | Cache layer (LruMap, SessionCache, CacheTier, CacheLayer with generation invalidation) | ✅ Complete |
+| 7 | Query layer (KmdbDatabase, KmdbCollection, KmdbQuery, Filter DSL, secondary indexes, reactivity) | ⏳ Not started |
+| 8 | Platform hardening (OPFS web storage, Zstd FFI/WASM, cloud adapters, performance benchmarks) | ⏳ Not started |
+
+All 452 tests pass as of 2026-03-29.
+
 ## Architecture
 
 KMDB is a local-first document database for Dart/Flutter with a 6-layer stack:
@@ -109,6 +124,18 @@ identifies which consolidation round produced the file.
   wal-00001.log
   sst/
     {deviceId}-{minHlc}-{maxHlc}.sst
+```
+
+### Sync Folder Layout
+
+```
+{sync-root}/
+  highwater/
+    {deviceId}.hwm        ← per-device high-water mark (JSON)
+  sstables/
+    {deviceId}-{minHlc}-{maxHlc}.sst          ← regular flush (3 segments)
+    {deviceId}-{epoch}-{minHlc}-{maxHlc}.sst  ← consolidation output (4 segments)
+  .consolidation-lease    ← coordinator lock (JSON)
 ```
 
 ### Cache Layer (§15)

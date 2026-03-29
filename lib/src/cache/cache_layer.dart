@@ -131,8 +131,11 @@ final class CacheLayer implements KvStore {
 
   /// Scans [namespace] for keys in [[startKey], [endKey]].
   ///
-  /// Scan results are not materialised in the session cache at this layer;
-  /// the Query Layer (Phase 7) handles materialised view caching via `$cache`.
+  /// Scan results are not materialised in the session cache at this layer.
+  /// Materialised view caching (spec §15.3) — persisting frequent scan results
+  /// as CBOR-encoded key lists in the `$cache` system namespace — is handled by
+  /// the Query Layer (Phase 7, `KmdbQuery`), which has knowledge of the query
+  /// parameters needed to form a stable cache key.
   @override
   Stream<KvEntry> scan(
     String namespace, {
@@ -165,11 +168,18 @@ final class CacheLayer implements KvStore {
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
 
-  /// Checks all tracked namespaces for stale cache entries.
+  /// Checks all tracked namespaces for stale cache entries (spec §15.4).
   ///
   /// Call this when the app returns to the foreground (mobile / web) to
   /// proactively evict any entries that became stale while the process was
-  /// suspended. On desktop this is a no-op because the process stays alive.
+  /// suspended (e.g. by a background sync that incremented generation counters).
+  /// On desktop this is a no-op because the process stays alive and receives
+  /// write events continuously via [KvStore.writeEvents].
+  ///
+  /// In Flutter, wire this into `WidgetsBindingObserver.didChangeAppLifecycleState`:
+  /// ```dart
+  /// if (state == AppLifecycleState.resumed) db.onResume();
+  /// ```
   Future<void> onResume() async {
     if (_tier == CacheTier.desktop) return; // in-memory is always fresh
 
