@@ -18,6 +18,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import '../../engine/util/xxhash.dart';
 import '../cloud/cloud_adapter.dart';
 
 /// A [CloudAdapter] backed by the local filesystem.
@@ -28,9 +29,10 @@ import '../cloud/cloud_adapter.dart';
 ///
 /// ## ETag implementation
 ///
-/// For Phase 5, the ETag is the file size in bytes as a decimal string. This
-/// is simple and collision-resistant enough for the lease protocol in typical
-/// usage. A proper content-hash-based ETag is implemented in Phase 8.
+/// The ETag is an XXH64 content hash of the file bytes, formatted as a
+/// zero-padded 16-character hex string. This is collision-resistant and
+/// correctly detects changes even when two versions of a file are the same
+/// size.
 ///
 /// ## compareAndSwap limitations
 ///
@@ -151,8 +153,10 @@ final class LocalDirectoryAdapter implements CloudAdapter {
   Future<String?> getEtag(String path) async {
     final file = File(_resolve(path));
     if (!file.existsSync()) return null;
-    // Use file size as the ETag (Phase 5 approximation).
-    final size = await file.length();
-    return size.toString();
+    // Compute an XXH64 content hash as the ETag. This is collision-resistant
+    // and correctly detects when two files have the same size but different
+    // content — which the Phase 5 file-size approximation could not.
+    final bytes = await file.readAsBytes();
+    return XxHash64.toHex(XxHash64.digest(bytes));
   }
 }

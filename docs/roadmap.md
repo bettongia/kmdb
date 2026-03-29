@@ -4,7 +4,52 @@ subtitle: Ideas, unfilfilled
 toc-title: "Contents"
 ...
 
-# Document version history & conflict resolution
+# SAHPool OPFS (High priority)
+
+Migrate `StorageAdapterWeb` from async File System API to
+  Sync Access Handles in a dedicated Web Worker for 3–4× throughput.
+
+# Performance Benchmarks (High priority)
+
+Create a performance benchmarking suite that can measure the performance of single- and multi-device use of KMDB.
+
+`benchmark/` directory validating P99 targets from
+  §18 (Concurrency):
+  - Put / Delete (no flush): P99 < 5ms
+  - Put (flush + compact): P99 < 200ms
+  - Get (memtable): P99 < 1ms
+  - Get (single-file mode): P99 < 2ms
+  - Scan (100 results): P99 < 10ms
+  - Database open: P99 < 100ms
+
+# Encryption (medium priority)
+
+Look at encryption options for the local and shared data.
+
+Consider Per-platform secure storage (iOS Keychain, Android SharedPreferences, web `localStorage`, desktop app-data dir) injectable via a `PlatformIdStore` interface; default falls back to `$meta`.
+
+Consider encryption at the value level in the KV store. This will need to be very user-friendly and could follow an approach of the user selecting their own salt rather than approaches such as managing PGP keys. The approach needs to work in the environment where the user understands little about encryption and won't store things like private keys right next to the KMDB data in their chosen storage location (e.g. local directory or Google Drive)
+
+# Cloud Adapter: Google Drive (medium priority)
+
+Directly connect to Google Drive for storing sync objects such as the SSTables etc. It's likely that the Encryption roadmap item should be combined with this.
+
+- Drive REST API + `If-Match` ETag
+- `GcsAdapter` (GCS JSON API), implements `CloudAdapter`
+- Each adapter lives under `lib/src/sync/cloud/`.
+
+# Cloud Adapter: Apple iCloud (low priority)
+
+Directly connect to iCloud for storing sync objects such as the SSTables etc.
+
+- Each adapter lives under `lib/src/sync/cloud/`.
+- `ICloudAdapter` (CloudKit record change tags)
+
+# Cloud Adapter: Google Cloud Storage (low priority)
+
+GCS will be the first object store adapter.
+
+# Document version history & conflict resolution (low priority)
 
 KMDB currently uses Last-Write-Wins (LWW) via HLC timestamps to resolve
 conflicts during sync compaction. This is correct and deterministic, but silent:
@@ -41,7 +86,7 @@ References:
 - [CouchDB conflict model](https://docs.couchdb.org/en/stable/replication/conflicts.html)
 - [Vector clocks (Lamport)](https://en.wikipedia.org/wiki/Vector_clock)
 
-# Full-text search
+# Full-text search (medium priority)
 
 Support traditional full-text search and vector-based searches.
 

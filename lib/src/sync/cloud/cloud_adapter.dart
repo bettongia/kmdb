@@ -14,6 +14,42 @@
 
 import 'dart:typed_data';
 
+/// Thrown by [CloudAdapter.compareAndSwap] when an optimistic concurrency check
+/// fails and the caller has opted for an exception over a boolean return.
+///
+/// The standard [CloudAdapter.compareAndSwap] returns `false` when the ETag
+/// check fails (another writer won the race). Cloud adapter implementations
+/// that use [LockConflictException] instead are free to throw it for conditions
+/// that are definitively unrecoverable (e.g. the local lock file was
+/// preemptively deleted by another coordinator holding a valid lease).
+///
+/// Callers should catch this exception and either back off and retry, or
+/// surface it as a sync error to the application.
+///
+/// Example:
+/// ```dart
+/// try {
+///   await adapter.compareAndSwap(leasePath, newBytes, ifMatchEtag: etag);
+/// } on LockConflictException catch (e) {
+///   log.warn('Lost lease race: $e');
+/// }
+/// ```
+final class LockConflictException implements Exception {
+  const LockConflictException(this.path, {this.reason});
+
+  /// The remote path where the conflict occurred.
+  final String path;
+
+  /// Optional description of why the conflict occurred.
+  final String? reason;
+
+  @override
+  String toString() {
+    final suffix = reason != null ? ': $reason' : '';
+    return 'LockConflictException($path)$suffix';
+  }
+}
+
 /// Abstract interface for the shared sync folder (cloud or local network share).
 ///
 /// The sync folder is the shared location where SSTables and per-device

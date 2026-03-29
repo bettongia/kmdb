@@ -22,14 +22,15 @@ Once each phase is completed:
 - ✅ Phase 4 complete (MetaStore, DeviceId, dirty-open flag, generation
   counters, hadUnclosedSession — 310 tests pass)
 - ✅ Phase 5 complete (HWM tracking, CloudAdapter, MemorySyncAdapter,
-  LocalDirectoryAdapter, SyncEngine push/pull/sync,
-  ConsolidationCoordinator lease protocol — tests pass)
+  LocalDirectoryAdapter, SyncEngine push/pull/sync, ConsolidationCoordinator
+  lease protocol — tests pass)
 - ✅ Phase 6 complete (LruMap, SessionCache, CacheTier, CacheLayer with
   generation-counter invalidation and onResume lifecycle — tests pass)
 - ✅ Phase 7 complete (KmdbCodec, KmdbDatabase, KmdbCollection, KmdbQuery,
   Filter DSL, secondary indexes with write interception and lazy build,
   reactivity via watch() — 584 tests pass as of 2026-03-29)
-- Phase 8: not started
+- ⏳ Phase 8 in progress (error types, LocalDirectoryAdapter ETag fix, OPFS web
+  adapter, hook/build.dart stub — tests pending)
 
 ---
 
@@ -787,28 +788,26 @@ stream.
 
 ---
 
-## Phase 8 — Platform Hardening & Polish
+## Phase 8 — Platform Hardening
 
-**Goal:** Production-ready on all targets.
+**Goal:** Error types, OPFS web storage, native build hook.
 
-- **Web StorageAdapter:** Full OPFS implementation via `dart:js_interop`;
-  SAHPool pattern
-- **Web compression:** Zstd WASM via `zstandard` package; fallback to Deflate
-- **Platform device ID:** Per-platform secure storage (Keychain,
-  SharedPreferences, localStorage, app data dir)
-- **Native Zstd FFI:** Wire `hook/build.dart` with `native_toolchain_c` for
-  libzstd compilation
-- **Cloud adapters:** Google Drive, iCloud, S3, and GCS `CloudAdapter`
-  implementations
-- **`KvStoreConfig.forTesting()`:** Tiny thresholds, no fsync, memory adapter —
-  used throughout test suite
-- **Performance benchmarks:** Validate P99 targets from §18 (write, read, scan,
-  open, compaction)
-- **Error types:** Define KMDB-specific exceptions (`CorruptedWalException`,
-  `CorruptedSstableException`, `LockConflictException`, `ClockSkewException`,
-  `StaleIndexException`)
+- ✅ **Error types:** `CorruptedWalException` (+ `WalReader.replayStrict`),
+  `StaleIndexException` (+ `KmdbQuery.requireFreshIndex()`),
+  `LockConflictException` — all exported from `kmdb.dart`. Existing
+  `CorruptedSstableException` and `ClockSkewException` already in place.
+- ✅ **LocalDirectoryAdapter ETag:** Upgraded from file-size approximation to
+  XXH64 content hash.
+- ✅ **Web StorageAdapter (OPFS):** Full implementation via `dart:js_interop`
+  and `package:web`; async File System API; in-memory lock table; SAHPool
+  deferred to Phase 9 (needs Worker context).
+- ✅ **`hook/build.dart` stub:** Documents the planned Zstd FFI compilation
+  path; Zstd deferred (see note below).
+- ✅ **`KvStoreConfig.forTesting()`:** Already implemented in Phase 3; confirmed
+  in use throughout test suite.
 
----
+Refer to @plan_zstd.md for implementing ZStandard across the supported platforms
+(mobile, web and desktop).
 
 ## Implementation Constraints (from spec & CLAUDE.md)
 
