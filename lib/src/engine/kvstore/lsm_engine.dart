@@ -502,7 +502,12 @@ final class LsmEngine {
     );
     final edit = await job.run();
 
+    // Build a set of output filenames so we never delete a file that was
+    // written as the compaction output. This guards against the edge case
+    // where the output HLC range exactly matches an input (same filename).
+    final outputNames = edit.added.map((a) => a.filename).toSet();
     for (final ref in edit.removed) {
+      if (outputNames.contains(ref.filename)) continue;
       await _adapter.deleteFile('$_sstDir/${ref.filename}');
     }
 
@@ -533,7 +538,9 @@ final class LsmEngine {
     );
     final edit = await job.run();
 
+    final outputNames = edit.added.map((a) => a.filename).toSet();
     for (final ref in edit.removed) {
+      if (outputNames.contains(ref.filename)) continue;
       await _adapter.deleteFile('$_sstDir/${ref.filename}');
     }
 
@@ -569,8 +576,12 @@ final class LsmEngine {
     );
     final edit = await job.run();
 
-    // Delete input files.
+    // Delete input files, but skip any whose filename matches the output.
+    // When the merged HLC range equals an input's range the output is written
+    // to the same path as that input; deleting it would erase the new file.
+    final outputNames = edit.added.map((a) => a.filename).toSet();
     for (final ref in edit.removed) {
+      if (outputNames.contains(ref.filename)) continue;
       await _adapter.deleteFile('$_sstDir/${ref.filename}');
     }
 

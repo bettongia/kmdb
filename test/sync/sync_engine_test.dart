@@ -53,8 +53,12 @@ Uint8List _buildSst({int count = 2, int basePhysical = 5000}) {
   for (var i = 0; i < count; i++) {
     final hlc = Hlc(basePhysical + i, 0);
     final key = Uint8List(16)..fillRange(0, 16, i + 1);
-    final internalKey =
-        KeyCodec.encodeInternalKey('ns', key, hlc, RecordType.put);
+    final internalKey = KeyCodec.encodeInternalKey(
+      'ns',
+      key,
+      hlc,
+      RecordType.put,
+    );
     writer.add(internalKey, Uint8List.fromList([i + 1]));
   }
   return writer.finish();
@@ -66,17 +70,16 @@ SyncEngine _makeEngine(
   MemorySyncAdapter cloudAdapter,
   MemoryStorageAdapter localAdapter,
   String deviceId,
-) =>
-    SyncEngine(
-      store: store,
-      cloudAdapter: cloudAdapter,
-      localAdapter: localAdapter,
-      deviceId: deviceId,
-      dbDir: _dbDir,
-      syncRoot: _syncRoot,
-      syncNamespaces: {'ns'},
-      consolidationConfig: const ConsolidationConfig(),
-    );
+) => SyncEngine(
+  store: store,
+  cloudAdapter: cloudAdapter,
+  localAdapter: localAdapter,
+  deviceId: deviceId,
+  dbDir: _dbDir,
+  syncRoot: _syncRoot,
+  syncNamespaces: {'ns'},
+  consolidationConfig: const ConsolidationConfig(),
+);
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -116,8 +119,10 @@ void main() {
       final engine = _makeEngine(store, cloudAdapter, localAdapter, 'dev00001');
       await engine.push();
 
-      final remoteFiles =
-          await cloudAdapter.list('$_syncRoot/sstables', extension: '.sst');
+      final remoteFiles = await cloudAdapter.list(
+        '$_syncRoot/sstables',
+        extension: '.sst',
+      );
       expect(remoteFiles, isNotEmpty);
       // All uploaded files should belong to this device.
       for (final f in remoteFiles) {
@@ -131,7 +136,9 @@ void main() {
       await engine.push();
 
       final hwm = await HighwaterMark.load(
-          '$_syncRoot/highwater/dev00001.hwm', cloudAdapter);
+        '$_syncRoot/highwater/dev00001.hwm',
+        cloudAdapter,
+      );
       expect(hwm, isNotNull);
       expect(hwm!.deviceId, equals('dev00001'));
     });
@@ -144,13 +151,17 @@ void main() {
       final engine = _makeEngine(store, cloudAdapter, localAdapter, 'dev00001');
       await engine.push();
 
-      final afterFirst =
-          await cloudAdapter.list('$_syncRoot/sstables', extension: '.sst');
+      final afterFirst = await cloudAdapter.list(
+        '$_syncRoot/sstables',
+        extension: '.sst',
+      );
 
       // Push again — no new files.
       await engine.push();
-      final afterSecond =
-          await cloudAdapter.list('$_syncRoot/sstables', extension: '.sst');
+      final afterSecond = await cloudAdapter.list(
+        '$_syncRoot/sstables',
+        extension: '.sst',
+      );
 
       expect(afterSecond.length, equals(afterFirst.length));
     });
@@ -161,26 +172,41 @@ void main() {
       await engine.push();
 
       final hwm = await HighwaterMark.load(
-          '$_syncRoot/highwater/dev00001.hwm', cloudAdapter);
+        '$_syncRoot/highwater/dev00001.hwm',
+        cloudAdapter,
+      );
       expect(hwm, isNotNull);
     });
 
-    test('push does not upload peer SSTables that were ingested during pull', () async {
-      // Simulate a peer SSTable that was placed in the local sst/ dir by pull.
-      const peerId = 'peer0001';
-      final peerFilename =
-          SstableInfo.flushName(peerId, const Hlc(1000, 0), const Hlc(1001, 0));
-      // Write the peer file to local sst/ as if pull had ingested it.
-      await localAdapter.writeFile('$_dbDir/sst/$peerFilename', _buildSst());
+    test(
+      'push does not upload peer SSTables that were ingested during pull',
+      () async {
+        // Simulate a peer SSTable that was placed in the local sst/ dir by pull.
+        const peerId = 'peer0001';
+        final peerFilename = SstableInfo.flushName(
+          peerId,
+          const Hlc(1000, 0),
+          const Hlc(1001, 0),
+        );
+        // Write the peer file to local sst/ as if pull had ingested it.
+        await localAdapter.writeFile('$_dbDir/sst/$peerFilename', _buildSst());
 
-      final engine = _makeEngine(store, cloudAdapter, localAdapter, 'dev00001');
-      await engine.push();
+        final engine = _makeEngine(
+          store,
+          cloudAdapter,
+          localAdapter,
+          'dev00001',
+        );
+        await engine.push();
 
-      // The remote sstables dir should NOT contain the peer file.
-      final remoteFiles =
-          await cloudAdapter.list('$_syncRoot/sstables', extension: '.sst');
-      expect(remoteFiles, isNot(contains(peerFilename)));
-    });
+        // The remote sstables dir should NOT contain the peer file.
+        final remoteFiles = await cloudAdapter.list(
+          '$_syncRoot/sstables',
+          extension: '.sst',
+        );
+        expect(remoteFiles, isNot(contains(peerFilename)));
+      },
+    );
   });
 
   // ── pull ──────────────────────────────────────────────────────────────────────
@@ -189,8 +215,11 @@ void main() {
     test('pull ingests a remote peer SSTable', () async {
       // Upload a peer SSTable to the sync folder.
       const peerId = 'peer0001';
-      final peerFilename =
-          SstableInfo.flushName(peerId, const Hlc(5000, 0), const Hlc(5001, 0));
+      final peerFilename = SstableInfo.flushName(
+        peerId,
+        const Hlc(5000, 0),
+        const Hlc(5001, 0),
+      );
       final sstBytes = _buildSst(basePhysical: 5000);
       await cloudAdapter.upload('$_syncRoot/sstables/$peerFilename', sstBytes);
 
@@ -204,26 +233,38 @@ void main() {
 
     test('pull updates HWM with ingested peer HLC', () async {
       const peerId = 'peer0001';
-      final peerFilename =
-          SstableInfo.flushName(peerId, const Hlc(5000, 0), const Hlc(5001, 0));
+      final peerFilename = SstableInfo.flushName(
+        peerId,
+        const Hlc(5000, 0),
+        const Hlc(5001, 0),
+      );
       await cloudAdapter.upload(
-          '$_syncRoot/sstables/$peerFilename', _buildSst(basePhysical: 5000));
+        '$_syncRoot/sstables/$peerFilename',
+        _buildSst(basePhysical: 5000),
+      );
 
       final engine = _makeEngine(store, cloudAdapter, localAdapter, 'dev00001');
       await engine.pull();
 
       final hwm = await HighwaterMark.load(
-          '$_syncRoot/highwater/dev00001.hwm', cloudAdapter);
+        '$_syncRoot/highwater/dev00001.hwm',
+        cloudAdapter,
+      );
       expect(hwm!.peers[peerId], isNotNull);
       expect(hwm.peers[peerId]!.physicalMs, greaterThanOrEqualTo(5001));
     });
 
     test('pull skips own device SSTables', () async {
       // Upload one of our own SSTables — should be ignored during pull.
-      final ownFilename =
-          SstableInfo.flushName('dev00001', const Hlc(1000, 0), const Hlc(1001, 0));
+      final ownFilename = SstableInfo.flushName(
+        'dev00001',
+        const Hlc(1000, 0),
+        const Hlc(1001, 0),
+      );
       await cloudAdapter.upload(
-          '$_syncRoot/sstables/$ownFilename', _buildSst());
+        '$_syncRoot/sstables/$ownFilename',
+        _buildSst(),
+      );
 
       final engine = _makeEngine(store, cloudAdapter, localAdapter, 'dev00001');
       // Should complete without error and without ingesting the own file.
@@ -232,8 +273,11 @@ void main() {
 
     test('pull skips already-ingested SSTables', () async {
       const peerId = 'peer0001';
-      final peerFilename =
-          SstableInfo.flushName(peerId, const Hlc(5000, 0), const Hlc(5001, 0));
+      final peerFilename = SstableInfo.flushName(
+        peerId,
+        const Hlc(5000, 0),
+        const Hlc(5001, 0),
+      );
       final sstBytes = _buildSst(basePhysical: 5000);
       await cloudAdapter.upload('$_syncRoot/sstables/$peerFilename', sstBytes);
 
@@ -242,7 +286,9 @@ void main() {
 
       // Write a sentinel to detect if the file is written again.
       await localAdapter.writeFile(
-          '$_dbDir/sst/$peerFilename', Uint8List.fromList([0xFF, 0xFF]));
+        '$_dbDir/sst/$peerFilename',
+        Uint8List.fromList([0xFF, 0xFF]),
+      );
 
       // Second pull — should skip because file already exists locally.
       await engine.pull();
@@ -260,7 +306,9 @@ void main() {
     test('pull skips files with unparseable names', () async {
       // Upload a file with an invalid SSTable name.
       await cloudAdapter.upload(
-          '$_syncRoot/sstables/not-a-valid-name.sst', _buildSst());
+        '$_syncRoot/sstables/not-a-valid-name.sst',
+        _buildSst(),
+      );
 
       final engine = _makeEngine(store, cloudAdapter, localAdapter, 'dev00001');
       // Should complete without throwing.
@@ -269,19 +317,25 @@ void main() {
 
     test('pull skips corrupted remote SSTable without updating HWM', () async {
       const peerId = 'peer0001';
-      final peerFilename =
-          SstableInfo.flushName(peerId, const Hlc(5000, 0), const Hlc(5001, 0));
+      final peerFilename = SstableInfo.flushName(
+        peerId,
+        const Hlc(5000, 0),
+        const Hlc(5001, 0),
+      );
       // Upload garbage bytes.
       await cloudAdapter.upload(
-          '$_syncRoot/sstables/$peerFilename',
-          Uint8List.fromList(List.filled(64, 0xAB)));
+        '$_syncRoot/sstables/$peerFilename',
+        Uint8List.fromList(List.filled(64, 0xAB)),
+      );
 
       final engine = _makeEngine(store, cloudAdapter, localAdapter, 'dev00001');
       await engine.pull();
 
       // HWM should not record this peer (ingestion failed).
       final hwm = await HighwaterMark.load(
-          '$_syncRoot/highwater/dev00001.hwm', cloudAdapter);
+        '$_syncRoot/highwater/dev00001.hwm',
+        cloudAdapter,
+      );
       // HWM may be null (nothing to save) or not contain the peer.
       if (hwm != null) {
         expect(hwm.peers.containsKey(peerId), isFalse);
@@ -300,10 +354,15 @@ void main() {
       await highHwm.save('$_syncRoot/highwater/dev00001.hwm', cloudAdapter);
 
       // Upload a peer SSTable with maxHlc < 9999.
-      final peerFilename =
-          SstableInfo.flushName(peerId, const Hlc(5000, 0), const Hlc(5001, 0));
+      final peerFilename = SstableInfo.flushName(
+        peerId,
+        const Hlc(5000, 0),
+        const Hlc(5001, 0),
+      );
       await cloudAdapter.upload(
-          '$_syncRoot/sstables/$peerFilename', _buildSst(basePhysical: 5000));
+        '$_syncRoot/sstables/$peerFilename',
+        _buildSst(basePhysical: 5000),
+      );
 
       final engine = _makeEngine(store, cloudAdapter, localAdapter, 'dev00001');
       await engine.pull();
@@ -320,10 +379,15 @@ void main() {
     test('sync calls push then pull', () async {
       const peerId = 'peer0002';
       // Pre-load the sync folder with a peer SSTable.
-      final peerFilename =
-          SstableInfo.flushName(peerId, const Hlc(7000, 0), const Hlc(7001, 0));
+      final peerFilename = SstableInfo.flushName(
+        peerId,
+        const Hlc(7000, 0),
+        const Hlc(7001, 0),
+      );
       await cloudAdapter.upload(
-          '$_syncRoot/sstables/$peerFilename', _buildSst(basePhysical: 7000));
+        '$_syncRoot/sstables/$peerFilename',
+        _buildSst(basePhysical: 7000),
+      );
 
       // Write local data that should be pushed.
       final key = '1' * 32;
@@ -334,79 +398,90 @@ void main() {
       await engine.sync();
 
       // Our SSTable should be in the sync folder.
-      final remoteFiles =
-          await cloudAdapter.list('$_syncRoot/sstables', extension: '.sst');
-      final ourFiles =
-          remoteFiles.where((f) => _safeDeviceId(f) == 'dev00001').toList();
+      final remoteFiles = await cloudAdapter.list(
+        '$_syncRoot/sstables',
+        extension: '.sst',
+      );
+      final ourFiles = remoteFiles
+          .where((f) => _safeDeviceId(f) == 'dev00001')
+          .toList();
       expect(ourFiles, isNotEmpty);
 
       // Peer SSTable should be reflected in the local HWM — the file itself may
       // have been compacted into a different SSTable, but the HWM records that
       // the peer's data was fully processed.
       final hwm = await HighwaterMark.load(
-          '$_syncRoot/highwater/dev00001.hwm', cloudAdapter);
+        '$_syncRoot/highwater/dev00001.hwm',
+        cloudAdapter,
+      );
       expect(hwm, isNotNull);
-      expect(hwm!.peers[peerId], isNotNull,
-          reason: 'HWM for $peerId should be set after pull ingested its SSTable');
+      expect(
+        hwm!.peers[peerId],
+        isNotNull,
+        reason: 'HWM for $peerId should be set after pull ingested its SSTable',
+      );
     });
 
-    test('sync two devices exchange data', () async {
-      // Device A writes data and syncs.
-      final adapterA = MemoryStorageAdapter();
-      final (storeA, _) = await KvStoreImpl.open(
-        '/dbA',
-        adapterA,
-        config: KvStoreConfig.forTesting(),
-        deviceId: 'devaaaaa',
-      );
-      final engineA = SyncEngine(
-        store: storeA,
-        cloudAdapter: cloudAdapter,
-        localAdapter: adapterA,
-        deviceId: 'devaaaaa',
-        dbDir: '/dbA',
-        syncRoot: _syncRoot,
-        syncNamespaces: {'ns'},
-      );
+    // We run this test multiple times to try and catch out sync errors
+    for (var i = 0; i < 20; i++) {
+      test('sync two devices exchange data - pass $i', () async {
+        // Device A writes data and syncs.
+        final adapterA = MemoryStorageAdapter();
+        final (storeA, _) = await KvStoreImpl.open(
+          '/dbA',
+          adapterA,
+          config: KvStoreConfig.forTesting(),
+          deviceId: 'devaaaaa',
+        );
+        final engineA = SyncEngine(
+          store: storeA,
+          cloudAdapter: cloudAdapter,
+          localAdapter: adapterA,
+          deviceId: 'devaaaaa',
+          dbDir: '/dbA',
+          syncRoot: _syncRoot,
+          syncNamespaces: {'ns'},
+        );
 
-      // Device B writes different data.
-      final adapterB = MemoryStorageAdapter();
-      final (storeB, _) = await KvStoreImpl.open(
-        '/dbB',
-        adapterB,
-        config: KvStoreConfig.forTesting(),
-        deviceId: 'devbbbbb',
-      );
-      final engineB = SyncEngine(
-        store: storeB,
-        cloudAdapter: cloudAdapter,
-        localAdapter: adapterB,
-        deviceId: 'devbbbbb',
-        dbDir: '/dbB',
-        syncRoot: _syncRoot,
-        syncNamespaces: {'ns'},
-      );
+        // Device B writes different data.
+        final adapterB = MemoryStorageAdapter();
+        final (storeB, _) = await KvStoreImpl.open(
+          '/dbB',
+          adapterB,
+          config: KvStoreConfig.forTesting(),
+          deviceId: 'devbbbbb',
+        );
+        final engineB = SyncEngine(
+          store: storeB,
+          cloudAdapter: cloudAdapter,
+          localAdapter: adapterB,
+          deviceId: 'devbbbbb',
+          dbDir: '/dbB',
+          syncRoot: _syncRoot,
+          syncNamespaces: {'ns'},
+        );
 
-      try {
-        final keyA = 'a' * 32;
-        await storeA.put('ns', keyA, Uint8List.fromList([1]));
-        await storeA.flush();
-        await engineA.push();
+        try {
+          final keyA = 'a' * 32;
+          await storeA.put('ns', keyA, Uint8List.fromList([1]));
+          await storeA.flush();
+          await engineA.push();
 
-        final keyB = 'b' * 32;
-        await storeB.put('ns', keyB, Uint8List.fromList([2]));
-        await storeB.flush();
-        await engineB.sync(); // B pushes its own data and pulls A's data
+          final keyB = 'b' * 32;
+          await storeB.put('ns', keyB, Uint8List.fromList([2]));
+          await storeB.flush();
+          await engineB.sync(); // B pushes its own data and pulls A's data
 
-        // B should now have A's data accessible (even if compaction merged the
-        // ingested SSTable file away, the data must be readable).
-        final bHasAData = await storeB.get('ns', keyA);
-        expect(bHasAData, isNotNull);
-      } finally {
-        await storeA.close();
-        await storeB.close();
-      }
-    });
+          // B should now have A's data accessible (even if compaction merged the
+          // ingested SSTable file away, the data must be readable).
+          final bHasAData = await storeB.get('ns', keyA);
+          expect(bHasAData, isNotNull);
+        } finally {
+          await storeA.close();
+          await storeB.close();
+        }
+      });
+    }
   });
 
   // ── ingestSstable ─────────────────────────────────────────────────────────────
@@ -414,8 +489,11 @@ void main() {
   group('KvStore.ingestSstable', () {
     test('ingestSstable writes SSTable to local sst/ directory', () async {
       const peerId = 'peer0099';
-      final filename =
-          SstableInfo.flushName(peerId, const Hlc(3000, 0), const Hlc(3001, 0));
+      final filename = SstableInfo.flushName(
+        peerId,
+        const Hlc(3000, 0),
+        const Hlc(3001, 0),
+      );
       final bytes = _buildSst(basePhysical: 3000);
 
       await store.ingestSstable(filename, bytes);
@@ -424,24 +502,33 @@ void main() {
       expect(exists, isTrue);
     });
 
-    test('ingestSstable throws CorruptedSstableException for bad bytes', () async {
-      const peerId = 'peer0099';
-      final filename =
-          SstableInfo.flushName(peerId, const Hlc(3000, 0), const Hlc(3001, 0));
-      final garbage = Uint8List.fromList(List.filled(64, 0xDE));
+    test(
+      'ingestSstable throws CorruptedSstableException for bad bytes',
+      () async {
+        const peerId = 'peer0099';
+        final filename = SstableInfo.flushName(
+          peerId,
+          const Hlc(3000, 0),
+          const Hlc(3001, 0),
+        );
+        final garbage = Uint8List.fromList(List.filled(64, 0xDE));
 
-      expect(
-        () => store.ingestSstable(filename, garbage),
-        throwsA(isA<CorruptedSstableException>()),
-      );
-    });
+        expect(
+          () => store.ingestSstable(filename, garbage),
+          throwsA(isA<CorruptedSstableException>()),
+        );
+      },
+    );
 
     test('ingestSstable advances local HLC', () async {
       // SSTable with a far-future HLC.
       const peerId = 'peer0099';
       const futurePhysical = 9999999999;
       final filename = SstableInfo.flushName(
-          peerId, const Hlc(futurePhysical, 0), const Hlc(futurePhysical, 1));
+        peerId,
+        const Hlc(futurePhysical, 0),
+        const Hlc(futurePhysical, 1),
+      );
       final bytes = _buildSst(basePhysical: futurePhysical);
 
       await store.ingestSstable(filename, bytes);

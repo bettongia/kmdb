@@ -26,6 +26,16 @@ import 'cloud/cloud_adapter.dart';
 import 'consolidation_config.dart';
 
 /// The lease state machine states for consolidation coordination.
+///
+/// Valid transitions (spec §12.6.1):
+/// ```
+/// idle → leaseAcquired   (this device wins the CAS write)
+/// idle → idle            (threshold not met, or another device holds lease)
+/// leaseAcquired → consolidating
+/// consolidating → verifying  (N-way merge written to sync folder)
+/// consolidating → leaseExpired (lease TTL exceeded during merge)
+/// verifying → complete   (inputs deleted, lease released)
+/// ```
 enum ConsolidationState {
   /// No consolidation is in progress or needed.
   idle,
@@ -33,16 +43,17 @@ enum ConsolidationState {
   /// This device holds the consolidation lease.
   leaseAcquired,
 
-  /// Actively merging input SSTables.
+  /// Actively merging input SSTables into the consolidated output.
   consolidating,
 
-  /// Verifying the output and updating the manifest.
+  /// Output SSTable uploaded; deleting input SSTables and releasing the lease.
   verifying,
 
-  /// Consolidation completed successfully.
+  /// Consolidation completed successfully; inputs deleted, lease released.
   complete,
 
-  /// Lease expired before consolidation finished.
+  /// Lease TTL expired before consolidation finished; state is reset to [idle]
+  /// on the next [ConsolidationCoordinator.runIfNeeded] call.
   leaseExpired,
 }
 
@@ -410,9 +421,18 @@ final class ConsolidationCoordinator {
   /// [lease] is the held lease. [outputFilename] is the output SSTable that
   /// was already uploaded by [consolidate].
   ///
-  /// Input SSTables are deleted only after the output is confirmed uploaded.
-  /// The lease file is deleted last — after this call returns, other devices
-  /// may proceed with their own operations.
+  /// Commit sequence:
+  /// 1. Delete each input SSTable from the sync folder (failures are non-fatal
+  ///    — a file may already have been removed by a previous partial commit).
+  /// 2. Delete the lease file so other devices may proceed.
+  ///
+  /// The output SSTable was uploaded by [consolidate] before this method is
+  /// called, so it is safe to delete inputs. The lease is released last.
+  ///
+  /// Note: the spec also describes a `.consolidation-manifest` file for crash
+  /// recovery of the commit step (§12 sync folder structure). That file is not
+  /// written in this implementation; instead, idempotent deletion makes partial
+  /// commits safe to retry without a manifest.
   Future<void> commit(ConsolidationLease lease, String outputFilename) async {
     // Delete input SSTables from the sync folder.
     for (final filename in lease.inputFiles) {

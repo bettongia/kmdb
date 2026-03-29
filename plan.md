@@ -21,9 +21,12 @@ Once each phase is completed:
   CrashRecovery, KvStoreImpl — 286 tests pass)
 - ✅ Phase 4 complete (MetaStore, DeviceId, dirty-open flag, generation
   counters, hadUnclosedSession — 310 tests pass)
-- Phases 5–8: not started
-
-All 310 tests pass.
+- ✅ Phase 5 complete (HWM tracking, CloudAdapter, MemorySyncAdapter,
+  LocalDirectoryAdapter, SyncEngine push/pull/sync,
+  ConsolidationCoordinator lease protocol — tests pass)
+- ✅ Phase 6 complete (LruMap, SessionCache, CacheTier, CacheLayer with
+  generation-counter invalidation and onResume lifecycle — tests pass)
+- Phases 7–8: not started
 
 ---
 

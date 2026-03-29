@@ -1,12 +1,12 @@
 .DEFAULT_GOAL := default
 
-.PHONY: site dart_doc test default checks coverage license_check license_add styles clean
+.PHONY: site dart_doc test default checks coverage license_check license_add styles clean spec
 
 COVERAGE_DIR=coverage
 
 ADDLICENSE_CONFIG=addlicense_config.txt
 
-default: test docs checks
+default: test site checks
 
 site: site/ styles site/index.html site/spec.html site/api/index.html site/roadmap.html
 
@@ -19,6 +19,7 @@ site/styles/styles.css: docs/styles/styles.css
 	mkdir -p site/styles/
 	cp docs/styles/styles.css site/styles/styles.css
 
+
 site/spec.html: site/ docs/spec/*.md docs/spec/.pandoc docs/template/header.html
 	pandoc --defaults="docs/spec/.pandoc" docs/spec/*.md -o "site/spec.html";
 
@@ -30,6 +31,12 @@ site/roadmap.html: site/ docs/roadmap.md docs/.pandoc docs/template/header.html
 
 site/api/index.html: lib/*.dart lib/**/*.dart
 	dart doc -o site/api
+
+site/spec.epub: site/ docs/spec/*.md
+	pandoc docs/spec/*.md -o site/spec.epub
+
+site/spec.pdf: site/ docs/spec/*.md
+	pandoc docs/spec/*.md -o site/spec.pdf
 
 checks: coverage license_check
 
