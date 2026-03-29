@@ -29,8 +29,8 @@ Once each phase is completed:
 - ✅ Phase 7 complete (KmdbCodec, KmdbDatabase, KmdbCollection, KmdbQuery,
   Filter DSL, secondary indexes with write interception and lazy build,
   reactivity via watch() — 584 tests pass as of 2026-03-29)
-- ⏳ Phase 8 in progress (error types, LocalDirectoryAdapter ETag fix, OPFS web
-  adapter, hook/build.dart stub — tests pending)
+- ✅ Phase 8 complete (error types, LocalDirectoryAdapter ETag fix, OPFS web
+  adapter, es_compression Zstd — 600 tests pass as of 2026-03-30)
 
 ---
 
@@ -801,8 +801,8 @@ stream.
 - ✅ **Web StorageAdapter (OPFS):** Full implementation via `dart:js_interop`
   and `package:web`; async File System API; in-memory lock table; SAHPool
   deferred to Phase 9 (needs Worker context).
-- ✅ **`hook/build.dart` stub:** Documents the planned Zstd FFI compilation
-  path; Zstd deferred (see note below).
+- ✅ **`hook/build.dart`:** Removed — `es_compression` bundles prebuilt
+  binaries; no build hook needed.
 - ✅ **`KvStoreConfig.forTesting()`:** Already implemented in Phase 3; confirmed
   in use throughout test suite.
 
