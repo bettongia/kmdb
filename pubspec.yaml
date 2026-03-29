@@ -13,7 +13,8 @@ dependencies:
   cbor: ^6.5.1
   meta: any
   uuid: ^4.5.3
-  zstandard: ^1.5.0
+  web: ^1.0.0
+  es_compression: ^2.0.15
   # path: ^1.9.0
 
 dev_dependencies:
