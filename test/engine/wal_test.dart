@@ -19,6 +19,7 @@ import 'package:test/test.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
 import 'package:kmdb/src/engine/util/hlc.dart';
 import 'package:kmdb/src/engine/util/key_codec.dart';
+import 'package:kmdb/src/engine/wal/wal_exceptions.dart';
 import 'package:kmdb/src/engine/wal/wal_reader.dart';
 import 'package:kmdb/src/engine/wal/wal_record.dart';
 import 'package:kmdb/src/engine/wal/wal_writer.dart';
@@ -259,6 +260,96 @@ void main() {
       expect(
         () => WalRecordType.fromByte(0xFF),
         throwsA(isA<FormatException>()),
+      );
+    });
+  });
+
+  // ── CorruptedWalException / replayStrict ────────────────────────────────────
+
+  group('CorruptedWalException', () {
+    test('toString without path or offset', () {
+      const e = CorruptedWalException('bad checksum');
+      expect(e.toString(), contains('CorruptedWalException'));
+      expect(e.toString(), contains('bad checksum'));
+    });
+
+    test('toString includes path and offset when provided', () {
+      const e = CorruptedWalException('bad checksum',
+          path: '/db/wal-00001.log', offset: 42);
+      expect(e.toString(), contains('/db/wal-00001.log'));
+      expect(e.toString(), contains('42'));
+    });
+
+    test('implements Exception', () {
+      expect(const CorruptedWalException('x'), isA<Exception>());
+    });
+  });
+
+  group('WalReader.replayStrict', () {
+    late MemoryStorageAdapter adapter;
+    late WalReader reader;
+
+    setUp(() {
+      adapter = MemoryStorageAdapter();
+      reader = _reader(adapter);
+    });
+
+    test('replays all valid records without error', () async {
+      final writer = _writer(adapter);
+      await writer.append(WalRecord(
+        type: WalRecordType.put,
+        sequence: _seq1,
+        namespace: 'ns',
+        key: _key,
+        value: _value,
+      ));
+      await writer.append(WalRecord(
+        type: WalRecordType.put,
+        sequence: _seq2,
+        namespace: 'ns',
+        key: _key,
+        value: _value,
+      ));
+
+      final records = <WalRecord>[];
+      await for (final r in reader.replayStrict('$_dir/wal-00001.log')) {
+        records.add(r);
+      }
+      expect(records, hasLength(2));
+    });
+
+    test('returns empty stream when file does not exist', () async {
+      final records = <WalRecord>[];
+      await for (final r in reader.replayStrict('$_dir/nonexistent.log')) {
+        records.add(r);
+      }
+      expect(records, isEmpty);
+    });
+
+    test('throws CorruptedWalException on checksum failure', () async {
+      // Write one valid record, then corrupt the file by appending bytes that
+      // look like a record header (≥ 17 bytes) but have a bad checksum.
+      final writer = _writer(adapter);
+      await writer.append(WalRecord(
+        type: WalRecordType.put,
+        sequence: _seq1,
+        namespace: 'ns',
+        key: _key,
+        value: _value,
+      ));
+      final path = '$_dir/wal-00001.log';
+      final existing = await adapter.readFile(path);
+      final corrupted = Uint8List(existing.length + 32);
+      corrupted.setAll(0, existing);
+      // Fill the appended region with 0xAA — guaranteed bad checksum.
+      corrupted.fillRange(existing.length, corrupted.length, 0xAA);
+      await adapter.writeFile(path, corrupted);
+
+      expect(
+        () async {
+          await for (final _ in reader.replayStrict(path)) {}
+        },
+        throwsA(isA<CorruptedWalException>()),
       );
     });
   });

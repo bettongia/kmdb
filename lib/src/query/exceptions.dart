@@ -46,6 +46,50 @@ final class DocumentNotFoundException implements Exception {
       'namespace "$namespace"';
 }
 
+/// Thrown when a query or collection operation requires a fresh secondary index
+/// but the index is currently [IndexStatus.stale] or [IndexStatus.building].
+///
+/// KMDB secondary indexes are rebuilt lazily in the background. Most callers
+/// can tolerate a temporarily stale index because the query layer falls back to
+/// a full namespace scan. [StaleIndexException] is thrown only when the caller
+/// has explicitly requested strict index freshness via
+/// [KmdbQuery.requireFreshIndex].
+///
+/// Example:
+/// ```dart
+/// try {
+///   final results = await collection
+///       .where(Field('city').equals('London'))
+///       .requireFreshIndex()
+///       .get();
+/// } on StaleIndexException catch (e) {
+///   // The 'city' index is rebuilding — retry after a short delay.
+///   print(e);
+/// }
+/// ```
+final class StaleIndexException implements Exception {
+  const StaleIndexException({
+    required this.namespace,
+    required this.path,
+    required this.status,
+  });
+
+  /// The collection namespace containing the stale index.
+  final String namespace;
+
+  /// The dot-notation field path the index covers.
+  final String path;
+
+  /// The current lifecycle status of the index (e.g. `'stale'` or
+  /// `'building'`).
+  final String status;
+
+  @override
+  String toString() =>
+      'StaleIndexException: index on "$path" in namespace "$namespace" '
+      'is $status — cannot serve query with requireFreshIndex()';
+}
+
 /// Describes an index whose build was interrupted by an unclean shutdown.
 ///
 /// Passed to [KmdbDatabase.open]'s `onIndexRebuildRequired` callback when

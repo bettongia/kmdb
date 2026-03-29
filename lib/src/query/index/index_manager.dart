@@ -113,6 +113,9 @@ final class IndexManager {
   /// full scan during the build.
   final void Function(String namespace, String path)? onIndexReady;
 
+  /// All index definitions registered with this manager.
+  List<IndexDefinition> get definitions => _definitions;
+
   // ── Public API ──────────────────────────────────────────────────────────────
 
   /// Returns the definitions for [namespace] whose status is [current] or
@@ -150,8 +153,10 @@ final class IndexManager {
   /// [WriteBatch]. [oldDoc] is the previous version (null if inserting);
   /// [newDoc] is the new version (null if deleting).
   ///
-  /// This method does NOT add write-interception for `undefined` indexes —
-  /// those have zero overhead until first query.
+  /// For indexes in `undefined` state, a lazy build is triggered on the first
+  /// write to the namespace so that [requireFreshIndex] queries issued shortly
+  /// after can find the index current without waiting for the first explicit
+  /// query to activate it.
   Future<void> interceptWrite({
     required WriteBatch batch,
     required String namespace,
@@ -168,6 +173,17 @@ final class IndexManager {
       if (newDoc != null) {
         IndexWriter.addEntries(
             batch: batch, definition: def, docKey: docKey, document: newDoc);
+      }
+    }
+    // Trigger a build for any undefined indexes on this namespace.  The build
+    // is scheduled as an event (not a microtask) so it starts after the
+    // current write batch commits, ensuring _buildIndex reads the correct
+    // generation counter and finds the document in its initial scan.
+    for (final def in _definitions) {
+      if (def.namespace != namespace) continue;
+      final state = await _loadState(def);
+      if (state.status == IndexStatus.undefined) {
+        _launchBuild(def);
       }
     }
   }
@@ -237,10 +253,13 @@ final class IndexManager {
   /// batches of 200 to write index entries. On completion, marks `current` or
   /// `stale` depending on whether concurrent writes advanced the generation.
   void _launchBuild(IndexDefinition definition) {
-    // Fire-and-forget: the build runs after the current microtask completes.
-    // Errors (e.g. DB closed before build finishes) are swallowed — the
-    // state remains `building` and will be recovered on next open.
-    Future.microtask(() => _buildIndex(definition)).catchError((_) {});
+    // Fire-and-forget: the build is scheduled as an event (Duration.zero timer)
+    // so it runs after all pending microtasks — including any in-flight write
+    // batch — have completed. This guarantees _buildIndex reads the generation
+    // counter after the triggering write commits, avoiding a spurious stale
+    // transition. Errors (e.g. DB closed before build finishes) are swallowed —
+    // the state remains `building` and will be recovered on next open.
+    Future(() => _buildIndex(definition)).catchError((_) {});
   }
 
   Future<void> _buildIndex(IndexDefinition definition) async {

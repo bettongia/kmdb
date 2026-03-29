@@ -15,7 +15,9 @@
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
 import 'package:kmdb/src/engine/util/key_codec.dart';
+import 'package:kmdb/src/query/exceptions.dart';
 import 'package:kmdb/src/query/filter/field_filter.dart';
+import 'package:kmdb/src/query/index/index_definition.dart';
 import 'package:kmdb/src/query/kmdb_codec.dart';
 import 'package:kmdb/src/query/kmdb_collection.dart';
 import 'package:kmdb/src/query/kmdb_database.dart';
@@ -376,6 +378,85 @@ void main() {
 
       await sub.cancel();
       expect(emitted.length, equals(countBefore)); // no re-emit
+      await db.close();
+    });
+  });
+
+  // ── requireFreshIndex / StaleIndexException ───────────────────────────────
+
+  group('StaleIndexException', () {
+    test('toString includes namespace, path, and status', () {
+      const e = StaleIndexException(
+        namespace: 'tasks',
+        path: 'assignee',
+        status: 'stale',
+      );
+      expect(e.toString(), contains('assignee'));
+      expect(e.toString(), contains('tasks'));
+      expect(e.toString(), contains('stale'));
+    });
+
+    test('implements Exception', () {
+      expect(
+        const StaleIndexException(
+          namespace: 'ns',
+          path: 'field',
+          status: 'building',
+        ),
+        isA<Exception>(),
+      );
+    });
+  });
+
+  group('requireFreshIndex()', () {
+    Future<(KmdbDatabase, KmdbCollection<_Item>)> openWithIndex() async {
+      final adapter = MemoryStorageAdapter();
+      final db = await KmdbDatabase.open(
+        path: '/db',
+        adapter: adapter,
+        config: KvStoreConfig.forTesting(),
+        indexes: [IndexDefinition('items', 'name')],
+      );
+      return (db, db.collection(namespace: 'items', codec: _codec));
+    }
+
+    test('does not throw when no indexes are defined', () async {
+      final (db, col) = await _open();
+      // No indexes defined — requireFreshIndex() should succeed immediately.
+      await expectLater(
+        col.all().requireFreshIndex().get(),
+        completes,
+      );
+      await db.close();
+    });
+
+    test('does not throw when index is current after build completes',
+        () async {
+      final (db, col) = await openWithIndex();
+      // Insert a document to trigger something to index.
+      await col.put(_Item(id: _key(), name: 'Alice', score: 1));
+      // Allow the background build microtask to complete.
+      await Future.delayed(const Duration(milliseconds: 20));
+      // Index should now be current — requireFreshIndex() should succeed.
+      await expectLater(
+        col.all().requireFreshIndex().get(),
+        completes,
+      );
+      await db.close();
+    });
+
+    test('requireFreshIndex flag propagates through pipeline methods',
+        () async {
+      final (db, col) = await _open();
+      // Verify the flag survives chaining.
+      final q = col
+          .where(Field('name').equals('x'))
+          .orderBy('name')
+          .limit(10)
+          .offset(0)
+          .requireFreshIndex();
+      // No indexes defined, so get() should succeed.
+      await expectLater(q.get(), completes);
       await db.close();
     });
   });

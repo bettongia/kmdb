@@ -15,8 +15,10 @@
 import 'dart:async';
 
 import '../encoding/value_codec.dart';
+import 'exceptions.dart';
 import 'filter/field_path.dart';
 import 'filter/filter.dart';
+import 'index/index_manager.dart';
 import 'kmdb_collection.dart';
 
 /// An immutable, lazy query pipeline over a [KmdbCollection].
@@ -55,13 +57,15 @@ final class KmdbQuery<T> {
     int? limitCount,
     int? offsetCount,
     String? keyPrefixValue,
+    bool requireFreshIndex = false,
   })  : _collection = collection,
         _filters = filters ?? const [],
         _orderByField = orderByField,
         _orderByDescending = orderByDescending,
         _limitCount = limitCount,
         _offsetCount = offsetCount,
-        _keyPrefixValue = keyPrefixValue;
+        _keyPrefixValue = keyPrefixValue,
+        _requireFreshIndex = requireFreshIndex;
 
   final KmdbCollection<T> _collection;
   final List<Filter> _filters;
@@ -70,6 +74,10 @@ final class KmdbQuery<T> {
   final int? _limitCount;
   final int? _offsetCount;
   final String? _keyPrefixValue;
+
+  /// Whether to throw [StaleIndexException] if any index for this namespace
+  /// is not [IndexStatus.current] when a terminal is called.
+  final bool _requireFreshIndex;
 
   // ── Pipeline methods ────────────────────────────────────────────────────────
 
@@ -84,6 +92,7 @@ final class KmdbQuery<T> {
         limitCount: _limitCount,
         offsetCount: _offsetCount,
         keyPrefixValue: _keyPrefixValue,
+        requireFreshIndex: _requireFreshIndex,
       );
 
   /// Orders results by [field].
@@ -102,6 +111,7 @@ final class KmdbQuery<T> {
         limitCount: _limitCount,
         offsetCount: _offsetCount,
         keyPrefixValue: _keyPrefixValue,
+        requireFreshIndex: _requireFreshIndex,
       );
 
   /// Limits the result to [count] documents.
@@ -115,6 +125,7 @@ final class KmdbQuery<T> {
         limitCount: count,
         offsetCount: _offsetCount,
         keyPrefixValue: _keyPrefixValue,
+        requireFreshIndex: _requireFreshIndex,
       );
 
   /// Skips the first [count] documents from the result.
@@ -129,6 +140,7 @@ final class KmdbQuery<T> {
         limitCount: _limitCount,
         offsetCount: count,
         keyPrefixValue: _keyPrefixValue,
+        requireFreshIndex: _requireFreshIndex,
       );
 
   /// Narrows the underlying LSM scan to keys that start with [prefix].
@@ -147,6 +159,40 @@ final class KmdbQuery<T> {
         limitCount: _limitCount,
         offsetCount: _offsetCount,
         keyPrefixValue: prefix,
+        requireFreshIndex: _requireFreshIndex,
+      );
+
+  /// Asserts that all secondary indexes for this collection are fully built
+  /// before the query executes.
+  ///
+  /// Returns a new [KmdbQuery]. When any terminal method is subsequently
+  /// called, the query checks every index defined for the collection's
+  /// namespace. If any index is [IndexStatus.stale] or [IndexStatus.building],
+  /// [StaleIndexException] is thrown rather than falling back to a full scan.
+  ///
+  /// Use this when correctness requires up-to-date index data, for example
+  /// when running scheduled background jobs that must not return stale results.
+  ///
+  /// Example:
+  /// ```dart
+  /// try {
+  ///   final results = await collection
+  ///       .where(Field('city').equals('London'))
+  ///       .requireFreshIndex()
+  ///       .get();
+  /// } on StaleIndexException catch (e) {
+  ///   // Index is rebuilding — retry after a short delay.
+  /// }
+  /// ```
+  KmdbQuery<T> requireFreshIndex() => KmdbQuery.fromCollection(
+        collection: _collection,
+        filters: _filters,
+        orderByField: _orderByField,
+        orderByDescending: _orderByDescending,
+        limitCount: _limitCount,
+        offsetCount: _offsetCount,
+        keyPrefixValue: _keyPrefixValue,
+        requireFreshIndex: true,
       );
 
   // ── Terminal methods ────────────────────────────────────────────────────────
@@ -246,6 +292,7 @@ final class KmdbQuery<T> {
   // ── Execution ───────────────────────────────────────────────────────────────
 
   Future<List<T>> _execute() async {
+    if (_requireFreshIndex) await _checkIndexFreshness();
     final (startKey, endKey) = _scanRange();
     final raw = <(String key, Map<String, dynamic> doc)>[];
 
@@ -296,6 +343,26 @@ final class KmdbQuery<T> {
     return results
         .map((pair) => _collection.codec.decode(pair.$2))
         .toList();
+  }
+
+  /// Checks that all secondary indexes for this collection's namespace are
+  /// [IndexStatus.current].
+  ///
+  /// Throws [StaleIndexException] for the first non-current index found.
+  Future<void> _checkIndexFreshness() async {
+    final ns = _collection.namespace;
+    final manager = _collection.database.indexManager;
+    for (final def in manager.definitions) {
+      if (def.namespace != ns) continue;
+      final state = await manager.getOrActivate(ns, def.path);
+      if (state.status != IndexStatus.current) {
+        throw StaleIndexException(
+          namespace: ns,
+          path: def.path,
+          status: state.status.name,
+        );
+      }
+    }
   }
 
   /// Computes the [startKey, endKey) range for the LSM scan from [_keyPrefixValue].

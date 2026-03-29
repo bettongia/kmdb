@@ -15,6 +15,7 @@
 import 'dart:typed_data';
 
 import '../platform/storage_adapter_interface.dart';
+import 'wal_exceptions.dart';
 import 'wal_record.dart';
 
 /// Replays WAL records from a single log file.
@@ -103,6 +104,55 @@ final class WalReader {
   Stream<WalRecord> replayAll(List<String> paths) async* {
     for (final path in paths) {
       yield* replayFromLastFlush(path);
+    }
+  }
+
+  /// Replays all valid WAL records from [path] in strict mode.
+  ///
+  /// Unlike [replay], this method throws [CorruptedWalException] on the first
+  /// checksum failure rather than stopping silently. Use this when you need to
+  /// distinguish between a clean truncation (expected after a crash) and
+  /// unexpected interior corruption that would indicate hardware-level data
+  /// loss or filesystem bugs.
+  ///
+  /// The non-strict [replay] is used by crash recovery because the final
+  /// in-flight write is always expected to be truncated. Use [replayStrict]
+  /// only for offline integrity checks or diagnostic tooling.
+  ///
+  /// Throws [CorruptedWalException] on checksum failure.
+  ///
+  /// Example:
+  /// ```dart
+  /// try {
+  ///   await for (final r in reader.replayStrict('/db/wal-00001.log')) {
+  ///     processRecord(r);
+  ///   }
+  /// } on CorruptedWalException catch (e) {
+  ///   print('Integrity failure: $e');
+  /// }
+  /// ```
+  Stream<WalRecord> replayStrict(String path) async* {
+    final Uint8List bytes;
+    try {
+      bytes = await adapter.readFile(path);
+    } on StorageException {
+      return; // file does not exist — nothing to replay
+    }
+
+    var offset = 0;
+    while (offset < bytes.length) {
+      final result = WalRecord.tryDecode(bytes, offset);
+      if (result == null) {
+        // In strict mode, any decode failure is an error.
+        throw CorruptedWalException(
+          'record decode failed at byte $offset',
+          path: path,
+          offset: offset,
+        );
+      }
+      final (record, consumed) = result;
+      offset += consumed;
+      yield record;
     }
   }
 }

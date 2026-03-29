@@ -24,6 +24,7 @@ export 'src/engine/kvstore/kv_store.dart'
 export 'src/engine/kvstore/kv_store_impl.dart' show KvStoreImpl;
 export 'src/engine/platform/storage_adapter_interface.dart'
     show StorageAdapter, StorageException, LockException;
+export 'src/engine/wal/wal_exceptions.dart' show CorruptedWalException;
 export 'src/engine/platform/storage_adapter_memory.dart'
     show MemoryStorageAdapter;
 
@@ -31,7 +32,7 @@ export 'src/engine/platform/storage_adapter_memory.dart'
 export 'src/sync/sync_engine.dart' show SyncEngine;
 export 'src/sync/consolidation_coordinator.dart' show ConsolidationCoordinator;
 export 'src/sync/consolidation_config.dart' show ConsolidationConfig;
-export 'src/sync/cloud/cloud_adapter.dart' show CloudAdapter;
+export 'src/sync/cloud/cloud_adapter.dart' show CloudAdapter, LockConflictException;
 export 'src/sync/local/memory_sync_adapter.dart' show MemorySyncAdapter;
 
 // ── Cache ─────────────────────────────────────────────────────────────────────
@@ -47,7 +48,8 @@ export 'src/query/exceptions.dart'
     show
         DocumentAlreadyExistsException,
         DocumentNotFoundException,
-        IndexRebuildEvent;
+        IndexRebuildEvent,
+        StaleIndexException;
 export 'src/query/filter/filter.dart' show Filter;
 export 'src/query/filter/field_filter.dart' show Field;
 export 'src/query/index/index_definition.dart' show IndexDefinition;
