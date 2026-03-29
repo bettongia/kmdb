@@ -5,6 +5,11 @@ code in this repository.
 
 ## General
 
+The `doc/roadmap.md` is used to track future work items and their priority.
+
+We'll create plans for our work and place them in the `plans/` directory. When
+the planned work has been completed we'll move them to `plans/completed`.
+
 Quality assurance is critical to this project and you need to maintain a minimum
 of 90% test coverage at all times. You must also run all tests successfully
 before considering a task to be complete.
@@ -47,16 +52,16 @@ make docs
 
 ## Implementation Status
 
-| Phase | Scope | Status |
-| :---- | :---- | :----- |
-| 1 | Primitives & platform layer (XXH64, HLC, KeyCodec, ValueCodec, StorageAdapter) | ✅ Complete |
-| 2 | Storage engine core (SkipList, Memtable, WAL, Bloom filter, SSTable writer/reader) | ✅ Complete |
-| 3 | LSM orchestration (Manifest, MergeIterator, CompactionJob, LsmEngine, CrashRecovery, KvStore) | ✅ Complete |
-| 4 | Value encoding integration & `$meta` (MetaStore, DeviceId, generation counters) | ✅ Complete |
-| 5 | Sync protocol (HighwaterMark, CloudAdapter, SyncEngine push/pull, ConsolidationCoordinator) | ✅ Complete |
-| 6 | Cache layer (LruMap, SessionCache, CacheTier, CacheLayer with generation invalidation) | ✅ Complete |
-| 7 | Query layer (KmdbDatabase, KmdbCollection, KmdbQuery, Filter DSL, secondary indexes, reactivity) | ⏳ Not started |
-| 8 | Platform hardening (OPFS web storage, Zstd FFI/WASM, cloud adapters, performance benchmarks) | ⏳ Not started |
+| Phase | Scope                                                                                            | Status         |
+| :---- | :----------------------------------------------------------------------------------------------- | :------------- |
+| 1     | Primitives & platform layer (XXH64, HLC, KeyCodec, ValueCodec, StorageAdapter)                   | ✅ Complete    |
+| 2     | Storage engine core (SkipList, Memtable, WAL, Bloom filter, SSTable writer/reader)               | ✅ Complete    |
+| 3     | LSM orchestration (Manifest, MergeIterator, CompactionJob, LsmEngine, CrashRecovery, KvStore)    | ✅ Complete    |
+| 4     | Value encoding integration & `$meta` (MetaStore, DeviceId, generation counters)                  | ✅ Complete    |
+| 5     | Sync protocol (HighwaterMark, CloudAdapter, SyncEngine push/pull, ConsolidationCoordinator)      | ✅ Complete    |
+| 6     | Cache layer (LruMap, SessionCache, CacheTier, CacheLayer with generation invalidation)           | ✅ Complete    |
+| 7     | Query layer (KmdbDatabase, KmdbCollection, KmdbQuery, Filter DSL, secondary indexes, reactivity) | ⏳ Not started |
+| 8     | Platform hardening (OPFS web storage, Zstd FFI/WASM, cloud adapters, performance benchmarks)     | ⏳ Not started |
 
 All 452 tests pass as of 2026-03-29.
 
