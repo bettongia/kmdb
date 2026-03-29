@@ -4,6 +4,10 @@ subtitle: Ideas, unfilfilled
 toc-title: "Contents"
 ...
 
+# Command line interface (CLI) (High priority)
+
+Implement a CLI that allows users to interact with the KMDB database via either batch operations or in an interactive REPL. The CLI should be its own package and may require the current codebase to move to a monorepo that utilises Pub Workspaces.
+
 # SAHPool OPFS (High priority)
 
 Migrate `StorageAdapterWeb` from async File System API to
