@@ -1,10 +1,10 @@
-// Copyright 2026 The KMDB Authors
+// Copyright 2026 The KMDB Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,9 +14,9 @@
 
 import 'dart:typed_data';
 
-import 'package:archive/archive.dart';
 import 'package:cbor/cbor.dart';
 
+import 'compression.dart';
 import 'compression_flag.dart';
 
 /// Threshold (in raw CBOR bytes) below which compression is skipped.
@@ -31,7 +31,7 @@ const int _kCompressionThreshold = 64;
 ///
 /// The encoding pipeline is:
 /// 1. Serialize the document to CBOR bytes via [CborEncoder].
-/// 2. Optionally compress with Zstd (preferred) or Deflate (fallback).
+/// 2. Optionally compress — Zstd on native, Deflate on web (see [compression]).
 /// 3. Prepend a 1-byte [CompressionFlag].
 ///
 /// ## Format
@@ -45,10 +45,9 @@ const int _kCompressionThreshold = 64;
 /// ## Compression strategy
 ///
 /// Compression is only applied when the raw CBOR exceeds
-/// [_kCompressionThreshold] bytes. On native platforms Zstd is used via the
-/// `zstandard` package; on web, Deflate from the `archive` package is used as
-/// a fallback. If neither produces a smaller output than raw CBOR the payload
-/// is stored uncompressed.
+/// [_kCompressionThreshold] bytes. The platform-specific [tryCompress]
+/// function selects the algorithm and skips compression entirely if the
+/// output would not be smaller than the input.
 ///
 /// ## Thread safety
 ///
@@ -69,13 +68,8 @@ final class ValueCodec {
       return _prepend(CompressionFlag.none, cborBytes);
     }
 
-    // Try Deflate (available on all platforms via `archive`).
-    final deflated = _deflate(cborBytes);
-    if (deflated.length < cborBytes.length) {
-      return _prepend(CompressionFlag.deflate, deflated);
-    }
-
-    return _prepend(CompressionFlag.none, cborBytes);
+    final (flag, payload) = tryCompress(cborBytes);
+    return _prepend(flag, payload);
   }
 
   // ── Decode ──────────────────────────────────────────────────────────────────
@@ -85,7 +79,10 @@ final class ValueCodec {
   /// Throws [FormatException] if the byte sequence is malformed or the CBOR
   /// payload cannot be decoded as a [Map].
   ///
-  /// Throws [ArgumentError] if [bytes] is empty.
+  /// Throws [ArgumentError] if [bytes] is empty or carries an unknown flag.
+  ///
+  /// Throws [UnsupportedError] if the flag identifies a compression algorithm
+  /// not available on the current platform (e.g. Zstd on web).
   static Map<String, dynamic> decode(Uint8List bytes) {
     if (bytes.isEmpty) {
       throw ArgumentError.value(bytes, 'bytes', 'Cannot decode empty bytes');
@@ -93,21 +90,7 @@ final class ValueCodec {
 
     final flag = CompressionFlag.fromByte(bytes[0]);
     final payload = bytes.sublist(1);
-
-    final Uint8List cborBytes;
-    switch (flag) {
-      case CompressionFlag.none:
-        cborBytes = payload;
-      case CompressionFlag.deflate:
-        cborBytes = _inflate(payload);
-      case CompressionFlag.zstd:
-        // Zstd support deferred to Phase 8 (platform layer). For now, any
-        // value encoded with Zstd by a future version cannot be decoded.
-        throw UnsupportedError(
-          'Zstd decompression is not yet supported on this platform',
-        );
-    }
-
+    final cborBytes = decompress(flag, payload);
     return _fromCbor(cborBytes);
   }
 
@@ -130,18 +113,6 @@ final class ValueCodec {
     // to be a Map<dynamic, dynamic> when the top-level value is CborMap.
     final obj = decoded.toObject() as Map<dynamic, dynamic>;
     return obj.map((k, v) => MapEntry(k as String, v));
-  }
-
-  // ── Compression helpers ──────────────────────────────────────────────────────
-
-  static Uint8List _deflate(Uint8List data) {
-    final encoder = ZLibEncoder();
-    return Uint8List.fromList(encoder.encode(data));
-  }
-
-  static Uint8List _inflate(Uint8List data) {
-    final decoder = ZLibDecoder();
-    return Uint8List.fromList(decoder.decodeBytes(data));
   }
 
   // ── Utility ─────────────────────────────────────────────────────────────────
