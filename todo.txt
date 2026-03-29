@@ -1,6 +1,0 @@
-[x] Update all documentation comments in the Dart code so that the specification defined in docs/spec is reflected in the API docs.
-[x] Update plan.md with the latest progress information
-[x] Re-run all tests to check that nothing is failing
-[x] Resolve any issues raised from failed tests
-[x] Update CLAUDE.md so that it reflects the current state of the project
-[ ] If any files have changed commit them to git.
