@@ -28,23 +28,38 @@ All code files must have a license at the top. The template file is
 @header_template.txt. You must add the comment syntax appropriate to the
 programming language. Also replace `{{.Year}}` to match the current year.
 
+## Repository Layout
+
+This is a **Pub Workspace**. The root `pubspec.yaml` is a workspace coordinator
+only; all source code lives under `packages/`:
+
+```
+packages/
+  kmdb/        — the core library (lib/, test/, example/)
+  kmdb_cli/    — the CLI tool (bin/, lib/, test/)
+```
+
+Run `dart pub get` once from the workspace root to resolve dependencies for all
+packages.
+
 ## Commands
 
 ```bash
-# Run all tests
-dart test
+# Run all tests (kmdb package)
+dart test packages/kmdb
 
 # Run a single test file
-dart test test/some_test.dart
+dart test packages/kmdb/test/some_test.dart
 
 # Run tests matching a name pattern
-dart test --name "some pattern"
+dart test packages/kmdb --name "some pattern"
 
-# Analyze/lint
-dart analyze
+# Analyze/lint (all packages)
+dart analyze packages/kmdb
+dart analyze packages/kmdb_cli
 
-# Format
-dart format .
+# Format (all packages)
+dart format packages/
 
 # Build docs site (requires pandoc)
 make docs

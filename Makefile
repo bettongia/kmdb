@@ -3,6 +3,7 @@
 .PHONY: site dart_doc test default checks coverage license_check license_add styles clean spec
 
 COVERAGE_DIR=site/coverage
+KMDB_PKG=packages/kmdb
 
 ADDLICENSE_CONFIG=addlicense_config.txt
 
@@ -32,8 +33,8 @@ site/roadmap.html: site/ docs/roadmap.md docs/.pandoc docs/template/header.html
 site/primer.html: site/ docs/primer.md docs/.pandoc docs/template/header.html
 	pandoc --defaults="docs/.pandoc" docs/primer.md -o "site/primer.html";
 
-site/api/index.html: lib/*.dart lib/**/*.dart
-	dart doc -o site/api
+site/api/index.html: $(KMDB_PKG)/lib/*.dart $(KMDB_PKG)/lib/**/*.dart
+	dart doc $(KMDB_PKG) -o site/api
 
 site/spec.epub: site/ docs/spec/*.md
 	pandoc docs/spec/*.md -o site/spec.epub \
@@ -59,10 +60,10 @@ site/primer.pdf: site/ docs/primer.md
 checks: coverage license_check
 
 test:
-	dart test
+	dart test -p vm $(KMDB_PKG)
 
-coverage: lib/*.dart lib/**/*.dart test/*.dart test/**/*.dart
-	dart pub global run coverage:test_with_coverage --out $(COVERAGE_DIR)
+coverage: $(KMDB_PKG)/lib/*.dart $(KMDB_PKG)/lib/**/*.dart $(KMDB_PKG)/test/*.dart $(KMDB_PKG)/test/**/*.dart
+	dart pub global run coverage:test_with_coverage --package=$(KMDB_PKG) --out $(COVERAGE_DIR)
 	lcov --summary $(COVERAGE_DIR)/lcov.info
 	genhtml $(COVERAGE_DIR)/lcov.info -o $(COVERAGE_DIR)/html
 
