@@ -102,11 +102,94 @@ abstract interface class KvStore {
   /// generated timestamps remain causally after ingested ones.
   Future<void> ingestSstable(String filename, Uint8List bytes);
 
+  /// Returns a sorted list of user-visible namespace names that have had at
+  /// least one document written to them.
+  ///
+  /// System namespaces (those starting with `$`) are excluded. The list is
+  /// derived from the namespace registry persisted in `$meta` and is therefore
+  /// accurate across restarts.
+  ///
+  /// Returns an empty list for a brand-new database that has never been written
+  /// to, or for databases created before this API was available.
+  Future<List<String>> listNamespaces();
+
+  /// Returns a snapshot of engine-level statistics.
+  ///
+  /// Includes SSTable counts per level, total on-disk size, and the path to
+  /// the database directory. Intended for the CLI `stats` command and
+  /// diagnostic tooling.
+  Future<StoreStats> stats();
+
+  /// Returns identifying information about this database instance.
+  ///
+  /// Includes the stable device ID persisted in `$meta` and the current HLC
+  /// clock value. Intended for the CLI `info` command.
+  Future<StoreInfo> storeInfo();
+
   /// Closes the store, flushing the active memtable and releasing the LOCK.
   ///
   /// After [close] returns the instance must not be used again. A new
   /// instance can be opened on the same path.
   Future<void> close();
+}
+
+// ── StoreStats ────────────────────────────────────────────────────────────────
+
+/// Engine-level statistics returned by [KvStore.stats].
+final class StoreStats {
+  /// Creates a [StoreStats] snapshot.
+  const StoreStats({
+    required this.dbDir,
+    required this.l0Count,
+    required this.l1Count,
+    required this.l2Count,
+    required this.totalSstBytes,
+    required this.totalDbBytes,
+  });
+
+  /// Absolute path to the database directory.
+  final String dbDir;
+
+  /// Number of SSTables at Level 0.
+  final int l0Count;
+
+  /// Number of SSTables at Level 1.
+  final int l1Count;
+
+  /// Number of SSTables at Level 2.
+  final int l2Count;
+
+  /// Total on-disk size of all SSTable files in bytes.
+  final int totalSstBytes;
+
+  /// Total on-disk size of all database files (SSTables + WAL + Manifest).
+  final int totalDbBytes;
+
+  /// Total number of SSTables across all levels.
+  int get totalSstCount => l0Count + l1Count + l2Count;
+}
+
+// ── StoreInfo ────────────────────────────────────────────────────────────────
+
+/// Identifying information returned by [KvStore.storeInfo].
+final class StoreInfo {
+  /// Creates a [StoreInfo] snapshot.
+  const StoreInfo({
+    required this.dbDir,
+    required this.deviceId,
+    required this.currentHlc,
+  });
+
+  /// Absolute path to the database directory.
+  final String dbDir;
+
+  /// The stable 8-character device identifier persisted in `$meta`.
+  final String deviceId;
+
+  /// The current HLC timestamp as a hex string (`physicalMs:logical`).
+  ///
+  /// Format: `"<48-bit physical ms as 12 hex chars>:<16-bit logical as 4 hex chars>"`
+  final String currentHlc;
 }
 
 // ── Public types ──────────────────────────────────────────────────────────────

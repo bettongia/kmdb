@@ -887,6 +887,57 @@ final class LsmEngine {
     return total;
   }
 
+  // ── Public stats / info ───────────────────────────────────────────────────
+
+  /// Returns the database directory path.
+  String get dbDir => _dbDir;
+
+  /// Returns the current device ID.
+  String get deviceId => _deviceId;
+
+  /// Returns the current HLC clock value as a hex string.
+  ///
+  /// Format: `<12 hex chars for physical ms>:<4 hex chars for logical counter>`
+  String get currentHlcString {
+    final physHex = _hlc.physicalMs.toRadixString(16).padLeft(12, '0');
+    final logHex = _hlc.logical.toRadixString(16).padLeft(4, '0');
+    return '$physHex:$logHex';
+  }
+
+  /// Returns SSTable file counts per level and total on-disk byte sizes.
+  Future<({int l0, int l1, int l2, int totalSstBytes, int totalDbBytes})>
+      levelStats() async {
+    final l0 = (_levels[0] ?? []).length;
+    final l1 = (_levels[1] ?? []).length;
+    final l2 = (_levels[2] ?? []).length;
+    final sstBytes = await _totalSstBytes();
+
+    // Total DB bytes: SSTables + all files in _dbDir (WAL, Manifest, CURRENT,
+    // LOCK). We sum sizes for all known SST files and add a pass over the
+    // root dir for the remaining files.
+    var rootBytes = 0;
+    try {
+      for (final name in await _adapter.listFiles(_dbDir)) {
+        try {
+          rootBytes += await _adapter.fileSize('$_dbDir/$name');
+        } on StorageException {
+          /* skip */
+        }
+      }
+    } on StorageException {
+      /* skip if dir listing fails */
+    }
+    final totalDbBytes = sstBytes + rootBytes;
+
+    return (
+      l0: l0,
+      l1: l1,
+      l2: l2,
+      totalSstBytes: sstBytes,
+      totalDbBytes: totalDbBytes,
+    );
+  }
+
   // ── Hex helper ────────────────────────────────────────────────────────────
 
   static String _bytesToHex(Uint8List bytes) {

@@ -14,6 +14,8 @@
 
 import 'dart:typed_data';
 
+import 'package:cbor/cbor.dart';
+
 import '../util/xxhash.dart';
 import 'lsm_engine.dart';
 
@@ -122,6 +124,40 @@ final class MetaStore {
         _nameToKey('device_id'),
         Uint8List.fromList(deviceId.codeUnits),
       );
+
+  // ── Namespace registry ─────────────────────────────────────────────────────
+
+  static const String _kNamespacesKey = 'namespaces';
+
+  /// Returns the sorted list of user-visible namespaces that have been written
+  /// to, as stored in `$meta`. Returns an empty list if none have been
+  /// registered yet.
+  Future<List<String>> getNamespaces() async {
+    final bytes = await _engine.get(kNamespace, _nameToKey(_kNamespacesKey));
+    if (bytes == null || bytes.isEmpty) return [];
+    // Stored as a CBOR array of strings.
+    final decoded = cbor.decode(bytes);
+    if (decoded is! CborList) return [];
+    return decoded
+        .map((e) => e is CborString ? e.toString() : null)
+        .whereType<String>()
+        .toList()
+      ..sort();
+  }
+
+  /// Adds [userNamespace] to the persisted set of known namespaces.
+  ///
+  /// This is called by [KvStoreImpl] after any successful user write. It is a
+  /// no-op if the namespace is already registered, so the overhead is a single
+  /// `get` + conditional `put` per write.
+  Future<void> registerNamespace(String userNamespace) async {
+    final current = await getNamespaces();
+    if (current.contains(userNamespace)) return;
+    final updated = [...current, userNamespace]..sort();
+    final encoded = cbor.encode(CborList(updated.map(CborString.new).toList()));
+    await _engine.put(
+        kNamespace, _nameToKey(_kNamespacesKey), Uint8List.fromList(encoded));
+  }
 
   // ── Index state ────────────────────────────────────────────────────────────
 

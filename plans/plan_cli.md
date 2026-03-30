@@ -333,17 +333,17 @@ dev_dependencies:
 
 ## Phase 1 Acceptance Criteria
 
-- [ ] Workspace migration complete; `dart test` and `dart analyze` pass from
+- [x] Workspace migration complete; `dart test` and `dart analyze` pass from
   the root for both packages.
-- [ ] All 15 commands implemented with `--help` text.
-- [ ] All 6 output modes implemented.
-- [ ] Filter expression JSON parser covers all DSL operators.
+- [x] All 15 commands implemented with `--help` text.
+- [x] All 6 output modes implemented.
+- [x] Filter expression JSON parser covers all DSL operators.
 - [ ] Import/export roundtrip test: export a namespace, clear it, re-import,
   verify all documents match.
 - [ ] Script file execution works via `--read`.
 - [ ] Stdin pipe execution works.
-- [ ] Exit codes are correct (0 = success, 1 = error).
-- [ ] Test coverage ≥ 90%.
+- [x] Exit codes are correct (0 = success, 1 = error).
+- [x] Test coverage ≥ 90%.
 
 ---
 

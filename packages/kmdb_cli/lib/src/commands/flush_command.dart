@@ -12,11 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'dart:io';
+import 'command.dart';
 
-import 'package:kmdb_cli/kmdb_cli.dart';
+/// Forces the active memtable to flush to an SSTable.
+///
+/// Usage: `kmdb <db> flush`
+final class FlushCommand implements CliCommand {
+  const FlushCommand();
 
-Future<void> main(List<String> args) async {
-  final exitCode = await KmdbCli.run(args);
-  exit(exitCode);
+  @override
+  String get name => 'flush';
+
+  @override
+  String get description => 'Force a memtable flush to disk.';
+
+  @override
+  String get usage => 'flush';
+
+  @override
+  Future<bool> execute(
+    CommandContext ctx,
+    List<String> args,
+    Map<String, dynamic> flags,
+  ) async {
+    await ctx.store.flush();
+    ctx.writeValue({'flushed': true});
+    return true;
+  }
 }

@@ -12,11 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'dart:io';
+import 'command.dart';
 
-import 'package:kmdb_cli/kmdb_cli.dart';
+/// Runs full compaction until all levels are stable.
+///
+/// Usage: `kmdb <db> compact`
+final class CompactCommand implements CliCommand {
+  const CompactCommand();
 
-Future<void> main(List<String> args) async {
-  final exitCode = await KmdbCli.run(args);
-  exit(exitCode);
+  @override
+  String get name => 'compact';
+
+  @override
+  String get description => 'Run full compaction on the database.';
+
+  @override
+  String get usage => 'compact';
+
+  @override
+  Future<bool> execute(
+    CommandContext ctx,
+    List<String> args,
+    Map<String, dynamic> flags,
+  ) async {
+    await ctx.store.compactAll();
+    ctx.writeValue({'compacted': true});
+    return true;
+  }
 }
