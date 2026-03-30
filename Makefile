@@ -4,6 +4,7 @@
 
 COVERAGE_DIR=site/coverage
 KMDB_PKG=packages/kmdb
+KMDB_CLI_PKG=packages/kmdb_cli
 
 ADDLICENSE_CONFIG=addlicense_config.txt
 
@@ -61,11 +62,15 @@ checks: coverage license_check
 
 test:
 	dart test -p vm $(KMDB_PKG)
+	dart test -p vm $(KMDB_CLI_PKG)
 
 coverage: $(KMDB_PKG)/lib/*.dart $(KMDB_PKG)/lib/**/*.dart $(KMDB_PKG)/test/*.dart $(KMDB_PKG)/test/**/*.dart
-	dart pub global run coverage:test_with_coverage --package=$(KMDB_PKG) --out $(COVERAGE_DIR)
-	lcov --summary $(COVERAGE_DIR)/lcov.info
-	genhtml $(COVERAGE_DIR)/lcov.info -o $(COVERAGE_DIR)/html
+	dart pub global run coverage:test_with_coverage --package=$(KMDB_PKG) --out $(COVERAGE_DIR)/kmdb
+	dart pub global run coverage:test_with_coverage --package=$(KMDB_CLI_PKG) --out $(COVERAGE_DIR)/kmdb_cli
+	lcov --summary $(COVERAGE_DIR)/kmdb/lcov.info
+	lcov --summary $(COVERAGE_DIR)/kmdb_cli/lcov.info
+	genhtml $(COVERAGE_DIR)/kmdb/lcov.info -o $(COVERAGE_DIR)/kmdb/html
+	genhtml $(COVERAGE_DIR)/kmdb_cli/lcov.info -o $(COVERAGE_DIR)/kmdb_cli/html
 
 license_check:
 	@echo "Checking for license headers..."
