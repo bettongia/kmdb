@@ -20,13 +20,23 @@ library;
 
 // ── Storage engine (public surface) ──────────────────────────────────────────
 export 'src/engine/kvstore/kv_store.dart'
-    show KvStore, KvEntry, OpenResult, WriteBatch, BatchEntry, KvStoreConfig;
+    show
+        KvStore,
+        KvEntry,
+        OpenResult,
+        WriteBatch,
+        BatchEntry,
+        KvStoreConfig,
+        StoreStats,
+        StoreInfo;
 export 'src/engine/kvstore/kv_store_impl.dart' show KvStoreImpl;
 export 'src/engine/platform/storage_adapter_interface.dart'
     show StorageAdapter, StorageException, LockException;
 export 'src/engine/wal/wal_exceptions.dart' show CorruptedWalException;
 export 'src/engine/platform/storage_adapter_memory.dart'
     show MemoryStorageAdapter;
+export 'src/engine/platform/storage_adapter_native.dart'
+    show StorageAdapterNative;
 
 // ── Sync ──────────────────────────────────────────────────────────────────────
 export 'src/sync/sync_engine.dart' show SyncEngine;
@@ -34,6 +44,9 @@ export 'src/sync/consolidation_coordinator.dart' show ConsolidationCoordinator;
 export 'src/sync/consolidation_config.dart' show ConsolidationConfig;
 export 'src/sync/cloud/cloud_adapter.dart' show CloudAdapter, LockConflictException;
 export 'src/sync/local/memory_sync_adapter.dart' show MemorySyncAdapter;
+
+// ── Value encoding ────────────────────────────────────────────────────────────
+export 'src/encoding/value_codec.dart' show ValueCodec;
 
 // ── Cache ─────────────────────────────────────────────────────────────────────
 export 'src/cache/cache_layer.dart' show CacheLayer;

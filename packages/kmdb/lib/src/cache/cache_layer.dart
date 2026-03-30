@@ -157,6 +157,15 @@ final class CacheLayer implements KvStore {
       _store.ingestSstable(filename, bytes);
 
   @override
+  Future<List<String>> listNamespaces() => _store.listNamespaces();
+
+  @override
+  Future<StoreStats> stats() => _store.stats();
+
+  @override
+  Future<StoreInfo> storeInfo() => _store.storeInfo();
+
+  @override
   Stream<String> get writeEvents => _store.writeEvents;
 
   /// Cancels the write-event subscription and closes the underlying store.

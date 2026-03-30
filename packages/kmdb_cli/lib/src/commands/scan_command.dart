@@ -1,0 +1,118 @@
+// Copyright 2026 The KMDB Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+import 'package:kmdb/kmdb.dart';
+
+import '../filter/filter_parser.dart';
+import 'command.dart';
+
+/// Scans a namespace with optional filtering, ordering, and pagination.
+///
+/// Usage:
+/// ```
+/// scan <namespace> [--filter <json>] [--order-by <field>] [--desc]
+///                  [--limit <n>] [--offset <n>] [--key-prefix <str>]
+/// ```
+final class ScanCommand implements CliCommand {
+  const ScanCommand();
+
+  @override
+  String get name => 'scan';
+
+  @override
+  String get description => 'Scan documents in a namespace.';
+
+  @override
+  String get usage =>
+      'scan <namespace> [--filter <json>] [--order-by <field>] [--desc] '
+      '[--limit <n>] [--offset <n>] [--key-prefix <str>]';
+
+  @override
+  Future<bool> execute(
+    CommandContext ctx,
+    List<String> args,
+    Map<String, dynamic> flags,
+  ) async {
+    if (args.isEmpty) {
+      ctx.writeError('scan requires <namespace>.\nUsage: $usage');
+      return false;
+    }
+    final namespace = args[0];
+
+    // Parse optional filter.
+    Filter? filter;
+    final filterJson = flags['filter'] as String?;
+    if (filterJson != null) {
+      try {
+        filter = FilterParser.parse(filterJson);
+      } on ArgumentError catch (e) {
+        ctx.writeError('Invalid filter: ${e.message}');
+        return false;
+      } on FormatException catch (e) {
+        ctx.writeError('Invalid filter JSON: ${e.message}');
+        return false;
+      }
+    }
+
+    final orderBy = flags['order-by'] as String?;
+    final descending = flags['desc'] == true;
+    final limit = _parseInt(flags['limit']);
+    final offset = _parseInt(flags['offset']);
+    final keyPrefix = flags['key-prefix'] as String?;
+
+    // Collect all matching documents.
+    final docs = <Map<String, dynamic>>[];
+
+    await for (final entry in ctx.store.scan(
+      namespace,
+      startKey: keyPrefix,
+    )) {
+      final doc = ValueCodec.decode(entry.value);
+      if (filter != null && !filter.evaluate(doc)) continue;
+      docs.add(doc);
+    }
+
+    // Sort.
+    if (orderBy != null) {
+      docs.sort((a, b) {
+        final av = a[orderBy];
+        final bv = b[orderBy];
+        final cmp = _compareValues(av, bv);
+        return descending ? -cmp : cmp;
+      });
+    }
+
+    // Paginate.
+    final start = offset ?? 0;
+    final end = limit != null ? (start + limit).clamp(0, docs.length) : docs.length;
+    final page = docs.sublist(start.clamp(0, docs.length), end);
+
+    ctx.writeDocuments(page);
+    return true;
+  }
+
+  static int? _parseInt(dynamic value) {
+    if (value == null) return null;
+    if (value is int) return value;
+    return int.tryParse('$value');
+  }
+
+  static int _compareValues(dynamic a, dynamic b) {
+    if (a == null && b == null) return 0;
+    if (a == null) return -1;
+    if (b == null) return 1;
+    if (a is num && b is num) return a.compareTo(b);
+    return '$a'.compareTo('$b');
+  }
+}

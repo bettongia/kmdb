@@ -18,6 +18,7 @@ import 'package:meta/meta.dart' show internal;
 
 import '../platform/storage_adapter_interface.dart';
 import 'crash_recovery.dart';
+import 'device_id.dart';
 import 'kv_store.dart';
 import 'lsm_engine.dart';
 import 'meta_store.dart';
@@ -117,6 +118,7 @@ final class KvStoreImpl implements KvStore {
     await _maybeMarkDirty();
     await _engine.put(namespace, key, value);
     await _meta.incrementGenerationCounter(namespace);
+    await _meta.registerNamespace(namespace);
   }
 
   @override
@@ -125,6 +127,7 @@ final class KvStoreImpl implements KvStore {
     await _maybeMarkDirty();
     await _engine.delete(namespace, key);
     await _meta.incrementGenerationCounter(namespace);
+    await _meta.registerNamespace(namespace);
   }
 
   @override
@@ -138,6 +141,7 @@ final class KvStoreImpl implements KvStore {
     final namespaces = batch.entries.map((e) => e.namespace).toSet();
     for (final ns in namespaces) {
       await _meta.incrementGenerationCounter(ns);
+      await _meta.registerNamespace(ns);
     }
   }
 
@@ -186,6 +190,40 @@ final class KvStoreImpl implements KvStore {
     await _engine.close();
   }
 
+  /// Loads the stored device ID from `$meta`, or generates and persists a new
+  /// one if none has been set.
+  ///
+  /// Returns an 8-character lowercase hex string. Callers outside the package
+  /// (e.g. the CLI) should call this once after opening the store so that all
+  /// subsequent writes and SSTable files are attributed to a stable identity.
+  Future<String> ensureDeviceId() => DeviceId.load(_meta);
+
+  @override
+  Future<List<String>> listNamespaces() => _meta.getNamespaces();
+
+  @override
+  Future<StoreStats> stats() async {
+    final ls = await _engine.levelStats();
+    return StoreStats(
+      dbDir: _engine.dbDir,
+      l0Count: ls.l0,
+      l1Count: ls.l1,
+      l2Count: ls.l2,
+      totalSstBytes: ls.totalSstBytes,
+      totalDbBytes: ls.totalDbBytes,
+    );
+  }
+
+  @override
+  Future<StoreInfo> storeInfo() async {
+    final deviceId = await _meta.getDeviceId() ?? _engine.deviceId;
+    return StoreInfo(
+      dbDir: _engine.dbDir,
+      deviceId: deviceId,
+      currentHlc: _engine.currentHlcString,
+    );
+  }
+
   // ── Internal access (query layer + tests) ────────────────────────────────
 
   /// Direct access to the [MetaStore] for use by the Query Layer and tests.
@@ -217,6 +255,7 @@ final class KvStoreImpl implements KvStore {
         .toSet();
     for (final ns in namespaces) {
       await _meta.incrementGenerationCounter(ns);
+      await _meta.registerNamespace(ns);
     }
     await _engine.writeBatch(batch);
   }

@@ -78,7 +78,7 @@ make docs
 | 7     | Query layer (KmdbDatabase, KmdbCollection, KmdbQuery, Filter DSL, secondary indexes, reactivity) | ✅ Complete    |
 | 8     | Platform hardening (OPFS web storage, Zstd FFI/WASM, cloud adapters, performance benchmarks)     | ✅ Complete    |
 
-All 600 tests pass as of 2026-03-30.
+All 600 kmdb + 97 kmdb_cli tests pass as of 2026-03-30.
 
 ## Architecture
 
