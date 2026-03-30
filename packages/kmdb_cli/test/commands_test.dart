@@ -21,6 +21,7 @@ import 'package:kmdb_cli/src/commands/command.dart';
 import 'package:kmdb_cli/src/commands/compact_command.dart';
 import 'package:kmdb_cli/src/commands/count_command.dart';
 import 'package:kmdb_cli/src/commands/delete_command.dart';
+import 'package:kmdb_cli/src/commands/export_command.dart';
 import 'package:kmdb_cli/src/commands/flush_command.dart';
 import 'package:kmdb_cli/src/commands/get_command.dart';
 import 'package:kmdb_cli/src/commands/import_command.dart';
@@ -711,6 +712,97 @@ void main() {
       expect(ok, isTrue);
       final result = json.decode(out.toString()) as Map;
       expect(result['imported'], equals(2));
+
+      tmp.delete();
+    });
+  });
+
+  // ── Export → Import roundtrip ───────────────────────────────────────────────
+
+  group('Export → Import roundtrip', () {
+    late KvStoreImpl store;
+    late StringBuffer out;
+    late StringBuffer err;
+
+    setUp(() async {
+      store = await _openStore();
+      out = StringBuffer();
+      err = StringBuffer();
+    });
+    tearDown(() => store.close());
+
+    test('export then import restores identical documents', () async {
+      // Seed three documents.
+      final ids = [_key('rnd1'), _key('rnd2'), _key('rnd3')];
+      final origDocs = [
+        {'id': ids[0], 'name': 'Alice', 'score': 10},
+        {'id': ids[1], 'name': 'Bob',   'score': 20},
+        {'id': ids[2], 'name': 'Carol', 'score': 30},
+      ];
+      for (final doc in origDocs) {
+        await _putDoc(store, 'people', doc);
+      }
+
+      // Export to a temp file.
+      final tmp = _TmpFile();
+      final exportCtx = _ctx(store, out: out, err: err);
+      final exportOk = await ExportCommand()
+          .execute(exportCtx, ['people'], {'output': tmp.path});
+      expect(exportOk, isTrue);
+
+      // Delete all documents from the namespace.
+      for (final id in ids) {
+        await store.delete('people', id);
+      }
+      // Verify namespace is empty.
+      final countOut = StringBuffer();
+      await CountCommand().execute(_ctx(store, out: countOut), ['people'], {});
+      expect((json.decode(countOut.toString()) as Map)['count'], equals(0));
+
+      // Re-import from the exported file.
+      final importOut = StringBuffer();
+      final importCtx = _ctx(store, out: importOut, err: err);
+      final importOk = await ImportCommand()
+          .execute(importCtx, ['people'], {'input': tmp.path});
+      expect(importOk, isTrue);
+      final importResult = json.decode(importOut.toString()) as Map;
+      expect(importResult['imported'], equals(3));
+
+      // Verify each document was restored correctly.
+      for (final orig in origDocs) {
+        final bytes = await store.get('people', orig['id'] as String);
+        expect(bytes, isNotNull,
+            reason: 'Missing document after re-import: ${orig['id']}');
+        final restored = ValueCodec.decode(bytes!);
+        expect(restored['name'], equals(orig['name']));
+        expect(restored['score'], equals(orig['score']));
+      }
+
+      tmp.delete();
+    });
+
+    test('export writes one line per document in NDJSON format', () async {
+      final id1 = _key('exp1');
+      final id2 = _key('exp2');
+      await _putDoc(store, 'items', {'id': id1, 'v': 1});
+      await _putDoc(store, 'items', {'id': id2, 'v': 2});
+
+      final tmp = _TmpFile();
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await ExportCommand()
+          .execute(ctx, ['items'], {'output': tmp.path});
+      expect(ok, isTrue);
+
+      final lines = io.File(tmp.path)
+          .readAsStringSync()
+          .trim()
+          .split('\n')
+          .where((l) => l.isNotEmpty)
+          .toList();
+      expect(lines, hasLength(2));
+      for (final line in lines) {
+        expect(() => json.decode(line), returnsNormally);
+      }
 
       tmp.delete();
     });
