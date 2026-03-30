@@ -2,13 +2,13 @@
 
 .PHONY: site dart_doc test default checks coverage license_check license_add styles clean spec
 
-COVERAGE_DIR=coverage
+COVERAGE_DIR=site/coverage
 
 ADDLICENSE_CONFIG=addlicense_config.txt
 
 default: test site checks
 
-site: site/ styles site/index.html site/spec.html site/api/index.html site/roadmap.html
+site: site/ styles site/index.html site/spec.html site/api/index.html site/roadmap.html site/primer.html
 
 site/:
 	mkdir -p site
@@ -28,6 +28,9 @@ site/index.html: site/ docs/index.md docs/.pandoc docs/template/header.html
 
 site/roadmap.html: site/ docs/roadmap.md docs/.pandoc docs/template/header.html
 	pandoc --defaults="docs/.pandoc" docs/roadmap.md -o "site/roadmap.html";
+
+site/primer.html: site/ docs/primer.md docs/.pandoc docs/template/header.html
+	pandoc --defaults="docs/.pandoc" docs/primer.md -o "site/primer.html";
 
 site/api/index.html: lib/*.dart lib/**/*.dart
 	dart doc -o site/api
@@ -58,7 +61,7 @@ checks: coverage license_check
 test:
 	dart test
 
-coverage:
+coverage: lib/*.dart lib/**/*.dart test/*.dart test/**/*.dart
 	dart pub global run coverage:test_with_coverage --out $(COVERAGE_DIR)
 	lcov --summary $(COVERAGE_DIR)/lcov.info
 	genhtml $(COVERAGE_DIR)/lcov.info -o $(COVERAGE_DIR)/html
