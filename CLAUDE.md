@@ -5,7 +5,7 @@ code in this repository.
 
 ## General
 
-The `doc/roadmap.md` is used to track future work items and their priority.
+The `docs/roadmap.md` is used to track future work items and their priority.
 
 We'll create plans for our work and place them in the `plans/` directory. When
 the planned work has been completed we'll move them to `plans/completed`.
@@ -60,10 +60,10 @@ make docs
 | 4     | Value encoding integration & `$meta` (MetaStore, DeviceId, generation counters)                  | ✅ Complete    |
 | 5     | Sync protocol (HighwaterMark, CloudAdapter, SyncEngine push/pull, ConsolidationCoordinator)      | ✅ Complete    |
 | 6     | Cache layer (LruMap, SessionCache, CacheTier, CacheLayer with generation invalidation)           | ✅ Complete    |
-| 7     | Query layer (KmdbDatabase, KmdbCollection, KmdbQuery, Filter DSL, secondary indexes, reactivity) | ⏳ Not started |
-| 8     | Platform hardening (OPFS web storage, Zstd FFI/WASM, cloud adapters, performance benchmarks)     | ⏳ Not started |
+| 7     | Query layer (KmdbDatabase, KmdbCollection, KmdbQuery, Filter DSL, secondary indexes, reactivity) | ✅ Complete    |
+| 8     | Platform hardening (OPFS web storage, Zstd FFI/WASM, cloud adapters, performance benchmarks)     | ✅ Complete    |
 
-All 452 tests pass as of 2026-03-29.
+All 600 tests pass as of 2026-03-30.
 
 ## Architecture
 
