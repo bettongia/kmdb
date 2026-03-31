@@ -31,10 +31,20 @@ The database path is a directory. It is created automatically on first use.
 Here's an example
 
 ```bash
+# Manually set an ID
 dart run bin/kmdb.dart mydb put notes \
   --value '{"id":"019242f4aac07b8fb7e8f1bfb2c3d4e5","title":"Hello"}'
 
+# Generate an ID automatically
+dart run bin/kmdb.dart mydb put notes --value '{"title": "New Note"}' --autoid
+
+dart run bin/kmdb.dart mydb get notes 019242f4aac07b8fb7e8f1bfb2c3d4e5
+
 dart run bin/kmdb.dart mydb collections
+
+dart run bin/kmdb.dart mydb count notes
+
+dart run bin/kmdb.dart mydb scan notes
 ```
 
 ### Global options

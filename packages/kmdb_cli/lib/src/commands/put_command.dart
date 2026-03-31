@@ -22,9 +22,10 @@ import 'command.dart';
 /// Upserts a document.
 ///
 /// The JSON document is read from `--value` (inline) or from stdin.
-/// The document must contain a string `id` field that becomes the key.
+/// The document must contain a string `id` field that becomes the key,
+/// or use `--autoid` to generate a new UUIDv7 identifier.
 ///
-/// Usage: `kmdb <db> put <namespace> [--value '<json>']`
+/// Usage: `kmdb <db> put <namespace> [--value '<json>'] [--autoid]`
 final class PutCommand implements CliCommand {
   const PutCommand();
 
@@ -36,7 +37,7 @@ final class PutCommand implements CliCommand {
       'Upsert a document. JSON read from --value or stdin.';
 
   @override
-  String get usage => 'put <namespace> [--value <json>]';
+  String get usage => 'put <namespace> [--value <json>] [--autoid]';
 
   @override
   Future<bool> execute(
@@ -71,12 +72,18 @@ final class PutCommand implements CliCommand {
       return false;
     }
 
+    final autoid = flags['autoid'] == true;
     final keyRaw = doc['id'];
-    if (keyRaw == null) {
-      ctx.writeError('Document must have a string "id" field.');
+    final String key;
+    if (keyRaw != null) {
+      key = '$keyRaw';
+    } else if (autoid) {
+      key = const UuidV7KeyGenerator().next();
+      doc['id'] = key;
+    } else {
+      ctx.writeError('Document must have a string "id" field, or use --autoid.');
       return false;
     }
-    final key = '$keyRaw';
 
     final encoded = ValueCodec.encode(doc);
     await ctx.store.put(namespace, key, encoded);

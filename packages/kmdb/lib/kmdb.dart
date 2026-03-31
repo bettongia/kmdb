@@ -47,6 +47,7 @@ export 'src/sync/local/memory_sync_adapter.dart' show MemorySyncAdapter;
 
 // ── Value encoding ────────────────────────────────────────────────────────────
 export 'src/encoding/value_codec.dart' show ValueCodec;
+export 'src/engine/util/key_codec.dart' show KeyGenerator, UuidV7KeyGenerator;
 
 // ── Cache ─────────────────────────────────────────────────────────────────────
 export 'src/cache/cache_layer.dart' show CacheLayer;

@@ -388,7 +388,7 @@ Options:
 Commands:
   Data:
     get <ns> <key>
-    put <ns> [--value <json>]
+    put <ns> [--value <json>] [--autoid]
     delete <ns> <key>
     scan <ns> [--filter <json>] [--order-by <field>] [--desc]
               [--limit <n>] [--offset <n>] [--key-prefix <str>]

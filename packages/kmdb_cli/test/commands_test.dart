@@ -211,6 +211,36 @@ void main() {
           await PutCommand().execute(ctx, [], {'value': '{"id":"$id"}'});
       expect(ok, isFalse);
     });
+
+    test('generates id when --autoid is provided and id is missing', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      const doc = '{"name":"Alice"}';
+      final ok = await PutCommand()
+          .execute(ctx, ['notes'], {'value': doc, 'autoid': true});
+      expect(ok, isTrue);
+
+      final decoded = json.decode(out.toString()) as List;
+      final generatedId = decoded[0]['id'] as String;
+      expect(generatedId, hasLength(32));
+
+      final result = await store.get('notes', generatedId);
+      expect(result, isNotNull);
+      expect(ValueCodec.decode(result!)['name'], equals('Alice'));
+    });
+
+    test('uses existing id when --autoid is provided but id is present',
+        () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final id = _key('preset');
+      final doc = '{"id":"$id","name":"Bob"}';
+      final ok = await PutCommand()
+          .execute(ctx, ['notes'], {'value': doc, 'autoid': true});
+      expect(ok, isTrue);
+
+      final result = await store.get('notes', id);
+      expect(result, isNotNull);
+      expect(ValueCodec.decode(result!)['name'], equals('Bob'));
+    });
   });
 
   // ── DeleteCommand ───────────────────────────────────────────────────────────
