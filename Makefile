@@ -68,6 +68,7 @@ site/spec.pdf: site/ docs/spec/*.md
 
 site/primer.pdf: site/ docs/primer.md
 	pandoc docs/primer.md --pdf-engine=xelatex -o site/primer.pdf \
+		--defaults="docs/.pandoc_pdf" \
 		-V mainfont="DejaVu Sans" \
   		-V monofont="DejaVu Sans Mono" \
 		-H docs/template/header.tex
