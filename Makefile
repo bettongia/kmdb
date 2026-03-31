@@ -1,6 +1,7 @@
 .DEFAULT_GOAL := default
 
-.PHONY: site dart_doc test default checks coverage license_check license_add styles clean spec
+.PHONY: test site dart_doc default checks coverage license_check license_add styles clean
+
 
 COVERAGE_DIR=site/coverage
 KMDB_PKG=packages/kmdb
@@ -8,9 +9,24 @@ KMDB_CLI_PKG=packages/kmdb_cli
 
 ADDLICENSE_CONFIG=addlicense_config.txt
 
-default: test site checks
+default: site/ checks site
 
-site: site/ styles site/index.html site/spec.html site/api/index.html site/roadmap.html site/primer.html
+test: test.log
+
+test.log: $(KMDB_PKG)/**/*.dart $(KMDB_CLI_PKG)/**/*.dart
+	melos test --no-select | tee test.log
+
+checks: coverage license_check
+
+license_check:
+	melos licenses
+
+license_add:
+	melos licenses:add
+
+coverage: site/coverage/html/index.html
+
+site: site/ styles site/index.html site/spec.html site/api/index.html site/roadmap.html site/primer.html site/spec.pdf site/primer.pdf
 
 site/:
 	mkdir -p site
@@ -34,18 +50,16 @@ site/roadmap.html: site/ docs/roadmap.md docs/.pandoc docs/template/header.html
 site/primer.html: site/ docs/primer.md docs/.pandoc docs/template/header.html
 	pandoc --defaults="docs/.pandoc" docs/primer.md -o "site/primer.html";
 
-site/api/index.html: $(KMDB_PKG)/lib/*.dart $(KMDB_PKG)/lib/**/*.dart
+site/api/index.html: $(KMDB_PKG)/**/*.dart
 	dart doc $(KMDB_PKG) -o site/api
 
 site/spec.epub: site/ docs/spec/*.md
 	pandoc docs/spec/*.md -o site/spec.epub \
 		--include-before-body docs/template/preface.md
 
-# To get PDFs building on a Mac:
-# brew install --cask mactex
-# sudo tlmgr update --self --all
-# sudo tlmgr paper a4
-# brew install --cask font-dejavu
+site/coverage/html/index.html: $(KMDB_PKG)/**/*.dart $(KMDB_CLI_PKG)/**/*.dart
+	melos coverage
+
 site/spec.pdf: site/ docs/spec/*.md
 	pandoc docs/spec/*.md --pdf-engine=xelatex -o site/spec.pdf \
 		-V mainfont="DejaVu Sans" \
@@ -58,27 +72,9 @@ site/primer.pdf: site/ docs/primer.md
   		-V monofont="DejaVu Sans Mono" \
 		-H docs/template/header.tex
 
-checks: coverage license_check
+$(KMDB_PKG)/**/*.dart:
 
-test:
-	dart test -p vm $(KMDB_PKG)
-	dart test -p vm $(KMDB_CLI_PKG)
-
-coverage: $(KMDB_PKG)/lib/*.dart $(KMDB_PKG)/lib/**/*.dart $(KMDB_PKG)/test/*.dart $(KMDB_PKG)/test/**/*.dart
-	dart pub global run coverage:test_with_coverage --package=$(KMDB_PKG) --out $(COVERAGE_DIR)/kmdb
-	dart pub global run coverage:test_with_coverage --package=$(KMDB_CLI_PKG) --out $(COVERAGE_DIR)/kmdb_cli
-	lcov --summary $(COVERAGE_DIR)/kmdb/lcov.info
-	lcov --summary $(COVERAGE_DIR)/kmdb_cli/lcov.info
-	genhtml $(COVERAGE_DIR)/kmdb/lcov.info -o $(COVERAGE_DIR)/kmdb/html
-	genhtml $(COVERAGE_DIR)/kmdb_cli/lcov.info -o $(COVERAGE_DIR)/kmdb_cli/html
-
-license_check:
-	@echo "Checking for license headers..."
-	cat $(ADDLICENSE_CONFIG) | xargs addlicense --check
-
-license_add:
-	cat $(ADDLICENSE_CONFIG) | xargs addlicense
+$(KMDB_CLI_PKG)/**/*.dart:
 
 clean:
 	rm -rf site
-	rm -rf coverage
