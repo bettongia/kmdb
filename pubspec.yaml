@@ -7,3 +7,64 @@ environment:
 workspace:
   - packages/kmdb
   - packages/kmdb_cli
+
+dev_dependencies:
+  melos: ^7.5.0
+
+melos:
+  scripts:
+    test:
+      description: Test all packages
+      exec: dart test
+      packageFilters:
+        dirExists: test
+
+    coverage:
+      steps:
+        - coverage:clean
+        - coverage:generate
+        - coverage:combine
+        - coverage:report
+
+    coverage:clean:
+      run: rm -rf coverage
+      exec:
+        dir-exists: coverage
+
+    coverage:generate:
+      description: Test all packages with coverage
+      run: |
+        dart pub global run coverage:test_with_coverage &&
+        lcov --summary coverage/lcov.info
+      exec:
+        concurrency: 1
+        dir-exists: test
+
+    coverage:combine:
+      description: Combine coverage across packages
+      steps:
+        - rm -rf $MELOS_ROOT_PATH/site/coverage
+        - mkdir $MELOS_ROOT_PATH/site/coverage
+        - coverage:aggregate
+        - lcov --summary site/coverage/lcov.info
+
+    coverage:aggregate:
+      run: $MELOS_ROOT_PATH/scripts/combine_coverage.sh
+      exec:
+        file-exists: coverage/lcov.info
+        concurrency: 1
+
+    coverage:report:
+      run: |
+        genhtml $MELOS_ROOT_PATH/site/coverage/lcov.info \
+          -o=$MELOS_ROOT_PATH/site/coverage/html
+
+    licenses:add:
+      run: |
+        cat addlicense_config.txt | xargs addlicense
+      description: Add the license header in all necessary files.
+
+    licenses:
+      run: |
+        cat addlicense_config.txt | xargs addlicense --check
+      description: Check the license header in all necessary files.
