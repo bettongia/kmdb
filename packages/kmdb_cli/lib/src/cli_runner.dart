@@ -193,16 +193,18 @@ abstract final class KmdbCli {
 
     final ctx = CommandContext(store: store, mode: mode, out: outSink);
 
-    // ── Collect command lines ────────────────────────────────────────────────
+    // ── Collect command source ───────────────────────────────────────────────
     // Sources (in priority order):
-    //  1. Inline tokens (remaining[1..])
+    //  1. Inline tokens (remaining[1..]) — already tokenised by the shell
     //  2. --read <file>
     //  3. stdin (when no inline commands and stdin is not a tty)
-    final List<String> commandLines;
+    List<String>? inlineTokens;
+    List<String>? commandLines;
 
     if (remaining.length > 1) {
-      // Inline command tokens after the db path.
-      commandLines = remaining.sublist(1);
+      // The shell already split the command into tokens; use them directly so
+      // values containing spaces (e.g. JSON) are not re-split.
+      inlineTokens = remaining.sublist(1);
     } else if (readPath != null) {
       commandLines = await _readLines(readPath, io.stderr);
       if (commandLines.isEmpty && !io.File(readPath).existsSync()) {
@@ -224,14 +226,20 @@ abstract final class KmdbCli {
     // ── Execute commands ─────────────────────────────────────────────────────
     var exitCode = 0;
     try {
-      for (final raw in commandLines) {
-        final trimmed = raw.trim();
-        if (trimmed.isEmpty || trimmed.startsWith('#')) continue;
+      if (inlineTokens != null) {
+        // Inline args are already tokenised by the shell; dispatch directly.
+        final success = await _dispatchTokens(inlineTokens, ctx, io.stderr);
+        if (!success) exitCode = 1;
+      } else {
+        for (final raw in commandLines!) {
+          final trimmed = raw.trim();
+          if (trimmed.isEmpty || trimmed.startsWith('#')) continue;
 
-        final success = await _executeCommandLine(trimmed, ctx, io.stderr);
-        if (!success) {
-          exitCode = 1;
-          if (!continueOnError) break;
+          final success = await _executeCommandLine(trimmed, ctx, io.stderr);
+          if (!success) {
+            exitCode = 1;
+            if (!continueOnError) break;
+          }
         }
       }
     } finally {
@@ -247,7 +255,7 @@ abstract final class KmdbCli {
 
   // ── Command line parsing & dispatch ───────────────────────────────────────
 
-  /// Parses [line] into a command name + args + flags, then dispatches.
+  /// Parses [line] into tokens, then dispatches.
   ///
   /// Returns `true` on success, `false` on error.
   static Future<bool> _executeCommandLine(
@@ -261,7 +269,20 @@ abstract final class KmdbCli {
       return false;
     }
 
-    final tokens = _tokenise(line);
+    return _dispatchTokens(_tokenize(line), ctx, errSink);
+  }
+
+  /// Dispatches a pre-tokenized command to the appropriate [CliCommand].
+  ///
+  /// Used both by [_executeCommandLine] (after tokenizing a string) and
+  /// directly for inline CLI args that the shell has already split.
+  ///
+  /// Returns `true` on success, `false` on error.
+  static Future<bool> _dispatchTokens(
+    List<String> tokens,
+    CommandContext ctx,
+    StringSink errSink,
+  ) async {
     if (tokens.isEmpty) return true;
 
     final commandName = tokens[0];
@@ -308,7 +329,7 @@ abstract final class KmdbCli {
   /// Splits [line] into tokens, respecting single and double quoted strings.
   ///
   /// Quoted strings may contain spaces. Quotes are stripped from the result.
-  static List<String> _tokenise(String line) {
+  static List<String> _tokenize(String line) {
     final tokens = <String>[];
     final buf = StringBuffer();
     String? quote;
