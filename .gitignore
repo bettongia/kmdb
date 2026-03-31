@@ -12,3 +12,4 @@ sandbox/
 coverage
 site
 test.log
+packages/kmdb_cli/bin/kmdb.exe

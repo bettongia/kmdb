@@ -28,27 +28,36 @@ echo "<command>" | kmdb [options] <database-path>
 
 The database path is a directory. It is created automatically on first use.
 
+Here's an example
+
+```bash
+dart run bin/kmdb.dart mydb put notes \
+  --value '{"id":"019242f4aac07b8fb7e8f1bfb2c3d4e5","title":"Hello"}'
+
+dart run bin/kmdb.dart mydb collections
+```
+
 ### Global options
 
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--mode <mode>` | `-m` | Output format (default: `json`) |
-| `--output <file>` | `-o` | Write output to a file instead of stdout |
-| `--read <file>` | `-r` | Read commands from a script file |
-| `--continue-on-error` | | Keep running after a command error (default: stop) |
-| `--version` | | Print version and exit |
-| `--help` | `-h` | Print help and exit |
+| Flag                  | Short | Description                                        |
+| --------------------- | ----- | -------------------------------------------------- |
+| `--mode <mode>`       | `-m`  | Output format (default: `json`)                    |
+| `--output <file>`     | `-o`  | Write output to a file instead of stdout           |
+| `--read <file>`       | `-r`  | Read commands from a script file                   |
+| `--continue-on-error` |       | Keep running after a command error (default: stop) |
+| `--version`           |       | Print version and exit                             |
+| `--help`              | `-h`  | Print help and exit                                |
 
 ### Output modes
 
-| Mode | Description |
-|------|-------------|
-| `json` | Indented JSON array (default) |
-| `compact` | Single-line JSON array |
-| `ndjson` | One JSON object per line (newline-delimited JSON) |
-| `table` | Fixed-width ASCII table |
-| `csv` | Comma-separated values with header row |
-| `line` | `field = value` pairs, documents separated by blank lines |
+| Mode      | Description                                               |
+| --------- | --------------------------------------------------------- |
+| `json`    | Indented JSON array (default)                             |
+| `compact` | Single-line JSON array                                    |
+| `ndjson`  | One JSON object per line (newline-delimited JSON)         |
+| `table`   | Fixed-width ASCII table                                   |
+| `csv`     | Comma-separated values with header row                    |
+| `line`    | `field = value` pairs, documents separated by blank lines |
 
 ## Commands
 
@@ -59,7 +68,7 @@ The database path is a directory. It is created automatically on first use.
 Retrieve a single document by its key.
 
 ```bash
-kmdb mydb.kmdb get notes 019242f4aac07b8fb7e8f1bfb2c3d4e5
+kmdb mydb get notes 019242f4aac07b8fb7e8f1bfb2c3d4e5
 ```
 
 #### `put <namespace> [--value <json>]`
@@ -68,10 +77,10 @@ Upsert a document. The document must be a JSON object with a string `id` field.
 If `--value` is omitted the JSON is read from stdin.
 
 ```bash
-kmdb mydb.kmdb put notes --value '{"id":"019242f4aac07b8fb7e8f1bfb2c3d4e5","title":"Hello"}'
+kmdb mydb put notes --value '{"id":"019242f4aac07b8fb7e8f1bfb2c3d4e5","title":"Hello"}'
 
 # From stdin
-echo '{"id":"019242f4...","title":"Hello"}' | kmdb mydb.kmdb put notes
+echo '{"id":"019242f4...","title":"Hello"}' | kmdb mydb put notes
 ```
 
 #### `delete <namespace> <key>`
@@ -79,7 +88,7 @@ echo '{"id":"019242f4...","title":"Hello"}' | kmdb mydb.kmdb put notes
 Delete a document by key (idempotent — succeeds even if the key does not exist).
 
 ```bash
-kmdb mydb.kmdb delete notes 019242f4aac07b8fb7e8f1bfb2c3d4e5
+kmdb mydb delete notes 019242f4aac07b8fb7e8f1bfb2c3d4e5
 ```
 
 #### `scan <namespace> [options]`
@@ -87,21 +96,21 @@ kmdb mydb.kmdb delete notes 019242f4aac07b8fb7e8f1bfb2c3d4e5
 Scan all documents in a namespace with optional filtering, ordering, and
 pagination.
 
-| Flag | Description |
-|------|-------------|
-| `--filter <json>` | JSON filter expression (see [Filters](#filters)) |
-| `--order-by <field>` | Sort by field (string or numeric comparison) |
-| `--desc` | Reverse sort order |
-| `--limit <n>` | Return at most n documents |
-| `--offset <n>` | Skip the first n documents |
+| Flag                 | Description                                      |
+| -------------------- | ------------------------------------------------ |
+| `--filter <json>`    | JSON filter expression (see [Filters](#filters)) |
+| `--order-by <field>` | Sort by field (string or numeric comparison)     |
+| `--desc`             | Reverse sort order                               |
+| `--limit <n>`        | Return at most n documents                       |
+| `--offset <n>`       | Skip the first n documents                       |
 | `--key-prefix <str>` | Restrict scan to keys beginning with this prefix |
 
 ```bash
 # All documents
-kmdb mydb.kmdb scan notes
+kmdb mydb scan notes
 
 # Active notes, most recent first, page 2
-kmdb mydb.kmdb scan notes \
+kmdb mydb scan notes \
   --filter '{"field":"status","op":"eq","value":"active"}' \
   --order-by updatedAt --desc --limit 20 --offset 20
 ```
@@ -111,8 +120,8 @@ kmdb mydb.kmdb scan notes \
 Count documents in a namespace, optionally filtered.
 
 ```bash
-kmdb mydb.kmdb count notes
-kmdb mydb.kmdb count notes --filter '{"field":"status","op":"eq","value":"active"}'
+kmdb mydb count notes
+kmdb mydb count notes --filter '{"field":"status","op":"eq","value":"active"}'
 ```
 
 ---
@@ -124,7 +133,7 @@ kmdb mydb.kmdb count notes --filter '{"field":"status","op":"eq","value":"active
 List all user-visible namespaces (collections) in the database.
 
 ```bash
-kmdb mydb.kmdb collections
+kmdb mydb collections
 ```
 
 #### `stats`
@@ -132,7 +141,7 @@ kmdb mydb.kmdb collections
 Show storage statistics: SSTable counts per level and byte totals.
 
 ```bash
-kmdb mydb.kmdb stats
+kmdb mydb stats
 ```
 
 #### `info`
@@ -140,7 +149,7 @@ kmdb mydb.kmdb stats
 Show database identity: directory path, device ID, and current HLC timestamp.
 
 ```bash
-kmdb mydb.kmdb info
+kmdb mydb info
 ```
 
 ---
@@ -153,22 +162,22 @@ Export a namespace to newline-delimited JSON (NDJSON). Writes to stdout if
 `--output` is omitted.
 
 ```bash
-kmdb mydb.kmdb export notes --output notes.ndjson
+kmdb mydb export notes --output notes.ndjson
 ```
 
 #### `import <namespace> [options]`
 
-Import NDJSON documents into a namespace. Each line must be a JSON object with
-a string `id` field. Reads from stdin if `--input` is omitted.
+Import NDJSON documents into a namespace. Each line must be a JSON object with a
+string `id` field. Reads from stdin if `--input` is omitted.
 
-| Flag | Description |
-|------|-------------|
-| `--input <file>` | Read from a file instead of stdin |
+| Flag                   | Description                               |
+| ---------------------- | ----------------------------------------- |
+| `--input <file>`       | Read from a file instead of stdin         |
 | `--on-conflict <mode>` | `replace` (default), `ignore`, or `error` |
 
 ```bash
-kmdb mydb.kmdb import notes --input notes.ndjson
-kmdb mydb.kmdb import notes --input notes.ndjson --on-conflict ignore
+kmdb mydb import notes --input notes.ndjson
+kmdb mydb import notes --input notes.ndjson --on-conflict ignore
 ```
 
 #### `dump [--output <file>]`
@@ -178,7 +187,7 @@ comments. Writes to stdout if `--output` is omitted. The output is compatible
 with `restore`.
 
 ```bash
-kmdb mydb.kmdb dump --output backup.ndjson
+kmdb mydb dump --output backup.ndjson
 ```
 
 #### `restore [--input <file>]`
@@ -187,7 +196,7 @@ Restore the entire database from a dump file produced by `dump`. Reads from
 stdin if `--input` is omitted.
 
 ```bash
-kmdb mydb.kmdb restore --input backup.ndjson
+kmdb mydb restore --input backup.ndjson
 ```
 
 ---
@@ -199,7 +208,7 @@ kmdb mydb.kmdb restore --input backup.ndjson
 Force the current in-memory memtable to flush to an SSTable on disk.
 
 ```bash
-kmdb mydb.kmdb flush
+kmdb mydb flush
 ```
 
 #### `compact`
@@ -207,16 +216,16 @@ kmdb mydb.kmdb flush
 Run full compaction — merges SSTables across all levels until stable.
 
 ```bash
-kmdb mydb.kmdb compact
+kmdb mydb compact
 ```
 
 #### `verify`
 
-Scan all documents in all namespaces and attempt to decode each one. Reports
-any documents that cannot be decoded (corrupt values).
+Scan all documents in all namespaces and attempt to decode each one. Reports any
+documents that cannot be decoded (corrupt values).
 
 ```bash
-kmdb mydb.kmdb verify
+kmdb mydb verify
 ```
 
 ---
@@ -236,25 +245,25 @@ field comparisons or logical combinations of multiple conditions.
 {"field": "deletedAt", "op": "isNull"}
 ```
 
-| Operator | Description |
-|----------|-------------|
-| `eq` | Equal to value |
-| `ne` | Not equal to value |
-| `lt` | Less than value |
-| `lte` | Less than or equal to value |
-| `gt` | Greater than value |
-| `gte` | Greater than or equal to value |
-| `between` | Inclusive range — value must be `[min, max]` |
-| `in` | Field value is one of the listed values |
-| `notIn` | Field value is not in the listed values |
-| `isNull` | Field is absent or null |
-| `isNotNull` | Field is present and non-null |
-| `isTrue` | Field is boolean `true` |
-| `isFalse` | Field is boolean `false` |
-| `startsWith` | String field starts with value |
-| `endsWith` | String field ends with value |
-| `contains` | String field contains value as a substring |
-| `containsAll` | Array field contains all listed values |
+| Operator      | Description                                    |
+| ------------- | ---------------------------------------------- |
+| `eq`          | Equal to value                                 |
+| `ne`          | Not equal to value                             |
+| `lt`          | Less than value                                |
+| `lte`         | Less than or equal to value                    |
+| `gt`          | Greater than value                             |
+| `gte`         | Greater than or equal to value                 |
+| `between`     | Inclusive range — value must be `[min, max]`   |
+| `in`          | Field value is one of the listed values        |
+| `notIn`       | Field value is not in the listed values        |
+| `isNull`      | Field is absent or null                        |
+| `isNotNull`   | Field is present and non-null                  |
+| `isTrue`      | Field is boolean `true`                        |
+| `isFalse`     | Field is boolean `false`                       |
+| `startsWith`  | String field starts with value                 |
+| `endsWith`    | String field ends with value                   |
+| `contains`    | String field contains value as a substring     |
+| `containsAll` | Array field contains all listed values         |
 | `containsAny` | Array field contains at least one listed value |
 
 ### Nested field paths
@@ -262,7 +271,7 @@ field comparisons or logical combinations of multiple conditions.
 Use dot notation to reach into nested objects:
 
 ```json
-{"field": "address.city", "op": "eq", "value": "London"}
+{ "field": "address.city", "op": "eq", "value": "London" }
 ```
 
 ### Logical combinators
@@ -287,9 +296,9 @@ Combinators can be nested to any depth.
 
 ## Script files
 
-Use `--read` to execute a series of commands from a file. Each line is a
-command exactly as you would type it on the terminal. Lines beginning with `#`
-are treated as comments and ignored.
+Use `--read` to execute a series of commands from a file. Each line is a command
+exactly as you would type it on the terminal. Lines beginning with `#` are
+treated as comments and ignored.
 
 ```
 # migrations/001.kmdb
@@ -300,7 +309,7 @@ put categories --value '{"id":"019242f4aac07b8fb7e8f1bfb2c3d402","name":"Persona
 ```
 
 ```bash
-kmdb mydb.kmdb --read migrations/001.kmdb
+kmdb mydb --read migrations/001.kmdb
 ```
 
 By default execution stops on the first error. Pass `--continue-on-error` to
@@ -314,18 +323,18 @@ process all lines regardless.
 
 ```bash
 # Count active documents across two databases
-for db in shard1.kmdb shard2.kmdb; do
+for db in shard1 shard2; do
   kmdb "$db" count tasks --filter '{"field":"status","op":"eq","value":"active"}'
 done
 
 # Export, transform with jq, and re-import
-kmdb mydb.kmdb export notes --mode ndjson \
+kmdb mydb export notes --mode ndjson \
   | jq -c '. + {"migrated": true}' \
-  | kmdb mydb.kmdb import notes_v2
+  | kmdb mydb import notes_v2
 
 # Backup all databases to timestamped files
-for db in *.kmdb; do
-  kmdb "$db" dump --output "backups/$(basename "$db" .kmdb)-$(date +%Y%m%d).ndjson"
+for db in *; do
+  kmdb "$db" dump --output "backups/$(basename "$db" )-$(date +%Y%m%d).ndjson"
 done
 ```
 
@@ -333,7 +342,7 @@ done
 
 ## Exit codes
 
-| Code | Meaning |
-|------|---------|
-| `0` | All commands succeeded |
-| `1` | One or more commands failed (error written to stderr) |
+| Code | Meaning                                               |
+| ---- | ----------------------------------------------------- |
+| `0`  | All commands succeeded                                |
+| `1`  | One or more commands failed (error written to stderr) |
