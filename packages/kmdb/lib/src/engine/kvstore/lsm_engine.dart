@@ -725,9 +725,9 @@ final class LsmEngine {
 
   // ── Close ─────────────────────────────────────────────────────────────────
 
-  /// Flushes the active memtable and releases the LOCK file.
-  Future<void> close() async {
-    if (_active.length > 0) await flush();
+  /// Flushes the active memtable (if [flush] is true) and releases the LOCK file.
+  Future<void> close({bool flush = true}) async {
+    if (flush && _active.length > 0) await this.flush();
     await _adapter.releaseLock('$_dbDir/LOCK');
     await _writeEventsController.close();
   }

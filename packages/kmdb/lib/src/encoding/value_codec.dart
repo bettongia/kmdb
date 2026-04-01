@@ -31,7 +31,7 @@ const int _kCompressionThreshold = 64;
 ///
 /// The encoding pipeline is:
 /// 1. Serialize the document to CBOR bytes via [CborEncoder].
-/// 2. Optionally compress — Zstd on native, Deflate on web (see [compression]).
+/// 2. Optionally compress — Zstd on native, Deflate on web.
 /// 3. Prepend a 1-byte [CompressionFlag].
 ///
 /// ## Format

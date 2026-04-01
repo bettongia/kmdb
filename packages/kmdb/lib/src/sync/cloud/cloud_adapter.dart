@@ -113,10 +113,9 @@ abstract interface class CloudAdapter {
   ///
   /// ## ETag semantics
   ///
-  /// The ETag format is implementation-specific. [MemorySyncAdapter] uses
-  /// a monotonically-increasing version counter. [LocalDirectoryAdapter]
-  /// uses the file's content length (sufficient for Phase 5; a proper
-  /// content hash is added in Phase 8).
+  /// The ETag format is implementation-specific. `MemorySyncAdapter` uses
+  /// a monotonically-increasing version counter. `LocalDirectoryAdapter`
+  /// uses the file's content hash.
   Future<bool> compareAndSwap(
     String path,
     Uint8List newBytes, {

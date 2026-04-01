@@ -21,7 +21,7 @@
 /// truncation: for example, when interior records are corrupt while later
 /// records are intact, or when a file is wholly unreadable.
 ///
-/// Use [WalReader.replayStrict] to opt in to strict mode where any checksum
+/// Use `WalReader.replayStrict` to opt in to strict mode where any checksum
 /// failure causes this exception to be thrown rather than silently stopping
 /// replay.
 ///
