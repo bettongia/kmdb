@@ -2,7 +2,11 @@
 
 ## UUIDv7 Document Keys
 
-Document keys are UUIDv7 values generated at insert time. UUIDv7 embeds a
+Document keys are UUIDv7 values generated at insert time by the system.
+The identifier is system-assigned and cannot be influenced by the user during
+insertion. This ensures the structural and performance guarantees of the time-ordered
+keys are maintained.
+ UUIDv7 embeds a
 millisecond-precision timestamp in the most significant bits, providing:
 
 - **Index locality:** Sequential inserts land at the SSTable tail, avoiding page
