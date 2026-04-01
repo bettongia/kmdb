@@ -104,6 +104,7 @@ abstract final class KmdbCli {
     var continueOnError = false;
     var showVersion = false;
     var showHelp = false;
+    var flushOnExit = true;
 
     final remaining = <String>[];
     var i = 0;
@@ -116,6 +117,10 @@ abstract final class KmdbCli {
           showHelp = true;
         case '--continue-on-error':
           continueOnError = true;
+        case '--flush':
+          flushOnExit = true;
+        case '--no-flush':
+          flushOnExit = false;
         case '--mode' || '-m':
           i++;
           if (i >= args.length) {
@@ -243,7 +248,7 @@ abstract final class KmdbCli {
         }
       }
     } finally {
-      await store.close();
+      await store.close(flush: flushOnExit);
       if (fileSink != null) {
         await fileSink.flush();
         await fileSink.close();
@@ -382,6 +387,8 @@ Options:
   --output, -o <file>  Write output to file instead of stdout
   --read, -r <file>    Read commands from a script file
   --continue-on-error  Keep running after a command error
+  --flush              Flush memtable to SSTable on exit (default)
+  --no-flush           Skip flush on exit (data remains in WAL)
   --version            Print version and exit
   --help, -h           Print this help and exit
 

@@ -108,7 +108,7 @@ final class CacheLayer implements KvStore {
 
   // ── KvStore — read path (cache-aware) ─────────────────────────────────────
 
-  /// Returns the raw bytes for [(namespace, key)], using the session cache.
+  /// Returns the raw bytes for (namespace, key), using the session cache.
   ///
   /// Lookup order:
   /// 1. Read the current generation counter from `$meta`.
@@ -170,9 +170,9 @@ final class CacheLayer implements KvStore {
 
   /// Cancels the write-event subscription and closes the underlying store.
   @override
-  Future<void> close() async {
+  Future<void> close({bool flush = true}) async {
     await _writeEventSub.cancel();
-    await _store.close();
+    await _store.close(flush: flush);
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────

@@ -90,10 +90,10 @@ abstract interface class KvStore {
   ///
   /// 1. Validates the SSTable footer checksum.
   /// 2. Writes the bytes to the local `sst/` directory.
-  /// 3. Appends a [VersionEdit] to the Manifest recording the new L0 file.
+  /// 3. Appends a VersionEdit to the Manifest recording the new L0 file.
   /// 4. Triggers compaction if needed.
   ///
-  /// Throws [CorruptedSstableException] if the footer checksum fails. Throws
+  /// Throws an exception if the footer checksum fails. Throws
   /// [FormatException] if [filename] does not match the SSTable naming
   /// convention.
   ///
@@ -126,11 +126,16 @@ abstract interface class KvStore {
   /// clock value. Intended for the CLI `info` command.
   Future<StoreInfo> storeInfo();
 
-  /// Closes the store, flushing the active memtable and releasing the LOCK.
+  /// Closes the store, optionally flushing the active memtable and releasing
+  /// the LOCK.
+  ///
+  /// If [flush] is true (the default), the active memtable is flushed to an
+  /// SSTable on disk before closing. If false, the data remains in the WAL/memtable
+  /// and will be recovered by the next instance that opens this path.
   ///
   /// After [close] returns the instance must not be used again. A new
   /// instance can be opened on the same path.
-  Future<void> close();
+  Future<void> close({bool flush = true});
 }
 
 // ── StoreStats ────────────────────────────────────────────────────────────────
@@ -197,7 +202,7 @@ final class StoreInfo {
 /// A raw key-value entry returned by [KvStore.scan].
 typedef KvEntry = ({String key, Uint8List value});
 
-/// Describes what happened during [KvStore.open] crash recovery.
+/// Describes what happened during KvStoreImpl.open crash recovery.
 final class OpenResult {
   const OpenResult({
     this.hadInterruptedWrites = false,

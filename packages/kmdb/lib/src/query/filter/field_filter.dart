@@ -101,8 +101,8 @@ final class Field {
   /// Matches documents where the (String) field ends with [suffix].
   Filter endsWith(String suffix) => _FieldFilter(path, _Op.endsWith, suffix);
 
-  /// Matches documents where the (String) field contains [substring], OR
-  /// where the array field contains [element] as an element.
+  /// Matches documents where the (String) field contains the given substring, OR
+  /// where the array field contains the given element.
   ///
   /// - If the resolved value is a `String`, performs a substring match.
   /// - If the resolved value is a `List`, checks for element membership.

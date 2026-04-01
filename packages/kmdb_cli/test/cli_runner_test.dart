@@ -325,4 +325,75 @@ count things
       expect(result.stderr, contains('unknown command'));
     });
   });
+
+  // ── --no-flush and flush command ──────────────────────────────────────────
+
+  group('KmdbCli — --no-flush and flush command', () {
+    late _TmpDir tmp;
+
+    setUp(() => tmp = _TmpDir());
+    tearDown(() => tmp.delete());
+
+    test('persists WAL and skips SST creation with --no-flush', () async {
+      final dbPath = tmp.file('db');
+      final id = 'a' * 32;
+
+      // Run put with --no-flush.
+      final putResult = await _run(
+          [dbPath, '--no-flush', 'put', 'notes', '--value', '{"id":"$id"}']);
+      expect(putResult.exitCode, equals(0), reason: putResult.stderr);
+
+      // Verify WAL exists, but no SST files.
+      final walFile = io.File(p.join(dbPath, 'wal-00001.log'));
+      expect(walFile.existsSync(), isTrue, reason: 'WAL should exist');
+
+      final sstDir = io.Directory(p.join(dbPath, 'sst'));
+      final sstFiles = sstDir
+          .listSync()
+          .where((f) => f.path.endsWith('.sst'))
+          .toList();
+      expect(sstFiles, isEmpty, reason: 'SST should NOT exist');
+
+      // Next command should still read the data (via WAL recovery).
+      final getResult = await _run([dbPath, 'get', 'notes', id]);
+      expect(getResult.exitCode, equals(0), reason: getResult.stderr);
+      final docs = json.decode(getResult.stdout) as List;
+      expect(docs[0]['id'], equals(id));
+
+      // Running flush command should move data to SST and delete WAL.
+      final flushResult = await _run([dbPath, 'flush']);
+      expect(flushResult.exitCode, equals(0), reason: flushResult.stderr);
+
+      // Verify WAL is gone (it's rotated/deleted on flush).
+      expect(walFile.existsSync(), isFalse, reason: 'WAL should be deleted');
+      
+      // Verify SST exists now.
+      final sstFilesAfter = sstDir
+          .listSync()
+          .where((f) => f.path.endsWith('.sst'))
+          .toList();
+      expect(sstFilesAfter, isNotEmpty, reason: 'SST SHOULD exist after flush');
+    });
+
+    test('flushes by default without --no-flush', () async {
+      final dbPath = tmp.file('db');
+      final id = 'b' * 32;
+
+      // Run put without flags (defaulting to --flush).
+      final putResult =
+          await _run([dbPath, 'put', 'notes', '--value', '{"id":"$id"}']);
+      expect(putResult.exitCode, equals(0), reason: putResult.stderr);
+
+      // Verify WAL is gone and SST exists.
+      final walFile = io.File(p.join(dbPath, 'wal-00001.log'));
+      expect(walFile.existsSync(), isFalse, reason: 'WAL should NOT exist (flushed)');
+
+      final sstDir = io.Directory(p.join(dbPath, 'sst'));
+      final sstFiles = sstDir
+          .listSync()
+          .where((f) => f.path.endsWith('.sst'))
+          .toList();
+      expect(sstFiles, isNotEmpty, reason: 'SST SHOULD exist (flushed)');
+    });
+  });
 }

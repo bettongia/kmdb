@@ -178,7 +178,7 @@ final class KvStoreImpl implements KvStore {
   Stream<String> get writeEvents => _engine.writeEvents;
 
   @override
-  Future<void> close() async {
+  Future<void> close({bool flush = true}) async {
     // Only write a tombstone to clear the dirty flag if the flag actually exists
     // in $meta. Writing an unnecessary tombstone would cause a memtable write,
     // which triggers a flush and potentially a compaction — both wasteful for
@@ -187,7 +187,7 @@ final class KvStoreImpl implements KvStore {
     if (_dirtyFlagPresent) {
       await _meta.clearDirty();
     }
-    await _engine.close();
+    await _engine.close(flush: flush);
   }
 
   /// Loads the stored device ID from `$meta`, or generates and persists a new

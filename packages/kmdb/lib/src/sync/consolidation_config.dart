@@ -59,7 +59,7 @@ final class ConsolidationConfig {
   /// Default: 0.5 (attempt renewal at the halfway point).
   final double renewalFraction;
 
-  /// Number of days since [HighwaterMark.lastUpdated] before a peer is
+  /// Number of days since a peer's last update before it is
   /// considered stale and excluded from consolidation input selection.
   ///
   /// Default: 90 days.

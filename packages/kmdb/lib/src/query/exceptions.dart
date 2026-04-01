@@ -47,7 +47,7 @@ final class DocumentNotFoundException implements Exception {
 }
 
 /// Thrown when a query or collection operation requires a fresh secondary index
-/// but the index is currently [IndexStatus.stale] or [IndexStatus.building].
+/// but the index is currently stale or building.
 ///
 /// KMDB secondary indexes are rebuilt lazily in the background. Most callers
 /// can tolerate a temporarily stale index because the query layer falls back to

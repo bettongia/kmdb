@@ -61,7 +61,7 @@ final class _CountingStore implements KvStore {
   @override
   Stream<String> get writeEvents => _inner.writeEvents;
   @override
-  Future<void> close() => _inner.close();
+  Future<void> close({bool flush = true}) => _inner.close(flush: flush);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

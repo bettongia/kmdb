@@ -164,10 +164,11 @@ final class KmdbDatabase {
   /// ```
   Future<void> onResume() => _cache.onResume();
 
-  /// Closes the database, flushing the active memtable and releasing the lock.
+  /// Closes the database, optionally flushing the active memtable and
+  /// releasing the lock.
   ///
   /// After [close] returns, this instance must not be used again.
-  Future<void> close() => _cache.close();
+  Future<void> close({bool flush = true}) => _cache.close(flush: flush);
 
   // ── Internal (used by KmdbCollection) ─────────────────────────────────────
 
