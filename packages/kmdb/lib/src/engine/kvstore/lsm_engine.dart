@@ -483,18 +483,21 @@ final class LsmEngine {
   /// Both L0 and L1 are cleared and replaced with the compaction output. Using
   /// a single job for both input levels avoids double-counting issues.
   Future<void> _compactL0ToL1() async {
-    final l0 = List<String>.from(_levels[0] ?? []);
-    final l1 = List<String>.from(_levels[1] ?? []);
-    final inputFiles = <String>[...l0, ...l1];
-    if (inputFiles.isEmpty) return;
+    final l0 = (_levels[0] ?? [])
+        .map((f) => SstableRef(level: 0, filename: f))
+        .toList();
+    final l1 = (_levels[1] ?? [])
+        .map((f) => SstableRef(level: 1, filename: f))
+        .toList();
+    final inputs = [...l0, ...l1];
+    if (inputs.isEmpty) return;
 
     final hlc = _tick();
     final job = CompactionJob(
       sstDir: _sstDir,
       deviceId: _deviceId,
-      inputLevel: 0,
       outputLevel: 1,
-      inputFiles: inputFiles,
+      inputs: inputs,
       adapter: _adapter,
       manifestWriter: _manifestWriter,
       logNumber: _walWriter.activeSequence,
@@ -521,16 +524,17 @@ final class LsmEngine {
 
   /// Compacts all L1 files into L2.
   Future<void> _compactL1ToL2() async {
-    final l1 = List<String>.from(_levels[1] ?? []);
-    if (l1.isEmpty) return;
+    final inputs = (_levels[1] ?? [])
+        .map((f) => SstableRef(level: 1, filename: f))
+        .toList();
+    if (inputs.isEmpty) return;
 
     final hlc = _tick();
     final job = CompactionJob(
       sstDir: _sstDir,
       deviceId: _deviceId,
-      inputLevel: 1,
       outputLevel: 2,
-      inputFiles: l1,
+      inputs: inputs,
       adapter: _adapter,
       manifestWriter: _manifestWriter,
       logNumber: _walWriter.activeSequence,
@@ -554,21 +558,20 @@ final class LsmEngine {
   ///
   /// Used when total data fits within [KvStoreConfig.singleFileThresholdBytes].
   Future<void> _compactAll() async {
-    final all = <String>[
-      ...(_levels[0] ?? []),
-      ...(_levels[1] ?? []),
-      ...(_levels[2] ?? []),
+    final inputs = [
+      ...(_levels[0] ?? []).map((f) => SstableRef(level: 0, filename: f)),
+      ...(_levels[1] ?? []).map((f) => SstableRef(level: 1, filename: f)),
+      ...(_levels[2] ?? []).map((f) => SstableRef(level: 2, filename: f)),
     ];
-    if (all.isEmpty) return;
+    if (inputs.isEmpty) return;
 
-    // Run a single job treating all inputs as "L0" and outputting to L2.
+    // Run a single job treating all inputs as a single merge and outputting to L2.
     final hlc = _tick();
     final job = CompactionJob(
       sstDir: _sstDir,
       deviceId: _deviceId,
-      inputLevel: 0,
       outputLevel: 2,
-      inputFiles: all,
+      inputs: inputs,
       adapter: _adapter,
       manifestWriter: _manifestWriter,
       logNumber: _walWriter.activeSequence,

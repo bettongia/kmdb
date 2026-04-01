@@ -59,9 +59,8 @@ final class CompactionJob {
   CompactionJob({
     required this.sstDir,
     required this.deviceId,
-    required this.inputLevel,
     required this.outputLevel,
-    required this.inputFiles,
+    required this.inputs,
     required this.adapter,
     required this.manifestWriter,
     required this.logNumber,
@@ -74,14 +73,11 @@ final class CompactionJob {
   /// Device identifier prefix for the output filename.
   final String deviceId;
 
-  /// Level of the input files.
-  final int inputLevel;
-
   /// Level of the output file.
   final int outputLevel;
 
-  /// Bare filenames of the input SSTables.
-  final List<String> inputFiles;
+  /// References to the input SSTables.
+  final List<SstableRef> inputs;
 
   /// Storage adapter for file I/O.
   final StorageAdapter adapter;
@@ -111,8 +107,8 @@ final class CompactionJob {
   Future<VersionEdit> run() async {
     // Open all input readers (ordered newest-first: index 0 = highest priority).
     final readers = <SstableReader>[];
-    for (final filename in inputFiles.reversed) {
-      final path = '$sstDir/$filename';
+    for (final ref in inputs.reversed) {
+      final path = '$sstDir/${ref.filename}';
       readers.add(await SstableReader.open(path, adapter));
     }
 
@@ -144,9 +140,7 @@ final class CompactionJob {
       final edit = VersionEdit(
         logNumber: logNumber,
         nextSeq: nextSeq,
-        removed: inputFiles
-            .map((f) => SstableRef(level: inputLevel, filename: f))
-            .toList(),
+        removed: inputs,
       );
       await manifestWriter.append(edit);
       return edit;
@@ -174,9 +168,7 @@ final class CompactionJob {
       logNumber: logNumber,
       nextSeq: nextSeq,
       added: [meta],
-      removed: inputFiles
-          .map((f) => SstableRef(level: inputLevel, filename: f))
-          .toList(),
+      removed: inputs,
     );
     await manifestWriter.append(edit);
     return edit;

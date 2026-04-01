@@ -20,6 +20,7 @@ import 'package:kmdb/src/engine/compaction/compaction_job.dart';
 import 'package:kmdb/src/engine/compaction/merge_iterator.dart';
 import 'package:kmdb/src/engine/manifest/manifest_reader.dart';
 import 'package:kmdb/src/engine/manifest/manifest_writer.dart';
+import 'package:kmdb/src/engine/manifest/version_edit.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
 import 'package:kmdb/src/engine/sstable/sstable_reader.dart';
 import 'package:kmdb/src/engine/sstable/sstable_writer.dart';
@@ -162,9 +163,11 @@ void main() {
       final job = CompactionJob(
         sstDir: _sstDir,
         deviceId: _deviceId,
-        inputLevel: 0,
         outputLevel: 1,
-        inputFiles: [f1, f2],
+        inputs: [
+          SstableRef(level: 0, filename: f1),
+          SstableRef(level: 0, filename: f2),
+        ],
         adapter: adapter,
         manifestWriter: manifestWriter,
         logNumber: 1,
@@ -203,9 +206,11 @@ void main() {
       final job = CompactionJob(
         sstDir: _sstDir,
         deviceId: _deviceId,
-        inputLevel: 0,
         outputLevel: 1,
-        inputFiles: [f2, f1], // f1 is last → reversed = first (highest priority)
+        inputs: [
+          SstableRef(level: 0, filename: f2),
+          SstableRef(level: 0, filename: f1),
+        ],
         adapter: adapter,
         manifestWriter: ManifestWriter(path: _manifestPath, adapter: adapter),
         logNumber: 1,
