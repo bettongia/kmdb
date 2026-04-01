@@ -14,9 +14,11 @@ Implementation work on a plan should follow the guidance provided in
 [CLAUDE.md](../CLAUDE.md) with these additional elements:
 
 1. Create a Git branch for the implementation work and use a Git worktree to
-   undertake the work. The branch should use the date and plan name as the
-   prefix - e.g. `20260401_plan_cli{_other detail if required}`.
-2. Update the plan file as you go, especially the status field
+   undertake the work - use the `.worktrees` directory in the project base to
+   house worktrees. The branch should use the date and plan name as the prefix -
+   e.g. `20260401_plan_cli{_other detail if required}`.
+2. Update the plan file as you go, especially the status field and task lists.
+   Use the version of the plan file in the worktree.
 3. Use check lists in the implementation plan and check off work as you go. That
    way we can continue work effectively after an interruption.
 4. All implementation work must include writing tests (and ensuring they pass)
