@@ -16,6 +16,7 @@ import 'dart:async';
 
 import '../encoding/value_codec.dart';
 import '../engine/kvstore/kv_store.dart';
+import '../engine/util/key_codec.dart';
 import 'exceptions.dart';
 import 'filter/filter.dart';
 import 'kmdb_codec.dart';
@@ -54,6 +55,7 @@ final class KmdbCollection<T> {
     required this.namespace,
     required this.codec,
     required KmdbDatabase database,
+    this.keyGenerator = const UuidV7KeyGenerator(),
   }) : _db = database;
 
   /// The namespace this collection operates in.
@@ -61,6 +63,9 @@ final class KmdbCollection<T> {
 
   /// The codec used to encode and decode documents.
   final KmdbCodec<T> codec;
+
+  /// The generator used for new document keys in [insert].
+  final KeyGenerator keyGenerator;
 
   final KmdbDatabase _db;
 
@@ -128,15 +133,26 @@ final class KmdbCollection<T> {
 
   /// Inserts [value] as a new document.
   ///
+  /// Assigns a new system-generated UUIDv7 key to the document via
+  /// [codec.withKey].
+  ///
+  /// Returns the updated document with its assigned key.
+  ///
   /// Throws [DocumentAlreadyExistsException] if a document with the same key
-  /// already exists.
-  Future<void> insert(T value) async {
-    final key = codec.keyOf(value);
+  /// already exists (rare for UUIDv7).
+  Future<T> insert(T value) async {
+    final key = keyGenerator.next();
     final existing = await _db.cache.get(namespace, key);
     if (existing != null) {
       throw DocumentAlreadyExistsException(key, namespace);
     }
-    await _writeDocument(key: key, newDoc: codec.encode(value), oldDoc: null);
+    final newValue = codec.withKey(value, key);
+    await _writeDocument(
+      key: key,
+      newDoc: codec.encode(newValue),
+      oldDoc: null,
+    );
+    return newValue;
   }
 
   /// Replaces the document with the same key as [value].

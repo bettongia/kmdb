@@ -38,6 +38,10 @@ final class _TaskCodec implements KmdbCodec<_Task> {
   String keyOf(_Task value) => value.id;
 
   @override
+  _Task withKey(_Task value, String key) =>
+      _Task(id: key, title: value.title, done: value.done);
+
+  @override
   Map<String, dynamic> encode(_Task value) =>
       {'id': value.id, 'title': value.title, 'done': value.done};
 
@@ -108,20 +112,51 @@ void main() {
   // ── insert / replace ──────────────────────────────────────────────────────
 
   group('insert', () {
-    test('inserts new document', () async {
+    test('inserts new document and returns updated model', () async {
       final (db, col) = await _open();
-      final task = _Task(id: _key(), title: 'New task');
-      await col.insert(task);
-      expect(await col.get(task.id), isNotNull);
+      final task = _Task(id: '', title: 'New task');
+      final inserted = await col.insert(task);
+      
+      expect(inserted.id, isNotEmpty);
+      expect(inserted.title, equals('New task'));
+      expect(await col.get(inserted.id), isNotNull);
+      await db.close();
+    });
+
+    test('uses collection keyGenerator', () async {
+      final adapter = MemoryStorageAdapter();
+      final db = await KmdbDatabase.open(path: '/db', adapter: adapter);
+      final myGen = SequentialKeyGenerator(start: 100);
+      final col = KmdbCollection(
+        namespace: 'tasks',
+        codec: _codec,
+        database: db,
+        keyGenerator: myGen,
+      );
+
+      final task = await col.insert(_Task(id: '', title: 'T'));
+      expect(task.id, equals(SequentialKeyGenerator(start: 100).next()));
       await db.close();
     });
 
     test('throws DocumentAlreadyExistsException if key exists', () async {
       final (db, col) = await _open();
-      final task = _Task(id: _key(), title: 'First');
-      await col.insert(task);
+      // Force same key by resetting generator or just using two inserts
+      // if it was random, but here we can just use put then insert with same key.
+      final id = '00000000000070008000000000000001';
+      final task = _Task(id: id, title: 'Existing');
+      await col.put(task);
+      
+      // We need to control the generator to trigger the collision in insert()
+      final col2 = KmdbCollection(
+        namespace: 'tasks',
+        codec: _codec,
+        database: db,
+        keyGenerator: SequentialKeyGenerator(start: 1),
+      );
+
       expect(
-        () => col.insert(task),
+        () => col2.insert(_Task(id: '', title: 'Collision')),
         throwsA(isA<DocumentAlreadyExistsException>()),
       );
       await db.close();

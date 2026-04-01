@@ -44,6 +44,10 @@ final class _ContactCodec implements KmdbCodec<_Contact> {
   String keyOf(_Contact v) => v.id;
 
   @override
+  _Contact withKey(_Contact v, String key) =>
+      _Contact(id: key, city: v.city, tags: v.tags);
+
+  @override
   Map<String, dynamic> encode(_Contact v) =>
       {'id': v.id, 'city': v.city, 'tags': v.tags};
 

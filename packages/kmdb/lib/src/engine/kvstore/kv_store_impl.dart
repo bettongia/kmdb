@@ -277,4 +277,28 @@ final class KvStoreImpl implements KvStore {
           namespace, 'namespace', 'System namespaces (starting with \$) are reserved');
     }
   }
+
+  /// Throws [ArgumentError] if [key] is not a valid UUIDv7 hex string.
+  ///
+  /// This check mirrors [KeyCodec.keyToBytes] validation but provides a
+  /// friendlier [ArgumentError] for the public API boundary.
+  static void _validateKey(String key) {
+    final stripped = key.replaceAll('-', '');
+    if (stripped.length != 32) {
+      throw ArgumentError.value(
+          key, 'key', 'Key must be 32 hex characters (UUIDv7)');
+    }
+    if (stripped[12] != '7') {
+      throw ArgumentError.value(
+          key, 'key', 'Key must be a valid UUIDv7 (version 7 required)');
+    }
+    final variantChar = stripped[16].toLowerCase();
+    if (variantChar != '8' &&
+        variantChar != '9' &&
+        variantChar != 'a' &&
+        variantChar != 'b') {
+      throw ArgumentError.value(
+          key, 'key', 'Key must be a valid UUIDv7 (variant 2 required)');
+    }
+  }
 }
