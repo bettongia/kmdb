@@ -5,7 +5,13 @@ code in this repository.
 
 ## General
 
+Work is planned using specifications in the `plans` directory. When working on
+plans make sure you review `plans/README.md` file for guidance. When asked to
+plan something do not commence implementation until explicitly told to do so.
+
 The `docs/roadmap.md` is used to track future work items and their priority.
+This is informational only but worth reviewing when working on the codebase as
+current work may intersect with the roadmap.
 
 We'll create plans for our work and place them in the `plans/` directory. When
 the planned work has been completed we'll move them to `plans/completed`.
@@ -67,16 +73,16 @@ make docs
 
 ## Implementation Status
 
-| Phase | Scope                                                                                            | Status         |
-| :---- | :----------------------------------------------------------------------------------------------- | :------------- |
-| 1     | Primitives & platform layer (XXH64, HLC, KeyCodec, ValueCodec, StorageAdapter)                   | ✅ Complete    |
-| 2     | Storage engine core (SkipList, Memtable, WAL, Bloom filter, SSTable writer/reader)               | ✅ Complete    |
-| 3     | LSM orchestration (Manifest, MergeIterator, CompactionJob, LsmEngine, CrashRecovery, KvStore)    | ✅ Complete    |
-| 4     | Value encoding integration & `$meta` (MetaStore, DeviceId, generation counters)                  | ✅ Complete    |
-| 5     | Sync protocol (HighwaterMark, CloudAdapter, SyncEngine push/pull, ConsolidationCoordinator)      | ✅ Complete    |
-| 6     | Cache layer (LruMap, SessionCache, CacheTier, CacheLayer with generation invalidation)           | ✅ Complete    |
-| 7     | Query layer (KmdbDatabase, KmdbCollection, KmdbQuery, Filter DSL, secondary indexes, reactivity) | ✅ Complete    |
-| 8     | Platform hardening (OPFS web storage, Zstd FFI/WASM, cloud adapters, performance benchmarks)     | ✅ Complete    |
+| Phase | Scope                                                                                            | Status      |
+| :---- | :----------------------------------------------------------------------------------------------- | :---------- |
+| 1     | Primitives & platform layer (XXH64, HLC, KeyCodec, ValueCodec, StorageAdapter)                   | ✅ Complete |
+| 2     | Storage engine core (SkipList, Memtable, WAL, Bloom filter, SSTable writer/reader)               | ✅ Complete |
+| 3     | LSM orchestration (Manifest, MergeIterator, CompactionJob, LsmEngine, CrashRecovery, KvStore)    | ✅ Complete |
+| 4     | Value encoding integration & `$meta` (MetaStore, DeviceId, generation counters)                  | ✅ Complete |
+| 5     | Sync protocol (HighwaterMark, CloudAdapter, SyncEngine push/pull, ConsolidationCoordinator)      | ✅ Complete |
+| 6     | Cache layer (LruMap, SessionCache, CacheTier, CacheLayer with generation invalidation)           | ✅ Complete |
+| 7     | Query layer (KmdbDatabase, KmdbCollection, KmdbQuery, Filter DSL, secondary indexes, reactivity) | ✅ Complete |
+| 8     | Platform hardening (OPFS web storage, Zstd FFI/WASM, cloud adapters, performance benchmarks)     | ✅ Complete |
 
 All 600 kmdb + 112 kmdb_cli tests pass as of 2026-03-30.
 

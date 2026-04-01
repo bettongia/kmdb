@@ -13,3 +13,5 @@ coverage
 site
 test.log
 packages/kmdb_cli/bin/kmdb.exe
+mydb/
+packages/**/doc
