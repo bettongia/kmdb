@@ -1,5 +1,12 @@
 {
   "permissions": {
     "allow": []
+  },
+  "sandbox": {
+    "enabled": true,
+    "filesystem": {
+      "denyRead": ["~/"],
+      "allowRead": ["."]
+    }
   }
 }
