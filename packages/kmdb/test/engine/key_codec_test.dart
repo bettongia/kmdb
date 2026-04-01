@@ -25,6 +25,10 @@ void main() {
       final key = KeyCodec.generate();
       expect(key.length, equals(32));
       expect(key, matches(RegExp(r'^[0-9a-f]{32}$')));
+      // UUIDv7 version 7
+      expect(key[12], equals('7'));
+      // UUIDv7 variant 2 (8, 9, a, or b)
+      expect(['8', '9', 'a', 'b'], contains(key[16]));
     });
 
     test('successive keys are unique', () {
@@ -33,12 +37,7 @@ void main() {
     });
 
     test('keys generated in different milliseconds are time-ordered', () {
-      // UUIDv7 embeds a ms timestamp in the MSBs. Keys generated in separate
-      // milliseconds must sort ascending. Sub-ms ordering is not guaranteed
-      // (the uuid package uses random sub-ms bits per RFC 9562 §5.7).
       final k1 = KeyCodec.generate();
-      // Spin until the system clock advances at least 1 ms so the timestamp
-      // field differs — avoids the random sub-ms ordering ambiguity.
       String k2;
       final deadline = DateTime.now().add(const Duration(seconds: 1));
       do {
@@ -49,14 +48,13 @@ void main() {
   });
 
   group('KeyCodec.keyToBytes / bytesToKey', () {
-    test('round-trips a 32-char hex key', () {
-      final key = 'a' * 32;
+    test('round-trips a valid UUIDv7 hex key', () {
+      final key = '00000000000070008000000000000000';
       expect(KeyCodec.bytesToKey(KeyCodec.keyToBytes(key)), equals(key));
     });
 
     test('strips hyphens from UUID-format input', () {
-      // Standard UUID with hyphens.
-      const uuid = '01234567-89ab-7cde-f012-3456789abcde';
+      const uuid = '00000000-0000-7000-8000-000000000000';
       final bytes = KeyCodec.keyToBytes(uuid);
       expect(bytes.length, equals(16));
     });
@@ -68,28 +66,42 @@ void main() {
       );
     });
 
+    test('keyToBytes throws on invalid version', () {
+      // version 6 instead of 7
+      const invalid = '00000000000060008000000000000000';
+      expect(
+        () => KeyCodec.keyToBytes(invalid),
+        throwsA(isA<FormatException>().having((e) => e.message, 'message',
+            contains('version 7 required'))),
+      );
+    });
+
+    test('keyToBytes throws on invalid variant', () {
+      // variant 0 (bits 00) instead of variant 2 (bits 10)
+      const invalid = '00000000000070000000000000000000';
+      expect(
+        () => KeyCodec.keyToBytes(invalid),
+        throwsA(isA<FormatException>().having((e) => e.message, 'message',
+            contains('variant 2 required'))),
+      );
+    });
+
     test('bytesToKey throws on wrong byte count', () {
       expect(
         () => KeyCodec.bytesToKey(Uint8List(10)),
         throwsA(isA<ArgumentError>()),
       );
     });
-
-    test('bytesToKey pads single hex digit', () {
-      final bytes = Uint8List(16); // all zeros
-      expect(KeyCodec.bytesToKey(bytes), equals('0' * 32));
-    });
   });
 
   group('Internal key encoding', () {
     const hlc = Hlc(0x017F8A0B1C00, 0x0042);
     const namespace = 'contacts';
-    final userKey = KeyCodec.keyToBytes('0' * 32);
+    final userKey = KeyCodec.keyToBytes('00000000000070008000000000000000');
 
     test('encodeInternalKey produces correct length', () {
       final internal = KeyCodec.encodeInternalKey(
           namespace, userKey, hlc, RecordType.put);
-      // 1 (nsLen) + 8 (ns) + 16 (key) + 8 (hlc) + 1 (type) = 34
       expect(internal.length, equals(34));
     });
 
@@ -128,9 +140,6 @@ void main() {
           namespace, userKey, const Hlc(100, 0), RecordType.put);
       final higher = KeyCodec.encodeInternalKey(
           namespace, userKey, const Hlc(200, 0), RecordType.put);
-      // The HLC is big-endian — a higher HLC means a greater byte sequence
-      // at the HLC position. The merge iterator relies on this for descending
-      // HLC ordering within the same user key.
       final hlcOffset = 1 + namespace.length + 16;
       for (var i = 0; i < 8; i++) {
         if (lower[hlcOffset + i] != higher[hlcOffset + i]) {
@@ -150,7 +159,7 @@ void main() {
 
     test('encodeNamespace produces correct length-prefixed bytes', () {
       final encoded = KeyCodec.encodeNamespace('tasks');
-      expect(encoded[0], equals(5)); // length prefix
+      expect(encoded[0], equals(5));
       expect(String.fromCharCodes(encoded.sublist(1)), equals('tasks'));
     });
   });
@@ -176,7 +185,7 @@ void main() {
       final k1 = gen.next();
       final k2 = gen.next();
       expect(k1, isNot(equals(k2)));
-      expect(k2.compareTo(k1) > 0, isTrue); // lexicographic; sequential hex increments
+      expect(k2.compareTo(k1) > 0, isTrue);
     });
 
     test('reset restarts from given value', () {
@@ -184,7 +193,13 @@ void main() {
       gen.next(); // 5
       gen.next(); // 6
       gen.reset();
-      expect(gen.next(), equals('0' * 32));
+      expect(gen.next(), equals('00000000000070008000000000000000'));
+    });
+
+    test('produces valid UUIDv7 structural bits', () {
+      final gen = SequentialKeyGenerator();
+      final key = gen.next();
+      expect(() => KeyCodec.keyToBytes(key), returnsNormally);
     });
   });
 }

@@ -368,15 +368,32 @@ final class KmdbQuery<T> {
   /// Computes the [startKey, endKey) range for the LSM scan from [_keyPrefixValue].
   ///
   /// Document keys are 32-char hex strings, so the prefix is padded with `'0'`
-  /// to produce valid 32-char startKey/endKey bounds for the LSM scan.
+  /// to produce 32-char startKey/endKey bounds. UUIDv7 structural bits (version
+  /// 7 and variant 2) are forced into the bounds to pass validation in the
+  /// storage layer.
   (String? startKey, String? endKey) _scanRange() {
     final prefix = _keyPrefixValue;
     if (prefix == null) return (null, null);
-    final start = prefix.padRight(32, '0');
+
+    String forceBits(String key) {
+      final chars = key.split('');
+      if (chars.length > 12) chars[12] = '7';
+      if (chars.length > 16) {
+        final v = chars[16].toLowerCase();
+        if (v != '8' && v != '9' && v != 'a' && v != 'b') {
+          chars[16] = '8';
+        }
+      }
+      return chars.join();
+    }
+
+    final start = forceBits(prefix.padRight(32, '0'));
     final next = _nextPrefix(prefix);
-    final end = next?.padRight(32, '0');
+    final end = next == null ? null : forceBits(next.padRight(32, '0'));
+
     return (start, end);
   }
+
 
   /// Returns the exclusive upper bound for a lexicographic prefix scan.
   ///

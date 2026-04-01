@@ -27,7 +27,8 @@ import 'package:kmdb/src/engine/wal/wal_writer.dart';
 const _dir = '/db';
 final _seq1 = const Hlc(1000, 0);
 final _seq2 = const Hlc(2000, 1);
-final _key = KeyCodec.keyToBytes('a' * 32);
+// Use a valid UUIDv7 key.
+final _key = KeyCodec.keyToBytes('aaaaaaaaaaaa7aa8aaaaaaaaaaaaaaaa');
 final _value = Uint8List.fromList([0x00, 0x01, 0x02]);
 
 WalWriter _writer(MemoryStorageAdapter adapter, {int seq = 1}) => WalWriter(

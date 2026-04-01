@@ -186,9 +186,9 @@ final class MetaStore {
   /// Encodes a symbolic [name] as a deterministic 32-character hex key.
   ///
   /// Two independent XXH64 digests (seeds 0 and 1) are concatenated to produce
-  /// 16 bytes (32 hex chars). This matches the LSM engine's fixed-width key
-  /// format and provides ample collision resistance for the small number of
-  /// distinct meta keys in use.
+  /// 16 bytes (32 hex chars). The resulting key is forced to follow the UUIDv7
+  /// structural format (version 7, variant 2) to pass validation in the
+  /// storage layer.
   static String _nameToKey(String name) {
     final data = Uint8List.fromList(name.codeUnits);
     final h1 = XxHash64.digest(data, seed: 0);
@@ -197,6 +197,13 @@ final class MetaStore {
     final bd = ByteData.sublistView(bytes);
     bd.setInt64(0, h1, Endian.big);
     bd.setInt64(8, h2, Endian.big);
+
+    // Force UUIDv7 structural bits:
+    // 1. Version 7: high nibble of byte 6 must be 0x7.
+    bytes[6] = (bytes[6] & 0x0F) | 0x70;
+    // 2. Variant 2: top two bits of byte 8 must be '10'.
+    bytes[8] = (bytes[8] & 0x3F) | 0x80;
+
     return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
   }
 

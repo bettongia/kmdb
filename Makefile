@@ -11,20 +11,23 @@ ADDLICENSE_CONFIG=addlicense_config.txt
 
 default: site/ checks site
 
+prepare:
+	dart pub global activate melos
+	dart pub global activate coverage
+	melos bootstrap
+
 test: test.log
 
 test.log: $(KMDB_PKG)/**/*.dart $(KMDB_CLI_PKG)/**/*.dart
 	melos test --no-select | tee test.log
 
-checks: coverage license_check
+checks: coverage.log license_check
 
 license_check:
 	melos licenses
 
 license_add:
 	melos licenses:add
-
-coverage: site/coverage/html/index.html
 
 site: site/ styles site/index.html site/spec.html site/api/index.html site/roadmap.html site/primer.html site/spec.pdf site/primer.pdf
 
@@ -57,8 +60,8 @@ site/spec.epub: site/ docs/spec/*.md
 	pandoc docs/spec/*.md -o site/spec.epub \
 		--include-before-body docs/template/preface.md
 
-site/coverage/html/index.html: $(KMDB_PKG)/**/*.dart $(KMDB_CLI_PKG)/**/*.dart
-	melos coverage
+coverage.log: $(KMDB_PKG)/**/*.dart $(KMDB_CLI_PKG)/**/*.dart
+	melos coverage | tee coverage.log
 
 site/spec.pdf: site/ docs/spec/*.md
 	pandoc docs/spec/*.md --pdf-engine=xelatex -o site/spec.pdf \

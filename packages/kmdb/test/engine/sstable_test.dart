@@ -25,9 +25,11 @@ import 'package:kmdb/src/engine/util/key_codec.dart';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-Uint8List _ikey(String ns, String hexKey, Hlc hlc) =>
-    KeyCodec.encodeInternalKey(
-        ns, KeyCodec.keyToBytes(hexKey.padLeft(32, '0')), hlc, RecordType.put);
+Uint8List _ikey(String ns, String hexSuffix, Hlc hlc) {
+  final hexKey = hexSuffix.padLeft(12, '0') + '70008' + hexSuffix.padLeft(15, '0');
+  return KeyCodec.encodeInternalKey(
+      ns, KeyCodec.keyToBytes(hexKey), hlc, RecordType.put);
+}
 
 Uint8List _val(int b) => Uint8List.fromList([b]);
 
@@ -82,8 +84,7 @@ void main() {
       final writer = SstableWriter();
       final keys = <Uint8List>[];
       for (var i = 0; i < 200; i++) {
-        final k = _ikey('ns', i.toRadixString(16).padLeft(32, '0'),
-            Hlc(i, 0));
+        final k = _ikey('ns', i.toRadixString(16), Hlc(i, 0));
         final v = Uint8List(100)..fillRange(0, 100, i & 0xFF);
         writer.add(k, v);
         keys.add(k);
