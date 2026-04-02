@@ -33,9 +33,13 @@ const _sstDir = '/db/sst';
 const _manifestPath = '/db/MANIFEST-00001';
 const _deviceId = 'deadbeef';
 
-Uint8List _ikey(String ns, String hexKey, Hlc hlc) =>
-    KeyCodec.encodeInternalKey(
-        ns, KeyCodec.keyToBytes(hexKey.padLeft(32, '0')), hlc, RecordType.put);
+/// Helper to build an internal key from a simple hex string.
+/// Ensures the key is a valid-looking UUIDv7.
+Uint8List _ikey(String ns, String hexSuffix, Hlc hlc) {
+  final hexKey = hexSuffix.padLeft(12, '0') + '70008' + hexSuffix.padLeft(15, '0');
+  return KeyCodec.encodeInternalKey(
+      ns, KeyCodec.keyToBytes(hexKey), hlc, RecordType.put);
+}
 
 Uint8List _val(int b) => Uint8List.fromList([b]);
 

@@ -12,7 +12,10 @@ sandbox/
 coverage
 site
 test.log
+coverage.log
 packages/kmdb_cli/bin/kmdb.exe
 mydb/
 packages/**/doc
+*.iml
+.idea
 .worktrees/

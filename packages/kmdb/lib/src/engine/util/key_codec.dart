@@ -73,7 +73,8 @@ final class KeyCodec {
   /// (`xxxxxxxxxxxxxxxx...`) UUID strings.
   ///
   /// Throws [FormatException] if [hexKey] is not a valid 32-character hex
-  /// string (after stripping hyphens).
+  /// string or does not conform to the UUIDv7 structure (version 7,
+  /// variant 2).
   static Uint8List keyToBytes(String hexKey) {
     final stripped = hexKey.replaceAll('-', '');
     if (stripped.length != 32) {
@@ -81,6 +82,28 @@ final class KeyCodec {
         'Key must be 32 hex characters (got ${stripped.length}): $hexKey',
       );
     }
+
+    // UUIDv7 structural validation:
+    // 1. Version nibble (4 bits at offset 6, high bits) must be 7.
+    //    In hex string, this is index 12.
+    if (stripped[12] != '7') {
+      throw FormatException(
+        'Key is not a valid UUIDv7 (version 7 required): $hexKey',
+      );
+    }
+
+    // 2. Variant bits (top 2 bits of byte 8) must be '10' (binary).
+    //    In hex string, this is index 16. Valid hex chars are 8, 9, a, b.
+    final variantChar = stripped[16].toLowerCase();
+    if (variantChar != '8' &&
+        variantChar != '9' &&
+        variantChar != 'a' &&
+        variantChar != 'b') {
+      throw FormatException(
+        'Key is not a valid UUIDv7 (variant 2 required): $hexKey',
+      );
+    }
+
     final bytes = Uint8List(16);
     for (var i = 0; i < 16; i++) {
       bytes[i] = int.parse(stripped.substring(i * 2, i * 2 + 2), radix: 16);
@@ -212,9 +235,10 @@ final class UuidV7KeyGenerator implements KeyGenerator {
 
 /// Deterministic [KeyGenerator] for tests.
 ///
-/// Produces keys of the form `000000000000000000000000000000xx` where `xx` is
-/// a zero-padded decimal counter. Keys are not valid UUIDs but are 16 bytes
-/// and sort predictably, which is all the storage engine requires.
+/// Produces keys that look like UUIDv7 (version 7, variant 2) but have a
+/// deterministic counter in the low bits.
+///
+/// Format: `000000000000700080000000000000xx`
 final class SequentialKeyGenerator implements KeyGenerator {
   SequentialKeyGenerator({int start = 0}) : _next = start;
 
@@ -222,7 +246,8 @@ final class SequentialKeyGenerator implements KeyGenerator {
 
   @override
   String next() {
-    final key = _next.toRadixString(16).padLeft(32, '0');
+    final hex = _next.toRadixString(16).padLeft(12, '0');
+    final key = '00000000000070008000$hex';
     _next++;
     return key;
   }

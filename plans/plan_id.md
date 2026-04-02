@@ -1,8 +1,8 @@
 # Move record ID creation to be an internal concern
 
-**Status**: Implementing
+**Status**: Completed
 
-**PR link**: {A link to the PR submitted for this plan}
+**PR link**: [Pull Request #1](https://github.com/aurochs-kmesh/kmdb/pull/1)
 
 ## Problem statement
 
@@ -159,4 +159,16 @@ In `put_command.dart`:
 
 ## Summary
 
-{Dot points highlighting the work undertaken}
+- **Enforced UUIDv7 Integrity**: `KeyCodec` now strictly validates the version
+  (7) and variant (2) bits of all hex keys.
+- **System-Assigned CLI IDs**: The `put` command now always generates a new
+  UUIDv7 and ignores any user-provided `id` field. The `--autoid` flag has been
+  removed as it is now the default and only behavior.
+- **Typed API Internalization**: `KmdbCollection.insert` now handles key
+  generation internally using a `KeyGenerator`. `KmdbCodec` gained a `withKey`
+  method to allow the collection to return a typed model with the assigned key.
+- **Public API Guards**: `KvStoreImpl` now validates all user-provided keys
+  before they reach the storage engine, ensuring system-wide structural
+  integrity.
+- **Comprehensive Verification**: All layers (codec, storage, query, CLI) have
+  been verified with new and updated tests, ensuring 100% pass rate.

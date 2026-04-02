@@ -31,13 +31,10 @@ The database path is a directory. It is created automatically on first use.
 Here's an example
 
 ```bash
-# Manually set an ID
-dart run bin/kmdb.dart mydb put notes \
-  --value '{"id":"019242f4aac07b8fb7e8f1bfb2c3d4e5","title":"Hello"}'
+# Insert a new document (ID is automatically assigned)
+dart run bin/kmdb.dart mydb put notes --value '{"title": "New Note"}'
 
-# Generate an ID automatically
-dart run bin/kmdb.dart mydb put notes --value '{"title": "New Note"}' --autoid
-
+# Retrieve it by the ID shown in the output
 dart run bin/kmdb.dart mydb get notes 019242f4aac07b8fb7e8f1bfb2c3d4e5
 
 dart run bin/kmdb.dart mydb collections
@@ -83,14 +80,17 @@ kmdb mydb get notes 019242f4aac07b8fb7e8f1bfb2c3d4e5
 
 #### `put <namespace> [--value <json>]`
 
-Upsert a document. The document must be a JSON object with a string `id` field.
-If `--value` is omitted the JSON is read from stdin.
+Insert a new document. A new system-generated UUIDv7 identifier is automatically
+assigned to the document's `id` field. To update an existing document, use the
+`import` command or the typed API.
+
+The JSON document is read from `--value` (inline) or from stdin.
 
 ```bash
-kmdb mydb put notes --value '{"id":"019242f4aac07b8fb7e8f1bfb2c3d4e5","title":"Hello"}'
+kmdb mydb put notes --value '{"title":"Hello"}'
 
 # From stdin
-echo '{"id":"019242f4...","title":"Hello"}' | kmdb mydb put notes
+echo '{"title":"Hello"}' | kmdb mydb put notes
 ```
 
 #### `delete <namespace> <key>`
@@ -314,8 +314,8 @@ treated as comments and ignored.
 # migrations/001.kmdb
 # Seed initial categories
 
-put categories --value '{"id":"019242f4aac07b8fb7e8f1bfb2c3d401","name":"Work"}'
-put categories --value '{"id":"019242f4aac07b8fb7e8f1bfb2c3d402","name":"Personal"}'
+put categories --value '{"name":"Work"}'
+put categories --value '{"name":"Personal"}'
 ```
 
 ```bash

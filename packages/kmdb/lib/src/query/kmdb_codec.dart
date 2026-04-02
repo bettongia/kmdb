@@ -24,6 +24,13 @@
 ///   String keyOf(Task value) => value.id;
 ///
 ///   @override
+///   Task withKey(Task value, String key) => Task(
+///         id: key,
+///         title: value.title,
+///         done: value.done,
+///       );
+///
+///   @override
 ///   Map<String, dynamic> encode(Task value) => value.toJson();
 ///
 ///   @override
@@ -41,9 +48,16 @@ abstract interface class KmdbCodec<T> {
   /// identify the document in the LSM store and in secondary indexes.
   ///
   /// The key must be a 32-character lowercase hex string (a UUIDv7 binary
-  /// key encoded as hex). Use [KeyGenerator] or `uuid` package to generate
-  /// compliant keys.
+  /// key encoded as hex). KMDB enforces UUIDv7 format validation (version 7,
+  /// variant 2) at the storage boundary.
   String keyOf(T value);
+
+  /// Returns a new instance of [value] with [key] assigned to its identifier
+  /// field.
+  ///
+  /// Called by [KmdbCollection.insert] after generating a new system key for
+  /// a document. Implementations usually use a `copyWith` method.
+  T withKey(T value, String key);
 
   /// Encodes [value] to a JSON-compatible map.
   ///

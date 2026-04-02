@@ -52,10 +52,12 @@ Uint8List _buildSst({int count = 2, int basePhysical = 5000}) {
   final writer = SstableWriter();
   for (var i = 0; i < count; i++) {
     final hlc = Hlc(basePhysical + i, 0);
-    final key = Uint8List(16)..fillRange(0, 16, i + 1);
+    // Use valid UUIDv7 format for keys in SSTable.
+    final keyHex = i.toRadixString(16).padLeft(12, '0') + '70008' + i.toRadixString(16).padLeft(15, '0');
+    final keyBytes = KeyCodec.keyToBytes(keyHex);
     final internalKey = KeyCodec.encodeInternalKey(
       'ns',
-      key,
+      keyBytes,
       hlc,
       RecordType.put,
     );
@@ -112,7 +114,7 @@ void main() {
   group('push', () {
     test('push uploads local SSTables to sync folder', () async {
       // Write enough data to trigger a flush.
-      final key = '0' * 32;
+      final key = '00000000000070008000000000000000';
       await store.put('ns', key, Uint8List.fromList([1, 2, 3]));
       await store.flush();
 
@@ -144,7 +146,7 @@ void main() {
     });
 
     test('push does not re-upload already-uploaded SSTables', () async {
-      final key = '0' * 32;
+      final key = '00000000000070008000000000000000';
       await store.put('ns', key, Uint8List.fromList([1]));
       await store.flush();
 
@@ -390,7 +392,7 @@ void main() {
       );
 
       // Write local data that should be pushed.
-      final key = '1' * 32;
+      final key = '00000000000070008000000000000001';
       await store.put('ns', key, Uint8List.fromList([42]));
       await store.flush();
 
@@ -462,12 +464,12 @@ void main() {
         );
 
         try {
-          final keyA = 'a' * 32;
+          final keyA = '0000000000007000800000000000000a';
           await storeA.put('ns', keyA, Uint8List.fromList([1]));
           await storeA.flush();
           await engineA.push();
 
-          final keyB = 'b' * 32;
+          final keyB = '0000000000007000800000000000000b';
           await storeB.put('ns', keyB, Uint8List.fromList([2]));
           await storeB.flush();
           await engineB.sync(); // B pushes its own data and pulls A's data
@@ -534,7 +536,7 @@ void main() {
       await store.ingestSstable(filename, bytes);
 
       // After ingestion, a new write should have an HLC ≥ futurePhysical.
-      final key = 'c' * 32;
+      final key = '0000000000007000800000000000000c';
       await store.put('ns', key, Uint8List.fromList([7]));
       // (We can't directly read the HLC from KvStore; the test just verifies
       // no exception is thrown and the write succeeds.)

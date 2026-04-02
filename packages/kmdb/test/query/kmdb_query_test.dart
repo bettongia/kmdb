@@ -28,6 +28,7 @@ import 'package:test/test.dart';
 final class _Item {
   const _Item({required this.id, required this.name, this.score = 0});
   final String id;
+  String get title => name; // for codec compatibility if needed elsewhere
   final String name;
   final int score;
 }
@@ -37,6 +38,10 @@ final class _ItemCodec implements KmdbCodec<_Item> {
 
   @override
   String keyOf(_Item v) => v.id;
+
+  @override
+  _Item withKey(_Item v, String key) =>
+      _Item(id: key, name: v.name, score: v.score);
 
   @override
   Map<String, dynamic> encode(_Item v) =>
@@ -221,11 +226,11 @@ void main() {
   group('keyPrefix()', () {
     test('narrows scan to matching key prefix', () async {
       final (db, col) = await _open();
-      // Use a fixed prefix to control which keys match.
+      // Use a fixed prefix. Must result in valid UUIDv7 keys.
       final prefix = '0000';
-      final k1 = '${prefix}0000000000000000000000000000'; // 32 chars
-      final k2 = '${prefix}1111111111111111111111111111';
-      final k3fixed = '11110000000000000000000000000000';
+      final k1 = '00000000000070008000000000000001';
+      final k2 = '00000000000070008000000000000002';
+      final k3fixed = 'ffffffffffff7fff8fffffffffffffff';
       await col.put(_Item(id: k1, name: 'match1'));
       await col.put(_Item(id: k2, name: 'match2'));
       await col.put(_Item(id: k3fixed, name: 'no-match'));

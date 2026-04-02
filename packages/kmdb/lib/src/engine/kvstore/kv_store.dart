@@ -35,9 +35,17 @@ abstract interface class KvStore {
   /// Writes [value] under [key] in [namespace].
   ///
   /// [key] must be a 32-character lowercase hex string (binary UUIDv7).
+  ///
+  /// Validation is enforced for all user namespaces. Any key that does not
+  /// follow the UUIDv7 format (version 7, variant 2) will cause an
+  /// [ArgumentError] to be thrown. System namespaces (starting with `$`) are
+  /// exempt from this format validation.
   Future<void> put(String namespace, String key, Uint8List value);
 
   /// Writes a delete tombstone for [key] in [namespace].
+  ///
+  /// [key] must be a valid UUIDv7 hex string. Format validation is enforced
+  /// for user namespaces.
   ///
   /// Subsequent [get] calls return `null` until a new value is written.
   Future<void> delete(String namespace, String key);

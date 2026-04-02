@@ -219,8 +219,10 @@ abstract final class KmdbCli {
       }
     } else if (!io.stdin.hasTerminal) {
       // Pipe: read all lines from stdin.
-      commandLines =
-          await io.stdin.transform(utf8.decoder).transform(const LineSplitter()).toList();
+      commandLines = await io.stdin
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .toList();
     } else {
       io.stderr.writeln('Error: no command provided.');
       _printUsage();
@@ -270,7 +272,9 @@ abstract final class KmdbCli {
   ) async {
     // A line may start with a dot-command prefix (reserved for Phase 2 REPL).
     if (line.startsWith('.')) {
-      errSink.writeln('Error: dot-commands are only supported in REPL mode (Phase 2).');
+      errSink.writeln(
+        'Error: dot-commands are only supported in REPL mode (Phase 2).',
+      );
       return false;
     }
 
@@ -294,8 +298,9 @@ abstract final class KmdbCli {
     final command = _commands[commandName];
     if (command == null) {
       errSink.writeln(
-          "Error: unknown command '$commandName'. "
-          "Run 'kmdb --help' for a list of commands.");
+        "Error: unknown command '$commandName'. "
+        "Run 'kmdb --help' for a list of commands.",
+      );
       return false;
     }
 
@@ -365,7 +370,9 @@ abstract final class KmdbCli {
   // ── File reader ───────────────────────────────────────────────────────────
 
   static Future<List<String>> _readLines(
-      String path, StringSink errSink) async {
+    String path,
+    StringSink errSink,
+  ) async {
     try {
       final content = await io.File(path).readAsString();
       return const LineSplitter().convert(content);
@@ -395,7 +402,7 @@ Options:
 Commands:
   Data:
     get <ns> <key>
-    put <ns> [--value <json>] [--autoid]
+    put <ns> [--value <json>]
     delete <ns> <key>
     scan <ns> [--filter <json>] [--order-by <field>] [--desc]
               [--limit <n>] [--offset <n>] [--key-prefix <str>]
