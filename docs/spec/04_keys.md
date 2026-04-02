@@ -2,8 +2,10 @@
 
 ## UUIDv7 Document Keys
 
-Document keys are UUIDv7 values generated at insert time. UUIDv7 embeds a
-millisecond-precision timestamp in the most significant bits, providing:
+Document keys are UUIDv7 values generated at insert time. KMDB enforces the
+UUIDv7 format (version 7, variant 2) for all user namespaces at the
+[KvStore] boundary. UUIDv7 embeds a millisecond-precision timestamp in the
+most significant bits, providing:
 
 - **Index locality:** Sequential inserts land at the SSTable tail, avoiding page
   splits. Measurable performance win at 100K+ documents.

@@ -331,6 +331,63 @@ void main() {
     });
   });
 
+  // ── Key validation ─────────────────────────────────────────────────────────
+
+  group('KvStore — key validation', () {
+    test('put with invalid key length throws ArgumentError', () async {
+      final adapter = _newAdapter();
+      final (store, _) = await _open(adapter);
+      await expectLater(
+        store.put('ns', 'short', _bytes('x')),
+        throwsA(isA<ArgumentError>().having((e) => e.message, 'message', contains('32 hex characters'))),
+      );
+      await store.close();
+    });
+
+    test('put with invalid UUID version throws ArgumentError', () async {
+      final adapter = _newAdapter();
+      final (store, _) = await _open(adapter);
+      const invalid = '00000000000060008000000000000000'; // version 6
+      await expectLater(
+        store.put('ns', invalid, _bytes('x')),
+        throwsA(isA<ArgumentError>().having((e) => e.message, 'message', contains('version 7 required'))),
+      );
+      await store.close();
+    });
+
+    test('put with invalid UUID variant throws ArgumentError', () async {
+      final adapter = _newAdapter();
+      final (store, _) = await _open(adapter);
+      const invalid = '00000000000070000000000000000000'; // variant 0
+      await expectLater(
+        store.put('ns', invalid, _bytes('x')),
+        throwsA(isA<ArgumentError>().having((e) => e.message, 'message', contains('variant 2 required'))),
+      );
+      await store.close();
+    });
+
+    test('delete with invalid key throws ArgumentError', () async {
+      final adapter = _newAdapter();
+      final (store, _) = await _open(adapter);
+      await expectLater(
+        store.delete('ns', 'invalid'),
+        throwsA(isA<ArgumentError>()),
+      );
+      await store.close();
+    });
+
+    test('writeBatch with invalid key throws ArgumentError', () async {
+      final adapter = _newAdapter();
+      final (store, _) = await _open(adapter);
+      final batch = WriteBatch()..put('ns', 'invalid', _bytes('x'));
+      await expectLater(
+        store.writeBatch(batch),
+        throwsA(isA<ArgumentError>()),
+      );
+      await store.close();
+    });
+  });
+
   // ── Close / reopen ─────────────────────────────────────────────────────────
 
   group('KvStore — close and reopen', () {

@@ -1,6 +1,6 @@
 # Move record ID creation to be an internal concern
 
-**Status**: Open
+**Status**: Completed
 
 **PR link**: {A link to the PR submitted for this plan}
 
@@ -26,17 +26,25 @@ as a long term pointer, especially between database instances.
 
 ## Open questions
 
-- [ ] Should `KvStore.put()` be changed to generate and return a key (splitting
+- [x] Should `KvStore.put()` be changed to generate and return a key (splitting
   the interface into `insert` vs `update`), or should UUIDv7 validation be
   enforced at the `KvStore` boundary while keeping the current signature?
-- [ ] How should `KmdbCollection.insert()` return the generated key to the
+  - **Decision**: Option A (Enforce validation) was chosen for minimal API breakage.
+- [x] How should `KmdbCollection.insert()` return the generated key to the
   typed-API caller — as a return value, or by mutating the model via a new codec
   method (e.g., `withKey(T value, String key) → T`)?
-- [ ] Should `KmdbCodec.keyOf()` be retained for `replace()`/`update()` lookups
+  - **Decision**: Added `withKey` to `KmdbCodec` to allow the typed API to return
+    an updated model instance with the generated key.
+- [x] Should `KmdbCodec.keyOf()` be retained for `replace()`/`update()` lookups
   on existing documents, or redesigned entirely?
-- [ ] What is the backup/restore contract? The plan says original UUIDv7s aid
+  - **Decision**: Retained `keyOf` for updates on existing documents that already
+    carry a system-assigned key.
+- [x] What is the backup/restore contract? The plan says original UUIDv7s aid
   ordering on restore — should the lower-level `KvStore` keep a back-door for
   trusted internal callers to supply a key?
+  - **Decision**: `KvStore.put` remains public and allows supplying a key, but
+    enforces UUIDv7 structural validation. This allows `ImportCommand` (and
+    restore) to preserve original IDs while ensuring system integrity.
 
 ## Investigation
 
@@ -175,4 +183,16 @@ Option A is lower risk for this iteration.
 
 ## Summary
 
-{Dot points highlighting the work undertaken}
+- **Enforced UUIDv7 Integrity**: `KeyCodec` now strictly validates the version
+  (7) and variant (2) bits of all hex keys.
+- **System-Assigned CLI IDs**: The `put` command now always generates a new
+  UUIDv7 and ignores any user-provided `id` field. The `--autoid` flag has been
+  removed as it is now the default and only behavior.
+- **Typed API Internalization**: `KmdbCollection.insert` now handles key
+  generation internally using a `KeyGenerator`. `KmdbCodec` gained a `withKey`
+  method to allow the collection to return a typed model with the assigned key.
+- **Public API Guards**: `KvStoreImpl` now validates all user-provided keys
+  before they reach the storage engine, ensuring system-wide structural
+  integrity.
+- **Comprehensive Verification**: All layers (codec, storage, query, CLI) have
+  been verified with new and updated tests, ensuring 100% pass rate.
