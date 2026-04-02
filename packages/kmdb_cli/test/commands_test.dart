@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     https://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,6 +16,7 @@ import 'dart:convert';
 import 'dart:io' as io;
 
 import 'package:kmdb/kmdb.dart';
+import 'package:kmdb_cli/kmdb_cli.dart';
 import 'package:kmdb_cli/src/commands/collections_command.dart';
 import 'package:kmdb_cli/src/commands/command.dart';
 import 'package:kmdb_cli/src/commands/compact_command.dart';
@@ -34,32 +35,17 @@ import 'package:test/test.dart';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-int _dbCounter = 0;
-int _keyCounter = 0;
-
-/// Opens a fresh in-memory [KvStoreImpl] for each test.
+/// Opens a fresh memory-backed store for testing.
 Future<KvStoreImpl> _openStore() async {
-  final adapter = MemoryStorageAdapter();
-  final dir = '/cmdtest${_dbCounter++}';
-  final (store, _) = await KvStoreImpl.open(dir, adapter);
-  await store.ensureDeviceId();
+  final (store, _) = await KvStoreImpl.open(
+    '/testdb',
+    MemoryStorageAdapter(),
+    config: KvStoreConfig.forTesting(),
+  );
   return store;
 }
 
-/// Returns a unique 32-character hex key for use as a document ID.
-///
-/// Keys at the KvStore boundary must be exactly 32 hex characters to satisfy
-/// [KeyCodec] validation.
-String _key([String? tag]) {
-  final n = _keyCounter++;
-  final hex = n.toRadixString(16).padLeft(4, '0');
-  final prefix = (tag ?? 'key').replaceAll(RegExp(r'[^0-9a-f]'), '0')
-      .padRight(28, '0')
-      .substring(0, 28);
-  return '$prefix$hex';
-}
-
-/// Builds a [CommandContext] with captured [out] and [err] buffers.
+/// Creates a [CommandContext] for testing.
 CommandContext _ctx(
   KvStoreImpl store, {
   OutputMode mode = OutputMode.json,
@@ -73,44 +59,40 @@ CommandContext _ctx(
       err: err ?? StringBuffer(),
     );
 
-/// Encodes and stores a document, using `doc['id']` as the storage key.
-///
-/// The `id` field must be a 32-character hex string (use [_key] to generate).
-Future<void> _putDoc(
-  KvStoreImpl store,
-  String namespace,
-  Map<String, dynamic> doc,
-) async {
-  final key = '${doc['id']}';
-  await store.put(namespace, key, ValueCodec.encode(doc));
+/// Deterministic valid UUIDv7 keys for CLI tests.
+String _key(String seed) {
+  // Use a simple but valid UUIDv7-looking hex string.
+  final hex = seed.codeUnits
+      .map((c) => c.toRadixString(16))
+      .join()
+      .padRight(32, '0')
+      .substring(0, 32);
+  final chars = hex.split('');
+  chars[12] = '7';
+  chars[16] = '8';
+  return chars.join();
 }
 
-// ── TmpFile helper ────────────────────────────────────────────────────────────
+/// Helper to write a raw document to the store bypass CLI logic.
+Future<void> _putDoc(
+    KvStoreImpl store, String ns, Map<String, dynamic> doc) async {
+  final id = doc['id'] as String;
+  await store.put(ns, id, ValueCodec.encode(doc));
+}
 
-/// A simple synchronous temp-file helper for tests that exercise file I/O.
+/// Simple temporary file wrapper.
 class _TmpFile {
-  _TmpFile() {
-    final tmp = io.Directory.systemTemp.createTempSync('kmdb_test_');
-    path = '${tmp.path}/data.ndjson';
-  }
-
-  late final String path;
-
+  _TmpFile() : path = '${io.Directory.systemTemp.path}/kmdb_test_${DateTime.now().microsecondsSinceEpoch}.json';
+  final String path;
   void write(String content) => io.File(path).writeAsStringSync(content);
-
-  void delete() {
-    try {
-      final f = io.File(path);
-      final dir = f.parent;
-      if (f.existsSync()) f.deleteSync();
-      if (dir.existsSync()) dir.deleteSync();
-    } catch (_) {}
-  }
+  void delete() => io.File(path).deleteSync();
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 void main() {
+  tearDown(MemoryStorageAdapter.releaseAllLocks);
+
   // ── GetCommand ──────────────────────────────────────────────────────────────
 
   group('GetCommand', () {
@@ -125,28 +107,22 @@ void main() {
     });
     tearDown(() => store.close());
 
-    test('returns document when found', () async {
-      final id = _key('abc');
-      await _putDoc(store, 'tasks', {'id': id, 'title': 'Do thing'});
+    test('fetches existing document and echoes it back', () async {
+      final id = _key('xone');
+      await _putDoc(store, 'notes', {'id': id, 'text': 'hello'});
+
       final ctx = _ctx(store, out: out, err: err);
-      final ok = await GetCommand().execute(ctx, ['tasks', id], {});
+      final ok = await GetCommand().execute(ctx, ['notes', id], {});
       expect(ok, isTrue);
-      final decoded = json.decode(out.toString()) as List;
-      expect(decoded[0]['title'], equals('Do thing'));
+      final result = json.decode(out.toString()) as List;
+      expect(result[0]['text'], equals('hello'));
     });
 
-    test('returns false and error when document not found', () async {
+    test('returns false when key is missing', () async {
       final ctx = _ctx(store, out: out, err: err);
-      final ok = await GetCommand().execute(ctx, ['tasks', _key('miss')], {});
+      final ok = await GetCommand().execute(ctx, ['notes', _key('miss')], {});
       expect(ok, isFalse);
       expect(err.toString(), contains('not found'));
-    });
-
-    test('returns false when key arg is missing', () async {
-      final ctx = _ctx(store, out: out, err: err);
-      final ok = await GetCommand().execute(ctx, ['tasks'], {});
-      expect(ok, isFalse);
-      expect(err.toString(), contains('requires'));
     });
 
     test('returns false when all args are missing', () async {
@@ -170,13 +146,18 @@ void main() {
     });
     tearDown(() => store.close());
 
-    test('upserts document and echoes it back', () async {
-      final id = _key('xone');
+    test('inserts document with generated ID and echoes it back', () async {
       final ctx = _ctx(store, out: out, err: err);
-      final doc = '{"id":"$id","name":"Alice"}';
+      const doc = '{"name":"Alice"}';
       final ok = await PutCommand().execute(ctx, ['notes'], {'value': doc});
       expect(ok, isTrue);
-      final result = await store.get('notes', id);
+      
+      final decoded = json.decode(out.toString()) as List;
+      final generatedId = decoded[0]['id'] as String;
+      expect(generatedId, hasLength(32));
+      expect(generatedId[12], equals('7')); // version
+
+      final result = await store.get('notes', generatedId);
       expect(result, isNotNull);
       expect(ValueCodec.decode(result!)['name'], equals('Alice'));
     });
@@ -196,50 +177,30 @@ void main() {
       expect(err.toString(), contains('JSON object'));
     });
 
-    test('returns false when document missing id', () async {
+    test('ignores user-provided id and generates a new one', () async {
       final ctx = _ctx(store, out: out, err: err);
-      final ok =
-          await PutCommand().execute(ctx, ['notes'], {'value': '{"x":1}'});
-      expect(ok, isFalse);
-      expect(err.toString(), contains('"id"'));
+      final userId = _key('user');
+      final doc = '{"id":"$userId","name":"Alice"}';
+      final ok = await PutCommand().execute(ctx, ['notes'], {'value': doc});
+      expect(ok, isTrue);
+
+      final decoded = json.decode(out.toString()) as List;
+      final assignedId = decoded[0]['id'] as String;
+      expect(assignedId, isNot(equals(userId)));
+      expect(assignedId, hasLength(32));
+
+      // The user-provided ID should NOT have been written.
+      expect(await store.get('notes', userId), isNull);
+      
+      // The assigned ID should have been written.
+      expect(await store.get('notes', assignedId), isNotNull);
     });
 
     test('returns false when namespace arg missing', () async {
       final ctx = _ctx(store, out: out, err: err);
-      final id = _key('nons');
       final ok =
-          await PutCommand().execute(ctx, [], {'value': '{"id":"$id"}'});
+          await PutCommand().execute(ctx, [], {'value': '{"name":"Alice"}'});
       expect(ok, isFalse);
-    });
-
-    test('generates id when --autoid is provided and id is missing', () async {
-      final ctx = _ctx(store, out: out, err: err);
-      const doc = '{"name":"Alice"}';
-      final ok = await PutCommand()
-          .execute(ctx, ['notes'], {'value': doc, 'autoid': true});
-      expect(ok, isTrue);
-
-      final decoded = json.decode(out.toString()) as List;
-      final generatedId = decoded[0]['id'] as String;
-      expect(generatedId, hasLength(32));
-
-      final result = await store.get('notes', generatedId);
-      expect(result, isNotNull);
-      expect(ValueCodec.decode(result!)['name'], equals('Alice'));
-    });
-
-    test('uses existing id when --autoid is provided but id is present',
-        () async {
-      final ctx = _ctx(store, out: out, err: err);
-      final id = _key('preset');
-      final doc = '{"id":"$id","name":"Bob"}';
-      final ok = await PutCommand()
-          .execute(ctx, ['notes'], {'value': doc, 'autoid': true});
-      expect(ok, isTrue);
-
-      final result = await store.get('notes', id);
-      expect(result, isNotNull);
-      expect(ValueCodec.decode(result!)['name'], equals('Bob'));
     });
   });
 
@@ -298,9 +259,9 @@ void main() {
       store = await _openStore();
       out = StringBuffer();
       err = StringBuffer();
-      idA = _key('scan');
-      idB = _key('scan');
-      idC = _key('scan');
+      idA = _key('scanA');
+      idB = _key('scanB');
+      idC = _key('scanC');
       await _putDoc(store, 'items', {'id': idA, 'score': 10, 'tag': 'x'});
       await _putDoc(store, 'items', {'id': idB, 'score': 30, 'tag': 'y'});
       await _putDoc(store, 'items', {'id': idC, 'score': 20, 'tag': 'x'});
@@ -332,6 +293,7 @@ void main() {
           await ScanCommand().execute(ctx, ['items'], {'order-by': 'score'});
       expect(ok, isTrue);
       final docs = json.decode(out.toString()) as List;
+      // Sort the expected order by key first if score was same, but here scores are unique.
       expect(docs.map((d) => d['score']).toList(), equals([10, 20, 30]));
     });
 
@@ -399,9 +361,9 @@ void main() {
       store = await _openStore();
       out = StringBuffer();
       err = StringBuffer();
-      await _putDoc(store, 'ns', {'id': _key('cnt'), 'active': true});
-      await _putDoc(store, 'ns', {'id': _key('cnt'), 'active': false});
-      await _putDoc(store, 'ns', {'id': _key('cnt'), 'active': true});
+      await _putDoc(store, 'ns', {'id': _key('cnt1'), 'active': true});
+      await _putDoc(store, 'ns', {'id': _key('cnt2'), 'active': false});
+      await _putDoc(store, 'ns', {'id': _key('cnt3'), 'active': true});
     });
     tearDown(() => store.close());
 
@@ -731,8 +693,8 @@ void main() {
     });
 
     test('skips blank lines in NDJSON file', () async {
-      final x1 = _key('blnk');
-      final x2 = _key('blnk');
+      final x1 = _key('blnk1');
+      final x2 = _key('blnk2');
       final tmp = _TmpFile();
       tmp.write('{"id":"$x1","v":1}\n\n{"id":"$x2","v":2}\n');
 

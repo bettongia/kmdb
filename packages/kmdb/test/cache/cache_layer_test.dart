@@ -98,11 +98,11 @@ void main() {
     // ── Cache hit / miss ────────────────────────────────────────────────────
 
     test('get returns null for absent key', () async {
-      expect(await cache.get('tasks', 'a' * 32), isNull);
+      expect(await cache.get('tasks', '0000000000007000800000000000000a'), isNull);
     });
 
     test('second get is served from cache without a KvStore call', () async {
-      final key = 'a' * 32;
+      final key = '0000000000007000800000000000000a';
       await store.put('tasks', key, _b(1));
 
       counting.getCalls = 0;
@@ -124,7 +124,7 @@ void main() {
     });
 
     test('write invalidates cache entry via generation counter', () async {
-      final key = 'a' * 32;
+      final key = '0000000000007000800000000000000a';
       await store.put('tasks', key, _b(1));
       await cache.get('tasks', key); // prime cache
 
@@ -139,7 +139,7 @@ void main() {
     });
 
     test('cache stores value after first get', () async {
-      final key = 'b' * 32;
+      final key = '0000000000007000800000000000000b';
       await store.put('notes', key, _b(7));
 
       expect(cache.cachedObjectCount, 0);
@@ -150,7 +150,7 @@ void main() {
     // ── Generation counter invalidation ─────────────────────────────────────
 
     test('generation counter advances after put, stale entry not served', () async {
-      final key = 'c' * 32;
+      final key = '0000000000007000800000000000000c';
       await store.put('ns', key, _b(1));
       await cache.get('ns', key); // gen=1 entry cached
 
@@ -162,7 +162,7 @@ void main() {
     });
 
     test('delete removes value; cache returns null after delete', () async {
-      final key = 'd' * 32;
+      final key = '0000000000007000800000000000000d';
       await cache.put('ns', key, _b(5));
       await Future<void>.delayed(Duration.zero);
 
@@ -185,9 +185,9 @@ void main() {
         maxObjects: 2,
       );
 
-      final k1 = '1' * 32;
-      final k2 = '2' * 32;
-      final k3 = '3' * 32;
+      final k1 = '00000000000070008000000000000001';
+      final k2 = '00000000000070008000000000000002';
+      final k3 = '00000000000070008000000000000003';
       await ownStore.put('ns', k1, _b(1));
       await ownStore.put('ns', k2, _b(2));
       await ownStore.put('ns', k3, _b(3));
@@ -229,7 +229,7 @@ void main() {
     // ── onResume ─────────────────────────────────────────────────────────────
 
     test('onResume is no-op on desktop', () async {
-      final key = 'e' * 32;
+      final key = '0000000000007000800000000000000e';
       await store.put('ns', key, _b(1));
       await cache.get('ns', key); // prime cache
       final countBefore = cache.cachedObjectCount;
@@ -246,7 +246,7 @@ void main() {
         tier: CacheTier.mobile,
       );
 
-      final key = 'f' * 32;
+      final key = '0000000000007000800000000000000f';
       await ownStore.put('ns', key, _b(1));
       await mobileCache.get('ns', key); // prime cache at gen=1
       expect(mobileCache.cachedObjectCount, greaterThan(0));
@@ -271,8 +271,8 @@ void main() {
     // ── scan pass-through ─────────────────────────────────────────────────────
 
     test('scan delegates to underlying KvStore', () async {
-      final k1 = 'aa${'a' * 30}';
-      final k2 = 'bb${'b' * 30}';
+      final k1 = '0000000000007000800000000000000a';
+      final k2 = '0000000000007000800000000000000b';
       await store.put('ns', k1, _b(1));
       await store.put('ns', k2, _b(2));
 
@@ -284,8 +284,8 @@ void main() {
     // ── writeBatch ────────────────────────────────────────────────────────────
 
     test('writeBatch delegates to underlying store', () async {
-      final k1 = '1' * 32;
-      final k2 = '2' * 32;
+      final k1 = '00000000000070008000000000000001';
+      final k2 = '00000000000070008000000000000002';
       await cache.writeBatch(WriteBatch()
         ..put('ns', k1, _b(10))
         ..put('ns', k2, _b(20)));

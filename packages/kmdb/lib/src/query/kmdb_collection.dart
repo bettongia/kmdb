@@ -16,6 +16,7 @@ import 'dart:async';
 
 import '../encoding/value_codec.dart';
 import '../engine/kvstore/kv_store.dart';
+import '../engine/util/key_codec.dart';
 import 'exceptions.dart';
 import 'filter/filter.dart';
 import 'kmdb_codec.dart';
@@ -26,6 +27,16 @@ import 'kmdb_query.dart';
 ///
 /// Obtained via [KmdbDatabase.collection]. Provides typed read, write, and
 /// query operations over a single [namespace] in the underlying LSM store.
+///
+/// ## Keys
+///
+/// KMDB uses UUIDv7 identifiers for all records. New documents are
+/// automatically assigned a system-generated key when created via [insert].
+/// Existing documents already carry a system-assigned key that is preserved
+/// during [put] or [replace].
+///
+/// All keys must be valid UUIDv7 hex strings. Format validation is enforced
+/// at the storage boundary.
 ///
 /// ## Conflict Semantics
 ///
@@ -54,6 +65,7 @@ final class KmdbCollection<T> {
     required this.namespace,
     required this.codec,
     required KmdbDatabase database,
+    this.keyGenerator = const UuidV7KeyGenerator(),
   }) : _db = database;
 
   /// The namespace this collection operates in.
@@ -61,6 +73,9 @@ final class KmdbCollection<T> {
 
   /// The codec used to encode and decode documents.
   final KmdbCodec<T> codec;
+
+  /// The generator used for new document keys in [insert].
+  final KeyGenerator keyGenerator;
 
   final KmdbDatabase _db;
 
@@ -128,19 +143,31 @@ final class KmdbCollection<T> {
 
   /// Inserts [value] as a new document.
   ///
+  /// Assigns a new system-generated UUIDv7 key to the document via
+  /// [codec.withKey].
+  ///
+  /// Returns the updated document with its assigned key.
+  ///
   /// Throws [DocumentAlreadyExistsException] if a document with the same key
-  /// already exists.
-  Future<void> insert(T value) async {
-    final key = codec.keyOf(value);
+  /// already exists (rare for UUIDv7).
+  Future<T> insert(T value) async {
+    final key = keyGenerator.next();
     final existing = await _db.cache.get(namespace, key);
     if (existing != null) {
       throw DocumentAlreadyExistsException(key, namespace);
     }
-    await _writeDocument(key: key, newDoc: codec.encode(value), oldDoc: null);
+    final newValue = codec.withKey(value, key);
+    await _writeDocument(
+      key: key,
+      newDoc: codec.encode(newValue),
+      oldDoc: null,
+    );
+    return newValue;
   }
 
   /// Replaces the document with the same key as [value].
   ///
+  /// The key returned by [codec.keyOf] must be a valid UUIDv7 hex string.
   /// Throws [DocumentNotFoundException] if no document with that key exists.
   Future<void> replace(T value) async {
     final key = codec.keyOf(value);
@@ -154,6 +181,8 @@ final class KmdbCollection<T> {
   }
 
   /// Upserts [value] — inserts if absent, replaces if present.
+  ///
+  /// The key returned by [codec.keyOf] must be a valid UUIDv7 hex string.
   Future<void> put(T value) async {
     final key = codec.keyOf(value);
     final existingBytes = await _db.cache.get(namespace, key);
@@ -175,7 +204,8 @@ final class KmdbCollection<T> {
 
   /// Deletes the document with [key].
   ///
-  /// No-op if the document does not exist.
+  /// [key] must be a valid UUIDv7 hex string. No-op if the document does not
+  /// exist.
   Future<void> delete(String key) async {
     final existingBytes = await _db.cache.get(namespace, key);
     if (existingBytes == null) return; // no-op
