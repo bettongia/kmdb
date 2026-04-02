@@ -115,6 +115,7 @@ final class KvStoreImpl implements KvStore {
   @override
   Future<void> put(String namespace, String key, Uint8List value) async {
     _guardNamespace(namespace);
+    _validateKey(key);
     await _maybeMarkDirty();
     await _engine.put(namespace, key, value);
     await _meta.incrementGenerationCounter(namespace);
@@ -124,6 +125,7 @@ final class KvStoreImpl implements KvStore {
   @override
   Future<void> delete(String namespace, String key) async {
     _guardNamespace(namespace);
+    _validateKey(key);
     await _maybeMarkDirty();
     await _engine.delete(namespace, key);
     await _meta.incrementGenerationCounter(namespace);
@@ -134,6 +136,7 @@ final class KvStoreImpl implements KvStore {
   Future<void> writeBatch(WriteBatch batch) async {
     for (final entry in batch.entries) {
       _guardNamespace(entry.namespace);
+      _validateKey(entry.key);
     }
     await _maybeMarkDirty();
     await _engine.writeBatch(batch);

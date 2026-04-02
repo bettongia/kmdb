@@ -28,6 +28,16 @@ import 'kmdb_query.dart';
 /// Obtained via [KmdbDatabase.collection]. Provides typed read, write, and
 /// query operations over a single [namespace] in the underlying LSM store.
 ///
+/// ## Keys
+///
+/// KMDB uses UUIDv7 identifiers for all records. New documents are
+/// automatically assigned a system-generated key when created via [insert].
+/// Existing documents already carry a system-assigned key that is preserved
+/// during [put] or [replace].
+///
+/// All keys must be valid UUIDv7 hex strings. Format validation is enforced
+/// at the storage boundary.
+///
 /// ## Conflict Semantics
 ///
 /// All writes use **Last-Write-Wins (LWW)** conflict resolution. When two
@@ -157,6 +167,7 @@ final class KmdbCollection<T> {
 
   /// Replaces the document with the same key as [value].
   ///
+  /// The key returned by [codec.keyOf] must be a valid UUIDv7 hex string.
   /// Throws [DocumentNotFoundException] if no document with that key exists.
   Future<void> replace(T value) async {
     final key = codec.keyOf(value);
@@ -170,6 +181,8 @@ final class KmdbCollection<T> {
   }
 
   /// Upserts [value] — inserts if absent, replaces if present.
+  ///
+  /// The key returned by [codec.keyOf] must be a valid UUIDv7 hex string.
   Future<void> put(T value) async {
     final key = codec.keyOf(value);
     final existingBytes = await _db.cache.get(namespace, key);
@@ -191,7 +204,8 @@ final class KmdbCollection<T> {
 
   /// Deletes the document with [key].
   ///
-  /// No-op if the document does not exist.
+  /// [key] must be a valid UUIDv7 hex string. No-op if the document does not
+  /// exist.
   Future<void> delete(String key) async {
     final existingBytes = await _db.cache.get(namespace, key);
     if (existingBytes == null) return; // no-op

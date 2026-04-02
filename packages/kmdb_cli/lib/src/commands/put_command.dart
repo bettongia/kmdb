@@ -21,9 +21,11 @@ import 'command.dart';
 
 /// Inserts a new document.
 ///
+/// A new system-generated UUIDv7 identifier is automatically assigned to the
+/// document's `id` field. To update an existing document, use the `import`
+/// command or the typed API.
+///
 /// The JSON document is read from `--value` (inline) or from stdin.
-/// A new UUIDv7 identifier is automatically assigned to the document's
-/// `id` field.
 ///
 /// Usage: `kmdb <db> put <namespace> [--value '<json>']`
 final class PutCommand implements CliCommand {
