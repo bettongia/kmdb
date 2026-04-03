@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := default
 
-.PHONY: test site dart_doc default checks coverage license_check license_add styles clean
+.PHONY: test cli_test site dart_doc default checks coverage license_check license_add styles clean
 
 
 COVERAGE_DIR=site/coverage
@@ -16,10 +16,15 @@ prepare:
 	dart pub global activate coverage
 	melos bootstrap
 
-test: test.log
+test: test.log cli_test
 
-test.log: $(KMDB_PKG)/**/*.dart $(KMDB_CLI_PKG)/**/*.dart
-	melos test --no-select | tee test.log
+test.log: $(KMDB_PKG)/**/*.dart
+	melos test --scope=kmdb | tee cli_test.log
+
+cli_test: cli_test.log
+
+cli_test.log: $(KMDB_CLI_PKG)/**/*.dart
+	melos test --scope=kmdb_cli | tee cli_test.log
 
 checks: coverage.log license_check
 
