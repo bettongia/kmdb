@@ -6,7 +6,8 @@
     "enabled": true,
     "filesystem": {
       "denyRead": ["~/"],
-      "allowRead": ["."]
+      "allowRead": ["./", "~/.pub-cache", "~/.gitconfig"],
+      "allowWrite": ["./"]
     }
   }
 }
