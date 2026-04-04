@@ -63,8 +63,10 @@ Before writing a single line of implementation code, you MUST:
 
 ## Git Branch and Worktree Setup
 
-Once you have confirmed the plan is `Investigated`, set up an isolated
-workspace:
+Once you have confirmed the plan is `Investigated`, ensure that the latest
+version of the plan has been committed to git.
+
+Then, set up an isolated workspace:
 
 1. **Derive a branch name** from the plan filename or title. Use kebab-case,
    e.g., `plans/add-zstd-compression.md` → `feature/add-zstd-compression`.
