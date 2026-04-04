@@ -39,6 +39,7 @@ export 'src/engine/sstable/sstable_reader.dart'
 export 'src/engine/sstable/sstable_writer.dart' show SstableFooter;
 export 'src/engine/sstable/bloom_filter.dart' show BloomFilter;
 export 'src/engine/util/hlc.dart' show Hlc;
+export 'src/engine/util/key_codec.dart' show KeyCodec;
 export 'src/engine/wal/wal_reader.dart' show WalReader;
 export 'src/engine/wal/wal_record.dart' show WalRecord, WalRecordType;
 export 'src/engine/wal/wal_exceptions.dart' show CorruptedWalException;

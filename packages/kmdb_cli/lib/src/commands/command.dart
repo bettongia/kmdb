@@ -45,6 +45,12 @@ final class CommandContext {
   /// Sink for error messages (stderr in production).
   final StringSink err;
 
+  /// When `true`, the CLI runner must not flush the memtable on exit.
+  ///
+  /// Set by read-only diagnostic commands (e.g. [UtilCommand]) that must never
+  /// cause side-effects on the database they are inspecting.
+  bool suppressFlush = false;
+
   /// Writes [docs] to [out] using the active [mode].
   void writeDocuments(List<Map<String, dynamic>> docs) {
     DocumentFormatter.format(docs, mode, sink: out);

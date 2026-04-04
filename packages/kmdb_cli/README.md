@@ -51,9 +51,11 @@ dart run bin/kmdb.dart mydb scan notes
 | `--mode <mode>`       | `-m`  | Output format (default: `json`)                    |
 | `--output <file>`     | `-o`  | Write output to a file instead of stdout           |
 | `--read <file>`       | `-r`  | Read commands from a script file                   |
-| `--continue-on-error` |       | Keep running after a command error (default: stop) |
-| `--version`           |       | Print version and exit                             |
-| `--help`              | `-h`  | Print help and exit                                |
+| `--continue-on-error` |       | Keep running after a command error (default: stop)    |
+| `--flush`             |       | Flush memtable to SSTable on exit (default)           |
+| `--no-flush`          |       | Skip flush on exit (data stays in WAL)                |
+| `--version`           |       | Print version and exit                                |
+| `--help`              | `-h`  | Print help and exit                                   |
 
 ### Output modes
 
@@ -236,6 +238,82 @@ documents that cannot be decoded (corrupt values).
 
 ```bash
 kmdb mydb verify
+```
+
+---
+
+### Diagnostics commands
+
+The `util` subcommands inspect raw storage-engine files without acquiring the
+database lock, so they are safe to run against a live database. They are
+**read-only** — they never write to or flush the database.
+
+#### `util sstable <filename> [--full] [--full --data]`
+
+Inspect a single SSTable file. The filename is resolved relative to the `sst/`
+subdirectory of the database directory.
+
+| Flag     | Description                                                      |
+| -------- | ---------------------------------------------------------------- |
+| _(none)_ | Summary: footer fields, Bloom filter stats, index entry count    |
+| `--full` | Adds index block references and all key/value entries            |
+| `--data` | Requires `--full`. Decodes user-namespace entry values as JSON   |
+
+```bash
+# Summary
+kmdb mydb util sstable abc123-....sst
+
+# Full record-level output
+kmdb mydb util sstable abc123-....sst --full
+
+# Full output with decoded document values
+kmdb mydb util sstable abc123-....sst --full --data
+```
+
+System-namespace entries (`$meta`, `$cache`, `$index:*`) use internal binary
+encodings and are not decoded even with `--data`.
+
+#### `util wal <filename> [--full] [--full --data]`
+
+Inspect a single WAL file. The filename is resolved relative to the database
+directory (e.g. `wal-00001.log`).
+
+| Flag     | Description                                                        |
+| -------- | ------------------------------------------------------------------ |
+| _(none)_ | Summary: record count, HLC range, distinct namespaces              |
+| `--full` | Every record with type, sequence, namespace, key, and value metadata |
+| `--data` | Requires `--full`. Decodes user-namespace `put` record values as JSON |
+
+```bash
+# Summary
+kmdb mydb util wal wal-00001.log
+
+# Full record listing
+kmdb mydb util wal wal-00001.log --full
+
+# Full listing with decoded document values
+kmdb mydb util wal wal-00001.log --full --data
+```
+
+System-namespace records (`$meta`, `$cache`, `$index:*`) use internal binary
+encodings and are not decoded even with `--data`.
+
+#### `util manifest [--full]`
+
+Inspect the active Manifest file. Resolves it automatically from the `CURRENT`
+pointer in the database directory.
+
+| Flag     | Description                                              |
+| -------- | -------------------------------------------------------- |
+| _(none)_ | Current level state: each level mapped to its SSTable filenames |
+| `--full` | Complete `VersionEdit` history with all added/removed entries   |
+
+```bash
+# Current level state
+kmdb mydb util manifest
+
+# Full VersionEdit history
+kmdb mydb util manifest --full
 ```
 
 ---
