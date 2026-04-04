@@ -138,8 +138,11 @@ void main() {
       expect(entries.length, equals(10));
       final keys = entries.map((e) => e.key).toList();
       for (var i = 0; i < keys.length - 1; i++) {
-        expect(keys[i].compareTo(keys[i + 1]), lessThan(0),
-            reason: 'key[$i] should be < key[${i + 1}]');
+        expect(
+          keys[i].compareTo(keys[i + 1]),
+          lessThan(0),
+          reason: 'key[$i] should be < key[${i + 1}]',
+        );
       }
       await store.close();
     });
@@ -178,8 +181,7 @@ void main() {
         await store.put('ns', _key(i), _bytes('v$i'));
       }
       await store.delete('ns', _key(2));
-      final keys =
-          (await store.scan('ns').toList()).map((e) => e.key).toList();
+      final keys = (await store.scan('ns').toList()).map((e) => e.key).toList();
       expect(keys, isNot(contains(_key(2))));
       expect(keys.length, equals(4));
       await store.close();
@@ -204,8 +206,7 @@ void main() {
       final (store, _) = await _open(adapter);
       await store.put('ns', _key(1), _bytes('after-flush'));
       await store.flush();
-      expect(_str(await store.get('ns', _key(1))),
-          equals('after-flush'));
+      expect(_str(await store.get('ns', _key(1))), equals('after-flush'));
       await store.close();
     });
 
@@ -323,10 +324,7 @@ void main() {
       final adapter = _newAdapter();
       final (store, _) = await _open(adapter);
       final batch = WriteBatch()..put(r'$index:ns:path', _key(1), _bytes('x'));
-      await expectLater(
-        store.writeBatch(batch),
-        throwsA(isA<ArgumentError>()),
-      );
+      await expectLater(store.writeBatch(batch), throwsA(isA<ArgumentError>()));
       await store.close();
     });
   });
@@ -339,7 +337,13 @@ void main() {
       final (store, _) = await _open(adapter);
       await expectLater(
         store.put('ns', 'short', _bytes('x')),
-        throwsA(isA<ArgumentError>().having((e) => e.message, 'message', contains('32 hex characters'))),
+        throwsA(
+          isA<ArgumentError>().having(
+            (e) => e.message,
+            'message',
+            contains('32 hex characters'),
+          ),
+        ),
       );
       await store.close();
     });
@@ -350,7 +354,13 @@ void main() {
       const invalid = '00000000000060008000000000000000'; // version 6
       await expectLater(
         store.put('ns', invalid, _bytes('x')),
-        throwsA(isA<ArgumentError>().having((e) => e.message, 'message', contains('version 7 required'))),
+        throwsA(
+          isA<ArgumentError>().having(
+            (e) => e.message,
+            'message',
+            contains('version 7 required'),
+          ),
+        ),
       );
       await store.close();
     });
@@ -361,7 +371,13 @@ void main() {
       const invalid = '00000000000070000000000000000000'; // variant 0
       await expectLater(
         store.put('ns', invalid, _bytes('x')),
-        throwsA(isA<ArgumentError>().having((e) => e.message, 'message', contains('variant 2 required'))),
+        throwsA(
+          isA<ArgumentError>().having(
+            (e) => e.message,
+            'message',
+            contains('variant 2 required'),
+          ),
+        ),
       );
       await store.close();
     });
@@ -380,10 +396,7 @@ void main() {
       final adapter = _newAdapter();
       final (store, _) = await _open(adapter);
       final batch = WriteBatch()..put('ns', 'invalid', _bytes('x'));
-      await expectLater(
-        store.writeBatch(batch),
-        throwsA(isA<ArgumentError>()),
-      );
+      await expectLater(store.writeBatch(batch), throwsA(isA<ArgumentError>()));
       await store.close();
     });
   });
@@ -402,10 +415,7 @@ void main() {
     test('second open while first is active throws LockException', () async {
       final adapter = _newAdapter();
       final (store, _) = await _open(adapter);
-      await expectLater(
-        _open(adapter),
-        throwsA(isA<LockException>()),
-      );
+      await expectLater(_open(adapter), throwsA(isA<LockException>()));
       await store.close();
     });
 

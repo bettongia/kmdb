@@ -36,9 +36,14 @@ const _deviceId = 'deadbeef';
 /// Helper to build an internal key from a simple hex string.
 /// Ensures the key is a valid-looking UUIDv7.
 Uint8List _ikey(String ns, String hexSuffix, Hlc hlc) {
-  final hexKey = hexSuffix.padLeft(12, '0') + '70008' + hexSuffix.padLeft(15, '0');
+  final hexKey =
+      hexSuffix.padLeft(12, '0') + '70008' + hexSuffix.padLeft(15, '0');
   return KeyCodec.encodeInternalKey(
-      ns, KeyCodec.keyToBytes(hexKey), hlc, RecordType.put);
+    ns,
+    KeyCodec.keyToBytes(hexKey),
+    hlc,
+    RecordType.put,
+  );
 }
 
 Uint8List _val(int b) => Uint8List.fromList([b]);
@@ -91,8 +96,10 @@ void main() {
 
       final r1 = await SstableReader.open('$_sstDir/a.sst', adapter);
       final r2 = await SstableReader.open('$_sstDir/b.sst', adapter);
-      final merged =
-          await MergeIterator([r1.scan(), r2.scan()]).entries.toList();
+      final merged = await MergeIterator([
+        r1.scan(),
+        r2.scan(),
+      ]).entries.toList();
 
       expect(merged.length, equals(4));
       // Verify ascending order.
@@ -112,8 +119,10 @@ void main() {
       // Source 0 = new (index 0 = higher priority).
       final rNew = await SstableReader.open('$_sstDir/new.sst', adapter);
       final rOld = await SstableReader.open('$_sstDir/old.sst', adapter);
-      final merged =
-          await MergeIterator([rNew.scan(), rOld.scan()]).entries.toList();
+      final merged = await MergeIterator([
+        rNew.scan(),
+        rOld.scan(),
+      ]).entries.toList();
 
       expect(merged.length, equals(1));
       expect(merged[0].value, equals(_val(99)));
@@ -152,17 +161,21 @@ void main() {
         });
 
       // Two input SSTables at L0.
-      final f1 = await _writeSSTable(adapter, 'f1-deadbeef-000001000000-000002000000.sst', [
-        (allKeys[0], _val(1)),
-        (allKeys[2], _val(3)),
-      ]);
-      final f2 = await _writeSSTable(adapter, 'f2-deadbeef-000003000000-000004000000.sst', [
-        (allKeys[1], _val(2)),
-        (allKeys[3], _val(4)),
-      ]);
+      final f1 = await _writeSSTable(
+        adapter,
+        'f1-deadbeef-000001000000-000002000000.sst',
+        [(allKeys[0], _val(1)), (allKeys[2], _val(3))],
+      );
+      final f2 = await _writeSSTable(
+        adapter,
+        'f2-deadbeef-000003000000-000004000000.sst',
+        [(allKeys[1], _val(2)), (allKeys[3], _val(4))],
+      );
 
-      final manifestWriter =
-          ManifestWriter(path: _manifestPath, adapter: adapter);
+      final manifestWriter = ManifestWriter(
+        path: _manifestPath,
+        adapter: adapter,
+      );
 
       final job = CompactionJob(
         sstDir: _sstDir,
@@ -187,13 +200,13 @@ void main() {
 
       // The output SSTable should be readable.
       final outFilename = edit.added[0].filename;
-      final reader =
-          await SstableReader.open('$_sstDir/$outFilename', adapter);
+      final reader = await SstableReader.open('$_sstDir/$outFilename', adapter);
       expect(reader.entryCount, equals(4));
 
       // Manifest should reflect the new state.
-      final state =
-          await ManifestReader(adapter: adapter).replay(_manifestPath);
+      final state = await ManifestReader(
+        adapter: adapter,
+      ).replay(_manifestPath);
       expect(state.levels[1], contains(outFilename));
       expect(state.levels[0], isEmpty);
     });
@@ -223,8 +236,7 @@ void main() {
       final edit = await job.run();
 
       final outFilename = edit.added[0].filename;
-      final reader =
-          await SstableReader.open('$_sstDir/$outFilename', adapter);
+      final reader = await SstableReader.open('$_sstDir/$outFilename', adapter);
       final entries = await reader.scan().toList();
       expect(entries.length, equals(1));
       expect(entries[0].value, equals(_val(99)));

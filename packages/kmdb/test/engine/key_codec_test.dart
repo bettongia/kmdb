@@ -71,8 +71,13 @@ void main() {
       const invalid = '00000000000060008000000000000000';
       expect(
         () => KeyCodec.keyToBytes(invalid),
-        throwsA(isA<FormatException>().having((e) => e.message, 'message',
-            contains('version 7 required'))),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('version 7 required'),
+          ),
+        ),
       );
     });
 
@@ -81,8 +86,13 @@ void main() {
       const invalid = '00000000000070000000000000000000';
       expect(
         () => KeyCodec.keyToBytes(invalid),
-        throwsA(isA<FormatException>().having((e) => e.message, 'message',
-            contains('variant 2 required'))),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('variant 2 required'),
+          ),
+        ),
       );
     });
 
@@ -101,53 +111,88 @@ void main() {
 
     test('encodeInternalKey produces correct length', () {
       final internal = KeyCodec.encodeInternalKey(
-          namespace, userKey, hlc, RecordType.put);
+        namespace,
+        userKey,
+        hlc,
+        RecordType.put,
+      );
       expect(internal.length, equals(34));
     });
 
     test('decodes namespace correctly', () {
       final internal = KeyCodec.encodeInternalKey(
-          namespace, userKey, hlc, RecordType.put);
+        namespace,
+        userKey,
+        hlc,
+        RecordType.put,
+      );
       expect(KeyCodec.decodeNamespace(internal), equals(namespace));
     });
 
     test('decodes user key correctly', () {
       final internal = KeyCodec.encodeInternalKey(
-          namespace, userKey, hlc, RecordType.put);
+        namespace,
+        userKey,
+        hlc,
+        RecordType.put,
+      );
       expect(KeyCodec.decodeUserKey(internal), equals(userKey));
     });
 
     test('decodes HLC correctly', () {
       final internal = KeyCodec.encodeInternalKey(
-          namespace, userKey, hlc, RecordType.put);
+        namespace,
+        userKey,
+        hlc,
+        RecordType.put,
+      );
       expect(KeyCodec.decodeHlc(internal), equals(hlc));
     });
 
     test('decodes RecordType put', () {
       final internal = KeyCodec.encodeInternalKey(
-          namespace, userKey, hlc, RecordType.put);
+        namespace,
+        userKey,
+        hlc,
+        RecordType.put,
+      );
       expect(KeyCodec.decodeRecordType(internal), equals(RecordType.put));
     });
 
     test('decodes RecordType delete', () {
       final internal = KeyCodec.encodeInternalKey(
-          namespace, userKey, hlc, RecordType.delete);
+        namespace,
+        userKey,
+        hlc,
+        RecordType.delete,
+      );
       expect(KeyCodec.decodeRecordType(internal), equals(RecordType.delete));
     });
 
-    test('higher HLC produces greater internal key bytes for same user key', () {
-      final lower = KeyCodec.encodeInternalKey(
-          namespace, userKey, const Hlc(100, 0), RecordType.put);
-      final higher = KeyCodec.encodeInternalKey(
-          namespace, userKey, const Hlc(200, 0), RecordType.put);
-      final hlcOffset = 1 + namespace.length + 16;
-      for (var i = 0; i < 8; i++) {
-        if (lower[hlcOffset + i] != higher[hlcOffset + i]) {
-          expect(higher[hlcOffset + i] > lower[hlcOffset + i], isTrue);
-          break;
+    test(
+      'higher HLC produces greater internal key bytes for same user key',
+      () {
+        final lower = KeyCodec.encodeInternalKey(
+          namespace,
+          userKey,
+          const Hlc(100, 0),
+          RecordType.put,
+        );
+        final higher = KeyCodec.encodeInternalKey(
+          namespace,
+          userKey,
+          const Hlc(200, 0),
+          RecordType.put,
+        );
+        final hlcOffset = 1 + namespace.length + 16;
+        for (var i = 0; i < 8; i++) {
+          if (lower[hlcOffset + i] != higher[hlcOffset + i]) {
+            expect(higher[hlcOffset + i] > lower[hlcOffset + i], isTrue);
+            break;
+          }
         }
-      }
-    });
+      },
+    );
 
     test('namespace exceeding 255 bytes throws', () {
       final longNs = 'x' * 256;
@@ -166,8 +211,10 @@ void main() {
 
   group('RecordType', () {
     test('put byte is 0x01', () => expect(RecordType.put.byte, equals(0x01)));
-    test('delete byte is 0x02',
-        () => expect(RecordType.delete.byte, equals(0x02)));
+    test(
+      'delete byte is 0x02',
+      () => expect(RecordType.delete.byte, equals(0x02)),
+    );
 
     test('fromByte round-trips', () {
       expect(RecordType.fromByte(0x01), equals(RecordType.put));

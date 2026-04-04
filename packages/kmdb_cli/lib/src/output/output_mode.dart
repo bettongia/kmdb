@@ -45,8 +45,9 @@ enum OutputMode {
       'csv' => csv,
       'line' => line,
       _ => throw ArgumentError(
-          'Unknown output mode "$name". '
-          'Valid modes: json, compact, ndjson, table, csv, line'),
+        'Unknown output mode "$name". '
+        'Valid modes: json, compact, ndjson, table, csv, line',
+      ),
     };
   }
 

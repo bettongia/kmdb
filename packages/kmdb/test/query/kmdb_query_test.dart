@@ -44,15 +44,18 @@ final class _ItemCodec implements KmdbCodec<_Item> {
       _Item(id: key, name: v.name, score: v.score);
 
   @override
-  Map<String, dynamic> encode(_Item v) =>
-      {'id': v.id, 'name': v.name, 'score': v.score};
+  Map<String, dynamic> encode(_Item v) => {
+    'id': v.id,
+    'name': v.name,
+    'score': v.score,
+  };
 
   @override
   _Item decode(Map<String, dynamic> j) => _Item(
-        id: j['id'] as String,
-        name: j['name'] as String,
-        score: j['score'] as int? ?? 0,
-      );
+    id: j['id'] as String,
+    name: j['name'] as String,
+    score: j['score'] as int? ?? 0,
+  );
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -108,11 +111,9 @@ void main() {
         _Item(id: _key(), name: 'Beta', score: 20),
         _Item(id: _key(), name: 'Gamma', score: 10),
       ]);
-      final results =
-          await col.where(Field('score').equals(10)).get();
+      final results = await col.where(Field('score').equals(10)).get();
       expect(results.length, equals(2));
-      expect(results.map((i) => i.name).toSet(),
-          equals({'Alpha', 'Gamma'}));
+      expect(results.map((i) => i.name).toSet(), equals({'Alpha', 'Gamma'}));
       await db.close();
     });
 
@@ -168,8 +169,7 @@ void main() {
         _Item(id: _key(), name: 'B', score: 2),
         _Item(id: _key(), name: 'C', score: 3),
       ]);
-      final results =
-          await col.all().orderBy('score', descending: true).get();
+      final results = await col.all().orderBy('score', descending: true).get();
       expect(results.map((i) => i.score).toList(), equals([3, 2, 1]));
       await db.close();
     });
@@ -196,8 +196,9 @@ void main() {
 
     test('limit restricts result count', () async {
       final (db, col) = await _open();
-      await col.putMany(List.generate(
-          5, (i) => _Item(id: _key(), name: 'x$i', score: i)));
+      await col.putMany(
+        List.generate(5, (i) => _Item(id: _key(), name: 'x$i', score: i)),
+      );
       final results = await col.all().orderBy('score').limit(3).get();
       expect(results.length, equals(3));
       await db.close();
@@ -205,10 +206,10 @@ void main() {
 
     test('offset skips documents', () async {
       final (db, col) = await _open();
-      await col.putMany(List.generate(
-          5, (i) => _Item(id: _key(), name: 'x$i', score: i)));
-      final results =
-          await col.all().orderBy('score').offset(2).limit(2).get();
+      await col.putMany(
+        List.generate(5, (i) => _Item(id: _key(), name: 'x$i', score: i)),
+      );
+      final results = await col.all().orderBy('score').offset(2).limit(2).get();
       expect(results.map((i) => i.score).toList(), equals([2, 3]));
       await db.close();
     });
@@ -236,8 +237,7 @@ void main() {
       await col.put(_Item(id: k3fixed, name: 'no-match'));
       final results = await col.all().keyPrefix(prefix).get();
       expect(results.length, equals(2));
-      expect(results.map((i) => i.name).toSet(),
-          equals({'match1', 'match2'}));
+      expect(results.map((i) => i.name).toSet(), equals({'match1', 'match2'}));
       await db.close();
     });
   });
@@ -251,8 +251,7 @@ void main() {
         _Item(id: _key(), name: 'A', score: 1),
         _Item(id: _key(), name: 'B', score: 2),
       ]);
-      final result =
-          await col.all().orderBy('score').first();
+      final result = await col.all().orderBy('score').first();
       expect(result, isNotNull);
       expect(result!.score, equals(1));
       await db.close();
@@ -260,8 +259,7 @@ void main() {
 
     test('returns null when no match', () async {
       final (db, col) = await _open();
-      final result =
-          await col.where(Field('score').equals(99)).first();
+      final result = await col.where(Field('score').equals(99)).first();
       expect(result, isNull);
       await db.close();
     });
@@ -270,8 +268,9 @@ void main() {
   group('count()', () {
     test('counts all documents', () async {
       final (db, col) = await _open();
-      await col.putMany(List.generate(
-          4, (i) => _Item(id: _key(), name: 'x$i')));
+      await col.putMany(
+        List.generate(4, (i) => _Item(id: _key(), name: 'x$i')),
+      );
       expect(await col.all().count(), equals(4));
       await db.close();
     });
@@ -283,8 +282,7 @@ void main() {
         _Item(id: _key(), name: 'B', score: 10),
         _Item(id: _key(), name: 'C', score: 5),
       ]);
-      expect(
-          await col.where(Field('score').equals(5)).count(), equals(2));
+      expect(await col.where(Field('score').equals(5)).count(), equals(2));
       await db.close();
     });
   });
@@ -293,16 +291,14 @@ void main() {
     test('true when at least one match', () async {
       final (db, col) = await _open();
       await col.put(_Item(id: _key(), name: 'A', score: 7));
-      expect(
-          await col.where(Field('score').equals(7)).any(), isTrue);
+      expect(await col.where(Field('score').equals(7)).any(), isTrue);
       await db.close();
     });
 
     test('false when no match', () async {
       final (db, col) = await _open();
       await col.put(_Item(id: _key(), name: 'A', score: 7));
-      expect(
-          await col.where(Field('score').equals(99)).any(), isFalse);
+      expect(await col.where(Field('score').equals(99)).any(), isFalse);
       await db.close();
     });
   });
@@ -428,41 +424,39 @@ void main() {
     test('does not throw when no indexes are defined', () async {
       final (db, col) = await _open();
       // No indexes defined — requireFreshIndex() should succeed immediately.
-      await expectLater(
-        col.all().requireFreshIndex().get(),
-        completes,
-      );
+      await expectLater(col.all().requireFreshIndex().get(), completes);
       await db.close();
     });
 
-    test('does not throw when index is current after build completes',
-        () async {
-      final (db, col) = await openWithIndex();
-      // Insert a document to trigger something to index.
-      await col.put(_Item(id: _key(), name: 'Alice', score: 1));
-      // Allow the background build microtask to complete.
-      await Future.delayed(const Duration(milliseconds: 20));
-      // Index should now be current — requireFreshIndex() should succeed.
-      await expectLater(
-        col.all().requireFreshIndex().get(),
-        completes,
-      );
-      await db.close();
-    });
+    test(
+      'does not throw when index is current after build completes',
+      () async {
+        final (db, col) = await openWithIndex();
+        // Insert a document to trigger something to index.
+        await col.put(_Item(id: _key(), name: 'Alice', score: 1));
+        // Allow the background build microtask to complete.
+        await Future.delayed(const Duration(milliseconds: 20));
+        // Index should now be current — requireFreshIndex() should succeed.
+        await expectLater(col.all().requireFreshIndex().get(), completes);
+        await db.close();
+      },
+    );
 
-    test('requireFreshIndex flag propagates through pipeline methods',
-        () async {
-      final (db, col) = await _open();
-      // Verify the flag survives chaining.
-      final q = col
-          .where(Field('name').equals('x'))
-          .orderBy('name')
-          .limit(10)
-          .offset(0)
-          .requireFreshIndex();
-      // No indexes defined, so get() should succeed.
-      await expectLater(q.get(), completes);
-      await db.close();
-    });
+    test(
+      'requireFreshIndex flag propagates through pipeline methods',
+      () async {
+        final (db, col) = await _open();
+        // Verify the flag survives chaining.
+        final q = col
+            .where(Field('name').equals('x'))
+            .orderBy('name')
+            .limit(10)
+            .offset(0)
+            .requireFreshIndex();
+        // No indexes defined, so get() should succeed.
+        await expectLater(q.get(), completes);
+        await db.close();
+      },
+    );
   });
 }

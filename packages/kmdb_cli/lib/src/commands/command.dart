@@ -30,8 +30,8 @@ final class CommandContext {
     this.mode = OutputMode.json,
     StringSink? out,
     StringSink? err,
-  })  : out = out ?? _StdoutSink(),
-        err = err ?? _StderrSink();
+  }) : out = out ?? _StdoutSink(),
+       err = err ?? _StderrSink();
 
   /// The open key-value store.
   final KvStoreImpl store;

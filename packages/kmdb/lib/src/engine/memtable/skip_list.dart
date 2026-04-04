@@ -127,7 +127,8 @@ final class SkipList {
       }
     }
 
-    current = current.forward[0] ?? _head; // first node ≥ start (or head if empty)
+    current =
+        current.forward[0] ?? _head; // first node ≥ start (or head if empty)
     if (identical(current, _head)) return; // empty list
 
     while (current != _head &&
@@ -177,7 +178,7 @@ final class SkipListEntry {
 /// Internal skip list node.
 final class _SkipNode {
   _SkipNode(this.key, this.value, int level)
-      : forward = List<_SkipNode?>.filled(level, null);
+    : forward = List<_SkipNode?>.filled(level, null);
 
   final Uint8List key;
   Uint8List value;

@@ -111,6 +111,19 @@ final class BloomFilter {
     return BloomFilter._(bits, hashCount);
   }
 
+  // ── Diagnostic accessors ──────────────────────────────────────────────────
+
+  /// Total number of bits in this filter.
+  ///
+  /// Useful for computing the false-positive rate: a filter with more bits
+  /// per key has a lower FPR.
+  int get numBits => _bits.length * 8;
+
+  /// Number of hash probes performed per key.
+  ///
+  /// The default is 7, yielding ~0.8% FPR at 10 bits/key.
+  int get numHashFunctions => _hashCount;
+
   // ── Query ─────────────────────────────────────────────────────────────────
 
   /// Returns `false` if [key] is definitely not in the set.

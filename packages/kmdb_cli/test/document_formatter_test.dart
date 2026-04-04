@@ -97,7 +97,9 @@ void main() {
     test('escapes commas in values', () {
       final buf = StringBuffer();
       DocumentFormatter.format(
-        [{'id': 'x', 'note': 'hello, world'}],
+        [
+          {'id': 'x', 'note': 'hello, world'},
+        ],
         OutputMode.csv,
         sink: buf,
       );
@@ -107,7 +109,9 @@ void main() {
     test('escapes double-quotes in values', () {
       final buf = StringBuffer();
       DocumentFormatter.format(
-        [{'id': 'x', 'note': 'say "hi"'}],
+        [
+          {'id': 'x', 'note': 'say "hi"'},
+        ],
         OutputMode.csv,
         sink: buf,
       );
@@ -148,10 +152,7 @@ void main() {
     });
 
     test('throws ArgumentError for unknown mode', () {
-      expect(
-        () => OutputMode.fromString('xml'),
-        throwsA(isA<ArgumentError>()),
-      );
+      expect(() => OutputMode.fromString('xml'), throwsA(isA<ArgumentError>()));
     });
   });
 }

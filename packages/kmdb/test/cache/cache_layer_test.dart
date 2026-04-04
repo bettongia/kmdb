@@ -42,6 +42,7 @@ final class _CountingStore implements KvStore {
     getCalls++;
     return _inner.get(ns, key);
   }
+
   @override
   Stream<KvEntry> scan(String ns, {String? startKey, String? endKey}) =>
       _inner.scan(ns, startKey: startKey, endKey: endKey);
@@ -67,7 +68,6 @@ final class _CountingStore implements KvStore {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 Uint8List _b(int v) => Uint8List.fromList([v]);
-
 
 int _dbCounter = 0;
 
@@ -98,7 +98,10 @@ void main() {
     // ── Cache hit / miss ────────────────────────────────────────────────────
 
     test('get returns null for absent key', () async {
-      expect(await cache.get('tasks', '0000000000007000800000000000000a'), isNull);
+      expect(
+        await cache.get('tasks', '0000000000007000800000000000000a'),
+        isNull,
+      );
     });
 
     test('second get is served from cache without a KvStore call', () async {
@@ -149,17 +152,20 @@ void main() {
 
     // ── Generation counter invalidation ─────────────────────────────────────
 
-    test('generation counter advances after put, stale entry not served', () async {
-      final key = '0000000000007000800000000000000c';
-      await store.put('ns', key, _b(1));
-      await cache.get('ns', key); // gen=1 entry cached
+    test(
+      'generation counter advances after put, stale entry not served',
+      () async {
+        final key = '0000000000007000800000000000000c';
+        await store.put('ns', key, _b(1));
+        await cache.get('ns', key); // gen=1 entry cached
 
-      await cache.put('ns', key, _b(99)); // gen increments to 2
-      await Future<void>.delayed(Duration.zero); // let write-event run
+        await cache.put('ns', key, _b(99)); // gen increments to 2
+        await Future<void>.delayed(Duration.zero); // let write-event run
 
-      final result = await cache.get('ns', key);
-      expect(result, equals(_b(99)));
-    });
+        final result = await cache.get('ns', key);
+        expect(result, equals(_b(99)));
+      },
+    );
 
     test('delete removes value; cache returns null after delete', () async {
       final key = '0000000000007000800000000000000d';
@@ -241,10 +247,7 @@ void main() {
     test('onResume evicts stale entries on mobile tier', () async {
       // Use its own store so closing mobileCache does not interfere with setUp.
       final (ownStore, _) = await _openStore();
-      final mobileCache = CacheLayer(
-        store: ownStore,
-        tier: CacheTier.mobile,
-      );
+      final mobileCache = CacheLayer(store: ownStore, tier: CacheTier.mobile);
 
       final key = '0000000000007000800000000000000f';
       await ownStore.put('ns', key, _b(1));
@@ -286,9 +289,11 @@ void main() {
     test('writeBatch delegates to underlying store', () async {
       final k1 = '00000000000070008000000000000001';
       final k2 = '00000000000070008000000000000002';
-      await cache.writeBatch(WriteBatch()
-        ..put('ns', k1, _b(10))
-        ..put('ns', k2, _b(20)));
+      await cache.writeBatch(
+        WriteBatch()
+          ..put('ns', k1, _b(10))
+          ..put('ns', k2, _b(20)),
+      );
 
       await Future<void>.delayed(Duration.zero);
       expect(await cache.get('ns', k1), equals(_b(10)));

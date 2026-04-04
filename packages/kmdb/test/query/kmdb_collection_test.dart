@@ -42,15 +42,18 @@ final class _TaskCodec implements KmdbCodec<_Task> {
       _Task(id: key, title: value.title, done: value.done);
 
   @override
-  Map<String, dynamic> encode(_Task value) =>
-      {'id': value.id, 'title': value.title, 'done': value.done};
+  Map<String, dynamic> encode(_Task value) => {
+    'id': value.id,
+    'title': value.title,
+    'done': value.done,
+  };
 
   @override
   _Task decode(Map<String, dynamic> json) => _Task(
-        id: json['id'] as String,
-        title: json['title'] as String,
-        done: json['done'] as bool? ?? false,
-      );
+    id: json['id'] as String,
+    title: json['title'] as String,
+    done: json['done'] as bool? ?? false,
+  );
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -116,7 +119,7 @@ void main() {
       final (db, col) = await _open();
       final task = _Task(id: '', title: 'New task');
       final inserted = await col.insert(task);
-      
+
       expect(inserted.id, isNotEmpty);
       expect(inserted.title, equals('New task'));
       expect(await col.get(inserted.id), isNotNull);
@@ -146,7 +149,7 @@ void main() {
       final id = '00000000000070008000000000000001';
       final task = _Task(id: id, title: 'Existing');
       await col.put(task);
-      
+
       // We need to control the generator to trigger the collision in insert()
       final col2 = KmdbCollection(
         namespace: 'tasks',
@@ -209,7 +212,10 @@ void main() {
       final (db, col) = await _open();
       final id = _key();
       await col.put(_Task(id: id, title: 'Draft', done: false));
-      final result = await col.update(id, (t) => _Task(id: t.id, title: t.title, done: true));
+      final result = await col.update(
+        id,
+        (t) => _Task(id: t.id, title: t.title, done: true),
+      );
       expect(result, isNotNull);
       expect(result!.done, isTrue);
       expect((await col.get(id))!.done, isTrue);

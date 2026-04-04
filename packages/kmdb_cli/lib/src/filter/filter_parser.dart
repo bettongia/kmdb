@@ -55,7 +55,8 @@ abstract final class FilterParser {
   static Filter _fromJson(dynamic node) {
     if (node is! Map<String, dynamic>) {
       throw ArgumentError(
-          'Expected a JSON object, got ${node.runtimeType}: $node');
+        'Expected a JSON object, got ${node.runtimeType}: $node',
+      );
     }
 
     // Logical combinators.
@@ -76,7 +77,8 @@ abstract final class FilterParser {
     final opRaw = node['op'];
     if (fieldRaw == null || opRaw == null) {
       throw ArgumentError(
-          'Filter node must have "and"/"or"/"not" or "field"+"op" keys: $node');
+        'Filter node must have "and"/"or"/"not" or "field"+"op" keys: $node',
+      );
     }
     final field = fieldRaw as String;
     final op = opRaw as String;
@@ -123,9 +125,13 @@ abstract final class FilterParser {
       case 'contains':
         return f.contains(value as Object);
       case 'containsAll':
-        return f.containsAll(_requireList(value, 'containsAll').cast<Object?>());
+        return f.containsAll(
+          _requireList(value, 'containsAll').cast<Object?>(),
+        );
       case 'containsAny':
-        return f.containsAny(_requireList(value, 'containsAny').cast<Object?>());
+        return f.containsAny(
+          _requireList(value, 'containsAny').cast<Object?>(),
+        );
       default:
         throw ArgumentError('Unknown filter operator: "$op"');
     }
@@ -134,7 +140,8 @@ abstract final class FilterParser {
   static List<dynamic> _requireList(dynamic value, String context) {
     if (value is! List) {
       throw ArgumentError(
-          '"$context" requires a JSON array, got ${value.runtimeType}');
+        '"$context" requires a JSON array, got ${value.runtimeType}',
+      );
     }
     return value;
   }
@@ -143,7 +150,8 @@ abstract final class FilterParser {
     final list = _requireList(value, context);
     if (list.length != length) {
       throw ArgumentError(
-          '"$context" requires exactly $length elements, got ${list.length}');
+        '"$context" requires exactly $length elements, got ${list.length}',
+      );
     }
     return list.cast<T>();
   }

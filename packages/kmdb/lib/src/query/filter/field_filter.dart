@@ -60,7 +60,8 @@ final class Field {
       _FieldFilter(path, _Op.gte, value);
 
   /// Matches documents where the field is less than or equal to [value].
-  Filter isLessThanOrEqualTo(Object value) => _FieldFilter(path, _Op.lte, value);
+  Filter isLessThanOrEqualTo(Object value) =>
+      _FieldFilter(path, _Op.lte, value);
 
   /// Matches documents where the field value falls within [[min], [max]]
   /// (inclusive on both ends).

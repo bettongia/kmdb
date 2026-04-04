@@ -50,8 +50,14 @@ void main() {
     test('0 → 1 byte', () => expect(Varint.encodedLength(0), equals(1)));
     test('127 → 1 byte', () => expect(Varint.encodedLength(127), equals(1)));
     test('128 → 2 bytes', () => expect(Varint.encodedLength(128), equals(2)));
-    test('16383 → 2 bytes', () => expect(Varint.encodedLength(16383), equals(2)));
-    test('16384 → 3 bytes', () => expect(Varint.encodedLength(16384), equals(3)));
+    test(
+      '16383 → 2 bytes',
+      () => expect(Varint.encodedLength(16383), equals(2)),
+    );
+    test(
+      '16384 → 3 bytes',
+      () => expect(Varint.encodedLength(16384), equals(3)),
+    );
   });
 
   group('encodeToBytes', () {

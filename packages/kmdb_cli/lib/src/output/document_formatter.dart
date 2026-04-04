@@ -56,17 +56,15 @@ abstract final class DocumentFormatter {
     StringSink out, {
     required bool indent,
   }) {
-    final encoder =
-        indent ? const JsonEncoder.withIndent('  ') : const JsonEncoder();
+    final encoder = indent
+        ? const JsonEncoder.withIndent('  ')
+        : const JsonEncoder();
     out.writeln(encoder.convert(docs));
   }
 
   // ── NDJSON ─────────────────────────────────────────────────────────────────
 
-  static void _writeNdjson(
-    List<Map<String, dynamic>> docs,
-    StringSink out,
-  ) {
+  static void _writeNdjson(List<Map<String, dynamic>> docs, StringSink out) {
     const enc = JsonEncoder();
     for (final doc in docs) {
       out.writeln(enc.convert(doc));
@@ -75,10 +73,7 @@ abstract final class DocumentFormatter {
 
   // ── Table ──────────────────────────────────────────────────────────────────
 
-  static void _writeTable(
-    List<Map<String, dynamic>> docs,
-    StringSink out,
-  ) {
+  static void _writeTable(List<Map<String, dynamic>> docs, StringSink out) {
     if (docs.isEmpty) {
       out.writeln('(no results)');
       return;
@@ -110,17 +105,16 @@ abstract final class DocumentFormatter {
 
     // Data rows.
     for (final doc in docs) {
-      final row = columns.map((c) => _cellString(doc[c]).padRight(widths[c]!)).join('  ');
+      final row = columns
+          .map((c) => _cellString(doc[c]).padRight(widths[c]!))
+          .join('  ');
       out.writeln(row);
     }
   }
 
   // ── CSV ────────────────────────────────────────────────────────────────────
 
-  static void _writeCsv(
-    List<Map<String, dynamic>> docs,
-    StringSink out,
-  ) {
+  static void _writeCsv(List<Map<String, dynamic>> docs, StringSink out) {
     if (docs.isEmpty) return;
 
     final columns = _collectColumns(docs);
@@ -130,16 +124,15 @@ abstract final class DocumentFormatter {
 
     // Data rows.
     for (final doc in docs) {
-      out.writeln(columns.map((c) => _csvEscape(_cellString(doc[c]))).join(','));
+      out.writeln(
+        columns.map((c) => _csvEscape(_cellString(doc[c]))).join(','),
+      );
     }
   }
 
   // ── Line ───────────────────────────────────────────────────────────────────
 
-  static void _writeLine(
-    List<Map<String, dynamic>> docs,
-    StringSink out,
-  ) {
+  static void _writeLine(List<Map<String, dynamic>> docs, StringSink out) {
     for (var i = 0; i < docs.length; i++) {
       if (i > 0) out.writeln();
       for (final entry in docs[i].entries) {
@@ -167,7 +160,8 @@ abstract final class DocumentFormatter {
   static String _cellString(dynamic value) {
     if (value == null) return '';
     if (value is String) return value;
-    if (value is Map || value is List) return const JsonEncoder().convert(value);
+    if (value is Map || value is List)
+      return const JsonEncoder().convert(value);
     return '$value';
   }
 

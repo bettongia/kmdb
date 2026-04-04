@@ -27,8 +27,10 @@ void main() {
   group('CompressionFlag', () {
     test('none byte is 0x00', () => expect(CompressionFlag.none.byte, 0x00));
     test('zstd byte is 0x01', () => expect(CompressionFlag.zstd.byte, 0x01));
-    test('deflate byte is 0x02',
-        () => expect(CompressionFlag.deflate.byte, 0x02));
+    test(
+      'deflate byte is 0x02',
+      () => expect(CompressionFlag.deflate.byte, 0x02),
+    );
 
     test('fromByte round-trips all known values', () {
       expect(CompressionFlag.fromByte(0x00), CompressionFlag.none);
@@ -100,7 +102,10 @@ void main() {
       final doc = {
         'id': 1,
         'name': 'Test',
-        'meta': {'version': 2, 'flags': [true, false]},
+        'meta': {
+          'version': 2,
+          'flags': [true, false],
+        },
         'empty': null,
       };
       expect(roundTrip(doc), equals(doc));
@@ -108,9 +113,7 @@ void main() {
 
     test('large document round-trips (triggers compression path)', () {
       // Build a document large enough to exceed the 64-byte threshold.
-      final doc = {
-        for (var i = 0; i < 20; i++) 'field_$i': 'value_$i' * 3,
-      };
+      final doc = {for (var i = 0; i < 20; i++) 'field_$i': 'value_$i' * 3};
       expect(roundTrip(doc), equals(doc));
     });
   });
@@ -149,13 +152,9 @@ void main() {
     test('cross-flag: Deflate-encoded value decodes correctly on native', () {
       // Manually construct a payload encoded with Deflate (flag 0x02) as a
       // web client would produce, then verify native can decode it.
-      final doc = {
-        for (var i = 0; i < 20; i++) 'k$i': 'v' * 10,
-      };
-      final cborBytes =
-          Uint8List.fromList(cbor.encode(CborValue(doc)));
-      final deflated =
-          Uint8List.fromList(ZLibEncoder().encode(cborBytes));
+      final doc = {for (var i = 0; i < 20; i++) 'k$i': 'v' * 10};
+      final cborBytes = Uint8List.fromList(cbor.encode(CborValue(doc)));
+      final deflated = Uint8List.fromList(ZLibEncoder().encode(cborBytes));
 
       // Build the on-disk byte sequence: [0x02][deflated CBOR].
       final stored = Uint8List(1 + deflated.length);
@@ -212,28 +211,19 @@ void main() {
 
     test('throws ArgumentError on unknown flag byte', () {
       final bad = Uint8List.fromList([0xFF, 0xA1, 0x60]); // 0xFF is unknown
-      expect(
-        () => ValueCodec.decode(bad),
-        throwsA(isA<ArgumentError>()),
-      );
+      expect(() => ValueCodec.decode(bad), throwsA(isA<ArgumentError>()));
     });
 
     test('throws on truncated deflate payload', () {
       // 0x02 = deflate, followed by garbage bytes that cannot be inflated.
       final bad = Uint8List.fromList([0x02, 0xDE, 0xAD, 0xBE, 0xEF]);
-      expect(
-        () => ValueCodec.decode(bad),
-        throwsA(anything),
-      );
+      expect(() => ValueCodec.decode(bad), throwsA(anything));
     });
 
     test('throws on truncated zstd payload', () {
       // 0x01 = zstd, followed by garbage bytes that cannot be decompressed.
       final bad = Uint8List.fromList([0x01, 0xDE, 0xAD, 0xBE, 0xEF]);
-      expect(
-        () => ValueCodec.decode(bad),
-        throwsA(anything),
-      );
+      expect(() => ValueCodec.decode(bad), throwsA(anything));
     });
   });
 

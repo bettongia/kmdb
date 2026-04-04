@@ -38,26 +38,30 @@ void main() {
   group('nested field (dot notation)', () {
     test('resolves one level deep', () {
       expect(
-          FieldPath.resolve('address.city',
-              {'address': <String, dynamic>{'city': 'Paris'}}),
-          equals('Paris'));
+        FieldPath.resolve('address.city', {
+          'address': <String, dynamic>{'city': 'Paris'},
+        }),
+        equals('Paris'),
+      );
     });
     test('resolves two levels deep', () {
       expect(
-          FieldPath.resolve('meta.stats.views', {
-            'meta': <String, dynamic>{
-              'stats': <String, dynamic>{'views': 100}
-            }
-          }),
-          equals(100));
+        FieldPath.resolve('meta.stats.views', {
+          'meta': <String, dynamic>{
+            'stats': <String, dynamic>{'views': 100},
+          },
+        }),
+        equals(100),
+      );
     });
     test('returns missing when intermediate is absent', () {
       expect(FieldPath.resolve('address.city', {}), equals(missing));
     });
     test('returns missing when intermediate is not a map', () {
       expect(
-          FieldPath.resolve('address.city', {'address': 'flat'}),
-          equals(missing));
+        FieldPath.resolve('address.city', {'address': 'flat'}),
+        equals(missing),
+      );
     });
   });
 
@@ -66,18 +70,27 @@ void main() {
   group('array index access', () {
     test('resolves specific index', () {
       expect(
-          FieldPath.resolve('tags[0]', {'tags': ['dart', 'flutter']}),
-          equals('dart'));
+        FieldPath.resolve('tags[0]', {
+          'tags': ['dart', 'flutter'],
+        }),
+        equals('dart'),
+      );
     });
     test('resolves index 1', () {
       expect(
-          FieldPath.resolve('tags[1]', {'tags': ['dart', 'flutter']}),
-          equals('flutter'));
+        FieldPath.resolve('tags[1]', {
+          'tags': ['dart', 'flutter'],
+        }),
+        equals('flutter'),
+      );
     });
     test('returns missing for out-of-bounds index', () {
       expect(
-          FieldPath.resolve('tags[5]', {'tags': ['dart']}),
-          equals(missing));
+        FieldPath.resolve('tags[5]', {
+          'tags': ['dart'],
+        }),
+        equals(missing),
+      );
     });
     test('returns missing when field is not an array', () {
       expect(FieldPath.resolve('x[0]', {'x': 'hello'}), equals(missing));
@@ -92,8 +105,11 @@ void main() {
   group('array fan-out ([])', () {
     test('returns all elements as a List', () {
       expect(
-          FieldPath.resolve('tags[]', {'tags': ['dart', 'flutter']}),
-          equals(['dart', 'flutter']));
+        FieldPath.resolve('tags[]', {
+          'tags': ['dart', 'flutter'],
+        }),
+        equals(['dart', 'flutter']),
+      );
     });
     test('returns empty list for empty array', () {
       expect(FieldPath.resolve('tags[]', {'tags': <dynamic>[]}), equals([]));

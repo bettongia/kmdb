@@ -80,27 +80,29 @@ final class WalWriter {
     required String namespace,
     required Uint8List keyBytes,
     required Uint8List value,
-  }) =>
-      append(WalRecord(
-        type: WalRecordType.put,
-        sequence: sequence,
-        namespace: namespace,
-        key: keyBytes,
-        value: value,
-      ));
+  }) => append(
+    WalRecord(
+      type: WalRecordType.put,
+      sequence: sequence,
+      namespace: namespace,
+      key: keyBytes,
+      value: value,
+    ),
+  );
 
   /// Writes a Delete tombstone record.
   Future<void> writeDelete({
     required Hlc sequence,
     required String namespace,
     required Uint8List keyBytes,
-  }) =>
-      append(WalRecord(
-        type: WalRecordType.delete,
-        sequence: sequence,
-        namespace: namespace,
-        key: keyBytes,
-      ));
+  }) => append(
+    WalRecord(
+      type: WalRecordType.delete,
+      sequence: sequence,
+      namespace: namespace,
+      key: keyBytes,
+    ),
+  );
 
   // ── Rotation ──────────────────────────────────────────────────────────────
 
@@ -114,10 +116,9 @@ final class WalWriter {
   /// delete it after the corresponding SSTable is confirmed in the Manifest.
   Future<String> rotate(Hlc sequence) async {
     final oldPath = activePath;
-    await append(WalRecord(
-      type: WalRecordType.flushMarker,
-      sequence: sequence,
-    ));
+    await append(
+      WalRecord(type: WalRecordType.flushMarker, sequence: sequence),
+    );
     _sequence++;
     return oldPath;
   }

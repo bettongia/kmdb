@@ -1,8 +1,8 @@
 # Database analysis utility in the CLI
 
-**Status**: Investigated
+**Status**: Complete
 
-**PR link**: {A link to the PR submitted for this plan}
+**PR link**: https://github.com/aurochs-kmesh/kmdb/pull/2
 
 ## Problem statement
 
@@ -157,26 +157,26 @@ The library file carries the standard Apache 2.0 license header and a doc
 comment stating this is a diagnostic API with no backwards-compatibility
 guarantee beyond the stable versioning of the `kmdb` package itself.
 
-- [ ] Create `lib/kmdb_analysis.dart` with the exports above.
+- [x] Create `lib/kmdb_analysis.dart` with the exports above.
 
 ### Step 2: Engine changes (`packages/kmdb`)
 
-- [ ] **Rename `_BlockRef` to `BlockRef`** (public): it is a `final class`
+- [x] **Rename `_BlockRef` to `BlockRef`** (public): it is a `final class`
       defined in `sstable_reader.dart`. Rename it and add a doc comment. This is
       required because returning `List<_BlockRef>` from any public getter is a
       Dart compilation error outside the defining library file.
-- [ ] **SSTable analysis support**:
+- [x] **SSTable analysis support**:
   - Update `SstableReader` to expose `SstableFooter footer`,
     `BloomFilter filter`, and `List<BlockRef> index` via public getters.
   - Add `toMap()` to `SstableFooter`.
   - `SstableMeta.toMap()` and `SstableRef.toMap()` already exist — do not
     re-implement them.
-- [ ] **WAL analysis support**:
+- [x] **WAL analysis support**:
   - Add `toMap()` to `WalRecord` and `WalRecordType`.
   - `WalRecord.toMap()` must hex-encode the key (raw 16-byte UUIDv7 binary).
   - The value must appear as `{"compressionFlag": N, "byteLength": N}` — full
     CBOR decode is out of scope for `util wal`.
-- [ ] **Manifest analysis support**:
+- [x] **Manifest analysis support**:
   - Add `toMap()` to `VersionEdit`. (`SstableMeta.toMap()` already exists.)
   - Add `ManifestReader.replayEdits()` returning `List<VersionEdit>` without
     updating any `ManifestState`. The existing `replay()` method is unchanged.
@@ -184,13 +184,13 @@ guarantee beyond the stable versioning of the `kmdb` package itself.
 
 ### Step 3: CLI changes (`packages/kmdb_cli`)
 
-- [ ] **Implement `UtilCommand`**:
+- [x] **Implement `UtilCommand`**:
   - Create `lib/src/commands/util_command.dart`.
   - Import `package:kmdb/kmdb_analysis.dart` for engine types.
   - Support subcommands: `sstable`, `wal`, `manifest`.
   - Add a `--full` flag to emit complete record-level output. Summary (metadata
     and counts) is the default.
-- [ ] **`util sstable <filename>`**:
+- [x] **`util sstable <filename>`**:
   - Resolve the filename relative to the `sst/` subdirectory of
     `store.stats().dbDir`.
   - Open the file directly via `StorageAdapterNative` — no `KvStore.open()`, no
@@ -202,7 +202,7 @@ guarantee beyond the stable versioning of the `kmdb` package itself.
   - On `CorruptedSstableException`: emit a structured error — in JSON mode as a
     top-level `"error"` field; in table mode as a stderr message.
   - On file not found: emit a clear error in the same manner.
-- [ ] **`util wal <filename>`**:
+- [x] **`util wal <filename>`**:
   - Open the file directly via `StorageAdapterNative` — no lock acquisition.
   - Use `WalReader.replayStrict` to surface corruption immediately rather than
     silently skipping bad records.
@@ -214,7 +214,7 @@ guarantee beyond the stable versioning of the `kmdb` package itself.
     then emit `"corruptedAt": {"recordIndex": N, "reason": "..."}` as a
     top-level JSON field. This ensures the partial output is not lost when
     copy-pasted into a bug ticket.
-- [ ] **`util manifest`**:
+- [x] **`util manifest`**:
   - Open the Manifest directly via `StorageAdapterNative` — no lock acquisition.
     Resolve the active manifest filename from the `CURRENT` file in `dbDir`.
   - Summary output (default): current `ManifestState` via
@@ -223,12 +223,12 @@ guarantee beyond the stable versioning of the `kmdb` package itself.
   - Full output (`--full`): complete `VersionEdit` sequence via
     `ManifestReader.replayEdits()`, each edit rendered via
     `VersionEdit.toMap()`.
-- [ ] **Registration**:
+- [x] **Registration**:
   - Register `UtilCommand` in `cli_runner.dart`.
 
 ### Step 4: Verification and testing
 
-- [ ] **Unit tests** in `packages/kmdb_cli/test/util_command_test.dart` using
+- [x] **Unit tests** in `packages/kmdb_cli/test/util_command_test.dart` using
       mock storage. Required scenarios:
   - File not found for each subcommand.
   - Corruption mid-stream for `util wal` — confirm records before the corruption
@@ -244,4 +244,11 @@ guarantee beyond the stable versioning of the `kmdb` package itself.
 
 ## Summary
 
-{Dot points highlighting the work undertaken}
+- Created `lib/kmdb_analysis.dart` diagnostic sub-library in `packages/kmdb` exporting storage-engine types (`SstableReader`, `BlockRef`, `SstableFooter`, `BloomFilter`, `WalReader`, `WalRecord`, `WalRecordType`, `CorruptedWalException`, `ManifestReader`, `ManifestState`, `VersionEdit`, `SstableMeta`, `Hlc`) without polluting the primary `kmdb.dart` API.
+- Renamed `_BlockRef` to `BlockRef` (public) in `sstable_reader.dart` and added doc comments; added `footer`, `filter`, and `index` public getters to `SstableReader`.
+- Added `BloomFilter.numBits` and `numHashFunctions` diagnostic accessors.
+- Added `SstableFooter.toMap()`, `WalRecord.toMap()`, `WalRecordType.toMap()`, and `VersionEdit.toMap()` for JSON output.
+- Added `ManifestReader.replayEdits()` returning the raw `List<VersionEdit>` sequence without computing state (the existing `replay()` is unchanged).
+- Implemented `UtilCommand` in `packages/kmdb_cli` with `sstable`, `wal`, and `manifest` subcommands and a `--full` flag; all subcommands open files via `StorageAdapterNative` with no lock acquisition.
+- Registered `UtilCommand` in `cli_runner.dart` and updated the help text.
+- Added 20 tests in `util_command_test.dart` covering: file-not-found for all three subcommands, WAL corruption mid-stream (records before failure preserved + `corruptedAt` marker), summary vs `--full` output for each subcommand, `util manifest` on a fresh database, and `CURRENT` file missing.

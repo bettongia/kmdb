@@ -57,22 +57,22 @@ final class SstableMeta {
   final int? walSequence;
 
   Map<String, dynamic> toMap() => {
-        'level': level,
-        'filename': filename,
-        'minKey': minKey,
-        'maxKey': maxKey,
-        'entryCount': entryCount,
-        if (walSequence != null) 'walSequence': walSequence,
-      };
+    'level': level,
+    'filename': filename,
+    'minKey': minKey,
+    'maxKey': maxKey,
+    'entryCount': entryCount,
+    if (walSequence != null) 'walSequence': walSequence,
+  };
 
   static SstableMeta fromMap(Map<dynamic, dynamic> m) => SstableMeta(
-        level: _toInt(m['level']),
-        filename: m['filename'] as String,
-        minKey: m['minKey'] as String,
-        maxKey: m['maxKey'] as String,
-        entryCount: _toInt(m['entryCount']),
-        walSequence: m['walSequence'] != null ? _toInt(m['walSequence']) : null,
-      );
+    level: _toInt(m['level']),
+    filename: m['filename'] as String,
+    minKey: m['minKey'] as String,
+    maxKey: m['maxKey'] as String,
+    entryCount: _toInt(m['entryCount']),
+    walSequence: m['walSequence'] != null ? _toInt(m['walSequence']) : null,
+  );
 }
 
 /// A reference to an SSTable file that was removed (input to compaction).
@@ -84,10 +84,8 @@ final class SstableRef {
 
   Map<String, dynamic> toMap() => {'level': level, 'filename': filename};
 
-  static SstableRef fromMap(Map<dynamic, dynamic> m) => SstableRef(
-        level: _toInt(m['level']),
-        filename: m['filename'] as String,
-      );
+  static SstableRef fromMap(Map<dynamic, dynamic> m) =>
+      SstableRef(level: _toInt(m['level']), filename: m['filename'] as String);
 }
 
 /// A single atomic state transition written to the Manifest.
@@ -126,6 +124,19 @@ final class VersionEdit {
 
   /// SSTables removed in this transition.
   final List<SstableRef> removed;
+
+  // ── Map representation ────────────────────────────────────────────────────
+
+  /// Returns a JSON-compatible representation of this edit.
+  ///
+  /// Intended for diagnostic output via `kmdb util manifest --full`.
+  /// Each added/removed SSTable is rendered via its own `toMap()`.
+  Map<String, dynamic> toMap() => {
+    'logNumber': logNumber,
+    'nextSeq': nextSeq,
+    'added': added.map((e) => e.toMap()).toList(),
+    'removed': removed.map((e) => e.toMap()).toList(),
+  };
 
   // ── Serialisation ─────────────────────────────────────────────────────────
 

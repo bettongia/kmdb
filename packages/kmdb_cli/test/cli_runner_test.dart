@@ -28,7 +28,10 @@ void main() {
   /// Runs the CLI with [args] and returns the result.
   Future<io.ProcessResult> _run(List<String> args) async {
     // Run from the package root where pubspec.yaml is located.
-    final result = await io.Process.run('dart', [binPath, ...args], workingDirectory: p.current);
+    final result = await io.Process.run('dart', [
+      binPath,
+      ...args,
+    ], workingDirectory: p.current);
     // Give the OS/FS a tiny bit of time to settle after command exit.
     await Future.delayed(const Duration(milliseconds: 50));
     return result;
@@ -51,17 +54,30 @@ void main() {
       final dbPath = tmp.file('db');
 
       // Put document (assigned a random UUIDv7 ID)
-      final putResult = await _run(
-          [dbPath, 'put', 'tasks', '--value', '{"title":"Buy bread"}']);
-      expect(putResult.exitCode, equals(0), reason: 'Put failed: ${putResult.stderr}');
-      
+      final putResult = await _run([
+        dbPath,
+        'put',
+        'tasks',
+        '--value',
+        '{"title":"Buy bread"}',
+      ]);
+      expect(
+        putResult.exitCode,
+        equals(0),
+        reason: 'Put failed: ${putResult.stderr}',
+      );
+
       final putDocs = json.decode(putResult.stdout) as List;
       final id = putDocs[0]['id'] as String;
       expect(id, hasLength(32));
 
       // Get document
       final getResult = await _run([dbPath, 'get', 'tasks', id]);
-      expect(getResult.exitCode, equals(0), reason: 'Get failed: ${getResult.stderr}');
+      expect(
+        getResult.exitCode,
+        equals(0),
+        reason: 'Get failed: ${getResult.stderr}',
+      );
       final docs = json.decode(getResult.stdout) as List;
       expect(docs, hasLength(1));
       expect(docs[0]['title'], equals('Buy bread'));
@@ -72,8 +88,13 @@ void main() {
       final dbPath = tmp.file('db');
 
       // Put
-      final putResult = await _run(
-          [dbPath, 'put', 'tasks', '--value', '{"title":"x"}']);
+      final putResult = await _run([
+        dbPath,
+        'put',
+        'tasks',
+        '--value',
+        '{"title":"x"}',
+      ]);
       final id = (json.decode(putResult.stdout) as List)[0]['id'] as String;
 
       // Delete
@@ -110,21 +131,39 @@ void main() {
       expect(p2.exitCode, 0);
 
       // 2. Export using --mode ndjson to stdout, and capture it.
-      final exportResult =
-          await _run([dbPath, '--mode', 'ndjson', 'export', 'tasks']);
-      expect(exportResult.exitCode, equals(0), reason: 'Export failed: ${exportResult.stderr}');
-      
+      final exportResult = await _run([
+        dbPath,
+        '--mode',
+        'ndjson',
+        'export',
+        'tasks',
+      ]);
+      expect(
+        exportResult.exitCode,
+        equals(0),
+        reason: 'Export failed: ${exportResult.stderr}',
+      );
+
       final exportContent = exportResult.stdout as String;
       final exportLines = exportContent.trim().split('\n');
-      expect(exportLines, hasLength(2), reason: 'Export should have 2 lines. Output: "$exportContent"');
+      expect(
+        exportLines,
+        hasLength(2),
+        reason: 'Export should have 2 lines. Output: "$exportContent"',
+      );
 
       // Write to file for import command.
       io.File(exportPath).writeAsStringSync(exportContent);
 
       // 3. Create a fresh DB and import
       final db2Path = tmp.file('db2');
-      final importResult =
-          await _run([db2Path, 'import', 'tasks', '--input', exportPath]);
+      final importResult = await _run([
+        db2Path,
+        'import',
+        'tasks',
+        '--input',
+        exportPath,
+      ]);
       expect(importResult.exitCode, equals(0), reason: importResult.stderr);
 
       // 4. Verify count in new DB
@@ -140,10 +179,16 @@ void main() {
       final dbPath = tmp.file('db');
 
       // Run put with --no-flush.
-      final putResult = await _run(
-          [dbPath, '--no-flush', 'put', 'notes', '--value', '{"title":"WAL test"}']);
+      final putResult = await _run([
+        dbPath,
+        '--no-flush',
+        'put',
+        'notes',
+        '--value',
+        '{"title":"WAL test"}',
+      ]);
       expect(putResult.exitCode, equals(0), reason: putResult.stderr);
-      
+
       final id = (json.decode(putResult.stdout) as List)[0]['id'] as String;
 
       // Verify WAL exists, but no SST files.
@@ -171,7 +216,7 @@ void main() {
 
       // Verify WAL is gone (it's rotated/deleted on flush).
       expect(walFile.existsSync(), isFalse, reason: 'WAL should be deleted');
-      
+
       // Verify SST exists now.
       final sstFilesAfter = sstDir
           .listSync()
@@ -184,13 +229,22 @@ void main() {
       final dbPath = tmp.file('db');
 
       // Run put without flags (defaulting to --flush).
-      final putResult =
-          await _run([dbPath, 'put', 'notes', '--value', '{"title":"Direct flush"}']);
+      final putResult = await _run([
+        dbPath,
+        'put',
+        'notes',
+        '--value',
+        '{"title":"Direct flush"}',
+      ]);
       expect(putResult.exitCode, equals(0), reason: putResult.stderr);
 
       // Verify WAL is gone and SST exists.
       final walFile = io.File(p.join(dbPath, 'wal-00001.log'));
-      expect(walFile.existsSync(), isFalse, reason: 'WAL should NOT exist (flushed)');
+      expect(
+        walFile.existsSync(),
+        isFalse,
+        reason: 'WAL should NOT exist (flushed)',
+      );
 
       final sstDir = io.Directory(p.join(dbPath, 'sst'));
       final sstFiles = sstDir

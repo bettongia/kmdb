@@ -91,7 +91,8 @@ final class SstableInfo {
       final epochVal = int.tryParse(epochStr);
       if (epochVal == null) {
         throw FormatException(
-            'Invalid epoch "$epochStr" in SSTable filename: $filename');
+          'Invalid epoch "$epochStr" in SSTable filename: $filename',
+        );
       }
       return SstableInfo(
         filename: filename,
@@ -103,7 +104,8 @@ final class SstableInfo {
     }
 
     throw FormatException(
-        'SSTable filename must have 3 or 4 dash-separated segments: $filename');
+      'SSTable filename must have 3 or 4 dash-separated segments: $filename',
+    );
   }
 
   // ── Generation ────────────────────────────────────────────────────────────
@@ -137,7 +139,8 @@ final class SstableInfo {
   static String _validateDeviceId(String id, String filename) {
     if (id.length != 8) {
       throw FormatException(
-          'deviceId must be 8 characters, got "$id" in: $filename');
+        'deviceId must be 8 characters, got "$id" in: $filename',
+      );
     }
     return id;
   }
@@ -147,7 +150,8 @@ final class SstableInfo {
       return Hlc.fromHex(hex);
     } catch (_) {
       throw FormatException(
-          'Invalid HLC hex "$hex" in SSTable filename: $filename');
+        'Invalid HLC hex "$hex" in SSTable filename: $filename',
+      );
     }
   }
 

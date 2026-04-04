@@ -65,14 +65,17 @@ final class IndexState {
   /// HLC timestamp string recorded when the build completed (diagnostics only).
   final String builtAt;
 
-  IndexState copyWith({IndexStatus? status, int? builtThrough, String? builtAt}) =>
-      IndexState(
-        namespace: namespace,
-        path: path,
-        status: status ?? this.status,
-        builtThrough: builtThrough ?? this.builtThrough,
-        builtAt: builtAt ?? this.builtAt,
-      );
+  IndexState copyWith({
+    IndexStatus? status,
+    int? builtThrough,
+    String? builtAt,
+  }) => IndexState(
+    namespace: namespace,
+    path: path,
+    status: status ?? this.status,
+    builtThrough: builtThrough ?? this.builtThrough,
+    builtAt: builtAt ?? this.builtAt,
+  );
 }
 
 /// Manages the lifecycle and persistent state of secondary indexes.
@@ -101,8 +104,8 @@ final class IndexManager {
     required KvStoreImpl store,
     required List<IndexDefinition> definitions,
     this.onIndexReady,
-  })  : _store = store,
-        _definitions = List.unmodifiable(definitions);
+  }) : _store = store,
+       _definitions = List.unmodifiable(definitions);
 
   final KvStoreImpl _store;
   final List<IndexDefinition> _definitions;
@@ -120,8 +123,7 @@ final class IndexManager {
 
   /// Returns the definitions for [namespace] whose status is [current] or
   /// [building] (i.e. write interception is active for them).
-  Future<List<IndexDefinition>> activeDefinitionsFor(
-      String namespace) async {
+  Future<List<IndexDefinition>> activeDefinitionsFor(String namespace) async {
     final result = <IndexDefinition>[];
     for (final def in _definitions) {
       if (def.namespace != namespace) continue;
@@ -142,7 +144,10 @@ final class IndexManager {
     final def = _find(namespace, path);
     if (def == null) {
       return IndexState(
-          namespace: namespace, path: path, status: IndexStatus.undefined);
+        namespace: namespace,
+        path: path,
+        status: IndexStatus.undefined,
+      );
     }
     return _loadState(def);
   }
@@ -168,11 +173,19 @@ final class IndexManager {
     for (final def in active) {
       if (oldDoc != null) {
         IndexWriter.removeEntries(
-            batch: batch, definition: def, docKey: docKey, document: oldDoc);
+          batch: batch,
+          definition: def,
+          docKey: docKey,
+          document: oldDoc,
+        );
       }
       if (newDoc != null) {
         IndexWriter.addEntries(
-            batch: batch, definition: def, docKey: docKey, document: newDoc);
+          batch: batch,
+          definition: def,
+          docKey: docKey,
+          document: newDoc,
+        );
       }
     }
     // Trigger a build for any undefined indexes on this namespace.  The build
@@ -199,7 +212,10 @@ final class IndexManager {
     final def = _find(namespace, path);
     if (def == null) {
       return IndexState(
-          namespace: namespace, path: path, status: IndexStatus.undefined);
+        namespace: namespace,
+        path: path,
+        status: IndexStatus.undefined,
+      );
     }
 
     final state = await _loadState(def);
@@ -234,7 +250,8 @@ final class IndexManager {
   /// Returns [IndexRebuildEvents] for any index found in the `building` state,
   /// which indicates a build was interrupted by an unclean shutdown (spec §16
   /// "Interrupted Build Recovery").
-  Future<List<({String namespace, String path})>> checkInterruptedBuilds() async {
+  Future<List<({String namespace, String path})>>
+  checkInterruptedBuilds() async {
     final events = <({String namespace, String path})>[];
     for (final def in _definitions) {
       final state = await _loadState(def);
@@ -264,14 +281,17 @@ final class IndexManager {
 
   Future<void> _buildIndex(IndexDefinition definition) async {
     // 1. Record the generation at build start and mark status = building.
-    final startGen =
-        await _store.meta.getGenerationCounter(definition.namespace);
-    await _persistState(IndexState(
-      namespace: definition.namespace,
-      path: definition.path,
-      status: IndexStatus.building,
-      builtThrough: startGen,
-    ));
+    final startGen = await _store.meta.getGenerationCounter(
+      definition.namespace,
+    );
+    await _persistState(
+      IndexState(
+        namespace: definition.namespace,
+        path: definition.path,
+        status: IndexStatus.building,
+        builtThrough: startGen,
+      ),
+    );
 
     // 2. Scan the entire namespace in batches of 200, writing index entries.
     //    Write interception is now active (activeDefinitionsFor returns this
@@ -285,8 +305,7 @@ final class IndexManager {
     }
 
     // 3. Check if the generation advanced during the build.
-    final endGen =
-        await _store.meta.getGenerationCounter(definition.namespace);
+    final endGen = await _store.meta.getGenerationCounter(definition.namespace);
     if (endGen == startGen) {
       // No concurrent writes — index is current.
       final currentState = IndexState(
@@ -300,12 +319,14 @@ final class IndexManager {
     } else {
       // Concurrent writes arrived; index is stale. A subsequent query will
       // trigger another rebuild.
-      await _persistState(IndexState(
-        namespace: definition.namespace,
-        path: definition.path,
-        status: IndexStatus.stale,
-        builtThrough: startGen,
-      ));
+      await _persistState(
+        IndexState(
+          namespace: definition.namespace,
+          path: definition.path,
+          status: IndexStatus.stale,
+          builtThrough: startGen,
+        ),
+      );
     }
   }
 
@@ -388,9 +409,10 @@ final class IndexManager {
       final decoded = cbor.decode(bytes);
       if (decoded is! CborMap) {
         return IndexState(
-            namespace: def.namespace,
-            path: def.path,
-            status: IndexStatus.undefined);
+          namespace: def.namespace,
+          path: def.path,
+          status: IndexStatus.undefined,
+        );
       }
       final map = decoded.toObject() as Map<dynamic, dynamic>;
       final statusStr = map['status'] as String? ?? 'undefined';
@@ -407,9 +429,10 @@ final class IndexManager {
       );
     } catch (_) {
       return IndexState(
-          namespace: def.namespace,
-          path: def.path,
-          status: IndexStatus.undefined);
+        namespace: def.namespace,
+        path: def.path,
+        status: IndexStatus.undefined,
+      );
     }
   }
 

@@ -49,13 +49,15 @@ void main() {
       );
     });
 
-    test('returned bytes are a copy — mutations do not affect stored data',
-        () async {
-      await adapter.writeFile('/db/foo', Uint8List.fromList([1, 2, 3]));
-      final result = await adapter.readFile('/db/foo');
-      result[0] = 99;
-      expect(await adapter.readFile('/db/foo'), equals([1, 2, 3]));
-    });
+    test(
+      'returned bytes are a copy — mutations do not affect stored data',
+      () async {
+        await adapter.writeFile('/db/foo', Uint8List.fromList([1, 2, 3]));
+        final result = await adapter.readFile('/db/foo');
+        result[0] = 99;
+        expect(await adapter.readFile('/db/foo'), equals([1, 2, 3]));
+      },
+    );
   });
 
   group('readFileRange', () {

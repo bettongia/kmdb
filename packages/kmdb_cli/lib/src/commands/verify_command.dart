@@ -52,11 +52,7 @@ final class VerifyCommand implements CliCommand {
         try {
           ValueCodec.decode(entry.value);
         } catch (e) {
-          errors.add({
-            'namespace': ns,
-            'key': entry.key,
-            'error': '$e',
-          });
+          errors.add({'namespace': ns, 'key': entry.key, 'error': '$e'});
         }
       }
     }

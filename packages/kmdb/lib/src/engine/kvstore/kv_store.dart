@@ -64,11 +64,7 @@ abstract interface class KvStore {
   /// [startKey] and [endKey] are optional 32-character hex strings.
   /// [startKey] is inclusive; [endKey] is exclusive. Pass `null` for an
   /// unbounded scan.
-  Stream<KvEntry> scan(
-    String namespace, {
-    String? startKey,
-    String? endKey,
-  });
+  Stream<KvEntry> scan(String namespace, {String? startKey, String? endKey});
 
   /// Explicitly flushes the active memtable to an SSTable on disk.
   ///
@@ -337,11 +333,11 @@ final class KvStoreConfig {
 
   /// Configuration for unit tests: tiny thresholds, no fsync, small cache.
   factory KvStoreConfig.forTesting() => const KvStoreConfig(
-        memtableSizeBytes: 4096,
-        l0CompactionTrigger: 2,
-        l1MaxBytes: 16 * 1024,
-        l2MaxBytes: 64 * 1024,
-        singleFileThresholdBytes: 8 * 1024,
-        fsyncOnWrite: false,
-      );
+    memtableSizeBytes: 4096,
+    l0CompactionTrigger: 2,
+    l1MaxBytes: 16 * 1024,
+    l2MaxBytes: 64 * 1024,
+    singleFileThresholdBytes: 8 * 1024,
+    fsyncOnWrite: false,
+  );
 }

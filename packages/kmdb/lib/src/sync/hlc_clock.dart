@@ -74,12 +74,12 @@ final class HlcClock {
   HlcClock({
     int Function()? wallClock,
     Duration maxClockSkew = const Duration(seconds: 60),
-  })  : _wallClock = wallClock ?? (() => DateTime.now().millisecondsSinceEpoch),
-        _maxSkewMs = maxClockSkew.inMilliseconds,
-        // Start at (0, 0) so that the first now() call always advances to the
-        // wall clock time. Recovery code is responsible for calling
-        // update(storedHwm) after open() to fast-forward past the stored HWM.
-        _current = const Hlc(0, 0);
+  }) : _wallClock = wallClock ?? (() => DateTime.now().millisecondsSinceEpoch),
+       _maxSkewMs = maxClockSkew.inMilliseconds,
+       // Start at (0, 0) so that the first now() call always advances to the
+       // wall clock time. Recovery code is responsible for calling
+       // update(storedHwm) after open() to fast-forward past the stored HWM.
+       _current = const Hlc(0, 0);
 
   final int Function() _wallClock;
   final int _maxSkewMs;
