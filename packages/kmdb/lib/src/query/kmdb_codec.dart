@@ -16,7 +16,23 @@
 ///
 /// [KmdbCodec] is the only piece of serialization logic that application code
 /// provides. Implementors delegate to generated code (`freezed`,
-/// `json_serializable`, or hand-written converters):
+/// `json_serializable`, or hand-written converters).
+///
+/// ## Reserved field prefix
+///
+/// The `_` prefix is reserved for KMDB system-managed fields. The most
+/// important is `_id`, which holds the document's UUIDv7 key.
+///
+/// - **`encode()`** must **not** include any top-level key starting with `_`.
+///   The framework validates this contract before every write and throws
+///   [ReservedFieldException] if violated.
+/// - **`decode()`** will receive the map with `_id` pre-injected by the
+///   framework. Implementations should read `json['_id']` to reconstruct the
+///   typed model's key field.
+/// - **`withKey()`** stamps the system key onto the typed model so that
+///   [KmdbCollection.insert] can return the document with its assigned `_id`.
+///
+/// ## Example
 ///
 /// ```dart
 /// class TaskCodec implements KmdbCodec<Task> {
@@ -30,11 +46,20 @@
 ///         done: value.done,
 ///       );
 ///
+///   // Do NOT include 'id' or any '_'-prefixed key here.
 ///   @override
-///   Map<String, dynamic> encode(Task value) => value.toJson();
+///   Map<String, dynamic> encode(Task value) => {
+///     'title': value.title,
+///     'done': value.done,
+///   };
 ///
+///   // The framework injects '_id' into the map before calling decode().
 ///   @override
-///   Task decode(Map<String, dynamic> json) => Task.fromJson(json);
+///   Task decode(Map<String, dynamic> json) => Task(
+///     id: json['_id'] as String,
+///     title: json['title'] as String,
+///     done: json['done'] as bool? ?? false,
+///   );
 /// }
 /// ```
 ///
@@ -61,13 +86,23 @@ abstract interface class KmdbCodec<T> {
 
   /// Encodes [value] to a JSON-compatible map.
   ///
+  /// **Must not** include any top-level key starting with `_`. The framework
+  /// validates this before every write and throws [ReservedFieldException] if
+  /// any `_`-prefixed key is found. The `_id` field in particular must not be
+  /// emitted here — it is injected automatically by the framework on the read
+  /// path.
+  ///
   /// CBOR encoding and compression are applied by the Query Layer on top of
   /// this map — the codec itself must not produce pre-encoded bytes.
   Map<String, dynamic> encode(T value);
 
   /// Decodes a JSON-compatible map to a typed [T] value.
   ///
-  /// Called by the Query Layer after CBOR decoding. Throws [FormatException]
-  /// or any application-specific exception if the map is invalid.
+  /// Called by the Query Layer after CBOR decoding. The map will contain
+  /// `_id` (the document's UUIDv7 key) injected by the framework. Use
+  /// `json['_id']` to reconstruct the typed model's key field.
+  ///
+  /// Throws [FormatException] or any application-specific exception if the
+  /// map is invalid.
   T decode(Map<String, dynamic> json);
 }

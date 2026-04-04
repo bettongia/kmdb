@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import '../exceptions.dart';
+
 /// Declares a secondary index on a document field within a collection.
 ///
 /// Index definitions are registered at [KmdbDatabase.open] time. No index
@@ -44,7 +46,14 @@
 /// ```
 final class IndexDefinition {
   /// Creates an [IndexDefinition] for [path] in [namespace].
-  const IndexDefinition(this.namespace, this.path);
+  ///
+  /// Throws [ReservedIndexPathException] if [path] starts with `_`, because
+  /// `_`-prefixed fields are system-managed and not user-queryable.
+  IndexDefinition(this.namespace, this.path) {
+    if (path.startsWith('_')) {
+      throw ReservedIndexPathException(namespace, path);
+    }
+  }
 
   /// The storage-layer namespace identifier for the collection this index
   /// belongs to. This matches the [name] parameter passed to
