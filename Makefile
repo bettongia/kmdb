@@ -16,7 +16,7 @@ prepare:
 	dart pub global activate coverage
 	melos bootstrap
 
-test: test.log cli_test
+test: test.log cli_test.log
 
 test.log: $(KMDB_PKG)/**/*.dart
 	melos test --scope=kmdb | tee cli_test.log
