@@ -27,7 +27,7 @@ import 'command.dart';
 ///
 /// The JSON document is read from `--value` (inline) or from stdin.
 ///
-/// Usage: `kmdb <db> put <namespace> [--value '<json>']`
+/// Usage: `kmdb <db> put <collection> [--value '<json>']`
 final class PutCommand implements CliCommand {
   const PutCommand();
 
@@ -39,7 +39,7 @@ final class PutCommand implements CliCommand {
       'Insert a new document. JSON read from --value or stdin.';
 
   @override
-  String get usage => 'put <namespace> [--value <json>]';
+  String get usage => 'put <collection> [--value <json>]';
 
   @override
   Future<bool> execute(
@@ -48,7 +48,7 @@ final class PutCommand implements CliCommand {
     Map<String, dynamic> flags,
   ) async {
     if (args.isEmpty) {
-      ctx.writeError('put requires <namespace>.\nUsage: $usage');
+      ctx.writeError('put requires <collection>.\nUsage: $usage');
       return false;
     }
     final namespace = args[0];

@@ -18,6 +18,20 @@ streams with debounced re-execution. Documents are serialized via a thin codec
 bridge to freezed/json_serializable, with UUIDv7 keys providing time-ordered
 insertion and index locality.
 
+## Terminology
+
+- **Collection** — a user-facing, typed logical partition of documents. This is
+  the primary concept for application code. Collections are obtained via
+  `db.collection(name: 'tasks', codec: ...)` and expose a fully-typed read/write
+  API.
+- **Namespace** — the underlying LSM storage partition. Every collection maps
+  1-to-1 to a namespace of the same name. Application developers work with
+  collections; the term "namespace" is an implementation detail of the storage
+  engine.
+- **System namespaces** — internal partitions prefixed with `$` (e.g. `$meta`,
+  `$index:…`, `$cache`). These are created and managed by the engine and are
+  never surfaced as user collections.
+
 ## Features
 
 TODO: List what your package can do. Maybe include images, gifs, or videos.

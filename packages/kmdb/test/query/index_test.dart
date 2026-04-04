@@ -75,7 +75,7 @@ Future<(KmdbDatabase, KmdbCollection<_Contact>)> _openWithIndexes() async {
     indexes: [_cityIndex, _tagsIndex],
     config: KvStoreConfig.forTesting(),
   );
-  return (db, db.collection(namespace: 'contacts', codec: _codec));
+  return (db, db.collection(name: 'contacts', codec: _codec));
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -421,7 +421,7 @@ void main() {
         indexes: [_cityIndex],
         config: KvStoreConfig.forTesting(),
       );
-      final col = db.collection(namespace: 'contacts', codec: _codec);
+      final col = db.collection(name: 'contacts', codec: _codec);
 
       final k1 = _key();
       await col.put(_Contact(id: k1, city: 'London'));

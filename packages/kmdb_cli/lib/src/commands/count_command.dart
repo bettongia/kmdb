@@ -17,9 +17,9 @@ import 'package:kmdb/kmdb.dart';
 import '../filter/filter_parser.dart';
 import 'command.dart';
 
-/// Counts documents in a namespace, optionally filtered.
+/// Counts documents in a collection, optionally filtered.
 ///
-/// Usage: `kmdb <db> count <namespace> [--filter <json>]`
+/// Usage: `kmdb <db> count <collection> [--filter <json>]`
 final class CountCommand implements CliCommand {
   const CountCommand();
 
@@ -27,10 +27,10 @@ final class CountCommand implements CliCommand {
   String get name => 'count';
 
   @override
-  String get description => 'Count documents in a namespace.';
+  String get description => 'Count documents in a collection.';
 
   @override
-  String get usage => 'count <namespace> [--filter <json>]';
+  String get usage => 'count <collection> [--filter <json>]';
 
   @override
   Future<bool> execute(
@@ -39,7 +39,7 @@ final class CountCommand implements CliCommand {
     Map<String, dynamic> flags,
   ) async {
     if (args.isEmpty) {
-      ctx.writeError('count requires <namespace>.\nUsage: $usage');
+      ctx.writeError('count requires <collection>.\nUsage: $usage');
       return false;
     }
     final namespace = args[0];

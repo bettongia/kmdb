@@ -47,7 +47,7 @@ import 'kmdb_collection.dart';
 /// ## Collections
 ///
 /// ```dart
-/// final tasks = db.collection(namespace: 'tasks', codec: TaskCodec());
+/// final tasks = db.collection(name: 'tasks', codec: TaskCodec());
 /// await tasks.put(Task(id: key, title: 'Buy milk'));
 /// final task = await tasks.get(key);
 /// ```
@@ -135,15 +135,15 @@ final class KmdbDatabase {
 
   // ── Public API ──────────────────────────────────────────────────────────────
 
-  /// Returns a typed collection for [namespace] using [codec] for
-  /// encode/decode.
+  /// Returns a typed collection for [name] using [codec] for encode/decode.
   ///
-  /// Multiple calls with the same [namespace] return independent
-  /// [KmdbCollection] instances that share the same underlying store.
+  /// Multiple calls with the same [name] return independent [KmdbCollection]
+  /// instances that share the same underlying store. The [name] is used as the
+  /// storage namespace identifier in the LSM engine.
   KmdbCollection<T> collection<T>({
-    required String namespace,
+    required String name,
     required KmdbCodec<T> codec,
-  }) => KmdbCollection<T>(namespace: namespace, codec: codec, database: this);
+  }) => KmdbCollection<T>(namespace: name, codec: codec, database: this);
 
   /// Checks all tracked namespaces for stale cache entries.
   ///

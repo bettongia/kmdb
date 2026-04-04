@@ -73,7 +73,7 @@ Future<(KmdbDatabase, KmdbCollection<_Task>)> _open({
     indexes: indexes,
     config: KvStoreConfig.forTesting(),
   );
-  final col = db.collection(namespace: 'tasks', codec: _codec);
+  final col = db.collection(name: 'tasks', codec: _codec);
   return (db, col);
 }
 

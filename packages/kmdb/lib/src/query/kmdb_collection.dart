@@ -54,7 +54,7 @@ import 'kmdb_query.dart';
 /// ## Example
 ///
 /// ```dart
-/// final tasks = db.collection(namespace: 'tasks', codec: TaskCodec());
+/// final tasks = db.collection(name: 'tasks', codec: TaskCodec());
 /// await tasks.put(Task(id: newKey, title: 'Buy milk'));
 /// final task = await tasks.get(newKey); // Task or null
 /// await for (final t in tasks.watchKey(newKey)) { ... }
@@ -68,7 +68,12 @@ final class KmdbCollection<T> {
     this.keyGenerator = const UuidV7KeyGenerator(),
   }) : _db = database;
 
-  /// The namespace this collection operates in.
+  /// The unique storage identifier for this collection in the LSM engine.
+  ///
+  /// This is the namespace passed as [name] to [KmdbDatabase.collection]. It
+  /// serves as the low-level partition key in the storage engine. System
+  /// namespaces (e.g. `$meta`, `$index:…`, `$cache`) are internal and are
+  /// never surfaced as user collections.
   final String namespace;
 
   /// The codec used to encode and decode documents.
