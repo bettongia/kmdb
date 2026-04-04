@@ -91,11 +91,19 @@ final class KmdbCollection<T> {
 
   /// Returns the document with [key], or `null` if it does not exist.
   ///
-  /// Uses the Cache Layer for cache-aware reads.
+  /// Uses the Cache Layer for cache-aware reads. The framework injects
+  /// `_id: key` into the decoded map before calling [codec.decode], so
+  /// implementations can read `json['_id']` to reconstruct the typed model's
+  /// key field.
   Future<T?> get(String key) async {
     final bytes = await _db.cache.get(namespace, key);
     if (bytes == null) return null;
-    return codec.decode(ValueCodec.decode(bytes));
+    // Inject the document key as '_id' before handing the map to the codec.
+    // This gives codec.decode() a consistent fromJson-style map that includes
+    // the system key without it being persisted in the value bytes.
+    final doc = ValueCodec.decode(bytes);
+    doc['_id'] = key;
+    return codec.decode(doc);
   }
 
   /// Returns a map of documents for each key in [keys].
@@ -242,12 +250,32 @@ final class KmdbCollection<T> {
 
   // ── Internal ───────────────────────────────────────────────────────────────
 
+  /// Validates that [doc] contains no top-level keys starting with `_`.
+  ///
+  /// The `_` prefix is reserved for KMDB system-managed fields (e.g. `_id`).
+  /// Throws [ReservedFieldException] listing every offending key if any are
+  /// found. Validation runs before any I/O, so no partial writes occur.
+  static void _validateNoReservedKeys(Map<String, dynamic> doc) {
+    final offending = doc.keys
+        .where((k) => k.startsWith('_'))
+        .toList(growable: false);
+    if (offending.isNotEmpty) {
+      throw ReservedFieldException(offending);
+    }
+  }
+
   /// Encodes and writes [newDoc], removing old index entries for [oldDoc].
+  ///
+  /// Validates that [newDoc] contains no `_`-prefixed top-level keys before
+  /// any I/O is performed.
   Future<void> _writeDocument({
     required String key,
     required Map<String, dynamic> newDoc,
     required Map<String, dynamic>? oldDoc,
   }) async {
+    // Validate before any I/O — throw immediately if the codec emitted
+    // reserved fields. This prevents partial writes on error.
+    _validateNoReservedKeys(newDoc);
     final encodedValue = ValueCodec.encode(newDoc);
     final batch = WriteBatch()..put(namespace, key, encodedValue);
     await _db.indexManager.interceptWrite(

@@ -95,9 +95,9 @@ final class ImportCommand implements CliCommand {
         return false;
       }
 
-      final keyRaw = doc['id'];
+      final keyRaw = doc['_id'];
       if (keyRaw == null) {
-        ctx.writeError('Line $lineNum: document missing "id" field');
+        ctx.writeError('Line $lineNum: document missing "_id" field');
         return false;
       }
       final key = '$keyRaw';

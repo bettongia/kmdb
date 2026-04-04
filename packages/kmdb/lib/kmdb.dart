@@ -64,6 +64,8 @@ export 'src/query/exceptions.dart'
         DocumentAlreadyExistsException,
         DocumentNotFoundException,
         IndexRebuildEvent,
+        ReservedFieldException,
+        ReservedIndexPathException,
         StaleIndexException;
 export 'src/query/filter/filter.dart' show Filter;
 export 'src/query/filter/field_filter.dart' show Field;

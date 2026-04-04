@@ -90,6 +90,74 @@ final class StaleIndexException implements Exception {
       'is $status — cannot serve query with requireFreshIndex()';
 }
 
+/// Thrown when [KmdbCollection] detects that the map returned by
+/// [KmdbCodec.encode] contains one or more top-level keys whose names begin
+/// with `_`.
+///
+/// The `_` prefix is reserved for system-managed fields (e.g. `_id`). User
+/// codecs must not emit these keys — the framework injects them automatically
+/// around every read and write.
+///
+/// [offendingKeys] lists every reserved-prefix key that was found so the
+/// developer can fix their codec in a single iteration.
+///
+/// Example:
+/// ```dart
+/// try {
+///   await collection.put(myDoc);
+/// } on ReservedFieldException catch (e) {
+///   // e.offendingKeys contains every offending field name.
+///   print(e);
+/// }
+/// ```
+final class ReservedFieldException implements Exception {
+  /// Creates a [ReservedFieldException] reporting [offendingKeys].
+  const ReservedFieldException(this.offendingKeys);
+
+  /// The top-level field names that start with `_` and must not appear in the
+  /// encoded map produced by [KmdbCodec.encode].
+  final List<String> offendingKeys;
+
+  @override
+  String toString() =>
+      'ReservedFieldException: codec.encode() must not return top-level keys '
+      'starting with "_". Offending keys: '
+      '${offendingKeys.map((k) => '"$k"').join(', ')}. '
+      'The "_" prefix is reserved for KMDB system fields (e.g. "_id").';
+}
+
+/// Thrown when [KmdbDatabase.open] is called with an [IndexDefinition] whose
+/// [IndexDefinition.path] begins with `_`.
+///
+/// Fields with the `_` prefix are system-managed (e.g. `_id`). Secondary
+/// indexes may only be defined on user-owned field paths.
+///
+/// Example:
+/// ```dart
+/// // This will throw at open() time:
+/// await KmdbDatabase.open(
+///   path: '/db',
+///   indexes: [IndexDefinition('users', '_id')],  // invalid
+/// );
+/// ```
+final class ReservedIndexPathException implements Exception {
+  /// Creates a [ReservedIndexPathException] for the given [namespace] and
+  /// offending [path].
+  const ReservedIndexPathException(this.namespace, this.path);
+
+  /// The namespace of the invalid index definition.
+  final String namespace;
+
+  /// The path that starts with `_`.
+  final String path;
+
+  @override
+  String toString() =>
+      'ReservedIndexPathException: index path "$path" in namespace '
+      '"$namespace" starts with "_", which is reserved for system fields. '
+      'Only user-owned field paths may be indexed.';
+}
+
 /// Describes an index whose build was interrupted by an unclean shutdown.
 ///
 /// Passed to [KmdbDatabase.open]'s `onIndexRebuildRequired` callback when
