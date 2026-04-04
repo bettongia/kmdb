@@ -129,9 +129,7 @@ void main() {
       final m = Memtable();
       for (var i = 1; i <= 5; i++) {
         final keyHex =
-            i.toRadixString(16).padLeft(12, '0') +
-            '70008' +
-            i.toRadixString(16).padLeft(15, '0');
+            '${i.toRadixString(16).padLeft(12, '0')}70008${i.toRadixString(16).padLeft(15, '0')}';
         final k = _key('ns', keyHex, const Hlc(1, 0), RecordType.put);
         m.put(k, Uint8List.fromList([i]));
       }

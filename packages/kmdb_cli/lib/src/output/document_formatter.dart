@@ -160,8 +160,9 @@ abstract final class DocumentFormatter {
   static String _cellString(dynamic value) {
     if (value == null) return '';
     if (value is String) return value;
-    if (value is Map || value is List)
+    if (value is Map || value is List) {
       return const JsonEncoder().convert(value);
+    }
     return '$value';
   }
 

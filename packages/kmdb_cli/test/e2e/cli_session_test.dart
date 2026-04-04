@@ -142,7 +142,7 @@ void main() {
 
       // Verify non-existent
       for (var i = 0; i < 10; i++) {
-        final ghostId = '0000000000000000000000000000000' + i.toString();
+        final ghostId = '0000000000000000000000000000000$i';
         final ghost = await harness.run(['get', 'notes', ghostId]);
         expect(ghost.exitCode, isNot(0));
       }
@@ -310,7 +310,7 @@ class ReadingListGenerator {
       'title': 'Book #$i',
       'authors': ['Author ${r.nextInt(100)}', 'Author ${r.nextInt(100)}'],
       'tags': ['genre${r.nextInt(5)}'],
-      'review': 'Review for book $i: ' + ('Excellent. ' * r.nextInt(3)),
+      'review': 'Review for book $i: ${'Excellent. ' * r.nextInt(3)}',
     };
   }
 }

@@ -16,7 +16,6 @@ import 'dart:convert';
 import 'dart:io' as io;
 
 import 'package:kmdb/kmdb.dart';
-import 'package:kmdb_cli/kmdb_cli.dart';
 import 'package:kmdb_cli/src/commands/collections_command.dart';
 import 'package:kmdb_cli/src/commands/command.dart';
 import 'package:kmdb_cli/src/commands/compact_command.dart';

@@ -285,7 +285,7 @@ final class UtilCommand implements CliCommand {
       ctx.writeValue({
         'file': filename,
         'records': recordMaps,
-        if (corruptedAt != null) 'corruptedAt': corruptedAt,
+        'corruptedAt': ?corruptedAt,
       });
     } else {
       // Summary output: record count, HLC range, distinct namespaces.
@@ -305,7 +305,7 @@ final class UtilCommand implements CliCommand {
         'recordCount': records.length,
         'hlcRange': {'min': minHlc?.toHex(), 'max': maxHlc?.toHex()},
         'namespaces': namespaces.toList()..sort(),
-        if (corruptedAt != null) 'corruptedAt': corruptedAt,
+        'corruptedAt': ?corruptedAt,
       });
     }
 
