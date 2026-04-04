@@ -89,6 +89,5 @@ final class _NotFilter extends Filter {
   final Filter _inner;
 
   @override
-  bool evaluate(Map<String, dynamic> document) =>
-      !_inner.evaluate(document);
+  bool evaluate(Map<String, dynamic> document) => !_inner.evaluate(document);
 }

@@ -44,10 +44,9 @@ final class RestoreCommand implements CliCommand {
 
     final Stream<String> lines;
     if (inputPath != null) {
-      lines = io.File(inputPath)
-          .openRead()
-          .transform(utf8.decoder)
-          .transform(const LineSplitter());
+      lines = io.File(
+        inputPath,
+      ).openRead().transform(utf8.decoder).transform(const LineSplitter());
     } else {
       lines = io.stdin.transform(utf8.decoder).transform(const LineSplitter());
     }
@@ -72,7 +71,8 @@ final class RestoreCommand implements CliCommand {
 
       if (currentNamespace == null) {
         ctx.writeError(
-            'Line $lineNum: encountered document before any namespace header.');
+          'Line $lineNum: encountered document before any namespace header.',
+        );
         return false;
       }
 
@@ -81,7 +81,8 @@ final class RestoreCommand implements CliCommand {
         final decoded = json.decode(trimmed);
         if (decoded is! Map<String, dynamic>) {
           ctx.writeError(
-              'Line $lineNum: expected JSON object, got ${decoded.runtimeType}');
+            'Line $lineNum: expected JSON object, got ${decoded.runtimeType}',
+          );
           return false;
         }
         doc = decoded;

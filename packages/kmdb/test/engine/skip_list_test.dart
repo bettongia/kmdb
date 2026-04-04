@@ -126,8 +126,8 @@ void main() {
       // Insert in shuffled order using a simple deterministic shuffle.
       final shuffled = [...keys];
       for (var i = shuffled.length - 1; i > 0; i--) {
-        final j = (i * 6364136223846793005 + 1442695040888963407) %
-            (shuffled.length);
+        final j =
+            (i * 6364136223846793005 + 1442695040888963407) % (shuffled.length);
         final tmp = shuffled[i];
         shuffled[i] = shuffled[j.abs()];
         shuffled[j.abs()] = tmp;

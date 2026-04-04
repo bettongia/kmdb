@@ -41,11 +41,12 @@ import 'compression_flag.dart';
 /// Throws [UnsupportedError] for [CompressionFlag.zstd] — Zstd decompression
 /// on web is deferred pending a WASM implementation.
 Uint8List decompress(CompressionFlag flag, Uint8List data) => switch (flag) {
-      CompressionFlag.none => data,
-      CompressionFlag.deflate =>
-        Uint8List.fromList(ZLibDecoder().decodeBytes(data)),
-      CompressionFlag.zstd => throw UnsupportedError(
-          'Zstd decompression is not supported on web. '
-          'This value was encoded on a native platform.',
-        ),
-    };
+  CompressionFlag.none => data,
+  CompressionFlag.deflate => Uint8List.fromList(
+    ZLibDecoder().decodeBytes(data),
+  ),
+  CompressionFlag.zstd => throw UnsupportedError(
+    'Zstd decompression is not supported on web. '
+    'This value was encoded on a native platform.',
+  ),
+};

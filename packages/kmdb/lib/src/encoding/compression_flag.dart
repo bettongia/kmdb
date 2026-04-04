@@ -41,10 +41,13 @@ enum CompressionFlag {
   ///
   /// Throws [ArgumentError] for unrecognised bytes.
   static CompressionFlag fromByte(int byte) => switch (byte) {
-        0x00 => none,
-        0x01 => zstd,
-        0x02 => deflate,
-        _ => throw ArgumentError.value(
-            byte, 'byte', 'Unknown CompressionFlag byte'),
-      };
+    0x00 => none,
+    0x01 => zstd,
+    0x02 => deflate,
+    _ => throw ArgumentError.value(
+      byte,
+      'byte',
+      'Unknown CompressionFlag byte',
+    ),
+  };
 }

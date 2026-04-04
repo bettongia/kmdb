@@ -184,8 +184,10 @@ final class StorageAdapterWeb implements StorageAdapter {
     for (final seg in segments) {
       try {
         dir = await dir
-            .getDirectoryHandle(seg,
-                web.FileSystemGetDirectoryOptions(create: false))
+            .getDirectoryHandle(
+              seg,
+              web.FileSystemGetDirectoryOptions(create: false),
+            )
             .toDart;
       } catch (_) {
         return []; // directory does not exist
@@ -227,8 +229,10 @@ final class StorageAdapterWeb implements StorageAdapter {
     var current = root;
     for (final seg in segments) {
       current = await current
-          .getDirectoryHandle(seg,
-              web.FileSystemGetDirectoryOptions(create: true))
+          .getDirectoryHandle(
+            seg,
+            web.FileSystemGetDirectoryOptions(create: true),
+          )
           .toDart;
     }
   }
@@ -239,7 +243,9 @@ final class StorageAdapterWeb implements StorageAdapter {
     _locks.add(lockPath);
     // Write a sentinel file so a stale lock is detectable on next open.
     await writeFile(
-        lockPath, Uint8List.fromList([0x4C, 0x4F, 0x43, 0x4B])); // "LOCK"
+      lockPath,
+      Uint8List.fromList([0x4C, 0x4F, 0x43, 0x4B]),
+    ); // "LOCK"
   }
 
   @override
@@ -272,8 +278,10 @@ final class StorageAdapterWeb implements StorageAdapter {
     var dir = await _storageRoot();
     for (final seg in dirSegments) {
       dir = await dir
-          .getDirectoryHandle(seg,
-              web.FileSystemGetDirectoryOptions(create: createDirs))
+          .getDirectoryHandle(
+            seg,
+            web.FileSystemGetDirectoryOptions(create: createDirs),
+          )
           .toDart;
     }
     return (dir, name);

@@ -38,6 +38,58 @@ final class ManifestReader {
 
   // ── Public API ────────────────────────────────────────────────────────────
 
+  /// Replays all valid VersionEdits from [path] and returns them as a list
+  /// without computing any [ManifestState].
+  ///
+  /// Unlike [replay], this method preserves the raw edit sequence so diagnostic
+  /// tooling can display the full version history. Use [replay] for crash
+  /// recovery; use [replayEdits] only for `util manifest --full` output.
+  ///
+  /// Returns an empty list if the file does not exist or has no valid records.
+  Future<List<VersionEdit>> replayEdits(String path) async {
+    final Uint8List bytes;
+    try {
+      bytes = await adapter.readFile(path);
+    } on StorageException {
+      return [];
+    }
+
+    final edits = <VersionEdit>[];
+    var offset = 0;
+
+    while (offset < bytes.length) {
+      // Need at least checksum(8) + length(4) = 12 bytes.
+      if (bytes.length - offset < 12) break;
+
+      final bd = ByteData.sublistView(bytes);
+      final storedChecksum = bd.getInt64(offset, Endian.big);
+      final cborLen = bd.getUint32(offset + 8, Endian.big);
+
+      // Validate we have the full record.
+      if (bytes.length - offset < 12 + cborLen) break;
+
+      // Verify checksum over [length(4) + cbor(N)].
+      final toHash = Uint8List.sublistView(
+        bytes,
+        offset + 8,
+        offset + 12 + cborLen,
+      );
+      final actualChecksum = XxHash64.digest(toHash);
+      if (storedChecksum != actualChecksum) break; // truncation / corruption
+
+      final cborBytes = bytes.sublist(offset + 12, offset + 12 + cborLen);
+      try {
+        edits.add(VersionEdit.fromCbor(cborBytes));
+      } on FormatException {
+        break; // malformed CBOR — stop replay
+      }
+
+      offset += 12 + cborLen;
+    }
+
+    return edits;
+  }
+
   /// Replays all valid VersionEdits from [path] and returns the resulting
   /// [ManifestState].
   ///
@@ -65,7 +117,11 @@ final class ManifestReader {
       if (bytes.length - offset < 12 + cborLen) break;
 
       // Verify checksum over [length(4) + cbor(N)].
-      final toHash = Uint8List.sublistView(bytes, offset + 8, offset + 12 + cborLen);
+      final toHash = Uint8List.sublistView(
+        bytes,
+        offset + 8,
+        offset + 12 + cborLen,
+      );
       final actualChecksum = XxHash64.digest(toHash);
       if (storedChecksum != actualChecksum) break; // truncation / corruption
 
@@ -94,10 +150,10 @@ final class ManifestState {
   });
 
   factory ManifestState.empty() => ManifestState._(
-        levels: {0: [], 1: [], 2: []},
-        maxLogNumber: 0,
-        maxNextSeq: 0,
-      );
+    levels: {0: [], 1: [], 2: []},
+    maxLogNumber: 0,
+    maxNextSeq: 0,
+  );
 
   factory ManifestState._fromEdits(List<VersionEdit> edits) {
     // levels[n] holds the set of live SSTable filenames at level n.
@@ -148,6 +204,5 @@ final class ManifestState {
   final int maxNextSeq;
 
   /// All live SSTable filenames across all levels.
-  Iterable<String> get allFiles =>
-      levels.values.expand((files) => files);
+  Iterable<String> get allFiles => levels.values.expand((files) => files);
 }

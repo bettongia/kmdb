@@ -57,16 +57,16 @@ final class ImportCommand implements CliCommand {
 
     if (!{'ignore', 'replace', 'error'}.contains(onConflict)) {
       ctx.writeError(
-          'Unknown --on-conflict value "$onConflict". Use: ignore, replace, error');
+        'Unknown --on-conflict value "$onConflict". Use: ignore, replace, error',
+      );
       return false;
     }
 
     final Stream<String> lines;
     if (inputPath != null) {
-      lines = io.File(inputPath)
-          .openRead()
-          .transform(utf8.decoder)
-          .transform(const LineSplitter());
+      lines = io.File(
+        inputPath,
+      ).openRead().transform(utf8.decoder).transform(const LineSplitter());
     } else {
       lines = io.stdin.transform(utf8.decoder).transform(const LineSplitter());
     }
@@ -84,7 +84,9 @@ final class ImportCommand implements CliCommand {
       try {
         final decoded = json.decode(trimmed);
         if (decoded is! Map<String, dynamic>) {
-          ctx.writeError('Line $lineNum: expected JSON object, got ${decoded.runtimeType}');
+          ctx.writeError(
+            'Line $lineNum: expected JSON object, got ${decoded.runtimeType}',
+          );
           return false;
         }
         doc = decoded;

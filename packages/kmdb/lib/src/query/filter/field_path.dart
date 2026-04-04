@@ -64,8 +64,7 @@ abstract final class FieldPath {
     return _resolveSegments(rawSegments, doc);
   }
 
-  static Object? _resolveSegments(
-      List<String> segments, Object? current) {
+  static Object? _resolveSegments(List<String> segments, Object? current) {
     for (final raw in segments) {
       if (current == null || current == missing) return missing;
 
@@ -73,7 +72,10 @@ abstract final class FieldPath {
       final bracketIdx = raw.indexOf('[');
       if (bracketIdx != -1) {
         final fieldName = bracketIdx == 0 ? null : raw.substring(0, bracketIdx);
-        final inner = raw.substring(bracketIdx + 1, raw.length - 1); // strip [ ]
+        final inner = raw.substring(
+          bracketIdx + 1,
+          raw.length - 1,
+        ); // strip [ ]
 
         // Resolve the field first if there is one
         Object? arrayValue = current;

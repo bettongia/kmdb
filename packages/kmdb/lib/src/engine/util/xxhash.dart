@@ -139,7 +139,8 @@ final class XxHash64 {
     // to isolate the low half.
     final hi = (hash >>> 32) & 0xFFFFFFFF;
     final lo = hash & 0xFFFFFFFF;
-    return '${hi.toRadixString(16).padLeft(8, '0')}${lo.toRadixString(16).padLeft(8, '0')}'.toUpperCase();
+    return '${hi.toRadixString(16).padLeft(8, '0')}${lo.toRadixString(16).padLeft(8, '0')}'
+        .toUpperCase();
   }
 
   // ── Internal helpers ─────────────────────────────────────────────────────
@@ -155,8 +156,7 @@ final class XxHash64 {
   /// Rotate-left 64-bit: shifts [v] left by [r] bits, wrapping the overflow
   /// into the low bits. The left shift result is truncated to 64 bits before
   /// OR-ing with the unsigned right shift.
-  static int _rotl(int v, int r) =>
-      (v << r).toSigned(64) | (v >>> (64 - r));
+  static int _rotl(int v, int r) => (v << r).toSigned(64) | (v >>> (64 - r));
 
   /// XXH64 mixing round applied to each 8-byte lane.
   static int _round(int acc, int input) {

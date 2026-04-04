@@ -113,7 +113,8 @@ final class LocalDirectoryAdapter implements CloudAdapter {
       // this is acceptable; the consolidation coordinator handles contention
       // via re-reads after write.
       if (file.existsSync()) return false;
-      final tmpPath = '$resolvedPath.cas-tmp-${DateTime.now().microsecondsSinceEpoch}';
+      final tmpPath =
+          '$resolvedPath.cas-tmp-${DateTime.now().microsecondsSinceEpoch}';
       final tmp = File(tmpPath);
       await file.parent.create(recursive: true);
       await tmp.writeAsBytes(newBytes, flush: true);
@@ -135,7 +136,8 @@ final class LocalDirectoryAdapter implements CloudAdapter {
     final currentEtag = await getEtag(path);
     if (currentEtag != ifMatchEtag) return false;
 
-    final tmpPath = '$resolvedPath.cas-tmp-${DateTime.now().microsecondsSinceEpoch}';
+    final tmpPath =
+        '$resolvedPath.cas-tmp-${DateTime.now().microsecondsSinceEpoch}';
     final tmp = File(tmpPath);
     await tmp.writeAsBytes(newBytes, flush: true);
     try {

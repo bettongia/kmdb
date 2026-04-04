@@ -59,19 +59,19 @@ final class LsmEngine {
     required ManifestWriter manifestWriter,
     required WalWriter walWriter,
     required Hlc initialHlc,
-  })  : _dbDir = dbDir,
-        _sstDir = sstDir,
-        _adapter = adapter,
-        _config = config,
-        _deviceId = deviceId,
-        _levels = levels,
-        _manifestWriter = manifestWriter,
-        _walWriter = walWriter,
-        _hlc = initialHlc,
-        _active = Memtable(),
-        // sync: true delivers events synchronously to subscribers — correct for
-        // KMDB's single-isolate model where listeners are set up before writes.
-        _writeEventsController = StreamController<String>.broadcast(sync: true);
+  }) : _dbDir = dbDir,
+       _sstDir = sstDir,
+       _adapter = adapter,
+       _config = config,
+       _deviceId = deviceId,
+       _levels = levels,
+       _manifestWriter = manifestWriter,
+       _walWriter = walWriter,
+       _hlc = initialHlc,
+       _active = Memtable(),
+       // sync: true delivers events synchronously to subscribers — correct for
+       // KMDB's single-isolate model where listeners are set up before writes.
+       _writeEventsController = StreamController<String>.broadcast(sync: true);
 
   final String _dbDir;
   final String _sstDir;
@@ -172,7 +172,11 @@ final class LsmEngine {
     final keyBytes = KeyCodec.keyToBytes(key);
     final hlc = _tick();
     final internalKey = KeyCodec.encodeInternalKey(
-        namespace, keyBytes, hlc, RecordType.put);
+      namespace,
+      keyBytes,
+      hlc,
+      RecordType.put,
+    );
     await _walWriter.writePut(
       sequence: hlc,
       namespace: namespace,
@@ -189,7 +193,11 @@ final class LsmEngine {
     final keyBytes = KeyCodec.keyToBytes(key);
     final hlc = _tick();
     final internalKey = KeyCodec.encodeInternalKey(
-        namespace, keyBytes, hlc, RecordType.delete);
+      namespace,
+      keyBytes,
+      hlc,
+      RecordType.delete,
+    );
     await _walWriter.writeDelete(
       sequence: hlc,
       namespace: namespace,
@@ -209,7 +217,11 @@ final class LsmEngine {
       final hlc = _tick();
       if (entry.isDelete) {
         final internalKey = KeyCodec.encodeInternalKey(
-            entry.namespace, keyBytes, hlc, RecordType.delete);
+          entry.namespace,
+          keyBytes,
+          hlc,
+          RecordType.delete,
+        );
         await _walWriter.writeDelete(
           sequence: hlc,
           namespace: entry.namespace,
@@ -219,7 +231,11 @@ final class LsmEngine {
       } else {
         final value = entry.value!;
         final internalKey = KeyCodec.encodeInternalKey(
-            entry.namespace, keyBytes, hlc, RecordType.put);
+          entry.namespace,
+          keyBytes,
+          hlc,
+          RecordType.put,
+        );
         await _walWriter.writePut(
           sequence: hlc,
           namespace: entry.namespace,
@@ -248,16 +264,18 @@ final class LsmEngine {
     final prefixEnd = _nextPrefix(prefix);
 
     // 1. Active memtable.
-    final fromActive =
-        _latestFromIterable(_active.scan(start: prefix, end: prefixEnd));
+    final fromActive = _latestFromIterable(
+      _active.scan(start: prefix, end: prefixEnd),
+    );
     if (fromActive != null) {
       return fromActive.isDelete ? null : fromActive.value;
     }
 
     // 2. Frozen memtable (if present).
     if (_frozen != null) {
-      final fromFrozen =
-          _latestFromIterable(_frozen!.scan(start: prefix, end: prefixEnd));
+      final fromFrozen = _latestFromIterable(
+        _frozen!.scan(start: prefix, end: prefixEnd),
+      );
       if (fromFrozen != null) {
         return fromFrozen.isDelete ? null : fromFrozen.value;
       }
@@ -267,7 +285,10 @@ final class LsmEngine {
     final l0 = _levels[0] ?? [];
     for (var i = l0.length - 1; i >= 0; i--) {
       final result = await _getFromSstable(
-          '$_sstDir/${l0[i]}', prefix, prefixEnd);
+        '$_sstDir/${l0[i]}',
+        prefix,
+        prefixEnd,
+      );
       if (result != null) return result.$1;
       if (result != null && result.$2) return result.$1;
     }
@@ -276,7 +297,10 @@ final class LsmEngine {
     for (final level in [1, 2]) {
       for (final filename in (_levels[level] ?? [])) {
         final result = await _getFromSstable(
-            '$_sstDir/$filename', prefix, prefixEnd);
+          '$_sstDir/$filename',
+          prefix,
+          prefixEnd,
+        );
         if (result != null) return result.$1;
         if (result != null && result.$2) return result.$1;
       }
@@ -315,7 +339,8 @@ final class LsmEngine {
     final l0 = _levels[0] ?? [];
     for (var i = l0.length - 1; i >= 0; i--) {
       final reader = await _openReader('$_sstDir/${l0[i]}');
-      if (reader != null) streams.add(reader.scan(start: scanStart, end: scanEnd));
+      if (reader != null)
+        streams.add(reader.scan(start: scanStart, end: scanEnd));
     }
     for (final level in [1, 2]) {
       for (final filename in (_levels[level] ?? [])) {
@@ -350,11 +375,13 @@ final class LsmEngine {
         }
         bufferedKey = userKeyHex;
         bufferedValue = entry.value;
-        bufferedIsDelete = KeyCodec.decodeRecordType(entry.key) == RecordType.delete;
+        bufferedIsDelete =
+            KeyCodec.decodeRecordType(entry.key) == RecordType.delete;
       } else {
         // Same user key, later HLC — update to this newer version.
         bufferedValue = entry.value;
-        bufferedIsDelete = KeyCodec.decodeRecordType(entry.key) == RecordType.delete;
+        bufferedIsDelete =
+            KeyCodec.decodeRecordType(entry.key) == RecordType.delete;
       }
     }
 
@@ -414,7 +441,11 @@ final class LsmEngine {
 
     final effectiveMin = minHlc ?? hlc;
     final effectiveMax = maxHlc ?? hlc;
-    final filename = SstableInfo.flushName(_deviceId, effectiveMin, effectiveMax);
+    final filename = SstableInfo.flushName(
+      _deviceId,
+      effectiveMin,
+      effectiveMax,
+    );
     final sstPath = '$_sstDir/$filename';
 
     final sstBytes = writer.finish();
@@ -430,11 +461,13 @@ final class LsmEngine {
       entryCount: entryCount,
       walSequence: _walWriter.activeSequence - 1, // the now-retired WAL
     );
-    await _manifestWriter.append(VersionEdit(
-      logNumber: _walWriter.activeSequence,
-      nextSeq: hlc.encoded,
-      added: [meta],
-    ));
+    await _manifestWriter.append(
+      VersionEdit(
+        logNumber: _walWriter.activeSequence,
+        nextSeq: hlc.encoded,
+        added: [meta],
+      ),
+    );
 
     // Update level 0 list.
     (_levels[0] ??= []).add(filename);
@@ -456,7 +489,8 @@ final class LsmEngine {
   Future<void> _compactIfNeeded() async {
     // Single-file shortcut: collapse everything to one L2 file if total
     // data ≤ singleFileThresholdBytes.
-    final totalFiles = (_levels[0] ?? []).length +
+    final totalFiles =
+        (_levels[0] ?? []).length +
         (_levels[1] ?? []).length +
         (_levels[2] ?? []).length;
 
@@ -597,7 +631,7 @@ final class LsmEngine {
     }
   }
 
-/// Runs compaction until all trigger conditions are cleared.
+  /// Runs compaction until all trigger conditions are cleared.
   Future<void> compactAll() async {
     for (var i = 0; i < 20; i++) {
       // Safety limit: at most 20 passes.
@@ -640,13 +674,15 @@ final class LsmEngine {
     final allFiles = <SstableMeta>[];
     for (final lvlEntry in _levels.entries) {
       for (final filename in lvlEntry.value) {
-        allFiles.add(SstableMeta(
-          level: lvlEntry.key,
-          filename: filename,
-          minKey: '',
-          maxKey: '',
-          entryCount: 0,
-        ));
+        allFiles.add(
+          SstableMeta(
+            level: lvlEntry.key,
+            filename: filename,
+            minKey: '',
+            maxKey: '',
+            entryCount: 0,
+          ),
+        );
       }
     }
     final snapshotEdit = VersionEdit(
@@ -661,8 +697,7 @@ final class LsmEngine {
 
     // Atomically update CURRENT.
     final tmp = '$_dbDir/CURRENT.tmp';
-    await _adapter.writeFile(
-        tmp, Uint8List.fromList('$newName\n'.codeUnits));
+    await _adapter.writeFile(tmp, Uint8List.fromList('$newName\n'.codeUnits));
     await _adapter.renameFile(tmp, currentPath);
 
     // Delete old manifest.
@@ -710,11 +745,13 @@ final class LsmEngine {
       // walSequence is null for peer-ingested files (they don't retire a WAL).
     );
 
-    await _manifestWriter.append(VersionEdit(
-      logNumber: _walWriter.activeSequence,
-      nextSeq: hlc.encoded,
-      added: [meta],
-    ));
+    await _manifestWriter.append(
+      VersionEdit(
+        logNumber: _walWriter.activeSequence,
+        nextSeq: hlc.encoded,
+        added: [meta],
+      ),
+    );
 
     (_levels[0] ??= []).add(filename);
 
@@ -769,8 +806,7 @@ final class LsmEngine {
     Uint8List? lastKey;
     Uint8List? lastValue;
 
-    await for (final entry
-        in reader.scan(start: prefix, end: prefixEnd)) {
+    await for (final entry in reader.scan(start: prefix, end: prefixEnd)) {
       // Verify the entry's key actually starts with our prefix (safety check).
       if (!_hasPrefix(entry.key, prefix)) break;
       lastKey = entry.key;
@@ -788,7 +824,8 @@ final class LsmEngine {
   ///
   /// Returns `null` if [entries] is empty.
   ({bool isDelete, Uint8List value})? _latestFromIterable(
-      Iterable<SkipListEntry> entries) {
+    Iterable<SkipListEntry> entries,
+  ) {
     SkipListEntry? last;
     for (final e in entries) {
       last = e;
@@ -909,7 +946,7 @@ final class LsmEngine {
 
   /// Returns SSTable file counts per level and total on-disk byte sizes.
   Future<({int l0, int l1, int l2, int totalSstBytes, int totalDbBytes})>
-      levelStats() async {
+  levelStats() async {
     final l0 = (_levels[0] ?? []).length;
     final l1 = (_levels[1] ?? []).length;
     final l2 = (_levels[2] ?? []).length;

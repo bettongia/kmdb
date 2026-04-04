@@ -27,13 +27,12 @@ MemoryStorageAdapter _newAdapter() => MemoryStorageAdapter();
 Future<(KvStoreImpl, OpenResult)> _open(
   MemoryStorageAdapter adapter, {
   KvStoreConfig? config,
-}) =>
-    KvStoreImpl.open(
-      _dbDir,
-      adapter,
-      config: config ?? KvStoreConfig.forTesting(),
-      deviceId: 'testdev1',
-    );
+}) => KvStoreImpl.open(
+  _dbDir,
+  adapter,
+  config: config ?? KvStoreConfig.forTesting(),
+  deviceId: 'testdev1',
+);
 
 Uint8List _bytes(String s) => Uint8List.fromList(s.codeUnits);
 
@@ -144,9 +143,7 @@ void main() {
       for (var i = 0; i < 5; i++) {
         await store.put('ns', _key(i), _bytes('v$i'));
       }
-      final entries = await store
-          .scan('ns', startKey: _key(2))
-          .toList();
+      final entries = await store.scan('ns', startKey: _key(2)).toList();
       final keys = entries.map((e) => e.key).toList();
       expect(keys, contains(_key(2)));
       expect(keys, isNot(contains(_key(0))));
@@ -160,9 +157,7 @@ void main() {
       for (var i = 0; i < 5; i++) {
         await store.put('ns', _key(i), _bytes('v$i'));
       }
-      final entries = await store
-          .scan('ns', endKey: _key(3))
-          .toList();
+      final entries = await store.scan('ns', endKey: _key(3)).toList();
       final keys = entries.map((e) => e.key).toList();
       expect(keys, isNot(contains(_key(3))));
       expect(keys, isNot(contains(_key(4))));
@@ -231,8 +226,9 @@ void main() {
       await store.compactAll();
 
       // After compactAll, L0 should be empty.
-      final l0Files =
-          adapter.files.keys.where((k) => k.endsWith('.sst')).toList();
+      final l0Files = adapter.files.keys
+          .where((k) => k.endsWith('.sst'))
+          .toList();
       // All data should be in a single consolidated SSTable.
       expect(l0Files.length, lessThanOrEqualTo(1));
       await store.close();

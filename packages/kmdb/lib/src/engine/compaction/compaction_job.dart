@@ -148,8 +148,11 @@ final class CompactionJob {
 
     final effectiveMin = minHlc ?? const Hlc(0, 0);
     final effectiveMax = maxHlc ?? const Hlc(0, 0);
-    final outputFilename =
-        SstableInfo.flushName(deviceId, effectiveMin, effectiveMax);
+    final outputFilename = SstableInfo.flushName(
+      deviceId,
+      effectiveMin,
+      effectiveMax,
+    );
     final outputPath = '$sstDir/$outputFilename';
 
     final outputBytes = writer.finish();

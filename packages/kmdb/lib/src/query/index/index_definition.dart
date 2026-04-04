@@ -55,7 +55,9 @@ final class IndexDefinition {
   /// The system namespace where index entries are stored.
   ///
   /// Format: `$index:{namespace}:{path}`.
-  String get indexNamespace => r'$index:' '$namespace:$path';
+  String get indexNamespace =>
+      r'$index:'
+      '$namespace:$path';
 
   @override
   String toString() => 'IndexDefinition($namespace, $path)';

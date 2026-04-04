@@ -24,7 +24,8 @@ final class CollectionsCommand implements CliCommand {
   String get name => 'collections';
 
   @override
-  String get description => 'List all collections (namespaces) in the database.';
+  String get description =>
+      'List all collections (namespaces) in the database.';
 
   @override
   String get usage => 'collections';

@@ -51,13 +51,12 @@ CommandContext _ctx(
   OutputMode mode = OutputMode.json,
   StringBuffer? out,
   StringBuffer? err,
-}) =>
-    CommandContext(
-      store: store,
-      mode: mode,
-      out: out ?? StringBuffer(),
-      err: err ?? StringBuffer(),
-    );
+}) => CommandContext(
+  store: store,
+  mode: mode,
+  out: out ?? StringBuffer(),
+  err: err ?? StringBuffer(),
+);
 
 /// Deterministic valid UUIDv7 keys for CLI tests.
 String _key(String seed) {
@@ -75,14 +74,19 @@ String _key(String seed) {
 
 /// Helper to write a raw document to the store bypass CLI logic.
 Future<void> _putDoc(
-    KvStoreImpl store, String ns, Map<String, dynamic> doc) async {
+  KvStoreImpl store,
+  String ns,
+  Map<String, dynamic> doc,
+) async {
   final id = doc['id'] as String;
   await store.put(ns, id, ValueCodec.encode(doc));
 }
 
 /// Simple temporary file wrapper.
 class _TmpFile {
-  _TmpFile() : path = '${io.Directory.systemTemp.path}/kmdb_test_${DateTime.now().microsecondsSinceEpoch}.json';
+  _TmpFile()
+    : path =
+          '${io.Directory.systemTemp.path}/kmdb_test_${DateTime.now().microsecondsSinceEpoch}.json';
   final String path;
   void write(String content) => io.File(path).writeAsStringSync(content);
   void delete() => io.File(path).deleteSync();
@@ -151,7 +155,7 @@ void main() {
       const doc = '{"name":"Alice"}';
       final ok = await PutCommand().execute(ctx, ['notes'], {'value': doc});
       expect(ok, isTrue);
-      
+
       final decoded = json.decode(out.toString()) as List;
       final generatedId = decoded[0]['id'] as String;
       expect(generatedId, hasLength(32));
@@ -171,8 +175,7 @@ void main() {
 
     test('returns false when document is not a JSON object', () async {
       final ctx = _ctx(store, out: out, err: err);
-      final ok =
-          await PutCommand().execute(ctx, ['notes'], {'value': '[1,2]'});
+      final ok = await PutCommand().execute(ctx, ['notes'], {'value': '[1,2]'});
       expect(ok, isFalse);
       expect(err.toString(), contains('JSON object'));
     });
@@ -191,15 +194,16 @@ void main() {
 
       // The user-provided ID should NOT have been written.
       expect(await store.get('notes', userId), isNull);
-      
+
       // The assigned ID should have been written.
       expect(await store.get('notes', assignedId), isNotNull);
     });
 
     test('returns false when namespace arg missing', () async {
       final ctx = _ctx(store, out: out, err: err);
-      final ok =
-          await PutCommand().execute(ctx, [], {'value': '{"name":"Alice"}'});
+      final ok = await PutCommand().execute(ctx, [], {
+        'value': '{"name":"Alice"}',
+      });
       expect(ok, isFalse);
     });
   });
@@ -232,8 +236,10 @@ void main() {
     test('succeeds (no-op) when key does not exist', () async {
       // Delete is idempotent at the store level.
       final ctx = _ctx(store, out: out, err: err);
-      final ok =
-          await DeleteCommand().execute(ctx, ['tasks', _key('gost')], {});
+      final ok = await DeleteCommand().execute(ctx, [
+        'tasks',
+        _key('gost'),
+      ], {});
       expect(ok, isTrue);
     });
 
@@ -279,8 +285,11 @@ void main() {
     test('applies filter', () async {
       final ctx = _ctx(store, out: out, err: err);
       final filter = '{"field":"tag","op":"eq","value":"x"}';
-      final ok =
-          await ScanCommand().execute(ctx, ['items'], {'filter': filter});
+      final ok = await ScanCommand().execute(
+        ctx,
+        ['items'],
+        {'filter': filter},
+      );
       expect(ok, isTrue);
       final docs = json.decode(out.toString()) as List;
       expect(docs, hasLength(2));
@@ -289,8 +298,11 @@ void main() {
 
     test('applies order-by ascending', () async {
       final ctx = _ctx(store, out: out, err: err);
-      final ok =
-          await ScanCommand().execute(ctx, ['items'], {'order-by': 'score'});
+      final ok = await ScanCommand().execute(
+        ctx,
+        ['items'],
+        {'order-by': 'score'},
+      );
       expect(ok, isTrue);
       final docs = json.decode(out.toString()) as List;
       // Sort the expected order by key first if score was same, but here scores are unique.
@@ -299,8 +311,11 @@ void main() {
 
     test('applies order-by descending', () async {
       final ctx = _ctx(store, out: out, err: err);
-      final ok = await ScanCommand()
-          .execute(ctx, ['items'], {'order-by': 'score', 'desc': true});
+      final ok = await ScanCommand().execute(
+        ctx,
+        ['items'],
+        {'order-by': 'score', 'desc': true},
+      );
       expect(ok, isTrue);
       final docs = json.decode(out.toString()) as List;
       expect(docs.map((d) => d['score']).toList(), equals([30, 20, 10]));
@@ -321,8 +336,11 @@ void main() {
 
     test('returns false for invalid filter JSON', () async {
       final ctx = _ctx(store, out: out, err: err);
-      final ok = await ScanCommand()
-          .execute(ctx, ['items'], {'filter': '{bad json}'});
+      final ok = await ScanCommand().execute(
+        ctx,
+        ['items'],
+        {'filter': '{bad json}'},
+      );
       expect(ok, isFalse);
       expect(err.toString(), contains('filter'));
     });
@@ -330,8 +348,11 @@ void main() {
     test('returns false for unknown filter operator', () async {
       final ctx = _ctx(store, out: out, err: err);
       final filter = '{"field":"x","op":"regex","value":".*"}';
-      final ok =
-          await ScanCommand().execute(ctx, ['items'], {'filter': filter});
+      final ok = await ScanCommand().execute(
+        ctx,
+        ['items'],
+        {'filter': filter},
+      );
       expect(ok, isFalse);
     });
 
@@ -378,8 +399,7 @@ void main() {
     test('counts filtered documents', () async {
       final ctx = _ctx(store, out: out, err: err);
       final filter = '{"field":"active","op":"isTrue"}';
-      final ok =
-          await CountCommand().execute(ctx, ['ns'], {'filter': filter});
+      final ok = await CountCommand().execute(ctx, ['ns'], {'filter': filter});
       expect(ok, isTrue);
       final result = json.decode(out.toString()) as Map;
       expect(result['count'], equals(2));
@@ -401,8 +421,7 @@ void main() {
 
     test('returns false for invalid filter', () async {
       final ctx = _ctx(store, out: out, err: err);
-      final ok =
-          await CountCommand().execute(ctx, ['ns'], {'filter': '{bad}'});
+      final ok = await CountCommand().execute(ctx, ['ns'], {'filter': '{bad}'});
       expect(ok, isFalse);
     });
   });
@@ -579,8 +598,11 @@ void main() {
 
     test('returns false for unknown --on-conflict value', () async {
       final ctx = _ctx(store, out: out, err: err);
-      final ok = await ImportCommand()
-          .execute(ctx, ['ns'], {'on-conflict': 'merge'});
+      final ok = await ImportCommand().execute(
+        ctx,
+        ['ns'],
+        {'on-conflict': 'merge'},
+      );
       expect(ok, isFalse);
       expect(err.toString(), contains('on-conflict'));
     });
@@ -607,17 +629,24 @@ void main() {
       tmp.write('{"id":"$p1","name":"Alice"}\n{"id":"$p2","name":"Bob"}\n');
 
       final ctx = _ctx(store, out: out, err: err);
-      final ok = await ImportCommand()
-          .execute(ctx, ['people'], {'input': tmp.path});
+      final ok = await ImportCommand().execute(
+        ctx,
+        ['people'],
+        {'input': tmp.path},
+      );
       expect(ok, isTrue);
       final result = json.decode(out.toString()) as Map;
       expect(result['imported'], equals(2));
       expect(result['skipped'], equals(0));
 
-      expect(ValueCodec.decode((await store.get('people', p1))!)['name'],
-          equals('Alice'));
-      expect(ValueCodec.decode((await store.get('people', p2))!)['name'],
-          equals('Bob'));
+      expect(
+        ValueCodec.decode((await store.get('people', p1))!)['name'],
+        equals('Alice'),
+      );
+      expect(
+        ValueCodec.decode((await store.get('people', p2))!)['name'],
+        equals('Bob'),
+      );
 
       tmp.delete();
     });
@@ -640,8 +669,9 @@ void main() {
       expect(result['skipped'], equals(1));
       // Original value must be unchanged.
       expect(
-          ValueCodec.decode((await store.get('people', p1))!)['name'],
-          equals('OldAlice'));
+        ValueCodec.decode((await store.get('people', p1))!)['name'],
+        equals('OldAlice'),
+      );
 
       tmp.delete();
     });
@@ -671,8 +701,11 @@ void main() {
       tmp.write('{"id":"$id"}\n{bad json}\n');
 
       final ctx = _ctx(store, out: out, err: err);
-      final ok =
-          await ImportCommand().execute(ctx, ['ns'], {'input': tmp.path});
+      final ok = await ImportCommand().execute(
+        ctx,
+        ['ns'],
+        {'input': tmp.path},
+      );
       expect(ok, isFalse);
       expect(err.toString(), contains('invalid JSON'));
 
@@ -684,8 +717,11 @@ void main() {
       tmp.write('{"name":"no-id"}\n');
 
       final ctx = _ctx(store, out: out, err: err);
-      final ok =
-          await ImportCommand().execute(ctx, ['ns'], {'input': tmp.path});
+      final ok = await ImportCommand().execute(
+        ctx,
+        ['ns'],
+        {'input': tmp.path},
+      );
       expect(ok, isFalse);
       expect(err.toString(), contains('"id"'));
 
@@ -699,8 +735,11 @@ void main() {
       tmp.write('{"id":"$x1","v":1}\n\n{"id":"$x2","v":2}\n');
 
       final ctx = _ctx(store, out: out, err: err);
-      final ok =
-          await ImportCommand().execute(ctx, ['ns'], {'input': tmp.path});
+      final ok = await ImportCommand().execute(
+        ctx,
+        ['ns'],
+        {'input': tmp.path},
+      );
       expect(ok, isTrue);
       final result = json.decode(out.toString()) as Map;
       expect(result['imported'], equals(2));
@@ -728,7 +767,7 @@ void main() {
       final ids = [_key('rnd1'), _key('rnd2'), _key('rnd3')];
       final origDocs = [
         {'id': ids[0], 'name': 'Alice', 'score': 10},
-        {'id': ids[1], 'name': 'Bob',   'score': 20},
+        {'id': ids[1], 'name': 'Bob', 'score': 20},
         {'id': ids[2], 'name': 'Carol', 'score': 30},
       ];
       for (final doc in origDocs) {
@@ -738,8 +777,11 @@ void main() {
       // Export to a temp file.
       final tmp = _TmpFile();
       final exportCtx = _ctx(store, out: out, err: err);
-      final exportOk = await ExportCommand()
-          .execute(exportCtx, ['people'], {'output': tmp.path});
+      final exportOk = await ExportCommand().execute(
+        exportCtx,
+        ['people'],
+        {'output': tmp.path},
+      );
       expect(exportOk, isTrue);
 
       // Delete all documents from the namespace.
@@ -754,8 +796,11 @@ void main() {
       // Re-import from the exported file.
       final importOut = StringBuffer();
       final importCtx = _ctx(store, out: importOut, err: err);
-      final importOk = await ImportCommand()
-          .execute(importCtx, ['people'], {'input': tmp.path});
+      final importOk = await ImportCommand().execute(
+        importCtx,
+        ['people'],
+        {'input': tmp.path},
+      );
       expect(importOk, isTrue);
       final importResult = json.decode(importOut.toString()) as Map;
       expect(importResult['imported'], equals(3));
@@ -763,8 +808,11 @@ void main() {
       // Verify each document was restored correctly.
       for (final orig in origDocs) {
         final bytes = await store.get('people', orig['id'] as String);
-        expect(bytes, isNotNull,
-            reason: 'Missing document after re-import: ${orig['id']}');
+        expect(
+          bytes,
+          isNotNull,
+          reason: 'Missing document after re-import: ${orig['id']}',
+        );
         final restored = ValueCodec.decode(bytes!);
         expect(restored['name'], equals(orig['name']));
         expect(restored['score'], equals(orig['score']));
@@ -781,8 +829,11 @@ void main() {
 
       final tmp = _TmpFile();
       final ctx = _ctx(store, out: out, err: err);
-      final ok = await ExportCommand()
-          .execute(ctx, ['items'], {'output': tmp.path});
+      final ok = await ExportCommand().execute(
+        ctx,
+        ['items'],
+        {'output': tmp.path},
+      );
       expect(ok, isTrue);
 
       final lines = io.File(tmp.path)

@@ -70,15 +70,12 @@ final class CacheLayer implements KvStore {
   ///
   /// [tier] defaults to [detectCacheTier]. [maxObjects] overrides the
   /// tier-derived session cache capacity.
-  CacheLayer({
-    required KvStore store,
-    CacheTier? tier,
-    int? maxObjects,
-  })  : _store = store,
-        _tier = tier ?? detectCacheTier(),
-        _cache = SessionCache(
-          maxObjects: maxObjects ?? (tier ?? detectCacheTier()).maxSessionObjects,
-        ) {
+  CacheLayer({required KvStore store, CacheTier? tier, int? maxObjects})
+    : _store = store,
+      _tier = tier ?? detectCacheTier(),
+      _cache = SessionCache(
+        maxObjects: maxObjects ?? (tier ?? detectCacheTier()).maxSessionObjects,
+      ) {
     _writeEventSub = _store.writeEvents.listen(_onWriteEvent);
   }
 
@@ -137,11 +134,7 @@ final class CacheLayer implements KvStore {
   /// the Query Layer (Phase 7, `KmdbQuery`), which has knowledge of the query
   /// parameters needed to form a stable cache key.
   @override
-  Stream<KvEntry> scan(
-    String namespace, {
-    String? startKey,
-    String? endKey,
-  }) =>
+  Stream<KvEntry> scan(String namespace, {String? startKey, String? endKey}) =>
       _store.scan(namespace, startKey: startKey, endKey: endKey);
 
   // ── KvStore — misc ─────────────────────────────────────────────────────────
@@ -228,8 +221,10 @@ final class CacheLayer implements KvStore {
   /// Returns 0 if no counter has been written yet (namespace is empty).
   Future<int> _readGeneration(String namespace) async {
     _trackedNamespaces.add(namespace);
-    final bytes =
-        await _store.get(MetaStore.kNamespace, MetaStore.genKey(namespace));
+    final bytes = await _store.get(
+      MetaStore.kNamespace,
+      MetaStore.genKey(namespace),
+    );
     if (bytes == null || bytes.length < 8) return 0;
     return ByteData.sublistView(bytes).getUint64(0, Endian.big);
   }

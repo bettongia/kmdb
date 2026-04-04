@@ -41,8 +41,7 @@ import 'lru_map.dart';
 /// - Mobile / Web: 256 objects
 final class SessionCache {
   /// Creates a [SessionCache] that holds at most [maxObjects] entries.
-  SessionCache({required int maxObjects})
-      : _lru = LruMap(maxObjects);
+  SessionCache({required int maxObjects}) : _lru = LruMap(maxObjects);
 
   final LruMap<String, _Entry> _lru;
 
@@ -75,7 +74,8 @@ final class SessionCache {
   void evictNamespace(String namespace, int currentGeneration) {
     final prefix = '$namespace\x00';
     _lru.removeWhere(
-        (k, v) => k.startsWith(prefix) && v.generation != currentGeneration);
+      (k, v) => k.startsWith(prefix) && v.generation != currentGeneration,
+    );
   }
 
   /// Evicts all entries for [namespace] regardless of generation.
