@@ -1,8 +1,8 @@
 # Reserve `_` field prefix for system use; introduce `_id` as the document key
 
-**Status**: Implementing
+**Status**: Complete
 
-**PR link**: _pending_
+**PR link**: https://github.com/aurochs-kmesh/kmdb/pull/5
 
 ## Problem statement
 
@@ -141,4 +141,13 @@ codec interface method is needed.
 
 ## Summary
 
-_To be completed after implementation._
+- Added `ReservedFieldException` and `ReservedIndexPathException` to `exceptions.dart` and exported them from `kmdb.dart`
+- Updated `KmdbCodec` interface with new doc contract: `encode()` must not return `_`-prefixed keys; `decode()` receives `_id` pre-injected
+- Added `_validateNoReservedKeys()` to `KmdbCollection._writeDocument()` — throws before any I/O if the encoded map contains reserved keys
+- Injected `_id: key` into decoded maps in both `KmdbCollection.get()` and `KmdbQuery._execute()` before calling `codec.decode()`
+- Made `IndexDefinition` constructor reject `_`-prefixed paths at construction time
+- Updated all three test codecs (`_TaskCodec`, `_ItemCodec`, `_ContactCodec`) to omit `id` from `encode()` and read `_id` in `decode()`
+- Added 7 `ReservedFieldException` tests (single key, multiple keys, `_id` specifically, nested key allowed, toString, insert and replace validation) and 4 `ReservedIndexPathException` tests
+- Updated CLI `put`, `import`, and `restore` commands to use `_id` as the key field
+- Updated all CLI test files (`commands_test.dart`, `cli_runner_test.dart`, `e2e/cli_session_test.dart`) to use `_id`
+- Updated `docs/spec/13_query_api.md` with the reserved prefix rules, updated `KmdbCodec` interface description, and a complete example codec
