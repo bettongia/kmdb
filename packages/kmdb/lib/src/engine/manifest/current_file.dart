@@ -32,10 +32,7 @@ import '../platform/storage_adapter_interface.dart';
 /// `CURRENT` intact; a partially written `CURRENT.tmp` is harmless and is
 /// cleaned up on the next open.
 final class CurrentFile {
-  const CurrentFile({
-    required this.dbDir,
-    required this.adapter,
-  });
+  const CurrentFile({required this.dbDir, required this.adapter});
 
   /// Database root directory.
   final String dbDir;

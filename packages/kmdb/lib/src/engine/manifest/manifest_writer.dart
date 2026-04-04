@@ -38,10 +38,7 @@ const int kManifestRotationThreshold = 1 * 1024 * 1024; // 1 MB
 /// outcomes. It is not responsible for CURRENT file management — that is
 /// handled by [CurrentFile].
 final class ManifestWriter {
-  ManifestWriter({
-    required this.path,
-    required this.adapter,
-  }) : _byteCount = 0;
+  ManifestWriter({required this.path, required this.adapter}) : _byteCount = 0;
 
   /// Full path of the Manifest file being written.
   final String path;

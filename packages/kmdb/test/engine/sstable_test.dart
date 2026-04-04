@@ -26,9 +26,14 @@ import 'package:kmdb/src/engine/util/key_codec.dart';
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 Uint8List _ikey(String ns, String hexSuffix, Hlc hlc) {
-  final hexKey = hexSuffix.padLeft(12, '0') + '70008' + hexSuffix.padLeft(15, '0');
+  final hexKey =
+      hexSuffix.padLeft(12, '0') + '70008' + hexSuffix.padLeft(15, '0');
   return KeyCodec.encodeInternalKey(
-      ns, KeyCodec.keyToBytes(hexKey), hlc, RecordType.put);
+    ns,
+    KeyCodec.keyToBytes(hexKey),
+    hlc,
+    RecordType.put,
+  );
 }
 
 Uint8List _val(int b) => Uint8List.fromList([b]);
@@ -162,28 +167,34 @@ void main() {
   });
 
   group('SstableReader: corruption detection', () {
-    test('corrupted footer checksum throws CorruptedSstableException', () async {
-      final k = _ikey('ns', 'a', const Hlc(1, 0));
-      final writer = SstableWriter()..add(k, _val(1));
-      final bytes = writer.finish();
-      // Corrupt the checksum field (last 8 bytes of the 48-byte footer).
-      bytes[bytes.length - 1] ^= 0xFF;
-      final adapter = MemoryStorageAdapter();
-      await adapter.writeFile('/sst/corrupt.sst', bytes);
-      expect(
-        () => SstableReader.open('/sst/corrupt.sst', adapter),
-        throwsA(isA<CorruptedSstableException>()),
-      );
-    });
+    test(
+      'corrupted footer checksum throws CorruptedSstableException',
+      () async {
+        final k = _ikey('ns', 'a', const Hlc(1, 0));
+        final writer = SstableWriter()..add(k, _val(1));
+        final bytes = writer.finish();
+        // Corrupt the checksum field (last 8 bytes of the 48-byte footer).
+        bytes[bytes.length - 1] ^= 0xFF;
+        final adapter = MemoryStorageAdapter();
+        await adapter.writeFile('/sst/corrupt.sst', bytes);
+        expect(
+          () => SstableReader.open('/sst/corrupt.sst', adapter),
+          throwsA(isA<CorruptedSstableException>()),
+        );
+      },
+    );
 
-    test('file shorter than 48 bytes throws CorruptedSstableException', () async {
-      final adapter = MemoryStorageAdapter();
-      await adapter.writeFile('/sst/tiny.sst', Uint8List(10));
-      expect(
-        () => SstableReader.open('/sst/tiny.sst', adapter),
-        throwsA(isA<CorruptedSstableException>()),
-      );
-    });
+    test(
+      'file shorter than 48 bytes throws CorruptedSstableException',
+      () async {
+        final adapter = MemoryStorageAdapter();
+        await adapter.writeFile('/sst/tiny.sst', Uint8List(10));
+        expect(
+          () => SstableReader.open('/sst/tiny.sst', adapter),
+          throwsA(isA<CorruptedSstableException>()),
+        );
+      },
+    );
   });
 
   group('SstableWriter: empty file', () {

@@ -55,8 +55,7 @@ void main() {
       final (store, _) = await _open(adapter);
       await store.close();
       expect(adapter.files.keys, contains('$_dbDir/CURRENT'));
-      expect(
-          adapter.files.keys.any((k) => k.contains('MANIFEST-')), isTrue);
+      expect(adapter.files.keys.any((k) => k.contains('MANIFEST-')), isTrue);
     });
   });
 
@@ -138,34 +137,36 @@ void main() {
   });
 
   group('CrashRecovery — WAL truncation recovery', () {
-    test('truncated WAL record does not crash open; good records survive',
-        () async {
-      final adapter = _newAdapter();
-      final (store, _) = await _open(adapter);
-      await store.put('ns', _key(1), _bytes('v1'));
-      await store.put('ns', _key(2), _bytes('v2'));
-      // Simulate a crash: release the lock without calling close(). This
-      // leaves the WAL with unflushed records (no flush marker, no SSTable).
-      MemoryStorageAdapter.releaseAllLocks();
+    test(
+      'truncated WAL record does not crash open; good records survive',
+      () async {
+        final adapter = _newAdapter();
+        final (store, _) = await _open(adapter);
+        await store.put('ns', _key(1), _bytes('v1'));
+        await store.put('ns', _key(2), _bytes('v2'));
+        // Simulate a crash: release the lock without calling close(). This
+        // leaves the WAL with unflushed records (no flush marker, no SSTable).
+        MemoryStorageAdapter.releaseAllLocks();
 
-      // Corrupt the WAL by truncating the last few bytes. The first record
-      // should still be recoverable; the second is corrupted.
-      final walKeys = adapter.files.keys
-          .where((k) => k.endsWith('.log'))
-          .toList();
-      expect(walKeys, isNotEmpty);
-      final walPath = walKeys.first;
-      final original = adapter.files[walPath]!;
-      // Truncate by removing 5 bytes from the end.
-      if (original.length > 5) {
-        adapter.files[walPath] = original.sublist(0, original.length - 5);
-      }
+        // Corrupt the WAL by truncating the last few bytes. The first record
+        // should still be recoverable; the second is corrupted.
+        final walKeys = adapter.files.keys
+            .where((k) => k.endsWith('.log'))
+            .toList();
+        expect(walKeys, isNotEmpty);
+        final walPath = walKeys.first;
+        final original = adapter.files[walPath]!;
+        // Truncate by removing 5 bytes from the end.
+        if (original.length > 5) {
+          adapter.files[walPath] = original.sublist(0, original.length - 5);
+        }
 
-      // Open should not throw; the truncation must be detected.
-      final (store2, result) = await _open(adapter);
-      expect(result.hadInterruptedWrites, isTrue);
-      await store2.close();
-    });
+        // Open should not throw; the truncation must be detected.
+        final (store2, result) = await _open(adapter);
+        expect(result.hadInterruptedWrites, isTrue);
+        await store2.close();
+      },
+    );
   });
 
   group('CrashRecovery — lock exclusivity', () {
@@ -173,10 +174,7 @@ void main() {
       final adapter = _newAdapter();
       final (store, _) = await _open(adapter);
       // Second open should fail — lock is held.
-      await expectLater(
-        _open(adapter),
-        throwsA(isA<LockException>()),
-      );
+      await expectLater(_open(adapter), throwsA(isA<LockException>()));
       await store.close();
     });
 

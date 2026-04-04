@@ -61,7 +61,10 @@ void main() {
       await adapter.upload('dir/a.sst', Uint8List(0));
       await adapter.upload('dir/b.sst', Uint8List(0));
       await adapter.upload('dir/sub/c.sst', Uint8List(0)); // nested — excluded
-      await adapter.upload('other/d.sst', Uint8List(0)); // different dir — excluded
+      await adapter.upload(
+        'other/d.sst',
+        Uint8List(0),
+      ); // different dir — excluded
 
       final files = await adapter.list('dir');
       expect(files, containsAll(['a.sst', 'b.sst']));
@@ -131,21 +134,34 @@ void main() {
 
     // ── compareAndSwap: if-none-match semantics ───────────────────────────────
 
-    test('compareAndSwap with null ifMatchEtag succeeds when file absent', () async {
-      final bytes = Uint8List.fromList([42]);
-      final result = await adapter.compareAndSwap('f', bytes, ifMatchEtag: null);
-      expect(result, isTrue);
-      expect(await adapter.download('f'), equals(bytes));
-    });
+    test(
+      'compareAndSwap with null ifMatchEtag succeeds when file absent',
+      () async {
+        final bytes = Uint8List.fromList([42]);
+        final result = await adapter.compareAndSwap(
+          'f',
+          bytes,
+          ifMatchEtag: null,
+        );
+        expect(result, isTrue);
+        expect(await adapter.download('f'), equals(bytes));
+      },
+    );
 
-    test('compareAndSwap with null ifMatchEtag fails when file exists', () async {
-      await adapter.upload('f', Uint8List.fromList([1]));
-      final result = await adapter.compareAndSwap(
-          'f', Uint8List.fromList([2]), ifMatchEtag: null);
-      expect(result, isFalse);
-      // Original content unchanged.
-      expect(await adapter.download('f'), equals(Uint8List.fromList([1])));
-    });
+    test(
+      'compareAndSwap with null ifMatchEtag fails when file exists',
+      () async {
+        await adapter.upload('f', Uint8List.fromList([1]));
+        final result = await adapter.compareAndSwap(
+          'f',
+          Uint8List.fromList([2]),
+          ifMatchEtag: null,
+        );
+        expect(result, isFalse);
+        // Original content unchanged.
+        expect(await adapter.download('f'), equals(Uint8List.fromList([1])));
+      },
+    );
 
     // ── compareAndSwap: conditional update ────────────────────────────────────
 
@@ -153,7 +169,11 @@ void main() {
       await adapter.upload('f', Uint8List.fromList([1]));
       final etag = await adapter.getEtag('f');
       final newBytes = Uint8List.fromList([99]);
-      final result = await adapter.compareAndSwap('f', newBytes, ifMatchEtag: etag);
+      final result = await adapter.compareAndSwap(
+        'f',
+        newBytes,
+        ifMatchEtag: etag,
+      );
       expect(result, isTrue);
       expect(await adapter.download('f'), equals(newBytes));
     });
@@ -165,7 +185,10 @@ void main() {
       await adapter.upload('f', Uint8List.fromList([2]));
       // Now try with the stale etag.
       final result = await adapter.compareAndSwap(
-          'f', Uint8List.fromList([3]), ifMatchEtag: staleEtag);
+        'f',
+        Uint8List.fromList([3]),
+        ifMatchEtag: staleEtag,
+      );
       expect(result, isFalse);
       // File has the value from the intervening write.
       expect(await adapter.download('f'), equals(Uint8List.fromList([2])));
@@ -173,14 +196,21 @@ void main() {
 
     test('compareAndSwap with etag fails when file does not exist', () async {
       final result = await adapter.compareAndSwap(
-          'f', Uint8List.fromList([1]), ifMatchEtag: '1');
+        'f',
+        Uint8List.fromList([1]),
+        ifMatchEtag: '1',
+      );
       expect(result, isFalse);
     });
 
     test('compareAndSwap increments etag on success', () async {
       await adapter.upload('f', Uint8List.fromList([1]));
       final etag1 = await adapter.getEtag('f');
-      await adapter.compareAndSwap('f', Uint8List.fromList([2]), ifMatchEtag: etag1);
+      await adapter.compareAndSwap(
+        'f',
+        Uint8List.fromList([2]),
+        ifMatchEtag: etag1,
+      );
       final etag2 = await adapter.getEtag('f');
       expect(etag1, isNot(equals(etag2)));
     });
@@ -205,17 +235,28 @@ void main() {
 
     // ── atomic CAS invariant ──────────────────────────────────────────────────
 
-    test('concurrent CAS: only one write wins when both see absent file', () async {
-      // Simulate two writers racing to create the same file.
-      // Since Dart is single-threaded, we interleave by calling both
-      // compareAndSwap before awaiting — but since the Futures complete
-      // synchronously in memory, the first to await wins.
-      final r1 = adapter.compareAndSwap('lease', Uint8List.fromList([1]), ifMatchEtag: null);
-      final r2 = adapter.compareAndSwap('lease', Uint8List.fromList([2]), ifMatchEtag: null);
-      final results = await Future.wait([r1, r2]);
-      // Exactly one should succeed.
-      final successes = results.where((r) => r).length;
-      expect(successes, equals(1));
-    });
+    test(
+      'concurrent CAS: only one write wins when both see absent file',
+      () async {
+        // Simulate two writers racing to create the same file.
+        // Since Dart is single-threaded, we interleave by calling both
+        // compareAndSwap before awaiting — but since the Futures complete
+        // synchronously in memory, the first to await wins.
+        final r1 = adapter.compareAndSwap(
+          'lease',
+          Uint8List.fromList([1]),
+          ifMatchEtag: null,
+        );
+        final r2 = adapter.compareAndSwap(
+          'lease',
+          Uint8List.fromList([2]),
+          ifMatchEtag: null,
+        );
+        final results = await Future.wait([r1, r2]);
+        // Exactly one should succeed.
+        final successes = results.where((r) => r).length;
+        expect(successes, equals(1));
+      },
+    );
   });
 }

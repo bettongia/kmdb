@@ -56,7 +56,7 @@ import 'meta_store.dart';
 /// ```
 final class KvStoreImpl implements KvStore {
   KvStoreImpl._(this._engine, this._meta, {required bool dirtyFlagPresent})
-      : _dirtyFlagPresent = dirtyFlagPresent;
+    : _dirtyFlagPresent = dirtyFlagPresent;
 
   final LsmEngine _engine;
   final MetaStore _meta;
@@ -94,8 +94,10 @@ final class KvStoreImpl implements KvStore {
     String deviceId = '00000000',
   }) async {
     final recovery = CrashRecovery(adapter: adapter, config: config);
-    final (engine, recoveryResult) =
-        await recovery.open(dbDir, deviceId: deviceId);
+    final (engine, recoveryResult) = await recovery.open(
+      dbDir,
+      deviceId: deviceId,
+    );
     final meta = MetaStore(engine);
 
     // Check for the dirty-open flag written by the previous session.
@@ -107,7 +109,10 @@ final class KvStoreImpl implements KvStore {
       hadUnclosedSession: hadUnclosedSession,
     );
 
-    return (KvStoreImpl._(engine, meta, dirtyFlagPresent: hadUnclosedSession), openResult);
+    return (
+      KvStoreImpl._(engine, meta, dirtyFlagPresent: hadUnclosedSession),
+      openResult,
+    );
   }
 
   // ── KvStore implementation ────────────────────────────────────────────────
@@ -153,11 +158,7 @@ final class KvStoreImpl implements KvStore {
       _engine.get(namespace, key);
 
   @override
-  Stream<KvEntry> scan(
-    String namespace, {
-    String? startKey,
-    String? endKey,
-  }) =>
+  Stream<KvEntry> scan(String namespace, {String? startKey, String? endKey}) =>
       _engine.scan(namespace, startKey: startKey, endKey: endKey);
 
   @override
@@ -277,7 +278,10 @@ final class KvStoreImpl implements KvStore {
   static void _guardNamespace(String namespace) {
     if (namespace.startsWith(r'$')) {
       throw ArgumentError.value(
-          namespace, 'namespace', 'System namespaces (starting with \$) are reserved');
+        namespace,
+        'namespace',
+        'System namespaces (starting with \$) are reserved',
+      );
     }
   }
 
@@ -289,11 +293,17 @@ final class KvStoreImpl implements KvStore {
     final stripped = key.replaceAll('-', '');
     if (stripped.length != 32) {
       throw ArgumentError.value(
-          key, 'key', 'Key must be 32 hex characters (UUIDv7)');
+        key,
+        'key',
+        'Key must be 32 hex characters (UUIDv7)',
+      );
     }
     if (stripped[12] != '7') {
       throw ArgumentError.value(
-          key, 'key', 'Key must be a valid UUIDv7 (version 7 required)');
+        key,
+        'key',
+        'Key must be a valid UUIDv7 (version 7 required)',
+      );
     }
     final variantChar = stripped[16].toLowerCase();
     if (variantChar != '8' &&
@@ -301,7 +311,10 @@ final class KvStoreImpl implements KvStore {
         variantChar != 'a' &&
         variantChar != 'b') {
       throw ArgumentError.value(
-          key, 'key', 'Key must be a valid UUIDv7 (variant 2 required)');
+        key,
+        'key',
+        'Key must be a valid UUIDv7 (variant 2 required)',
+      );
     }
   }
 }

@@ -60,9 +60,9 @@ enum CacheTier {
 
   /// Maximum number of decoded objects held in the session cache.
   int get maxSessionObjects => switch (this) {
-        CacheTier.desktop => 2000,
-        CacheTier.mobile || CacheTier.web => 256,
-      };
+    CacheTier.desktop => 2000,
+    CacheTier.mobile || CacheTier.web => 256,
+  };
 
   /// Whether the persistent materialised view cache (`$cache`) is required.
   ///

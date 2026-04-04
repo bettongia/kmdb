@@ -95,14 +95,14 @@ final class SyncEngine {
     required String syncRoot,
     required Set<String> syncNamespaces,
     ConsolidationConfig consolidationConfig = const ConsolidationConfig(),
-  })  : _store = store,
-        _cloudAdapter = cloudAdapter,
-        _localAdapter = localAdapter,
-        _deviceId = deviceId,
-        _dbDir = dbDir,
-        _syncRoot = syncRoot,
-        _syncNamespaces = syncNamespaces,
-        _consolidationConfig = consolidationConfig;
+  }) : _store = store,
+       _cloudAdapter = cloudAdapter,
+       _localAdapter = localAdapter,
+       _deviceId = deviceId,
+       _dbDir = dbDir,
+       _syncRoot = syncRoot,
+       _syncNamespaces = syncNamespaces,
+       _consolidationConfig = consolidationConfig;
 
   final KvStore _store;
   final CloudAdapter _cloudAdapter;
@@ -151,13 +151,19 @@ final class SyncEngine {
     // 2. List local SSTables — only include files belonging to this device
     //    (named with our deviceId prefix) to avoid re-uploading peer files
     //    that were ingested during pull.
-    final localFiles = await _localAdapter.listFiles(_sstDir, extension: '.sst');
+    final localFiles = await _localAdapter.listFiles(
+      _sstDir,
+      extension: '.sst',
+    );
     final ownLocalFiles = localFiles
         .where((f) => _safeDeviceId(f) == _deviceId)
         .toSet();
 
     // 3. List remote SSTables.
-    final remoteFiles = (await _cloudAdapter.list(_remoteSstDir, extension: '.sst')).toSet();
+    final remoteFiles = (await _cloudAdapter.list(
+      _remoteSstDir,
+      extension: '.sst',
+    )).toSet();
 
     // 4. Upload new SSTables.
     final uploaded = <String>[];
@@ -169,7 +175,8 @@ final class SyncEngine {
     }
 
     // 5. Load or create the local HWM.
-    var hwm = await HighwaterMark.load(_remoteHwmPath, _cloudAdapter) ??
+    var hwm =
+        await HighwaterMark.load(_remoteHwmPath, _cloudAdapter) ??
         HighwaterMark(
           deviceId: _deviceId,
           currentHlc: const Hlc(0, 0),
@@ -204,7 +211,8 @@ final class SyncEngine {
   /// 5. Optionally run consolidation if threshold is met.
   Future<void> pull() async {
     // 1. Load local HWM.
-    var hwm = await HighwaterMark.load(_remoteHwmPath, _cloudAdapter) ??
+    var hwm =
+        await HighwaterMark.load(_remoteHwmPath, _cloudAdapter) ??
         HighwaterMark(
           deviceId: _deviceId,
           currentHlc: const Hlc(0, 0),
@@ -213,7 +221,10 @@ final class SyncEngine {
         );
 
     // 2. List all remote SSTables.
-    final remoteFiles = await _cloudAdapter.list(_remoteSstDir, extension: '.sst');
+    final remoteFiles = await _cloudAdapter.list(
+      _remoteSstDir,
+      extension: '.sst',
+    );
 
     // Track highest ingested HLC per peer for HWM update.
     final peerMaxHlc = <String, Hlc>{};

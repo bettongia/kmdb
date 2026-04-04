@@ -81,7 +81,8 @@ final class MetaStore {
   /// Exposed for tests that need to verify the key exists directly.
   static String genKey(String userNamespace) => _genKey(userNamespace);
 
-  static String _genKey(String userNamespace) => _nameToKey('gen:$userNamespace');
+  static String _genKey(String userNamespace) =>
+      _nameToKey('gen:$userNamespace');
 
   // ── Dirty-open flag ────────────────────────────────────────────────────────
 
@@ -120,10 +121,10 @@ final class MetaStore {
   ///
   /// [deviceId] must be an 8-character lowercase hex string.
   Future<void> putDeviceId(String deviceId) => _engine.put(
-        kNamespace,
-        _nameToKey('device_id'),
-        Uint8List.fromList(deviceId.codeUnits),
-      );
+    kNamespace,
+    _nameToKey('device_id'),
+    Uint8List.fromList(deviceId.codeUnits),
+  );
 
   // ── Namespace registry ─────────────────────────────────────────────────────
 
@@ -156,7 +157,10 @@ final class MetaStore {
     final updated = [...current, userNamespace]..sort();
     final encoded = cbor.encode(CborList(updated.map(CborString.new).toList()));
     await _engine.put(
-        kNamespace, _nameToKey(_kNamespacesKey), Uint8List.fromList(encoded));
+      kNamespace,
+      _nameToKey(_kNamespacesKey),
+      Uint8List.fromList(encoded),
+    );
   }
 
   // ── Index state ────────────────────────────────────────────────────────────

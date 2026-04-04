@@ -27,11 +27,7 @@ import 'package:test/test.dart';
 // ── Test model ────────────────────────────────────────────────────────────────
 
 final class _Contact {
-  const _Contact({
-    required this.id,
-    required this.city,
-    this.tags = const [],
-  });
+  const _Contact({required this.id, required this.city, this.tags = const []});
   final String id;
   final String city;
   final List<String> tags;
@@ -48,15 +44,18 @@ final class _ContactCodec implements KmdbCodec<_Contact> {
       _Contact(id: key, city: v.city, tags: v.tags);
 
   @override
-  Map<String, dynamic> encode(_Contact v) =>
-      {'id': v.id, 'city': v.city, 'tags': v.tags};
+  Map<String, dynamic> encode(_Contact v) => {
+    'id': v.id,
+    'city': v.city,
+    'tags': v.tags,
+  };
 
   @override
   _Contact decode(Map<String, dynamic> j) => _Contact(
-        id: j['id'] as String,
-        city: j['city'] as String,
-        tags: (j['tags'] as List?)?.cast<String>() ?? [],
-      );
+    id: j['id'] as String,
+    city: j['city'] as String,
+    tags: (j['tags'] as List?)?.cast<String>() ?? [],
+  );
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -141,8 +140,10 @@ void main() {
         document: {'city': 'London'},
       );
       expect(batch.length, equals(1));
-      final expectedNs =
-          IndexWriter.indexNamespaceForValue(_cityIndex, 'London')!;
+      final expectedNs = IndexWriter.indexNamespaceForValue(
+        _cityIndex,
+        'London',
+      )!;
       expect(batch.entries.first.namespace, equals(expectedNs));
     });
 
@@ -166,7 +167,7 @@ void main() {
         definition: def,
         docKey: _key(),
         document: {
-          'tags': ['dart', 'flutter']
+          'tags': ['dart', 'flutter'],
         },
       );
       expect(batch.length, equals(2));
@@ -218,10 +219,11 @@ void main() {
 
       expect(delBatch.length, equals(1));
       expect(delBatch.entries.first.isDelete, isTrue);
-      expect(delBatch.entries.first.namespace,
-          equals(addBatch.entries.first.namespace));
       expect(
-          delBatch.entries.first.key, equals(addBatch.entries.first.key));
+        delBatch.entries.first.namespace,
+        equals(addBatch.entries.first.namespace),
+      );
+      expect(delBatch.entries.first.key, equals(addBatch.entries.first.key));
     });
   });
 
@@ -237,8 +239,7 @@ void main() {
 
     test('getOrActivate transitions undefined → building', () async {
       final (db, _) = await _openWithIndexes();
-      final state =
-          await db.indexManager.getOrActivate('contacts', 'city');
+      final state = await db.indexManager.getOrActivate('contacts', 'city');
       expect(state.status, equals(IndexStatus.building));
       await db.close();
     });
@@ -271,8 +272,10 @@ void main() {
       await Future.delayed(const Duration(milliseconds: 100));
 
       final state = await db.indexManager.getState('contacts', 'city');
-      expect(state.status,
-          anyOf(equals(IndexStatus.current), equals(IndexStatus.stale)));
+      expect(
+        state.status,
+        anyOf(equals(IndexStatus.current), equals(IndexStatus.stale)),
+      );
       await db.close();
     });
   });
@@ -321,10 +324,8 @@ void main() {
       final (db, col) = await _openWithIndexes();
       final k1 = _key();
       final k2 = _key();
-      await col.put(
-          _Contact(id: k1, city: 'x', tags: ['dart', 'flutter']));
-      await col.put(
-          _Contact(id: k2, city: 'x', tags: ['flutter', 'web']));
+      await col.put(_Contact(id: k1, city: 'x', tags: ['dart', 'flutter']));
+      await col.put(_Contact(id: k2, city: 'x', tags: ['flutter', 'web']));
 
       await db.indexManager.getOrActivate('contacts', 'tags[]');
       await Future.delayed(const Duration(milliseconds: 100));
@@ -377,14 +378,18 @@ void main() {
 
       expect(
         (await IndexReader.lookupByValue(
-                store: db.store, definition: _cityIndex, value: 'London'))
-            .contains(k1),
+          store: db.store,
+          definition: _cityIndex,
+          value: 'London',
+        )).contains(k1),
         isFalse,
       );
       expect(
         (await IndexReader.lookupByValue(
-                store: db.store, definition: _cityIndex, value: 'Paris'))
-            .contains(k1),
+          store: db.store,
+          definition: _cityIndex,
+          value: 'Paris',
+        )).contains(k1),
         isTrue,
       );
       await db.close();

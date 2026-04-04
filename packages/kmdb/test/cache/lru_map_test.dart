@@ -67,7 +67,7 @@ void main() {
       lru.put('b', 2);
       lru.put('c', 3);
       lru.put('a', 99); // update 'a'; 'b' becomes LRU
-      lru.put('d', 4);  // evicts 'b'
+      lru.put('d', 4); // evicts 'b'
       expect(lru.get('a'), 99);
       expect(lru.get('b'), isNull);
     });

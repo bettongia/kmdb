@@ -53,7 +53,10 @@ Uint8List _buildSst({int count = 2, int basePhysical = 5000}) {
   for (var i = 0; i < count; i++) {
     final hlc = Hlc(basePhysical + i, 0);
     // Use valid UUIDv7 format for keys in SSTable.
-    final keyHex = i.toRadixString(16).padLeft(12, '0') + '70008' + i.toRadixString(16).padLeft(15, '0');
+    final keyHex =
+        i.toRadixString(16).padLeft(12, '0') +
+        '70008' +
+        i.toRadixString(16).padLeft(15, '0');
     final keyBytes = KeyCodec.keyToBytes(keyHex);
     final internalKey = KeyCodec.encodeInternalKey(
       'ns',

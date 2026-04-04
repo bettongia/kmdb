@@ -32,10 +32,14 @@ final class Hlc implements Comparable<Hlc> {
   /// [physicalMs] must fit in 48 bits (≤ 281474976710655).
   /// [logical] must fit in 16 bits (≤ 65535).
   const Hlc(this.physicalMs, this.logical)
-      : assert(physicalMs >= 0 && physicalMs <= 0xFFFFFFFFFFFF,
-            'physicalMs must fit in 48 bits'),
-        assert(logical >= 0 && logical <= 0xFFFF,
-            'logical counter must fit in 16 bits');
+    : assert(
+        physicalMs >= 0 && physicalMs <= 0xFFFFFFFFFFFF,
+        'physicalMs must fit in 48 bits',
+      ),
+      assert(
+        logical >= 0 && logical <= 0xFFFF,
+        'logical counter must fit in 16 bits',
+      );
 
   /// Physical wall-clock component, milliseconds since Unix epoch (48-bit).
   final int physicalMs;
@@ -53,9 +57,9 @@ final class Hlc implements Comparable<Hlc> {
 
   /// Decodes a packed 64-bit [encoded] value back into an [Hlc].
   static Hlc fromEncoded(int encoded) => Hlc(
-        (encoded >>> 16) & 0xFFFFFFFFFFFF, // upper 48 bits
-        encoded & 0xFFFF, // lower 16 bits
-      );
+    (encoded >>> 16) & 0xFFFFFFFFFFFF, // upper 48 bits
+    encoded & 0xFFFF, // lower 16 bits
+  );
 
   /// Parses a 16-character uppercase hex string (the full 64-bit encoding).
   ///
@@ -69,7 +73,9 @@ final class Hlc implements Comparable<Hlc> {
       final encoded = int.parse(hex, radix: 16);
       return fromEncoded(encoded);
     }
-    throw FormatException('HLC hex must be 12 or 16 characters, got ${hex.length}');
+    throw FormatException(
+      'HLC hex must be 12 or 16 characters, got ${hex.length}',
+    );
   }
 
   /// Formats the full 64-bit HLC as a 16-character uppercase hex string.

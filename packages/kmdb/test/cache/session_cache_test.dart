@@ -132,11 +132,14 @@ void main() {
       expect(small.get('ns', 'k3', 1), equals(_bytes(3)));
     });
 
-    test('namespace prefix does not match entries with prefix-extended names', () {
-      // 'ns' should not match 'ns_extended'
-      cache.put('ns_extended', 'k', 1, _bytes(5));
-      cache.evictNamespaceAll('ns');
-      expect(cache.get('ns_extended', 'k', 1), equals(_bytes(5)));
-    });
+    test(
+      'namespace prefix does not match entries with prefix-extended names',
+      () {
+        // 'ns' should not match 'ns_extended'
+        cache.put('ns_extended', 'k', 1, _bytes(5));
+        cache.evictNamespaceAll('ns');
+        expect(cache.get('ns_extended', 'k', 1), equals(_bytes(5)));
+      },
+    );
   });
 }

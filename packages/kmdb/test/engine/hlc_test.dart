@@ -112,12 +112,15 @@ void main() {
         const Hlc(100, 0),
         const Hlc(300, 0),
       ]..sort();
-      expect(hlcs, equals([
-        const Hlc(100, 0),
-        const Hlc(100, 5),
-        const Hlc(200, 0),
-        const Hlc(300, 0),
-      ]));
+      expect(
+        hlcs,
+        equals([
+          const Hlc(100, 0),
+          const Hlc(100, 5),
+          const Hlc(200, 0),
+          const Hlc(300, 0),
+        ]),
+      );
     });
   });
 
@@ -221,10 +224,7 @@ void main() {
       );
       // Remote is 120s ahead of wall (exceeds 60s limit).
       final remote = Hlc(wall + 120000, 0);
-      expect(
-        () => clock.update(remote),
-        throwsA(isA<ClockSkewException>()),
-      );
+      expect(() => clock.update(remote), throwsA(isA<ClockSkewException>()));
     });
 
     test('accepts remote just within the skew window', () {

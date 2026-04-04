@@ -104,9 +104,7 @@ final class ValueCodec {
   static Map<String, dynamic> _fromCbor(Uint8List bytes) {
     final decoded = cbor.decode(bytes);
     if (decoded is! CborMap) {
-      throw FormatException(
-        'Expected CBOR map, got ${decoded.runtimeType}',
-      );
+      throw FormatException('Expected CBOR map, got ${decoded.runtimeType}');
     }
     // toObject() recursively converts the CBOR tree to plain Dart objects
     // (String, int, double, bool, null, List, Map). The result is guaranteed

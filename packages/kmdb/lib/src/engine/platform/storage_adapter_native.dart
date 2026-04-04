@@ -44,11 +44,7 @@ final class StorageAdapterNative implements StorageAdapter {
   }
 
   @override
-  Future<Uint8List> readFileRange(
-    String path,
-    int offset,
-    int length,
-  ) async {
+  Future<Uint8List> readFileRange(String path, int offset, int length) async {
     RandomAccessFile? raf;
     try {
       raf = await File(path).open();
@@ -129,7 +125,7 @@ final class StorageAdapterNative implements StorageAdapter {
       await File(path).delete();
     } on FileSystemException catch (e) {
       // Ignore "not found" — delete is specified as a no-op in that case.
-      if (e.osError?.errorCode == 2 /* ENOENT */) return;
+      if (e.osError?.errorCode == 2 /* ENOENT */ ) return;
       throw StorageException(e.message, path: path);
     }
   }

@@ -44,10 +44,7 @@ final class StatsCommand implements CliCommand {
         'l2': s.l2Count,
         'total': s.totalSstCount,
       },
-      'bytes': {
-        'sstables': s.totalSstBytes,
-        'total': s.totalDbBytes,
-      },
+      'bytes': {'sstables': s.totalSstBytes, 'total': s.totalDbBytes},
     });
     return true;
   }

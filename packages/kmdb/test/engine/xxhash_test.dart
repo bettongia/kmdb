@@ -53,14 +53,19 @@ void main() {
 
     test('32 bytes → exercises the 32-byte stripe path', () {
       // Exactly one stripe of 32 bytes.
-      final data = Uint8List.fromList(utf8.encode('12345678901234567890123456789012'));
+      final data = Uint8List.fromList(
+        utf8.encode('12345678901234567890123456789012'),
+      );
       final hash = XxHash64.digest(data);
       expect(XxHash64.toHex(hash), equals('40FD1AA52D98274C'));
     });
 
     test('64 bytes → two full stripes', () {
       final data = Uint8List.fromList(
-          utf8.encode('1234567890123456789012345678901234567890123456789012345678901234'));
+        utf8.encode(
+          '1234567890123456789012345678901234567890123456789012345678901234',
+        ),
+      );
       final hash = XxHash64.digest(data);
       expect(XxHash64.toHex(hash), equals('D011332221B7885A'));
     });

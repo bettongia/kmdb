@@ -61,9 +61,9 @@ final class KmdbDatabase {
     required CacheLayer cache,
     required KvStoreImpl store,
     required IndexManager indexManager,
-  })  : _cache = cache,
-        _store = store,
-        _indexManager = indexManager;
+  }) : _cache = cache,
+       _store = store,
+       _indexManager = indexManager;
 
   final CacheLayer _cache;
   final KvStoreImpl _store;
@@ -97,7 +97,7 @@ final class KmdbDatabase {
     List<IndexDefinition> indexes = const [],
     void Function(String namespace, String path)? onIndexReady,
     Future<void> Function(List<IndexRebuildEvent> events)?
-        onIndexRebuildRequired,
+    onIndexRebuildRequired,
     KvStoreConfig config = const KvStoreConfig(),
     String deviceId = '00000000',
   }) async {
@@ -120,8 +120,7 @@ final class KmdbDatabase {
       final interrupted = await indexManager.checkInterruptedBuilds();
       if (interrupted.isNotEmpty) {
         final events = interrupted
-            .map((e) =>
-                IndexRebuildEvent(namespace: e.namespace, path: e.path))
+            .map((e) => IndexRebuildEvent(namespace: e.namespace, path: e.path))
             .toList();
         await onIndexRebuildRequired(events);
       }
@@ -144,12 +143,7 @@ final class KmdbDatabase {
   KmdbCollection<T> collection<T>({
     required String namespace,
     required KmdbCodec<T> codec,
-  }) =>
-      KmdbCollection<T>(
-        namespace: namespace,
-        codec: codec,
-        database: this,
-      );
+  }) => KmdbCollection<T>(namespace: namespace, codec: codec, database: this);
 
   /// Checks all tracked namespaces for stale cache entries.
   ///

@@ -42,10 +42,7 @@ import 'lsm_engine.dart';
 /// 8. Prepare dirty-open flag (written on first WriteBatch, not during open).
 /// 9. Return `(LsmEngine, OpenResult)`.
 final class CrashRecovery {
-  const CrashRecovery({
-    required this.adapter,
-    required this.config,
-  });
+  const CrashRecovery({required this.adapter, required this.config});
 
   /// Storage adapter used for all I/O.
   final StorageAdapter adapter;
@@ -84,8 +81,7 @@ final class CrashRecovery {
       await currentFile.write(manifestName);
       final initPath = '$dbDir/$manifestName';
       final initWriter = ManifestWriter(path: initPath, adapter: adapter);
-      await initWriter.append(
-          const VersionEdit(logNumber: 0, nextSeq: 0));
+      await initWriter.append(const VersionEdit(logNumber: 0, nextSeq: 0));
     }
     final manifestPath = '$dbDir/$manifestName';
 
@@ -176,9 +172,7 @@ final class CrashRecovery {
           record.namespace,
           keyBytes,
           hlc,
-          record.type == WalRecordType.put
-              ? RecordType.put
-              : RecordType.delete,
+          record.type == WalRecordType.put ? RecordType.put : RecordType.delete,
         );
         restoredMemtable.put(internalKey, Uint8List.fromList(record.value));
         affectedNamespaces.add(record.namespace);
@@ -186,10 +180,7 @@ final class CrashRecovery {
     }
 
     // ── Step 8: Open Manifest writer for new writes ───────────────────────────
-    final manifestWriter = ManifestWriter(
-      path: manifestPath,
-      adapter: adapter,
-    );
+    final manifestWriter = ManifestWriter(path: manifestPath, adapter: adapter);
 
     // ── Step 9: Start WAL writer at the next sequence number ─────────────────
     final walWriter = WalWriterFactory.create(
@@ -261,11 +252,10 @@ final class WalWriterFactory {
     required StorageAdapter adapter,
     required int initialSequence,
     required bool fsyncOnWrite,
-  }) =>
-      WalWriter(
-        dirPath: dirPath,
-        adapter: adapter,
-        initialSequence: initialSequence,
-        fsyncOnWrite: fsyncOnWrite,
-      );
+  }) => WalWriter(
+    dirPath: dirPath,
+    adapter: adapter,
+    initialSequence: initialSequence,
+    fsyncOnWrite: fsyncOnWrite,
+  );
 }
