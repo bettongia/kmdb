@@ -43,11 +43,19 @@ enum WalRecordType {
   ///
   /// Throws [FormatException] for unrecognised bytes.
   static WalRecordType fromByte(int byte) => switch (byte) {
-        0x01 => put,
-        0x02 => delete,
-        0x03 => flushMarker,
-        _ => throw FormatException('Unknown WAL record type: 0x${byte.toRadixString(16)}'),
-      };
+    0x01 => put,
+    0x02 => delete,
+    0x03 => flushMarker,
+    _ => throw FormatException(
+      'Unknown WAL record type: 0x${byte.toRadixString(16)}',
+    ),
+  };
+
+  /// Returns a JSON-compatible representation of this record type.
+  ///
+  /// Returns the enum name as a string (e.g. `"put"`, `"delete"`,
+  /// `"flushMarker"`).
+  Map<String, dynamic> toMap() => {'name': name, 'byte': byte};
 }
 
 // ── WAL record ──────────────────────────────────────────────────────────────
@@ -85,6 +93,34 @@ final class WalRecord {
 
   /// Encoded value bytes (flag + CBOR; empty for delete / flush marker).
   final List<int> value;
+
+  // ── Serialisation ────────────────────────────────────────────────────────
+
+  /// Returns a JSON-compatible representation of this record.
+  ///
+  /// The [key] field is hex-encoded (the raw 16-byte UUIDv7 binary is not
+  /// human-readable and does not survive JSON serialisation). The [value]
+  /// field is summarised as `{"compressionFlag": N, "byteLength": N}` —
+  /// full CBOR decode of the value is out of scope for diagnostic output.
+  ///
+  /// The [sequence] is represented as a 16-character uppercase hex string
+  /// for compact, unambiguous rendering.
+  Map<String, dynamic> toMap() {
+    final keyHex = key.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    final valueMap = value.isEmpty
+        ? null
+        : {
+            'compressionFlag': value.isNotEmpty ? value[0] : 0,
+            'byteLength': value.length,
+          };
+    return {
+      'type': type.name,
+      'sequence': sequence.toHex(),
+      if (namespace.isNotEmpty) 'namespace': namespace,
+      if (key.isNotEmpty) 'key': keyHex,
+      'value': valueMap,
+    }..removeWhere((_, v) => v == null);
+  }
 
   // ── Encoding ──────────────────────────────────────────────────────────────
 
