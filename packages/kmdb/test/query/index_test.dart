@@ -15,6 +15,7 @@
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
 import 'package:kmdb/src/engine/util/key_codec.dart';
+import 'package:kmdb/src/query/exceptions.dart';
 import 'package:kmdb/src/query/index/index_definition.dart';
 import 'package:kmdb/src/query/index/index_manager.dart';
 import 'package:kmdb/src/query/index/index_reader.dart';
@@ -44,15 +45,11 @@ final class _ContactCodec implements KmdbCodec<_Contact> {
       _Contact(id: key, city: v.city, tags: v.tags);
 
   @override
-  Map<String, dynamic> encode(_Contact v) => {
-    'id': v.id,
-    'city': v.city,
-    'tags': v.tags,
-  };
+  Map<String, dynamic> encode(_Contact v) => {'city': v.city, 'tags': v.tags};
 
   @override
   _Contact decode(Map<String, dynamic> j) => _Contact(
-    id: j['id'] as String,
+    id: j['_id'] as String,
     city: j['city'] as String,
     tags: (j['tags'] as List?)?.cast<String>() ?? [],
   );
@@ -431,6 +428,39 @@ void main() {
       final indexKeys = await db.store.scan(ns).toList();
       expect(indexKeys, isEmpty);
       await db.close();
+    });
+  });
+
+  // ── ReservedIndexPathException ────────────────────────────────────────────
+
+  group('ReservedIndexPathException', () {
+    test('IndexDefinition with _id path throws immediately', () {
+      expect(
+        () => IndexDefinition('contacts', '_id'),
+        throwsA(
+          isA<ReservedIndexPathException>()
+              .having((e) => e.namespace, 'namespace', 'contacts')
+              .having((e) => e.path, 'path', '_id'),
+        ),
+      );
+    });
+
+    test('IndexDefinition with arbitrary _ prefix throws', () {
+      expect(
+        () => IndexDefinition('users', '_rev'),
+        throwsA(isA<ReservedIndexPathException>()),
+      );
+    });
+
+    test('nested path containing _ mid-segment does not throw', () {
+      // 'meta._internal' starts with 'm', not '_', so it is allowed.
+      expect(() => IndexDefinition('users', 'meta._internal'), returnsNormally);
+    });
+
+    test('ReservedIndexPathException toString contains path and namespace', () {
+      final ex = ReservedIndexPathException('users', '_rev');
+      expect(ex.toString(), contains('_rev'));
+      expect(ex.toString(), contains('users'));
     });
   });
 }
