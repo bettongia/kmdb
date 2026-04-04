@@ -1,6 +1,6 @@
 # Plan: Namespace vs. Collection Clarification
 
-**Status**: Open
+**Status**: Investigated
 
 **PR link**: {A link to the PR submitted for this plan}
 
@@ -84,7 +84,79 @@ Query Layer API (parameter rename) and the CLI help interface.
 
 ## Implementation plan
 
-{Checklists and notes for the implementation work}
+### 1. `packages/kmdb` — Query Layer API
+
+- [ ] **`kmdb_database.dart`**: Rename the `namespace` parameter to `name` in
+  `KmdbCollection<T> collection<T>({required String namespace, ...})`. Update
+  the forwarding call to `KmdbCollection<T>(namespace: name, ...)` so the
+  internal wiring stays correct. Update the two doc-comment references to
+  `[namespace]` on the same method (lines 138 and 141).
+- [ ] **`kmdb_collection.dart`**: Keep `final String namespace` as-is. Update
+  the class-level doc-comment example (line 57) from
+  `db.collection(namespace: 'tasks', ...)` to `db.collection(name: 'tasks', ...)`
+  and revise the `namespace` property doc comment (line 71) to clarify it is the
+  collection's unique storage identifier, not a user-facing label.
+- [ ] **`index_definition.dart`**: Keep `final String namespace` as-is. Update
+  its doc comment (line 49) to describe it as the storage-layer identifier for
+  the collection this index belongs to.
+
+### 2. `packages/kmdb_cli` — CLI commands
+
+Update each of the following command files to replace every occurrence of
+`<namespace>` with `<collection>` in usage strings, description strings, and
+error messages (e.g. `'<namespace> argument is required'`):
+
+- [ ] `get_command.dart`
+- [ ] `put_command.dart`
+- [ ] `delete_command.dart`
+- [ ] `scan_command.dart`
+- [ ] `count_command.dart`
+- [ ] `import_command.dart`
+- [ ] `export_command.dart`
+
+- [ ] **`collections_command.dart`**: Update the class doc comment (line 17)
+  from "Lists all user-visible namespaces (collections)" to
+  "Lists all user collections in the database." Update the `description` getter
+  (line 28) from `'List all collections (namespaces) in the database.'` to
+  `'List all user collections in the database.'`
+
+### 3. Tests
+
+8 occurrences of `db.collection(namespace:` across 5 test files need updating
+to `db.collection(name:`:
+
+- [ ] `test/query/kmdb_query_test.dart` (3 occurrences)
+- [ ] `test/query/index_test.dart` (2 occurrences)
+- [ ] `test/query/kmdb_collection_test.dart` (1 occurrence)
+- [ ] `lib/src/query/kmdb_database.dart` (1 — the call site, handled in step 1)
+- [ ] `lib/src/query/kmdb_collection.dart` (1 — the doc example, handled in step 1)
+
+### 4. Documentation
+
+- [ ] **`docs/spec/13_query_api.md`**: Update the `KmdbCollection<T>` section
+  heading example (line 55) from `db.collection(namespace: '...', codec: ...)` to
+  `db.collection(name: '...', codec: ...)`. The `onIndexReady(namespace, path)`
+  callback parameter name can remain `namespace` — it is emitted by the index
+  system and refers to the storage identifier.
+- [ ] **`README.md`**: Add a "Terminology" section (after the intro, before
+  Getting Started) explaining:
+  - **Collection** — user-facing typed document partition; the primary concept
+    for application code.
+  - **Namespace** — the underlying LSM storage partition. Each collection maps
+    1-to-1 to a namespace of the same name. System namespaces (`$meta`,
+    `$index:…`, `$cache`) are internal and are not surfaced as collections.
+- [ ] **`CLAUDE.md`** Query Layer section: replace the reference
+  `namespace: '...'` in any code examples with `name: '...'`.
+
+### 5. Verification
+
+- [ ] `dart analyze packages/kmdb` — zero issues
+- [ ] `dart analyze packages/kmdb_cli` — zero issues
+- [ ] `dart test packages/kmdb` — all tests pass
+- [ ] `dart test packages/kmdb_cli` — all tests pass
+- [ ] `kmdb --help` shows `<collection>` (not `<namespace>`) for all data
+  commands
+- [ ] `kmdb <db> collections --help` shows the updated description
 
 ## Summary
 
