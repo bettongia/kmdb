@@ -32,6 +32,7 @@ import 'commands/info_command.dart';
 import 'commands/restore_command.dart';
 import 'commands/scan_command.dart';
 import 'commands/stats_command.dart';
+import 'commands/util_command.dart';
 import 'commands/verify_command.dart';
 import 'database_opener.dart';
 import 'output/output_mode.dart';
@@ -57,6 +58,7 @@ final _commands = <String, CliCommand>{
     const FlushCommand(),
     const CompactCommand(),
     const VerifyCommand(),
+    const UtilCommand(),
   ])
     cmd.name: cmd,
 };
@@ -423,6 +425,11 @@ Commands:
     flush
     compact
     verify
+
+  Diagnostics:
+    util sstable <filename>          Inspect SSTable file
+    util wal <filename>              Inspect WAL file
+    util manifest                    Inspect active Manifest
 
 Examples:
   kmdb mydb.kmdb get notes 019abc...

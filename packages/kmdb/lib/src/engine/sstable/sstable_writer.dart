@@ -215,11 +215,13 @@ final class SstableWriter {
     final block = Uint8List.fromList(_blockBuf);
     _blocks.add(block);
 
-    _indexEntries.add(_IndexEntry(
-      lastKey: Uint8List.fromList(_lastKey),
-      blockOffset: _offset,
-      blockSize: block.length,
-    ));
+    _indexEntries.add(
+      _IndexEntry(
+        lastKey: Uint8List.fromList(_lastKey),
+        blockOffset: _offset,
+        blockSize: block.length,
+      ),
+    );
     _offset += block.length;
 
     // Reset block state.
@@ -280,4 +282,18 @@ final class SstableFooter {
 
   /// XXH64 checksum of all bytes preceding the checksum field.
   final int checksum;
+
+  /// Serialises this footer to a JSON-compatible map.
+  ///
+  /// Intended for diagnostic output via `kmdb util sstable`. The checksum is
+  /// represented as a hex string for readability.
+  Map<String, dynamic> toMap() => {
+    'filterOffset': filterOffset,
+    'filterSize': filterSize,
+    'indexOffset': indexOffset,
+    'indexSize': indexSize,
+    'entryCount': entryCount,
+    'checksum':
+        '0x${checksum.toUnsigned(64).toRadixString(16).padLeft(16, '0')}',
+  };
 }

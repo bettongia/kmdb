@@ -33,16 +33,30 @@ final class CorruptedSstableException implements Exception {
       : 'CorruptedSstableException: $message';
 }
 
-/// A parsed index entry pointing to one data block.
-final class _BlockRef {
-  const _BlockRef({
+/// A parsed index entry pointing to one data block within an SSTable.
+///
+/// Exposed via [SstableReader.index] for diagnostic tooling (see
+/// `package:kmdb/kmdb_analysis.dart`). Each [BlockRef] corresponds to one
+/// 4 KiB data block and records the offset and byte length of that block
+/// together with the last key stored in it (used for binary search during
+/// point lookups).
+final class BlockRef {
+  /// Creates a [BlockRef] with the given [lastKey], [offset], and [size].
+  const BlockRef({
     required this.lastKey,
     required this.offset,
     required this.size,
   });
 
+  /// The last (largest) key stored in this block.
+  ///
+  /// Used during point lookups to find the candidate block via binary search.
   final Uint8List lastKey;
+
+  /// Byte offset of this block from the start of the SSTable file.
   final int offset;
+
+  /// Size of this block in bytes, including the trailing XXH64 checksum.
   final int size;
 }
 
@@ -73,11 +87,11 @@ final class SstableReader {
     required StorageAdapter adapter,
     required SstableFooter footer,
     required BloomFilter filter,
-    required List<_BlockRef> index,
-  })  : _adapter = adapter,
-        _footer = footer,
-        _filter = filter,
-        _index = index;
+    required List<BlockRef> index,
+  }) : _adapter = adapter,
+       _footer = footer,
+       _filter = filter,
+       _index = index;
 
   /// Path of the SSTable file being read.
   final String path;
@@ -85,10 +99,27 @@ final class SstableReader {
   final StorageAdapter _adapter;
   final SstableFooter _footer;
   final BloomFilter _filter;
-  final List<_BlockRef> _index;
+  final List<BlockRef> _index;
 
   /// Total number of entries in this SSTable (from footer).
   int get entryCount => _footer.entryCount;
+
+  /// The parsed SSTable footer containing block offsets, sizes, and checksum.
+  ///
+  /// Exposed for diagnostic tooling; prefer [entryCount] for normal use.
+  SstableFooter get footer => _footer;
+
+  /// The Bloom filter loaded from this SSTable's filter block.
+  ///
+  /// Exposed for diagnostic tooling to inspect filter metadata such as bit
+  /// count and hash function count.
+  BloomFilter get filter => _filter;
+
+  /// The index entries for this SSTable, one per data block.
+  ///
+  /// Each [BlockRef] records the last key, byte offset, and byte size of one
+  /// data block. Exposed for diagnostic tooling; do not mutate the returned list.
+  List<BlockRef> get index => List.unmodifiable(_index);
 
   // ── Factory ───────────────────────────────────────────────────────────────
 
@@ -96,20 +127,17 @@ final class SstableReader {
   ///
   /// Throws [CorruptedSstableException] if the footer checksum is invalid.
   /// Throws [StorageException] if the file does not exist.
-  static Future<SstableReader> open(
-    String path,
-    StorageAdapter adapter,
-  ) async {
+  static Future<SstableReader> open(String path, StorageAdapter adapter) async {
     final fileSize = await adapter.fileSize(path);
     if (fileSize < 48) {
       throw CorruptedSstableException(
-          'File too small to contain a footer ($fileSize bytes)',
-          path: path);
+        'File too small to contain a footer ($fileSize bytes)',
+        path: path,
+      );
     }
 
     // Read and validate the footer.
-    final footerBytes =
-        await adapter.readFileRange(path, fileSize - 48, 48);
+    final footerBytes = await adapter.readFileRange(path, fileSize - 48, 48);
     final footer = _parseFooter(footerBytes, path);
 
     // Validate checksum: hash all bytes from 0 to (fileSize - 8).
@@ -117,20 +145,27 @@ final class SstableReader {
     final actualChecksum = XxHash64.digest(toHash);
     if (actualChecksum != footer.checksum) {
       throw CorruptedSstableException(
-          'Footer checksum mismatch: '
-          'expected ${XxHash64.toHex(footer.checksum)} '
-          'got ${XxHash64.toHex(actualChecksum)}',
-          path: path);
+        'Footer checksum mismatch: '
+        'expected ${XxHash64.toHex(footer.checksum)} '
+        'got ${XxHash64.toHex(actualChecksum)}',
+        path: path,
+      );
     }
 
     // Load filter block.
-    final filterBytes =
-        await adapter.readFileRange(path, footer.filterOffset, footer.filterSize);
+    final filterBytes = await adapter.readFileRange(
+      path,
+      footer.filterOffset,
+      footer.filterSize,
+    );
     final filter = BloomFilter.fromBytes(filterBytes);
 
     // Load and parse index block.
-    final indexBytes =
-        await adapter.readFileRange(path, footer.indexOffset, footer.indexSize);
+    final indexBytes = await adapter.readFileRange(
+      path,
+      footer.indexOffset,
+      footer.indexSize,
+    );
     final index = _parseIndex(indexBytes);
 
     return SstableReader._(
@@ -190,7 +225,7 @@ final class SstableReader {
   // ── Internal helpers ──────────────────────────────────────────────────────
 
   /// Binary-searches the index for the block whose lastKey ≥ [key].
-  _BlockRef? _findBlock(Uint8List key) {
+  BlockRef? _findBlock(Uint8List key) {
     if (_index.isEmpty) return null;
     // Binary search: find the first block whose lastKey ≥ key.
     var lo = 0;
@@ -208,7 +243,7 @@ final class SstableReader {
   }
 
   /// Reads, validates, and decodes a single data block.
-  Future<List<SstEntry>> _readBlock(_BlockRef ref) async {
+  Future<List<SstEntry>> _readBlock(BlockRef ref) async {
     final blockBytes = await _adapter.readFileRange(path, ref.offset, ref.size);
     return _decodeBlock(blockBytes, path);
   }
@@ -218,8 +253,9 @@ final class SstableReader {
   static SstableFooter _parseFooter(Uint8List bytes, String path) {
     if (bytes.length != 48) {
       throw CorruptedSstableException(
-          'Footer must be 48 bytes, got ${bytes.length}',
-          path: path);
+        'Footer must be 48 bytes, got ${bytes.length}',
+        path: path,
+      );
     }
     final bd = ByteData.sublistView(bytes);
     return SstableFooter(
@@ -232,8 +268,8 @@ final class SstableReader {
     );
   }
 
-  static List<_BlockRef> _parseIndex(Uint8List bytes) {
-    final refs = <_BlockRef>[];
+  static List<BlockRef> _parseIndex(Uint8List bytes) {
+    final refs = <BlockRef>[];
     var pos = 0;
     while (pos < bytes.length) {
       final (keyLen, n1) = Varint.decode(bytes, pos);
@@ -244,7 +280,9 @@ final class SstableReader {
       pos += n2;
       final (blockSize, n3) = Varint.decode(bytes, pos);
       pos += n3;
-      refs.add(_BlockRef(lastKey: lastKey, offset: blockOffset, size: blockSize));
+      refs.add(
+        BlockRef(lastKey: lastKey, offset: blockOffset, size: blockSize),
+      );
     }
     return refs;
   }
@@ -272,18 +310,23 @@ final class SstableReader {
     final actualChecksum = XxHash64.digest(data);
     if (storedChecksum != actualChecksum) {
       throw CorruptedSstableException(
-          'Data block checksum mismatch', path: path);
+        'Data block checksum mismatch',
+        path: path,
+      );
     }
 
     // Read the restart array: it sits between the entries and the checksum.
     // The 4 bytes before the checksum (at offset data.length - 4) are numRestarts.
-    final numRestarts =
-        ByteData.sublistView(data).getUint32(data.length - 4, Endian.little);
+    final numRestarts = ByteData.sublistView(
+      data,
+    ).getUint32(data.length - 4, Endian.little);
     // Entries occupy data[0, data.length - (numRestarts+1)*4).
     final entriesEnd = data.length - (numRestarts + 1) * 4;
     if (entriesEnd < 0) {
       throw CorruptedSstableException(
-          'Data block restart array overflows block', path: path);
+        'Data block restart array overflows block',
+        path: path,
+      );
     }
 
     // Decode entries.
