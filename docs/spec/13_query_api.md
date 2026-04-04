@@ -41,12 +41,77 @@ abstract interface class KmdbCodec<T> {
   /// Must not change after a document is written.
   String keyOf(T value);
 
+  /// Returns a new instance of [value] with [key] assigned to its identifier
+  /// field. Called by insert() after generating a new system key.
+  T withKey(T value, String key);
+
   /// Encode to a JSON-compatible map. CBOR encoding is applied by the
   /// Query Layer — the codec works with Map<String, dynamic> only.
+  ///
+  /// MUST NOT include any top-level key starting with '_'. The '_' prefix is
+  /// reserved for KMDB system fields. Including '_id' or any other '_'-prefixed
+  /// key will cause ReservedFieldException to be thrown before any I/O.
   Map<String, dynamic> encode(T value);
 
   /// Decode from a JSON-compatible map.
+  ///
+  /// The framework injects '_id' (the document's UUIDv7 key) into the map
+  /// before calling decode(). Implementations should read json['_id'] to
+  /// reconstruct the typed model's key field.
   T decode(Map<String, dynamic> json);
+}
+```
+
+### Reserved `_` Field Prefix
+
+The `_` prefix is reserved for KMDB system-managed fields. Currently defined:
+
+| Field | Meaning |
+| ----- | ------- |
+| `_id` | The document's UUIDv7 key (injected by the framework on read; never stored in value bytes) |
+
+Rules:
+
+1. `encode()` **must not** return any top-level key starting with `_`. The
+   framework validates this before every write and throws
+   `ReservedFieldException` if violated. This includes `_id` — the framework
+   owns it entirely.
+2. `decode()` receives the map with `_id` pre-injected. Read `json['_id']` to
+   reconstruct the key field in your typed model.
+3. `withKey()` stamps the key onto the typed model so that `insert()` can
+   return the document with its assigned `_id`.
+4. Secondary index paths must not start with `_`. Defining an index on a
+   reserved path throws `ReservedIndexPathException` at `KmdbDatabase.open()`
+   time.
+
+### Example Codec
+
+```dart
+class TaskCodec implements KmdbCodec<Task> {
+  @override
+  String keyOf(Task value) => value.id;
+
+  @override
+  Task withKey(Task value, String key) => Task(
+        id: key,
+        title: value.title,
+        done: value.done,
+      );
+
+  // Do NOT include 'id' or any '_'-prefixed key here.
+  @override
+  Map<String, dynamic> encode(Task value) => {
+    'title': value.title,
+    'done': value.done,
+  };
+
+  // The framework injects '_id' before calling decode().
+  @override
+  Task decode(Map<String, dynamic> json) => Task(
+    id: json['_id'] as String,
+    title: json['title'] as String,
+    done: json['done'] as bool? ?? false,
+  );
 }
 ```
 
@@ -145,8 +210,8 @@ sufficient at KMDB's target scale (≤100K documents); a lazy cursor with
 ref-counted SSTable retention can be introduced if larger scale demands it.
 Prefer `watch()` for reactive UI lists.
 
-**`orderBy('id')`** maps directly to `KvStore.scan(descending:)` and avoids an
-in-memory sort — the only `orderBy` with this optimisation. All other fields
+**`orderBy('_id')`** maps directly to `KvStore.scan(descending:)` and avoids
+an in-memory sort — the only `orderBy` with this optimisation. All other fields
 require a full in-memory sort after scan.
 
 ## Filter DSL

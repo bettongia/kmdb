@@ -22,7 +22,7 @@ import 'command.dart';
 /// Inserts a new document.
 ///
 /// A new system-generated UUIDv7 identifier is automatically assigned to the
-/// document's `id` field. To update an existing document, use the `import`
+/// document's `_id` field. To update an existing document, use the `import`
 /// command or the typed API.
 ///
 /// The JSON document is read from `--value` (inline) or from stdin.
@@ -75,7 +75,9 @@ final class PutCommand implements CliCommand {
     }
 
     final String key = const UuidV7KeyGenerator().next();
-    doc['id'] = key;
+    // Store the key as '_id' so the document echoed back to the caller
+    // includes the authoritative system key field.
+    doc['_id'] = key;
 
     final encoded = ValueCodec.encode(doc);
     await ctx.store.put(namespace, key, encoded);

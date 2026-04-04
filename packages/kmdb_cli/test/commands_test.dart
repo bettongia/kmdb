@@ -72,13 +72,16 @@ String _key(String seed) {
   return chars.join();
 }
 
-/// Helper to write a raw document to the store bypass CLI logic.
+/// Helper to write a raw document to the store bypassing CLI logic.
+///
+/// The document map must contain a `'_id'` key whose value is the UUIDv7
+/// hex string to use as the storage key.
 Future<void> _putDoc(
   KvStoreImpl store,
   String ns,
   Map<String, dynamic> doc,
 ) async {
-  final id = doc['id'] as String;
+  final id = doc['_id'] as String;
   await store.put(ns, id, ValueCodec.encode(doc));
 }
 
@@ -113,7 +116,7 @@ void main() {
 
     test('fetches existing document and echoes it back', () async {
       final id = _key('xone');
-      await _putDoc(store, 'notes', {'id': id, 'text': 'hello'});
+      await _putDoc(store, 'notes', {'_id': id, 'text': 'hello'});
 
       final ctx = _ctx(store, out: out, err: err);
       final ok = await GetCommand().execute(ctx, ['notes', id], {});
@@ -157,7 +160,7 @@ void main() {
       expect(ok, isTrue);
 
       final decoded = json.decode(out.toString()) as List;
-      final generatedId = decoded[0]['id'] as String;
+      final generatedId = decoded[0]['_id'] as String;
       expect(generatedId, hasLength(32));
       expect(generatedId[12], equals('7')); // version
 
@@ -183,12 +186,13 @@ void main() {
     test('ignores user-provided id and generates a new one', () async {
       final ctx = _ctx(store, out: out, err: err);
       final userId = _key('user');
-      final doc = '{"id":"$userId","name":"Alice"}';
+      final doc = '{"_id":"$userId","name":"Alice"}';
       final ok = await PutCommand().execute(ctx, ['notes'], {'value': doc});
       expect(ok, isTrue);
 
       final decoded = json.decode(out.toString()) as List;
-      final assignedId = decoded[0]['id'] as String;
+      // The echoed document uses '_id' as the system key field.
+      final assignedId = decoded[0]['_id'] as String;
       expect(assignedId, isNot(equals(userId)));
       expect(assignedId, hasLength(32));
 
@@ -224,7 +228,7 @@ void main() {
 
     test('deletes existing document', () async {
       final id = _key('del1');
-      await _putDoc(store, 'tasks', {'id': id, 'x': 1});
+      await _putDoc(store, 'tasks', {'_id': id, 'x': 1});
       final ctx = _ctx(store, out: out, err: err);
       final ok = await DeleteCommand().execute(ctx, ['tasks', id], {});
       expect(ok, isTrue);
@@ -268,9 +272,9 @@ void main() {
       idA = _key('scanA');
       idB = _key('scanB');
       idC = _key('scanC');
-      await _putDoc(store, 'items', {'id': idA, 'score': 10, 'tag': 'x'});
-      await _putDoc(store, 'items', {'id': idB, 'score': 30, 'tag': 'y'});
-      await _putDoc(store, 'items', {'id': idC, 'score': 20, 'tag': 'x'});
+      await _putDoc(store, 'items', {'_id': idA, 'score': 10, 'tag': 'x'});
+      await _putDoc(store, 'items', {'_id': idB, 'score': 30, 'tag': 'y'});
+      await _putDoc(store, 'items', {'_id': idC, 'score': 20, 'tag': 'x'});
     });
     tearDown(() => store.close());
 
@@ -382,9 +386,9 @@ void main() {
       store = await _openStore();
       out = StringBuffer();
       err = StringBuffer();
-      await _putDoc(store, 'ns', {'id': _key('cnt1'), 'active': true});
-      await _putDoc(store, 'ns', {'id': _key('cnt2'), 'active': false});
-      await _putDoc(store, 'ns', {'id': _key('cnt3'), 'active': true});
+      await _putDoc(store, 'ns', {'_id': _key('cnt1'), 'active': true});
+      await _putDoc(store, 'ns', {'_id': _key('cnt2'), 'active': false});
+      await _putDoc(store, 'ns', {'_id': _key('cnt3'), 'active': true});
     });
     tearDown(() => store.close());
 
@@ -448,8 +452,8 @@ void main() {
     });
 
     test('lists namespaces written to', () async {
-      await _putDoc(store, 'tasks', {'id': _key('task'), 'v': 1});
-      await _putDoc(store, 'notes', {'id': _key('note'), 'v': 2});
+      await _putDoc(store, 'tasks', {'_id': _key('task'), 'v': 1});
+      await _putDoc(store, 'notes', {'_id': _key('note'), 'v': 2});
       final ctx = _ctx(store, out: out, err: err);
       final ok = await CollectionsCommand().execute(ctx, [], {});
       expect(ok, isTrue);
@@ -458,7 +462,7 @@ void main() {
     });
 
     test('does not include system namespaces', () async {
-      await _putDoc(store, 'tasks', {'id': _key('sys'), 'v': 1});
+      await _putDoc(store, 'tasks', {'_id': _key('sys'), 'v': 1});
       final ctx = _ctx(store, out: out, err: err);
       await CollectionsCommand().execute(ctx, [], {});
       final result = (json.decode(out.toString()) as List).cast<String>();
@@ -543,7 +547,7 @@ void main() {
     tearDown(() => store.close());
 
     test('flushes and returns {flushed: true}', () async {
-      await _putDoc(store, 'ns', {'id': _key('flsh'), 'v': 1});
+      await _putDoc(store, 'ns', {'_id': _key('flsh'), 'v': 1});
       final ctx = _ctx(store, out: out, err: err);
       final ok = await FlushCommand().execute(ctx, [], {});
       expect(ok, isTrue);
@@ -626,7 +630,7 @@ void main() {
       final p1 = _key('imp1');
       final p2 = _key('imp2');
       final tmp = _TmpFile();
-      tmp.write('{"id":"$p1","name":"Alice"}\n{"id":"$p2","name":"Bob"}\n');
+      tmp.write('{"_id":"$p1","name":"Alice"}\n{"_id":"$p2","name":"Bob"}\n');
 
       final ctx = _ctx(store, out: out, err: err);
       final ok = await ImportCommand().execute(
@@ -653,10 +657,10 @@ void main() {
 
     test('ignore conflict skips existing documents', () async {
       final p1 = _key('ign1');
-      await _putDoc(store, 'people', {'id': p1, 'name': 'OldAlice'});
+      await _putDoc(store, 'people', {'_id': p1, 'name': 'OldAlice'});
 
       final tmp = _TmpFile();
-      tmp.write('{"id":"$p1","name":"NewAlice"}\n');
+      tmp.write('{"_id":"$p1","name":"NewAlice"}\n');
 
       final ctx = _ctx(store, out: out, err: err);
       final ok = await ImportCommand().execute(
@@ -678,10 +682,10 @@ void main() {
 
     test('error conflict returns false on duplicate', () async {
       final p1 = _key('err1');
-      await _putDoc(store, 'people', {'id': p1, 'name': 'Alice'});
+      await _putDoc(store, 'people', {'_id': p1, 'name': 'Alice'});
 
       final tmp = _TmpFile();
-      tmp.write('{"id":"$p1","name":"NewAlice"}\n');
+      tmp.write('{"_id":"$p1","name":"NewAlice"}\n');
 
       final ctx = _ctx(store, out: out, err: err);
       final ok = await ImportCommand().execute(
@@ -698,7 +702,7 @@ void main() {
     test('returns false for invalid JSON in file', () async {
       final id = _key('okid');
       final tmp = _TmpFile();
-      tmp.write('{"id":"$id"}\n{bad json}\n');
+      tmp.write('{"_id":"$id"}\n{bad json}\n');
 
       final ctx = _ctx(store, out: out, err: err);
       final ok = await ImportCommand().execute(
@@ -723,7 +727,7 @@ void main() {
         {'input': tmp.path},
       );
       expect(ok, isFalse);
-      expect(err.toString(), contains('"id"'));
+      expect(err.toString(), contains('"_id"'));
 
       tmp.delete();
     });
@@ -732,7 +736,7 @@ void main() {
       final x1 = _key('blnk1');
       final x2 = _key('blnk2');
       final tmp = _TmpFile();
-      tmp.write('{"id":"$x1","v":1}\n\n{"id":"$x2","v":2}\n');
+      tmp.write('{"_id":"$x1","v":1}\n\n{"_id":"$x2","v":2}\n');
 
       final ctx = _ctx(store, out: out, err: err);
       final ok = await ImportCommand().execute(
@@ -766,9 +770,9 @@ void main() {
       // Seed three documents.
       final ids = [_key('rnd1'), _key('rnd2'), _key('rnd3')];
       final origDocs = [
-        {'id': ids[0], 'name': 'Alice', 'score': 10},
-        {'id': ids[1], 'name': 'Bob', 'score': 20},
-        {'id': ids[2], 'name': 'Carol', 'score': 30},
+        {'_id': ids[0], 'name': 'Alice', 'score': 10},
+        {'_id': ids[1], 'name': 'Bob', 'score': 20},
+        {'_id': ids[2], 'name': 'Carol', 'score': 30},
       ];
       for (final doc in origDocs) {
         await _putDoc(store, 'people', doc);
@@ -807,11 +811,11 @@ void main() {
 
       // Verify each document was restored correctly.
       for (final orig in origDocs) {
-        final bytes = await store.get('people', orig['id'] as String);
+        final bytes = await store.get('people', orig['_id'] as String);
         expect(
           bytes,
           isNotNull,
-          reason: 'Missing document after re-import: ${orig['id']}',
+          reason: 'Missing document after re-import: ${orig['_id']}',
         );
         final restored = ValueCodec.decode(bytes!);
         expect(restored['name'], equals(orig['name']));
@@ -824,8 +828,8 @@ void main() {
     test('export writes one line per document in NDJSON format', () async {
       final id1 = _key('exp1');
       final id2 = _key('exp2');
-      await _putDoc(store, 'items', {'id': id1, 'v': 1});
-      await _putDoc(store, 'items', {'id': id2, 'v': 2});
+      await _putDoc(store, 'items', {'_id': id1, 'v': 1});
+      await _putDoc(store, 'items', {'_id': id2, 'v': 2});
 
       final tmp = _TmpFile();
       final ctx = _ctx(store, out: out, err: err);

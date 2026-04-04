@@ -43,16 +43,39 @@ final class _TaskCodec implements KmdbCodec<_Task> {
 
   @override
   Map<String, dynamic> encode(_Task value) => {
-    'id': value.id,
     'title': value.title,
     'done': value.done,
   };
 
   @override
   _Task decode(Map<String, dynamic> json) => _Task(
-    id: json['id'] as String,
+    id: json['_id'] as String,
     title: json['title'] as String,
     done: json['done'] as bool? ?? false,
+  );
+}
+
+/// A codec that unconditionally returns a fixed map from [encode], used to
+/// test that [ReservedFieldException] is thrown when reserved keys are present.
+final class _BadCodec implements KmdbCodec<_Task> {
+  const _BadCodec(this._encodedMap);
+
+  final Map<String, dynamic> _encodedMap;
+
+  @override
+  String keyOf(_Task value) => value.id;
+
+  @override
+  _Task withKey(_Task value, String key) =>
+      _Task(id: key, title: value.title, done: value.done);
+
+  @override
+  Map<String, dynamic> encode(_Task value) => Map.of(_encodedMap);
+
+  @override
+  _Task decode(Map<String, dynamic> json) => _Task(
+    id: json['_id'] as String? ?? '',
+    title: json['title'] as String? ?? '',
   );
 }
 
@@ -275,6 +298,113 @@ void main() {
       for (final t in tasks) {
         expect(await col.get(t.id), isNotNull);
       }
+      await db.close();
+    });
+  });
+
+  // ── ReservedFieldException ────────────────────────────────────────────────
+
+  group('ReservedFieldException', () {
+    // A codec that deliberately emits a single '_'-prefixed key.
+    final badCodecSingle = _BadCodec({'_secret': 'value', 'title': 'ok'});
+
+    // A codec that emits multiple '_'-prefixed keys.
+    final badCodecMultiple = _BadCodec({'_foo': 1, '_bar': 2, 'title': 'ok'});
+
+    // A codec that specifically emits '_id', which is the most common mistake.
+    final badCodecId = _BadCodec({'_id': 'some-id', 'title': 'ok'});
+
+    // A codec that emits a nested key starting with '_' — this must NOT throw
+    // because only top-level keys are reserved.
+    final okNestedCodec = _BadCodec({
+      'nested': {'_internal': true},
+      'title': 'ok',
+    });
+
+    test('single _-prefixed key throws ReservedFieldException', () async {
+      final (db, _) = await _open();
+      final col = db.collection(name: 'tasks', codec: badCodecSingle);
+      final task = _Task(id: _key(), title: 'Bad');
+      expect(
+        () => col.put(task),
+        throwsA(
+          isA<ReservedFieldException>().having(
+            (e) => e.offendingKeys,
+            'offendingKeys',
+            contains('_secret'),
+          ),
+        ),
+      );
+      await db.close();
+    });
+
+    test('multiple _-prefixed keys listed in exception', () async {
+      final (db, _) = await _open();
+      final col = db.collection(name: 'tasks', codec: badCodecMultiple);
+      final task = _Task(id: _key(), title: 'Bad');
+      expect(
+        () => col.put(task),
+        throwsA(
+          isA<ReservedFieldException>().having(
+            (e) => e.offendingKeys,
+            'offendingKeys',
+            containsAll(['_foo', '_bar']),
+          ),
+        ),
+      );
+      await db.close();
+    });
+
+    test('_id in encode() output throws ReservedFieldException', () async {
+      final (db, _) = await _open();
+      final col = db.collection(name: 'tasks', codec: badCodecId);
+      final task = _Task(id: _key(), title: 'Bad');
+      expect(
+        () => col.put(task),
+        throwsA(
+          isA<ReservedFieldException>().having(
+            (e) => e.offendingKeys,
+            'offendingKeys',
+            contains('_id'),
+          ),
+        ),
+      );
+      await db.close();
+    });
+
+    test('nested _ field allowed — only top-level is reserved', () async {
+      final (db, _) = await _open();
+      final col = db.collection(name: 'tasks', codec: okNestedCodec);
+      final task = _Task(id: _key(), title: 'Ok');
+      // Should complete without error.
+      await expectLater(col.put(task), completes);
+      await db.close();
+    });
+
+    test('ReservedFieldException toString contains offending keys', () {
+      final ex = ReservedFieldException(['_id', '_rev']);
+      expect(ex.toString(), contains('"_id"'));
+      expect(ex.toString(), contains('"_rev"'));
+    });
+
+    test('insert also validates reserved keys', () async {
+      final (db, _) = await _open();
+      final col = db.collection(name: 'tasks', codec: badCodecId);
+      final task = _Task(id: '', title: 'Bad');
+      expect(() => col.insert(task), throwsA(isA<ReservedFieldException>()));
+      await db.close();
+    });
+
+    test('replace also validates reserved keys', () async {
+      final (db, col) = await _open();
+      final id = _key();
+      await col.put(_Task(id: id, title: 'Good'));
+
+      final badCol = db.collection(name: 'tasks', codec: badCodecSingle);
+      expect(
+        () => badCol.replace(_Task(id: id, title: 'Bad')),
+        throwsA(isA<ReservedFieldException>()),
+      );
       await db.close();
     });
   });

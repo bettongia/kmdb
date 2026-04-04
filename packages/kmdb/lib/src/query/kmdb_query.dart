@@ -97,7 +97,7 @@ final class KmdbQuery<T> {
 
   /// Orders results by [field].
   ///
-  /// When [field] is `'id'`, the ordering uses the natural LSM scan order
+  /// When [field] is `'_id'`, the ordering uses the natural LSM scan order
   /// (ascending by document key). For all other fields, documents are sorted
   /// in memory after the scan.
   ///
@@ -308,6 +308,10 @@ final class KmdbQuery<T> {
         continue; // skip corrupt values
       }
 
+      // Inject the document key as '_id' so that filters can match on it and
+      // codec.decode() receives the complete fromJson-style map.
+      doc['_id'] = entry.key;
+
       // Apply all filters (AND-ed).
       if (_filters.isNotEmpty) {
         if (!_filters.every((f) => f.evaluate(doc))) continue;
@@ -338,7 +342,8 @@ final class KmdbQuery<T> {
       results = results.sublist(0, lim);
     }
 
-    // Decode to typed T.
+    // Decode to typed T. '_id' was already injected into each map above, so
+    // codec.decode() receives the full fromJson-style representation.
     return results.map((pair) => _collection.codec.decode(pair.$2)).toList();
   }
 
