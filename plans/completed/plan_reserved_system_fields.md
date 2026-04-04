@@ -114,40 +114,31 @@ codec interface method is needed.
 
 ## Implementation plan
 
-- [x] Add `ReservedFieldException` to `packages/kmdb/lib/src/query/exceptions.dart`
-- [x] Update `KmdbCodec` interface: revise contract, doc comments, and example
+- [ ] Add `ReservedFieldException` to `packages/kmdb/lib/src/query/exceptions.dart`
+- [ ] Update `KmdbCodec` interface: revise contract, doc comments, and example
       in `packages/kmdb/lib/src/query/kmdb_codec.dart`
-- [x] Add `_` prefix validation to `KmdbCollection._writeDocument` in
+- [ ] Add `_` prefix validation to `KmdbCollection._writeDocument` in
       `packages/kmdb/lib/src/query/kmdb_collection.dart`
-- [x] Inject `_id: key` before `codec.decode()` in `KmdbCollection.get()` in
+- [ ] Inject `_id: key` before `codec.decode()` in `KmdbCollection.get()` in
       `packages/kmdb/lib/src/query/kmdb_collection.dart`
-- [x] Inject `_id: key` before `codec.decode()` in `KmdbQuery._execute()` in
+- [ ] Inject `_id: key` before `codec.decode()` in `KmdbQuery._execute()` in
       `packages/kmdb/lib/src/query/kmdb_query.dart`; update `orderBy` doc comment
-- [x] Add validation in `IndexDefinition` (or `IndexManager`) rejecting index
+- [ ] Add validation in `IndexDefinition` (or `IndexManager`) rejecting index
       paths that start with `_`
-- [x] Update test codecs in `kmdb_collection_test.dart`, `kmdb_query_test.dart`,
+- [ ] Update test codecs in `kmdb_collection_test.dart`, `kmdb_query_test.dart`,
       and `index_test.dart` to remove `id` from `encode()` and read `_id` in
       `decode()`
-- [x] Add new `ReservedFieldException` tests to `kmdb_collection_test.dart`
+- [ ] Add new `ReservedFieldException` tests to `kmdb_collection_test.dart`
       covering: single `_`-prefixed key, multiple offending keys, `_id`
       specifically, and a nested field with `_` prefix (should be allowed — only
       top-level is reserved)
-- [x] Update CLI commands: `put_command.dart`, `restore_command.dart`,
+- [ ] Update CLI commands: `put_command.dart`, `restore_command.dart`,
       `import_command.dart`
-- [x] Update CLI tests: all `['id']` references to `['_id']`
-- [x] Update `docs/spec/13_query_api.md`
-- [x] Run full test suite (`dart test packages/kmdb` and
+- [ ] Update CLI tests: all `['id']` references to `['_id']`
+- [ ] Update `docs/spec/13_query_api.md`
+- [ ] Run full test suite (`dart test packages/kmdb` and
       `dart test packages/kmdb_cli`) and confirm all pass at ≥90% coverage
 
 ## Summary
 
-- Added `ReservedFieldException` and `ReservedIndexPathException` to `exceptions.dart` and exported them from `kmdb.dart`
-- Updated `KmdbCodec` interface with new doc contract: `encode()` must not return `_`-prefixed keys; `decode()` receives `_id` pre-injected
-- Added `_validateNoReservedKeys()` to `KmdbCollection._writeDocument()` — throws before any I/O if the encoded map contains reserved keys
-- Injected `_id: key` into decoded maps in both `KmdbCollection.get()` and `KmdbQuery._execute()` before calling `codec.decode()`
-- Made `IndexDefinition` constructor reject `_`-prefixed paths at construction time
-- Updated all three test codecs (`_TaskCodec`, `_ItemCodec`, `_ContactCodec`) to omit `id` from `encode()` and read `_id` in `decode()`
-- Added 7 `ReservedFieldException` tests (single key, multiple keys, `_id` specifically, nested key allowed, toString, insert and replace validation) and 4 `ReservedIndexPathException` tests
-- Updated CLI `put`, `import`, and `restore` commands to use `_id` as the key field
-- Updated all CLI test files (`commands_test.dart`, `cli_runner_test.dart`, `e2e/cli_session_test.dart`) to use `_id`
-- Updated `docs/spec/13_query_api.md` with the reserved prefix rules, updated `KmdbCodec` interface description, and a complete example codec
+_To be completed after implementation._
