@@ -1,8 +1,8 @@
 # Database analysis utility in the CLI
 
-**Status**: Implementing
+**Status**: Complete
 
-**PR link**: {A link to the PR submitted for this plan}
+**PR link**: https://github.com/aurochs-kmesh/kmdb/pull/2
 
 ## Problem statement
 
@@ -244,4 +244,11 @@ guarantee beyond the stable versioning of the `kmdb` package itself.
 
 ## Summary
 
-{Dot points highlighting the work undertaken}
+- Created `lib/kmdb_analysis.dart` diagnostic sub-library in `packages/kmdb` exporting storage-engine types (`SstableReader`, `BlockRef`, `SstableFooter`, `BloomFilter`, `WalReader`, `WalRecord`, `WalRecordType`, `CorruptedWalException`, `ManifestReader`, `ManifestState`, `VersionEdit`, `SstableMeta`, `Hlc`) without polluting the primary `kmdb.dart` API.
+- Renamed `_BlockRef` to `BlockRef` (public) in `sstable_reader.dart` and added doc comments; added `footer`, `filter`, and `index` public getters to `SstableReader`.
+- Added `BloomFilter.numBits` and `numHashFunctions` diagnostic accessors.
+- Added `SstableFooter.toMap()`, `WalRecord.toMap()`, `WalRecordType.toMap()`, and `VersionEdit.toMap()` for JSON output.
+- Added `ManifestReader.replayEdits()` returning the raw `List<VersionEdit>` sequence without computing state (the existing `replay()` is unchanged).
+- Implemented `UtilCommand` in `packages/kmdb_cli` with `sstable`, `wal`, and `manifest` subcommands and a `--full` flag; all subcommands open files via `StorageAdapterNative` with no lock acquisition.
+- Registered `UtilCommand` in `cli_runner.dart` and updated the help text.
+- Added 20 tests in `util_command_test.dart` covering: file-not-found for all three subcommands, WAL corruption mid-stream (records before failure preserved + `corruptedAt` marker), summary vs `--full` output for each subcommand, `util manifest` on a fresh database, and `CURRENT` file missing.
