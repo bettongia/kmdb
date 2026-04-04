@@ -52,7 +52,7 @@ abstract interface class KmdbCodec<T> {
 
 ## `KmdbCollection<T>`
 
-Obtained via `db.collection(namespace: '...', codec: ...)`.
+Obtained via `db.collection(name: '...', codec: ...)`.
 
 ### Conflict Semantics
 

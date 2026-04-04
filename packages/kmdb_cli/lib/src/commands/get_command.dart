@@ -18,7 +18,7 @@ import 'command.dart';
 
 /// Retrieves a single document by key.
 ///
-/// Usage: `kmdb <db> get <namespace> <key>`
+/// Usage: `kmdb <db> get <collection> <key>`
 final class GetCommand implements CliCommand {
   const GetCommand();
 
@@ -29,7 +29,7 @@ final class GetCommand implements CliCommand {
   String get description => 'Retrieve a document by key.';
 
   @override
-  String get usage => 'get <namespace> <key>';
+  String get usage => 'get <collection> <key>';
 
   @override
   Future<bool> execute(
@@ -38,7 +38,7 @@ final class GetCommand implements CliCommand {
     Map<String, dynamic> flags,
   ) async {
     if (args.length < 2) {
-      ctx.writeError('get requires <namespace> and <key>.\nUsage: $usage');
+      ctx.writeError('get requires <collection> and <key>.\nUsage: $usage');
       return false;
     }
     final namespace = args[0];

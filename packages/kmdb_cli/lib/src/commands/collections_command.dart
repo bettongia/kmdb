@@ -14,7 +14,7 @@
 
 import 'command.dart';
 
-/// Lists all user-visible namespaces (collections).
+/// Lists all user collections in the database.
 ///
 /// Usage: `kmdb <db> collections`
 final class CollectionsCommand implements CliCommand {
@@ -24,8 +24,7 @@ final class CollectionsCommand implements CliCommand {
   String get name => 'collections';
 
   @override
-  String get description =>
-      'List all collections (namespaces) in the database.';
+  String get description => 'List all user collections in the database.';
 
   @override
   String get usage => 'collections';

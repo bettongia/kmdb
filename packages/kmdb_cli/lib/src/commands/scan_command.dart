@@ -17,12 +17,12 @@ import 'package:kmdb/kmdb.dart';
 import '../filter/filter_parser.dart';
 import 'command.dart';
 
-/// Scans a namespace with optional filtering, ordering, and pagination.
+/// Scans a collection with optional filtering, ordering, and pagination.
 ///
 /// Usage:
 /// ```
-/// scan <namespace> [--filter <json>] [--order-by <field>] [--desc]
-///                  [--limit <n>] [--offset <n>] [--key-prefix <str>]
+/// scan <collection> [--filter <json>] [--order-by <field>] [--desc]
+///                   [--limit <n>] [--offset <n>] [--key-prefix <str>]
 /// ```
 final class ScanCommand implements CliCommand {
   const ScanCommand();
@@ -31,11 +31,11 @@ final class ScanCommand implements CliCommand {
   String get name => 'scan';
 
   @override
-  String get description => 'Scan documents in a namespace.';
+  String get description => 'Scan documents in a collection.';
 
   @override
   String get usage =>
-      'scan <namespace> [--filter <json>] [--order-by <field>] [--desc] '
+      'scan <collection> [--filter <json>] [--order-by <field>] [--desc] '
       '[--limit <n>] [--offset <n>] [--key-prefix <str>]';
 
   @override
@@ -45,7 +45,7 @@ final class ScanCommand implements CliCommand {
     Map<String, dynamic> flags,
   ) async {
     if (args.isEmpty) {
-      ctx.writeError('scan requires <namespace>.\nUsage: $usage');
+      ctx.writeError('scan requires <collection>.\nUsage: $usage');
       return false;
     }
     final namespace = args[0];
