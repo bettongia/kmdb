@@ -23,8 +23,13 @@ test.log: $(KMDB_PKG)/**/*.dart
 
 cli_test: cli_test.log
 
-cli_test.log: $(KMDB_CLI_PKG)/**/*.dart
+cli_test.log: $(KMDB_CLI_PKG)/**/*.dart $(KMDB_PKG)/**/*.dart
 	melos test --scope=kmdb_cli | tee cli_test.log
+
+e2e_test: e2e_test.log
+
+e2e_test.log: $(KMDB_CLI_PKG)/**/*.dart $(KMDB_PKG)/**/*.dart
+	melos e2e-test | tee e2e_test.log
 
 checks: coverage.log license_check
 
@@ -87,3 +92,6 @@ $(KMDB_CLI_PKG)/**/*.dart:
 
 clean:
 	rm -rf site
+	rm e2e_test.log
+	rm test.log
+	rm cli_test.log
