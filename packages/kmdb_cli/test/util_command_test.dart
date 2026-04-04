@@ -131,6 +131,15 @@ void main() {
       expect(ok, isFalse);
       expect(err.toString(), contains("Unknown util subcommand 'badcmd'"));
     });
+
+    test('every subcommand path sets suppressFlush on the context', () async {
+      // suppressFlush must be set regardless of whether the subcommand
+      // succeeds, so that the CLI runner never flushes after a util call.
+      final ctx = _ctx(store);
+      expect(ctx.suppressFlush, isFalse);
+      await const UtilCommand().execute(ctx, ['manifest'], {});
+      expect(ctx.suppressFlush, isTrue);
+    });
   });
 
   // ── util sstable ───────────────────────────────────────────────────────────
@@ -223,6 +232,29 @@ void main() {
       },
     );
 
+    test(
+      '--data without --full is ignored (no entries in output)',
+      () async {
+        final sstDir = io.Directory('${tmpDir.path}/sst');
+        final files = sstDir.listSync().whereType<io.File>().toList();
+        expect(files, isNotEmpty);
+        final filename = files.first.path.split('/').last;
+
+        final out = StringBuffer();
+        final ctx = _ctx(store, out: out);
+        final ok = await const UtilCommand().execute(
+          ctx,
+          ['sstable', filename],
+          {'data': true},
+        );
+        expect(ok, isTrue);
+        final result = json.decode(out.toString()) as Map<String, dynamic>;
+        // Without --full, entries must not be present even if --data is set.
+        expect(result.containsKey('entries'), isFalse);
+        expect(result.containsKey('index'), isFalse);
+      },
+    );
+
     test('--full output includes index block refs and all entries', () async {
       final sstDir = io.Directory('${tmpDir.path}/sst');
       final files = sstDir.listSync().whereType<io.File>().toList();
@@ -265,6 +297,71 @@ void main() {
         expect(val['byteLength'], isA<int>());
       }
     });
+    test(
+      '--full --data includes decoded values for user entries',
+      () async {
+        final sstDir = io.Directory('${tmpDir.path}/sst');
+        final files = sstDir.listSync().whereType<io.File>().toList();
+        expect(files, isNotEmpty);
+        final filename = files.first.path.split('/').last;
+
+        final out = StringBuffer();
+        final ctx = _ctx(store, out: out);
+        final ok = await const UtilCommand().execute(
+          ctx,
+          ['sstable', filename],
+          {'full': true, 'data': true},
+        );
+        expect(ok, isTrue);
+        final result = json.decode(out.toString()) as Map<String, dynamic>;
+
+        expect(result.containsKey('index'), isTrue);
+        expect(result.containsKey('entries'), isTrue);
+
+        final entries = result['entries'] as List;
+        expect(entries.length, greaterThanOrEqualTo(2));
+
+        // Every entry value must have the byte-level metadata fields.
+        // System namespace entries must have no decoded/decodeError;
+        // user namespace entries must have one of the two.
+        for (final e in entries) {
+          final entry = e as Map<String, dynamic>;
+          final val = entry['value'] as Map<String, dynamic>;
+          expect(val['compressionFlag'], isA<int>());
+          expect(val['byteLength'], isA<int>());
+
+          final keyHex = entry['key'] as String;
+          final keyBytes = Uint8List.fromList(
+            List.generate(keyHex.length ~/ 2,
+                (i) => int.parse(keyHex.substring(i * 2, i * 2 + 2), radix: 16)),
+          );
+          final ns = KeyCodec.decodeNamespace(keyBytes);
+          if (ns.startsWith(r'$')) {
+            expect(val.containsKey('decoded'), isFalse,
+                reason: 'system entry should not be decoded');
+            expect(val.containsKey('decodeError'), isFalse,
+                reason: 'system entry should not have decodeError');
+          } else {
+            expect(val.containsKey('decoded') || val.containsKey('decodeError'), isTrue,
+                reason: 'user entry should have decoded or decodeError');
+          }
+        }
+
+        // The two user-written documents ('a' and 'b') must decode correctly.
+        final decodedValues = entries
+            .cast<Map<String, dynamic>>()
+            .map((e) => e['value'] as Map<String, dynamic>)
+            .where((v) => v.containsKey('decoded'))
+            .map((v) => v['decoded'] as Map<String, dynamic>)
+            .toList();
+
+        final ids = decodedValues
+            .where((d) => d.containsKey('id'))
+            .map((d) => d['id'])
+            .toSet();
+        expect(ids, containsAll(['a', 'b']));
+      },
+    );
   });
 
   // ── util wal ──────────────────────────────────────────────────────────────
@@ -386,6 +483,90 @@ void main() {
         expect(val['byteLength'], isA<int>());
       }
     });
+
+    test('--data without --full is ignored (no decoded fields)', () async {
+      final walFiles = tmpDir
+          .listSync()
+          .whereType<io.File>()
+          .where((f) => f.path.endsWith('.log'))
+          .toList();
+      expect(walFiles, isNotEmpty);
+      final filename = walFiles.first.path.split('/').last;
+
+      final out = StringBuffer();
+      final ctx = _ctx(store, out: out);
+      final ok = await const UtilCommand().execute(
+        ctx,
+        ['wal', filename],
+        {'data': true},
+      );
+      expect(ok, isTrue);
+      final result = json.decode(out.toString()) as Map<String, dynamic>;
+      // Without --full, summary output must not contain records.
+      expect(result.containsKey('records'), isFalse);
+    });
+
+    test(
+      '--full --data includes decoded values for put records',
+      () async {
+        final walFiles = tmpDir
+            .listSync()
+            .whereType<io.File>()
+            .where((f) => f.path.endsWith('.log'))
+            .toList();
+        expect(walFiles, isNotEmpty);
+        final filename = walFiles.first.path.split('/').last;
+
+        final out = StringBuffer();
+        final ctx = _ctx(store, out: out);
+        final ok = await const UtilCommand().execute(
+          ctx,
+          ['wal', filename],
+          {'full': true, 'data': true},
+        );
+        expect(ok, isTrue);
+        final result = json.decode(out.toString()) as Map<String, dynamic>;
+        final records = result['records'] as List;
+        expect(records, isNotEmpty);
+
+        final putRecords = records
+            .cast<Map<String, dynamic>>()
+            .where((r) => r['type'] == 'put')
+            .toList();
+        expect(putRecords, isNotEmpty);
+
+        // User-namespace put records must have decoded or decodeError.
+        // System-namespace put records must have neither.
+        for (final r in putRecords) {
+          final val = r['value'] as Map<String, dynamic>;
+          expect(val['compressionFlag'], isA<int>());
+          expect(val['byteLength'], isA<int>());
+
+          final ns = r['namespace'] as String? ?? '';
+          if (ns.startsWith(r'$')) {
+            expect(val.containsKey('decoded'), isFalse,
+                reason: 'system entry should not be decoded');
+            expect(val.containsKey('decodeError'), isFalse,
+                reason: 'system entry should not have decodeError');
+          } else {
+            expect(
+              val.containsKey('decoded') || val.containsKey('decodeError'),
+              isTrue,
+              reason: 'user entry should have decoded or decodeError',
+            );
+          }
+        }
+
+        // The two user-written documents must decode to the expected ids.
+        final ids = putRecords
+            .map((r) => r['value'] as Map<String, dynamic>)
+            .where((v) => v.containsKey('decoded'))
+            .map((v) => (v['decoded'] as Map<String, dynamic>)['id'])
+            .whereType<String>()
+            .toSet();
+        expect(ids, containsAll(['a', 'b']));
+      },
+    );
 
     test(
       'corruption mid-stream emits records before failure and corruptedAt',

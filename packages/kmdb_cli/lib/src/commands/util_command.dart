@@ -14,6 +14,7 @@
 
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:kmdb/kmdb.dart';
 import 'package:kmdb/kmdb_analysis.dart' hide CorruptedWalException;
@@ -29,12 +30,14 @@ import 'command.dart';
 /// ## Usage
 ///
 /// ```bash
-/// kmdb mydb util sstable <filename>           # summary (default)
-/// kmdb mydb util sstable <filename> --full    # complete record-level output
-/// kmdb mydb util wal <filename>               # summary
-/// kmdb mydb util wal <filename> --full        # every record
-/// kmdb mydb util manifest                     # current level state
-/// kmdb mydb util manifest --full              # complete VersionEdit history
+/// kmdb mydb util sstable <filename>                    # summary (default)
+/// kmdb mydb util sstable <filename> --full             # complete record-level output
+/// kmdb mydb util sstable <filename> --full --data      # full output + decoded values
+/// kmdb mydb util wal <filename>                        # summary
+/// kmdb mydb util wal <filename> --full                 # every record
+/// kmdb mydb util wal <filename> --full --data          # full output + decoded values
+/// kmdb mydb util manifest                              # current level state
+/// kmdb mydb util manifest --full                       # complete VersionEdit history
 /// ```
 ///
 /// All subcommands are **read-only** — no writes are performed.
@@ -50,7 +53,8 @@ final class UtilCommand implements CliCommand {
       'Inspect raw SSTable, WAL, and Manifest files for debugging.';
 
   @override
-  String get usage => 'util <sstable|wal|manifest> [filename] [--full]';
+  String get usage =>
+      'util <sstable|wal|manifest> [filename] [--full] [--data]';
 
   @override
   Future<bool> execute(
@@ -58,6 +62,9 @@ final class UtilCommand implements CliCommand {
     List<String> args,
     Map<String, dynamic> flags,
   ) async {
+    // util is purely diagnostic — never flush the memtable on exit.
+    ctx.suppressFlush = true;
+
     if (args.isEmpty) {
       ctx.writeError(
         'util requires a subcommand: sstable, wal, or manifest. '
@@ -69,10 +76,11 @@ final class UtilCommand implements CliCommand {
     final sub = args[0];
     final subArgs = args.sublist(1);
     final full = flags['full'] == true;
+    final data = full && flags['data'] == true;
 
     return switch (sub) {
-      'sstable' => _sstable(ctx, subArgs, full: full),
-      'wal' => _wal(ctx, subArgs, full: full),
+      'sstable' => _sstable(ctx, subArgs, full: full, data: data),
+      'wal' => _wal(ctx, subArgs, full: full, data: data),
       'manifest' => _manifest(ctx, subArgs, full: full),
       _ => _unknownSubcommand(ctx, sub),
     };
@@ -90,10 +98,16 @@ final class UtilCommand implements CliCommand {
   ///
   /// Full output ([full] = true): everything above plus each [BlockRef] and
   /// every key/value pair from every data block.
+  ///
+  /// Data output ([data] = true, requires [full] = true): decodes each entry
+  /// value using [ValueCodec] and includes the result alongside the byte-level
+  /// metadata. Entries that cannot be decoded (e.g. internal system records)
+  /// include a `decodeError` field instead of `decoded`.
   Future<bool> _sstable(
     CommandContext ctx,
     List<String> args, {
     required bool full,
+    required bool data,
   }) async {
     if (args.isEmpty) {
       ctx.writeError('util sstable requires a filename argument.');
@@ -154,13 +168,28 @@ final class UtilCommand implements CliCommand {
       // Stream every key/value entry from all data blocks.
       final entries = <Map<String, dynamic>>[];
       await for (final entry in reader.scan()) {
-        entries.add({
-          'key': _hexEncode(entry.key),
-          'value': {
-            'compressionFlag': entry.value.isNotEmpty ? entry.value[0] : 0,
-            'byteLength': entry.value.length,
-          },
-        });
+        final valueMap = <String, dynamic>{
+          'compressionFlag': entry.value.isNotEmpty ? entry.value[0] : 0,
+          'byteLength': entry.value.length,
+        };
+
+        if (data && entry.value.isNotEmpty) {
+          // Only attempt ValueCodec decoding for user namespaces. System
+          // namespaces (those starting with '$') use internal raw encodings
+          // that are incompatible with ValueCodec.
+          final ns = KeyCodec.decodeNamespace(Uint8List.fromList(entry.key));
+          if (!ns.startsWith(r'$')) {
+            try {
+              valueMap['decoded'] = ValueCodec.decode(
+                Uint8List.fromList(entry.value),
+              );
+            } catch (e) {
+              valueMap['decodeError'] = e.toString();
+            }
+          }
+        }
+
+        entries.add({'key': _hexEncode(entry.key), 'value': valueMap});
       }
       result['entries'] = entries;
     }
@@ -180,8 +209,12 @@ final class UtilCommand implements CliCommand {
   /// Summary output (default): total record count, HLC range (min/max as hex
   /// strings), and the list of distinct namespaces seen.
   ///
-  /// Full output ([full] = true): every record rendered via
-  /// [WalRecord.toMap].
+  /// Full output ([full] = true): every record rendered via [WalRecord.toMap].
+  ///
+  /// Data output ([data] = true, requires [full] = true): decodes the value of
+  /// each `put` record using [ValueCodec] and includes the result alongside the
+  /// byte-level metadata. Records that cannot be decoded include a `decodeError`
+  /// field instead of `decoded`.
   ///
   /// On [CorruptedWalException]: records decoded before the failure are
   /// included in the output, then a `corruptedAt` field is added.
@@ -189,6 +222,7 @@ final class UtilCommand implements CliCommand {
     CommandContext ctx,
     List<String> args, {
     required bool full,
+    required bool data,
   }) async {
     if (args.isEmpty) {
       ctx.writeError('util wal requires a filename argument.');
@@ -226,9 +260,31 @@ final class UtilCommand implements CliCommand {
 
     if (full) {
       // Full output: every record plus optional corruption marker.
+      // When data=true, augment each put record's value map with decoded content.
+      final recordMaps = records.map((r) {
+        final map = r.toMap();
+        if (data && r.value.isNotEmpty && !r.namespace.startsWith(r'$')) {
+          // Only attempt ValueCodec decoding for user namespaces. System
+          // namespaces (those starting with '$') use internal raw encodings
+          // that are incompatible with ValueCodec.
+          final valueMap = Map<String, dynamic>.from(
+            map['value'] as Map<String, dynamic>,
+          );
+          try {
+            valueMap['decoded'] = ValueCodec.decode(
+              Uint8List.fromList(r.value),
+            );
+          } catch (e) {
+            valueMap['decodeError'] = e.toString();
+          }
+          map['value'] = valueMap;
+        }
+        return map;
+      }).toList();
+
       ctx.writeValue({
         'file': filename,
-        'records': records.map((r) => r.toMap()).toList(),
+        'records': recordMaps,
         if (corruptedAt != null) 'corruptedAt': corruptedAt,
       });
     } else {

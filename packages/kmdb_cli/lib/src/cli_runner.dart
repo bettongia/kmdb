@@ -252,7 +252,7 @@ abstract final class KmdbCli {
         }
       }
     } finally {
-      await store.close(flush: flushOnExit);
+      await store.close(flush: flushOnExit && !ctx.suppressFlush);
       if (fileSink != null) {
         await fileSink.flush();
         await fileSink.close();
