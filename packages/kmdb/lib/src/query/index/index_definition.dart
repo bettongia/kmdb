@@ -46,7 +46,9 @@ final class IndexDefinition {
   /// Creates an [IndexDefinition] for [path] in [namespace].
   const IndexDefinition(this.namespace, this.path);
 
-  /// The collection namespace this index belongs to.
+  /// The storage-layer namespace identifier for the collection this index
+  /// belongs to. This matches the [name] parameter passed to
+  /// [KmdbDatabase.collection] when the collection was created.
   final String namespace;
 
   /// The dot-notation field path to index.

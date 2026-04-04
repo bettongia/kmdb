@@ -19,14 +19,14 @@ import 'package:kmdb/kmdb.dart';
 
 import 'command.dart';
 
-/// Imports NDJSON documents into a namespace.
+/// Imports NDJSON documents into a collection.
 ///
 /// Each line in the input must be a valid JSON object with a string `id` field.
 ///
 /// Usage:
 /// ```
-/// kmdb <db> import <namespace> [--input <file>]
-///                               [--on-conflict ignore|replace|error]
+/// kmdb <db> import <collection> [--input <file>]
+///                                [--on-conflict ignore|replace|error]
 /// ```
 final class ImportCommand implements CliCommand {
   const ImportCommand();
@@ -35,11 +35,11 @@ final class ImportCommand implements CliCommand {
   String get name => 'import';
 
   @override
-  String get description => 'Import NDJSON documents into a namespace.';
+  String get description => 'Import NDJSON documents into a collection.';
 
   @override
   String get usage =>
-      'import <namespace> [--input <file>] [--on-conflict ignore|replace|error]';
+      'import <collection> [--input <file>] [--on-conflict ignore|replace|error]';
 
   @override
   Future<bool> execute(
@@ -48,7 +48,7 @@ final class ImportCommand implements CliCommand {
     Map<String, dynamic> flags,
   ) async {
     if (args.isEmpty) {
-      ctx.writeError('import requires <namespace>.\nUsage: $usage');
+      ctx.writeError('import requires <collection>.\nUsage: $usage');
       return false;
     }
     final namespace = args[0];

@@ -71,7 +71,7 @@ Future<(KmdbDatabase, KmdbCollection<_Item>)> _open() async {
     adapter: adapter,
     config: KvStoreConfig.forTesting(),
   );
-  return (db, db.collection(namespace: 'items', codec: _codec));
+  return (db, db.collection(name: 'items', codec: _codec));
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -367,7 +367,7 @@ void main() {
 
     test('write to different namespace does not trigger re-emit', () async {
       final (db, col) = await _open();
-      final other = db.collection(namespace: 'other', codec: _codec);
+      final other = db.collection(name: 'other', codec: _codec);
 
       final emitted = <List<_Item>>[];
       final sub = col.all().watch().listen(emitted.add);
@@ -418,7 +418,7 @@ void main() {
         config: KvStoreConfig.forTesting(),
         indexes: [IndexDefinition('items', 'name')],
       );
-      return (db, db.collection(namespace: 'items', codec: _codec));
+      return (db, db.collection(name: 'items', codec: _codec));
     }
 
     test('does not throw when no indexes are defined', () async {

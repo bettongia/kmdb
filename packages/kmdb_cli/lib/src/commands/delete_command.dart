@@ -16,7 +16,7 @@ import 'command.dart';
 
 /// Deletes a document by key.
 ///
-/// Usage: `kmdb <db> delete <namespace> <key>`
+/// Usage: `kmdb <db> delete <collection> <key>`
 final class DeleteCommand implements CliCommand {
   const DeleteCommand();
 
@@ -27,7 +27,7 @@ final class DeleteCommand implements CliCommand {
   String get description => 'Delete a document by key.';
 
   @override
-  String get usage => 'delete <namespace> <key>';
+  String get usage => 'delete <collection> <key>';
 
   @override
   Future<bool> execute(
@@ -36,7 +36,7 @@ final class DeleteCommand implements CliCommand {
     Map<String, dynamic> flags,
   ) async {
     if (args.length < 2) {
-      ctx.writeError('delete requires <namespace> and <key>.\nUsage: $usage');
+      ctx.writeError('delete requires <collection> and <key>.\nUsage: $usage');
       return false;
     }
     final namespace = args[0];

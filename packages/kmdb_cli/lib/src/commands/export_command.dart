@@ -19,9 +19,9 @@ import 'package:kmdb/kmdb.dart';
 
 import 'command.dart';
 
-/// Exports a namespace to newline-delimited JSON (NDJSON).
+/// Exports a collection to newline-delimited JSON (NDJSON).
 ///
-/// Usage: `kmdb <db> export <namespace> [--output <file>]`
+/// Usage: `kmdb <db> export <collection> [--output <file>]`
 final class ExportCommand implements CliCommand {
   const ExportCommand();
 
@@ -29,10 +29,10 @@ final class ExportCommand implements CliCommand {
   String get name => 'export';
 
   @override
-  String get description => 'Export a namespace to NDJSON.';
+  String get description => 'Export a collection to NDJSON.';
 
   @override
-  String get usage => 'export <namespace> [--output <file>]';
+  String get usage => 'export <collection> [--output <file>]';
 
   @override
   Future<bool> execute(
@@ -41,7 +41,7 @@ final class ExportCommand implements CliCommand {
     Map<String, dynamic> flags,
   ) async {
     if (args.isEmpty) {
-      ctx.writeError('export requires <namespace>.\nUsage: $usage');
+      ctx.writeError('export requires <collection>.\nUsage: $usage');
       return false;
     }
     final namespace = args[0];
