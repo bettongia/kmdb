@@ -21,6 +21,12 @@ melos:
       packageFilters:
         dirExists: test
 
+    e2e-test:
+      description: Run the e2e tests
+      exec: dart test --preset e2e
+      packageFilters:
+        dirExists: test/e2e
+
     coverage:
       steps:
         - coverage:clean

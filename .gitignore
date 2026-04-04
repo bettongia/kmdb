@@ -19,5 +19,6 @@ packages/**/doc
 *.iml
 .idea
 .worktrees/
-packages/kmdb_cli/bin/kmdb_test.exe
-cli_test.log
+packages/kmdb_cli/bin/kmdb*.exe
+*_test.log
+cli_e2e_test.log
