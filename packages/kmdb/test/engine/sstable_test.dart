@@ -27,7 +27,7 @@ import 'package:kmdb/src/engine/util/key_codec.dart';
 
 Uint8List _ikey(String ns, String hexSuffix, Hlc hlc) {
   final hexKey =
-      hexSuffix.padLeft(12, '0') + '70008' + hexSuffix.padLeft(15, '0');
+      '${hexSuffix.padLeft(12, '0')}70008${hexSuffix.padLeft(15, '0')}';
   return KeyCodec.encodeInternalKey(
     ns,
     KeyCodec.keyToBytes(hexKey),

@@ -26,7 +26,7 @@ void main() {
   const binPath = 'bin/kmdb.dart';
 
   /// Runs the CLI with [args] and returns the result.
-  Future<io.ProcessResult> _run(List<String> args) async {
+  Future<io.ProcessResult> run(List<String> args) async {
     // Run from the package root where pubspec.yaml is located.
     final result = await io.Process.run('dart', [
       binPath,
@@ -44,7 +44,7 @@ void main() {
 
   group('KmdbCli — integration', () {
     test('shows help when no args provided', () async {
-      final result = await _run([]);
+      final result = await run([]);
       // CLI returns 1 when no args provided.
       expect(result.exitCode, equals(1));
       expect(result.stdout, contains('Usage: kmdb'));
@@ -54,7 +54,7 @@ void main() {
       final dbPath = tmp.file('db');
 
       // Put document (assigned a random UUIDv7 ID)
-      final putResult = await _run([
+      final putResult = await run([
         dbPath,
         'put',
         'tasks',
@@ -72,7 +72,7 @@ void main() {
       expect(id, hasLength(32));
 
       // Get document
-      final getResult = await _run([dbPath, 'get', 'tasks', id]);
+      final getResult = await run([dbPath, 'get', 'tasks', id]);
       expect(
         getResult.exitCode,
         equals(0),
@@ -88,7 +88,7 @@ void main() {
       final dbPath = tmp.file('db');
 
       // Put
-      final putResult = await _run([
+      final putResult = await run([
         dbPath,
         'put',
         'tasks',
@@ -98,11 +98,11 @@ void main() {
       final id = (json.decode(putResult.stdout) as List)[0]['_id'] as String;
 
       // Delete
-      final delResult = await _run([dbPath, 'delete', 'tasks', id]);
+      final delResult = await run([dbPath, 'delete', 'tasks', id]);
       expect(delResult.exitCode, equals(0), reason: delResult.stderr);
 
       // Get (should be empty)
-      final getResult = await _run([dbPath, 'get', 'tasks', id]);
+      final getResult = await run([dbPath, 'get', 'tasks', id]);
       // get returns 1 and error message if not found
       expect(getResult.exitCode, equals(1));
       expect(getResult.stderr, contains('not found'));
@@ -111,10 +111,10 @@ void main() {
     test('scan documents', () async {
       final dbPath = tmp.file('db');
 
-      await _run([dbPath, 'put', 'tasks', '--value', '{"title":"A"}']);
-      await _run([dbPath, 'put', 'tasks', '--value', '{"title":"B"}']);
+      await run([dbPath, 'put', 'tasks', '--value', '{"title":"A"}']);
+      await run([dbPath, 'put', 'tasks', '--value', '{"title":"B"}']);
 
-      final scanResult = await _run([dbPath, 'scan', 'tasks']);
+      final scanResult = await run([dbPath, 'scan', 'tasks']);
       expect(scanResult.exitCode, equals(0), reason: scanResult.stderr);
       final docs = json.decode(scanResult.stdout) as List;
       expect(docs, hasLength(2));
@@ -125,13 +125,13 @@ void main() {
       final exportPath = tmp.file('export.ndjson');
 
       // 1. Create some data
-      final p1 = await _run([dbPath, 'put', 'tasks', '--value', '{"v":1}']);
-      final p2 = await _run([dbPath, 'put', 'tasks', '--value', '{"v":2}']);
+      final p1 = await run([dbPath, 'put', 'tasks', '--value', '{"v":1}']);
+      final p2 = await run([dbPath, 'put', 'tasks', '--value', '{"v":2}']);
       expect(p1.exitCode, 0);
       expect(p2.exitCode, 0);
 
       // 2. Export using --mode ndjson to stdout, and capture it.
-      final exportResult = await _run([
+      final exportResult = await run([
         dbPath,
         '--mode',
         'ndjson',
@@ -157,7 +157,7 @@ void main() {
 
       // 3. Create a fresh DB and import
       final db2Path = tmp.file('db2');
-      final importResult = await _run([
+      final importResult = await run([
         db2Path,
         'import',
         'tasks',
@@ -167,7 +167,7 @@ void main() {
       expect(importResult.exitCode, equals(0), reason: importResult.stderr);
 
       // 4. Verify count in new DB
-      final countResult = await _run([db2Path, 'count', 'tasks']);
+      final countResult = await run([db2Path, 'count', 'tasks']);
       expect(countResult.exitCode, equals(0), reason: countResult.stderr);
       final result = json.decode(countResult.stdout) as Map;
       expect(result['count'], equals(2));
@@ -179,7 +179,7 @@ void main() {
       final dbPath = tmp.file('db');
 
       // Run put with --no-flush.
-      final putResult = await _run([
+      final putResult = await run([
         dbPath,
         '--no-flush',
         'put',
@@ -205,13 +205,13 @@ void main() {
       }
 
       // Next command should still read the data (via WAL recovery).
-      final getResult = await _run([dbPath, 'get', 'notes', id]);
+      final getResult = await run([dbPath, 'get', 'notes', id]);
       expect(getResult.exitCode, equals(0), reason: getResult.stderr);
       final docs = json.decode(getResult.stdout) as List;
       expect(docs[0]['_id'], equals(id));
 
       // Running flush command should move data to SST and delete WAL.
-      final flushResult = await _run([dbPath, 'flush']);
+      final flushResult = await run([dbPath, 'flush']);
       expect(flushResult.exitCode, equals(0), reason: flushResult.stderr);
 
       // Verify WAL is gone (it's rotated/deleted on flush).
@@ -229,7 +229,7 @@ void main() {
       final dbPath = tmp.file('db');
 
       // Run put without flags (defaulting to --flush).
-      final putResult = await _run([
+      final putResult = await run([
         dbPath,
         'put',
         'notes',

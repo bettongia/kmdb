@@ -339,8 +339,9 @@ final class LsmEngine {
     final l0 = _levels[0] ?? [];
     for (var i = l0.length - 1; i >= 0; i--) {
       final reader = await _openReader('$_sstDir/${l0[i]}');
-      if (reader != null)
+      if (reader != null) {
         streams.add(reader.scan(start: scanStart, end: scanEnd));
+      }
     }
     for (final level in [1, 2]) {
       for (final filename in (_levels[level] ?? [])) {

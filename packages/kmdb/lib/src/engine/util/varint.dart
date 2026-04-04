@@ -41,8 +41,9 @@ final class Varint {
 
   /// Returns the number of bytes needed to encode [value].
   static int encodedLength(int value) {
-    if (value < 0)
+    if (value < 0) {
       throw ArgumentError.value(value, 'value', 'must be non-negative');
+    }
     if (value == 0) return 1;
     var n = 0;
     var v = value;
@@ -60,8 +61,9 @@ final class Varint {
   /// Throws [ArgumentError] if [value] is negative.
   /// Throws [RangeError] if [buf] does not have enough space.
   static int encode(int value, Uint8List buf, int offset) {
-    if (value < 0)
+    if (value < 0) {
       throw ArgumentError.value(value, 'value', 'must be non-negative');
+    }
     var v = value;
     var pos = offset;
     do {
