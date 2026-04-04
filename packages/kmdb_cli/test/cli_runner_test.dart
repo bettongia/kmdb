@@ -68,7 +68,7 @@ void main() {
       );
 
       final putDocs = json.decode(putResult.stdout) as List;
-      final id = putDocs[0]['id'] as String;
+      final id = putDocs[0]['_id'] as String;
       expect(id, hasLength(32));
 
       // Get document
@@ -81,7 +81,7 @@ void main() {
       final docs = json.decode(getResult.stdout) as List;
       expect(docs, hasLength(1));
       expect(docs[0]['title'], equals('Buy bread'));
-      expect(docs[0]['id'], equals(id));
+      expect(docs[0]['_id'], equals(id));
     });
 
     test('delete document', () async {
@@ -95,7 +95,7 @@ void main() {
         '--value',
         '{"title":"x"}',
       ]);
-      final id = (json.decode(putResult.stdout) as List)[0]['id'] as String;
+      final id = (json.decode(putResult.stdout) as List)[0]['_id'] as String;
 
       // Delete
       final delResult = await _run([dbPath, 'delete', 'tasks', id]);
@@ -189,7 +189,7 @@ void main() {
       ]);
       expect(putResult.exitCode, equals(0), reason: putResult.stderr);
 
-      final id = (json.decode(putResult.stdout) as List)[0]['id'] as String;
+      final id = (json.decode(putResult.stdout) as List)[0]['_id'] as String;
 
       // Verify WAL exists, but no SST files.
       final walFile = io.File(p.join(dbPath, 'wal-00001.log'));
@@ -208,7 +208,7 @@ void main() {
       final getResult = await _run([dbPath, 'get', 'notes', id]);
       expect(getResult.exitCode, equals(0), reason: getResult.stderr);
       final docs = json.decode(getResult.stdout) as List;
-      expect(docs[0]['id'], equals(id));
+      expect(docs[0]['_id'], equals(id));
 
       // Running flush command should move data to SST and delete WAL.
       final flushResult = await _run([dbPath, 'flush']);

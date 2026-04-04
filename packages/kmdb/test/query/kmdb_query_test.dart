@@ -44,15 +44,11 @@ final class _ItemCodec implements KmdbCodec<_Item> {
       _Item(id: key, name: v.name, score: v.score);
 
   @override
-  Map<String, dynamic> encode(_Item v) => {
-    'id': v.id,
-    'name': v.name,
-    'score': v.score,
-  };
+  Map<String, dynamic> encode(_Item v) => {'name': v.name, 'score': v.score};
 
   @override
   _Item decode(Map<String, dynamic> j) => _Item(
-    id: j['id'] as String,
+    id: j['_id'] as String,
     name: j['name'] as String,
     score: j['score'] as int? ?? 0,
   );
