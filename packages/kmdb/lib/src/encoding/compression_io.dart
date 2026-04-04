@@ -45,9 +45,9 @@ import 'compression_flag.dart';
 /// Throws [UnsupportedError] for unrecognised flags (guarded upstream by
 /// [CompressionFlag.fromByte]).
 Uint8List decompress(CompressionFlag flag, Uint8List data) => switch (flag) {
-      CompressionFlag.none => data,
-      CompressionFlag.zstd =>
-        Uint8List.fromList(ZstdCodec().decode(data)),
-      CompressionFlag.deflate =>
-        Uint8List.fromList(ZLibDecoder().decodeBytes(data)),
-    };
+  CompressionFlag.none => data,
+  CompressionFlag.zstd => Uint8List.fromList(ZstdCodec().decode(data)),
+  CompressionFlag.deflate => Uint8List.fromList(
+    ZLibDecoder().decodeBytes(data),
+  ),
+};

@@ -21,8 +21,7 @@ import 'package:kmdb/src/engine/util/hlc.dart';
 import 'package:kmdb/src/engine/util/key_codec.dart';
 
 Uint8List _key(String ns, String hexKey, Hlc hlc, RecordType type) =>
-    KeyCodec.encodeInternalKey(
-        ns, KeyCodec.keyToBytes(hexKey), hlc, type);
+    KeyCodec.encodeInternalKey(ns, KeyCodec.keyToBytes(hexKey), hlc, type);
 
 const _k0 = '00000000000070008000000000000000';
 const _kf = 'ffffffffffff7fff8fffffffffffffff';
@@ -129,7 +128,10 @@ void main() {
     test('frozen entries iterable contains all entries', () {
       final m = Memtable();
       for (var i = 1; i <= 5; i++) {
-        final keyHex = i.toRadixString(16).padLeft(12, '0') + '70008' + i.toRadixString(16).padLeft(15, '0');
+        final keyHex =
+            i.toRadixString(16).padLeft(12, '0') +
+            '70008' +
+            i.toRadixString(16).padLeft(15, '0');
         final k = _key('ns', keyHex, const Hlc(1, 0), RecordType.put);
         m.put(k, Uint8List.fromList([i]));
       }

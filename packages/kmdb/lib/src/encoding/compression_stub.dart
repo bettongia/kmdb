@@ -26,10 +26,9 @@ import 'compression_flag.dart';
 
 /// Returns [data] unchanged for [CompressionFlag.none]; throws
 /// [UnsupportedError] for any compressed flag.
-Uint8List decompress(CompressionFlag flag, Uint8List data) =>
-    switch (flag) {
-      CompressionFlag.none => data,
-      _ => throw UnsupportedError(
-          'Compression flag $flag is not supported in this build configuration.',
-        ),
-    };
+Uint8List decompress(CompressionFlag flag, Uint8List data) => switch (flag) {
+  CompressionFlag.none => data,
+  _ => throw UnsupportedError(
+    'Compression flag $flag is not supported in this build configuration.',
+  ),
+};

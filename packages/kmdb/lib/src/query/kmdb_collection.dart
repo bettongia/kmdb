@@ -120,10 +120,7 @@ final class KmdbCollection<T> {
     late StreamSubscription<String> sub;
 
     void emitCurrent() {
-      get(key).then(
-        controller.add,
-        onError: controller.addError,
-      );
+      get(key).then(controller.add, onError: controller.addError);
     }
 
     controller = StreamController<T?>(
@@ -176,8 +173,7 @@ final class KmdbCollection<T> {
       throw DocumentNotFoundException(key, namespace);
     }
     final oldDoc = ValueCodec.decode(existingBytes);
-    await _writeDocument(
-        key: key, newDoc: codec.encode(value), oldDoc: oldDoc);
+    await _writeDocument(key: key, newDoc: codec.encode(value), oldDoc: oldDoc);
   }
 
   /// Upserts [value] — inserts if absent, replaces if present.
@@ -186,10 +182,10 @@ final class KmdbCollection<T> {
   Future<void> put(T value) async {
     final key = codec.keyOf(value);
     final existingBytes = await _db.cache.get(namespace, key);
-    final oldDoc =
-        existingBytes != null ? ValueCodec.decode(existingBytes) : null;
-    await _writeDocument(
-        key: key, newDoc: codec.encode(value), oldDoc: oldDoc);
+    final oldDoc = existingBytes != null
+        ? ValueCodec.decode(existingBytes)
+        : null;
+    await _writeDocument(key: key, newDoc: codec.encode(value), oldDoc: oldDoc);
   }
 
   /// Upserts each value in [values] as individual atomic writes.
@@ -274,5 +270,4 @@ final class KmdbCollection<T> {
     );
     await _db.store.writeBatchInternal(batch);
   }
-
 }

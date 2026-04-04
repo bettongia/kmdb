@@ -181,8 +181,8 @@ final class ConsolidationCoordinator {
     required this.syncRoot,
     ConsolidationConfig config = const ConsolidationConfig(),
     int Function()? wallClock,
-  })  : _config = config,
-        _wallClock = wallClock ?? (() => DateTime.now().millisecondsSinceEpoch);
+  }) : _config = config,
+       _wallClock = wallClock ?? (() => DateTime.now().millisecondsSinceEpoch);
 
   /// The 8-character identifier for this device.
   final String deviceId;

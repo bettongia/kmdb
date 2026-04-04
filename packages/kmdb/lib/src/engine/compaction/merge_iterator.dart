@@ -55,7 +55,7 @@ final class MergeEntry {
 /// ```
 final class MergeIterator {
   MergeIterator(List<Stream<SstEntry>> sources)
-      : _sources = sources.map(StreamIterator.new).toList();
+    : _sources = sources.map(StreamIterator.new).toList();
 
   final List<StreamIterator<SstEntry>> _sources;
 

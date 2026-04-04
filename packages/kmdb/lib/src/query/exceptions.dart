@@ -96,10 +96,7 @@ final class StaleIndexException implements Exception {
 /// the dirty-open flag indicates a previous session ended abruptly while an
 /// index was in the `building` state (spec §16 "Interrupted Build Recovery").
 final class IndexRebuildEvent {
-  const IndexRebuildEvent({
-    required this.namespace,
-    required this.path,
-  });
+  const IndexRebuildEvent({required this.namespace, required this.path});
 
   /// The collection namespace the index belongs to.
   final String namespace;
@@ -108,6 +105,5 @@ final class IndexRebuildEvent {
   final String path;
 
   @override
-  String toString() =>
-      'IndexRebuildEvent(namespace: $namespace, path: $path)';
+  String toString() => 'IndexRebuildEvent(namespace: $namespace, path: $path)';
 }

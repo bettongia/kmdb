@@ -101,8 +101,9 @@ final class StorageException implements Exception {
   final String? path;
 
   @override
-  String toString() =>
-      path != null ? 'StorageException($path): $message' : 'StorageException: $message';
+  String toString() => path != null
+      ? 'StorageException($path): $message'
+      : 'StorageException: $message';
 }
 
 /// Thrown when an exclusive database lock cannot be acquired because another

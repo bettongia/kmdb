@@ -28,17 +28,23 @@ void main() {
     // ── Field comparisons ──────────────────────────────────────────────────
 
     test('eq matches equal value', () {
-      final f = FilterParser.parse('{"field":"status","op":"eq","value":"active"}');
+      final f = FilterParser.parse(
+        '{"field":"status","op":"eq","value":"active"}',
+      );
       expect(f.evaluate(doc), isTrue);
     });
 
     test('eq does not match unequal value', () {
-      final f = FilterParser.parse('{"field":"status","op":"eq","value":"inactive"}');
+      final f = FilterParser.parse(
+        '{"field":"status","op":"eq","value":"inactive"}',
+      );
       expect(f.evaluate(doc), isFalse);
     });
 
     test('ne matches unequal value', () {
-      final f = FilterParser.parse('{"field":"status","op":"ne","value":"inactive"}');
+      final f = FilterParser.parse(
+        '{"field":"status","op":"ne","value":"inactive"}',
+      );
       expect(f.evaluate(doc), isTrue);
     });
 
@@ -68,24 +74,32 @@ void main() {
     });
 
     test('between matches value in range', () {
-      final f = FilterParser.parse('{"field":"score","op":"between","value":[1,100]}');
+      final f = FilterParser.parse(
+        '{"field":"score","op":"between","value":[1,100]}',
+      );
       expect(f.evaluate(doc), isTrue);
     });
 
     test('between does not match value outside range', () {
-      final f = FilterParser.parse('{"field":"score","op":"between","value":[50,100]}');
+      final f = FilterParser.parse(
+        '{"field":"score","op":"between","value":[50,100]}',
+      );
       expect(f.evaluate(doc), isFalse);
     });
 
     // ── Set membership ─────────────────────────────────────────────────────
 
     test('in matches value in list', () {
-      final f = FilterParser.parse('{"field":"status","op":"in","value":["active","pending"]}');
+      final f = FilterParser.parse(
+        '{"field":"status","op":"in","value":["active","pending"]}',
+      );
       expect(f.evaluate(doc), isTrue);
     });
 
     test('notIn matches value not in list', () {
-      final f = FilterParser.parse('{"field":"status","op":"notIn","value":["inactive","pending"]}');
+      final f = FilterParser.parse(
+        '{"field":"status","op":"notIn","value":["inactive","pending"]}',
+      );
       expect(f.evaluate(doc), isTrue);
     });
 
@@ -115,34 +129,46 @@ void main() {
     // ── String ops ─────────────────────────────────────────────────────────
 
     test('startsWith matches prefix', () {
-      final f = FilterParser.parse('{"field":"city","op":"startsWith","value":"Lon"}');
+      final f = FilterParser.parse(
+        '{"field":"city","op":"startsWith","value":"Lon"}',
+      );
       expect(f.evaluate(doc), isTrue);
     });
 
     test('endsWith matches suffix', () {
-      final f = FilterParser.parse('{"field":"city","op":"endsWith","value":"don"}');
+      final f = FilterParser.parse(
+        '{"field":"city","op":"endsWith","value":"don"}',
+      );
       expect(f.evaluate(doc), isTrue);
     });
 
     test('contains matches substring', () {
-      final f = FilterParser.parse('{"field":"city","op":"contains","value":"ond"}');
+      final f = FilterParser.parse(
+        '{"field":"city","op":"contains","value":"ond"}',
+      );
       expect(f.evaluate(doc), isTrue);
     });
 
     // ── Array ops ──────────────────────────────────────────────────────────
 
     test('containsAll matches all elements present', () {
-      final f = FilterParser.parse('{"field":"tags","op":"containsAll","value":["dart","flutter"]}');
+      final f = FilterParser.parse(
+        '{"field":"tags","op":"containsAll","value":["dart","flutter"]}',
+      );
       expect(f.evaluate(doc), isTrue);
     });
 
     test('containsAll fails if one element missing', () {
-      final f = FilterParser.parse('{"field":"tags","op":"containsAll","value":["dart","java"]}');
+      final f = FilterParser.parse(
+        '{"field":"tags","op":"containsAll","value":["dart","java"]}',
+      );
       expect(f.evaluate(doc), isFalse);
     });
 
     test('containsAny matches any element present', () {
-      final f = FilterParser.parse('{"field":"tags","op":"containsAny","value":["java","dart"]}');
+      final f = FilterParser.parse(
+        '{"field":"tags","op":"containsAny","value":["java","dart"]}',
+      );
       expect(f.evaluate(doc), isTrue);
     });
 
@@ -150,24 +176,29 @@ void main() {
 
     test('and matches when all sub-filters match', () {
       final f = FilterParser.parse(
-          '{"and":[{"field":"status","op":"eq","value":"active"},{"field":"score","op":"gt","value":10}]}');
+        '{"and":[{"field":"status","op":"eq","value":"active"},{"field":"score","op":"gt","value":10}]}',
+      );
       expect(f.evaluate(doc), isTrue);
     });
 
     test('and fails when one sub-filter fails', () {
       final f = FilterParser.parse(
-          '{"and":[{"field":"status","op":"eq","value":"active"},{"field":"score","op":"gt","value":100}]}');
+        '{"and":[{"field":"status","op":"eq","value":"active"},{"field":"score","op":"gt","value":100}]}',
+      );
       expect(f.evaluate(doc), isFalse);
     });
 
     test('or matches when at least one sub-filter matches', () {
       final f = FilterParser.parse(
-          '{"or":[{"field":"status","op":"eq","value":"inactive"},{"field":"score","op":"eq","value":42}]}');
+        '{"or":[{"field":"status","op":"eq","value":"inactive"},{"field":"score","op":"eq","value":42}]}',
+      );
       expect(f.evaluate(doc), isTrue);
     });
 
     test('not inverts the filter', () {
-      final f = FilterParser.parse('{"not":{"field":"status","op":"eq","value":"active"}}');
+      final f = FilterParser.parse(
+        '{"not":{"field":"status","op":"eq","value":"active"}}',
+      );
       expect(f.evaluate(doc), isFalse);
       expect(f.evaluate({'status': 'inactive'}), isTrue);
     });
@@ -175,7 +206,9 @@ void main() {
     // ── Nested dot-path ────────────────────────────────────────────────────
 
     test('nested dot-path resolves correctly', () {
-      final f = FilterParser.parse('{"field":"address.city","op":"eq","value":"London"}');
+      final f = FilterParser.parse(
+        '{"field":"address.city","op":"eq","value":"London"}',
+      );
       expect(f.evaluate(doc), isTrue);
     });
 
@@ -189,7 +222,10 @@ void main() {
     });
 
     test('invalid JSON throws FormatException', () {
-      expect(() => FilterParser.parse('{bad json}'), throwsA(isA<FormatException>()));
+      expect(
+        () => FilterParser.parse('{bad json}'),
+        throwsA(isA<FormatException>()),
+      );
     });
 
     test('missing field+op keys throws ArgumentError', () {
@@ -201,7 +237,9 @@ void main() {
 
     test('between requires exactly 2 elements', () {
       expect(
-        () => FilterParser.parse('{"field":"score","op":"between","value":[1,2,3]}'),
+        () => FilterParser.parse(
+          '{"field":"score","op":"between","value":[1,2,3]}',
+        ),
         throwsA(isA<ArgumentError>()),
       );
     });

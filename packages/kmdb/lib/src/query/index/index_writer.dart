@@ -101,7 +101,9 @@ abstract final class IndexWriter {
   ///
   /// Returns `null` for value types that are not indexable (List, Map, etc.).
   static String? indexNamespaceForValue(
-      IndexDefinition definition, Object value) {
+    IndexDefinition definition,
+    Object value,
+  ) {
     final hex = _encodeValueHex(value);
     if (hex == null) return null;
     return '${definition.indexNamespace}:$hex';
@@ -114,7 +116,9 @@ abstract final class IndexWriter {
   /// Fan-out paths return each element individually. Scalar paths return a
   /// single-element list.
   static List<Object?> _resolveValues(
-      String path, Map<String, dynamic> document) {
+    String path,
+    Map<String, dynamic> document,
+  ) {
     final resolved = FieldPath.resolve(path, document);
     if (resolved == missing) return const [missing];
     if (resolved is List && path.endsWith('[]')) {
@@ -161,7 +165,8 @@ abstract final class IndexWriter {
     bd.setFloat64(0, value, Endian.big);
     if (bytes[0] & 0x80 != 0) {
       for (var i = 0; i < 8; i++) {
-        bytes[i] ^= 0xFF; // negative: flip all bits so more-negative sorts first
+        bytes[i] ^=
+            0xFF; // negative: flip all bits so more-negative sorts first
       }
     } else {
       bytes[0] ^= 0x80; // positive: flip sign bit only

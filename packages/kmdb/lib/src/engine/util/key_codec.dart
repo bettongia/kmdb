@@ -37,10 +37,10 @@ enum RecordType {
   ///
   /// Throws [ArgumentError] for unrecognised bytes.
   static RecordType fromByte(int byte) => switch (byte) {
-        0x01 => put,
-        0x02 => delete,
-        _ => throw ArgumentError.value(byte, 'byte', 'Unknown RecordType byte'),
-      };
+    0x01 => put,
+    0x02 => delete,
+    _ => throw ArgumentError.value(byte, 'byte', 'Unknown RecordType byte'),
+  };
 }
 
 // ── User key encoding ─────────────────────────────────────────────────────

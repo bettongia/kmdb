@@ -42,7 +42,8 @@ export 'src/engine/platform/storage_adapter_native.dart'
 export 'src/sync/sync_engine.dart' show SyncEngine;
 export 'src/sync/consolidation_coordinator.dart' show ConsolidationCoordinator;
 export 'src/sync/consolidation_config.dart' show ConsolidationConfig;
-export 'src/sync/cloud/cloud_adapter.dart' show CloudAdapter, LockConflictException;
+export 'src/sync/cloud/cloud_adapter.dart'
+    show CloudAdapter, LockConflictException;
 export 'src/sync/local/memory_sync_adapter.dart' show MemorySyncAdapter;
 
 // ── Value encoding ────────────────────────────────────────────────────────────

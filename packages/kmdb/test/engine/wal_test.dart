@@ -32,14 +32,13 @@ final _key = KeyCodec.keyToBytes('aaaaaaaaaaaa7aa8aaaaaaaaaaaaaaaa');
 final _value = Uint8List.fromList([0x00, 0x01, 0x02]);
 
 WalWriter _writer(MemoryStorageAdapter adapter, {int seq = 1}) => WalWriter(
-      dirPath: _dir,
-      adapter: adapter,
-      initialSequence: seq,
-      fsyncOnWrite: false,
-    );
+  dirPath: _dir,
+  adapter: adapter,
+  initialSequence: seq,
+  fsyncOnWrite: false,
+);
 
-WalReader _reader(MemoryStorageAdapter adapter) =>
-    WalReader(adapter: adapter);
+WalReader _reader(MemoryStorageAdapter adapter) => WalReader(adapter: adapter);
 
 void main() {
   group('WalRecord encoding', () {
@@ -77,10 +76,7 @@ void main() {
     });
 
     test('flush marker round-trips (no ns/key/value)', () {
-      final r = WalRecord(
-        type: WalRecordType.flushMarker,
-        sequence: _seq1,
-      );
+      final r = WalRecord(type: WalRecordType.flushMarker, sequence: _seq1);
       final bytes = r.encode();
       final (decoded, consumed) = WalRecord.tryDecode(bytes, 0)!;
       expect(decoded.type, equals(WalRecordType.flushMarker));
@@ -145,7 +141,11 @@ void main() {
 
       expect(writer.activeSequence, equals(3));
       await writer.writePut(
-          sequence: _seq1, namespace: 'n', keyBytes: _key, value: _value);
+        sequence: _seq1,
+        namespace: 'n',
+        keyBytes: _key,
+        value: _value,
+      );
       final oldPath = await writer.rotate(_seq2);
       expect(oldPath, contains('wal-00003.log'));
       expect(writer.activeSequence, equals(4));
@@ -165,29 +165,32 @@ void main() {
 
       // Write two records, then a flush marker, then one more record.
       await writer.writePut(
-          sequence: const Hlc(1, 0),
-          namespace: 'ns',
-          keyBytes: _key,
-          value: _value);
+        sequence: const Hlc(1, 0),
+        namespace: 'ns',
+        keyBytes: _key,
+        value: _value,
+      );
       await writer.writePut(
-          sequence: const Hlc(2, 0),
-          namespace: 'ns',
-          keyBytes: _key,
-          value: _value);
+        sequence: const Hlc(2, 0),
+        namespace: 'ns',
+        keyBytes: _key,
+        value: _value,
+      );
       // Manually write a flush marker mid-file.
-      await writer.append(WalRecord(
-        type: WalRecordType.flushMarker,
-        sequence: const Hlc(3, 0),
-      ));
+      await writer.append(
+        WalRecord(type: WalRecordType.flushMarker, sequence: const Hlc(3, 0)),
+      );
       await writer.writePut(
-          sequence: const Hlc(4, 0),
-          namespace: 'ns',
-          keyBytes: _key,
-          value: _value);
+        sequence: const Hlc(4, 0),
+        namespace: 'ns',
+        keyBytes: _key,
+        value: _value,
+      );
 
       final reader = _reader(adapter);
-      final records =
-          await reader.replayFromLastFlush(writer.activePath).toList();
+      final records = await reader
+          .replayFromLastFlush(writer.activePath)
+          .toList();
       // Only the record after the flush marker should be returned.
       expect(records.length, equals(1));
       expect(records[0].sequence, equals(const Hlc(4, 0)));
@@ -207,8 +210,9 @@ void main() {
       }
 
       final reader = _reader(adapter);
-      final records =
-          await reader.replayFromLastFlush(writer.activePath).toList();
+      final records = await reader
+          .replayFromLastFlush(writer.activePath)
+          .toList();
       expect(records.length, equals(3));
     });
 
@@ -227,22 +231,26 @@ void main() {
 
       // File 1: two puts + flush marker.
       await writer.writePut(
-          sequence: const Hlc(1, 0),
-          namespace: 'ns',
-          keyBytes: _key,
-          value: _value);
+        sequence: const Hlc(1, 0),
+        namespace: 'ns',
+        keyBytes: _key,
+        value: _value,
+      );
       final file1 = await writer.rotate(const Hlc(2, 0));
 
       // File 2: one put.
       await writer.writePut(
-          sequence: const Hlc(3, 0),
-          namespace: 'ns',
-          keyBytes: _key,
-          value: _value);
+        sequence: const Hlc(3, 0),
+        namespace: 'ns',
+        keyBytes: _key,
+        value: _value,
+      );
 
       final reader = _reader(adapter);
-      final records =
-          await reader.replayAll([file1, writer.activePath]).toList();
+      final records = await reader.replayAll([
+        file1,
+        writer.activePath,
+      ]).toList();
       // file1 has flush marker at end — replay from flush gives 0 records.
       // file2 has no flush marker — all 1 record returned.
       expect(records.length, equals(1));
@@ -275,8 +283,11 @@ void main() {
     });
 
     test('toString includes path and offset when provided', () {
-      const e = CorruptedWalException('bad checksum',
-          path: '/db/wal-00001.log', offset: 42);
+      const e = CorruptedWalException(
+        'bad checksum',
+        path: '/db/wal-00001.log',
+        offset: 42,
+      );
       expect(e.toString(), contains('/db/wal-00001.log'));
       expect(e.toString(), contains('42'));
     });
@@ -297,20 +308,24 @@ void main() {
 
     test('replays all valid records without error', () async {
       final writer = _writer(adapter);
-      await writer.append(WalRecord(
-        type: WalRecordType.put,
-        sequence: _seq1,
-        namespace: 'ns',
-        key: _key,
-        value: _value,
-      ));
-      await writer.append(WalRecord(
-        type: WalRecordType.put,
-        sequence: _seq2,
-        namespace: 'ns',
-        key: _key,
-        value: _value,
-      ));
+      await writer.append(
+        WalRecord(
+          type: WalRecordType.put,
+          sequence: _seq1,
+          namespace: 'ns',
+          key: _key,
+          value: _value,
+        ),
+      );
+      await writer.append(
+        WalRecord(
+          type: WalRecordType.put,
+          sequence: _seq2,
+          namespace: 'ns',
+          key: _key,
+          value: _value,
+        ),
+      );
 
       final records = <WalRecord>[];
       await for (final r in reader.replayStrict('$_dir/wal-00001.log')) {
@@ -331,13 +346,15 @@ void main() {
       // Write one valid record, then corrupt the file by appending bytes that
       // look like a record header (≥ 17 bytes) but have a bad checksum.
       final writer = _writer(adapter);
-      await writer.append(WalRecord(
-        type: WalRecordType.put,
-        sequence: _seq1,
-        namespace: 'ns',
-        key: _key,
-        value: _value,
-      ));
+      await writer.append(
+        WalRecord(
+          type: WalRecordType.put,
+          sequence: _seq1,
+          namespace: 'ns',
+          key: _key,
+          value: _value,
+        ),
+      );
       final path = '$_dir/wal-00001.log';
       final existing = await adapter.readFile(path);
       final corrupted = Uint8List(existing.length + 32);
@@ -346,12 +363,9 @@ void main() {
       corrupted.fillRange(existing.length, corrupted.length, 0xAA);
       await adapter.writeFile(path, corrupted);
 
-      expect(
-        () async {
-          await for (final _ in reader.replayStrict(path)) {}
-        },
-        throwsA(isA<CorruptedWalException>()),
-      );
+      expect(() async {
+        await for (final _ in reader.replayStrict(path)) {}
+      }, throwsA(isA<CorruptedWalException>()));
     });
   });
 }

@@ -34,7 +34,10 @@ abstract final class DatabaseOpener {
   static Future<KvStoreImpl> open(String dbPath) async {
     if (dbPath.isEmpty) {
       throw ArgumentError.value(
-          dbPath, 'dbPath', 'Database path must not be empty');
+        dbPath,
+        'dbPath',
+        'Database path must not be empty',
+      );
     }
 
     final adapter = StorageAdapterNative();

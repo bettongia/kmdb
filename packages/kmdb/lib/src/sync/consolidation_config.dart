@@ -70,9 +70,9 @@ final class ConsolidationConfig {
   /// Uses a 5-second lease TTL and a 3-file consolidation threshold, making
   /// it practical to test lease expiry and re-acquisition within tests.
   factory ConsolidationConfig.forTesting() => const ConsolidationConfig(
-        threshold: 3,
-        ttlMs: 5000, // 5 seconds
-        renewalFraction: 0.5,
-        staleDays: 90,
-      );
+    threshold: 3,
+    ttlMs: 5000, // 5 seconds
+    renewalFraction: 0.5,
+    staleDays: 90,
+  );
 }

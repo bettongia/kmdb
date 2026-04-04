@@ -81,10 +81,7 @@ final class HighwaterMark {
   /// Returns `null` if no HWM file exists for this device yet (i.e. first
   /// push from this device). Throws [FormatException] if the file exists but
   /// cannot be parsed.
-  static Future<HighwaterMark?> load(
-    String path,
-    CloudAdapter adapter,
-  ) async {
+  static Future<HighwaterMark?> load(String path, CloudAdapter adapter) async {
     final bytes = await adapter.download(path);
     if (bytes == null) return null;
     return _parse(bytes, path);
@@ -99,7 +96,8 @@ final class HighwaterMark {
       'currentHlc': currentHlc.toPhysicalHex(),
       'lastUpdated': lastUpdated.toUtc().toIso8601String(),
       'peers': {
-        for (final entry in peers.entries) entry.key: entry.value.toPhysicalHex(),
+        for (final entry in peers.entries)
+          entry.key: entry.value.toPhysicalHex(),
       },
     };
     final json = jsonEncode(map);
@@ -189,7 +187,8 @@ final class HighwaterMark {
 
     if (deviceId == null || currentHlcStr == null || lastUpdatedStr == null) {
       throw FormatException(
-          'HWM file missing required fields (deviceId, currentHlc, lastUpdated) at $path');
+        'HWM file missing required fields (deviceId, currentHlc, lastUpdated) at $path',
+      );
     }
 
     final Hlc currentHlc;
@@ -213,7 +212,8 @@ final class HighwaterMark {
           peers[entry.key] = Hlc.fromHex(entry.value as String);
         } catch (e) {
           throw FormatException(
-              'HWM peer HLC invalid for "${entry.key}" at $path: $e');
+            'HWM peer HLC invalid for "${entry.key}" at $path: $e',
+          );
         }
       }
     }

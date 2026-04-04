@@ -74,10 +74,7 @@ final class ScanCommand implements CliCommand {
     // Collect all matching documents.
     final docs = <Map<String, dynamic>>[];
 
-    await for (final entry in ctx.store.scan(
-      namespace,
-      startKey: keyPrefix,
-    )) {
+    await for (final entry in ctx.store.scan(namespace, startKey: keyPrefix)) {
       final doc = ValueCodec.decode(entry.value);
       if (filter != null && !filter.evaluate(doc)) continue;
       docs.add(doc);
@@ -95,7 +92,9 @@ final class ScanCommand implements CliCommand {
 
     // Paginate.
     final start = offset ?? 0;
-    final end = limit != null ? (start + limit).clamp(0, docs.length) : docs.length;
+    final end = limit != null
+        ? (start + limit).clamp(0, docs.length)
+        : docs.length;
     final page = docs.sublist(start.clamp(0, docs.length), end);
 
     ctx.writeDocuments(page);

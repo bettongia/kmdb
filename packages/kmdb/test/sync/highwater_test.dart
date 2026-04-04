@@ -35,7 +35,10 @@ void main() {
     });
 
     test('load returns null for empty path before any push', () async {
-      final result = await HighwaterMark.load('sync/highwater/dev1.hwm', adapter);
+      final result = await HighwaterMark.load(
+        'sync/highwater/dev1.hwm',
+        adapter,
+      );
       expect(result, isNull);
     });
 
@@ -108,24 +111,30 @@ void main() {
       );
     });
 
-    test('load throws FormatException for JSON array instead of object', () async {
-      const path = 'bad.hwm';
-      await adapter.upload(path, Uint8List.fromList('[1, 2, 3]'.codeUnits));
-      expect(
-        () => HighwaterMark.load(path, adapter),
-        throwsA(isA<FormatException>()),
-      );
-    });
+    test(
+      'load throws FormatException for JSON array instead of object',
+      () async {
+        const path = 'bad.hwm';
+        await adapter.upload(path, Uint8List.fromList('[1, 2, 3]'.codeUnits));
+        expect(
+          () => HighwaterMark.load(path, adapter),
+          throwsA(isA<FormatException>()),
+        );
+      },
+    );
 
-    test('load throws FormatException when required fields are missing', () async {
-      const path = 'bad.hwm';
-      final json = '{"deviceId":"x"}'; // missing currentHlc and lastUpdated
-      await adapter.upload(path, Uint8List.fromList(json.codeUnits));
-      expect(
-        () => HighwaterMark.load(path, adapter),
-        throwsA(isA<FormatException>()),
-      );
-    });
+    test(
+      'load throws FormatException when required fields are missing',
+      () async {
+        const path = 'bad.hwm';
+        final json = '{"deviceId":"x"}'; // missing currentHlc and lastUpdated
+        await adapter.upload(path, Uint8List.fromList(json.codeUnits));
+        expect(
+          () => HighwaterMark.load(path, adapter),
+          throwsA(isA<FormatException>()),
+        );
+      },
+    );
 
     test('load throws FormatException for invalid currentHlc', () async {
       const path = 'bad.hwm';

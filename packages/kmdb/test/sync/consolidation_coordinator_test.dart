@@ -33,8 +33,12 @@ Uint8List _buildSst({int count = 2, int basePhysical = 1000}) {
     final hlc = Hlc(basePhysical + i, 0);
     final ns = 'test';
     final key = Uint8List(16)..fillRange(0, 16, i);
-    final internalKey =
-        KeyCodec.encodeInternalKey(ns, key, hlc, RecordType.put);
+    final internalKey = KeyCodec.encodeInternalKey(
+      ns,
+      key,
+      hlc,
+      RecordType.put,
+    );
     writer.add(internalKey, Uint8List.fromList([i]));
   }
   return writer.finish();
@@ -77,8 +81,9 @@ void main() {
     });
 
     test('fromBytes returns null for invalid JSON', () {
-      final result =
-          ConsolidationLease.fromBytes(Uint8List.fromList('not json'.codeUnits));
+      final result = ConsolidationLease.fromBytes(
+        Uint8List.fromList('not json'.codeUnits),
+      );
       expect(result, isNull);
     });
 
@@ -138,8 +143,16 @@ void main() {
     test('runIfNeeded returns false when threshold not met', () async {
       // Only 2 cross-device files with threshold=3.
       final files = [
-        SstableInfo.flushName('peer0001', const Hlc(1000, 0), const Hlc(1001, 0)),
-        SstableInfo.flushName('peer0002', const Hlc(2000, 0), const Hlc(2001, 0)),
+        SstableInfo.flushName(
+          'peer0001',
+          const Hlc(1000, 0),
+          const Hlc(1001, 0),
+        ),
+        SstableInfo.flushName(
+          'peer0002',
+          const Hlc(2000, 0),
+          const Hlc(2001, 0),
+        ),
       ];
       final result = await coordinator.runIfNeeded(files);
       expect(result, isFalse);
@@ -154,8 +167,16 @@ void main() {
         SstableInfo.flushName(deviceId, const Hlc(3000, 0), const Hlc(3001, 0)),
       ];
       final peerFiles = [
-        SstableInfo.flushName('peer0001', const Hlc(4000, 0), const Hlc(4001, 0)),
-        SstableInfo.flushName('peer0002', const Hlc(5000, 0), const Hlc(5001, 0)),
+        SstableInfo.flushName(
+          'peer0001',
+          const Hlc(4000, 0),
+          const Hlc(4001, 0),
+        ),
+        SstableInfo.flushName(
+          'peer0002',
+          const Hlc(5000, 0),
+          const Hlc(5001, 0),
+        ),
       ];
       final result = await coordinator.runIfNeeded([...ownFiles, ...peerFiles]);
       expect(result, isFalse);
@@ -165,7 +186,11 @@ void main() {
 
     test('acquireLease succeeds when no lease exists', () async {
       final files = [
-        SstableInfo.flushName('peer0001', const Hlc(1000, 0), const Hlc(1001, 0)),
+        SstableInfo.flushName(
+          'peer0001',
+          const Hlc(1000, 0),
+          const Hlc(1001, 0),
+        ),
       ];
       final lease = await coordinator.acquireLease(files);
       expect(lease, isNotNull);
@@ -173,21 +198,26 @@ void main() {
       expect(lease.inputFiles, equals(files));
     });
 
-    test('acquireLease fails when valid lease held by another device', () async {
-      // Write a valid lease held by another device.
-      final otherLease = ConsolidationLease(
-        holder: 'otherdev',
-        acquiredAt: DateTime.now().millisecondsSinceEpoch,
-        expiresAt: DateTime.now().millisecondsSinceEpoch + 60000,
-        epoch: 1,
-        inputFiles: ['a.sst'],
-      );
-      await cloudAdapter.upload(
-          '$syncRoot/.consolidation-lease', otherLease.toBytes());
+    test(
+      'acquireLease fails when valid lease held by another device',
+      () async {
+        // Write a valid lease held by another device.
+        final otherLease = ConsolidationLease(
+          holder: 'otherdev',
+          acquiredAt: DateTime.now().millisecondsSinceEpoch,
+          expiresAt: DateTime.now().millisecondsSinceEpoch + 60000,
+          epoch: 1,
+          inputFiles: ['a.sst'],
+        );
+        await cloudAdapter.upload(
+          '$syncRoot/.consolidation-lease',
+          otherLease.toBytes(),
+        );
 
-      final result = await coordinator.acquireLease(['b.sst']);
-      expect(result, isNull);
-    });
+        final result = await coordinator.acquireLease(['b.sst']);
+        expect(result, isNull);
+      },
+    );
 
     test('acquireLease succeeds when existing lease is expired', () async {
       // Write an expired lease.
@@ -199,7 +229,9 @@ void main() {
         inputFiles: ['a.sst'],
       );
       await cloudAdapter.upload(
-          '$syncRoot/.consolidation-lease', expiredLease.toBytes());
+        '$syncRoot/.consolidation-lease',
+        expiredLease.toBytes(),
+      );
 
       final files = ['b.sst'];
       final lease = await coordinator.acquireLease(files);
@@ -210,8 +242,9 @@ void main() {
     test('acquireLease succeeds when existing lease file is corrupt', () async {
       // Write garbage into the lease file — treated as expired/corrupt.
       await cloudAdapter.upload(
-          '$syncRoot/.consolidation-lease',
-          Uint8List.fromList('GARBAGE'.codeUnits));
+        '$syncRoot/.consolidation-lease',
+        Uint8List.fromList('GARBAGE'.codeUnits),
+      );
 
       final files = ['b.sst'];
       final lease = await coordinator.acquireLease(files);
@@ -224,10 +257,20 @@ void main() {
 
     test('consolidate merges input SSTables into output', () async {
       // Upload two peer SSTables to the sync folder.
-      final f1 = await _uploadSst(cloudAdapter, syncRoot, 'peer0001',
-          const Hlc(1000, 0), const Hlc(1001, 0));
-      final f2 = await _uploadSst(cloudAdapter, syncRoot, 'peer0002',
-          const Hlc(2000, 0), const Hlc(2001, 0));
+      final f1 = await _uploadSst(
+        cloudAdapter,
+        syncRoot,
+        'peer0001',
+        const Hlc(1000, 0),
+        const Hlc(1001, 0),
+      );
+      final f2 = await _uploadSst(
+        cloudAdapter,
+        syncRoot,
+        'peer0002',
+        const Hlc(2000, 0),
+        const Hlc(2001, 0),
+      );
 
       final lease = ConsolidationLease(
         holder: deviceId,
@@ -263,8 +306,13 @@ void main() {
 
     test('consolidate skips missing input files gracefully', () async {
       // Lease references a file that doesn't exist in the sync folder.
-      final f1 = await _uploadSst(cloudAdapter, syncRoot, 'peer0001',
-          const Hlc(1000, 0), const Hlc(1001, 0));
+      final f1 = await _uploadSst(
+        cloudAdapter,
+        syncRoot,
+        'peer0001',
+        const Hlc(1000, 0),
+        const Hlc(1001, 0),
+      );
 
       final lease = ConsolidationLease(
         holder: deviceId,
@@ -285,14 +333,26 @@ void main() {
     // ── commit ────────────────────────────────────────────────────────────────
 
     test('commit deletes input files and releases lease', () async {
-      final f1 = await _uploadSst(cloudAdapter, syncRoot, 'peer0001',
-          const Hlc(1000, 0), const Hlc(1001, 0));
-      final f2 = await _uploadSst(cloudAdapter, syncRoot, 'peer0002',
-          const Hlc(2000, 0), const Hlc(2001, 0));
+      final f1 = await _uploadSst(
+        cloudAdapter,
+        syncRoot,
+        'peer0001',
+        const Hlc(1000, 0),
+        const Hlc(1001, 0),
+      );
+      final f2 = await _uploadSst(
+        cloudAdapter,
+        syncRoot,
+        'peer0002',
+        const Hlc(2000, 0),
+        const Hlc(2001, 0),
+      );
 
       // Write a fake lease file.
       await cloudAdapter.upload(
-          '$syncRoot/.consolidation-lease', Uint8List.fromList([1]));
+        '$syncRoot/.consolidation-lease',
+        Uint8List.fromList([1]),
+      );
 
       final lease = ConsolidationLease(
         holder: deviceId,
@@ -310,7 +370,9 @@ void main() {
 
       // Lease file should be removed.
       expect(
-          cloudAdapter.containsFile('$syncRoot/.consolidation-lease'), isFalse);
+        cloudAdapter.containsFile('$syncRoot/.consolidation-lease'),
+        isFalse,
+      );
     });
 
     test('commit is resilient to already-deleted input files', () async {
@@ -329,23 +391,42 @@ void main() {
 
     test('runIfNeeded consolidates when threshold is met', () async {
       // Upload 3 peer SSTables (threshold=3 in forTesting).
-      await _uploadSst(cloudAdapter, syncRoot, 'peer0001',
-          const Hlc(1000, 0), const Hlc(1001, 0));
-      await _uploadSst(cloudAdapter, syncRoot, 'peer0002',
-          const Hlc(2000, 0), const Hlc(2001, 0));
-      await _uploadSst(cloudAdapter, syncRoot, 'peer0003',
-          const Hlc(3000, 0), const Hlc(3001, 0));
+      await _uploadSst(
+        cloudAdapter,
+        syncRoot,
+        'peer0001',
+        const Hlc(1000, 0),
+        const Hlc(1001, 0),
+      );
+      await _uploadSst(
+        cloudAdapter,
+        syncRoot,
+        'peer0002',
+        const Hlc(2000, 0),
+        const Hlc(2001, 0),
+      );
+      await _uploadSst(
+        cloudAdapter,
+        syncRoot,
+        'peer0003',
+        const Hlc(3000, 0),
+        const Hlc(3001, 0),
+      );
 
-      final remoteFiles =
-          await cloudAdapter.list('$syncRoot/sstables', extension: '.sst');
+      final remoteFiles = await cloudAdapter.list(
+        '$syncRoot/sstables',
+        extension: '.sst',
+      );
 
       final result = await coordinator.runIfNeeded(remoteFiles);
       expect(result, isTrue);
       expect(coordinator.state, equals(ConsolidationState.complete));
 
       // Input files should have been deleted.
-      final remaining =
-          await cloudAdapter.list('$syncRoot/sstables', extension: '.sst');
+      final remaining = await cloudAdapter.list(
+        '$syncRoot/sstables',
+        extension: '.sst',
+      );
       // Output consolidation file should exist, inputs gone.
       expect(remaining.length, equals(1));
       expect(remaining.first, contains(deviceId));

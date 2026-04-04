@@ -27,7 +27,11 @@ void main() {
       final keys = List.generate(1000, (i) => _k('key-$i'));
       final filter = BloomFilter.build(keys);
       for (final k in keys) {
-        expect(filter.mayContain(k), isTrue, reason: 'key "${utf8.decode(k)}" should be found');
+        expect(
+          filter.mayContain(k),
+          isTrue,
+          reason: 'key "${utf8.decode(k)}" should be found',
+        );
       }
     });
   });

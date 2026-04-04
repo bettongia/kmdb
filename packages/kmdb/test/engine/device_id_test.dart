@@ -21,11 +21,7 @@ import 'package:test/test.dart';
 const _dbDir = '/db';
 
 Future<(KvStoreImpl, OpenResult)> _open(MemoryStorageAdapter adapter) =>
-    KvStoreImpl.open(
-      _dbDir,
-      adapter,
-      config: KvStoreConfig.forTesting(),
-    );
+    KvStoreImpl.open(_dbDir, adapter, config: KvStoreConfig.forTesting());
 
 void main() {
   tearDown(MemoryStorageAdapter.releaseAllLocks);

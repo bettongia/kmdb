@@ -80,8 +80,10 @@ void main() {
       expect(Field('x').isGreaterThan(0).evaluate({}), isFalse);
     });
     test('string comparison', () {
-      expect(Field('name').isGreaterThan('alice').evaluate({'name': 'bob'}),
-          isTrue);
+      expect(
+        Field('name').isGreaterThan('alice').evaluate({'name': 'bob'}),
+        isTrue,
+      );
     });
   });
 
@@ -166,21 +168,26 @@ void main() {
   // ── Array operations ──────────────────────────────────────────────────────────
 
   group('Array filters', () {
-    final doc = {'tags': ['dart', 'flutter', 'mobile']};
+    final doc = {
+      'tags': ['dart', 'flutter', 'mobile'],
+    };
     test('contains (array element)', () {
       expect(Field('tags').contains('dart').evaluate(doc), isTrue);
       expect(Field('tags').contains('web').evaluate(doc), isFalse);
     });
     test('containsAll', () {
       expect(
-          Field('tags').containsAll(['dart', 'flutter']).evaluate(doc), isTrue);
+        Field('tags').containsAll(['dart', 'flutter']).evaluate(doc),
+        isTrue,
+      );
       expect(Field('tags').containsAll(['dart', 'web']).evaluate(doc), isFalse);
     });
     test('containsAny', () {
-      expect(Field('tags').containsAny(['web', 'flutter']).evaluate(doc),
-          isTrue);
       expect(
-          Field('tags').containsAny(['web', 'ios']).evaluate(doc), isFalse);
+        Field('tags').containsAny(['web', 'flutter']).evaluate(doc),
+        isTrue,
+      );
+      expect(Field('tags').containsAny(['web', 'ios']).evaluate(doc), isFalse);
     });
     test('returns false for non-list field', () {
       expect(Field('x').containsAll(['a']).evaluate({'x': 'a'}), isFalse);
@@ -191,17 +198,11 @@ void main() {
 
   group('Filter.and', () {
     test('matches when all filters match', () {
-      final f = Filter.and([
-        Field('a').equals(1),
-        Field('b').equals(2),
-      ]);
+      final f = Filter.and([Field('a').equals(1), Field('b').equals(2)]);
       expect(f.evaluate({'a': 1, 'b': 2}), isTrue);
     });
     test('does not match if any filter fails', () {
-      final f = Filter.and([
-        Field('a').equals(1),
-        Field('b').equals(99),
-      ]);
+      final f = Filter.and([Field('a').equals(1), Field('b').equals(99)]);
       expect(f.evaluate({'a': 1, 'b': 2}), isFalse);
     });
     test('empty list matches everything', () {
@@ -221,17 +222,11 @@ void main() {
 
   group('Filter.or', () {
     test('matches when any filter matches', () {
-      final f = Filter.or([
-        Field('x').equals(1),
-        Field('x').equals(2),
-      ]);
+      final f = Filter.or([Field('x').equals(1), Field('x').equals(2)]);
       expect(f.evaluate({'x': 2}), isTrue);
     });
     test('does not match if no filter matches', () {
-      final f = Filter.or([
-        Field('x').equals(1),
-        Field('x').equals(2),
-      ]);
+      final f = Filter.or([Field('x').equals(1), Field('x').equals(2)]);
       expect(f.evaluate({'x': 3}), isFalse);
     });
     test('empty list never matches', () {
@@ -258,21 +253,19 @@ void main() {
         ]),
       ]);
       expect(
-          f.evaluate({'status': 'active', 'priority': 5, 'dueDate': null}),
-          isTrue);
+        f.evaluate({'status': 'active', 'priority': 5, 'dueDate': null}),
+        isTrue,
+      );
       expect(
-          f.evaluate({
-            'status': 'active',
-            'priority': 1,
-            'dueDate': '2026-01-01'
-          }),
-          isTrue);
-      expect(
-          f.evaluate({'status': 'active', 'priority': 1}),
-          isFalse);
-      expect(
-          f.evaluate({'status': 'archived', 'priority': 5}),
-          isFalse);
+        f.evaluate({
+          'status': 'active',
+          'priority': 1,
+          'dueDate': '2026-01-01',
+        }),
+        isTrue,
+      );
+      expect(f.evaluate({'status': 'active', 'priority': 1}), isFalse);
+      expect(f.evaluate({'status': 'archived', 'priority': 5}), isFalse);
     });
   });
 }
