@@ -2,7 +2,7 @@
 
 **Status**: Completed
 
-**PR link**: {A link to the PR submitted for this plan}
+**PR link**: https://github.com/aurochs-kmesh/kmdb/pull/3
 
 ## Problem statement
 
