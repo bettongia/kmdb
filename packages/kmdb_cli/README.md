@@ -51,11 +51,11 @@ dart run bin/kmdb.dart mydb scan notes
 | `--mode <mode>`       | `-m`  | Output format (default: `json`)                    |
 | `--output <file>`     | `-o`  | Write output to a file instead of stdout           |
 | `--read <file>`       | `-r`  | Read commands from a script file                   |
-| `--continue-on-error` |       | Keep running after a command error (default: stop)    |
-| `--flush`             |       | Flush memtable to SSTable on exit (default)           |
-| `--no-flush`          |       | Skip flush on exit (data stays in WAL)                |
-| `--version`           |       | Print version and exit                                |
-| `--help`              | `-h`  | Print help and exit                                   |
+| `--continue-on-error` |       | Keep running after a command error (default: stop) |
+| `--flush`             |       | Flush memtable to SSTable on exit (default)        |
+| `--no-flush`          |       | Skip flush on exit (data stays in WAL)             |
+| `--version`           |       | Print version and exit                             |
+| `--help`              | `-h`  | Print help and exit                                |
 
 ### Output modes
 
@@ -72,7 +72,7 @@ dart run bin/kmdb.dart mydb scan notes
 
 ### Data commands
 
-#### `get <namespace> <key>`
+#### `get <collection> <key>`
 
 Retrieve a single document by its key.
 
@@ -80,7 +80,7 @@ Retrieve a single document by its key.
 kmdb mydb get notes 019242f4aac07b8fb7e8f1bfb2c3d4e5
 ```
 
-#### `put <namespace> [--value <json>]`
+#### `put <collection> [--value <json>]`
 
 Insert a new document. A new system-generated UUIDv7 identifier is automatically
 assigned to the document's `id` field. To update an existing document, use the
@@ -95,7 +95,7 @@ kmdb mydb put notes --value '{"title":"Hello"}'
 echo '{"title":"Hello"}' | kmdb mydb put notes
 ```
 
-#### `delete <namespace> <key>`
+#### `delete <collection> <key>`
 
 Delete a document by key (idempotent — succeeds even if the key does not exist).
 
@@ -103,9 +103,9 @@ Delete a document by key (idempotent — succeeds even if the key does not exist
 kmdb mydb delete notes 019242f4aac07b8fb7e8f1bfb2c3d4e5
 ```
 
-#### `scan <namespace> [options]`
+#### `scan <collection> [options]`
 
-Scan all documents in a namespace with optional filtering, ordering, and
+Scan all documents in a collection with optional filtering, ordering, and
 pagination.
 
 | Flag                 | Description                                      |
@@ -127,9 +127,9 @@ kmdb mydb scan notes \
   --order-by updatedAt --desc --limit 20 --offset 20
 ```
 
-#### `count <namespace> [--filter <json>]`
+#### `count <collection> [--filter <json>]`
 
-Count documents in a namespace, optionally filtered.
+Count documents in a collection, optionally filtered.
 
 ```bash
 kmdb mydb count notes
@@ -142,7 +142,7 @@ kmdb mydb count notes --filter '{"field":"status","op":"eq","value":"active"}'
 
 #### `collections`
 
-List all user-visible namespaces (collections) in the database.
+List all user-visible collections in the database.
 
 ```bash
 kmdb mydb collections
@@ -168,19 +168,19 @@ kmdb mydb info
 
 ### Import / Export commands
 
-#### `export <namespace> [--output <file>]`
+#### `export <collection> [--output <file>]`
 
-Export a namespace to newline-delimited JSON (NDJSON). Writes to stdout if
+Export a collection to newline-delimited JSON (NDJSON). Writes to stdout if
 `--output` is omitted.
 
 ```bash
 kmdb mydb export notes --output notes.ndjson
 ```
 
-#### `import <namespace> [options]`
+#### `import <collection> [options]`
 
-Import NDJSON documents into a namespace. Each line must be a JSON object with a
-string `id` field. Reads from stdin if `--input` is omitted.
+Import NDJSON documents into a collection. Each line must be a JSON object with
+a string `id` field. Reads from stdin if `--input` is omitted.
 
 | Flag                   | Description                               |
 | ---------------------- | ----------------------------------------- |
@@ -194,7 +194,7 @@ kmdb mydb import notes --input notes.ndjson --on-conflict ignore
 
 #### `dump [--output <file>]`
 
-Dump the entire database (all namespaces) as NDJSON with namespace header
+Dump the entire database (all collections) as NDJSON with collection header
 comments. Writes to stdout if `--output` is omitted. The output is compatible
 with `restore`.
 
@@ -233,8 +233,8 @@ kmdb mydb compact
 
 #### `verify`
 
-Scan all documents in all namespaces and attempt to decode each one. Reports any
-documents that cannot be decoded (corrupt values).
+Scan all documents in all collections and attempt to decode each one. Reports
+any documents that cannot be decoded (corrupt values).
 
 ```bash
 kmdb mydb verify
@@ -253,11 +253,11 @@ database lock, so they are safe to run against a live database. They are
 Inspect a single SSTable file. The filename is resolved relative to the `sst/`
 subdirectory of the database directory.
 
-| Flag     | Description                                                      |
-| -------- | ---------------------------------------------------------------- |
-| _(none)_ | Summary: footer fields, Bloom filter stats, index entry count    |
-| `--full` | Adds index block references and all key/value entries            |
-| `--data` | Requires `--full`. Decodes user-namespace entry values as JSON   |
+| Flag     | Description                                                     |
+| -------- | --------------------------------------------------------------- |
+| _(none)_ | Summary: footer fields, Bloom filter stats, index entry count   |
+| `--full` | Adds index block references and all key/value entries           |
+| `--data` | Requires `--full`. Decodes user-collection entry values as JSON |
 
 ```bash
 # Summary
@@ -270,7 +270,7 @@ kmdb mydb util sstable abc123-....sst --full
 kmdb mydb util sstable abc123-....sst --full --data
 ```
 
-System-namespace entries (`$meta`, `$cache`, `$index:*`) use internal binary
+System-collection entries (`$meta`, `$cache`, `$index:*`) use internal binary
 encodings and are not decoded even with `--data`.
 
 #### `util wal <filename> [--full] [--full --data]`
@@ -278,11 +278,11 @@ encodings and are not decoded even with `--data`.
 Inspect a single WAL file. The filename is resolved relative to the database
 directory (e.g. `wal-00001.log`).
 
-| Flag     | Description                                                        |
-| -------- | ------------------------------------------------------------------ |
-| _(none)_ | Summary: record count, HLC range, distinct namespaces              |
-| `--full` | Every record with type, sequence, namespace, key, and value metadata |
-| `--data` | Requires `--full`. Decodes user-namespace `put` record values as JSON |
+| Flag     | Description                                                            |
+| -------- | ---------------------------------------------------------------------- |
+| _(none)_ | Summary: record count, HLC range, distinct collections                 |
+| `--full` | Every record with type, sequence, collection, key, and value metadata  |
+| `--data` | Requires `--full`. Decodes user-collection `put` record values as JSON |
 
 ```bash
 # Summary
@@ -295,7 +295,7 @@ kmdb mydb util wal wal-00001.log --full
 kmdb mydb util wal wal-00001.log --full --data
 ```
 
-System-namespace records (`$meta`, `$cache`, `$index:*`) use internal binary
+System-collection records (`$meta`, `$cache`, `$index:*`) use internal binary
 encodings and are not decoded even with `--data`.
 
 #### `util manifest [--full]`
@@ -303,8 +303,8 @@ encodings and are not decoded even with `--data`.
 Inspect the active Manifest file. Resolves it automatically from the `CURRENT`
 pointer in the database directory.
 
-| Flag     | Description                                              |
-| -------- | -------------------------------------------------------- |
+| Flag     | Description                                                     |
+| -------- | --------------------------------------------------------------- |
 | _(none)_ | Current level state: each level mapped to its SSTable filenames |
 | `--full` | Complete `VersionEdit` history with all added/removed entries   |
 

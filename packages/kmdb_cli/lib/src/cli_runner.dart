@@ -357,6 +357,14 @@ abstract final class KmdbCli {
     for (var ci = 0; ci < line.length; ci++) {
       final ch = line[ci];
       if (quote != null) {
+        if (ch == '\\' && ci + 1 < line.length) {
+          final next = line[ci + 1];
+          if (next == quote || next == '\\') {
+            buf.write(next);
+            ci++;
+            continue;
+          }
+        }
         if (ch == quote) {
           quote = null;
         } else {
