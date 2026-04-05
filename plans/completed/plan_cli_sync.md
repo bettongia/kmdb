@@ -1,8 +1,8 @@
 # CLI — Sync commands
 
-**Status**: Implementing
+**Status**: Complete
 
-**PR link**: {A link to the PR submitted for this plan}
+**PR link**: https://github.com/aurochs-kmesh/kmdb/pull/6
 
 ## Problem statement
 
