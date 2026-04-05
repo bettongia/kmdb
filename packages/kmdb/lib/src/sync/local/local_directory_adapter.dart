@@ -19,9 +19,9 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import '../../engine/util/xxhash.dart';
-import '../cloud/cloud_adapter.dart';
+import '../sync_storage_adapter.dart';
 
-/// A [CloudAdapter] backed by the local filesystem.
+/// A [SyncStorageAdapter] backed by the local filesystem.
 ///
 /// Suitable for use with NAS mounts, SMB/CIFS shares, locally-synced cloud
 /// folders (e.g. a Dropbox or OneDrive folder), or any directory accessible
@@ -49,7 +49,7 @@ import '../cloud/cloud_adapter.dart';
 /// final adapter = LocalDirectoryAdapter('/mnt/nas/kmdb-sync');
 /// await adapter.upload('sstables/abc.sst', bytes);
 /// ```
-final class LocalDirectoryAdapter implements CloudAdapter {
+final class LocalDirectoryAdapter implements SyncStorageAdapter {
   /// Creates a [LocalDirectoryAdapter] rooted at [rootPath].
   ///
   /// [rootPath] is the base directory for all remote paths. It is created if

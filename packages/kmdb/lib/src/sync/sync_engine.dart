@@ -17,7 +17,7 @@ import '../engine/platform/storage_adapter_interface.dart';
 import '../engine/sstable/sstable_info.dart';
 import '../engine/sstable/sstable_reader.dart';
 import '../engine/util/hlc.dart';
-import 'cloud/cloud_adapter.dart';
+import 'sync_storage_adapter.dart';
 import 'consolidation_config.dart';
 import 'consolidation_coordinator.dart';
 import 'highwater.dart';
@@ -88,7 +88,7 @@ final class SyncEngine {
   /// always excluded).
   SyncEngine({
     required KvStore store,
-    required CloudAdapter cloudAdapter,
+    required SyncStorageAdapter cloudAdapter,
     required StorageAdapter localAdapter,
     required String deviceId,
     required String dbDir,
@@ -105,7 +105,7 @@ final class SyncEngine {
        _consolidationConfig = consolidationConfig;
 
   final KvStore _store;
-  final CloudAdapter _cloudAdapter;
+  final SyncStorageAdapter _cloudAdapter;
   final StorageAdapter _localAdapter;
   final String _deviceId;
   final String _dbDir;
