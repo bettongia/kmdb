@@ -32,6 +32,10 @@ import 'commands/info_command.dart';
 import 'commands/restore_command.dart';
 import 'commands/scan_command.dart';
 import 'commands/stats_command.dart';
+import 'commands/pull_command.dart';
+import 'commands/push_command.dart';
+import 'commands/remote_command.dart';
+import 'commands/sync_command.dart';
 import 'commands/util_command.dart';
 import 'commands/verify_command.dart';
 import 'database_opener.dart';
@@ -59,6 +63,10 @@ final _commands = <String, CliCommand>{
     const CompactCommand(),
     const VerifyCommand(),
     const UtilCommand(),
+    const RemoteCommand(),
+    const PushCommand(),
+    const PullCommand(),
+    const SyncCommand(),
   ])
     cmd.name: cmd,
 };
@@ -425,6 +433,14 @@ Commands:
     flush
     compact
     verify
+
+  Sync:
+    remote add <name> --path <path>  Add a named sync remote
+    remote remove <name>             Remove a named sync remote
+    remote list                      List all sync remotes
+    push [<remote>] [--sync-dir <path>]   Push local SSTables to sync folder
+    pull [<remote>] [--sync-dir <path>]   Pull peer SSTables from sync folder
+    sync [<remote>] [--sync-dir <path>]   Push then pull
 
   Diagnostics:
     util sstable <filename>          Inspect SSTable file

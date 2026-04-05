@@ -21,13 +21,29 @@ import 'package:kmdb/kmdb.dart';
 /// plain [Map<String, dynamic>] via the engine's [ValueCodec].
 ///
 /// The device ID is loaded from (or generated into) `$meta` so CLI writes are
-/// attributed to the same device across sessions.
+/// attributed to the same device across sessions. Crucially, the engine is
+/// opened with the stored device ID so that SSTable filenames are consistent
+/// with the device identity used by [SyncEngine].
 abstract final class DatabaseOpener {
   DatabaseOpener._();
 
   /// Opens the database at [dbPath] and returns the underlying [KvStoreImpl].
   ///
   /// Creates the directory if it does not exist.
+  ///
+  /// The first open of a fresh database generates a new device ID and stores it
+  /// in `$meta`. On every subsequent open, the stored device ID is loaded and
+  /// used to name SSTables, ensuring consistent device identity across CLI
+  /// sessions and compatibility with [SyncEngine].
+  ///
+  /// ## Two-phase open
+  ///
+  /// To correctly initialise the engine device ID:
+  ///
+  /// 1. Open with the default device ID (`'00000000'`).
+  /// 2. Load (or generate) the stable device ID from `$meta`.
+  /// 3. If the device ID differs from the default, reopen with the correct ID
+  ///    so all subsequent SSTable writes use the stable identity.
   ///
   /// Throws [LockException] if another process has the database open.
   /// Throws [ArgumentError] if [dbPath] is empty.
@@ -43,10 +59,31 @@ abstract final class DatabaseOpener {
     final adapter = StorageAdapterNative();
     await adapter.createDirectory(dbPath);
 
-    final (store, _) = await KvStoreImpl.open(dbPath, adapter);
+    // Phase 1: open with the default device ID.
+    var (store, _) = await KvStoreImpl.open(dbPath, adapter);
 
-    // Ensure a stable device ID is set in $meta (generates one on first open).
-    await store.ensureDeviceId();
+    // Load (or generate) the stable device ID.  On first open this generates
+    // and persists a new 8-character hex ID; on subsequent opens it returns
+    // the previously stored value.
+    final deviceId = await store.ensureDeviceId();
+
+    // Phase 2: if the stored device ID differs from the default, close and
+    // reopen so the LSM engine uses the correct ID for all future SSTable
+    // names.  This ensures SyncEngine.push() can match local SSTables against
+    // the device identity exposed by storeInfo().
+    const defaultDeviceId = '00000000';
+    if (deviceId != defaultDeviceId) {
+      // Close without flushing — the WAL records the writes from phase 1
+      // (i.e. the ensureDeviceId write) and will be replayed on reopen.
+      await store.close(flush: false);
+
+      final result = await KvStoreImpl.open(
+        dbPath,
+        adapter,
+        deviceId: deviceId,
+      );
+      store = result.$1;
+    }
 
     return store;
   }

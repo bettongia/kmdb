@@ -42,10 +42,7 @@ void main() {
 
   test('upload creates intermediate directories', () async {
     await adapter.upload('a/b/c/file.bin', Uint8List.fromList([9]));
-    expect(
-      File('${tempDir.path}/a/b/c/file.bin').existsSync(),
-      isTrue,
-    );
+    expect(File('${tempDir.path}/a/b/c/file.bin').existsSync(), isTrue);
   });
 
   test('download returns null for missing file', () async {
@@ -130,15 +127,17 @@ void main() {
     expect(etag1, isNot(equals(etag2)));
   });
 
-  test('getEtag differs for files that are the same size but different content',
-      () async {
-    // Regression: a file-size based approach would return equal ETags here.
-    await adapter.upload('f', Uint8List.fromList([0x00]));
-    final etag1 = await adapter.getEtag('f');
-    await adapter.upload('f', Uint8List.fromList([0xff]));
-    final etag2 = await adapter.getEtag('f');
-    expect(etag1, isNot(equals(etag2)));
-  });
+  test(
+    'getEtag differs for files that are the same size but different content',
+    () async {
+      // Regression: a file-size based approach would return equal ETags here.
+      await adapter.upload('f', Uint8List.fromList([0x00]));
+      final etag1 = await adapter.getEtag('f');
+      await adapter.upload('f', Uint8List.fromList([0xff]));
+      final etag2 = await adapter.getEtag('f');
+      expect(etag1, isNot(equals(etag2)));
+    },
+  );
 
   test('getEtag returns null after delete', () async {
     await adapter.upload('f', Uint8List(1));
@@ -162,20 +161,17 @@ void main() {
     },
   );
 
-  test(
-    'compareAndSwap with null ifMatchEtag fails when file exists',
-    () async {
-      await adapter.upload('f', Uint8List.fromList([1]));
-      final result = await adapter.compareAndSwap(
-        'f',
-        Uint8List.fromList([2]),
-        ifMatchEtag: null,
-      );
-      expect(result, isFalse);
-      // Original content is unchanged.
-      expect(await adapter.download('f'), equals(Uint8List.fromList([1])));
-    },
-  );
+  test('compareAndSwap with null ifMatchEtag fails when file exists', () async {
+    await adapter.upload('f', Uint8List.fromList([1]));
+    final result = await adapter.compareAndSwap(
+      'f',
+      Uint8List.fromList([2]),
+      ifMatchEtag: null,
+    );
+    expect(result, isFalse);
+    // Original content is unchanged.
+    expect(await adapter.download('f'), equals(Uint8List.fromList([1])));
+  });
 
   test(
     'compareAndSwap with null ifMatchEtag creates parent directories',
@@ -186,10 +182,7 @@ void main() {
         ifMatchEtag: null,
       );
       expect(result, isTrue);
-      expect(
-        File('${tempDir.path}/deep/nested/f').existsSync(),
-        isTrue,
-      );
+      expect(File('${tempDir.path}/deep/nested/f').existsSync(), isTrue);
     },
   );
 

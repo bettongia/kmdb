@@ -63,9 +63,8 @@ Device-local storage only. Never shared with any other device. Contains:
   sst/
     {deviceId}-{minHlc}-{maxHlc}.sst        ← locally-produced SSTables
     {otherDeviceId}-{minHlc}-{maxHlc}.sst   ← SSTables ingested from peers
-  sync/
-    outbox/                   ← SSTables staged for upload
-    inbox/                    ← downloaded remote SSTables awaiting ingestion
+  local/
+    config.json               ← CLI-only: named sync remotes (never synced)
 ```
 
 The local database directory is protected by an exclusive file lock

@@ -150,7 +150,13 @@ identifies which consolidation round produced the file.
   wal-00001.log
   sst/
     {deviceId}-{minHlc}-{maxHlc}.sst
+  local/
+    config.json             ← CLI-only: named sync remotes
 ```
+
+The `local/` subdirectory holds per-machine, non-synced CLI state. It is
+created lazily on first `remote add` and is never uploaded or read by
+`SyncEngine`.
 
 ### Sync Folder Layout
 
