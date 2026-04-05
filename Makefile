@@ -19,7 +19,7 @@ prepare:
 test: test.log cli_test.log
 
 test.log: $(KMDB_PKG)/**/*.dart
-	melos test --scope=kmdb | tee cli_test.log
+	melos test --scope=kmdb | tee test.log
 
 cli_test: cli_test.log
 
@@ -92,6 +92,7 @@ $(KMDB_CLI_PKG)/**/*.dart:
 
 clean:
 	rm -rf site
-	rm e2e_test.log
-	rm test.log
-	rm cli_test.log
+	rm -f e2e_test.log
+	rm -f test.log
+	rm -f cli_test.log
+	rm -f coverage.log

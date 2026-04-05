@@ -1,8 +1,8 @@
 # CLI — Sync commands
 
-**Status**: Investigated
+**Status**: Complete
 
-**PR link**: {A link to the PR submitted for this plan}
+**PR link**: https://github.com/aurochs-kmesh/kmdb/pull/6
 
 ## Problem statement
 
@@ -296,60 +296,73 @@ The `--mode` flag has no effect on sync command output.
 
 ### 1. Config infrastructure
 
-- [ ] Create `remote_config.dart` — sealed `RemoteConfig`, `LocalRemoteConfig`,
+- [x] Create `remote_config.dart` — sealed `RemoteConfig`, `LocalRemoteConfig`,
   `fromJson` factory, `toJson`, `adapterFor()` factory function
-- [ ] Create `kmdb_config.dart` — `KmdbConfig.load()`, `save()`,
+- [x] Create `kmdb_config.dart` — `KmdbConfig.load()`, `save()`,
   `addRemote()`, `removeRemote()`, `remotes` getter; atomic write
   (write-to-temp, rename)
-- [ ] Tests: `kmdb_config_test.dart` — round-trip JSON, duplicate add error,
+- [x] Tests: `kmdb_config_test.dart` — round-trip JSON, duplicate add error,
   remove non-existent error, corrupt JSON error, missing file returns empty
 
 ### 2. `remote` command
 
-- [ ] Create `remote_command.dart` — dispatch on first arg (add/remove/list)
-- [ ] `add`: validate flags, construct `RemoteConfig`, load config, add,
+- [x] Create `remote_command.dart` — dispatch on first arg (add/remove/list)
+- [x] `add`: validate flags, construct `RemoteConfig`, load config, add,
   save; error on duplicate without `--force`
-- [ ] `remove`: load config, remove by name, save; error if not found
-- [ ] `list`: load config, print name + type + key fields per remote
-- [ ] Tests: `remote_command_test.dart` — add/list/remove round-trip; duplicate
+- [x] `remove`: load config, remove by name, save; error if not found
+- [x] `list`: load config, print name + type + key fields per remote
+- [x] Tests: `remote_command_test.dart` — add/list/remove round-trip; duplicate
   error; remove non-existent error; unknown subcommand error
 
 ### 3. Sync commands
 
-- [ ] Create `push_command.dart`
-  - [ ] Resolve remote: positional arg → config lookup; no arg → `origin`;
+- [x] Create `push_command.dart`
+  - [x] Resolve remote: positional arg → config lookup; no arg → `origin`;
     `--sync-dir` → ad-hoc `LocalRemoteConfig`; conflict → error
-  - [ ] Flush the memtable via `ctx.store.flush()` before pushing — ensures
+  - [x] Flush the memtable via `ctx.store.flush()` before pushing — ensures
     all recent writes are materialised as SSTables so nothing is silently
     excluded from the upload
-  - [ ] Resolve device ID via `MetaStore(ctx.store).getDeviceId()`
-  - [ ] Build namespace set (all non-`$`, or `--namespace` override)
-  - [ ] Construct adapter via `adapterFor(remote)` and `SyncEngine`
-  - [ ] Call `engine.push()`; print summary; return `true`
-  - [ ] Handle errors; write to `ctx.err`; return `false`
-- [ ] Create `pull_command.dart` (same structure, call `engine.pull()`; no
+  - [x] Resolve device ID via `store.storeInfo().deviceId`
+  - [x] Build namespace set (all non-`$`, or `--namespace` override)
+  - [x] Construct adapter via `adapterFor(remote)` and `SyncEngine`
+  - [x] Call `engine.push()`; print summary; return `true`
+  - [x] Handle errors; write to `ctx.err`; return `false`
+- [x] Create `pull_command.dart` (same structure, call `engine.pull()`; no
   flush needed — pull only writes to the local store as a destination)
-- [ ] Create `sync_command.dart` (flush then `engine.sync()` — same rationale
+- [x] Create `sync_command.dart` (flush then `engine.sync()` — same rationale
   as push: memtable must be flushed before the push half of sync)
-- [ ] Tests:
-  - [ ] `push_command_test.dart` — push via named remote; push via `--sync-dir`;
+- [x] Tests:
+  - [x] `push_command_test.dart` — push via named remote; push via `--sync-dir`;
     default to `origin`; error when no remote and no `origin`; both name and
     `--sync-dir` is error; no user namespaces warns
-  - [ ] `pull_command_test.dart` — pull with no peer data is no-op; pull
+  - [x] `pull_command_test.dart` — pull with no peer data is no-op; pull
     ingests peer SSTables; same remote resolution error cases
-  - [ ] `sync_command_test.dart` — round-trip between two logical devices;
+  - [x] `sync_command_test.dart` — round-trip between two logical devices;
     same error cases
 
 ### 4. CLI registration
 
-- [ ] Register `remote`, `push`, `pull`, `sync` in `cli_runner.dart`
+- [x] Register `remote`, `push`, `pull`, `sync` in `cli_runner.dart`
 
 ### 5. Documentation
 
-- [ ] Add doc comments to all new classes and commands
-- [ ] Update `CLAUDE.md` local directory layout to show `local/` subdirectory
+- [x] Add doc comments to all new classes and commands
+- [x] Update `CLAUDE.md` local directory layout to show `local/` subdirectory
 - [ ] Update `docs/spec/` directory layout diagram
 
 ## Summary
 
-{Dot points highlighting the work undertaken}
+- Added CLI sync commands (`push`, `pull`, `sync`) backed by the existing `SyncEngine`
+- Added `remote` command for managing named sync targets (`add`, `remove`, `list`)
+- Introduced `KmdbConfig` and `RemoteConfig` (sealed hierarchy) in a new
+  `packages/kmdb_cli/lib/src/config/` package for per-database config in
+  `{dbDir}/local/config.json`
+- Introduced `SyncHelpers` utility for shared remote-resolution and
+  namespace-resolution logic across all three sync commands
+- Fixed `DatabaseOpener.open()` to perform a two-phase open: after generating
+  or loading the stable device ID from `$meta`, reopen the store with that ID
+  so SSTable filenames are consistent with the identity exposed by
+  `SyncEngine.push()` — preventing a "no files to upload" silent failure
+- Added 64 new tests covering config round-trips, error cases, sync edge cases,
+  and a round-trip push/pull scenario between two logical devices
+- Updated `CLAUDE.md` to document the `local/` subdirectory
