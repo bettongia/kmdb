@@ -1,0 +1,2 @@
+put categories --value '{"name":"Work"}'
+put categories --value '{"name":"Personal"}'
