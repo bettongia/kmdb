@@ -15,4 +15,5 @@
 // Compatibility re-export. The interface was renamed to SyncStorageAdapter
 // and moved to lib/src/sync/sync_storage_adapter.dart.
 // ignore: uri_does_not_exist
-export '../sync_storage_adapter.dart' show SyncStorageAdapter, LockConflictException;
+export '../sync_storage_adapter.dart'
+    show SyncStorageAdapter, LockConflictException;
