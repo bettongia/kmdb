@@ -90,7 +90,9 @@ kmdb/
    storage_adapter_web.dart
    storage_adapter_stub.dart
    cloud/
-    cloud_adapter.dart      # Abstract google_drive_adapter.dart icloud_adapter.dart
+    sync_storage_adapter.dart  # Abstract (SyncStorageAdapter interface)
+    cloud/
+     google_drive_adapter.dart icloud_adapter.dart  # Cloud implementations
 hook/
  build.dart                    # Native build hooks
 ```

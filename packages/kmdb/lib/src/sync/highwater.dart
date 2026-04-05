@@ -16,7 +16,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import '../engine/util/hlc.dart';
-import 'cloud/cloud_adapter.dart';
+import 'sync_storage_adapter.dart';
 
 /// Per-device high-water mark (HWM) persisted in the sync folder.
 ///
@@ -81,7 +81,7 @@ final class HighwaterMark {
   /// Returns `null` if no HWM file exists for this device yet (i.e. first
   /// push from this device). Throws [FormatException] if the file exists but
   /// cannot be parsed.
-  static Future<HighwaterMark?> load(String path, CloudAdapter adapter) async {
+  static Future<HighwaterMark?> load(String path, SyncStorageAdapter adapter) async {
     final bytes = await adapter.download(path);
     if (bytes == null) return null;
     return _parse(bytes, path);
@@ -90,7 +90,7 @@ final class HighwaterMark {
   // ── Persistence ───────────────────────────────────────────────────────────
 
   /// Serialises this HWM to JSON and uploads it to [path] via [adapter].
-  Future<void> save(String path, CloudAdapter adapter) async {
+  Future<void> save(String path, SyncStorageAdapter adapter) async {
     final map = {
       'deviceId': deviceId,
       'currentHlc': currentHlc.toPhysicalHex(),

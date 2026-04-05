@@ -39,7 +39,7 @@ Consider encryption at the value level in the KV store. This will need to be ver
 Directly connect to Google Drive for storing sync objects such as the SSTables etc. It's likely that the Encryption roadmap item should be combined with this.
 
 - Drive REST API + `If-Match` ETag
-- `GcsAdapter` (GCS JSON API), implements `CloudAdapter`
+- `GcsAdapter` (GCS JSON API), implements `SyncStorageAdapter`
 - Each adapter lives under `lib/src/sync/cloud/`.
 
 # Cloud Adapter: Apple iCloud (low priority)
@@ -47,7 +47,7 @@ Directly connect to Google Drive for storing sync objects such as the SSTables e
 Directly connect to iCloud for storing sync objects such as the SSTables etc.
 
 - Each adapter lives under `lib/src/sync/cloud/`.
-- `ICloudAdapter` (CloudKit record change tags)
+- `ICloudAdapter` (CloudKit record change tags), implements `SyncStorageAdapter`
 
 # Cloud Adapter: Google Cloud Storage (low priority)
 

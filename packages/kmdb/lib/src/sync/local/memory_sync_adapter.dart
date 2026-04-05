@@ -14,9 +14,9 @@
 
 import 'dart:typed_data';
 
-import '../cloud/cloud_adapter.dart';
+import '../sync_storage_adapter.dart';
 
-/// In-memory [CloudAdapter] for tests.
+/// In-memory [SyncStorageAdapter] for tests.
 ///
 /// All file contents live in a [Map] keyed by full remote path. Operations are
 /// synchronous internally — [Future]s complete in the same microtask.
@@ -39,7 +39,7 @@ import '../cloud/cloud_adapter.dart';
 /// await adapter.upload('sync/sstables/a.sst', bytes);
 /// final files = await adapter.list('sync/sstables', extension: '.sst');
 /// ```
-final class MemorySyncAdapter implements CloudAdapter {
+final class MemorySyncAdapter implements SyncStorageAdapter {
   /// Creates an empty [MemorySyncAdapter].
   MemorySyncAdapter();
 

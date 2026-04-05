@@ -22,7 +22,7 @@ import '../engine/sstable/sstable_reader.dart';
 import '../engine/sstable/sstable_writer.dart';
 import '../engine/util/hlc.dart';
 import '../engine/util/key_codec.dart';
-import 'cloud/cloud_adapter.dart';
+import 'sync_storage_adapter.dart';
 import 'consolidation_config.dart';
 
 /// The lease state machine states for consolidation coordination.
@@ -188,7 +188,7 @@ final class ConsolidationCoordinator {
   final String deviceId;
 
   /// Cloud adapter for accessing the sync folder.
-  final CloudAdapter cloudAdapter;
+  final SyncStorageAdapter cloudAdapter;
 
   /// Local storage adapter (used to write intermediate files if needed).
   final StorageAdapter localAdapter;
