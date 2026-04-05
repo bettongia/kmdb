@@ -45,6 +45,8 @@ export 'src/sync/consolidation_config.dart' show ConsolidationConfig;
 export 'src/sync/sync_storage_adapter.dart'
     show SyncStorageAdapter, LockConflictException;
 export 'src/sync/local/memory_sync_adapter.dart' show MemorySyncAdapter;
+export 'src/sync/local/local_directory_adapter.dart'
+    show LocalDirectoryAdapter;
 
 // ── Value encoding ────────────────────────────────────────────────────────────
 export 'src/encoding/value_codec.dart' show ValueCodec;
