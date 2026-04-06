@@ -248,6 +248,44 @@ dart run ../../bin/kmdb.dart syncdb_3 scan notes
 dart run ../../bin/kmdb.dart syncdb_4 scan notes
 ```
 
+### A note about Copying the database directory
+
+```sh
+dart run ../../bin/kmdb.dart copydb_og put notes --value '{"title": "Original note"}'
+dart run ../../bin/kmdb.dart copydb_og scan notes
+
+# Use the filesystem to copy the database directory:
+cp -R copydb_og copydb_copy
+
+# We should see the original note:
+dart run ../../bin/kmdb.dart copydb_copy scan notes
+
+dart run ../../bin/kmdb.dart copydb_og info | jq '.deviceId'
+dart run ../../bin/kmdb.dart copydb_copy info | jq '.deviceId'
+
+# Configure a remote
+dart run ../../bin/kmdb.dart copydb_og remote add origin --path $PWD/remote_mount/copydb_sync
+dart run ../../bin/kmdb.dart copydb_copy remote add origin --path $PWD/remote_mount/copydb_sync
+
+# When you now sync you'll see that it looks like the data is from the same deviceId
+dart run ../../bin/kmdb.dart copydb_og sync
+dart run ../../bin/kmdb.dart copydb_copy sync
+
+# So create a new note and sync it
+dart run ../../bin/kmdb.dart copydb_og put notes --value '{"title": "Original note - the sequel"}'
+dart run ../../bin/kmdb.dart copydb_og scan notes
+dart run ../../bin/kmdb.dart copydb_og sync
+
+# Sync to the copy
+dart run ../../bin/kmdb.dart copydb_copy sync
+
+# The scan unfortunately displays only 1 note:
+dart run ../../bin/kmdb.dart copydb_copy scan notes
+```
+
+The issue is that `copydb_copy` has the same deviceId and kmdb gets a bit
+confused.
+
 ## Management
 
 Some handy database management utilities:
@@ -267,6 +305,7 @@ To delete the database, just run:
 ```sh
 rm -rf demodb*
 rm -rf syncdb*
+rm -rf copydb*
 rm -rf remote_mount
 ```
 
