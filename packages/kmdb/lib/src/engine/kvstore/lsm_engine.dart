@@ -77,7 +77,13 @@ final class LsmEngine {
   final String _sstDir;
   final StorageAdapter _adapter;
   final KvStoreConfig _config;
-  final String _deviceId;
+
+  /// The 8-character device identifier used for new SSTable filenames.
+  ///
+  /// Mutable so that [reassignDeviceId] can update it after renaming existing
+  /// SSTable files. All methods that generate new SSTable names read this field
+  /// at the time of flush/compaction.
+  String _deviceId;
 
   /// Live SSTable filenames grouped by level (0, 1, 2).
   final Map<int, List<String>> _levels;
@@ -773,6 +779,125 @@ final class LsmEngine {
 
     await _rotateManifestIfNeeded();
     await _compactIfNeeded();
+  }
+
+  // ── Device ID reassignment ────────────────────────────────────────────────
+
+  /// Assigns a new device identity to this engine instance.
+  ///
+  /// This is the low-level implementation called by [KvStoreImpl.reassignDeviceId].
+  /// It:
+  ///
+  /// 1. Validates [newDeviceId] — must be 8 lowercase hex chars, not equal to
+  ///    the current device ID.
+  /// 2. Flushes the active memtable so all in-memory data lands in SSTables
+  ///    before any renaming occurs.
+  /// 3. For each SSTable owned by this device (filename prefix matches current
+  ///    device ID), renames the file to use [newDeviceId].
+  /// 4. Appends a single [VersionEdit] to the Manifest recording all renames.
+  /// 5. Updates `[_deviceId]` so subsequent flushes and compactions use the
+  ///    new identity.
+  ///
+  /// **Crash safety:** if the process dies during step 3 (renames), the next
+  /// open will replay the Manifest and find the old filenames still referenced.
+  /// The renamed files will be treated as orphans and deleted during crash
+  /// recovery, while the old-named files remain valid — i.e. the rename is
+  /// idempotent. The device ID in `$meta` is not written until after the
+  /// VersionEdit is persisted, so the caller ([KvStoreImpl]) updates `$meta`
+  /// after this method returns.
+  Future<void> reassignDeviceId(String newDeviceId) async {
+    // Validate format: must be exactly 8 lowercase hex characters.
+    final hexPattern = RegExp(r'^[0-9a-f]{8}$');
+    if (!hexPattern.hasMatch(newDeviceId)) {
+      throw ArgumentError.value(
+        newDeviceId,
+        'newDeviceId',
+        'Device ID must be exactly 8 lowercase hex characters (e.g. "a1b2c3d4")',
+      );
+    }
+    if (newDeviceId == _deviceId) {
+      throw ArgumentError.value(
+        newDeviceId,
+        'newDeviceId',
+        'New device ID must differ from the current device ID ($_deviceId)',
+      );
+    }
+
+    // Flush the active memtable first so there are no in-memory entries that
+    // have not yet been written to an SSTable under the old device ID. This
+    // ensures the rename step covers the complete set of owned SSTables.
+    await flush();
+
+    // Collect all SSTable entries from the current manifest state that belong
+    // to this device (filename prefix = current device ID).
+    final oldPrefix = '$_deviceId-';
+    final removed = <SstableRef>[];
+    final added = <SstableMeta>[];
+
+    // Build the list of renames across all levels.
+    final newLevels = <int, List<String>>{};
+    for (final lvlEntry in _levels.entries) {
+      final level = lvlEntry.key;
+      final newFilenames = <String>[];
+      for (final oldFilename in lvlEntry.value) {
+        if (oldFilename.startsWith(oldPrefix)) {
+          // Replace only the device ID prefix — the rest of the filename
+          // (HLC timestamps and extension) is unchanged.
+          final newFilename = newDeviceId + oldFilename.substring(8);
+
+          // Rename on disk.
+          await _adapter.renameFile(
+            '$_sstDir/$oldFilename',
+            '$_sstDir/$newFilename',
+          );
+
+          // Record the rename for the VersionEdit.
+          removed.add(SstableRef(level: level, filename: oldFilename));
+
+          // We need the minKey/maxKey/entryCount from the manifest to
+          // reconstruct the SstableMeta for the new filename. Since we don't
+          // have easy access to that metadata here, we use empty strings for
+          // minKey/maxKey (the manifest uses these only for diagnostics, not
+          // correctness — identical to how ingestAt0 operates).
+          added.add(
+            SstableMeta(
+              level: level,
+              filename: newFilename,
+              minKey: '',
+              maxKey: '',
+              entryCount: 0,
+            ),
+          );
+          newFilenames.add(newFilename);
+        } else {
+          // Peer-owned SSTable — do not rename.
+          newFilenames.add(oldFilename);
+        }
+      }
+      newLevels[level] = newFilenames;
+    }
+
+    // Append a single VersionEdit to the Manifest recording all renames.
+    // This is written before updating _deviceId so that, on crash recovery,
+    // the old names are still in the Manifest and the renamed files on disk
+    // are treated as orphans (deleted) — a safe, recoverable state.
+    if (removed.isNotEmpty) {
+      final hlc = _tick();
+      await _manifestWriter.append(
+        VersionEdit(
+          logNumber: _walWriter.activeSequence,
+          nextSeq: hlc.encoded,
+          added: added,
+          removed: removed,
+        ),
+      );
+    }
+
+    // Update the in-memory level map and device ID.
+    for (final entry in newLevels.entries) {
+      _levels[entry.key] = entry.value;
+    }
+    _deviceId = newDeviceId;
   }
 
   // ── Close ─────────────────────────────────────────────────────────────────

@@ -30,6 +30,7 @@ import 'commands/import_command.dart';
 import 'commands/put_command.dart';
 import 'commands/info_command.dart';
 import 'commands/init_command.dart';
+import 'commands/new_device_id_command.dart';
 import 'commands/restore_command.dart';
 import 'commands/scan_command.dart';
 import 'commands/stats_command.dart';
@@ -64,6 +65,7 @@ final _commands = <String, CliCommand>{
     const FlushCommand(),
     const CompactCommand(),
     const VerifyCommand(),
+    const NewDeviceIdCommand(),
     const UtilCommand(),
     const RemoteCommand(),
     const PushCommand(),
@@ -453,6 +455,7 @@ Commands:
     flush
     compact
     verify
+    new-device-id
 
   Sync:
     remote add <name> --path <path>  Add a named sync remote
