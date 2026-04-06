@@ -2,6 +2,7 @@
 
 demodb*
 syncdb*
+copydb*
 *.export
 *.dump
 remote_mount
