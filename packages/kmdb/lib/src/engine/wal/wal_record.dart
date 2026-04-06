@@ -69,7 +69,7 @@ enum WalRecordType {
 /// ```
 ///
 /// The checksum covers all bytes after the 8-byte checksum field.
-/// [FlushMarker] records omit the namespace, key, and value fields.
+/// [WalRecordType.flushMarker] records omit the namespace, key, and value fields.
 final class WalRecord {
   const WalRecord({
     required this.type,

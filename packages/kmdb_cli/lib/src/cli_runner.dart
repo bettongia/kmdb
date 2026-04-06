@@ -45,6 +45,8 @@ import 'commands/verify_command.dart';
 import 'database_opener.dart';
 import 'output/output_mode.dart';
 
+/// @docImport 'commands/command.dart';
+
 /// Version string shown by `--version`.
 const _kVersion = '0.1.0';
 

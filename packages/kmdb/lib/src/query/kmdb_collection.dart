@@ -70,7 +70,7 @@ final class KmdbCollection<T> {
 
   /// The unique storage identifier for this collection in the LSM engine.
   ///
-  /// This is the namespace passed as [name] to [KmdbDatabase.collection]. It
+  /// This is the namespace passed as `name` to [KmdbDatabase.collection]. It
   /// serves as the low-level partition key in the storage engine. System
   /// namespaces (e.g. `$meta`, `$index:…`, `$cache`) are internal and are
   /// never surfaced as user collections.
@@ -92,7 +92,7 @@ final class KmdbCollection<T> {
   /// Returns the document with [key], or `null` if it does not exist.
   ///
   /// Uses the Cache Layer for cache-aware reads. The framework injects
-  /// `_id: key` into the decoded map before calling [codec.decode], so
+  /// `_id: key` into the decoded map before calling [KmdbCodec.decode], so
   /// implementations can read `json['_id']` to reconstruct the typed model's
   /// key field.
   Future<T?> get(String key) async {
@@ -154,7 +154,7 @@ final class KmdbCollection<T> {
   /// Inserts [value] as a new document.
   ///
   /// Assigns a new system-generated UUIDv7 key to the document via
-  /// [codec.withKey].
+  /// [KmdbCodec.withKey].
   ///
   /// Returns the updated document with its assigned key.
   ///
@@ -177,7 +177,7 @@ final class KmdbCollection<T> {
 
   /// Replaces the document with the same key as [value].
   ///
-  /// The key returned by [codec.keyOf] must be a valid UUIDv7 hex string.
+  /// The key returned by [KmdbCodec.keyOf] must be a valid UUIDv7 hex string.
   /// Throws [DocumentNotFoundException] if no document with that key exists.
   Future<void> replace(T value) async {
     final key = codec.keyOf(value);
@@ -191,7 +191,7 @@ final class KmdbCollection<T> {
 
   /// Upserts [value] — inserts if absent, replaces if present.
   ///
-  /// The key returned by [codec.keyOf] must be a valid UUIDv7 hex string.
+  /// The key returned by [KmdbCodec.keyOf] must be a valid UUIDv7 hex string.
   Future<void> put(T value) async {
     final key = codec.keyOf(value);
     final existingBytes = await _db.cache.get(namespace, key);

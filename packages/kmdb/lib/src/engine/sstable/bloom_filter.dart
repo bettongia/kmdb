@@ -51,7 +51,7 @@ final class BloomFilter {
 
   /// Default number of hash probes per key.
   ///
-  /// Derived from `bitsPerKey * ln(2) ≈ bitsPerKey * 0.693`. Clamped to [1, 30].
+  /// Derived from `bitsPerKey * ln(2) ≈ bitsPerKey * 0.693`. Clamped to `[1, 30]`.
   static const int defaultHashCount = 7;
 
   // ── Factory constructors ──────────────────────────────────────────────────

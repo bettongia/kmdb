@@ -22,3 +22,4 @@ packages/**/doc
 packages/kmdb_cli/bin/kmdb*.exe
 *_test.log
 cli_e2e_test.log
+doc/
