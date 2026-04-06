@@ -13,18 +13,24 @@
 // limitations under the License.
 
 import 'dart:convert';
-import 'dart:io' as io;
 
 import 'package:kmdb/kmdb.dart';
 
 import 'command.dart';
 
-/// Dumps the entire database as NDJSON to stdout or a file.
+/// Dumps the entire database as NDJSON.
 ///
 /// Each collection is preceded by a header comment line:
 /// `# collection: <name>`
 ///
-/// Usage: `kmdb <db> dump [--output <file>]`
+/// Output is written to [CommandContext.out]. To redirect to a file, use the
+/// global `--output <file>` flag:
+///
+/// ```
+/// kmdb mydb --output backup.ndjson dump
+/// ```
+///
+/// Usage: `kmdb <db> dump`
 final class DumpCommand implements CliCommand {
   const DumpCommand();
 
@@ -35,7 +41,7 @@ final class DumpCommand implements CliCommand {
   String get description => 'Dump all collections to NDJSON.';
 
   @override
-  String get usage => 'dump [--output <file>]';
+  String get usage => 'dump';
 
   @override
   Future<bool> execute(
@@ -43,32 +49,14 @@ final class DumpCommand implements CliCommand {
     List<String> args,
     Map<String, dynamic> flags,
   ) async {
-    final outputPath = flags['output'] as String?;
-    final io.IOSink sink = outputPath != null
-        ? io.File(outputPath).openWrite()
-        : io.stdout;
-
     const enc = JsonEncoder();
-    var total = 0;
-    try {
-      final collections = await ctx.store.listNamespaces();
-      for (final coll in collections) {
-        sink.writeln('# collection: $coll');
-        await for (final entry in ctx.store.scan(coll)) {
-          final doc = ValueCodec.decode(entry.value);
-          sink.writeln(enc.convert(doc));
-          total++;
-        }
+    final collections = await ctx.store.listNamespaces();
+    for (final coll in collections) {
+      ctx.out.writeln('# collection: $coll');
+      await for (final entry in ctx.store.scan(coll)) {
+        final doc = ValueCodec.decode(entry.value);
+        ctx.out.writeln(enc.convert(doc));
       }
-    } finally {
-      if (outputPath != null) {
-        await sink.flush();
-        await sink.close();
-      }
-    }
-
-    if (outputPath != null) {
-      ctx.writeValue({'dumped': total, 'file': outputPath});
     }
     return true;
   }

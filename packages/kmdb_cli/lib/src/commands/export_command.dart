@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import 'dart:convert';
-import 'dart:io' as io;
 
 import 'package:kmdb/kmdb.dart';
 
@@ -21,7 +20,14 @@ import 'command.dart';
 
 /// Exports a collection to newline-delimited JSON (NDJSON).
 ///
-/// Usage: `kmdb <db> export <collection> [--output <file>]`
+/// Output is written to [CommandContext.out]. To redirect to a file, use the
+/// global `--output <file>` flag:
+///
+/// ```
+/// kmdb mydb --output backup.ndjson export notes
+/// ```
+///
+/// Usage: `kmdb <db> export <collection>`
 final class ExportCommand implements CliCommand {
   const ExportCommand();
 
@@ -32,7 +38,7 @@ final class ExportCommand implements CliCommand {
   String get description => 'Export a collection to NDJSON.';
 
   @override
-  String get usage => 'export <collection> [--output <file>]';
+  String get usage => 'export <collection>';
 
   @override
   Future<bool> execute(
@@ -45,29 +51,11 @@ final class ExportCommand implements CliCommand {
       return false;
     }
     final collection = args[0];
-    final outputPath = flags['output'] as String?;
-
-    final io.IOSink sink = outputPath != null
-        ? io.File(outputPath).openWrite()
-        : io.stdout;
 
     const enc = JsonEncoder();
-    var count = 0;
-    try {
-      await for (final entry in ctx.store.scan(collection)) {
-        final doc = ValueCodec.decode(entry.value);
-        sink.writeln(enc.convert(doc));
-        count++;
-      }
-    } finally {
-      if (outputPath != null) {
-        await sink.flush();
-        await sink.close();
-      }
-    }
-
-    if (outputPath != null) {
-      ctx.writeValue({'exported': count, 'file': outputPath});
+    await for (final entry in ctx.store.scan(collection)) {
+      final doc = ValueCodec.decode(entry.value);
+      ctx.out.writeln(enc.convert(doc));
     }
     return true;
   }

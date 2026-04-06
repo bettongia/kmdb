@@ -443,9 +443,9 @@ Commands:
     info
 
   Import / Export:
-    export <coll> [--output <file>]
+    export <coll>                        (use --output <file> to write to a file)
     import <coll> [--input <file>] [--on-conflict ignore|replace|error]
-    dump [--output <file>]
+    dump                                 (use --output <file> to write to a file)
     restore [--input <file>]
 
   Maintenance:

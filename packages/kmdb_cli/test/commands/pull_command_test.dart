@@ -129,14 +129,15 @@ void main() {
     expect(out.toString(), contains('pull: complete'));
   });
 
-  // ── Pull no namespaces warning ────────────────────────────────────────────
+  // ── Pull on empty local store ─────────────────────────────────────────────
 
-  test('pull with no user namespaces exits successfully', () async {
-    // Fresh store — no user namespaces.
+  test('pull on empty local store succeeds and reports complete', () async {
+    // Fresh store with no local collections — pull should still run so that
+    // a device with no data can receive peer SSTables on its first sync.
     final ctx = _ctx(store, out: out, err: err);
     final ok = await pullCmd.execute(ctx, [], {'sync-dir': syncDir.path});
     expect(ok, isTrue);
-    expect(out.toString(), contains('nothing to pull'));
+    expect(out.toString(), contains('pull: complete'));
   });
 
   // ── Pull via --sync-dir ───────────────────────────────────────────────────

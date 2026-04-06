@@ -115,11 +115,56 @@ void main() {
 
   // ── Sync with no user namespaces ──────────────────────────────────────────
 
-  test('sync with no user namespaces exits successfully', () async {
+  test('sync on empty local store skips push but still pulls', () async {
+    // An empty local store has nothing to push, but pull must still run so a
+    // device with no local data can receive peer SSTables on its first sync.
     final ctx = _ctx(store, out: out, err: err);
     final ok = await syncCmd.execute(ctx, [], {'sync-dir': syncDir.path});
     expect(ok, isTrue);
-    expect(out.toString(), contains('nothing to sync'));
+    expect(out.toString(), contains('sync: complete'));
+  });
+
+  // ── Regression: first sync on empty local store receives peer data ──────────
+
+  test('sync on empty store pulls peer data on first run', () async {
+    // Regression test for: an empty local store caused sync to bail before
+    // the pull phase, so a device with no local collections could never
+    // receive data from peers via sync.
+
+    // Peer device pushes data to the shared sync folder.
+    const peerDeviceId = 'peer1234';
+    final peerDbDir = io.Directory('${tmpDir.path}/peer_db')..createSync();
+    final peerStore = await _openStoreWithId(peerDbDir.path, peerDeviceId);
+    final peerKey = _key();
+    await peerStore.put(
+      'notes',
+      peerKey,
+      ValueCodec.encode({'msg': 'hello from peer'}),
+    );
+    final peerInfo = await peerStore.storeInfo();
+    final peerEngine = SyncEngine(
+      store: peerStore,
+      cloudAdapter: LocalDirectoryAdapter(syncDir.path),
+      localAdapter: StorageAdapterNative(),
+      deviceId: peerDeviceId,
+      dbDir: peerInfo.dbDir,
+      syncRoot: '',
+      syncNamespaces: {'notes'},
+    );
+    await peerEngine.push();
+    await peerStore.close(flush: false);
+
+    // Local store is completely empty — no user collections.
+    final ctx = _ctx(store, out: out, err: err);
+    final ok = await syncCmd.execute(ctx, [], {'sync-dir': syncDir.path});
+    expect(ok, isTrue);
+    expect(out.toString(), contains('sync: complete'));
+
+    // The peer's document must be present despite the local store being empty
+    // when sync started.
+    final raw = await store.get('notes', peerKey);
+    expect(raw, isNotNull);
+    expect(ValueCodec.decode(raw!)['msg'], equals('hello from peer'));
   });
 
   // ── Sync via --sync-dir ───────────────────────────────────────────────────
