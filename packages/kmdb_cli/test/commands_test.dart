@@ -26,6 +26,7 @@ import 'package:kmdb_cli/src/commands/flush_command.dart';
 import 'package:kmdb_cli/src/commands/get_command.dart';
 import 'package:kmdb_cli/src/commands/import_command.dart';
 import 'package:kmdb_cli/src/commands/info_command.dart';
+import 'package:kmdb_cli/src/commands/init_command.dart';
 import 'package:kmdb_cli/src/commands/put_command.dart';
 import 'package:kmdb_cli/src/commands/scan_command.dart';
 import 'package:kmdb_cli/src/commands/stats_command.dart';
@@ -48,11 +49,13 @@ Future<KvStoreImpl> _openStore() async {
 CommandContext _ctx(
   KvStoreImpl store, {
   OutputMode mode = OutputMode.json,
+  bool dbCreated = false,
   StringBuffer? out,
   StringBuffer? err,
 }) => CommandContext(
   store: store,
   mode: mode,
+  dbCreated: dbCreated,
   out: out ?? StringBuffer(),
   err: err ?? StringBuffer(),
 );
@@ -86,9 +89,9 @@ Future<void> _putDoc(
 
 /// Simple temporary file wrapper.
 class _TmpFile {
-  _TmpFile()
+  _TmpFile({String ext = 'json'})
     : path =
-          '${io.Directory.systemTemp.path}/kmdb_test_${DateTime.now().microsecondsSinceEpoch}.json';
+          '${io.Directory.systemTemp.path}/kmdb_test_${DateTime.now().microsecondsSinceEpoch}.$ext';
   final String path;
   void write(String content) => io.File(path).writeAsStringSync(content);
   void delete() => io.File(path).deleteSync();
@@ -98,6 +101,54 @@ class _TmpFile {
 
 void main() {
   tearDown(MemoryStorageAdapter.releaseAllLocks);
+
+  // ── InitCommand ─────────────────────────────────────────────────────────────
+
+  group('InitCommand', () {
+    late KvStoreImpl store;
+    late StringBuffer out;
+    late StringBuffer err;
+
+    setUp(() async {
+      store = await _openStore();
+      out = StringBuffer();
+      err = StringBuffer();
+    });
+    tearDown(() => store.close());
+
+    test('reports path, deviceId, and created=true for a fresh database',
+        () async {
+      final ctx = _ctx(store, out: out, err: err, dbCreated: true);
+      final ok = await InitCommand().execute(ctx, [], {});
+      expect(ok, isTrue);
+
+      final result = json.decode(out.toString()) as Map<String, dynamic>;
+      expect(result['path'], isA<String>());
+      expect(result['deviceId'], isA<String>());
+      expect(result['created'], isTrue);
+    });
+
+    test('reports created=false when reopening an existing database', () async {
+      final ctx = _ctx(store, out: out, err: err, dbCreated: false);
+      final ok = await InitCommand().execute(ctx, [], {});
+      expect(ok, isTrue);
+
+      final result = json.decode(out.toString()) as Map<String, dynamic>;
+      expect(result['created'], isFalse);
+    });
+
+    test('is idempotent — running init twice on same store succeeds', () async {
+      final ctx1 = _ctx(store, out: out, err: err, dbCreated: true);
+      expect(await InitCommand().execute(ctx1, [], {}), isTrue);
+
+      final out2 = StringBuffer();
+      final ctx2 = _ctx(store, out: out2, err: err, dbCreated: false);
+      expect(await InitCommand().execute(ctx2, [], {}), isTrue);
+
+      final result = json.decode(out2.toString()) as Map<String, dynamic>;
+      expect(result['created'], isFalse);
+    });
+  });
 
   // ── GetCommand ──────────────────────────────────────────────────────────────
 
@@ -208,6 +259,132 @@ void main() {
         'value': '{"name":"Alice"}',
       });
       expect(ok, isFalse);
+    });
+
+    test('inserts multiple documents from a JSON array via --value', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      const arrayJson = '[{"name":"Alice"},{"name":"Bob"}]';
+      final ok = await PutCommand().execute(ctx, ['notes'], {'value': arrayJson});
+      expect(ok, isTrue);
+
+      final decoded = json.decode(out.toString()) as List;
+      expect(decoded, hasLength(2));
+      final id0 = decoded[0]['_id'] as String;
+      final id1 = decoded[1]['_id'] as String;
+      expect(id0, hasLength(32));
+      expect(id1, hasLength(32));
+      expect(id0, isNot(equals(id1)));
+
+      expect(
+        ValueCodec.decode((await store.get('notes', id0))!)['name'],
+        equals('Alice'),
+      );
+      expect(
+        ValueCodec.decode((await store.get('notes', id1))!)['name'],
+        equals('Bob'),
+      );
+    });
+
+    test('inserts document from a JSON file via --file', () async {
+      final tmp = _TmpFile();
+      tmp.write('{"name":"Carol"}');
+      addTearDown(tmp.delete);
+
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await PutCommand().execute(ctx, ['notes'], {'file': tmp.path});
+      expect(ok, isTrue);
+
+      final decoded = json.decode(out.toString()) as List;
+      expect(decoded, hasLength(1));
+      final id = decoded[0]['_id'] as String;
+      expect(
+        ValueCodec.decode((await store.get('notes', id))!)['name'],
+        equals('Carol'),
+      );
+    });
+
+    test('inserts multiple documents from a JSON array file via --file',
+        () async {
+      final tmp = _TmpFile();
+      tmp.write('[{"name":"Dave"},{"name":"Eve"}]');
+      addTearDown(tmp.delete);
+
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await PutCommand().execute(ctx, ['notes'], {'file': tmp.path});
+      expect(ok, isTrue);
+
+      final decoded = json.decode(out.toString()) as List;
+      expect(decoded, hasLength(2));
+      expect(decoded.map((d) => d['name']), containsAll(['Dave', 'Eve']));
+    });
+
+    test('inserts multiple documents from an NDJSON file via --file', () async {
+      final tmp = _TmpFile(ext: 'ndjson');
+      tmp.write('{"name":"Frank"}\n{"name":"Grace"}\n\n');
+      addTearDown(tmp.delete);
+
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await PutCommand().execute(ctx, ['notes'], {'file': tmp.path});
+      expect(ok, isTrue);
+
+      final decoded = json.decode(out.toString()) as List;
+      expect(decoded, hasLength(2));
+      expect(decoded.map((d) => d['name']), containsAll(['Frank', 'Grace']));
+    });
+
+    test('inserts multiple documents from a JSONL file via --file', () async {
+      final tmp = _TmpFile(ext: 'jsonl');
+      tmp.write('{"name":"Heidi"}\n{"name":"Ivan"}\n');
+      addTearDown(tmp.delete);
+
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await PutCommand().execute(ctx, ['notes'], {'file': tmp.path});
+      expect(ok, isTrue);
+
+      final decoded = json.decode(out.toString()) as List;
+      expect(decoded, hasLength(2));
+      expect(decoded.map((d) => d['name']), containsAll(['Heidi', 'Ivan']));
+    });
+
+    test('returns false when --file path does not exist', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await PutCommand().execute(
+        ctx,
+        ['notes'],
+        {'file': '/nonexistent/path/file.json'},
+      );
+      expect(ok, isFalse);
+      expect(err.toString(), contains('Cannot read file'));
+    });
+
+    test('returns false for non-object items in JSON array', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await PutCommand().execute(
+        ctx,
+        ['notes'],
+        {'value': '[{"name":"Alice"}, 42]'},
+      );
+      expect(ok, isFalse);
+      expect(err.toString(), contains('JSON object'));
+    });
+
+    test('returns false for invalid JSON line in NDJSON file', () async {
+      final tmp = _TmpFile(ext: 'ndjson');
+      tmp.write('{"name":"Alice"}\n{bad json}\n');
+      addTearDown(tmp.delete);
+
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await PutCommand().execute(ctx, ['notes'], {'file': tmp.path});
+      expect(ok, isFalse);
+      expect(err.toString(), contains('invalid JSON'));
+    });
+
+    test('inserts zero documents from an empty JSON array', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await PutCommand().execute(ctx, ['notes'], {'value': '[]'});
+      expect(ok, isTrue);
+      final decoded = json.decode(out.toString()) as List;
+      expect(decoded, isEmpty);
     });
   });
 

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'dart:io' as io;
+
 import 'package:kmdb/kmdb.dart';
 
 /// Opens a [KvStoreImpl] from a filesystem path.
@@ -27,7 +29,11 @@ import 'package:kmdb/kmdb.dart';
 abstract final class DatabaseOpener {
   DatabaseOpener._();
 
-  /// Opens the database at [dbPath] and returns the underlying [KvStoreImpl].
+  /// Opens the database at [dbPath] and returns the store and a creation flag.
+  ///
+  /// The returned record is `(store, created)` where [created] is `true` when
+  /// the database did not previously exist (i.e. no `CURRENT` file was present
+  /// before this call) and `false` when an existing database was reopened.
   ///
   /// Creates the directory if it does not exist.
   ///
@@ -47,7 +53,7 @@ abstract final class DatabaseOpener {
   ///
   /// Throws [LockException] if another process has the database open.
   /// Throws [ArgumentError] if [dbPath] is empty.
-  static Future<KvStoreImpl> open(String dbPath) async {
+  static Future<(KvStoreImpl, bool created)> open(String dbPath) async {
     if (dbPath.isEmpty) {
       throw ArgumentError.value(
         dbPath,
@@ -55,6 +61,11 @@ abstract final class DatabaseOpener {
         'Database path must not be empty',
       );
     }
+
+    // Detect whether this is a fresh database before any files are written.
+    // The CURRENT file is created on the very first open, so its absence means
+    // the database does not yet exist.
+    final created = !io.File('$dbPath/CURRENT').existsSync();
 
     final adapter = StorageAdapterNative();
     await adapter.createDirectory(dbPath);
@@ -85,6 +96,6 @@ abstract final class DatabaseOpener {
       store = result.$1;
     }
 
-    return store;
+    return (store, created);
   }
 }
