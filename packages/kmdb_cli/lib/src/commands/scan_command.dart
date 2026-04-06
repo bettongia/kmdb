@@ -108,7 +108,10 @@ final class ScanCommand implements CliCommand {
   /// Returns `null` when [value] is null (no projection requested).
   static Set<String>? _parseSelect(dynamic value) {
     if (value == null) return null;
-    final parts = '$value'.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty);
+    final parts = '$value'
+        .split(',')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty);
     return parts.isEmpty ? null : parts.toSet();
   }
 
