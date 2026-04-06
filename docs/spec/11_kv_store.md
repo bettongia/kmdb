@@ -87,6 +87,21 @@ abstract interface class KvStore {
   /// manually — useful before a sync push or for testing.
   Future<void> compactAll();
 
+  // ── Device Identity ────────────────────────────────────────────────────────
+
+  /// Assigns a new device identity to this store.
+  ///
+  /// Renames every SSTable whose filename starts with the current device ID to
+  /// use [newDeviceId], appends a VersionEdit to the Manifest, then persists
+  /// the new ID to `$meta`. Peer-owned SSTables are not renamed.
+  ///
+  /// [newDeviceId] must be an 8-character lowercase hex string and must differ
+  /// from the current device ID. Throws [ArgumentError] otherwise.
+  ///
+  /// Call this after copying a database directory to give the copy a unique
+  /// identity before its first sync. See §4 (Keys & Identifiers) for details.
+  Future<void> reassignDeviceId(String newDeviceId);
+
   // ── Reactivity ─────────────────────────────────────────────────────────────
 
   /// Emits the namespace name after each successful write to that namespace.

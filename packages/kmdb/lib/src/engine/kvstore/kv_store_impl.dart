@@ -182,6 +182,21 @@ final class KvStoreImpl implements KvStore {
   Stream<String> get writeEvents => _engine.writeEvents;
 
   @override
+  Future<void> reassignDeviceId(String newDeviceId) async {
+    // Delegate the heavy lifting (validation, flush, file renames, VersionEdit)
+    // to the engine. The engine updates _deviceId after the VersionEdit is
+    // persisted to the Manifest.
+    await _engine.reassignDeviceId(newDeviceId);
+
+    // Persist the new device ID to $meta. This is done after the engine write
+    // so that, on crash before this point, the next open sees the old ID and
+    // recovers into a consistent state (the renamed files will be orphans, which
+    // crash recovery will delete, and the old-named originals in the Manifest
+    // will be valid).
+    await _meta.putDeviceId(newDeviceId);
+  }
+
+  @override
   Future<void> close({bool flush = true}) async {
     // Only write a tombstone to clear the dirty flag if the flag actually exists
     // in $meta. Writing an unnecessary tombstone would cause a memtable write,

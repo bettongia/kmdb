@@ -48,3 +48,36 @@ conflict resolution. It must be persisted outside the database:
 - Web: localStorage (per-origin, survives page reload).
 
 - Desktop: Platform-specific app data directory.
+
+### Reassigning a Device Identity
+
+When a database directory is copied (for example, to create a staging environment or
+a test fixture from a production snapshot), the copy shares the same device ID as the
+original. This breaks the sync protocol because both databases appear to the sync engine
+as the same peer.
+
+The CLI `new-device-id` command resolves this by reassigning a fresh 8-character hex
+device ID to the copy:
+
+```bash
+kmdb <db> new-device-id
+# Output: { "oldDeviceId": "a1b2c3d4", "newDeviceId": "9f8e7d6c" }
+```
+
+Internally, `KvStore.reassignDeviceId(newId)`:
+
+1. Flushes the active memtable so all in-memory data is persisted in SSTables.
+2. Renames every SSTable whose filename starts with `{oldId}-` to `{newId}-`.
+   Peer-owned SSTables (those whose filename prefix belongs to another device)
+   are **not** renamed.
+3. Appends a single `VersionEdit` to the Manifest recording all renames
+   atomically. The old entries are removed and the new entries are added in one
+   record.
+4. Persists the new device ID to `$meta` so subsequent opens and `storeInfo()`
+   return the new value.
+
+**Remote highwater marks:** if the database has already synced under the old ID,
+the remote sync folder will have an orphaned `highwater/{oldId}.hwm` file. The
+`new-device-id` command warns when configured remotes are detected. The operator
+must delete the old `.hwm` file from the remote manually. For the primary use case
+(renaming a copy *before* the first sync) there is nothing to clean up.

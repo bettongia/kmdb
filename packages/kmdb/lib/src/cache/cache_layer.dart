@@ -161,6 +161,14 @@ final class CacheLayer implements KvStore {
   @override
   Stream<String> get writeEvents => _store.writeEvents;
 
+  /// Delegates device ID reassignment to the underlying store.
+  ///
+  /// The session cache does not embed the device ID, so no cache invalidation
+  /// is needed — the rename affects only SSTable filenames and `$meta`.
+  @override
+  Future<void> reassignDeviceId(String newDeviceId) =>
+      _store.reassignDeviceId(newDeviceId);
+
   /// Cancels the write-event subscription and closes the underlying store.
   @override
   Future<void> close({bool flush = true}) async {

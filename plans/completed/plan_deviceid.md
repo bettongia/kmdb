@@ -1,8 +1,8 @@
 # CLI: Allow the deviceId to be changed
 
-**Status**: Investigated
+**Status**: Complete
 
-**PR link**: {A link to the PR submitted for this plan}
+**PR link**: https://github.com/aurochs-kmesh/kmdb/pull/8
 
 ## Problem statement
 
@@ -144,18 +144,18 @@ Future<void> reassignDeviceId(String newDeviceId);
 
 Implement in `LsmEngine` (`lsm_engine.dart`):
 
-- [ ] Validate `newDeviceId` — 8 lowercase hex chars, not equal to current ID (defensive; the CLI always generates the ID)
-- [ ] Call `flush()` to drain the memtable
-- [ ] Read active SSTable list from current `ManifestState`
-- [ ] For each SSTable whose bare filename starts with `{currentDeviceId}-`:
+- [x] Validate `newDeviceId` — 8 lowercase hex chars, not equal to current ID (defensive; the CLI always generates the ID)
+- [x] Call `flush()` to drain the memtable
+- [x] Read active SSTable list from current `ManifestState`
+- [x] For each SSTable whose bare filename starts with `{currentDeviceId}-`:
   - Compute new filename by replacing the prefix
   - Rename the file on disk via `StorageAdapter`
   - Collect `(level, oldName, newName, meta)` tuples
-- [ ] Append one `VersionEdit` to the manifest:
+- [x] Append one `VersionEdit` to the manifest:
   - `removed` = all old-named entries (level + filename)
   - `added` = all new-named entries (same level, same minKey/maxKey/entryCount, walSequence=null)
-- [ ] Call `MetaStore.putDeviceId(newDeviceId)` and flush `$meta` to SSTable
-- [ ] Update the in-memory `_deviceId` field used by push filtering
+- [x] Call `MetaStore.putDeviceId(newDeviceId)` and flush `$meta` to SSTable
+- [x] Update the in-memory `_deviceId` field used by push filtering
 
 Also add to `KvStoreImpl` as a delegation wrapper.
 
@@ -167,14 +167,14 @@ New file `packages/kmdb_cli/lib/src/commands/new_device_id_command.dart`:
 kmdb <db> new-device-id
 ```
 
-- [ ] Generate a new random deviceId (same algorithm as `DeviceId.generate()`)
-- [ ] Open the database via `DatabaseOpener`
-- [ ] Check for configured remotes (`local/config.json`). If any exist, print a
+- [x] Generate a new random deviceId (same algorithm as `DeviceId.generate()`)
+- [x] Open the database via `DatabaseOpener`
+- [x] Check for configured remotes (`local/config.json`). If any exist, print a
   warning: the remote `highwater/{oldDeviceId}.hwm` file must be deleted
   manually after sync
-- [ ] Call `store.reassignDeviceId(newId)`
-- [ ] Close the store
-- [ ] Output `{ "oldDeviceId": "…", "newDeviceId": "…" }`
+- [x] Call `store.reassignDeviceId(newId)`
+- [x] Close the store
+- [x] Output `{ "oldDeviceId": "…", "newDeviceId": "…" }`
 
 Register in `kmdb_cli_runner.dart` (or wherever commands are wired up).
 
@@ -182,7 +182,7 @@ Register in `kmdb_cli_runner.dart` (or wherever commands are wired up).
 
 **`kmdb` package** (`packages/kmdb/test/`):
 
-- [ ] `reassign_device_id_test.dart`
+- [x] `reassign_device_id_test.dart`
   - Write several records (forces multiple SSTables), call `reassignDeviceId`, close,
     reopen — verify all documents still readable under new ID
   - Verify old SSTable filenames no longer exist on disk
@@ -195,17 +195,24 @@ Register in `kmdb_cli_runner.dart` (or wherever commands are wired up).
 
 **`kmdb_cli` package** (`packages/kmdb_cli/test/`):
 
-- [ ] `new_device_id_command_test.dart`
+- [x] `new_device_id_command_test.dart`
   - Happy path: command produces correct JSON output
   - Remote warning: output includes warning text when remotes are configured
 
 ### 4 — Documentation
 
-- [ ] Add `new-device-id` to the CLI reference in `docs/` (whichever file covers
-  CLI usage)
-- [ ] Add a note to `docs/spec/04_keys.md` explaining that the deviceId can be
+- [x] Add `new-device-id` to the CLI reference in `docs/` (whichever file covers
+  CLI usage) — added to `docs/spec/11_kv_store.md` and `cli_runner.dart` help text
+- [x] Add a note to `docs/spec/04_keys.md` explaining that the deviceId can be
   changed with `new-device-id` and describing the SSTable rename semantics
 
 ## Summary
 
-{Dot points highlighting the work undertaken}
+- Added `KvStore.reassignDeviceId(String newDeviceId)` to the public `KvStore` interface and implemented it in `LsmEngine`: flushes the memtable, renames all local SSTables (those with the old device ID prefix) via `StorageAdapter`, appends a single `VersionEdit` to the Manifest recording the renames, and updates `$meta` last so any crash before completion leaves the store recoverable with the old ID
+- Peer-owned SSTables (files whose prefix differs from the local device ID, ingested via `pull`) are never renamed — only files starting with `{oldDeviceId}-` are touched
+- `KvStoreImpl.reassignDeviceId` delegates to `LsmEngine.reassignDeviceId` and updates the in-memory `_deviceId` field so subsequent flushes use the new prefix
+- Added `packages/kmdb_cli/lib/src/commands/new_device_id_command.dart`: `kmdb <db> new-device-id` generates a fresh 8-char lowercase hex ID (first 8 chars of a UUID v4), warns to stderr about orphaned remote highwater mark files when sync remotes are configured, and outputs `{"oldDeviceId":"…","newDeviceId":"…"}` to stdout
+- 15 new tests in `reassign_device_id_test.dart` covering: validation (non-hex, wrong length, uppercase, same-as-current), data readability after reassign and close/reopen, old-prefix file removal, new-prefix file creation, manifest replay correctness, peer SSTable protection, empty-store no-op, and post-reassign write prefix correctness
+- 5 new tests in `new_device_id_command_test.dart` covering: happy path JSON output, store reflecting new ID, oldDeviceId from storeInfo, no warning without remotes, warning with configured remotes
+- Updated `docs/spec/04_keys.md` and `docs/spec/11_kv_store.md` to document the `reassignDeviceId` operation and `new-device-id` CLI command
+- 657 kmdb tests and 218 kmdb_cli tests all pass
