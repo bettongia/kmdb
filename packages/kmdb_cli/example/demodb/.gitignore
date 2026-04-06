@@ -1,2 +1,6 @@
 *.csv
-demodb
+demodb*
+syncdb*
+*.export
+*.dump
+remote_mount
