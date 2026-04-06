@@ -188,22 +188,25 @@ dart run ../../bin/kmdb.dart demodb scan notes
 ### A small demo script
 
 ```sh
-dart run ../../bin/kmdb.dart syncdb_1 put notes --value '{"title": "Sync note 1"}'
-dart run ../../bin/kmdb.dart syncdb_2 put notes --value '{"title": "Sync note 2"}'
-dart run ../../bin/kmdb.dart syncdb_3 put notes --value '{"title": "Sync note 3"}'
-dart run ../../bin/kmdb.dart syncdb_4 put notes --value '{"title": "Sync note 4"}'
+# Create 4 new databases and add a note to each
+for db in syncdb_{1..4}; do
+    dart run ../../bin/kmdb.dart $db put notes --value "{\"title\": \"Sync note for $db\"}"
+done
+
+# Each database instance has its own deviceId, helping us with syncing
+for db in syncdb_{1..4}; do
+    dart run ../../bin/kmdb.dart $db info
+done
 
 # Configure the remotes
-dart run ../../bin/kmdb.dart syncdb_1 remote add origin --path $PWD/remote_mount/syncdb
-dart run ../../bin/kmdb.dart syncdb_2 remote add origin --path $PWD/remote_mount/syncdb
-dart run ../../bin/kmdb.dart syncdb_3 remote add origin --path $PWD/remote_mount/syncdb
-dart run ../../bin/kmdb.dart syncdb_4 remote add origin --path $PWD/remote_mount/syncdb
+for db in syncdb_{1..4}; do
+  dart run ../../bin/kmdb.dart $db remote add origin --path $PWD/remote_mount/syncdb
+done
 
 # Sync the data
-dart run ../../bin/kmdb.dart syncdb_1 sync
-dart run ../../bin/kmdb.dart syncdb_2 sync
-dart run ../../bin/kmdb.dart syncdb_3 sync
-dart run ../../bin/kmdb.dart syncdb_4 sync
+for db in syncdb_{1..4}; do
+  dart run ../../bin/kmdb.dart $db sync
+done
 
 # Check the notes in each database instance
 
@@ -237,7 +240,9 @@ dart run ../../bin/kmdb.dart demodb compact
 To delete the database, just run:
 
 ```sh
-rm -rf demodb demodb_* syncdb_* remote_mount
+rm -rf demodb*
+rm -rf syncdb*
+rm -rf remote_mount
 ```
 
 ## Data prep
