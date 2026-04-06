@@ -240,10 +240,11 @@ void main() {
 
       // Verify WAL is gone and SST exists.
       final walFile = io.File(p.join(dbPath, 'wal-00001.log'));
+      // print(walFile.parent.listSync());
       expect(
         walFile.existsSync(),
         isFalse,
-        reason: 'WAL should NOT exist (flushed)',
+        reason: 'WAL should NOT exist (flushed): ${walFile}',
       );
 
       final sstDir = io.Directory(p.join(dbPath, 'sst'));

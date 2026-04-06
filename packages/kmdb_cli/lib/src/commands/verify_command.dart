@@ -16,9 +16,9 @@ import 'package:kmdb/kmdb.dart';
 
 import 'command.dart';
 
-/// Verifies that every document in every namespace can be decoded correctly.
+/// Verifies that every document in every collection can be decoded correctly.
 ///
-/// This is a read-only operation: it scans all namespaces and attempts to
+/// This is a read-only operation: it scans all collections and attempts to
 /// decode each stored value using [ValueCodec]. Any corrupt or undecodable
 /// value is reported as an error.
 ///
@@ -42,17 +42,17 @@ final class VerifyCommand implements CliCommand {
     List<String> args,
     Map<String, dynamic> flags,
   ) async {
-    final namespaces = await ctx.store.listNamespaces();
+    final collections = await ctx.store.listNamespaces();
     var checked = 0;
     final errors = <Map<String, dynamic>>[];
 
-    for (final ns in namespaces) {
-      await for (final entry in ctx.store.scan(ns)) {
+    for (final coll in collections) {
+      await for (final entry in ctx.store.scan(coll)) {
         checked++;
         try {
           ValueCodec.decode(entry.value);
         } catch (e) {
-          errors.add({'namespace': ns, 'key': entry.key, 'error': '$e'});
+          errors.add({'collection': coll, 'key': entry.key, 'error': '$e'});
         }
       }
     }

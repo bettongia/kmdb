@@ -181,18 +181,18 @@ void main() {
     final ctx = _ctx(store, out: out, err: err);
     final ok = await pushCmd.execute(ctx, [], {
       'sync-dir': syncDir.path,
-      'namespace': 'notes',
+      'collection': 'notes',
     });
     expect(ok, isTrue);
   });
 
-  test('system namespaces cannot be synced via --namespace', () async {
+  test('system collections cannot be synced via --namespace', () async {
     final ctx = _ctx(store, out: out, err: err);
     final ok = await pushCmd.execute(ctx, [], {
       'sync-dir': syncDir.path,
-      'namespace': r'$meta',
+      'collection': r'$meta',
     });
     expect(ok, isFalse);
-    expect(err.toString(), contains('system namespace'));
+    expect(err.toString(), contains('system collection'));
   });
 }

@@ -39,10 +39,10 @@ final class DeleteCommand implements CliCommand {
       ctx.writeError('delete requires <collection> and <key>.\nUsage: $usage');
       return false;
     }
-    final namespace = args[0];
+    final collection = args[0];
     final key = args[1];
 
-    await ctx.store.delete(namespace, key);
+    await ctx.store.delete(collection, key);
     ctx.writeValue({'deleted': key});
     return true;
   }

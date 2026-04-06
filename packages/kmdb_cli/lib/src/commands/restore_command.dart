@@ -29,7 +29,7 @@ final class RestoreCommand implements CliCommand {
   String get name => 'restore';
 
   @override
-  String get description => 'Restore all namespaces from a NDJSON dump.';
+  String get description => 'Restore all collections from a NDJSON dump.';
 
   @override
   String get usage => 'restore [--input <file>]';
@@ -51,7 +51,7 @@ final class RestoreCommand implements CliCommand {
       lines = io.stdin.transform(utf8.decoder).transform(const LineSplitter());
     }
 
-    String? currentNamespace;
+    String? currentCollection;
     var imported = 0;
     var lineNum = 0;
 
@@ -60,18 +60,18 @@ final class RestoreCommand implements CliCommand {
       final trimmed = line.trim();
       if (trimmed.isEmpty) continue;
 
-      // Namespace header line emitted by dump.
-      if (trimmed.startsWith('# namespace: ')) {
-        currentNamespace = trimmed.substring('# namespace: '.length).trim();
+      // Collection header line emitted by dump.
+      if (trimmed.startsWith('# collection: ')) {
+        currentCollection = trimmed.substring('# collection: '.length).trim();
         continue;
       }
 
       // Skip other comment lines.
       if (trimmed.startsWith('#')) continue;
 
-      if (currentNamespace == null) {
+      if (currentCollection == null) {
         ctx.writeError(
-          'Line $lineNum: encountered document before any namespace header.',
+          'Line $lineNum: encountered document before any collection header.',
         );
         return false;
       }
@@ -98,7 +98,7 @@ final class RestoreCommand implements CliCommand {
       }
 
       final encoded = ValueCodec.encode(doc);
-      await ctx.store.put(currentNamespace, '$keyRaw', encoded);
+      await ctx.store.put(currentCollection, '$keyRaw', encoded);
       imported++;
     }
 

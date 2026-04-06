@@ -77,11 +77,11 @@ String _key(String seed) {
 /// hex string to use as the storage key.
 Future<void> _putDoc(
   KvStoreImpl store,
-  String ns,
+  String coll,
   Map<String, dynamic> doc,
 ) async {
   final id = doc['_id'] as String;
-  await store.put(ns, id, ValueCodec.encode(doc));
+  await store.put(coll, id, ValueCodec.encode(doc));
 }
 
 /// Simple temporary file wrapper.

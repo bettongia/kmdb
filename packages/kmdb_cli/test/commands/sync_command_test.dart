@@ -197,13 +197,13 @@ void main() {
 
   // ── Namespace filtering ───────────────────────────────────────────────────
 
-  test('system namespace cannot be synced via --namespace', () async {
+  test('system collection cannot be synced via --namespace', () async {
     final ctx = _ctx(store, out: out, err: err);
     final ok = await syncCmd.execute(ctx, [], {
       'sync-dir': syncDir.path,
-      'namespace': r'$meta',
+      'collection': r'$meta',
     });
     expect(ok, isFalse);
-    expect(err.toString(), contains('system namespace'));
+    expect(err.toString(), contains('system collection'));
   });
 }
