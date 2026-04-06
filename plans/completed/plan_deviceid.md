@@ -1,8 +1,8 @@
 # CLI: Allow the deviceId to be changed
 
-**Status**: Implementing
+**Status**: Complete
 
-**PR link**: {A link to the PR submitted for this plan}
+**PR link**: https://github.com/aurochs-kmesh/kmdb/pull/8
 
 ## Problem statement
 
@@ -208,4 +208,11 @@ Register in `kmdb_cli_runner.dart` (or wherever commands are wired up).
 
 ## Summary
 
-{Dot points highlighting the work undertaken}
+- Added `KvStore.reassignDeviceId(String newDeviceId)` to the public `KvStore` interface and implemented it in `LsmEngine`: flushes the memtable, renames all local SSTables (those with the old device ID prefix) via `StorageAdapter`, appends a single `VersionEdit` to the Manifest recording the renames, and updates `$meta` last so any crash before completion leaves the store recoverable with the old ID
+- Peer-owned SSTables (files whose prefix differs from the local device ID, ingested via `pull`) are never renamed — only files starting with `{oldDeviceId}-` are touched
+- `KvStoreImpl.reassignDeviceId` delegates to `LsmEngine.reassignDeviceId` and updates the in-memory `_deviceId` field so subsequent flushes use the new prefix
+- Added `packages/kmdb_cli/lib/src/commands/new_device_id_command.dart`: `kmdb <db> new-device-id` generates a fresh 8-char lowercase hex ID (first 8 chars of a UUID v4), warns to stderr about orphaned remote highwater mark files when sync remotes are configured, and outputs `{"oldDeviceId":"…","newDeviceId":"…"}` to stdout
+- 15 new tests in `reassign_device_id_test.dart` covering: validation (non-hex, wrong length, uppercase, same-as-current), data readability after reassign and close/reopen, old-prefix file removal, new-prefix file creation, manifest replay correctness, peer SSTable protection, empty-store no-op, and post-reassign write prefix correctness
+- 5 new tests in `new_device_id_command_test.dart` covering: happy path JSON output, store reflecting new ID, oldDeviceId from storeInfo, no warning without remotes, warning with configured remotes
+- Updated `docs/spec/04_keys.md` and `docs/spec/11_kv_store.md` to document the `reassignDeviceId` operation and `new-device-id` CLI command
+- 657 kmdb tests and 218 kmdb_cli tests all pass
