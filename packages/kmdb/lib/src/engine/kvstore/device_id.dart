@@ -24,12 +24,13 @@ import 'meta_store.dart';
 ///
 /// ## Identity format
 ///
-/// The ID is the first 8 characters of a hyphen-stripped UUIDv7 string.
-/// UUIDv7 embeds the current millisecond timestamp in its most-significant
-/// bits, so IDs generated at different times are highly unlikely to collide —
-/// even across independently provisioned devices.
+/// The ID is the first 8 characters of a hyphen-stripped UUID v4 string
+/// (purely random). Using the random portion of a UUID rather than a
+/// timestamp prefix ensures uniqueness even when multiple databases are
+/// opened for the first time within the same millisecond — a common
+/// scenario in tests and CLI demos.
 ///
-/// Example: `'01965a4b'`
+/// Example: `'a3f2b1c9'`
 ///
 /// ## Platform-specific storage
 ///
@@ -53,11 +54,14 @@ abstract final class DeviceId {
     final stored = await meta.getDeviceId();
     if (stored != null) return stored;
 
-    // First open: generate a new 8-char ID from the UUIDv7 timestamp prefix.
-    // Stripping hyphens and taking the first 8 characters yields the 32-bit
-    // time_high field, which is unique per millisecond and avoids any external
-    // entropy source.
-    final id = const Uuid().v7().replaceAll('-', '').substring(0, 8);
+    // First open: generate a new 8-char ID from the random portion of a UUID.
+    // UUIDv4 is used rather than the timestamp prefix of a UUIDv7 because
+    // multiple databases opened within the same millisecond (common in tests
+    // and CLI demos) would otherwise receive identical IDs — the top 32 bits
+    // of a UUIDv7 timestamp change only every ~65 seconds.  A random UUID
+    // gives ~4 billion values in 4 bytes, making same-millisecond collisions
+    // negligibly unlikely.
+    final id = const Uuid().v4().replaceAll('-', '').substring(0, 8);
     await meta.putDeviceId(id);
     return id;
   }

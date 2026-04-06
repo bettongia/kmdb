@@ -78,16 +78,6 @@ final class SyncCommand implements CliCommand {
       return false;
     }
 
-    if (collections.isEmpty) {
-      ctx.out.writeln('sync: no user collections found; nothing to sync.');
-      return true;
-    }
-
-    // Flush the memtable before the push phase so all recent writes are
-    // materialised as SSTables.  Without this, data still in the memtable
-    // would be silently excluded from the upload half of sync.
-    await ctx.store.flush();
-
     final adapter = adapterFor(remote);
     final engine = SyncEngine(
       store: ctx.store,
@@ -99,10 +89,28 @@ final class SyncCommand implements CliCommand {
       syncNamespaces: collections,
     );
 
+    // Push phase: only if there are local collections to upload.
+    // An empty local store has nothing to push — skip flush and upload,
+    // but still proceed to pull so peer data can be received.
+    if (collections.isNotEmpty) {
+      // Flush the memtable so all recent writes are materialised as SSTables
+      // before uploading.  Without this flush, data still in the memtable
+      // would be silently excluded from the push.
+      await ctx.store.flush();
+      try {
+        await engine.push();
+      } catch (e) {
+        ctx.writeError('sync push failed: $e');
+        return false;
+      }
+    }
+
+    // Pull phase: always run, even on an empty local store, so that a device
+    // with no collections yet can receive data from peers on its first sync.
     try {
-      await engine.sync();
+      await engine.pull();
     } catch (e) {
-      ctx.writeError('sync failed: $e');
+      ctx.writeError('sync pull failed: $e');
       return false;
     }
 

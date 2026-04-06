@@ -932,12 +932,10 @@ void main() {
 
   group('Export → Import roundtrip', () {
     late KvStoreImpl store;
-    late StringBuffer out;
     late StringBuffer err;
 
     setUp(() async {
       store = await _openStore();
-      out = StringBuffer();
       err = StringBuffer();
     });
     tearDown(() => store.close());
@@ -954,15 +952,16 @@ void main() {
         await _putDoc(store, 'people', doc);
       }
 
-      // Export to a temp file.
-      final tmp = _TmpFile();
-      final exportCtx = _ctx(store, out: out, err: err);
-      final exportOk = await ExportCommand().execute(
-        exportCtx,
-        ['people'],
-        {'output': tmp.path},
-      );
+      // Export via ctx.out (mirrors how --output redirects ctx.out in prod).
+      final exportOut = StringBuffer();
+      final exportCtx = _ctx(store, out: exportOut, err: err);
+      final exportOk = await ExportCommand().execute(exportCtx, ['people'], {});
       expect(exportOk, isTrue);
+
+      // Write the captured NDJSON to a temp file for ImportCommand.
+      final tmp = _TmpFile();
+      tmp.write(exportOut.toString());
+      addTearDown(tmp.delete);
 
       // Delete all documents from the namespace.
       for (final id in ids) {
@@ -997,8 +996,6 @@ void main() {
         expect(restored['name'], equals(orig['name']));
         expect(restored['score'], equals(orig['score']));
       }
-
-      tmp.delete();
     });
 
     test('export writes one line per document in NDJSON format', () async {
@@ -1007,17 +1004,13 @@ void main() {
       await _putDoc(store, 'items', {'_id': id1, 'v': 1});
       await _putDoc(store, 'items', {'_id': id2, 'v': 2});
 
-      final tmp = _TmpFile();
-      final ctx = _ctx(store, out: out, err: err);
-      final ok = await ExportCommand().execute(
-        ctx,
-        ['items'],
-        {'output': tmp.path},
-      );
+      final exportOut = StringBuffer();
+      final ctx = _ctx(store, out: exportOut, err: err);
+      final ok = await ExportCommand().execute(ctx, ['items'], {});
       expect(ok, isTrue);
 
-      final lines = io.File(tmp.path)
-          .readAsStringSync()
+      final lines = exportOut
+          .toString()
           .trim()
           .split('\n')
           .where((l) => l.isNotEmpty)
@@ -1026,8 +1019,6 @@ void main() {
       for (final line in lines) {
         expect(() => json.decode(line), returnsNormally);
       }
-
-      tmp.delete();
     });
   });
 

@@ -81,11 +81,6 @@ final class PullCommand implements CliCommand {
       return false;
     }
 
-    if (collections.isEmpty) {
-      ctx.out.writeln('pull: no user collections found; nothing to pull.');
-      return true;
-    }
-
     final adapter = adapterFor(remote);
     final engine = SyncEngine(
       store: ctx.store,
