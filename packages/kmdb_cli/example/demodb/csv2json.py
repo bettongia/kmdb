@@ -21,10 +21,13 @@ input = sys.argv[1]
 if input == "":
     sys.exit("input file is required")
 
+dialect = csv.excel
+has_header = False
 data = []
 
 with open(input, newline='') as csvfile:
     dialect = csv.Sniffer().sniff(csvfile.read(1024))
+    csvfile.seek(0)
 
     has_header = csv.Sniffer().has_header(csvfile.read(1024))
     csvfile.seek(0)
