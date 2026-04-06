@@ -76,3 +76,6 @@ melos:
       run: |
         cat addlicense_config.txt | xargs addlicense --check
       description: Check the license header in all necessary files.
+
+    doc:
+      exec: dart doc

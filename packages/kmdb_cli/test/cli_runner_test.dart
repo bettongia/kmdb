@@ -31,7 +31,8 @@ void main() {
   // subdirectory; when invoked from the package root, `pubspec.yaml` is at
   // the current directory.
   final _workspacePkg = p.join(p.current, 'packages', 'kmdb_cli');
-  final packageRoot = io.File(p.join(_workspacePkg, 'pubspec.yaml')).existsSync()
+  final packageRoot =
+      io.File(p.join(_workspacePkg, 'pubspec.yaml')).existsSync()
       ? _workspacePkg
       : p.current;
 

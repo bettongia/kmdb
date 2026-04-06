@@ -12,6 +12,7 @@
 --ignore="**/*.g.m"
 --ignore="**/*.rb"
 --ignore="**/*.txt"
+--ignore="packages/**/doc/api/**"
 --ignore="**/.dart_tool/**"
 --ignore="**/lib/src/generated/**"
 --ignore="**/coverage/**"

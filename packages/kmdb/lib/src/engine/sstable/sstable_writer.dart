@@ -18,6 +18,8 @@ import '../util/varint.dart';
 import '../util/xxhash.dart';
 import 'bloom_filter.dart';
 
+/// @docImport 'sstable_reader.dart';
+
 /// Target size for a single data block (4 KiB).
 const int kBlockSize = 4 * 1024;
 
@@ -254,7 +256,7 @@ class _IndexEntry {
   final int blockSize;
 }
 
-/// Parsed SSTable footer returned by [SstableReader.readFooter].
+/// Parsed SSTable footer returned by [SstableReader].
 final class SstableFooter {
   const SstableFooter({
     required this.filterOffset,
