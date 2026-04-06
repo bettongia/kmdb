@@ -18,7 +18,7 @@ import 'command.dart';
 
 /// Retrieves a single document by key.
 ///
-/// Usage: `kmdb <db> get <collection> <key>`
+/// Usage: `kmdb <db> get <coll> <key>`
 final class GetCommand implements CliCommand {
   const GetCommand();
 
@@ -29,7 +29,7 @@ final class GetCommand implements CliCommand {
   String get description => 'Retrieve a document by key.';
 
   @override
-  String get usage => 'get <collection> <key>';
+  String get usage => 'get <coll> <key> [--select <field1,field2,...>]';
 
   @override
   Future<bool> execute(
@@ -38,19 +38,33 @@ final class GetCommand implements CliCommand {
     Map<String, dynamic> flags,
   ) async {
     if (args.length < 2) {
-      ctx.writeError('get requires <collection> and <key>.\nUsage: $usage');
+      ctx.writeError('get requires <coll> and <key>.\nUsage: $usage');
       return false;
     }
-    final namespace = args[0];
+    final collection = args[0];
     final key = args[1];
 
-    final bytes = await ctx.store.get(namespace, key);
+    final bytes = await ctx.store.get(collection, key);
     if (bytes == null) {
-      ctx.writeError('Document not found: $namespace/$key');
+      ctx.writeError('Document not found: $collection/$key');
       return false;
     }
 
-    final doc = ValueCodec.decode(bytes);
+    var doc = ValueCodec.decode(bytes);
+    final selectValue = flags['select'];
+    if (selectValue != null) {
+      final fields = '$selectValue'
+          .split(',')
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toSet();
+      if (fields.isNotEmpty) {
+        doc = {
+          for (final entry in doc.entries)
+            if (fields.contains(entry.key)) entry.key: entry.value,
+        };
+      }
+    }
     ctx.writeDocuments([doc]);
     return true;
   }

@@ -174,11 +174,11 @@ final class UtilCommand implements CliCommand {
         };
 
         if (data && entry.value.isNotEmpty) {
-          // Only attempt ValueCodec decoding for user namespaces. System
-          // namespaces (those starting with '$') use internal raw encodings
+          // Only attempt ValueCodec decoding for user collections. System
+          // collections (those starting with '$') use internal raw encodings
           // that are incompatible with ValueCodec.
-          final ns = KeyCodec.decodeNamespace(Uint8List.fromList(entry.key));
-          if (!ns.startsWith(r'$')) {
+          final coll = KeyCodec.decodeNamespace(Uint8List.fromList(entry.key));
+          if (!coll.startsWith(r'$')) {
             try {
               valueMap['decoded'] = ValueCodec.decode(
                 Uint8List.fromList(entry.value),
@@ -264,8 +264,8 @@ final class UtilCommand implements CliCommand {
       final recordMaps = records.map((r) {
         final map = r.toMap();
         if (data && r.value.isNotEmpty && !r.namespace.startsWith(r'$')) {
-          // Only attempt ValueCodec decoding for user namespaces. System
-          // namespaces (those starting with '$') use internal raw encodings
+          // Only attempt ValueCodec decoding for user collections. System
+          // collections (those starting with '$') use internal raw encodings
           // that are incompatible with ValueCodec.
           final valueMap = Map<String, dynamic>.from(
             map['value'] as Map<String, dynamic>,
@@ -288,23 +288,23 @@ final class UtilCommand implements CliCommand {
         'corruptedAt': ?corruptedAt,
       });
     } else {
-      // Summary output: record count, HLC range, distinct namespaces.
+      // Summary output: record count, HLC range, distinct collections.
       Hlc? minHlc;
       Hlc? maxHlc;
-      final namespaces = <String>{};
+      final collections = <String>{};
 
       for (final r in records) {
         final seq = r.sequence;
         if (minHlc == null || seq < minHlc) minHlc = seq;
         if (maxHlc == null || seq > maxHlc) maxHlc = seq;
-        if (r.namespace.isNotEmpty) namespaces.add(r.namespace);
+        if (r.namespace.isNotEmpty) collections.add(r.namespace);
       }
 
       ctx.writeValue({
         'file': filename,
         'recordCount': records.length,
         'hlcRange': {'min': minHlc?.toHex(), 'max': maxHlc?.toHex()},
-        'namespaces': namespaces.toList()..sort(),
+        'collections': collections.toList()..sort(),
         'corruptedAt': ?corruptedAt,
       });
     }

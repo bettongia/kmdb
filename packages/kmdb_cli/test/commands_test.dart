@@ -26,8 +26,11 @@ import 'package:kmdb_cli/src/commands/flush_command.dart';
 import 'package:kmdb_cli/src/commands/get_command.dart';
 import 'package:kmdb_cli/src/commands/import_command.dart';
 import 'package:kmdb_cli/src/commands/info_command.dart';
+import 'package:kmdb_cli/src/commands/init_command.dart';
+import 'package:kmdb_cli/src/commands/insert_command.dart';
 import 'package:kmdb_cli/src/commands/put_command.dart';
 import 'package:kmdb_cli/src/commands/scan_command.dart';
+import 'package:kmdb_cli/src/commands/update_command.dart';
 import 'package:kmdb_cli/src/commands/stats_command.dart';
 import 'package:kmdb_cli/src/output/output_mode.dart';
 import 'package:test/test.dart';
@@ -48,11 +51,13 @@ Future<KvStoreImpl> _openStore() async {
 CommandContext _ctx(
   KvStoreImpl store, {
   OutputMode mode = OutputMode.json,
+  bool dbCreated = false,
   StringBuffer? out,
   StringBuffer? err,
 }) => CommandContext(
   store: store,
   mode: mode,
+  dbCreated: dbCreated,
   out: out ?? StringBuffer(),
   err: err ?? StringBuffer(),
 );
@@ -77,18 +82,18 @@ String _key(String seed) {
 /// hex string to use as the storage key.
 Future<void> _putDoc(
   KvStoreImpl store,
-  String ns,
+  String coll,
   Map<String, dynamic> doc,
 ) async {
   final id = doc['_id'] as String;
-  await store.put(ns, id, ValueCodec.encode(doc));
+  await store.put(coll, id, ValueCodec.encode(doc));
 }
 
 /// Simple temporary file wrapper.
 class _TmpFile {
-  _TmpFile()
+  _TmpFile({String ext = 'json'})
     : path =
-          '${io.Directory.systemTemp.path}/kmdb_test_${DateTime.now().microsecondsSinceEpoch}.json';
+          '${io.Directory.systemTemp.path}/kmdb_test_${DateTime.now().microsecondsSinceEpoch}.$ext';
   final String path;
   void write(String content) => io.File(path).writeAsStringSync(content);
   void delete() => io.File(path).deleteSync();
@@ -98,6 +103,56 @@ class _TmpFile {
 
 void main() {
   tearDown(MemoryStorageAdapter.releaseAllLocks);
+
+  // ── InitCommand ─────────────────────────────────────────────────────────────
+
+  group('InitCommand', () {
+    late KvStoreImpl store;
+    late StringBuffer out;
+    late StringBuffer err;
+
+    setUp(() async {
+      store = await _openStore();
+      out = StringBuffer();
+      err = StringBuffer();
+    });
+    tearDown(() => store.close());
+
+    test(
+      'reports path, deviceId, and created=true for a fresh database',
+      () async {
+        final ctx = _ctx(store, out: out, err: err, dbCreated: true);
+        final ok = await InitCommand().execute(ctx, [], {});
+        expect(ok, isTrue);
+
+        final result = json.decode(out.toString()) as Map<String, dynamic>;
+        expect(result['path'], isA<String>());
+        expect(result['deviceId'], isA<String>());
+        expect(result['created'], isTrue);
+      },
+    );
+
+    test('reports created=false when reopening an existing database', () async {
+      final ctx = _ctx(store, out: out, err: err, dbCreated: false);
+      final ok = await InitCommand().execute(ctx, [], {});
+      expect(ok, isTrue);
+
+      final result = json.decode(out.toString()) as Map<String, dynamic>;
+      expect(result['created'], isFalse);
+    });
+
+    test('is idempotent — running init twice on same store succeeds', () async {
+      final ctx1 = _ctx(store, out: out, err: err, dbCreated: true);
+      expect(await InitCommand().execute(ctx1, [], {}), isTrue);
+
+      final out2 = StringBuffer();
+      final ctx2 = _ctx(store, out: out2, err: err, dbCreated: false);
+      expect(await InitCommand().execute(ctx2, [], {}), isTrue);
+
+      final result = json.decode(out2.toString()) as Map<String, dynamic>;
+      expect(result['created'], isFalse);
+    });
+  });
 
   // ── GetCommand ──────────────────────────────────────────────────────────────
 
@@ -135,6 +190,37 @@ void main() {
       final ctx = _ctx(store, out: out, err: err);
       final ok = await GetCommand().execute(ctx, [], {});
       expect(ok, isFalse);
+    });
+
+    test('--select returns only requested fields', () async {
+      final id = _key('xsel');
+      await _putDoc(store, 'notes', {'_id': id, 'text': 'hi', 'score': 5});
+
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await GetCommand().execute(
+        ctx,
+        ['notes', id],
+        {'select': 'text'},
+      );
+      expect(ok, isTrue);
+      final result = json.decode(out.toString()) as List;
+      expect(result[0].keys.toList(), equals(['text']));
+      expect(result[0]['text'], equals('hi'));
+    });
+
+    test('--select with unknown field returns empty document', () async {
+      final id = _key('xselunk');
+      await _putDoc(store, 'notes', {'_id': id, 'text': 'hi'});
+
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await GetCommand().execute(
+        ctx,
+        ['notes', id],
+        {'select': 'nonexistent'},
+      );
+      expect(ok, isTrue);
+      final result = json.decode(out.toString()) as List;
+      expect(result[0], isEmpty);
     });
   });
 
@@ -208,6 +294,142 @@ void main() {
         'value': '{"name":"Alice"}',
       });
       expect(ok, isFalse);
+    });
+
+    test('inserts multiple documents from a JSON array via --value', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      const arrayJson = '[{"name":"Alice"},{"name":"Bob"}]';
+      final ok = await PutCommand().execute(
+        ctx,
+        ['notes'],
+        {'value': arrayJson},
+      );
+      expect(ok, isTrue);
+
+      final decoded = json.decode(out.toString()) as List;
+      expect(decoded, hasLength(2));
+      final id0 = decoded[0]['_id'] as String;
+      final id1 = decoded[1]['_id'] as String;
+      expect(id0, hasLength(32));
+      expect(id1, hasLength(32));
+      expect(id0, isNot(equals(id1)));
+
+      expect(
+        ValueCodec.decode((await store.get('notes', id0))!)['name'],
+        equals('Alice'),
+      );
+      expect(
+        ValueCodec.decode((await store.get('notes', id1))!)['name'],
+        equals('Bob'),
+      );
+    });
+
+    test('inserts document from a JSON file via --file', () async {
+      final tmp = _TmpFile();
+      tmp.write('{"name":"Carol"}');
+      addTearDown(tmp.delete);
+
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await PutCommand().execute(ctx, ['notes'], {'file': tmp.path});
+      expect(ok, isTrue);
+
+      final decoded = json.decode(out.toString()) as List;
+      expect(decoded, hasLength(1));
+      final id = decoded[0]['_id'] as String;
+      expect(
+        ValueCodec.decode((await store.get('notes', id))!)['name'],
+        equals('Carol'),
+      );
+    });
+
+    test(
+      'inserts multiple documents from a JSON array file via --file',
+      () async {
+        final tmp = _TmpFile();
+        tmp.write('[{"name":"Dave"},{"name":"Eve"}]');
+        addTearDown(tmp.delete);
+
+        final ctx = _ctx(store, out: out, err: err);
+        final ok = await PutCommand().execute(
+          ctx,
+          ['notes'],
+          {'file': tmp.path},
+        );
+        expect(ok, isTrue);
+
+        final decoded = json.decode(out.toString()) as List;
+        expect(decoded, hasLength(2));
+        expect(decoded.map((d) => d['name']), containsAll(['Dave', 'Eve']));
+      },
+    );
+
+    test('inserts multiple documents from an NDJSON file via --file', () async {
+      final tmp = _TmpFile(ext: 'ndjson');
+      tmp.write('{"name":"Frank"}\n{"name":"Grace"}\n\n');
+      addTearDown(tmp.delete);
+
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await PutCommand().execute(ctx, ['notes'], {'file': tmp.path});
+      expect(ok, isTrue);
+
+      final decoded = json.decode(out.toString()) as List;
+      expect(decoded, hasLength(2));
+      expect(decoded.map((d) => d['name']), containsAll(['Frank', 'Grace']));
+    });
+
+    test('inserts multiple documents from a JSONL file via --file', () async {
+      final tmp = _TmpFile(ext: 'jsonl');
+      tmp.write('{"name":"Heidi"}\n{"name":"Ivan"}\n');
+      addTearDown(tmp.delete);
+
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await PutCommand().execute(ctx, ['notes'], {'file': tmp.path});
+      expect(ok, isTrue);
+
+      final decoded = json.decode(out.toString()) as List;
+      expect(decoded, hasLength(2));
+      expect(decoded.map((d) => d['name']), containsAll(['Heidi', 'Ivan']));
+    });
+
+    test('returns false when --file path does not exist', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await PutCommand().execute(
+        ctx,
+        ['notes'],
+        {'file': '/nonexistent/path/file.json'},
+      );
+      expect(ok, isFalse);
+      expect(err.toString(), contains('Cannot read file'));
+    });
+
+    test('returns false for non-object items in JSON array', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await PutCommand().execute(
+        ctx,
+        ['notes'],
+        {'value': '[{"name":"Alice"}, 42]'},
+      );
+      expect(ok, isFalse);
+      expect(err.toString(), contains('JSON object'));
+    });
+
+    test('returns false for invalid JSON line in NDJSON file', () async {
+      final tmp = _TmpFile(ext: 'ndjson');
+      tmp.write('{"name":"Alice"}\n{bad json}\n');
+      addTearDown(tmp.delete);
+
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await PutCommand().execute(ctx, ['notes'], {'file': tmp.path});
+      expect(ok, isFalse);
+      expect(err.toString(), contains('invalid JSON'));
+    });
+
+    test('inserts zero documents from an empty JSON array', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await PutCommand().execute(ctx, ['notes'], {'value': '[]'});
+      expect(ok, isTrue);
+      final decoded = json.decode(out.toString()) as List;
+      expect(decoded, isEmpty);
     });
   });
 
@@ -371,6 +593,65 @@ void main() {
       expect(ok, isTrue);
       final docs = json.decode(out.toString()) as List;
       expect(docs, isEmpty);
+    });
+
+    test('--select projects to requested fields only', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await ScanCommand().execute(
+        ctx,
+        ['items'],
+        {'select': 'score,tag'},
+      );
+      expect(ok, isTrue);
+      final docs = json.decode(out.toString()) as List;
+      expect(docs, hasLength(3));
+      for (final doc in docs) {
+        final keys = (doc as Map).keys.toSet();
+        expect(keys, equals({'score', 'tag'}));
+      }
+    });
+
+    test('--select with single field', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await ScanCommand().execute(
+        ctx,
+        ['items'],
+        {'select': 'score'},
+      );
+      expect(ok, isTrue);
+      final docs = json.decode(out.toString()) as List;
+      expect(docs, hasLength(3));
+      expect(docs.every((d) => (d as Map).keys.single == 'score'), isTrue);
+    });
+
+    test('--select interacts correctly with --filter', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final filter = '{"field":"tag","op":"eq","value":"x"}';
+      final ok = await ScanCommand().execute(
+        ctx,
+        ['items'],
+        {'filter': filter, 'select': 'score'},
+      );
+      expect(ok, isTrue);
+      final docs = json.decode(out.toString()) as List;
+      // Only items with tag 'x' (score 10 and 20) but projected to score only.
+      expect(docs, hasLength(2));
+      final scores = docs.map((d) => d['score']).toSet();
+      expect(scores, equals({10, 20}));
+      expect(docs.every((d) => (d as Map).keys.single == 'score'), isTrue);
+    });
+
+    test('--select with unknown field produces empty documents', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await ScanCommand().execute(
+        ctx,
+        ['items'],
+        {'select': 'nonexistent'},
+      );
+      expect(ok, isTrue);
+      final docs = json.decode(out.toString()) as List;
+      expect(docs, hasLength(3));
+      expect(docs.every((d) => (d as Map).isEmpty), isTrue);
     });
   });
 
@@ -755,12 +1036,10 @@ void main() {
 
   group('Export → Import roundtrip', () {
     late KvStoreImpl store;
-    late StringBuffer out;
     late StringBuffer err;
 
     setUp(() async {
       store = await _openStore();
-      out = StringBuffer();
       err = StringBuffer();
     });
     tearDown(() => store.close());
@@ -777,15 +1056,16 @@ void main() {
         await _putDoc(store, 'people', doc);
       }
 
-      // Export to a temp file.
-      final tmp = _TmpFile();
-      final exportCtx = _ctx(store, out: out, err: err);
-      final exportOk = await ExportCommand().execute(
-        exportCtx,
-        ['people'],
-        {'output': tmp.path},
-      );
+      // Export via ctx.out (mirrors how --output redirects ctx.out in prod).
+      final exportOut = StringBuffer();
+      final exportCtx = _ctx(store, out: exportOut, err: err);
+      final exportOk = await ExportCommand().execute(exportCtx, ['people'], {});
       expect(exportOk, isTrue);
+
+      // Write the captured NDJSON to a temp file for ImportCommand.
+      final tmp = _TmpFile();
+      tmp.write(exportOut.toString());
+      addTearDown(tmp.delete);
 
       // Delete all documents from the namespace.
       for (final id in ids) {
@@ -820,8 +1100,6 @@ void main() {
         expect(restored['name'], equals(orig['name']));
         expect(restored['score'], equals(orig['score']));
       }
-
-      tmp.delete();
     });
 
     test('export writes one line per document in NDJSON format', () async {
@@ -830,17 +1108,13 @@ void main() {
       await _putDoc(store, 'items', {'_id': id1, 'v': 1});
       await _putDoc(store, 'items', {'_id': id2, 'v': 2});
 
-      final tmp = _TmpFile();
-      final ctx = _ctx(store, out: out, err: err);
-      final ok = await ExportCommand().execute(
-        ctx,
-        ['items'],
-        {'output': tmp.path},
-      );
+      final exportOut = StringBuffer();
+      final ctx = _ctx(store, out: exportOut, err: err);
+      final ok = await ExportCommand().execute(ctx, ['items'], {});
       expect(ok, isTrue);
 
-      final lines = io.File(tmp.path)
-          .readAsStringSync()
+      final lines = exportOut
+          .toString()
           .trim()
           .split('\n')
           .where((l) => l.isNotEmpty)
@@ -849,8 +1123,601 @@ void main() {
       for (final line in lines) {
         expect(() => json.decode(line), returnsNormally);
       }
+    });
+  });
 
-      tmp.delete();
+  // ── InsertCommand ───────────────────────────────────────────────────────────
+
+  group('InsertCommand', () {
+    late KvStoreImpl store;
+    late StringBuffer out;
+    late StringBuffer err;
+
+    setUp(() async {
+      store = await _openStore();
+      out = StringBuffer();
+      err = StringBuffer();
+    });
+    tearDown(() => store.close());
+
+    test('inserts document with generated ID and echoes it back', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      const doc = '{"name":"Alice"}';
+      final ok = await InsertCommand().execute(ctx, ['notes'], {'value': doc});
+      expect(ok, isTrue);
+
+      final decoded = json.decode(out.toString()) as List;
+      final generatedId = decoded[0]['_id'] as String;
+      expect(generatedId, hasLength(32));
+      expect(generatedId[12], equals('7')); // UUIDv7 version nibble
+
+      final stored = await store.get('notes', generatedId);
+      expect(stored, isNotNull);
+      expect(ValueCodec.decode(stored!)['name'], equals('Alice'));
+    });
+
+    test('ignores user-provided _id and generates a new one', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final userId = _key('user');
+      final doc = '{"_id":"$userId","name":"Alice"}';
+      final ok = await InsertCommand().execute(ctx, ['notes'], {'value': doc});
+      expect(ok, isTrue);
+
+      final decoded = json.decode(out.toString()) as List;
+      final assignedId = decoded[0]['_id'] as String;
+      expect(assignedId, isNot(equals(userId)));
+
+      // User-supplied ID must NOT have been stored.
+      expect(await store.get('notes', userId), isNull);
+      // The generated ID must exist.
+      expect(await store.get('notes', assignedId), isNotNull);
+    });
+
+    test('returns false for invalid JSON via --value', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await InsertCommand().execute(
+        ctx,
+        ['notes'],
+        {'value': '{bad}'},
+      );
+      expect(ok, isFalse);
+      expect(err.toString(), contains('Invalid JSON'));
+    });
+
+    test('returns false when document is not a JSON object', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await InsertCommand().execute(
+        ctx,
+        ['notes'],
+        {'value': '[1,2]'},
+      );
+      expect(ok, isFalse);
+      expect(err.toString(), contains('JSON object'));
+    });
+
+    test('inserts multiple documents from a JSON array via --value', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      const arrayJson = '[{"name":"Alice"},{"name":"Bob"}]';
+      final ok = await InsertCommand().execute(
+        ctx,
+        ['notes'],
+        {'value': arrayJson},
+      );
+      expect(ok, isTrue);
+
+      final decoded = json.decode(out.toString()) as List;
+      expect(decoded, hasLength(2));
+      final id0 = decoded[0]['_id'] as String;
+      final id1 = decoded[1]['_id'] as String;
+      expect(id0, isNot(equals(id1)));
+    });
+
+    test('inserts document from a JSON file via --file', () async {
+      final tmp = _TmpFile();
+      tmp.write('{"name":"Carol"}');
+      addTearDown(tmp.delete);
+
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await InsertCommand().execute(
+        ctx,
+        ['notes'],
+        {'file': tmp.path},
+      );
+      expect(ok, isTrue);
+
+      final decoded = json.decode(out.toString()) as List;
+      expect(decoded, hasLength(1));
+      final id = decoded[0]['_id'] as String;
+      expect(
+        ValueCodec.decode((await store.get('notes', id))!)['name'],
+        equals('Carol'),
+      );
+    });
+
+    test('inserts multiple documents from an NDJSON file via --file', () async {
+      final tmp = _TmpFile(ext: 'ndjson');
+      tmp.write('{"name":"Frank"}\n{"name":"Grace"}\n\n');
+      addTearDown(tmp.delete);
+
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await InsertCommand().execute(
+        ctx,
+        ['notes'],
+        {'file': tmp.path},
+      );
+      expect(ok, isTrue);
+
+      final decoded = json.decode(out.toString()) as List;
+      expect(decoded, hasLength(2));
+      expect(decoded.map((d) => d['name']), containsAll(['Frank', 'Grace']));
+    });
+
+    test('inserts zero documents from an empty JSON array', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await InsertCommand().execute(ctx, ['notes'], {'value': '[]'});
+      expect(ok, isTrue);
+      final decoded = json.decode(out.toString()) as List;
+      expect(decoded, isEmpty);
+    });
+
+    test('returns false when collection arg is missing', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await InsertCommand().execute(ctx, [], {'value': '{"x":1}'});
+      expect(ok, isFalse);
+    });
+
+    test('returns false when --file path does not exist', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await InsertCommand().execute(
+        ctx,
+        ['notes'],
+        {'file': '/nonexistent/path/file.json'},
+      );
+      expect(ok, isFalse);
+      expect(err.toString(), contains('Cannot read file'));
+    });
+  });
+
+  // ── PutCommand (deprecated wrapper) ────────────────────────────────────────
+
+  group('PutCommand (deprecated)', () {
+    late KvStoreImpl store;
+    late StringBuffer out;
+    late StringBuffer err;
+
+    setUp(() async {
+      store = await _openStore();
+      out = StringBuffer();
+      err = StringBuffer();
+    });
+    tearDown(() => store.close());
+
+    test('still inserts document and emits a deprecation warning', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await PutCommand().execute(
+        ctx,
+        ['notes'],
+        {'value': '{"x":1}'},
+      );
+      expect(ok, isTrue);
+
+      // Document should be stored.
+      final decoded = json.decode(out.toString()) as List;
+      expect(decoded, hasLength(1));
+      expect(decoded[0]['_id'], isNotNull);
+
+      // Deprecation warning must appear on stderr.
+      expect(err.toString(), contains('deprecated'));
+      expect(err.toString(), contains('insert'));
+    });
+
+    test('deprecation warning appears even when insert fails', () async {
+      // Pass invalid JSON so InsertCommand returns false.
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await PutCommand().execute(
+        ctx,
+        ['notes'],
+        {'value': '{bad json}'},
+      );
+      expect(ok, isFalse);
+
+      // Warning still emitted before delegate runs.
+      expect(err.toString(), contains('deprecated'));
+    });
+  });
+
+  // ── UpdateCommand ───────────────────────────────────────────────────────────
+
+  group('UpdateCommand', () {
+    late KvStoreImpl store;
+    late StringBuffer out;
+    late StringBuffer err;
+    late String idA;
+    late String idB;
+    late String idC;
+
+    setUp(() async {
+      store = await _openStore();
+      out = StringBuffer();
+      err = StringBuffer();
+      idA = _key('updA');
+      idB = _key('updB');
+      idC = _key('updC');
+      await _putDoc(store, 'col', {
+        '_id': idA,
+        'name': 'Alice',
+        'status': 'active',
+      });
+      await _putDoc(store, 'col', {
+        '_id': idB,
+        'name': 'Bob',
+        'status': 'active',
+      });
+      await _putDoc(store, 'col', {
+        '_id': idC,
+        'name': 'Carol',
+        'status': 'inactive',
+      });
+    });
+    tearDown(() => store.close());
+
+    // ── Single-id mode (positional) ──────────────────────────────────────────
+
+    test('single-id: updates one field and preserves others', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await UpdateCommand().execute(
+        ctx,
+        ['col', idA],
+        {'set': '{"status":"done"}'},
+      );
+      expect(ok, isTrue);
+
+      final doc = ValueCodec.decode((await store.get('col', idA))!);
+      expect(doc['status'], equals('done'));
+      expect(doc['name'], equals('Alice')); // untouched
+      expect(doc['_id'], equals(idA)); // _id preserved
+    });
+
+    test('single-id: adds a new field that did not exist', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await UpdateCommand().execute(
+        ctx,
+        ['col', idA],
+        {'set': '{"score":99}'},
+      );
+      expect(ok, isTrue);
+
+      final doc = ValueCodec.decode((await store.get('col', idA))!);
+      expect(doc['score'], equals(99));
+      expect(doc['name'], equals('Alice')); // still present
+    });
+
+    test(
+      'single-id: does not overwrite _id even when --set contains _id',
+      () async {
+        final ctx = _ctx(store, out: out, err: err);
+        final ok = await UpdateCommand().execute(
+          ctx,
+          ['col', idA],
+          {'set': '{"_id":"injected","status":"done"}'},
+        );
+        expect(ok, isTrue);
+
+        final doc = ValueCodec.decode((await store.get('col', idA))!);
+        expect(doc['_id'], equals(idA)); // original _id preserved
+      },
+    );
+
+    test('single-id: returns false when document does not exist', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await UpdateCommand().execute(
+        ctx,
+        ['col', _key('ghost')],
+        {'set': '{"x":1}'},
+      );
+      expect(ok, isFalse);
+      expect(err.toString(), contains('not found'));
+    });
+
+    test('single-id: reports {"updated": 1}', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      await UpdateCommand().execute(
+        ctx,
+        ['col', idA],
+        {'set': '{"status":"done"}'},
+      );
+      final result = json.decode(out.toString()) as Map;
+      expect(result['updated'], equals(1));
+    });
+
+    // ── Multi-id mode (--id) ─────────────────────────────────────────────────
+
+    test('multi-id: updates all listed documents', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await UpdateCommand().execute(
+        ctx,
+        ['col'],
+        {'id': '$idA,$idB', 'set': '{"status":"reviewed"}'},
+      );
+      expect(ok, isTrue);
+
+      final docA = ValueCodec.decode((await store.get('col', idA))!);
+      final docB = ValueCodec.decode((await store.get('col', idB))!);
+      expect(docA['status'], equals('reviewed'));
+      expect(docB['status'], equals('reviewed'));
+    });
+
+    test('multi-id: reports count of updated documents', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      await UpdateCommand().execute(
+        ctx,
+        ['col'],
+        {'id': '$idA,$idB', 'set': '{"x":1}'},
+      );
+      final result = json.decode(out.toString()) as Map;
+      expect(result['updated'], equals(2));
+    });
+
+    test(
+      'multi-id: returns false and reports error when one id is missing',
+      () async {
+        final ctx = _ctx(store, out: out, err: err);
+        final ok = await UpdateCommand().execute(
+          ctx,
+          ['col'],
+          {'id': '$idA,${_key("missing")}', 'set': '{"x":1}'},
+        );
+        expect(ok, isFalse);
+        expect(err.toString(), contains('not found'));
+      },
+    );
+
+    test('multi-id: single id in --id flag works', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await UpdateCommand().execute(
+        ctx,
+        ['col'],
+        {'id': idA, 'set': '{"status":"solo"}'},
+      );
+      expect(ok, isTrue);
+      final result = json.decode(out.toString()) as Map;
+      expect(result['updated'], equals(1));
+      final doc = ValueCodec.decode((await store.get('col', idA))!);
+      expect(doc['status'], equals('solo'));
+    });
+
+    // ── Filter mode ──────────────────────────────────────────────────────────
+
+    test('filter: updates only matching documents', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final filter = '{"field":"status","op":"eq","value":"active"}';
+      final ok = await UpdateCommand().execute(
+        ctx,
+        ['col'],
+        {'filter': filter, 'set': '{"flagged":true}'},
+      );
+      expect(ok, isTrue);
+
+      final docA = ValueCodec.decode((await store.get('col', idA))!);
+      final docB = ValueCodec.decode((await store.get('col', idB))!);
+      final docC = ValueCodec.decode((await store.get('col', idC))!);
+      expect(docA['flagged'], isTrue); // active -> updated
+      expect(docB['flagged'], isTrue); // active -> updated
+      expect(docC['flagged'], isNull); // inactive -> not touched
+    });
+
+    test('filter: returns {"updated": 0} when nothing matches', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final filter = '{"field":"status","op":"eq","value":"archived"}';
+      final ok = await UpdateCommand().execute(
+        ctx,
+        ['col'],
+        {'filter': filter, 'set': '{"x":1}'},
+      );
+      expect(ok, isTrue);
+      final result = json.decode(out.toString()) as Map;
+      expect(result['updated'], equals(0));
+    });
+
+    test('filter: returns false for invalid filter JSON', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await UpdateCommand().execute(
+        ctx,
+        ['col'],
+        {'filter': '{bad json}', 'set': '{"x":1}'},
+      );
+      expect(ok, isFalse);
+      expect(err.toString(), contains('filter'));
+    });
+
+    test('filter: returns false for unknown filter operator', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await UpdateCommand().execute(
+        ctx,
+        ['col'],
+        {'filter': '{"field":"x","op":"regex","value":".*"}', 'set': '{"x":1}'},
+      );
+      expect(ok, isFalse);
+    });
+
+    // ── All-docs mode ─────────────────────────────────────────────────────────
+
+    test('all: updates every document in the collection', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await UpdateCommand().execute(
+        ctx,
+        ['col'],
+        {'all': true, 'set': '{"archived":true}'},
+      );
+      expect(ok, isTrue);
+
+      for (final id in [idA, idB, idC]) {
+        final doc = ValueCodec.decode((await store.get('col', id))!);
+        expect(doc['archived'], isTrue);
+      }
+
+      final result = json.decode(out.toString()) as Map;
+      expect(result['updated'], equals(3));
+    });
+
+    test('all: returns {"updated": 0} for an empty collection', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await UpdateCommand().execute(
+        ctx,
+        ['empty'],
+        {'all': true, 'set': '{"x":1}'},
+      );
+      expect(ok, isTrue);
+      final result = json.decode(out.toString()) as Map;
+      expect(result['updated'], equals(0));
+    });
+
+    // ── Mutual exclusion ─────────────────────────────────────────────────────
+
+    test('returns false when positional id and --all are both given', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await UpdateCommand().execute(
+        ctx,
+        ['col', idA],
+        {'all': true, 'set': '{"x":1}'},
+      );
+      expect(ok, isFalse);
+      expect(err.toString(), contains('mutually exclusive'));
+    });
+
+    test('returns false when --id and --filter are both given', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await UpdateCommand().execute(
+        ctx,
+        ['col'],
+        {
+          'id': idA,
+          'filter': '{"field":"status","op":"eq","value":"active"}',
+          'set': '{"x":1}',
+        },
+      );
+      expect(ok, isFalse);
+      expect(err.toString(), contains('mutually exclusive'));
+    });
+
+    test('returns false when --filter and --all are both given', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await UpdateCommand().execute(
+        ctx,
+        ['col'],
+        {
+          'filter': '{"field":"status","op":"eq","value":"active"}',
+          'all': true,
+          'set': '{"x":1}',
+        },
+      );
+      expect(ok, isFalse);
+      expect(err.toString(), contains('mutually exclusive'));
+    });
+
+    test('returns false when no targeting mode is given', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await UpdateCommand().execute(
+        ctx,
+        ['col'],
+        {'set': '{"x":1}'},
+      );
+      expect(ok, isFalse);
+      expect(err.toString(), contains('targeting mode'));
+    });
+
+    // ── --set validation ─────────────────────────────────────────────────────
+
+    test('returns false when --set is missing', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await UpdateCommand().execute(ctx, ['col', idA], {});
+      expect(ok, isFalse);
+      expect(err.toString(), contains('--set'));
+    });
+
+    test('returns false when --set is invalid JSON', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await UpdateCommand().execute(
+        ctx,
+        ['col', idA],
+        {'set': '{bad json}'},
+      );
+      expect(ok, isFalse);
+      expect(err.toString(), contains('Invalid JSON'));
+    });
+
+    test('returns false when --set is a JSON array', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await UpdateCommand().execute(
+        ctx,
+        ['col', idA],
+        {'set': '[{"x":1}]'},
+      );
+      expect(ok, isFalse);
+      expect(err.toString(), contains('JSON object'));
+    });
+
+    test('returns false when --set is a JSON scalar', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await UpdateCommand().execute(
+        ctx,
+        ['col', idA],
+        {'set': '"just a string"'},
+      );
+      expect(ok, isFalse);
+      expect(err.toString(), contains('JSON object'));
+    });
+
+    // ── Shallow merge semantics ──────────────────────────────────────────────
+
+    test(
+      'shallow merge: replaces entire nested object when key is in --set',
+      () async {
+        // Set up document with a nested object.
+        final id = _key('nested');
+        await _putDoc(store, 'col', {
+          '_id': id,
+          'profile': {'city': 'Sydney', 'country': 'AU'},
+          'name': 'Dana',
+        });
+
+        final ctx = _ctx(store, out: out, err: err);
+        final ok = await UpdateCommand().execute(
+          ctx,
+          ['col', id],
+          {'set': '{"profile":{"city":"Melbourne"}}'},
+        );
+        expect(ok, isTrue);
+
+        final doc = ValueCodec.decode((await store.get('col', id))!);
+        // Shallow merge: entire profile replaced.
+        expect(doc['profile'], equals({'city': 'Melbourne'}));
+        expect(doc['name'], equals('Dana')); // sibling field unchanged
+      },
+    );
+
+    // ── Error: missing collection ─────────────────────────────────────────────
+
+    test('returns false when collection arg is missing', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await UpdateCommand().execute(ctx, [], {'set': '{"x":1}'});
+      expect(ok, isFalse);
+      expect(err.toString(), contains('update requires'));
+    });
+
+    // ── Filter mode: empty collection ─────────────────────────────────────────
+
+    test('filter: returns {"updated":0} on empty collection', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final filter = '{"field":"status","op":"eq","value":"active"}';
+      final ok = await UpdateCommand().execute(
+        ctx,
+        ['empty'],
+        {'filter': filter, 'set': '{"x":1}'},
+      );
+      expect(ok, isTrue);
+      final result = json.decode(out.toString()) as Map;
+      expect(result['updated'], equals(0));
     });
   });
 

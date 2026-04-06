@@ -42,7 +42,7 @@ final class CountCommand implements CliCommand {
       ctx.writeError('count requires <collection>.\nUsage: $usage');
       return false;
     }
-    final namespace = args[0];
+    final collection = args[0];
 
     Filter? filter;
     final filterJson = flags['filter'] as String?;
@@ -59,7 +59,7 @@ final class CountCommand implements CliCommand {
     }
 
     var count = 0;
-    await for (final entry in ctx.store.scan(namespace)) {
+    await for (final entry in ctx.store.scan(collection)) {
       if (filter != null) {
         final doc = ValueCodec.decode(entry.value);
         if (!filter.evaluate(doc)) continue;

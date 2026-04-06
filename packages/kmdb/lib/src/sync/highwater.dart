@@ -81,7 +81,10 @@ final class HighwaterMark {
   /// Returns `null` if no HWM file exists for this device yet (i.e. first
   /// push from this device). Throws [FormatException] if the file exists but
   /// cannot be parsed.
-  static Future<HighwaterMark?> load(String path, SyncStorageAdapter adapter) async {
+  static Future<HighwaterMark?> load(
+    String path,
+    SyncStorageAdapter adapter,
+  ) async {
     final bytes = await adapter.download(path);
     if (bytes == null) return null;
     return _parse(bytes, path);

@@ -436,7 +436,7 @@ void main() {
           RegExp(r'^[0-9A-F]{16}$').hasMatch(hlcRange['min'] as String),
           isTrue,
         );
-        expect(result['namespaces'], contains('ns'));
+        expect(result['collections'], contains('ns'));
         // Summary mode must NOT include full record list.
         expect(result.containsKey('records'), isFalse);
       },
@@ -660,7 +660,7 @@ void main() {
       ], {});
       expect(ok, isTrue);
       final result = json.decode(out.toString()) as Map<String, dynamic>;
-      expect(result['namespaces'], isEmpty);
+      expect(result['collections'], isEmpty);
       expect(result['recordCount'], equals(1));
     });
   });

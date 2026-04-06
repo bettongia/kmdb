@@ -36,7 +36,8 @@ final class ScanCommand implements CliCommand {
   @override
   String get usage =>
       'scan <collection> [--filter <json>] [--order-by <field>] [--desc] '
-      '[--limit <n>] [--offset <n>] [--key-prefix <str>]';
+      '[--limit <n>] [--offset <n>] [--key-prefix <str>] '
+      '[--select <field1,field2,...>]';
 
   @override
   Future<bool> execute(
@@ -48,7 +49,7 @@ final class ScanCommand implements CliCommand {
       ctx.writeError('scan requires <collection>.\nUsage: $usage');
       return false;
     }
-    final namespace = args[0];
+    final collection = args[0];
 
     // Parse optional filter.
     Filter? filter;
@@ -70,14 +71,15 @@ final class ScanCommand implements CliCommand {
     final limit = _parseInt(flags['limit']);
     final offset = _parseInt(flags['offset']);
     final keyPrefix = flags['key-prefix'] as String?;
+    final selectFields = _parseSelect(flags['select']);
 
     // Collect all matching documents.
     final docs = <Map<String, dynamic>>[];
 
-    await for (final entry in ctx.store.scan(namespace, startKey: keyPrefix)) {
+    await for (final entry in ctx.store.scan(collection, startKey: keyPrefix)) {
       final doc = ValueCodec.decode(entry.value);
       if (filter != null && !filter.evaluate(doc)) continue;
-      docs.add(doc);
+      docs.add(selectFields != null ? _project(doc, selectFields) : doc);
     }
 
     // Sort.
@@ -100,6 +102,27 @@ final class ScanCommand implements CliCommand {
     ctx.writeDocuments(page);
     return true;
   }
+
+  /// Parses a comma-separated `--select` value into a set of field names.
+  ///
+  /// Returns `null` when [value] is null (no projection requested).
+  static Set<String>? _parseSelect(dynamic value) {
+    if (value == null) return null;
+    final parts = '$value'
+        .split(',')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty);
+    return parts.isEmpty ? null : parts.toSet();
+  }
+
+  /// Returns a copy of [doc] containing only the keys in [fields].
+  static Map<String, dynamic> _project(
+    Map<String, dynamic> doc,
+    Set<String> fields,
+  ) => {
+    for (final entry in doc.entries)
+      if (fields.contains(entry.key)) entry.key: entry.value,
+  };
 
   static int? _parseInt(dynamic value) {
     if (value == null) return null;

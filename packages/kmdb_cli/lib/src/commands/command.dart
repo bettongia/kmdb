@@ -28,6 +28,7 @@ final class CommandContext {
   CommandContext({
     required this.store,
     this.mode = OutputMode.json,
+    this.dbCreated = false,
     StringSink? out,
     StringSink? err,
   }) : out = out ?? _StdoutSink(),
@@ -38,6 +39,13 @@ final class CommandContext {
 
   /// The active output format.
   final OutputMode mode;
+
+  /// Whether the database was freshly created during this session open.
+  ///
+  /// `true` when no `CURRENT` file existed before [DatabaseOpener.open] was
+  /// called (i.e. this is the first ever open of the database at this path).
+  /// `false` when an existing database was reopened.
+  final bool dbCreated;
 
   /// Sink for normal output (stdout in production).
   final StringSink out;

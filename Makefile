@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := default
 
-.PHONY: test cli_test site dart_doc default checks coverage license_check license_add styles clean
+.PHONY: default pre_commit test e2e_test tests_all cli_test site dart_doc default checks coverage license_check license_add styles clean
 
 
 COVERAGE_DIR=site/coverage
@@ -11,6 +11,10 @@ ADDLICENSE_CONFIG=addlicense_config.txt
 
 default: site/ checks site
 
+pre_commit: clean tests_all default
+
+tests_all: test e2e_test
+
 prepare:
 	dart pub global activate melos
 	dart pub global activate coverage
@@ -19,7 +23,7 @@ prepare:
 test: test.log cli_test.log
 
 test.log: $(KMDB_PKG)/**/*.dart
-	melos test --scope=kmdb | tee cli_test.log
+	melos test --scope=kmdb | tee test.log
 
 cli_test: cli_test.log
 
@@ -92,6 +96,7 @@ $(KMDB_CLI_PKG)/**/*.dart:
 
 clean:
 	rm -rf site
-	rm e2e_test.log
-	rm test.log
-	rm cli_test.log
+	rm -f e2e_test.log
+	rm -f test.log
+	rm -f cli_test.log
+	rm -f coverage.log

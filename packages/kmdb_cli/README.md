@@ -32,10 +32,13 @@ Here's an example
 
 ```bash
 # Insert a new document (ID is automatically assigned)
-dart run bin/kmdb.dart mydb put notes --value '{"title": "New Note"}'
+dart run bin/kmdb.dart mydb insert notes --value '{"title": "New Note"}'
 
 # Retrieve it by the ID shown in the output
 dart run bin/kmdb.dart mydb get notes 019242f4aac07b8fb7e8f1bfb2c3d4e5
+
+# Update a field on an existing document
+dart run bin/kmdb.dart mydb update notes 019242f4aac07b8fb7e8f1bfb2c3d4e5 --set '{"title": "Updated Note"}'
 
 dart run bin/kmdb.dart mydb collections
 
@@ -51,11 +54,11 @@ dart run bin/kmdb.dart mydb scan notes
 | `--mode <mode>`       | `-m`  | Output format (default: `json`)                    |
 | `--output <file>`     | `-o`  | Write output to a file instead of stdout           |
 | `--read <file>`       | `-r`  | Read commands from a script file                   |
-| `--continue-on-error` |       | Keep running after a command error (default: stop)    |
-| `--flush`             |       | Flush memtable to SSTable on exit (default)           |
-| `--no-flush`          |       | Skip flush on exit (data stays in WAL)                |
-| `--version`           |       | Print version and exit                                |
-| `--help`              | `-h`  | Print help and exit                                   |
+| `--continue-on-error` |       | Keep running after a command error (default: stop) |
+| `--flush`             |       | Flush memtable to SSTable on exit (default)        |
+| `--no-flush`          |       | Skip flush on exit (data stays in WAL)             |
+| `--version`           |       | Print version and exit                             |
+| `--help`              | `-h`  | Print help and exit                                |
 
 ### Output modes
 
@@ -72,7 +75,7 @@ dart run bin/kmdb.dart mydb scan notes
 
 ### Data commands
 
-#### `get <namespace> <key>`
+#### `get <collection> <key>`
 
 Retrieve a single document by its key.
 
@@ -80,22 +83,90 @@ Retrieve a single document by its key.
 kmdb mydb get notes 019242f4aac07b8fb7e8f1bfb2c3d4e5
 ```
 
-#### `put <namespace> [--value <json>]`
+#### `insert <collection> [--value <json>] [--file <path>]`
 
-Insert a new document. A new system-generated UUIDv7 identifier is automatically
-assigned to the document's `id` field. To update an existing document, use the
-`import` command or the typed API.
+Insert one or more new documents. A new system-generated UUIDv7 identifier is
+automatically assigned to each document's `_id` field. Any `_id` supplied by the
+caller is replaced.
 
-The JSON document is read from `--value` (inline) or from stdin.
+Input is read from `--value` (inline JSON), `--file` (path to a JSON or NDJSON
+file), or stdin (auto-detected as JSON or NDJSON).
+
+| Flag            | Description                                                         |
+| --------------- | ------------------------------------------------------------------- |
+| `--value <json>`| Inline JSON object or array                                         |
+| `--file <path>` | File path; `.ndjson`/`.jsonl` files are parsed as NDJSON, others as JSON |
 
 ```bash
-kmdb mydb put notes --value '{"title":"Hello"}'
+# Single document
+kmdb mydb insert notes --value '{"title":"Hello"}'
+
+# Multiple documents from a JSON array
+kmdb mydb insert notes --value '[{"title":"Hello"},{"title":"World"}]'
+
+# From an NDJSON file
+kmdb mydb insert notes --file docs.ndjson
 
 # From stdin
-echo '{"title":"Hello"}' | kmdb mydb put notes
+echo '{"title":"Hello"}' | kmdb mydb insert notes
 ```
 
-#### `delete <namespace> <key>`
+#### `update <collection> [<id> | --id <ids> | --filter <json> | --all] --set <json>`
+
+Partially update one or more documents using a shallow merge. The fields in
+`--set` are merged into the top-level of each matching document. Nested objects
+are replaced wholesale. The `_id` field is always preserved and cannot be
+overwritten.
+
+Exactly one targeting mode is required. The modes are mutually exclusive.
+
+| Targeting mode           | Description                                      |
+| ------------------------ | ------------------------------------------------ |
+| Positional `<id>`        | Update a single document by key                  |
+| `--id <id1,id2,...>`     | Update a comma-separated list of documents by key |
+| `--filter <json>`        | Update all documents matching the filter         |
+| `--all`                  | Update every document in the collection          |
+
+The `--set` flag is always required and must be a JSON object (not an array or
+scalar).
+
+Reports `{"updated": N}` on success.
+
+```bash
+# Update a single document by ID
+kmdb mydb update notes 019242f4aac07b8fb7e8f1bfb2c3d4e5 --set '{"status":"done"}'
+
+# Update multiple specific IDs
+kmdb mydb update notes --id 019abc...,019def... --set '{"archived":true}'
+
+# Update all documents matching a filter
+kmdb mydb update notes \
+  --filter '{"field":"status","op":"eq","value":"active"}' \
+  --set '{"flagged":true}'
+
+# Update every document in the collection
+kmdb mydb update notes --all --set '{"migrated":true}'
+```
+
+> **Note:** `update` operates at the KvStore layer and does not update
+> secondary indexes defined via `KmdbDatabase.collection`. Indexes will be
+> stale until the next Query Layer write or index rebuild. Each document write
+> is independent — there is no atomicity guarantee across multiple documents.
+
+#### `put <collection> [--value <json>] [--file <path>]` *(deprecated)*
+
+> **Deprecated** — use `insert` instead.
+>
+> `put` is a deprecated alias for `insert`. It still works but prints a
+> deprecation warning to stderr. Update any scripts to use `insert`.
+
+```bash
+# This still works but emits a warning:
+kmdb mydb put notes --value '{"title":"Hello"}'
+# Warning: `put` is deprecated, use `insert` instead.
+```
+
+#### `delete <collection> <key>`
 
 Delete a document by key (idempotent — succeeds even if the key does not exist).
 
@@ -103,9 +174,9 @@ Delete a document by key (idempotent — succeeds even if the key does not exist
 kmdb mydb delete notes 019242f4aac07b8fb7e8f1bfb2c3d4e5
 ```
 
-#### `scan <namespace> [options]`
+#### `scan <collection> [options]`
 
-Scan all documents in a namespace with optional filtering, ordering, and
+Scan all documents in a collection with optional filtering, ordering, and
 pagination.
 
 | Flag                 | Description                                      |
@@ -127,9 +198,9 @@ kmdb mydb scan notes \
   --order-by updatedAt --desc --limit 20 --offset 20
 ```
 
-#### `count <namespace> [--filter <json>]`
+#### `count <collection> [--filter <json>]`
 
-Count documents in a namespace, optionally filtered.
+Count documents in a collection, optionally filtered.
 
 ```bash
 kmdb mydb count notes
@@ -142,7 +213,7 @@ kmdb mydb count notes --filter '{"field":"status","op":"eq","value":"active"}'
 
 #### `collections`
 
-List all user-visible namespaces (collections) in the database.
+List all user-visible collections in the database.
 
 ```bash
 kmdb mydb collections
@@ -168,19 +239,19 @@ kmdb mydb info
 
 ### Import / Export commands
 
-#### `export <namespace> [--output <file>]`
+#### `export <collection> [--output <file>]`
 
-Export a namespace to newline-delimited JSON (NDJSON). Writes to stdout if
+Export a collection to newline-delimited JSON (NDJSON). Writes to stdout if
 `--output` is omitted.
 
 ```bash
 kmdb mydb export notes --output notes.ndjson
 ```
 
-#### `import <namespace> [options]`
+#### `import <collection> [options]`
 
-Import NDJSON documents into a namespace. Each line must be a JSON object with a
-string `id` field. Reads from stdin if `--input` is omitted.
+Import NDJSON documents into a collection. Each line must be a JSON object with
+a string `id` field. Reads from stdin if `--input` is omitted.
 
 | Flag                   | Description                               |
 | ---------------------- | ----------------------------------------- |
@@ -194,7 +265,7 @@ kmdb mydb import notes --input notes.ndjson --on-conflict ignore
 
 #### `dump [--output <file>]`
 
-Dump the entire database (all namespaces) as NDJSON with namespace header
+Dump the entire database (all collections) as NDJSON with collection header
 comments. Writes to stdout if `--output` is omitted. The output is compatible
 with `restore`.
 
@@ -233,8 +304,8 @@ kmdb mydb compact
 
 #### `verify`
 
-Scan all documents in all namespaces and attempt to decode each one. Reports any
-documents that cannot be decoded (corrupt values).
+Scan all documents in all collections and attempt to decode each one. Reports
+any documents that cannot be decoded (corrupt values).
 
 ```bash
 kmdb mydb verify
@@ -253,11 +324,11 @@ database lock, so they are safe to run against a live database. They are
 Inspect a single SSTable file. The filename is resolved relative to the `sst/`
 subdirectory of the database directory.
 
-| Flag     | Description                                                      |
-| -------- | ---------------------------------------------------------------- |
-| _(none)_ | Summary: footer fields, Bloom filter stats, index entry count    |
-| `--full` | Adds index block references and all key/value entries            |
-| `--data` | Requires `--full`. Decodes user-namespace entry values as JSON   |
+| Flag     | Description                                                     |
+| -------- | --------------------------------------------------------------- |
+| _(none)_ | Summary: footer fields, Bloom filter stats, index entry count   |
+| `--full` | Adds index block references and all key/value entries           |
+| `--data` | Requires `--full`. Decodes user-collection entry values as JSON |
 
 ```bash
 # Summary
@@ -270,7 +341,7 @@ kmdb mydb util sstable abc123-....sst --full
 kmdb mydb util sstable abc123-....sst --full --data
 ```
 
-System-namespace entries (`$meta`, `$cache`, `$index:*`) use internal binary
+System-collection entries (`$meta`, `$cache`, `$index:*`) use internal binary
 encodings and are not decoded even with `--data`.
 
 #### `util wal <filename> [--full] [--full --data]`
@@ -278,11 +349,11 @@ encodings and are not decoded even with `--data`.
 Inspect a single WAL file. The filename is resolved relative to the database
 directory (e.g. `wal-00001.log`).
 
-| Flag     | Description                                                        |
-| -------- | ------------------------------------------------------------------ |
-| _(none)_ | Summary: record count, HLC range, distinct namespaces              |
-| `--full` | Every record with type, sequence, namespace, key, and value metadata |
-| `--data` | Requires `--full`. Decodes user-namespace `put` record values as JSON |
+| Flag     | Description                                                            |
+| -------- | ---------------------------------------------------------------------- |
+| _(none)_ | Summary: record count, HLC range, distinct collections                 |
+| `--full` | Every record with type, sequence, collection, key, and value metadata  |
+| `--data` | Requires `--full`. Decodes user-collection `put` record values as JSON |
 
 ```bash
 # Summary
@@ -295,7 +366,7 @@ kmdb mydb util wal wal-00001.log --full
 kmdb mydb util wal wal-00001.log --full --data
 ```
 
-System-namespace records (`$meta`, `$cache`, `$index:*`) use internal binary
+System-collection records (`$meta`, `$cache`, `$index:*`) use internal binary
 encodings and are not decoded even with `--data`.
 
 #### `util manifest [--full]`
@@ -303,8 +374,8 @@ encodings and are not decoded even with `--data`.
 Inspect the active Manifest file. Resolves it automatically from the `CURRENT`
 pointer in the database directory.
 
-| Flag     | Description                                              |
-| -------- | -------------------------------------------------------- |
+| Flag     | Description                                                     |
+| -------- | --------------------------------------------------------------- |
 | _(none)_ | Current level state: each level mapped to its SSTable filenames |
 | `--full` | Complete `VersionEdit` history with all added/removed entries   |
 
@@ -392,8 +463,8 @@ treated as comments and ignored.
 # migrations/001.kmdb
 # Seed initial categories
 
-put categories --value '{"name":"Work"}'
-put categories --value '{"name":"Personal"}'
+insert categories --value '{"name":"Work"}'
+insert categories --value '{"name":"Personal"}'
 ```
 
 ```bash

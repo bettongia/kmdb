@@ -12,22 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'dart:convert';
-import 'dart:io' as io;
-
-import 'package:kmdb/kmdb.dart';
-
 import 'command.dart';
+import 'insert_command.dart';
 
-/// Inserts a new document.
+/// Deprecated alias for [InsertCommand].
 ///
-/// A new system-generated UUIDv7 identifier is automatically assigned to the
-/// document's `_id` field. To update an existing document, use the `import`
-/// command or the typed API.
+/// The `put` command was renamed to `insert` because `put` implies upsert
+/// semantics (HTTP PUT), whereas this command always generates a new UUIDv7
+/// key and ignores any `_id` in the payload — which is insert semantics.
 ///
-/// The JSON document is read from `--value` (inline) or from stdin.
+/// Using `put` prints a deprecation warning to stderr and delegates to
+/// [InsertCommand]. Update any scripts to use `insert` instead.
 ///
-/// Usage: `kmdb <db> put <collection> [--value '<json>']`
+/// Usage: `kmdb <db> put <collection> [--value <json>] [--file <path>]`
 final class PutCommand implements CliCommand {
   const PutCommand();
 
@@ -36,10 +33,11 @@ final class PutCommand implements CliCommand {
 
   @override
   String get description =>
-      'Insert a new document. JSON read from --value or stdin.';
+      'Deprecated — use `insert` instead. '
+      'Insert one or more documents.';
 
   @override
-  String get usage => 'put <collection> [--value <json>]';
+  String get usage => 'put <collection> [--value <json>] [--file <path>]';
 
   @override
   Future<bool> execute(
@@ -47,41 +45,8 @@ final class PutCommand implements CliCommand {
     List<String> args,
     Map<String, dynamic> flags,
   ) async {
-    if (args.isEmpty) {
-      ctx.writeError('put requires <collection>.\nUsage: $usage');
-      return false;
-    }
-    final namespace = args[0];
-
-    // Read document JSON from --value flag or stdin.
-    final String jsonString;
-    if (flags['value'] != null) {
-      jsonString = flags['value'] as String;
-    } else {
-      jsonString = await io.stdin.transform(utf8.decoder).join();
-    }
-
-    final Map<String, dynamic> doc;
-    try {
-      final decoded = json.decode(jsonString);
-      if (decoded is! Map<String, dynamic>) {
-        ctx.writeError('Document must be a JSON object.');
-        return false;
-      }
-      doc = decoded;
-    } on FormatException catch (e) {
-      ctx.writeError('Invalid JSON: ${e.message}');
-      return false;
-    }
-
-    final String key = const UuidV7KeyGenerator().next();
-    // Store the key as '_id' so the document echoed back to the caller
-    // includes the authoritative system key field.
-    doc['_id'] = key;
-
-    final encoded = ValueCodec.encode(doc);
-    await ctx.store.put(namespace, key, encoded);
-    ctx.writeDocuments([doc]);
-    return true;
+    // Emit deprecation warning to stderr before delegating.
+    ctx.err.writeln('Warning: `put` is deprecated, use `insert` instead.');
+    return const InsertCommand().execute(ctx, args, flags);
   }
 }

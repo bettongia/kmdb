@@ -27,11 +27,19 @@ import 'commands/export_command.dart';
 import 'commands/flush_command.dart';
 import 'commands/get_command.dart';
 import 'commands/import_command.dart';
+import 'commands/insert_command.dart';
 import 'commands/put_command.dart';
+import 'commands/update_command.dart';
 import 'commands/info_command.dart';
+import 'commands/init_command.dart';
+import 'commands/new_device_id_command.dart';
 import 'commands/restore_command.dart';
 import 'commands/scan_command.dart';
 import 'commands/stats_command.dart';
+import 'commands/pull_command.dart';
+import 'commands/push_command.dart';
+import 'commands/remote_command.dart';
+import 'commands/sync_command.dart';
 import 'commands/util_command.dart';
 import 'commands/verify_command.dart';
 import 'database_opener.dart';
@@ -43,8 +51,11 @@ const _kVersion = '0.1.0';
 /// All registered CLI commands, keyed by their primary name.
 final _commands = <String, CliCommand>{
   for (final cmd in <CliCommand>[
+    const InitCommand(),
     const GetCommand(),
+    const InsertCommand(),
     const PutCommand(),
+    const UpdateCommand(),
     const DeleteCommand(),
     const ScanCommand(),
     const CountCommand(),
@@ -58,7 +69,12 @@ final _commands = <String, CliCommand>{
     const FlushCommand(),
     const CompactCommand(),
     const VerifyCommand(),
+    const NewDeviceIdCommand(),
     const UtilCommand(),
+    const RemoteCommand(),
+    const PushCommand(),
+    const PullCommand(),
+    const SyncCommand(),
   ])
     cmd.name: cmd,
 };
@@ -72,16 +88,16 @@ final _commands = <String, CliCommand>{
 ///
 /// ```bash
 /// # Inline command
-/// kmdb mydb.kmdb get notes <key>
+/// kmdb mydb get notes <key>
 ///
 /// # Multiple inline commands (processed in order)
-/// kmdb mydb.kmdb ".mode table" "scan notes"
+/// kmdb mydb ".mode table" "scan notes"
 ///
 /// # Read commands from a file
-/// kmdb mydb.kmdb --read script.kmdb
+/// kmdb mydb --read script.kmdb
 ///
 /// # Pipe commands from stdin
-/// echo "scan notes --limit 5" | kmdb mydb.kmdb
+/// echo "scan notes --limit 5" | kmdb mydb
 /// ```
 abstract final class KmdbCli {
   KmdbCli._();
@@ -188,8 +204,9 @@ abstract final class KmdbCli {
     // ── Open database ────────────────────────────────────────────────────────
     final dbPath = remaining[0];
     final KvStoreImpl store;
+    final bool dbCreated;
     try {
-      store = await DatabaseOpener.open(dbPath);
+      (store, dbCreated) = await DatabaseOpener.open(dbPath);
     } on LockException catch (e) {
       io.stderr.writeln('Error: $e');
       return 1;
@@ -198,7 +215,12 @@ abstract final class KmdbCli {
       return 1;
     }
 
-    final ctx = CommandContext(store: store, mode: mode, out: outSink);
+    final ctx = CommandContext(
+      store: store,
+      mode: mode,
+      out: outSink,
+      dbCreated: dbCreated,
+    );
 
     // ── Collect command source ───────────────────────────────────────────────
     // Sources (in priority order):
@@ -349,6 +371,14 @@ abstract final class KmdbCli {
     for (var ci = 0; ci < line.length; ci++) {
       final ch = line[ci];
       if (quote != null) {
+        if (ch == '\\' && ci + 1 < line.length) {
+          final next = line[ci + 1];
+          if (next == quote || next == '\\') {
+            buf.write(next);
+            ci++;
+            continue;
+          }
+        }
         if (ch == quote) {
           quote = null;
         } else {
@@ -402,13 +432,19 @@ Options:
   --help, -h           Print this help and exit
 
 Commands:
+  Database:
+    init
+
   Data:
-    get <ns> <key>
-    put <ns> [--value <json>]
-    delete <ns> <key>
-    scan <ns> [--filter <json>] [--order-by <field>] [--desc]
+    get <coll> <key> [--select <fields>]
+    insert <coll> [--value <json>] [--file <path>]
+    update <coll> [<id> | --id <id1,id2,...> | --filter <json> | --all] --set <json>
+    delete <coll> <key>
+    scan <coll> [--filter <json>] [--order-by <field>] [--desc]
               [--limit <n>] [--offset <n>] [--key-prefix <str>]
-    count <ns> [--filter <json>]
+              [--select <field1,field2,...>]
+    count <coll> [--filter <json>]
+    put <coll> [--value <json>] [--file <path>]   (deprecated — use insert)
 
   Introspection:
     collections
@@ -416,15 +452,24 @@ Commands:
     info
 
   Import / Export:
-    export <ns> [--output <file>]
-    import <ns> [--input <file>] [--on-conflict ignore|replace|error]
-    dump [--output <file>]
+    export <coll>                        (use --output <file> to write to a file)
+    import <coll> [--input <file>] [--on-conflict ignore|replace|error]
+    dump                                 (use --output <file> to write to a file)
     restore [--input <file>]
 
   Maintenance:
     flush
     compact
     verify
+    new-device-id
+
+  Sync:
+    remote add <name> --path <path>  Add a named sync remote
+    remote remove <name>             Remove a named sync remote
+    remote list                      List all sync remotes
+    push [<remote>] [--collection <coll>]...   Push local SSTables to sync folder
+    pull [<remote>] [--sync-dir <path>] [--collection <coll>]...   Pull peer SSTables from sync folder
+    sync [<remote>] [--sync-dir <path>] [--collection <coll>]...   Push then pull
 
   Diagnostics:
     util sstable <filename>          Inspect SSTable file
@@ -432,11 +477,11 @@ Commands:
     util manifest                    Inspect active Manifest
 
 Examples:
-  kmdb mydb.kmdb get notes 019abc...
-  kmdb mydb.kmdb scan notes --filter '{"field":"status","op":"eq","value":"active"}' --limit 10
-  kmdb mydb.kmdb dump --output backup.ndjson
-  kmdb mydb.kmdb --read migrations/001.kmdb
-  echo "collections" | kmdb mydb.kmdb
+  kmdb mydb get notes 019abc...
+  kmdb mydb scan notes --filter '{"field":"status","op":"eq","value":"active"}' --limit 10
+  kmdb mydb dump --output backup.ndjson
+  kmdb mydb --read migrations/001.kmdb
+  echo "collections" | kmdb mydb
 ''');
   }
 }
