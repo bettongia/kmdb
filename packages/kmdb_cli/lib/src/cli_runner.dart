@@ -430,11 +430,12 @@ Commands:
     init
 
   Data:
-    get <coll> <key>
+    get <coll> <key> [--select <fields>]
     put <coll> [--value <json>] [--file <path>]
     delete <coll> <key>
     scan <coll> [--filter <json>] [--order-by <field>] [--desc]
               [--limit <n>] [--offset <n>] [--key-prefix <str>]
+              [--select <field1,field2,...>]
     count <coll> [--filter <json>]
 
   Introspection:

@@ -187,6 +187,33 @@ void main() {
       final ok = await GetCommand().execute(ctx, [], {});
       expect(ok, isFalse);
     });
+
+    test('--select returns only requested fields', () async {
+      final id = _key('xsel');
+      await _putDoc(store, 'notes', {'_id': id, 'text': 'hi', 'score': 5});
+
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await GetCommand().execute(ctx, ['notes', id], {'select': 'text'});
+      expect(ok, isTrue);
+      final result = json.decode(out.toString()) as List;
+      expect(result[0].keys.toList(), equals(['text']));
+      expect(result[0]['text'], equals('hi'));
+    });
+
+    test('--select with unknown field returns empty document', () async {
+      final id = _key('xselunk');
+      await _putDoc(store, 'notes', {'_id': id, 'text': 'hi'});
+
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await GetCommand().execute(
+        ctx,
+        ['notes', id],
+        {'select': 'nonexistent'},
+      );
+      expect(ok, isTrue);
+      final result = json.decode(out.toString()) as List;
+      expect(result[0], isEmpty);
+    });
   });
 
   // ── PutCommand ──────────────────────────────────────────────────────────────
@@ -548,6 +575,71 @@ void main() {
       expect(ok, isTrue);
       final docs = json.decode(out.toString()) as List;
       expect(docs, isEmpty);
+    });
+
+    test('--select projects to requested fields only', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await ScanCommand().execute(
+        ctx,
+        ['items'],
+        {'select': 'score,tag'},
+      );
+      expect(ok, isTrue);
+      final docs = json.decode(out.toString()) as List;
+      expect(docs, hasLength(3));
+      for (final doc in docs) {
+        final keys = (doc as Map).keys.toSet();
+        expect(keys, equals({'score', 'tag'}));
+      }
+    });
+
+    test('--select with single field', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await ScanCommand().execute(
+        ctx,
+        ['items'],
+        {'select': 'score'},
+      );
+      expect(ok, isTrue);
+      final docs = json.decode(out.toString()) as List;
+      expect(docs, hasLength(3));
+      expect(
+        docs.every((d) => (d as Map).keys.single == 'score'),
+        isTrue,
+      );
+    });
+
+    test('--select interacts correctly with --filter', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final filter = '{"field":"tag","op":"eq","value":"x"}';
+      final ok = await ScanCommand().execute(
+        ctx,
+        ['items'],
+        {'filter': filter, 'select': 'score'},
+      );
+      expect(ok, isTrue);
+      final docs = json.decode(out.toString()) as List;
+      // Only items with tag 'x' (score 10 and 20) but projected to score only.
+      expect(docs, hasLength(2));
+      final scores = docs.map((d) => d['score']).toSet();
+      expect(scores, equals({10, 20}));
+      expect(
+        docs.every((d) => (d as Map).keys.single == 'score'),
+        isTrue,
+      );
+    });
+
+    test('--select with unknown field produces empty documents', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await ScanCommand().execute(
+        ctx,
+        ['items'],
+        {'select': 'nonexistent'},
+      );
+      expect(ok, isTrue);
+      final docs = json.decode(out.toString()) as List;
+      expect(docs, hasLength(3));
+      expect(docs.every((d) => (d as Map).isEmpty), isTrue);
     });
   });
 

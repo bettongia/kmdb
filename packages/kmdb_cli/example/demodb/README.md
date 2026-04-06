@@ -77,6 +77,31 @@ cat elements.ndjson| dart run ../../bin/kmdb.dart demodb put elements
 dart run ../../bin/kmdb.dart demodb count elements
 ```
 
+## Query
+
+```sh
+dart run ../../bin/kmdb.dart demodb scan weather_stations --filter '{"field":"Station Name","op":"eq","value":"MAWSON"}'
+```
+
+```sh
+dart run ../../bin/kmdb.dart demodb scan weather_stations --filter '{"field":"Station Name","op":"eq","value":"MAWSON"}' --mode table
+
+dart run ../../bin/kmdb.dart demodb scan weather_stations --filter '{"field":"Station Name","op":"eq","value":"MAWSON"}' --mode csv
+```
+
+You can use `jq` to manipulate the default JSON-based output:
+
+```sh
+dart run ../../bin/kmdb.dart demodb scan weather_stations --filter '{"field":"Station Name","op":"eq","value":"MAWSON"}' | jq '.[] | {"Country or Territory", "WMO Station Number", "Period"}'
+```
+
+But using `--select` and the table mode will give you some nicely formatted
+output:
+
+```sh
+dart run ../../bin/kmdb.dart demodb scan elements --filter '{"field":"Name","op":"startsWith","value":"H"}' --select Name,Symbol,Atomic_Number --mode table
+```
+
 ## Export/Import
 
 Export lets you export a collection to NDJSON format:
