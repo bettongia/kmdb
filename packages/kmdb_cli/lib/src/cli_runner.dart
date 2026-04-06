@@ -27,7 +27,9 @@ import 'commands/export_command.dart';
 import 'commands/flush_command.dart';
 import 'commands/get_command.dart';
 import 'commands/import_command.dart';
+import 'commands/insert_command.dart';
 import 'commands/put_command.dart';
+import 'commands/update_command.dart';
 import 'commands/info_command.dart';
 import 'commands/init_command.dart';
 import 'commands/new_device_id_command.dart';
@@ -51,7 +53,9 @@ final _commands = <String, CliCommand>{
   for (final cmd in <CliCommand>[
     const InitCommand(),
     const GetCommand(),
+    const InsertCommand(),
     const PutCommand(),
+    const UpdateCommand(),
     const DeleteCommand(),
     const ScanCommand(),
     const CountCommand(),
@@ -433,12 +437,14 @@ Commands:
 
   Data:
     get <coll> <key> [--select <fields>]
-    put <coll> [--value <json>] [--file <path>]
+    insert <coll> [--value <json>] [--file <path>]
+    update <coll> [<id> | --id <id1,id2,...> | --filter <json> | --all] --set <json>
     delete <coll> <key>
     scan <coll> [--filter <json>] [--order-by <field>] [--desc]
               [--limit <n>] [--offset <n>] [--key-prefix <str>]
               [--select <field1,field2,...>]
     count <coll> [--filter <json>]
+    put <coll> [--value <json>] [--file <path>]   (deprecated — use insert)
 
   Introspection:
     collections

@@ -25,13 +25,23 @@ import 'package:test/test.dart';
 void main() {
   const binPath = 'bin/kmdb.dart';
 
+  // Resolve the package root so these tests work regardless of which
+  // directory `dart test` is invoked from (workspace root or package root).
+  // When invoked from the workspace root, `packages/kmdb_cli` is a
+  // subdirectory; when invoked from the package root, `pubspec.yaml` is at
+  // the current directory.
+  final _workspacePkg = p.join(p.current, 'packages', 'kmdb_cli');
+  final packageRoot = io.File(p.join(_workspacePkg, 'pubspec.yaml')).existsSync()
+      ? _workspacePkg
+      : p.current;
+
   /// Runs the CLI with [args] and returns the result.
   Future<io.ProcessResult> run(List<String> args) async {
     // Run from the package root where pubspec.yaml is located.
     final result = await io.Process.run('dart', [
       binPath,
       ...args,
-    ], workingDirectory: p.current);
+    ], workingDirectory: packageRoot);
     // Give the OS/FS a tiny bit of time to settle after command exit.
     await Future.delayed(const Duration(milliseconds: 50));
     return result;
