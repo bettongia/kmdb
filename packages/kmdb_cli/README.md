@@ -32,10 +32,13 @@ Here's an example
 
 ```bash
 # Insert a new document (ID is automatically assigned)
-dart run bin/kmdb.dart mydb put notes --value '{"title": "New Note"}'
+dart run bin/kmdb.dart mydb insert notes --value '{"title": "New Note"}'
 
 # Retrieve it by the ID shown in the output
 dart run bin/kmdb.dart mydb get notes 019242f4aac07b8fb7e8f1bfb2c3d4e5
+
+# Update a field on an existing document
+dart run bin/kmdb.dart mydb update notes 019242f4aac07b8fb7e8f1bfb2c3d4e5 --set '{"title": "Updated Note"}'
 
 dart run bin/kmdb.dart mydb collections
 
@@ -80,19 +83,87 @@ Retrieve a single document by its key.
 kmdb mydb get notes 019242f4aac07b8fb7e8f1bfb2c3d4e5
 ```
 
-#### `put <collection> [--value <json>]`
+#### `insert <collection> [--value <json>] [--file <path>]`
 
-Insert a new document. A new system-generated UUIDv7 identifier is automatically
-assigned to the document's `id` field. To update an existing document, use the
-`import` command or the typed API.
+Insert one or more new documents. A new system-generated UUIDv7 identifier is
+automatically assigned to each document's `_id` field. Any `_id` supplied by the
+caller is replaced.
 
-The JSON document is read from `--value` (inline) or from stdin.
+Input is read from `--value` (inline JSON), `--file` (path to a JSON or NDJSON
+file), or stdin (auto-detected as JSON or NDJSON).
+
+| Flag            | Description                                                         |
+| --------------- | ------------------------------------------------------------------- |
+| `--value <json>`| Inline JSON object or array                                         |
+| `--file <path>` | File path; `.ndjson`/`.jsonl` files are parsed as NDJSON, others as JSON |
 
 ```bash
-kmdb mydb put notes --value '{"title":"Hello"}'
+# Single document
+kmdb mydb insert notes --value '{"title":"Hello"}'
+
+# Multiple documents from a JSON array
+kmdb mydb insert notes --value '[{"title":"Hello"},{"title":"World"}]'
+
+# From an NDJSON file
+kmdb mydb insert notes --file docs.ndjson
 
 # From stdin
-echo '{"title":"Hello"}' | kmdb mydb put notes
+echo '{"title":"Hello"}' | kmdb mydb insert notes
+```
+
+#### `update <collection> [<id> | --id <ids> | --filter <json> | --all] --set <json>`
+
+Partially update one or more documents using a shallow merge. The fields in
+`--set` are merged into the top-level of each matching document. Nested objects
+are replaced wholesale. The `_id` field is always preserved and cannot be
+overwritten.
+
+Exactly one targeting mode is required. The modes are mutually exclusive.
+
+| Targeting mode           | Description                                      |
+| ------------------------ | ------------------------------------------------ |
+| Positional `<id>`        | Update a single document by key                  |
+| `--id <id1,id2,...>`     | Update a comma-separated list of documents by key |
+| `--filter <json>`        | Update all documents matching the filter         |
+| `--all`                  | Update every document in the collection          |
+
+The `--set` flag is always required and must be a JSON object (not an array or
+scalar).
+
+Reports `{"updated": N}` on success.
+
+```bash
+# Update a single document by ID
+kmdb mydb update notes 019242f4aac07b8fb7e8f1bfb2c3d4e5 --set '{"status":"done"}'
+
+# Update multiple specific IDs
+kmdb mydb update notes --id 019abc...,019def... --set '{"archived":true}'
+
+# Update all documents matching a filter
+kmdb mydb update notes \
+  --filter '{"field":"status","op":"eq","value":"active"}' \
+  --set '{"flagged":true}'
+
+# Update every document in the collection
+kmdb mydb update notes --all --set '{"migrated":true}'
+```
+
+> **Note:** `update` operates at the KvStore layer and does not update
+> secondary indexes defined via `KmdbDatabase.collection`. Indexes will be
+> stale until the next Query Layer write or index rebuild. Each document write
+> is independent — there is no atomicity guarantee across multiple documents.
+
+#### `put <collection> [--value <json>] [--file <path>]` *(deprecated)*
+
+> **Deprecated** — use `insert` instead.
+>
+> `put` is a deprecated alias for `insert`. It still works but prints a
+> deprecation warning to stderr. Update any scripts to use `insert`.
+
+```bash
+# This still works but emits a warning:
+kmdb mydb put notes --value '{"title":"Hello"}'
+# Warning: `put` is deprecated, use `insert` instead.
 ```
 
 #### `delete <collection> <key>`
@@ -392,8 +463,8 @@ treated as comments and ignored.
 # migrations/001.kmdb
 # Seed initial categories
 
-put categories --value '{"name":"Work"}'
-put categories --value '{"name":"Personal"}'
+insert categories --value '{"name":"Work"}'
+insert categories --value '{"name":"Personal"}'
 ```
 
 ```bash

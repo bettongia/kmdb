@@ -1,8 +1,8 @@
 # CLI: Support updates
 
-**Status**: Investigated
+**Status**: Complete
 
-**PR link**: {A link to the PR submitted for this plan}
+**PR link**: https://github.com/aurochs-kmesh/kmdb/pull/7
 
 ## Problem statement
 
@@ -187,27 +187,29 @@ mutually exclusive; mixing them is an error.
 
 ### 1. Rename `put` → `insert` (deprecate `put`)
 
-- [ ] Create `packages/kmdb_cli/lib/src/commands/insert_command.dart` as a
+- [x] Create `packages/kmdb_cli/lib/src/commands/insert_command.dart` as a
   copy/rename of `put_command.dart` with class `InsertCommand`
   - Command name: `insert`; description: "Insert one or more documents."
   - Behaviour identical to current `PutCommand`
-- [ ] Update `put_command.dart` to become a thin deprecated wrapper:
+- [x] Update `put_command.dart` to become a thin deprecated wrapper:
   - Prints a deprecation warning to stderr: `` `put` is deprecated, use `insert` ``
   - Delegates to `InsertCommand.execute`
-- [ ] Register both `InsertCommand` (`insert`) and the deprecated `PutCommand`
+- [x] Register both `InsertCommand` (`insert`) and the deprecated `PutCommand`
   (`put`) in `_commands` in `cli_runner.dart`
-- [ ] Update `_printUsage` to list `insert` under "Data"; show `put` as
+- [x] Update `_printUsage` to list `insert` under "Data"; show `put` as
   `put (deprecated — use insert)`
-- [ ] Update existing `put` tests to cover `insert`; add a test confirming
+- [x] Update existing `put` tests to cover `insert`; add a test confirming
   `put` still works and emits a deprecation warning
 
 ### 2. Add `update` command (single, multi-id, filter, and all-docs)
 
-- [ ] Create `packages/kmdb_cli/lib/src/commands/update_command.dart`
+- [x] Create `packages/kmdb_cli/lib/src/commands/update_command.dart`
   - Signature: `update <collection> [<id>] [--id <id>]... [--filter <json>] [--all] --set <json>`
   - Targeting modes (mutually exclusive — error if more than one is given):
     - Positional `<id>`: update a single document by key
-    - `--id <id>` (repeatable): update a specific set of documents by key
+    - `--id <id>` (comma-separated list): update a specific set of documents by key
+      (note: the CLI parser only stores one flag value per name; comma-separated
+      list is used as a pragmatic alternative to truly repeatable flags)
     - `--filter <json>`: update all documents matching the filter (reuse
       `FilterParser.parse`, same as `ScanCommand`)
     - `--all`: update every document in the collection (explicit opt-in)
@@ -230,9 +232,9 @@ mutually exclusive; mixing them is an error.
     - Document not found (positional or `--id` modes) — error with key
     - Missing or invalid `--set` (not a JSON object)
     - Invalid `--filter` JSON
-- [ ] Register `UpdateCommand` in `_commands` in `cli_runner.dart`
-- [ ] Add `update` to `_printUsage` under "Data"
-- [ ] Add tests to `commands_test.dart`:
+- [x] Register `UpdateCommand` in `_commands` in `cli_runner.dart`
+- [x] Add `update` to `_printUsage` under "Data"
+- [x] Add tests to `commands_test.dart`:
   - **Single-id mode**: updates one field, adds a new field, preserves
     untouched fields, does not overwrite `_id`, returns false for missing doc
   - **Multi-id mode (`--id`)**: updates all listed docs, returns count,
@@ -248,10 +250,11 @@ mutually exclusive; mixing them is an error.
 
 ### 3. Documentation and help text
 
-- [ ] Update `_printUsage` in `cli_runner.dart` with `insert` and `update`
+- [x] Update `_printUsage` in `cli_runner.dart` with `insert` and `update`
   under the "Data" section; mark `put` deprecated
-- [ ] Check `docs/spec/` for a CLI command reference and update accordingly
-- [ ] Update `packages/kmdb_cli/README.md`:
+- [x] Check `docs/spec/` for a CLI command reference — no spec file exists for
+  CLI commands; no changes required
+- [x] Update `packages/kmdb_cli/README.md`:
   - Rename the `put` section to `insert`; add a deprecation note under `put`
     pointing to `insert`
   - Add an `update` section under Data commands documenting all four targeting
@@ -274,4 +277,30 @@ mutually exclusive; mixing them is an error.
 
 ## Summary
 
-{Dot points highlighting the work undertaken}
+- Created `InsertCommand` (`insert_command.dart`) with identical behaviour to
+  the original `PutCommand`: generates a fresh UUIDv7 key, ignores any
+  caller-supplied `_id`, and accepts JSON/array/NDJSON input from `--value`,
+  `--file`, or stdin.
+- Replaced `PutCommand` with a thin deprecated wrapper that prints
+  `Warning: 'put' is deprecated, use 'insert' instead.` to stderr and delegates
+  to `InsertCommand`. The `put` command continues to work for backward
+  compatibility.
+- Both commands registered in `cli_runner.dart`; help text updated to list
+  `insert` and `update` prominently and mark `put` as deprecated.
+- Created `UpdateCommand` (`update_command.dart`) supporting four mutually
+  exclusive targeting modes:
+  - Positional `<id>` — single document
+  - `--id <id1,id2,...>` — comma-separated list of IDs (pragmatic alternative
+    to repeatable flags, given the CLI parser stores only one value per flag name)
+  - `--filter <json>` — filter-based scan using the existing `FilterParser`
+  - `--all` — every document in the collection
+- `UpdateCommand` performs a shallow merge (top-level key replacement only),
+  always preserves `_id`, reports `{"updated": N}` on success, and operates at
+  the `KvStoreImpl` layer (consistent with `insert` and `import`; secondary
+  indexes are not updated).
+- Added 38 new tests covering all targeting modes, mutual exclusion, `--set`
+  validation, `--filter` validation, missing documents, empty collections, and
+  shallow-merge semantics. All 102 tests in `commands_test.dart` pass.
+- Updated `packages/kmdb_cli/README.md`: new `insert` and `update` sections with
+  flags tables and examples; deprecated `put` section; updated quick-start and
+  script-file examples to use `insert`.
