@@ -20,6 +20,13 @@ import 'dart:math';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
+// Resolve the package root so these tests work regardless of which
+// directory `dart test` is invoked from (workspace root or package root).
+final _workspacePkg = p.join(p.current, 'packages', 'kmdb_cli');
+final _packageRoot = File(p.join(_workspacePkg, 'pubspec.yaml')).existsSync()
+    ? _workspacePkg
+    : p.current;
+
 void main() {
   late Directory dbDir;
   late String dbPath;
@@ -27,8 +34,8 @@ void main() {
 
   setUpAll(() async {
     // Compile CLI to exe
-    final binPath = p.absolute('bin', 'kmdb.dart');
-    exePath = p.absolute('bin', 'kmdb_e2e.exe');
+    final binPath = p.join(_packageRoot, 'bin', 'kmdb.dart');
+    exePath = p.join(_packageRoot, 'bin', 'kmdb_e2e.exe');
     print('Compiling $binPath to $exePath...');
     final result = await Process.run('dart', [
       'compile',
@@ -105,17 +112,17 @@ void main() {
         if (i > 0 && i % 200 == 0) {
           final noteIdx = random.nextInt(capturedNotes.length);
           final sampleNote = capturedNotes[noteIdx];
-          final retrieved = await harness.get('notes', sampleNote['id']);
+          final retrieved = await harness.get('notes', sampleNote['_id']);
           expect(retrieved['title'], sampleNote['title']);
 
           // Delete one
           final readingIdx = random.nextInt(capturedReading.length);
           final sampleReading = capturedReading.removeAt(readingIdx);
-          await harness.run(['delete', 'reading_list', sampleReading['id']]);
+          await harness.run(['delete', 'reading_list', sampleReading['_id']]);
           final gone = await harness.run([
             'get',
             'reading_list',
-            sampleReading['id'],
+            sampleReading['_id'],
           ]);
           expect(gone.exitCode, isNot(0));
         }
@@ -128,15 +135,15 @@ void main() {
       // Phase 2: Point Lookups
       print('Phase 2: Point Lookups...');
       for (final expected in capturedNotes) {
-        final actual = await harness.get('notes', expected['id']);
+        final actual = await harness.get('notes', expected['_id']);
         expect(actual['title'], expected['title']);
       }
       for (final expected in capturedReading) {
-        final actual = await harness.get('reading_list', expected['id']);
+        final actual = await harness.get('reading_list', expected['_id']);
         expect(actual['title'], expected['title']);
       }
       for (final expected in capturedShopping) {
-        final actual = await harness.get('shopping_list', expected['id']);
+        final actual = await harness.get('shopping_list', expected['_id']);
         expect(actual['item'], expected['item']);
       }
 
@@ -199,11 +206,11 @@ void main() {
       print('Phase 4: Deletion...');
       final notesToDelete = capturedNotes.take(5).toList();
       for (final note in notesToDelete) {
-        final delResult = await harness.run(['delete', 'notes', note['id']]);
+        final delResult = await harness.run(['delete', 'notes', note['_id']]);
         expect(delResult.exitCode, 0);
 
         // Verify immediate recall failure
-        final gone = await harness.run(['get', 'notes', note['id']]);
+        final gone = await harness.run(['get', 'notes', note['_id']]);
         expect(gone.exitCode, isNot(0));
       }
 
