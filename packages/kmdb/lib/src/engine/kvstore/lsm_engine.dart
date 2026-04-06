@@ -420,7 +420,7 @@ final class LsmEngine {
 
     // 2. Rotate WAL.
     final hlc = _tick();
-    final oldWalPath = await _walWriter.rotate(hlc);
+    await _walWriter.rotate(hlc);
 
     // 3. Write SSTable from frozen memtable.
     final writer = SstableWriter();
@@ -476,8 +476,19 @@ final class LsmEngine {
     // 5. Discard frozen memtable.
     _frozen = null;
 
-    // Delete the retired WAL file (it's been fully persisted in the SSTable).
-    await _adapter.deleteFile(oldWalPath);
+    // Delete all WAL files that have now been fully persisted in the SSTable.
+    // Normally this is just the one file returned by rotate(), but after a
+    // two-phase open (e.g. DatabaseOpener) older WAL files may have been
+    // replayed into the restored memtable and are now superseded as well.
+    // Any file with sequence < activeSequence is safe to remove.
+    final allWalFiles = await _adapter.listFiles(_dbDir, extension: '.log');
+    for (final name in allWalFiles) {
+      if (!name.startsWith('wal-') || !name.endsWith('.log')) continue;
+      final seqStr = name.substring(4, name.length - 4);
+      final seq = int.tryParse(seqStr);
+      if (seq == null || seq >= _walWriter.activeSequence) continue;
+      await _adapter.deleteFile('$_dbDir/$name');
+    }
 
     // 6. Rotate manifest if needed, then compact.
     await _rotateManifestIfNeeded();

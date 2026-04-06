@@ -30,7 +30,7 @@ import 'sync_helpers.dart';
 /// kmdb <db> sync                     # uses remote named "origin"
 /// kmdb <db> sync dropbox             # uses remote named "dropbox"
 /// kmdb <db> sync --sync-dir <path>   # one-off; bypasses config
-/// kmdb <db> sync [<remote>] [--namespace <ns>]...
+/// kmdb <db> sync [<remote>] [--collection <coll>]...
 /// ```
 final class SyncCommand implements CliCommand {
   /// Creates a [SyncCommand].
@@ -45,7 +45,7 @@ final class SyncCommand implements CliCommand {
 
   @override
   String get usage =>
-      'sync [<remote>] [--sync-dir <path>] [--namespace <ns>]...';
+      'sync [<remote>] [--sync-dir <path>] [--collection <coll>]...';
 
   @override
   Future<bool> execute(
@@ -69,17 +69,17 @@ final class SyncCommand implements CliCommand {
       return false;
     }
 
-    // Resolve namespace set: all non-$ namespaces, or --namespace overrides.
-    final Set<String> namespaces;
+    // Resolve collection set: all non-$ collections, or --collection overrides.
+    final Set<String> collections;
     try {
-      namespaces = await SyncHelpers.resolveNamespaces(ctx.store, flags);
+      collections = await SyncHelpers.resolveCollections(ctx.store, flags);
     } on ArgumentError catch (e) {
       ctx.writeError(e.message as String);
       return false;
     }
 
-    if (namespaces.isEmpty) {
-      ctx.out.writeln('sync: no user namespaces found; nothing to sync.');
+    if (collections.isEmpty) {
+      ctx.out.writeln('sync: no user collections found; nothing to sync.');
       return true;
     }
 
@@ -96,7 +96,7 @@ final class SyncCommand implements CliCommand {
       deviceId: deviceId,
       dbDir: dbDir,
       syncRoot: '',
-      syncNamespaces: namespaces,
+      syncNamespaces: collections,
     );
 
     try {

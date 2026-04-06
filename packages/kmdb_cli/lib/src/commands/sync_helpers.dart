@@ -76,42 +76,42 @@ abstract final class SyncHelpers {
     return remote;
   }
 
-  /// Returns the set of namespaces to sync.
+  /// Returns the set of collections to sync.
   ///
-  /// If the `namespace` flag is present (it can appear multiple times as a
+  /// If the `collection` flag is present (it can appear multiple times as a
   /// space-separated list because the CLI tokeniser treats each flag value
-  /// as a single token), the result is restricted to those namespaces.
-  /// Otherwise, all non-`$`-prefixed namespaces from the store are returned.
+  /// as a single token), the result is restricted to those collections.
+  /// Otherwise, all non-`$`-prefixed collections from the store are returned.
   ///
-  /// Throws [ArgumentError] if an explicitly requested namespace begins with
-  /// `$` (system namespaces cannot be synced via CLI).
-  static Future<Set<String>> resolveNamespaces(
+  /// Throws [ArgumentError] if an explicitly requested collection begins with
+  /// `$` (system collections cannot be synced via CLI).
+  static Future<Set<String>> resolveCollections(
     KvStore store,
     Map<String, dynamic> flags,
   ) async {
-    final namespaceFlag = flags['namespace'];
+    final collectionFlag = flags['collection'];
 
-    if (namespaceFlag != null) {
+    if (collectionFlag != null) {
       // The CLI flag parser stores each flag value as a single String token.
-      // To support multiple namespaces, callers can repeat --namespace or
+      // To support multiple collections, callers can repeat --collection or
       // pass a single comma-separated list; we handle both.
       final requested = <String>{};
-      if (namespaceFlag is String) {
-        requested.addAll(namespaceFlag.split(',').map((s) => s.trim()));
+      if (collectionFlag is String) {
+        requested.addAll(collectionFlag.split(',').map((s) => s.trim()));
       }
-      for (final ns in requested) {
-        if (ns.startsWith(r'$')) {
+      for (final coll in requested) {
+        if (coll.startsWith(r'$')) {
           throw ArgumentError(
-            "Cannot sync system namespace '$ns'. "
-            'Only user namespaces (not starting with \$) can be synced.',
+            "Cannot sync system collection '$coll'. "
+            'Only user collections (not starting with \$) can be synced.',
           );
         }
       }
       return requested;
     }
 
-    // Default: all user (non-$) namespaces.
+    // Default: all user (non-$) collections.
     final all = await store.listNamespaces();
-    return all.where((ns) => !ns.startsWith(r'$')).toSet();
+    return all.where((coll) => !coll.startsWith(r'$')).toSet();
   }
 }

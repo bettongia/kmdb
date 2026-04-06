@@ -21,8 +21,8 @@ import 'command.dart';
 
 /// Dumps the entire database as NDJSON to stdout or a file.
 ///
-/// Each namespace is preceded by a header comment line:
-/// `# namespace: <name>`
+/// Each collection is preceded by a header comment line:
+/// `# collection: <name>`
 ///
 /// Usage: `kmdb <db> dump [--output <file>]`
 final class DumpCommand implements CliCommand {
@@ -32,7 +32,7 @@ final class DumpCommand implements CliCommand {
   String get name => 'dump';
 
   @override
-  String get description => 'Dump all namespaces to NDJSON.';
+  String get description => 'Dump all collections to NDJSON.';
 
   @override
   String get usage => 'dump [--output <file>]';
@@ -51,10 +51,10 @@ final class DumpCommand implements CliCommand {
     const enc = JsonEncoder();
     var total = 0;
     try {
-      final namespaces = await ctx.store.listNamespaces();
-      for (final ns in namespaces) {
-        sink.writeln('# namespace: $ns');
-        await for (final entry in ctx.store.scan(ns)) {
+      final collections = await ctx.store.listNamespaces();
+      for (final coll in collections) {
+        sink.writeln('# collection: $coll');
+        await for (final entry in ctx.store.scan(coll)) {
           final doc = ValueCodec.decode(entry.value);
           sink.writeln(enc.convert(doc));
           total++;

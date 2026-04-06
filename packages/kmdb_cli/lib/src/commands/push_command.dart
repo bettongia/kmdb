@@ -35,7 +35,7 @@ import 'sync_helpers.dart';
 /// kmdb <db> push                     # uses remote named "origin"
 /// kmdb <db> push dropbox             # uses remote named "dropbox"
 /// kmdb <db> push --sync-dir <path>   # one-off; bypasses config
-/// kmdb <db> push [<remote>] [--namespace <ns>]...
+/// kmdb <db> push [<remote>] [--collection <coll>]...
 /// ```
 final class PushCommand implements CliCommand {
   /// Creates a [PushCommand].
@@ -50,7 +50,7 @@ final class PushCommand implements CliCommand {
 
   @override
   String get usage =>
-      'push [<remote>] [--sync-dir <path>] [--namespace <ns>]...';
+      'push [<remote>] [--sync-dir <path>] [--collection <coll>]...';
 
   @override
   Future<bool> execute(
@@ -74,17 +74,17 @@ final class PushCommand implements CliCommand {
       return false;
     }
 
-    // Resolve namespace set: all non-$ namespaces, or --namespace overrides.
-    final Set<String> namespaces;
+    // Resolve collection set: all non-$ collections, or --collection overrides.
+    final Set<String> collections;
     try {
-      namespaces = await SyncHelpers.resolveNamespaces(ctx.store, flags);
+      collections = await SyncHelpers.resolveCollections(ctx.store, flags);
     } on ArgumentError catch (e) {
       ctx.writeError(e.message as String);
       return false;
     }
 
-    if (namespaces.isEmpty) {
-      ctx.out.writeln('push: no user namespaces found; nothing to push.');
+    if (collections.isEmpty) {
+      ctx.out.writeln('push: no user collections found; nothing to push.');
       return true;
     }
 
@@ -101,7 +101,7 @@ final class PushCommand implements CliCommand {
       deviceId: deviceId,
       dbDir: dbDir,
       syncRoot: '',
-      syncNamespaces: namespaces,
+      syncNamespaces: collections,
     );
 
     try {

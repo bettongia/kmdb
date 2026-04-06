@@ -51,7 +51,7 @@ final class PutCommand implements CliCommand {
       ctx.writeError('put requires <collection>.\nUsage: $usage');
       return false;
     }
-    final namespace = args[0];
+    final collection = args[0];
 
     // Read document JSON from --value flag or stdin.
     final String jsonString;
@@ -80,7 +80,7 @@ final class PutCommand implements CliCommand {
     doc['_id'] = key;
 
     final encoded = ValueCodec.encode(doc);
-    await ctx.store.put(namespace, key, encoded);
+    await ctx.store.put(collection, key, encoded);
     ctx.writeDocuments([doc]);
     return true;
   }

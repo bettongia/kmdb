@@ -51,7 +51,7 @@ final class ImportCommand implements CliCommand {
       ctx.writeError('import requires <collection>.\nUsage: $usage');
       return false;
     }
-    final namespace = args[0];
+    final collection = args[0];
     final inputPath = flags['input'] as String?;
     final onConflict = (flags['on-conflict'] as String?) ?? 'replace';
 
@@ -103,7 +103,7 @@ final class ImportCommand implements CliCommand {
       final key = '$keyRaw';
 
       if (onConflict != 'replace') {
-        final existing = await ctx.store.get(namespace, key);
+        final existing = await ctx.store.get(collection, key);
         if (existing != null) {
           if (onConflict == 'error') {
             ctx.writeError('Line $lineNum: document already exists: $key');
@@ -116,7 +116,7 @@ final class ImportCommand implements CliCommand {
       }
 
       final encoded = ValueCodec.encode(doc);
-      await ctx.store.put(namespace, key, encoded);
+      await ctx.store.put(collection, key, encoded);
       imported++;
     }
 

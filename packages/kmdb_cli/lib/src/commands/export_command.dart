@@ -44,7 +44,7 @@ final class ExportCommand implements CliCommand {
       ctx.writeError('export requires <collection>.\nUsage: $usage');
       return false;
     }
-    final namespace = args[0];
+    final collection = args[0];
     final outputPath = flags['output'] as String?;
 
     final io.IOSink sink = outputPath != null
@@ -54,7 +54,7 @@ final class ExportCommand implements CliCommand {
     const enc = JsonEncoder();
     var count = 0;
     try {
-      await for (final entry in ctx.store.scan(namespace)) {
+      await for (final entry in ctx.store.scan(collection)) {
         final doc = ValueCodec.decode(entry.value);
         sink.writeln(enc.convert(doc));
         count++;

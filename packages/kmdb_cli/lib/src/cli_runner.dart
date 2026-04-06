@@ -80,16 +80,16 @@ final _commands = <String, CliCommand>{
 ///
 /// ```bash
 /// # Inline command
-/// kmdb mydb.kmdb get notes <key>
+/// kmdb mydb get notes <key>
 ///
 /// # Multiple inline commands (processed in order)
-/// kmdb mydb.kmdb ".mode table" "scan notes"
+/// kmdb mydb ".mode table" "scan notes"
 ///
 /// # Read commands from a file
-/// kmdb mydb.kmdb --read script.kmdb
+/// kmdb mydb --read script.kmdb
 ///
 /// # Pipe commands from stdin
-/// echo "scan notes --limit 5" | kmdb mydb.kmdb
+/// echo "scan notes --limit 5" | kmdb mydb
 /// ```
 abstract final class KmdbCli {
   KmdbCli._();
@@ -419,12 +419,12 @@ Options:
 
 Commands:
   Data:
-    get <ns> <key>
-    put <ns> [--value <json>]
-    delete <ns> <key>
-    scan <ns> [--filter <json>] [--order-by <field>] [--desc]
+    get <coll> <key>
+    put <coll> [--value <json>]
+    delete <coll> <key>
+    scan <coll> [--filter <json>] [--order-by <field>] [--desc]
               [--limit <n>] [--offset <n>] [--key-prefix <str>]
-    count <ns> [--filter <json>]
+    count <coll> [--filter <json>]
 
   Introspection:
     collections
@@ -432,8 +432,8 @@ Commands:
     info
 
   Import / Export:
-    export <ns> [--output <file>]
-    import <ns> [--input <file>] [--on-conflict ignore|replace|error]
+    export <coll> [--output <file>]
+    import <coll> [--input <file>] [--on-conflict ignore|replace|error]
     dump [--output <file>]
     restore [--input <file>]
 
@@ -446,9 +446,9 @@ Commands:
     remote add <name> --path <path>  Add a named sync remote
     remote remove <name>             Remove a named sync remote
     remote list                      List all sync remotes
-    push [<remote>] [--sync-dir <path>]   Push local SSTables to sync folder
-    pull [<remote>] [--sync-dir <path>]   Pull peer SSTables from sync folder
-    sync [<remote>] [--sync-dir <path>]   Push then pull
+    push [<remote>] [--collection <coll>]...   Push local SSTables to sync folder
+    pull [<remote>] [--sync-dir <path>] [--collection <coll>]...   Pull peer SSTables from sync folder
+    sync [<remote>] [--sync-dir <path>] [--collection <coll>]...   Push then pull
 
   Diagnostics:
     util sstable <filename>          Inspect SSTable file
@@ -456,11 +456,11 @@ Commands:
     util manifest                    Inspect active Manifest
 
 Examples:
-  kmdb mydb.kmdb get notes 019abc...
-  kmdb mydb.kmdb scan notes --filter '{"field":"status","op":"eq","value":"active"}' --limit 10
-  kmdb mydb.kmdb dump --output backup.ndjson
-  kmdb mydb.kmdb --read migrations/001.kmdb
-  echo "collections" | kmdb mydb.kmdb
+  kmdb mydb get notes 019abc...
+  kmdb mydb scan notes --filter '{"field":"status","op":"eq","value":"active"}' --limit 10
+  kmdb mydb dump --output backup.ndjson
+  kmdb mydb --read migrations/001.kmdb
+  echo "collections" | kmdb mydb
 ''');
   }
 }

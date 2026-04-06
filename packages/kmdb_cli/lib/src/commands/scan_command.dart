@@ -48,7 +48,7 @@ final class ScanCommand implements CliCommand {
       ctx.writeError('scan requires <collection>.\nUsage: $usage');
       return false;
     }
-    final namespace = args[0];
+    final collection = args[0];
 
     // Parse optional filter.
     Filter? filter;
@@ -74,7 +74,7 @@ final class ScanCommand implements CliCommand {
     // Collect all matching documents.
     final docs = <Map<String, dynamic>>[];
 
-    await for (final entry in ctx.store.scan(namespace, startKey: keyPrefix)) {
+    await for (final entry in ctx.store.scan(collection, startKey: keyPrefix)) {
       final doc = ValueCodec.decode(entry.value);
       if (filter != null && !filter.evaluate(doc)) continue;
       docs.add(doc);
