@@ -189,7 +189,6 @@ final class UtilCommand implements CliCommand {
           }
         }
 
-
         entries.add({'key': _hexEncode(entry.key), 'value': valueMap});
       }
       result['entries'] = entries;

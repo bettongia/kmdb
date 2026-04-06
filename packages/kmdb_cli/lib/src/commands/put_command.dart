@@ -185,9 +185,7 @@ final class PutCommand implements CliCommand {
     final result = <Map<String, dynamic>>[];
     for (var i = 0; i < array.length; i++) {
       if (array[i] is! Map<String, dynamic>) {
-        ctx.writeError(
-          'Array item $i from $source is not a JSON object.',
-        );
+        ctx.writeError('Array item $i from $source is not a JSON object.');
         return null;
       }
       result.add(array[i] as Map<String, dynamic>);
@@ -229,7 +227,9 @@ final class PutCommand implements CliCommand {
       try {
         decoded = json.decode(trimmed);
       } on FormatException catch (e) {
-        ctx.writeError('Line $lineNum from $source: invalid JSON: ${e.message}');
+        ctx.writeError(
+          'Line $lineNum from $source: invalid JSON: ${e.message}',
+        );
         return null;
       }
 
