@@ -1,0 +1,13 @@
+tags:
+  e2e:
+    skip:
+      "E2E tests are skipped by default. Use `dart test --preset e2e` to run
+      them."
+    timeout: 10m
+presets:
+  e2e:
+    exclude_tags: "any"
+    include_tags: "e2e"
+    tags:
+      e2e:
+        skip: false
