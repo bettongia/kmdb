@@ -28,7 +28,8 @@ String _key() => const UuidV7KeyGenerator().next();
 
 /// Opens a store via the production [DatabaseOpener] so the engine device ID
 /// matches the meta-stored device ID, as required for sync.
-Future<KvStoreImpl> _openStore(String dir) => DatabaseOpener.open(dir);
+Future<KvStoreImpl> _openStore(String dir) async =>
+    (await DatabaseOpener.open(dir)).$1;
 
 CommandContext _ctx(
   KvStoreImpl store, {

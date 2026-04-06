@@ -27,7 +27,8 @@ String _key() => const UuidV7KeyGenerator().next();
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /// Opens a store via [DatabaseOpener] so the engine device ID is correct.
-Future<KvStoreImpl> _openStore(String dir) => DatabaseOpener.open(dir);
+Future<KvStoreImpl> _openStore(String dir) async =>
+    (await DatabaseOpener.open(dir)).$1;
 
 /// Opens a store with an explicit [deviceId] for tests requiring distinct
 /// device identities.

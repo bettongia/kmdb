@@ -29,6 +29,7 @@ import 'commands/get_command.dart';
 import 'commands/import_command.dart';
 import 'commands/put_command.dart';
 import 'commands/info_command.dart';
+import 'commands/init_command.dart';
 import 'commands/restore_command.dart';
 import 'commands/scan_command.dart';
 import 'commands/stats_command.dart';
@@ -47,6 +48,7 @@ const _kVersion = '0.1.0';
 /// All registered CLI commands, keyed by their primary name.
 final _commands = <String, CliCommand>{
   for (final cmd in <CliCommand>[
+    const InitCommand(),
     const GetCommand(),
     const PutCommand(),
     const DeleteCommand(),
@@ -196,8 +198,9 @@ abstract final class KmdbCli {
     // ── Open database ────────────────────────────────────────────────────────
     final dbPath = remaining[0];
     final KvStoreImpl store;
+    final bool dbCreated;
     try {
-      store = await DatabaseOpener.open(dbPath);
+      (store, dbCreated) = await DatabaseOpener.open(dbPath);
     } on LockException catch (e) {
       io.stderr.writeln('Error: $e');
       return 1;
@@ -206,7 +209,12 @@ abstract final class KmdbCli {
       return 1;
     }
 
-    final ctx = CommandContext(store: store, mode: mode, out: outSink);
+    final ctx = CommandContext(
+      store: store,
+      mode: mode,
+      out: outSink,
+      dbCreated: dbCreated,
+    );
 
     // ── Collect command source ───────────────────────────────────────────────
     // Sources (in priority order):
@@ -418,9 +426,12 @@ Options:
   --help, -h           Print this help and exit
 
 Commands:
+  Database:
+    init
+
   Data:
     get <coll> <key>
-    put <coll> [--value <json>]
+    put <coll> [--value <json>] [--file <path>]
     delete <coll> <key>
     scan <coll> [--filter <json>] [--order-by <field>] [--desc]
               [--limit <n>] [--offset <n>] [--key-prefix <str>]
