@@ -130,6 +130,28 @@ abstract interface class KvStore {
   /// clock value. Intended for the CLI `info` command.
   Future<StoreInfo> storeInfo();
 
+  /// Assigns a new device identity to this store.
+  ///
+  /// All SSTable files whose filename begins with the current device ID are
+  /// renamed to use [newDeviceId]. A single VersionEdit is appended to the
+  /// Manifest recording the renames. The `$meta` device_id entry is updated
+  /// last so that, on any crash before completion, the next open will still
+  /// see the old ID and recover cleanly.
+  ///
+  /// [newDeviceId] must be an 8-character lowercase hex string. Throws
+  /// [ArgumentError] if the format is invalid or if [newDeviceId] is the same
+  /// as the current device ID.
+  ///
+  /// **Caller responsibility:** the store must be idle (no concurrent writes).
+  /// The method calls [flush] internally before renaming to ensure all
+  /// memtable data is persisted in SSTables first.
+  ///
+  /// Example:
+  /// ```dart
+  /// await store.reassignDeviceId('a1b2c3d4');
+  /// ```
+  Future<void> reassignDeviceId(String newDeviceId);
+
   /// Closes the store, optionally flushing the active memtable and releasing
   /// the LOCK.
   ///

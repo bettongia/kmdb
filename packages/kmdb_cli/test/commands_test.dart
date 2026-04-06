@@ -116,17 +116,19 @@ void main() {
     });
     tearDown(() => store.close());
 
-    test('reports path, deviceId, and created=true for a fresh database',
-        () async {
-      final ctx = _ctx(store, out: out, err: err, dbCreated: true);
-      final ok = await InitCommand().execute(ctx, [], {});
-      expect(ok, isTrue);
+    test(
+      'reports path, deviceId, and created=true for a fresh database',
+      () async {
+        final ctx = _ctx(store, out: out, err: err, dbCreated: true);
+        final ok = await InitCommand().execute(ctx, [], {});
+        expect(ok, isTrue);
 
-      final result = json.decode(out.toString()) as Map<String, dynamic>;
-      expect(result['path'], isA<String>());
-      expect(result['deviceId'], isA<String>());
-      expect(result['created'], isTrue);
-    });
+        final result = json.decode(out.toString()) as Map<String, dynamic>;
+        expect(result['path'], isA<String>());
+        expect(result['deviceId'], isA<String>());
+        expect(result['created'], isTrue);
+      },
+    );
 
     test('reports created=false when reopening an existing database', () async {
       final ctx = _ctx(store, out: out, err: err, dbCreated: false);
@@ -193,7 +195,11 @@ void main() {
       await _putDoc(store, 'notes', {'_id': id, 'text': 'hi', 'score': 5});
 
       final ctx = _ctx(store, out: out, err: err);
-      final ok = await GetCommand().execute(ctx, ['notes', id], {'select': 'text'});
+      final ok = await GetCommand().execute(
+        ctx,
+        ['notes', id],
+        {'select': 'text'},
+      );
       expect(ok, isTrue);
       final result = json.decode(out.toString()) as List;
       expect(result[0].keys.toList(), equals(['text']));
@@ -291,7 +297,11 @@ void main() {
     test('inserts multiple documents from a JSON array via --value', () async {
       final ctx = _ctx(store, out: out, err: err);
       const arrayJson = '[{"name":"Alice"},{"name":"Bob"}]';
-      final ok = await PutCommand().execute(ctx, ['notes'], {'value': arrayJson});
+      final ok = await PutCommand().execute(
+        ctx,
+        ['notes'],
+        {'value': arrayJson},
+      );
       expect(ok, isTrue);
 
       final decoded = json.decode(out.toString()) as List;
@@ -330,20 +340,26 @@ void main() {
       );
     });
 
-    test('inserts multiple documents from a JSON array file via --file',
-        () async {
-      final tmp = _TmpFile();
-      tmp.write('[{"name":"Dave"},{"name":"Eve"}]');
-      addTearDown(tmp.delete);
+    test(
+      'inserts multiple documents from a JSON array file via --file',
+      () async {
+        final tmp = _TmpFile();
+        tmp.write('[{"name":"Dave"},{"name":"Eve"}]');
+        addTearDown(tmp.delete);
 
-      final ctx = _ctx(store, out: out, err: err);
-      final ok = await PutCommand().execute(ctx, ['notes'], {'file': tmp.path});
-      expect(ok, isTrue);
+        final ctx = _ctx(store, out: out, err: err);
+        final ok = await PutCommand().execute(
+          ctx,
+          ['notes'],
+          {'file': tmp.path},
+        );
+        expect(ok, isTrue);
 
-      final decoded = json.decode(out.toString()) as List;
-      expect(decoded, hasLength(2));
-      expect(decoded.map((d) => d['name']), containsAll(['Dave', 'Eve']));
-    });
+        final decoded = json.decode(out.toString()) as List;
+        expect(decoded, hasLength(2));
+        expect(decoded.map((d) => d['name']), containsAll(['Dave', 'Eve']));
+      },
+    );
 
     test('inserts multiple documents from an NDJSON file via --file', () async {
       final tmp = _TmpFile(ext: 'ndjson');
@@ -603,10 +619,7 @@ void main() {
       expect(ok, isTrue);
       final docs = json.decode(out.toString()) as List;
       expect(docs, hasLength(3));
-      expect(
-        docs.every((d) => (d as Map).keys.single == 'score'),
-        isTrue,
-      );
+      expect(docs.every((d) => (d as Map).keys.single == 'score'), isTrue);
     });
 
     test('--select interacts correctly with --filter', () async {
@@ -623,10 +636,7 @@ void main() {
       expect(docs, hasLength(2));
       final scores = docs.map((d) => d['score']).toSet();
       expect(scores, equals({10, 20}));
-      expect(
-        docs.every((d) => (d as Map).keys.single == 'score'),
-        isTrue,
-      );
+      expect(docs.every((d) => (d as Map).keys.single == 'score'), isTrue);
     });
 
     test('--select with unknown field produces empty documents', () async {
