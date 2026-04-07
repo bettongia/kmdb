@@ -205,6 +205,20 @@ abstract final class KmdbCli {
 
     // ── Open database ────────────────────────────────────────────────────────
     final dbPath = remaining[0];
+
+    // Guard: when the inline command is 'init', refuse to proceed if the
+    // target directory already contains files that are not part of a KMDB
+    // database.  This prevents accidental pollution of foreign directories
+    // (e.g. home dirs, source trees) with KMDB files.  The check runs before
+    // DatabaseOpener.open so we never write any files to the directory.
+    if (remaining.length > 1 && remaining[1] == 'init') {
+      final initError = _checkInitDirectory(dbPath);
+      if (initError != null) {
+        io.stderr.writeln('Error: $initError');
+        return 1;
+      }
+    }
+
     final KvStoreImpl store;
     final bool dbCreated;
     try {
@@ -358,6 +372,31 @@ abstract final class KmdbCli {
       errSink.writeln('Error executing "$commandName": $e\n$st');
       return false;
     }
+  }
+
+  // ── Init directory guard ──────────────────────────────────────────────────
+
+  /// Returns an error message if [dbPath] is unsafe for `init`, or `null` if
+  /// it is safe to proceed.
+  ///
+  /// A path is considered safe when:
+  /// - the directory does not yet exist (will be created fresh), or
+  /// - the directory already contains a `CURRENT` file (existing KMDB
+  ///   database), or
+  /// - the directory exists but is completely empty.
+  ///
+  /// Any other non-empty directory is rejected to prevent accidentally
+  /// writing KMDB files into a foreign location such as a home directory or
+  /// a source-code tree.
+  static String? _checkInitDirectory(String dbPath) {
+    final dir = io.Directory(dbPath);
+    if (!dir.existsSync()) return null; // will be created fresh — safe
+    if (io.File('$dbPath/CURRENT').existsSync()) return null; // existing KMDB db — safe
+    final entries = dir.listSync();
+    if (entries.isEmpty) return null; // empty directory — safe
+    return '"$dbPath" is not empty and does not contain an existing KMDB '
+        'database. Provide an empty or non-existent directory to create a '
+        'new database, or point init at an existing KMDB database path.';
   }
 
   // ── Tokeniser ─────────────────────────────────────────────────────────────
