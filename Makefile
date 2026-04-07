@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := default
 
-.PHONY: default pre_commit test e2e_test tests_all cli_test site dart_doc default checks coverage license_check license_add styles clean format
+.PHONY: default cicd pre_commit test e2e_test tests_all cli_test site dart_doc default checks coverage license_check license_add styles clean format
 
 
 COVERAGE_DIR=site/coverage
@@ -11,7 +11,9 @@ ADDLICENSE_CONFIG=addlicense_config.txt
 
 default: site/ format checks site
 
-pre_commit: clean format tests_all default
+pre_commit: clean default
+
+cicd: test e2e_test default
 
 tests_all: test e2e_test
 
