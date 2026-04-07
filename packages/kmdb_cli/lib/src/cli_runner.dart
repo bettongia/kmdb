@@ -391,7 +391,8 @@ abstract final class KmdbCli {
   static String? _checkInitDirectory(String dbPath) {
     final dir = io.Directory(dbPath);
     if (!dir.existsSync()) return null; // will be created fresh — safe
-    if (io.File('$dbPath/CURRENT').existsSync()) return null; // existing KMDB db — safe
+    if (io.File('$dbPath/CURRENT').existsSync())
+      return null; // existing KMDB db — safe
     final entries = dir.listSync();
     if (entries.isEmpty) return null; // empty directory — safe
     return '"$dbPath" is not empty and does not contain an existing KMDB '
