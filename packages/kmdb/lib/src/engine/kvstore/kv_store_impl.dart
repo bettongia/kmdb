@@ -269,6 +269,16 @@ final class KvStoreImpl implements KvStore {
   Future<List<String>> listNamespaces() => _meta.getNamespaces();
 
   @override
+  Future<bool> createNamespace(String namespace) async {
+    _guardNamespace(namespace);
+    final existing = await _meta.getNamespaces();
+    if (existing.contains(namespace)) return false;
+    await _maybeMarkDirty();
+    await _meta.registerNamespace(namespace);
+    return true;
+  }
+
+  @override
   Future<StoreStats> stats() async {
     final ls = await _engine.levelStats();
     return StoreStats(

@@ -117,6 +117,17 @@ abstract interface class KvStore {
   /// to, or for databases created before this API was available.
   Future<List<String>> listNamespaces();
 
+  /// Registers [namespace] in the namespace registry without writing any
+  /// documents.
+  ///
+  /// Returns `true` if the namespace was newly created, or `false` if it was
+  /// already registered (no-op, identical behaviour to `init` on an existing
+  /// database).
+  ///
+  /// [namespace] must not start with `$` (system namespaces are reserved).
+  /// Throws [ArgumentError] if that constraint is violated.
+  Future<bool> createNamespace(String namespace);
+
   /// Returns a snapshot of engine-level statistics.
   ///
   /// Includes SSTable counts per level, total on-disk size, and the path to

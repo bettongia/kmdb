@@ -153,6 +153,10 @@ final class CacheLayer implements KvStore {
   Future<List<String>> listNamespaces() => _store.listNamespaces();
 
   @override
+  Future<bool> createNamespace(String namespace) =>
+      _store.createNamespace(namespace);
+
+  @override
   Future<StoreStats> stats() => _store.stats();
 
   @override

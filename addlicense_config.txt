@@ -19,4 +19,6 @@
 --ignore="site/**"
 --ignore="vendor/**"
 --ignore=".claude"
+--ignore=".worktrees/ui/packages/kmdb_ui/build/**"
+--ignore=".worktrees/ui/packages/kmdb_ui/macos/**"
 .

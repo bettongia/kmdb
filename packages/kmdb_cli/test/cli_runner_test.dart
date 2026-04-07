@@ -52,6 +52,55 @@ void main() {
   setUp(() => tmp = _TmpDir());
   tearDown(() => tmp.clean());
 
+  group('KmdbCli — init directory guard', () {
+    test('init succeeds in a non-existent directory', () async {
+      final dbPath = tmp.file('fresh_db');
+      final result = await run([dbPath, 'init']);
+      expect(result.exitCode, equals(0), reason: result.stderr);
+    });
+
+    test('init succeeds in an empty directory', () async {
+      final dbPath = tmp.file('empty_dir');
+      io.Directory(dbPath).createSync();
+      final result = await run([dbPath, 'init']);
+      expect(result.exitCode, equals(0), reason: result.stderr);
+    });
+
+    test('init succeeds when reopening an existing KMDB database', () async {
+      final dbPath = tmp.file('existing_db');
+      // First init creates the database.
+      final first = await run([dbPath, 'init']);
+      expect(first.exitCode, equals(0), reason: first.stderr);
+      // Second init on the same path should succeed.
+      final second = await run([dbPath, 'init']);
+      expect(second.exitCode, equals(0), reason: second.stderr);
+    });
+
+    test(
+      'init fails on a non-empty directory without a KMDB database',
+      () async {
+        final dbPath = tmp.file('foreign_dir');
+        io.Directory(dbPath).createSync();
+        // Plant a foreign file in the directory.
+        io.File(
+          p.join(dbPath, 'existing_file.txt'),
+        ).writeAsStringSync('some existing content');
+        final result = await run([dbPath, 'init']);
+        expect(result.exitCode, equals(1));
+        expect(result.stderr, contains('is not empty'));
+      },
+    );
+
+    test('init fails on a directory that contains sub-directories', () async {
+      final dbPath = tmp.file('dir_with_subdir');
+      io.Directory(dbPath).createSync();
+      io.Directory(p.join(dbPath, 'subdir')).createSync();
+      final result = await run([dbPath, 'init']);
+      expect(result.exitCode, equals(1));
+      expect(result.stderr, contains('is not empty'));
+    });
+  });
+
   group('KmdbCli — integration', () {
     test('shows help when no args provided', () async {
       final result = await run([]);
