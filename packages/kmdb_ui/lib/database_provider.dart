@@ -33,7 +33,7 @@ class DatabaseProvider with ChangeNotifier {
   Map<String, dynamic>? _selectedDocument;
   String? _loadError;
   ThemeMode _themeMode = ThemeMode.system;
-  
+
   bool _isOpening = false;
 
   DatabaseProvider(this.prefs) {
@@ -62,7 +62,7 @@ class DatabaseProvider with ChangeNotifier {
         debugPrint('Error loading bookmarks: $e');
       }
     }
-    
+
     final themeStr = prefs.getString(_kThemeModeKey);
     if (themeStr != null) {
       _themeMode = ThemeMode.values.firstWhere(
@@ -105,12 +105,12 @@ class DatabaseProvider with ChangeNotifier {
 
   Future<void> selectDatabase(String path) async {
     if (_isOpening) return;
-    
+
     final absolutePath = File(path).absolute.path;
     if (!_recentDatabasePaths.contains(absolutePath)) {
       _recentDatabasePaths.add(absolutePath);
     }
-    
+
     if (_selectedDatabasePath == absolutePath && _store != null) {
       return;
     }
@@ -129,7 +129,7 @@ class DatabaseProvider with ChangeNotifier {
           await _channel.invokeMethod('startAccessing', {'bookmark': bookmark});
         } catch (e) {
           debugPrint('Error starting access for bookmark: $e');
-          // If resolving fails, we'll still try to open (it might work if 
+          // If resolving fails, we'll still try to open (it might work if
           // the app currently has access), but user might need to re-pick.
         }
       }
@@ -138,15 +138,21 @@ class DatabaseProvider with ChangeNotifier {
       _selectedCollection = null;
       _selectedDocument = null;
       notifyListeners(); // Let the UI show the loading state for the new path
-      
+
       final adapter = StorageAdapterNative();
-      final (store, _) = await KvStoreImpl.open(_selectedDatabasePath!, adapter);
+      final (store, _) = await KvStoreImpl.open(
+        _selectedDatabasePath!,
+        adapter,
+      );
       _store = store;
 
       // Upon successful open, request a bookmark if we don't have one (or to update it)
       if (Platform.isMacOS) {
         try {
-          final newBookmark = await _channel.invokeMethod<String>('getBookmark', {'path': absolutePath});
+          final newBookmark = await _channel.invokeMethod<String>(
+            'getBookmark',
+            {'path': absolutePath},
+          );
           if (newBookmark != null) {
             _bookmarks[absolutePath] = newBookmark;
             await _saveToPrefs();
@@ -242,6 +248,23 @@ class DatabaseProvider with ChangeNotifier {
     }
     // Note: notifyListeners is called in selectDatabase after this
   }
+
+  Future<bool> createCollection(String name) async {
+    final store = _store;
+    if (store == null) return false;
+
+    try {
+      final created = await store.createNamespace(name);
+      await _loadCollections();
+      notifyListeners();
+      return created;
+    } catch (e) {
+      debugPrint('Error creating collection: $e');
+      return false;
+    }
+  }
+
+  Future<void> refreshCollections() => _loadCollections().then((_) => notifyListeners());
 
   @override
   void dispose() {

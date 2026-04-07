@@ -106,7 +106,11 @@ class _NewDatabaseDialogState extends State<NewDatabaseDialog> {
                       children: [
                         const Text(
                           'PARENT DIRECTORY',
-                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.blueGrey),
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blueGrey,
+                          ),
                         ),
                         const SizedBox(height: 4),
                         Text(
@@ -114,7 +118,9 @@ class _NewDatabaseDialogState extends State<NewDatabaseDialog> {
                           style: TextStyle(
                             fontSize: 12,
                             color: _parentPath == null ? Colors.grey : null,
-                            fontStyle: _parentPath == null ? FontStyle.italic : null,
+                            fontStyle: _parentPath == null
+                                ? FontStyle.italic
+                                : null,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -136,7 +142,10 @@ class _NewDatabaseDialogState extends State<NewDatabaseDialog> {
                 autofocus: true,
                 decoration: InputDecoration(
                   labelText: 'DATABASE NAME',
-                  labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                  labelStyle: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
                   hintText: 'e.g. mydb',
                   isDense: true,
                   border: const OutlineInputBorder(),

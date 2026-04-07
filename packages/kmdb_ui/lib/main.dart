@@ -103,13 +103,17 @@ class _HomePageState extends State<HomePage> {
           label: 'KMDB Browser',
           menus: [
             if (PlatformProvidedMenuItem.hasMenu(
-                PlatformProvidedMenuItemType.about))
+              PlatformProvidedMenuItemType.about,
+            ))
               const PlatformProvidedMenuItem(
-                  type: PlatformProvidedMenuItemType.about),
+                type: PlatformProvidedMenuItemType.about,
+              ),
             if (PlatformProvidedMenuItem.hasMenu(
-                PlatformProvidedMenuItemType.quit))
+              PlatformProvidedMenuItemType.quit,
+            ))
               const PlatformProvidedMenuItem(
-                  type: PlatformProvidedMenuItemType.quit),
+                type: PlatformProvidedMenuItemType.quit,
+              ),
           ],
         ),
         PlatformMenu(
@@ -169,7 +173,10 @@ class _HomePageState extends State<HomePage> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  SizedBox(width: _dbWidth, child: const DatabaseHistoryColumn()),
+                  SizedBox(
+                    width: _dbWidth,
+                    child: const DatabaseHistoryColumn(),
+                  ),
                   _ColumnDivider(
                     onDrag: (delta) {
                       setState(() {
@@ -179,26 +186,32 @@ class _HomePageState extends State<HomePage> {
                   ),
                   if (provider.selectedDatabasePath != null) ...[
                     SizedBox(
-                        width: _collectionWidth,
-                        child: const CollectionListColumn()),
+                      width: _collectionWidth,
+                      child: const CollectionListColumn(),
+                    ),
                     _ColumnDivider(
                       onDrag: (delta) {
                         setState(() {
-                          _collectionWidth =
-                              (_collectionWidth + delta).clamp(150.0, 600.0);
+                          _collectionWidth = (_collectionWidth + delta).clamp(
+                            150.0,
+                            600.0,
+                          );
                         });
                       },
                     ),
                   ],
                   if (provider.selectedCollection != null) ...[
                     SizedBox(
-                        width: _contentWidth,
-                        child: const DocumentContentColumn()),
+                      width: _contentWidth,
+                      child: const DocumentContentColumn(),
+                    ),
                     _ColumnDivider(
                       onDrag: (delta) {
                         setState(() {
-                          _contentWidth =
-                              (_contentWidth + delta).clamp(200.0, 800.0);
+                          _contentWidth = (_contentWidth + delta).clamp(
+                            200.0,
+                            800.0,
+                          );
                         });
                       },
                     ),
@@ -211,8 +224,10 @@ class _HomePageState extends State<HomePage> {
                     _ColumnDivider(
                       onDrag: (delta) {
                         setState(() {
-                          _detailWidth =
-                              (_detailWidth + delta).clamp(200.0, 1000.0);
+                          _detailWidth = (_detailWidth + delta).clamp(
+                            200.0,
+                            1000.0,
+                          );
                         });
                       },
                     ),
@@ -243,10 +258,7 @@ class _ColumnDivider extends StatelessWidget {
           width: 8,
           color: Colors.transparent,
           child: Center(
-            child: Container(
-              width: 1,
-              color: Colors.grey.shade300,
-            ),
+            child: Container(width: 1, color: Colors.grey.shade300),
           ),
         ),
       ),

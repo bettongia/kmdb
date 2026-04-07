@@ -21,6 +21,7 @@ import 'package:flutter_json_view/flutter_json_view.dart';
 import 'dart:convert';
 import 'database_provider.dart';
 import 'collection_provider.dart';
+import 'new_collection_dialog.dart';
 import 'add_document_dialog.dart';
 
 class DatabaseHistoryColumn extends StatelessWidget {
@@ -42,9 +43,9 @@ class DatabaseHistoryColumn extends StatelessWidget {
             child: Text(
               'DATABASES',
               style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    color: Theme.of(context).colorScheme.primary,
-                    fontWeight: FontWeight.bold,
-                  ),
+                color: Theme.of(context).colorScheme.primary,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
           Expanded(
@@ -54,7 +55,10 @@ class DatabaseHistoryColumn extends StatelessWidget {
                 final path = provider.recentDatabasePaths[index];
                 final isSelected = provider.selectedDatabasePath == path;
                 return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.0),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8.0,
+                    vertical: 2.0,
+                  ),
                   child: GestureDetector(
                     onSecondaryTap: () {
                       showDialog(
@@ -91,19 +95,31 @@ class DatabaseHistoryColumn extends StatelessWidget {
                     },
                     child: ListTile(
                       dense: true,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                       selected: isSelected,
-                      selectedTileColor: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.4),
+                      selectedTileColor: Theme.of(
+                        context,
+                      ).colorScheme.primaryContainer.withOpacity(0.4),
                       title: Text(
                         p.basename(path),
                         style: TextStyle(
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                          color: isSelected ? Theme.of(context).colorScheme.primary : null,
+                          fontWeight: isSelected
+                              ? FontWeight.bold
+                              : FontWeight.normal,
+                          color: isSelected
+                              ? Theme.of(context).colorScheme.primary
+                              : null,
                         ),
                       ),
-                      leading: isSelected 
-                        ? Icon(Icons.storage, size: 18, color: Theme.of(context).colorScheme.primary)
-                        : const Icon(Icons.storage_outlined, size: 18),
+                      leading: isSelected
+                          ? Icon(
+                              Icons.storage,
+                              size: 18,
+                              color: Theme.of(context).colorScheme.primary,
+                            )
+                          : const Icon(Icons.storage_outlined, size: 18),
                       onTap: () => provider.selectDatabase(path),
                       trailing: IconButton(
                         icon: const Icon(Icons.close, size: 14),
@@ -141,13 +157,28 @@ class CollectionListColumn extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Text(
-              'COLLECTIONS',
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+            padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'COLLECTIONS',
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
                     color: Theme.of(context).colorScheme.secondary,
                     fontWeight: FontWeight.bold,
                   ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.add, size: 20),
+                  tooltip: 'Add Collection',
+                  onPressed: () {
+                    showDialog(
+                      context: context,
+                      builder: (context) => const NewCollectionDialog(),
+                    );
+                  },
+                ),
+              ],
             ),
           ),
           Expanded(
@@ -158,18 +189,24 @@ class CollectionListColumn extends StatelessWidget {
                       children: [
                         CircularProgressIndicator(strokeWidth: 2),
                         SizedBox(height: 16),
-                        Text('Opening database...',
-                            style: TextStyle(fontSize: 12)),
+                        Text(
+                          'Opening database...',
+                          style: TextStyle(fontSize: 12),
+                        ),
                       ],
                     ),
                   )
                 : provider.loadError != null
-                    ? Padding(
+                ? Padding(
                     padding: const EdgeInsets.all(16.0),
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.error_outline, color: Colors.red, size: 24),
+                        const Icon(
+                          Icons.error_outline,
+                          color: Colors.red,
+                          size: 24,
+                        ),
                         const SizedBox(height: 8),
                         Text(
                           'Error loading collections:',
@@ -179,7 +216,9 @@ class CollectionListColumn extends StatelessWidget {
                         const SizedBox(height: 4),
                         Text(
                           provider.loadError!,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.red),
+                          style: Theme.of(
+                            context,
+                          ).textTheme.bodySmall?.copyWith(color: Colors.red),
                           textAlign: TextAlign.center,
                         ),
                       ],
@@ -188,34 +227,48 @@ class CollectionListColumn extends StatelessWidget {
                 : ListView.builder(
                     itemCount: provider.collections.length,
                     itemBuilder: (context, index) {
-                final name = provider.collections[index];
-                final count = provider.getCollectionCount(name);
-                final isSelected = provider.selectedCollection == name;
-                return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.0),
-                  child: ListTile(
-                    dense: true,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    selected: isSelected,
-                    selectedTileColor: Theme.of(context).colorScheme.secondaryContainer.withOpacity(0.4),
-                    title: Text(
-                      name,
-                      style: TextStyle(
-                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                        color: isSelected ? Theme.of(context).colorScheme.secondary : null,
-                      ),
-                    ),
-                    trailing: Text(
-                      '$count',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                      ),
-                    ),
-                    onTap: () => provider.selectCollection(name),
+                      final name = provider.collections[index];
+                      final count = provider.getCollectionCount(name);
+                      final isSelected = provider.selectedCollection == name;
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8.0,
+                          vertical: 2.0,
+                        ),
+                        child: ListTile(
+                          dense: true,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          selected: isSelected,
+                          selectedTileColor: Theme.of(
+                            context,
+                          ).colorScheme.secondaryContainer.withOpacity(0.4),
+                          title: Text(
+                            name,
+                            style: TextStyle(
+                              fontWeight: isSelected
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
+                              color: isSelected
+                                  ? Theme.of(context).colorScheme.secondary
+                                  : null,
+                            ),
+                          ),
+                          trailing: Text(
+                            '$count',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  fontWeight: isSelected
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                ),
+                          ),
+                          onTap: () => provider.selectCollection(name),
+                        ),
+                      );
+                    },
                   ),
-                );
-              },
-            ),
           ),
         ],
       ),
@@ -239,9 +292,7 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
     final collectionProvider = context.watch<CollectionProvider?>();
 
     if (collectionProvider == null) {
-      return const Expanded(
-        child: Center(child: Text('Select a collection')),
-      );
+      return const Expanded(child: Center(child: Text('Select a collection')));
     }
 
     _queryController.text = collectionProvider.query;
@@ -264,8 +315,9 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
                   showDialog(
                     context: context,
                     builder: (_) => AddDocumentDialog(
-                      onAddJson: (json) {
-                        collectionProvider.addDocument(json);
+                      onAddJson: (json) async {
+                        await collectionProvider.addDocument(json);
+                        await databaseProvider.refreshCollections();
                       },
                     ),
                   );
@@ -292,25 +344,38 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
               itemBuilder: (context, index) {
                 final document = collectionProvider.documents[index];
                 final isSelected =
-                    databaseProvider.selectedDocument?['_id'] == document['_id'];
-                
-                final title = document['title'] ??
+                    databaseProvider.selectedDocument?['_id'] ==
+                    document['_id'];
+
+                final title =
+                    document['title'] ??
                     document['name'] ??
                     document['subject'] ??
                     'Document';
-                
+
                 return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.0),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8.0,
+                    vertical: 2.0,
+                  ),
                   child: ListTile(
                     dense: true,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                     selected: isSelected,
-                    selectedTileColor: Theme.of(context).colorScheme.tertiaryContainer.withOpacity(0.4),
+                    selectedTileColor: Theme.of(
+                      context,
+                    ).colorScheme.tertiaryContainer.withOpacity(0.4),
                     title: Text(
                       title,
                       style: TextStyle(
-                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                        color: isSelected ? Theme.of(context).colorScheme.tertiary : null,
+                        fontWeight: isSelected
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                        color: isSelected
+                            ? Theme.of(context).colorScheme.tertiary
+                            : null,
                       ),
                     ),
                     subtitle: Text(
@@ -319,7 +384,9 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 10,
-                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        fontWeight: isSelected
+                            ? FontWeight.bold
+                            : FontWeight.normal,
                       ),
                     ),
                     onTap: () => databaseProvider.selectDocument(document),
@@ -358,8 +425,11 @@ class DocumentDetailColumn extends StatelessWidget {
                 tooltip: 'Copy JSON',
                 icon: const Icon(Icons.copy, size: 18),
                 onPressed: () {
-                  Clipboard.setData(ClipboardData(
-                      text: const JsonEncoder.withIndent('  ').convert(doc)));
+                  Clipboard.setData(
+                    ClipboardData(
+                      text: const JsonEncoder.withIndent('  ').convert(doc),
+                    ),
+                  );
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text('Copied to clipboard'),

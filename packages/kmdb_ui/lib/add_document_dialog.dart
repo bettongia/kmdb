@@ -44,9 +44,11 @@ class _AddDocumentDialogState extends State<AddDocumentDialog> {
           child: const Text('Cancel'),
         ),
         ElevatedButton(
-          onPressed: () {
-            widget.onAddJson(_textController.text);
-            Navigator.of(context).pop();
+          onPressed: () async {
+            await widget.onAddJson(_textController.text);
+            if (mounted) {
+              Navigator.of(context).pop();
+            }
           },
           child: const Text('Add'),
         ),
