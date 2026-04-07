@@ -56,6 +56,9 @@ final class _CountingStore implements KvStore {
   @override
   Future<List<String>> listNamespaces() => _inner.listNamespaces();
   @override
+  Future<bool> createNamespace(String namespace) =>
+      _inner.createNamespace(namespace);
+  @override
   Future<StoreStats> stats() => _inner.stats();
   @override
   Future<StoreInfo> storeInfo() => _inner.storeInfo();

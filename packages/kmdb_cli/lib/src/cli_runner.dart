@@ -19,6 +19,7 @@ import 'package:kmdb/kmdb.dart';
 
 import 'commands/collections_command.dart';
 import 'commands/command.dart';
+import 'commands/create_collection_command.dart';
 import 'commands/compact_command.dart';
 import 'commands/count_command.dart';
 import 'commands/delete_command.dart';
@@ -62,6 +63,7 @@ final _commands = <String, CliCommand>{
     const ScanCommand(),
     const CountCommand(),
     const CollectionsCommand(),
+    const CreateCollectionCommand(),
     const StatsCommand(),
     const InfoCommand(),
     const ExportCommand(),
@@ -490,6 +492,7 @@ Commands:
 
   Introspection:
     collections
+    create-collection <name>
     stats
     info
 
