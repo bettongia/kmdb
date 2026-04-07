@@ -12,68 +12,57 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:path/path.dart' as p;
+import 'package:kmdb/kmdb.dart';
 
 class CollectionProvider with ChangeNotifier {
-  final Directory _collectionDirectory;
+  final String _databasePath;
+  final String _collectionName;
   final List<Map<String, dynamic>> _documents = [];
   int _displayLimit = 25;
   String _query = '';
+  int _totalCount = 0;
 
   List<Map<String, dynamic>> get documents => _documents;
   int get displayLimit => _displayLimit;
   String get query => _query;
-  String get collectionName => p.basename(_collectionDirectory.path);
+  String get collectionName => _collectionName;
+  int get totalCount => _totalCount;
 
-  CollectionProvider(this._collectionDirectory) {
+  CollectionProvider(this._databasePath, this._collectionName) {
     loadDocuments();
   }
 
-  void loadDocuments() {
+  Future<void> loadDocuments() async {
     _documents.clear();
+    _totalCount = 0;
+    final adapter = StorageAdapterNative();
     try {
-      final files = _collectionDirectory.listSync().where(
-        (entity) => entity is File && p.extension(entity.path) == '.json',
-      );
+      final (store, _) = await KvStoreImpl.open(_databasePath, adapter);
+      try {
+        final stream = store.scan(_collectionName);
+        int count = 0;
+        await for (final entry in stream) {
+          final doc = ValueCodec.decode(entry.value);
+          _totalCount++;
 
-      var filteredFiles = files;
-      if (_query.isNotEmpty) {
-        filteredFiles = files.where((file) {
-          try {
-            final content = File(file.path).readAsStringSync();
-            return content.contains(_query);
-          } catch (e) {
-            return false;
+          // Simple in-memory filter for the UI
+          if (_query.isNotEmpty) {
+            final docString = doc.toString().toLowerCase();
+            if (!docString.contains(_query.toLowerCase())) continue;
           }
-        });
-      }
 
-      var limitedFiles = (_displayLimit == -1)
-          ? filteredFiles
-          : filteredFiles.take(_displayLimit);
-
-      for (var fileEntity in limitedFiles) {
-        try {
-          final file = File(fileEntity.path);
-          final content = file.readAsStringSync();
-          final data = jsonDecode(content) as Map<String, dynamic>;
-          data['__filename'] = p.basename(file.path);
-          _documents.add(data);
-        } catch (e) {
-          _documents.add({
-            '__filename': p.basename(fileEntity.path),
-            '__error': 'Failed to load document: $e',
-          });
+          if (_displayLimit == -1 || count < _displayLimit) {
+            _documents.add(doc);
+            count++;
+          }
         }
+      } finally {
+        await store.close();
       }
     } catch (e) {
-      _documents.add({
-        '__filename': 'Error',
-        '__error': 'Failed to read collection directory: $e',
-      });
+      _documents.add({'error': 'Failed to load documents: $e'});
     }
     notifyListeners();
   }
@@ -94,15 +83,30 @@ class CollectionProvider with ChangeNotifier {
 
   Future<void> addDocument(String jsonContent) async {
     try {
-      final decodedJson = jsonDecode(jsonContent);
-      final id = DateTime.now().millisecondsSinceEpoch.toString();
-      final filename = '$id.json';
-      final file = File(p.join(_collectionDirectory.path, filename));
-      await file.writeAsString(jsonEncode(decodedJson));
-      loadDocuments();
+      final decoded = json.decode(jsonContent);
+      final Map<String, dynamic> doc;
+      if (decoded is Map<String, dynamic>) {
+        doc = decoded;
+      } else {
+        throw const FormatException('Input must be a JSON object.');
+      }
+
+      final key = const UuidV7KeyGenerator().next();
+      doc['_id'] = key;
+      final encoded = ValueCodec.encode(doc);
+
+      final adapter = StorageAdapterNative();
+      final (store, _) = await KvStoreImpl.open(_databasePath, adapter);
+      try {
+        await store.put(_collectionName, key, encoded);
+      } finally {
+        await store.close();
+      }
+
+      await loadDocuments();
     } catch (e) {
-      // Handle error
-      print('Error adding document: $e');
+      _documents.add({'error': 'Failed to add document: $e'});
+      notifyListeners();
     }
   }
 }

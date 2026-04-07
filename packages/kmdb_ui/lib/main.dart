@@ -17,10 +17,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import 'database_provider.dart';
-import 'database_page.dart';
 import 'collection_provider.dart';
-import 'collection_page.dart';
-import 'analysis_page.dart';
+import 'database_columns.dart';
 
 void main() {
   runApp(const MyApp());
@@ -37,19 +35,24 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProxyProvider<DatabaseProvider, CollectionProvider?>(
           create: (_) => null,
           update: (_, databaseProvider, previous) {
-            if (databaseProvider.selectedCollection != null) {
-              return CollectionProvider(databaseProvider.selectedCollection!);
+            if (databaseProvider.selectedDatabasePath != null &&
+                databaseProvider.selectedCollection != null) {
+              return CollectionProvider(
+                databaseProvider.selectedDatabasePath!,
+                databaseProvider.selectedCollection!,
+              );
             }
             return null;
           },
         ),
       ],
       child: MaterialApp(
-        title: 'Document Database UI',
+        title: 'KMDB Browser',
+        debugShowCheckedModeBanner: false,
         theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+          colorScheme: ColorScheme.fromSeed(seedColor: Colors.blueGrey),
           useMaterial3: true,
-          textTheme: GoogleFonts.latoTextTheme(),
+          textTheme: GoogleFonts.interTextTheme(),
         ),
         home: const HomePage(),
       ),
@@ -65,35 +68,108 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  int _selectedIndex = 0;
-
-  static const List<Widget> _widgetOptions = <Widget>[
-    DatabasePage(),
-    CollectionPage(),
-    AnalysisPage(),
-  ];
-
-  void _onItemTapped(int index) {
-    setState(() {
-      _selectedIndex = index;
-    });
-  }
+  double _dbWidth = 200;
+  double _collectionWidth = 250;
+  double _contentWidth = 400;
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: _widgetOptions.elementAt(_selectedIndex),
-      bottomNavigationBar: BottomNavigationBar(
-        items: const <BottomNavigationBarItem>[
-          BottomNavigationBarItem(icon: Icon(Icons.storage), label: 'Database'),
-          BottomNavigationBarItem(icon: Icon(Icons.list), label: 'Collection'),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.analytics),
-            label: 'Analysis',
+    final provider = context.watch<DatabaseProvider>();
+
+    return PlatformMenuBar(
+      menus: [
+        PlatformMenu(
+          label: 'KMDB Browser',
+          menus: [
+            if (PlatformProvidedMenuItem.hasMenu(
+                PlatformProvidedMenuItemType.about))
+              const PlatformProvidedMenuItem(
+                  type: PlatformProvidedMenuItemType.about),
+            if (PlatformProvidedMenuItem.hasMenu(
+                PlatformProvidedMenuItemType.quit))
+              const PlatformProvidedMenuItem(
+                  type: PlatformProvidedMenuItemType.quit),
+          ],
+        ),
+        PlatformMenu(
+          label: 'Database',
+          menus: [
+            PlatformMenuItem(
+              label: 'Open...',
+              onSelected: () => provider.openDatabase(),
+              shortcut: const CharacterActivator('o', meta: true),
+            ),
+          ],
+        ),
+      ],
+      child: Scaffold(
+        body: SafeArea(
+          child: Row(
+            children: [
+              SizedBox(width: _dbWidth, child: const DatabaseHistoryColumn()),
+              _ColumnDivider(
+                onDrag: (delta) {
+                  setState(() {
+                    _dbWidth = (_dbWidth + delta).clamp(100.0, 500.0);
+                  });
+                },
+              ),
+              if (provider.selectedDatabasePath != null) ...[
+                SizedBox(
+                    width: _collectionWidth,
+                    child: const CollectionListColumn()),
+                _ColumnDivider(
+                  onDrag: (delta) {
+                    setState(() {
+                      _collectionWidth =
+                          (_collectionWidth + delta).clamp(150.0, 600.0);
+                    });
+                  },
+                ),
+              ],
+              if (provider.selectedCollection != null) ...[
+                SizedBox(
+                    width: _contentWidth, child: const DocumentContentColumn()),
+                _ColumnDivider(
+                  onDrag: (delta) {
+                    setState(() {
+                      _contentWidth =
+                          (_contentWidth + delta).clamp(200.0, 800.0);
+                    });
+                  },
+                ),
+              ],
+              const DocumentDetailColumn(),
+            ],
           ),
-        ],
-        currentIndex: _selectedIndex,
-        onTap: _onItemTapped,
+        ),
+      ),
+    );
+  }
+}
+
+class _ColumnDivider extends StatelessWidget {
+  final Function(double) onDrag;
+
+  const _ColumnDivider({required this.onDrag});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onHorizontalDragUpdate: (details) => onDrag(details.delta.dx),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.resizeLeftRight,
+        child: Container(
+          width: 8,
+          color: Colors.transparent,
+          child: Center(
+            child: Container(
+              width: 1,
+              color: Colors.grey.shade300,
+            ),
+          ),
+        ),
       ),
     );
   }

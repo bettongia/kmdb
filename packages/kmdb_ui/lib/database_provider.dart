@@ -12,47 +12,93 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:path/path.dart' as p;
+import 'package:kmdb/kmdb.dart';
 
 class DatabaseProvider with ChangeNotifier {
-  Directory? _databaseDirectory;
-  List<String> _collections = [];
-  Directory? _selectedCollection;
+  final List<String> _recentDatabasePaths = [];
+  String? _selectedDatabasePath;
+  Map<String, int> _collections = {};
+  String? _selectedCollection;
+  Map<String, dynamic>? _selectedDocument;
 
-  Directory? get databaseDirectory => _databaseDirectory;
-  List<String> get collections => _collections;
-  Directory? get selectedCollection => _selectedCollection;
+  List<String> get recentDatabasePaths => _recentDatabasePaths;
+  String? get selectedDatabasePath => _selectedDatabasePath;
+  List<String> get collections => _collections.keys.toList();
+  int getCollectionCount(String name) => _collections[name] ?? 0;
+  String? get selectedCollection => _selectedCollection;
+  Map<String, dynamic>? get selectedDocument => _selectedDocument;
 
-  Future<void> selectDatabase() async {
-    final selectedDirectory = await FilePicker.getDirectoryPath();
+  Future<void> openDatabase() async {
+    final path = await FilePicker.getDirectoryPath();
+    if (path != null) {
+      if (!_recentDatabasePaths.contains(path)) {
+        _recentDatabasePaths.add(path);
+      }
+      await selectDatabase(path);
+    }
+  }
 
-    if (selectedDirectory != null) {
-      _databaseDirectory = Directory(selectedDirectory);
-      _loadCollections();
+  Future<void> selectDatabase(String path) async {
+    if (_selectedDatabasePath != path) {
+      _selectedDatabasePath = path;
+      _selectedCollection = null;
+      _selectedDocument = null;
+      await _loadCollections();
       notifyListeners();
     }
+  }
+
+  void removeDatabase(String path) {
+    _recentDatabasePaths.remove(path);
+    if (_selectedDatabasePath == path) {
+      _selectedDatabasePath = null;
+      _collections = {};
+      _selectedCollection = null;
+      _selectedDocument = null;
+    }
+    notifyListeners();
   }
 
   void selectCollection(String collectionName) {
-    if (_databaseDirectory != null) {
-      _selectedCollection = Directory(
-        p.join(_databaseDirectory!.path, collectionName),
-      );
+    if (_selectedDatabasePath != null) {
+      _selectedCollection = collectionName;
+      _selectedDocument = null;
       notifyListeners();
     }
   }
 
-  void _loadCollections() {
-    if (_databaseDirectory != null) {
-      _collections = _databaseDirectory!
-          .listSync()
-          .whereType<Directory>()
-          .map((entity) => p.basename(entity.path))
-          .toList();
+  void selectDocument(Map<String, dynamic>? doc) {
+    _selectedDocument = doc;
+    notifyListeners();
+  }
+
+  Future<void> _loadCollections() async {
+    final path = _selectedDatabasePath;
+    if (path == null) return;
+
+    final adapter = StorageAdapterNative();
+    try {
+      final (store, _) = await KvStoreImpl.open(path, adapter);
+      try {
+        final names = await store.listNamespaces();
+        final Map<String, int> newCollections = {};
+        for (final name in names) {
+          int count = 0;
+          await for (final _ in store.scan(name)) {
+            count++;
+          }
+          newCollections[name] = count;
+        }
+        _collections = newCollections;
+      } finally {
+        await store.close();
+      }
+    } catch (e) {
+      _collections = {};
+      debugPrint('Error loading collections: $e');
     }
+    notifyListeners();
   }
 }
