@@ -233,6 +233,41 @@ void main() {
     });
   });
 
+  group('KmdbCli — --key=value flag syntax', () {
+    test('insert accepts --value=<json> (equals form)', () async {
+      final dbPath = tmp.file('db');
+      // The shell passes --value={"title":"hi"} as a single token when the
+      // user writes --value='{"title":"hi"}'. The CLI must split on the first
+      // '=' to parse the flag value correctly; previously this caused the
+      // process to hang waiting on stdin.
+      final result = await run([dbPath, 'insert', 'notes', '--value={"title":"hi"}']);
+      expect(result.exitCode, equals(0), reason: result.stderr);
+      final docs = json.decode(result.stdout) as List;
+      expect(docs[0]['title'], equals('hi'));
+    });
+
+    test('insert accepts --file=<path> (equals form)', () async {
+      final dbPath = tmp.file('db');
+      final jsonPath = tmp.file('doc.json');
+      io.File(jsonPath).writeAsStringSync('{"title":"from file"}');
+      final result = await run([dbPath, 'insert', 'notes', '--file=$jsonPath']);
+      expect(result.exitCode, equals(0), reason: result.stderr);
+      final docs = json.decode(result.stdout) as List;
+      expect(docs[0]['title'], equals('from file'));
+    });
+
+    test('scan accepts --limit=<n> (equals form)', () async {
+      final dbPath = tmp.file('db');
+      await run([dbPath, 'put', 'notes', '--value', '{"v":1}']);
+      await run([dbPath, 'put', 'notes', '--value', '{"v":2}']);
+      await run([dbPath, 'put', 'notes', '--value', '{"v":3}']);
+      final result = await run([dbPath, 'scan', 'notes', '--limit=2']);
+      expect(result.exitCode, equals(0), reason: result.stderr);
+      final docs = json.decode(result.stdout) as List;
+      expect(docs, hasLength(2));
+    });
+  });
+
   group('KmdbCli — --no-flush and flush command', () {
     test('persists WAL and skips SST creation with --no-flush', () async {
       final dbPath = tmp.file('db');

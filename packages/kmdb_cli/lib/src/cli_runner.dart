@@ -353,13 +353,19 @@ abstract final class KmdbCli {
     while (j < tokens.length) {
       final t = tokens[j];
       if (t.startsWith('--')) {
-        final flagName = t.substring(2);
-        // Boolean flags have no value; value flags consume the next token.
-        if (j + 1 < tokens.length && !tokens[j + 1].startsWith('--')) {
-          flags[flagName] = tokens[j + 1];
+        final rest = t.substring(2);
+        final eqIdx = rest.indexOf('=');
+        if (eqIdx != -1) {
+          // --key=value form (e.g. --value='{"x":1}' as passed by shells).
+          flags[rest.substring(0, eqIdx)] = rest.substring(eqIdx + 1);
+          j++;
+        } else if (j + 1 < tokens.length && !tokens[j + 1].startsWith('--')) {
+          // --key value form (space-separated).
+          flags[rest] = tokens[j + 1];
           j += 2;
         } else {
-          flags[flagName] = true;
+          // Boolean flag with no value.
+          flags[rest] = true;
           j++;
         }
       } else {
