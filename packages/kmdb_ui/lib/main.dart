@@ -19,6 +19,7 @@ import 'package:provider/provider.dart';
 import 'database_provider.dart';
 import 'collection_provider.dart';
 import 'database_columns.dart';
+import 'new_database_dialog.dart';
 
 void main() {
   runApp(const MyApp());
@@ -94,6 +95,19 @@ class _HomePageState extends State<HomePage> {
         PlatformMenu(
           label: 'Database',
           menus: [
+            PlatformMenuItem(
+              label: 'New...',
+              onSelected: () async {
+                final String? path = await showDialog<String>(
+                  context: context,
+                  builder: (_) => const NewDatabaseDialog(),
+                );
+                if (path != null) {
+                  provider.selectDatabase(path);
+                }
+              },
+              shortcut: const CharacterActivator('n', meta: true),
+            ),
             PlatformMenuItem(
               label: 'Open...',
               onSelected: () => provider.openDatabase(),

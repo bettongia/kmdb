@@ -33,21 +33,22 @@ class DatabaseProvider with ChangeNotifier {
   Future<void> openDatabase() async {
     final path = await FilePicker.getDirectoryPath();
     if (path != null) {
-      if (!_recentDatabasePaths.contains(path)) {
-        _recentDatabasePaths.add(path);
-      }
       await selectDatabase(path);
     }
   }
 
   Future<void> selectDatabase(String path) async {
+    if (!_recentDatabasePaths.contains(path)) {
+      _recentDatabasePaths.add(path);
+    }
+    
     if (_selectedDatabasePath != path) {
       _selectedDatabasePath = path;
       _selectedCollection = null;
       _selectedDocument = null;
       await _loadCollections();
-      notifyListeners();
     }
+    notifyListeners();
   }
 
   void removeDatabase(String path) {
