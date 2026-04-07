@@ -17,7 +17,7 @@ import 'package:flutter/material.dart';
 import 'package:kmdb/kmdb.dart';
 
 class CollectionProvider with ChangeNotifier {
-  final String _databasePath;
+  final KvStore _store;
   final String _collectionName;
   final List<Map<String, dynamic>> _documents = [];
   int _displayLimit = 25;
@@ -30,36 +30,30 @@ class CollectionProvider with ChangeNotifier {
   String get collectionName => _collectionName;
   int get totalCount => _totalCount;
 
-  CollectionProvider(this._databasePath, this._collectionName) {
+  CollectionProvider(this._store, this._collectionName) {
     loadDocuments();
   }
 
   Future<void> loadDocuments() async {
     _documents.clear();
     _totalCount = 0;
-    final adapter = StorageAdapterNative();
     try {
-      final (store, _) = await KvStoreImpl.open(_databasePath, adapter);
-      try {
-        final stream = store.scan(_collectionName);
-        int count = 0;
-        await for (final entry in stream) {
-          final doc = ValueCodec.decode(entry.value);
-          _totalCount++;
+      final stream = _store.scan(_collectionName);
+      int count = 0;
+      await for (final entry in stream) {
+        final doc = ValueCodec.decode(entry.value);
+        _totalCount++;
 
-          // Simple in-memory filter for the UI
-          if (_query.isNotEmpty) {
-            final docString = doc.toString().toLowerCase();
-            if (!docString.contains(_query.toLowerCase())) continue;
-          }
-
-          if (_displayLimit == -1 || count < _displayLimit) {
-            _documents.add(doc);
-            count++;
-          }
+        // Simple in-memory filter for the UI
+        if (_query.isNotEmpty) {
+          final docString = doc.toString().toLowerCase();
+          if (!docString.contains(_query.toLowerCase())) continue;
         }
-      } finally {
-        await store.close();
+
+        if (_displayLimit == -1 || count < _displayLimit) {
+          _documents.add(doc);
+          count++;
+        }
       }
     } catch (e) {
       _documents.add({'error': 'Failed to load documents: $e'});
@@ -95,14 +89,7 @@ class CollectionProvider with ChangeNotifier {
       doc['_id'] = key;
       final encoded = ValueCodec.encode(doc);
 
-      final adapter = StorageAdapterNative();
-      final (store, _) = await KvStoreImpl.open(_databasePath, adapter);
-      try {
-        await store.put(_collectionName, key, encoded);
-      } finally {
-        await store.close();
-      }
-
+      await _store.put(_collectionName, key, encoded);
       await loadDocuments();
     } catch (e) {
       _documents.add({'error': 'Failed to add document: $e'});

@@ -15,31 +15,36 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'database_provider.dart';
 import 'collection_provider.dart';
 import 'database_columns.dart';
 import 'new_database_dialog.dart';
 
-void main() {
-  runApp(const MyApp());
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final prefs = await SharedPreferences.getInstance();
+  runApp(MyApp(prefs: prefs));
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  final SharedPreferences prefs;
+
+  const MyApp({super.key, required this.prefs});
 
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => DatabaseProvider()),
+        ChangeNotifierProvider(create: (_) => DatabaseProvider(prefs)),
         ChangeNotifierProxyProvider<DatabaseProvider, CollectionProvider?>(
           create: (_) => null,
           update: (_, databaseProvider, previous) {
-            if (databaseProvider.selectedDatabasePath != null &&
+            if (databaseProvider.store != null &&
                 databaseProvider.selectedCollection != null) {
               return CollectionProvider(
-                databaseProvider.selectedDatabasePath!,
+                databaseProvider.store!,
                 databaseProvider.selectedCollection!,
               );
             }
@@ -47,15 +52,28 @@ class MyApp extends StatelessWidget {
           },
         ),
       ],
-      child: MaterialApp(
-        title: 'KMDB Browser',
-        debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: Colors.blueGrey),
-          useMaterial3: true,
-          textTheme: GoogleFonts.interTextTheme(),
-        ),
-        home: const HomePage(),
+      child: Consumer<DatabaseProvider>(
+        builder: (context, provider, child) {
+          return MaterialApp(
+            title: 'KMDB Browser',
+            debugShowCheckedModeBanner: false,
+            theme: ThemeData(
+              colorScheme: ColorScheme.fromSeed(seedColor: Colors.blueGrey),
+              useMaterial3: true,
+              textTheme: GoogleFonts.interTextTheme(),
+            ),
+            home: const HomePage(),
+            themeMode: provider.themeMode,
+            darkTheme: ThemeData(
+              colorScheme: ColorScheme.fromSeed(
+                seedColor: Colors.blueGrey,
+                brightness: Brightness.dark,
+              ),
+              useMaterial3: true,
+              textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme),
+            ),
+          );
+        },
       ),
     );
   }
@@ -72,6 +90,8 @@ class _HomePageState extends State<HomePage> {
   double _dbWidth = 200;
   double _collectionWidth = 250;
   double _contentWidth = 400;
+  double _detailWidth = 500;
+  final ScrollController _scrollController = ScrollController();
 
   @override
   Widget build(BuildContext context) {
@@ -115,46 +135,91 @@ class _HomePageState extends State<HomePage> {
             ),
           ],
         ),
+        PlatformMenu(
+          label: 'View',
+          menus: [
+            PlatformMenu(
+              label: 'Mode',
+              menus: [
+                PlatformMenuItem(
+                  label: 'Light',
+                  onSelected: () => provider.setThemeMode(ThemeMode.light),
+                ),
+                PlatformMenuItem(
+                  label: 'Dark',
+                  onSelected: () => provider.setThemeMode(ThemeMode.dark),
+                ),
+                PlatformMenuItem(
+                  label: 'System',
+                  onSelected: () => provider.setThemeMode(ThemeMode.system),
+                ),
+              ],
+            ),
+          ],
+        ),
       ],
       child: Scaffold(
         body: SafeArea(
-          child: Row(
-            children: [
-              SizedBox(width: _dbWidth, child: const DatabaseHistoryColumn()),
-              _ColumnDivider(
-                onDrag: (delta) {
-                  setState(() {
-                    _dbWidth = (_dbWidth + delta).clamp(100.0, 500.0);
-                  });
-                },
+          child: Scrollbar(
+            controller: _scrollController,
+            thumbVisibility: true,
+            child: SingleChildScrollView(
+              controller: _scrollController,
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SizedBox(width: _dbWidth, child: const DatabaseHistoryColumn()),
+                  _ColumnDivider(
+                    onDrag: (delta) {
+                      setState(() {
+                        _dbWidth = (_dbWidth + delta).clamp(100.0, 500.0);
+                      });
+                    },
+                  ),
+                  if (provider.selectedDatabasePath != null) ...[
+                    SizedBox(
+                        width: _collectionWidth,
+                        child: const CollectionListColumn()),
+                    _ColumnDivider(
+                      onDrag: (delta) {
+                        setState(() {
+                          _collectionWidth =
+                              (_collectionWidth + delta).clamp(150.0, 600.0);
+                        });
+                      },
+                    ),
+                  ],
+                  if (provider.selectedCollection != null) ...[
+                    SizedBox(
+                        width: _contentWidth,
+                        child: const DocumentContentColumn()),
+                    _ColumnDivider(
+                      onDrag: (delta) {
+                        setState(() {
+                          _contentWidth =
+                              (_contentWidth + delta).clamp(200.0, 800.0);
+                        });
+                      },
+                    ),
+                  ],
+                  if (provider.selectedDocument != null) ...[
+                    SizedBox(
+                      width: _detailWidth,
+                      child: const DocumentDetailColumn(),
+                    ),
+                    _ColumnDivider(
+                      onDrag: (delta) {
+                        setState(() {
+                          _detailWidth =
+                              (_detailWidth + delta).clamp(200.0, 1000.0);
+                        });
+                      },
+                    ),
+                  ],
+                ],
               ),
-              if (provider.selectedDatabasePath != null) ...[
-                SizedBox(
-                    width: _collectionWidth,
-                    child: const CollectionListColumn()),
-                _ColumnDivider(
-                  onDrag: (delta) {
-                    setState(() {
-                      _collectionWidth =
-                          (_collectionWidth + delta).clamp(150.0, 600.0);
-                    });
-                  },
-                ),
-              ],
-              if (provider.selectedCollection != null) ...[
-                SizedBox(
-                    width: _contentWidth, child: const DocumentContentColumn()),
-                _ColumnDivider(
-                  onDrag: (delta) {
-                    setState(() {
-                      _contentWidth =
-                          (_contentWidth + delta).clamp(200.0, 800.0);
-                    });
-                  },
-                ),
-              ],
-              const DocumentDetailColumn(),
-            ],
+            ),
           ),
         ),
       ),

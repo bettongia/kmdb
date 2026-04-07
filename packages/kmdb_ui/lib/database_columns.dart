@@ -55,28 +55,61 @@ class DatabaseHistoryColumn extends StatelessWidget {
                 final isSelected = provider.selectedDatabasePath == path;
                 return Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.0),
-                  child: ListTile(
-                    dense: true,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    selected: isSelected,
-                    selectedTileColor: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.4),
-                    title: Text(
-                      p.basename(path),
-                      style: TextStyle(
-                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                        color: isSelected ? Theme.of(context).colorScheme.primary : null,
+                  child: GestureDetector(
+                    onSecondaryTap: () {
+                      showDialog(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          title: const Text('Database Information'),
+                          content: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'LOCATION',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.blueGrey,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              SelectableText(
+                                path,
+                                style: const TextStyle(fontSize: 13),
+                              ),
+                            ],
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context),
+                              child: const Text('Close'),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                    child: ListTile(
+                      dense: true,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      selected: isSelected,
+                      selectedTileColor: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.4),
+                      title: Text(
+                        p.basename(path),
+                        style: TextStyle(
+                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                          color: isSelected ? Theme.of(context).colorScheme.primary : null,
+                        ),
+                      ),
+                      leading: isSelected 
+                        ? Icon(Icons.storage, size: 18, color: Theme.of(context).colorScheme.primary)
+                        : const Icon(Icons.storage_outlined, size: 18),
+                      onTap: () => provider.selectDatabase(path),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.close, size: 14),
+                        onPressed: () => provider.removeDatabase(path),
                       ),
                     ),
-                    leading: isSelected 
-                      ? Icon(Icons.storage, size: 18, color: Theme.of(context).colorScheme.primary)
-                      : const Icon(Icons.storage_outlined, size: 18),
-                    onTap: () => provider.selectDatabase(path),
-                    trailing: isSelected
-                        ? null
-                        : IconButton(
-                            icon: const Icon(Icons.close, size: 14),
-                            onPressed: () => provider.removeDatabase(path),
-                          ),
                   ),
                 );
               },
@@ -118,9 +151,43 @@ class CollectionListColumn extends StatelessWidget {
             ),
           ),
           Expanded(
-            child: ListView.builder(
-              itemCount: provider.collections.length,
-              itemBuilder: (context, index) {
+            child: provider.isOpening
+                ? const Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        CircularProgressIndicator(strokeWidth: 2),
+                        SizedBox(height: 16),
+                        Text('Opening database...',
+                            style: TextStyle(fontSize: 12)),
+                      ],
+                    ),
+                  )
+                : provider.loadError != null
+                    ? Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.error_outline, color: Colors.red, size: 24),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Error loading collections:',
+                          style: Theme.of(context).textTheme.titleSmall,
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          provider.loadError!,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.red),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  )
+                : ListView.builder(
+                    itemCount: provider.collections.length,
+                    itemBuilder: (context, index) {
                 final name = provider.collections[index];
                 final count = provider.getCollectionCount(name);
                 final isSelected = provider.selectedCollection == name;
@@ -279,77 +346,74 @@ class DocumentDetailColumn extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    return Expanded(
-      flex: 2,
-      child: Container(
-        color: Theme.of(context).colorScheme.surface,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            AppBar(
-              title: const Text('Details', style: TextStyle(fontSize: 16)),
-              actions: [
-                IconButton(
-                  tooltip: 'Copy JSON',
-                  icon: const Icon(Icons.copy, size: 18),
-                  onPressed: () {
-                    Clipboard.setData(ClipboardData(
-                        text: const JsonEncoder.withIndent('  ').convert(doc)));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Copied to clipboard'),
-                        behavior: SnackBarBehavior.floating,
-                        width: 200,
-                        duration: Duration(seconds: 1),
-                      ),
-                    );
-                  },
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => provider.selectDocument(null),
-                ),
-              ],
-            ),
-            Expanded(
-              child: Material(
-                color: Theme.of(context).colorScheme.surface,
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(16.0),
-                  child: JsonView.map(
-                    doc,
-                    theme: JsonViewTheme(
-                      viewType: JsonViewType.collapsible,
-                      backgroundColor: Theme.of(context).colorScheme.surface,
-                      keyStyle: GoogleFonts.robotoMono(
-                        color: Colors.indigo.shade800,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                      ),
-                      stringStyle: GoogleFonts.robotoMono(
-                        color: Colors.teal.shade700,
-                        fontSize: 13,
-                      ),
-                      intStyle: GoogleFonts.robotoMono(
-                        color: Colors.orange.shade800,
-                        fontSize: 13,
-                      ),
-                      doubleStyle: GoogleFonts.robotoMono(
-                        color: Colors.orange.shade800,
-                        fontSize: 13,
-                      ),
-                      boolStyle: GoogleFonts.robotoMono(
-                        color: Colors.pink.shade700,
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold,
-                      ),
+    return Container(
+      color: Theme.of(context).colorScheme.surface,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          AppBar(
+            title: const Text('Details', style: TextStyle(fontSize: 16)),
+            actions: [
+              IconButton(
+                tooltip: 'Copy JSON',
+                icon: const Icon(Icons.copy, size: 18),
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(
+                      text: const JsonEncoder.withIndent('  ').convert(doc)));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Copied to clipboard'),
+                      behavior: SnackBarBehavior.floating,
+                      width: 200,
+                      duration: Duration(seconds: 1),
+                    ),
+                  );
+                },
+              ),
+              IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => provider.selectDocument(null),
+              ),
+            ],
+          ),
+          Expanded(
+            child: Material(
+              color: Theme.of(context).colorScheme.surface,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16.0),
+                child: JsonView.map(
+                  doc,
+                  theme: JsonViewTheme(
+                    viewType: JsonViewType.collapsible,
+                    backgroundColor: Theme.of(context).colorScheme.surface,
+                    keyStyle: GoogleFonts.robotoMono(
+                      color: Colors.indigo.shade800,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                    stringStyle: GoogleFonts.robotoMono(
+                      color: Colors.teal.shade700,
+                      fontSize: 13,
+                    ),
+                    intStyle: GoogleFonts.robotoMono(
+                      color: Colors.orange.shade800,
+                      fontSize: 13,
+                    ),
+                    doubleStyle: GoogleFonts.robotoMono(
+                      color: Colors.orange.shade800,
+                      fontSize: 13,
+                    ),
+                    boolStyle: GoogleFonts.robotoMono(
+                      color: Colors.pink.shade700,
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
                 ),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
