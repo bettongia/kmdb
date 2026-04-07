@@ -6,3 +6,4 @@ copydb*
 *.export
 *.dump
 remote_mount
+*.log
