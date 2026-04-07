@@ -14,7 +14,7 @@ site
 test.log
 coverage.log
 packages/kmdb_cli/bin/kmdb.exe
-mydb/
+mydb*/
 packages/**/doc
 *.iml
 .idea
