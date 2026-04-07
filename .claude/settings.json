@@ -9,5 +9,18 @@
       "allowRead": ["./", "~/.pub-cache", "~/.gitconfig"],
       "allowWrite": ["./"]
     }
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.command' | grep -q 'git commit' && make pre_commit || true"
+          }
+        ]
+      }
+    ]
   }
 }
