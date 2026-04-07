@@ -1,14 +1,8 @@
 {
   "permissions": {
-    "allow": []
-  },
-  "sandbox": {
-    "enabled": true,
-    "filesystem": {
-      "denyRead": ["~/"],
-      "allowRead": ["./", "~/.pub-cache", "~/.gitconfig"],
-      "allowWrite": ["./"]
-    }
+    "allow": [
+      "Bash(make pre_commit)"
+    ]
   },
   "hooks": {
     "PreToolUse": [
@@ -22,5 +16,21 @@
         ]
       }
     ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "filesystem": {
+      "allowWrite": [
+        "./"
+      ],
+      "denyRead": [
+        "~/"
+      ],
+      "allowRead": [
+        "./",
+        "~/.pub-cache",
+        "~/.gitconfig"
+      ]
+    }
   }
 }
