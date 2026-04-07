@@ -30,10 +30,9 @@ void main() {
   // When invoked from the workspace root, `packages/kmdb_cli` is a
   // subdirectory; when invoked from the package root, `pubspec.yaml` is at
   // the current directory.
-  final _workspacePkg = p.join(p.current, 'packages', 'kmdb_cli');
-  final packageRoot =
-      io.File(p.join(_workspacePkg, 'pubspec.yaml')).existsSync()
-      ? _workspacePkg
+  final workspacePkg = p.join(p.current, 'packages', 'kmdb_cli');
+  final packageRoot = io.File(p.join(workspacePkg, 'pubspec.yaml')).existsSync()
+      ? workspacePkg
       : p.current;
 
   /// Runs the CLI with [args] and returns the result.
@@ -255,7 +254,7 @@ void main() {
       expect(
         walFile.existsSync(),
         isFalse,
-        reason: 'WAL should NOT exist (flushed): ${walFile}',
+        reason: 'WAL should NOT exist (flushed): $walFile',
       );
 
       final sstDir = io.Directory(p.join(dbPath, 'sst'));

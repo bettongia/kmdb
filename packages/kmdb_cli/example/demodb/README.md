@@ -15,7 +15,7 @@ _Note that a database will also be created when you call `put` to insert data._
 Let's create a new document in the `notes` collection:
 
 ```sh
-dart run ../../bin/kmdb.dart demodb put notes --value '{"title": "New Note"}'
+dart run ../../bin/kmdb.dart demodb insert notes --value '{"title": "New Note"}'
 ```
 
 We can check to make sure that we have 1 document in the `notes` collection:
@@ -155,7 +155,7 @@ dart run ../../bin/kmdb.dart demodb_2 scan notes
 
 ```sh
 dart run ../../bin/kmdb.dart demodb scan notes
-dart run ../../bin/kmdb.dart demodb put notes --value '{"title": "Very important note"}'
+dart run ../../bin/kmdb.dart demodb insert notes --value '{"title": "Very important note"}'
 dart run ../../bin/kmdb.dart demodb sync
 ```
 
@@ -184,7 +184,7 @@ dart run ../../bin/kmdb.dart demodb_4 remote add origin --path $PWD/remote_mount
 dart run ../../bin/kmdb.dart demodb_4 sync
 dart run ../../bin/kmdb.dart demodb_4 collections
 dart run ../../bin/kmdb.dart demodb_4 scan notes
-dart run ../../bin/kmdb.dart demodb_4 put notes --value '{"title": "note to self"}'
+dart run ../../bin/kmdb.dart demodb_4 insert notes --value '{"title": "note to self"}'
 dart run ../../bin/kmdb.dart demodb_4 sync
 ```
 
@@ -194,10 +194,10 @@ dart run ../../bin/kmdb.dart demodb scan notes
 ```
 
 ```sh
-dart run ../../bin/kmdb.dart demodb put notes --value '{"title": "demodb"}'
-dart run ../../bin/kmdb.dart demodb_2 put notes --value '{"title": "demodb 2"}'
-dart run ../../bin/kmdb.dart demodb_3 put notes --value '{"title": "demodb 3"}'
-dart run ../../bin/kmdb.dart demodb_4 put notes --value '{"title": "demodb 4"}'
+dart run ../../bin/kmdb.dart demodb insert notes --value '{"title": "demodb"}'
+dart run ../../bin/kmdb.dart demodb_2 insert notes --value '{"title": "demodb 2"}'
+dart run ../../bin/kmdb.dart demodb_3 insert notes --value '{"title": "demodb 3"}'
+dart run ../../bin/kmdb.dart demodb_4 insert notes --value '{"title": "demodb 4"}'
 
 dart run ../../bin/kmdb.dart demodb sync
 dart run ../../bin/kmdb.dart demodb_2 sync
@@ -215,7 +215,7 @@ dart run ../../bin/kmdb.dart demodb scan notes
 ```sh
 # Create 4 new databases and add a note to each
 for db in syncdb_{1..4}; do
-    dart run ../../bin/kmdb.dart $db put notes --value "{\"title\": \"Sync note for $db\"}"
+    dart run ../../bin/kmdb.dart $db insert notes --value "{\"title\": \"Sync note for $db\"}"
 done
 
 # Each database instance has its own deviceId, helping us with syncing
@@ -251,7 +251,7 @@ dart run ../../bin/kmdb.dart syncdb_4 scan notes
 ### A note about Copying the database directory
 
 ```sh
-dart run ../../bin/kmdb.dart copydb_og put notes --value '{"title": "Original note"}'
+dart run ../../bin/kmdb.dart copydb_og insert notes --value '{"title": "Original note"}'
 dart run ../../bin/kmdb.dart copydb_og scan notes
 
 # Use the filesystem to copy the database directory:
@@ -272,7 +272,7 @@ dart run ../../bin/kmdb.dart copydb_og sync
 dart run ../../bin/kmdb.dart copydb_copy sync
 
 # So create a new note and sync it
-dart run ../../bin/kmdb.dart copydb_og put notes --value '{"title": "Original note - the sequel"}'
+dart run ../../bin/kmdb.dart copydb_og insert notes --value '{"title": "Original note - the sequel"}'
 dart run ../../bin/kmdb.dart copydb_og scan notes
 dart run ../../bin/kmdb.dart copydb_og sync
 
@@ -284,7 +284,58 @@ dart run ../../bin/kmdb.dart copydb_copy scan notes
 ```
 
 The issue is that `copydb_copy` has the same deviceId and kmdb gets a bit
-confused.
+confused. So we need to set a new device ID for the copy:
+
+```sh
+dart run ../../bin/kmdb.dart copydb_copy info
+dart run ../../bin/kmdb.dart copydb_copy new-device-id
+dart run ../../bin/kmdb.dart copydb_copy info
+```
+
+You should see the device ID has changed. You will also see the following
+warning from the call to `new-device-id` (your list of `hwm` files will be
+different):
+
+```
+Warning: this database has 1 configured remote(s). After syncing with the new device ID, delete the stale highwater mark file(s) from each remote sync folder:
+  highwater/2e8e43cb.hwm
+```
+
+First up, let's perform the sync:
+
+```sh
+dart run ../../bin/kmdb.dart copydb_copy sync
+```
+
+Then delete the `hwm` files (change the command to match the file you saw in
+your warning):
+
+```sh
+rm remote_mount/copydb_sync/highwater/1a62a005.hwm
+```
+
+```sh
+dart run ../../bin/kmdb.dart copydb_copy scan notes
+dart run ../../bin/kmdb.dart copydb_copy sync
+
+echo After sync:
+dart run ../../bin/kmdb.dart copydb_copy scan notes
+```
+
+Let's do one final check and create a new note in `copydb_og`:
+
+```sh
+dart run ../../bin/kmdb.dart copydb_og insert notes --value '{"title": "Synco noto"}'
+dart run ../../bin/kmdb.dart copydb_og scan notes
+dart run ../../bin/kmdb.dart copydb_og sync
+```
+
+Finally, we'll sync `copydb_copy` and check if we got the note:
+
+```sh
+dart run ../../bin/kmdb.dart copydb_copy sync
+dart run ../../bin/kmdb.dart copydb_copy scan notes
+```
 
 ## Management
 

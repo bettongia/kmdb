@@ -194,6 +194,13 @@ final class KvStoreImpl implements KvStore {
     // crash recovery will delete, and the old-named originals in the Manifest
     // will be valid).
     await _meta.putDeviceId(newDeviceId);
+
+    // Also update the DEVICE_ID file so that future opens prefer it over the
+    // $meta value (which is susceptible to peer-overwrite via sync ingestion).
+    await _engine.adapter.writeFile(
+      '${_engine.dbDir}/$kDeviceIdFilename',
+      Uint8List.fromList(newDeviceId.codeUnits),
+    );
   }
 
   @override
@@ -209,13 +216,54 @@ final class KvStoreImpl implements KvStore {
     await _engine.close(flush: flush);
   }
 
-  /// Loads the stored device ID from `$meta`, or generates and persists a new
-  /// one if none has been set.
+  /// Loads the stored device ID, or generates and persists a new one if none
+  /// has been set.
   ///
   /// Returns an 8-character lowercase hex string. Callers outside the package
   /// (e.g. the CLI) should call this once after opening the store so that all
   /// subsequent writes and SSTable files are attributed to a stable identity.
-  Future<String> ensureDeviceId() => DeviceId.load(_meta);
+  ///
+  /// ## Storage strategy
+  ///
+  /// The device ID is stored in **two** places:
+  ///
+  /// 1. `{dbDir}/DEVICE_ID` — a plain-text file in the database root.  This
+  ///    file is never uploaded by [SyncEngine] (which only uploads `.sst` files
+  ///    from the `sst/` subdirectory), so peer devices can never overwrite it.
+  ///
+  /// 2. `$meta` inside the LSM — retained for backward compatibility only.
+  ///    Because SSTables (including their `$meta` entries) are exchanged during
+  ///    sync, a peer's device ID can land in the local LSM via Last-Write-Wins
+  ///    compaction.  The DEVICE_ID file is therefore always preferred over the
+  ///    `$meta` value when both are present.
+  Future<String> ensureDeviceId() async {
+    // 1. Try the dedicated DEVICE_ID file first.  It lives outside sst/ so
+    //    sync never touches it.
+    final filePath = '${_engine.dbDir}/$kDeviceIdFilename';
+    try {
+      final bytes = await _engine.adapter.readFile(filePath);
+      final id = String.fromCharCodes(bytes).trim();
+      if (RegExp(r'^[0-9a-f]{8}$').hasMatch(id)) return id;
+    } on StorageException {
+      // File absent — fall through.
+    }
+
+    // 2. Fall back to $meta (backward-compatible path for existing databases).
+    final id = await DeviceId.load(_meta);
+
+    // 3. Write to the DEVICE_ID file so future opens skip the $meta lookup.
+    await _engine.adapter.writeFile(filePath, Uint8List.fromList(id.codeUnits));
+
+    return id;
+  }
+
+  /// Filename of the local device-identity file stored in the database root.
+  ///
+  /// The file contains exactly 8 lowercase hex characters (no newline required,
+  /// but a trailing newline is tolerated).  It is intentionally placed in the
+  /// database root rather than in `sst/` so that [SyncEngine] never uploads it
+  /// to the sync folder.
+  static const String kDeviceIdFilename = 'DEVICE_ID';
 
   @override
   Future<List<String>> listNamespaces() => _meta.getNamespaces();
