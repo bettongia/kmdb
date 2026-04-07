@@ -76,16 +76,20 @@ void main() {
       expect(second.exitCode, equals(0), reason: second.stderr);
     });
 
-    test('init fails on a non-empty directory without a KMDB database', () async {
-      final dbPath = tmp.file('foreign_dir');
-      io.Directory(dbPath).createSync();
-      // Plant a foreign file in the directory.
-      io.File(p.join(dbPath, 'existing_file.txt'))
-          .writeAsStringSync('some existing content');
-      final result = await run([dbPath, 'init']);
-      expect(result.exitCode, equals(1));
-      expect(result.stderr, contains('is not empty'));
-    });
+    test(
+      'init fails on a non-empty directory without a KMDB database',
+      () async {
+        final dbPath = tmp.file('foreign_dir');
+        io.Directory(dbPath).createSync();
+        // Plant a foreign file in the directory.
+        io.File(
+          p.join(dbPath, 'existing_file.txt'),
+        ).writeAsStringSync('some existing content');
+        final result = await run([dbPath, 'init']);
+        expect(result.exitCode, equals(1));
+        expect(result.stderr, contains('is not empty'));
+      },
+    );
 
     test('init fails on a directory that contains sub-directories', () async {
       final dbPath = tmp.file('dir_with_subdir');
