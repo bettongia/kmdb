@@ -18,6 +18,7 @@ import 'dart:io' as io;
 import 'package:kmdb/kmdb.dart';
 import 'package:kmdb_cli/src/commands/collections_command.dart';
 import 'package:kmdb_cli/src/commands/command.dart';
+import 'package:kmdb_cli/src/commands/create_collection_command.dart';
 import 'package:kmdb_cli/src/commands/compact_command.dart';
 import 'package:kmdb_cli/src/commands/count_command.dart';
 import 'package:kmdb_cli/src/commands/delete_command.dart';
@@ -747,6 +748,84 @@ void main() {
       await CollectionsCommand().execute(ctx, [], {});
       final result = (json.decode(out.toString()) as List).cast<String>();
       expect(result.any((ns) => ns.startsWith(r'$')), isFalse);
+    });
+  });
+
+  // ── CreateCollectionCommand ────────────────────────────────────────────────
+
+  group('CreateCollectionCommand', () {
+    late KvStoreImpl store;
+    late StringBuffer out;
+    late StringBuffer err;
+
+    setUp(() async {
+      store = await _openStore();
+      out = StringBuffer();
+      err = StringBuffer();
+    });
+    tearDown(() => store.close());
+
+    test('creates a new collection and returns created: true', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await CreateCollectionCommand().execute(ctx, ['widgets'], {});
+      expect(ok, isTrue);
+      final result = json.decode(out.toString()) as Map<String, dynamic>;
+      expect(result['name'], 'widgets');
+      expect(result['created'], isTrue);
+    });
+
+    test('collection appears in listNamespaces after creation', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      await CreateCollectionCommand().execute(ctx, ['widgets'], {});
+      final namespaces = await store.listNamespaces();
+      expect(namespaces, contains('widgets'));
+    });
+
+    test(
+      'is a no-op when collection already exists, returns created: false',
+      () async {
+        await CreateCollectionCommand().execute(
+          _ctx(store, out: StringBuffer(), err: StringBuffer()),
+          ['widgets'],
+          {},
+        );
+        out.clear();
+        final ctx = _ctx(store, out: out, err: err);
+        final ok = await CreateCollectionCommand().execute(ctx, [
+          'widgets',
+        ], {});
+        expect(ok, isTrue);
+        final result = json.decode(out.toString()) as Map<String, dynamic>;
+        expect(result['name'], 'widgets');
+        expect(result['created'], isFalse);
+      },
+    );
+
+    test(
+      'is a no-op when collection was populated via a document write',
+      () async {
+        await _putDoc(store, 'notes', {'_id': _key('note'), 'v': 1});
+        final ctx = _ctx(store, out: out, err: err);
+        final ok = await CreateCollectionCommand().execute(ctx, ['notes'], {});
+        expect(ok, isTrue);
+        final result = json.decode(out.toString()) as Map<String, dynamic>;
+        expect(result['created'], isFalse);
+      },
+    );
+
+    test('returns error when no name argument is provided', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await CreateCollectionCommand().execute(ctx, [], {});
+      expect(ok, isFalse);
+      expect(err.toString(), contains('Error'));
+    });
+
+    test('rejects system namespace names', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      expect(
+        () => CreateCollectionCommand().execute(ctx, [r'$meta'], {}),
+        throwsArgumentError,
+      );
     });
   });
 
