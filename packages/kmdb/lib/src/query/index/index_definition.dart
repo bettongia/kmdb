@@ -56,7 +56,7 @@ final class IndexDefinition {
   }
 
   /// The storage-layer namespace identifier for the collection this index
-  /// belongs to. This matches the [name] parameter passed to
+  /// belongs to. This matches the `name` parameter passed to
   /// [KmdbDatabase.collection] when the collection was created.
   final String namespace;
 

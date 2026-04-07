@@ -30,7 +30,7 @@ import 'wal_record.dart';
 ///
 /// ```dart
 /// final reader = WalReader(adapter: adapter);
-/// await for (final record in reader.replay('/db/wal-00001.log')) {
+/// await for (final record in reader.replay(path)) {
 ///   // process record
 /// }
 /// ```
@@ -38,7 +38,7 @@ import 'wal_record.dart';
 /// ## Crash recovery
 ///
 /// [replay] returns *all* records from the beginning of the file. The
-/// [LsmEngine] uses [replayFromLastFlush] to efficiently skip records that
+/// `LsmEngine` uses [replayFromLastFlush] to efficiently skip records that
 /// are already safely in an SSTable.
 final class WalReader {
   const WalReader({required this.adapter});
