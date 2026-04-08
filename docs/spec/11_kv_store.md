@@ -205,6 +205,14 @@ final class KvStoreConfig {
   // Sync
   final Duration maxClockSkew;        // default: 60s
 
+  // Value size guard
+  final int maxValueBytes;            // default: 1048576 (1 MiB)
+                                      // Set to maxValueBytesUnlimited (-1) to
+                                      // disable. Checked at put()/writeBatch()
+                                      // before any I/O. Large payloads should
+                                      // use the vault facility instead.
+  static const int maxValueBytesUnlimited = -1;
+
   /// Tiny thresholds, no fsync — forces all code paths with a handful of writes.
   factory KvStoreConfig.forTesting();
 }
