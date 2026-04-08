@@ -55,11 +55,16 @@ import 'meta_store.dart';
 /// await store.close();
 /// ```
 final class KvStoreImpl implements KvStore {
-  KvStoreImpl._(this._engine, this._meta, {required bool dirtyFlagPresent})
-    : _dirtyFlagPresent = dirtyFlagPresent;
+  KvStoreImpl._(
+    this._engine,
+    this._meta,
+    this._config, {
+    required bool dirtyFlagPresent,
+  }) : _dirtyFlagPresent = dirtyFlagPresent;
 
   final LsmEngine _engine;
   final MetaStore _meta;
+  final KvStoreConfig _config;
 
   /// Whether the dirty-open flag has been written this session.
   ///
@@ -110,7 +115,7 @@ final class KvStoreImpl implements KvStore {
     );
 
     return (
-      KvStoreImpl._(engine, meta, dirtyFlagPresent: hadUnclosedSession),
+      KvStoreImpl._(engine, meta, config, dirtyFlagPresent: hadUnclosedSession),
       openResult,
     );
   }
@@ -121,6 +126,7 @@ final class KvStoreImpl implements KvStore {
   Future<void> put(String namespace, String key, Uint8List value) async {
     _guardNamespace(namespace);
     _validateKey(key);
+    _validateValueSize(value);
     await _maybeMarkDirty();
     await _engine.put(namespace, key, value);
     await _meta.incrementGenerationCounter(namespace);
@@ -142,6 +148,7 @@ final class KvStoreImpl implements KvStore {
     for (final entry in batch.entries) {
       _guardNamespace(entry.namespace);
       _validateKey(entry.key);
+      if (entry.value != null) _validateValueSize(entry.value!);
     }
     await _maybeMarkDirty();
     await _engine.writeBatch(batch);
@@ -321,6 +328,9 @@ final class KvStoreImpl implements KvStore {
   /// The dirty-open flag is set on the first call, identical to [writeBatch].
   @internal
   Future<void> writeBatchInternal(WriteBatch batch) async {
+    for (final entry in batch.entries) {
+      if (entry.value != null) _validateValueSize(entry.value!);
+    }
     await _maybeMarkDirty();
     // Increment generation counters BEFORE the engine write so that when the
     // engine emits write events (synchronously during writeBatch), any
@@ -345,6 +355,19 @@ final class KvStoreImpl implements KvStore {
     await _meta.setDirty();
     _sessionDirtyMarked = true;
     _dirtyFlagPresent = true;
+  }
+
+  /// Throws [ArgumentError] if [value] exceeds [KvStoreConfig.maxValueBytes].
+  void _validateValueSize(Uint8List value) {
+    final limit = _config.maxValueBytes;
+    if (limit != KvStoreConfig.maxValueBytesUnlimited && value.length > limit) {
+      throw ArgumentError.value(
+        value.length,
+        'value',
+        'Value size (${value.length} bytes) exceeds maxValueBytes ($limit). '
+            'Store large payloads in the vault instead.',
+      );
+    }
   }
 
   /// Throws [ArgumentError] when [namespace] begins with `$`.
