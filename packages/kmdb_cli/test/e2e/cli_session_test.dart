@@ -33,7 +33,8 @@ void main() {
   late String exePath;
 
   setUpAll(() async {
-    // Compile CLI to exe
+    // Compile CLI to exe so each invocation doesn't pay JIT startup cost and
+    // the build hooks for kmdb_zstd fire once rather than per-run.
     final binPath = p.join(_packageRoot, 'bin', 'kmdb.dart');
     exePath = p.join(_packageRoot, 'bin', 'kmdb_e2e.exe');
     print('Compiling $binPath to $exePath...');
