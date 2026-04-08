@@ -34,7 +34,7 @@ cli_test.log: $(KMDB_CLI_PKG)/**/*.dart $(KMDB_PKG)/**/*.dart
 
 e2e_test: e2e_test.log
 
-e2e_test.log: $(KMDB_CLI_PKG)/**/*.dart $(KMDB_PKG)/**/*.dart
+e2e_test.log: $(KMDB_CLI_PKG)/**/*.dart $(KMDB_PKG)/**/*.dart packages/kmdb_cli/test/e2e/cli_session_test.dart
 	melos e2e-test | tee e2e_test.log
 
 checks: coverage.log license_check
