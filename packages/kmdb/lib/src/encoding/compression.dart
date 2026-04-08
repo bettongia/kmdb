@@ -15,8 +15,9 @@
 /// Conditional export that selects the platform-appropriate compression
 /// implementation at compile time.
 ///
-/// - Native (`dart:io`): Zstd via `es_compression` (prebuilt FFI bindings).
-/// - Web (`dart:js_interop`): Deflate via `package:archive`.
+/// - Native (`dart:io`): Zstd via `kmdb_zstd` (FFI bindings compiled from
+///   source via `native_toolchain_c`).
+/// - Web (`dart:js_interop`): no-op; values are stored uncompressed.
 /// - Stub (neither): no-op; values are stored uncompressed.
 ///
 /// Each implementation exposes two top-level functions with identical

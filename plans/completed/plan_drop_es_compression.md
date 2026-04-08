@@ -1,6 +1,6 @@
 # Drop `es_compression` and replace with `kmdb_zstd`
 
-**Status**: Investigated
+**Status**: Complete
 
 **PR link**: _pending_
 
@@ -85,65 +85,85 @@ annotations. This is harmless but should be noted as technical debt.
 
 ### 1. Update `packages/kmdb/pubspec.yaml`
 
-- [ ] Add `kmdb_zstd: any` to `dependencies`
-- [ ] Remove `es_compression: ^2.0.15` from `dependencies`
-- [ ] Remove `archive: ^4.0.9` from `dependencies`
+- [x] Add `kmdb_zstd: any` to `dependencies`
+- [x] Remove `es_compression: ^2.0.15` from `dependencies`
+- [x] Remove `archive: ^4.0.9` from `dependencies`
 
 ### 2. Rewrite `compression_io.dart`
 
-- [ ] Remove `import 'package:archive/archive.dart'`
-- [ ] Remove `import 'package:es_compression/zstd.dart'`
-- [ ] Add `import 'package:kmdb_zstd/zstd.dart'`
-- [ ] Replace `ZstdCodec(level: 3).encode(data)` with
+- [x] Remove `import 'package:archive/archive.dart'`
+- [x] Remove `import 'package:es_compression/zstd.dart'`
+- [x] Add `import 'package:kmdb_zstd/zstd.dart'`
+- [x] Replace `ZstdCodec(level: 3).encode(data)` with
   `ZstdSimple(level: 3).compress(data)` in `tryCompress`
-- [ ] Replace `ZstdCodec().decode(data)` with `ZstdSimple().decompress(data)`
+- [x] Replace `ZstdCodec().decode(data)` with `ZstdSimple().decompress(data)`
   in `decompress`
-- [ ] Remove the `CompressionFlag.deflate` arm from `decompress` (no longer
+- [x] Remove the `CompressionFlag.deflate` arm from `decompress` (no longer
   needed — clean break)
-- [ ] Update the file-level comment to reflect the new dependency
+- [x] Update the file-level comment to reflect the new dependency
 
 ### 3. Rewrite `compression_web.dart`
 
-- [ ] Remove `import 'package:archive/archive.dart'`
-- [ ] Change `tryCompress` to return `(CompressionFlag.none, data)` always
+- [x] Remove `import 'package:archive/archive.dart'`
+- [x] Change `tryCompress` to return `(CompressionFlag.none, data)` always
   (no compression on web — same as stub)
-- [ ] Change `decompress` to handle only `CompressionFlag.none` and
+- [x] Change `decompress` to handle only `CompressionFlag.none` and
   `CompressionFlag.zstd` (throw `UnsupportedError` for zstd as before); remove
   the `deflate` arm
-- [ ] Update the file-level comment
+- [x] Update the file-level comment
 
 ### 4. Simplify `compression_flag.dart`
 
-- [ ] Remove the `deflate(0x02)` variant from the `CompressionFlag` enum
-- [ ] Remove the `0x02` case from `CompressionFlag.fromByte`
-- [ ] Update doc comments to remove references to Deflate
+- [x] Remove the `deflate(0x02)` variant from the `CompressionFlag` enum
+- [x] Remove the `0x02` case from `CompressionFlag.fromByte`
+- [x] Update doc comments to remove references to Deflate
 
 ### 5. Update `compression.dart` doc comment
 
-- [ ] Update the library doc comment to remove the Deflate reference
-- [ ] Update the native platform description to reference `kmdb_zstd`
+- [x] Update the library doc comment to remove the Deflate reference
+- [x] Update the native platform description to reference `kmdb_zstd`
 
 ### 6. Update `CONTRIBUTING.md`
 
-- [ ] Remove the section describing the ARM64 `es_compression` blob workaround
-- [ ] Remove the `es_compression` references
+- [x] Remove the section describing the ARM64 `es_compression` blob workaround
+- [x] Remove the `es_compression` references
 
 ### 7. Run `dart pub get` from workspace root
 
-- [ ] Verify the dependency graph resolves correctly with `kmdb_zstd` in place
+- [x] Verify the dependency graph resolves correctly with `kmdb_zstd` in place
 
 ### 8. Tests
 
-- [ ] Run `dart test packages/kmdb` and confirm all tests pass
-- [ ] Check compression-specific tests cover: compress round-trip, no-compress
+- [x] Run `dart test packages/kmdb` and confirm all tests pass (662 tests pass)
+- [x] Check compression-specific tests cover: compress round-trip, no-compress
   passthrough, unknown flag rejection
-- [ ] Add or update tests if coverage drops below 90%
+- [x] Add or update tests if coverage drops below 90%
 
 ### 9. Analyse
 
-- [ ] Run `dart analyze packages/kmdb` — zero errors/warnings
-- [ ] Run `dart analyze packages/kmdb_cli` — zero errors/warnings
+- [x] Run `dart analyze packages/kmdb` — zero errors/warnings
+- [x] Run `dart analyze packages/kmdb_cli` — zero errors/warnings (pre-existing
+  infos only, no new issues)
 
 ## Summary
 
-_To be filled in on completion._
+- Replaced `es_compression` with the first-party `kmdb_zstd` package in
+  `packages/kmdb/pubspec.yaml`; also removed `archive` which was only needed
+  for Deflate support.
+- Rewrote `compression_io.dart` to use `ZstdSimple.compress` /
+  `ZstdSimple.decompress` from `kmdb_zstd` instead of `ZstdCodec` from
+  `es_compression`. Dropped the Deflate decode arm (clean break).
+- Collapsed `compression_web.dart` to a no-op: `tryCompress` always returns
+  `(CompressionFlag.none, data)`; Zstd decode still throws `UnsupportedError`
+  as before.
+- Removed `CompressionFlag.deflate(0x02)` from the enum and its `fromByte`
+  case. Byte `0x02` now throws `ArgumentError`, surfacing legacy data clearly.
+- Updated doc comments in `compression.dart` and `compression_flag.dart` to
+  remove Deflate references and credit `kmdb_zstd`.
+- Removed the `es_compression` ARM64 workaround section from `CONTRIBUTING.md`.
+- Updated `value_codec_test.dart`: removed `archive` import, updated
+  `CompressionFlag` tests to reflect the two-value enum, replaced the
+  cross-flag Deflate round-trip test with a test verifying that flag `0x02`
+  now throws `ArgumentError`.
+- All 662 `kmdb` tests and 270 `kmdb_cli` tests pass. Zero analyzer
+  errors/warnings introduced. License headers verified clean.

@@ -14,25 +14,19 @@
 
 // Web compression implementation.
 //
-// Uses Deflate (via package:archive) for encoding. Zstd decompression on web
-// is deferred — values written with flag 0x01 by a native client cannot yet
-// be decoded here; an UnsupportedError is thrown to surface the gap clearly.
+// Web stores values uncompressed (CompressionFlag.none). Deflate has been
+// removed as a clean break — the project is pre-release. Zstd decompression
+// on web is deferred; an UnsupportedError is thrown to surface the gap
+// clearly if a value compressed on native is read on web.
 
 import 'dart:typed_data';
 
-import 'package:archive/archive.dart';
-
 import 'compression_flag.dart';
 
-/// Attempts to compress [data] with Deflate.
+/// Returns [data] uncompressed — web stores values with no compression.
 ///
-/// Returns `(CompressionFlag.deflate, compressed)` when the compressed output
-/// is smaller than the input, or `(CompressionFlag.none, data)` otherwise.
+/// Always returns `(CompressionFlag.none, data)`.
 (CompressionFlag, Uint8List) tryCompress(Uint8List data) {
-  final compressed = Uint8List.fromList(ZLibEncoder().encode(data));
-  if (compressed.length < data.length) {
-    return (CompressionFlag.deflate, compressed);
-  }
   return (CompressionFlag.none, data);
 }
 
@@ -42,9 +36,6 @@ import 'compression_flag.dart';
 /// on web is deferred pending a WASM implementation.
 Uint8List decompress(CompressionFlag flag, Uint8List data) => switch (flag) {
   CompressionFlag.none => data,
-  CompressionFlag.deflate => Uint8List.fromList(
-    ZLibDecoder().decodeBytes(data),
-  ),
   CompressionFlag.zstd => throw UnsupportedError(
     'Zstd decompression is not supported on web. '
     'This value was encoded on a native platform.',
