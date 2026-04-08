@@ -240,7 +240,12 @@ void main() {
       // user writes --value='{"title":"hi"}'. The CLI must split on the first
       // '=' to parse the flag value correctly; previously this caused the
       // process to hang waiting on stdin.
-      final result = await run([dbPath, 'insert', 'notes', '--value={"title":"hi"}']);
+      final result = await run([
+        dbPath,
+        'insert',
+        'notes',
+        '--value={"title":"hi"}',
+      ]);
       expect(result.exitCode, equals(0), reason: result.stderr);
       final docs = json.decode(result.stdout) as List;
       expect(docs[0]['title'], equals('hi'));
