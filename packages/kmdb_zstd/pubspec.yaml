@@ -1,0 +1,37 @@
+name: kmdb_zstd
+description: Zstd compression for KMDB.
+version: 1.0.0
+# repository: https://github.com/my_org/my_repo
+publish_to: none
+
+resolution: workspace
+
+environment:
+  sdk: ^3.10.0
+
+# Add regular dependencies here.
+dependencies:
+  code_assets: any
+  hooks: any
+  logging: any
+  ffi: ^2.1.4
+  native_toolchain_c: ^0.17.6
+  collection: ^1.19.1
+
+dev_dependencies:
+  lints: any
+  test: any
+  ffigen: any
+
+ffigen:
+  name: Zstd
+  description: zstd compression for kmdb
+  output: "lib/src/third_party/zstd.dart"
+
+  headers:
+    entry-points:
+      - "third_party/zstd/zstd.h"
+
+  functions:
+    include:
+      ["ZSTD_compress", "ZSTD_decompress", "ZSTD_minCLevel", "ZSTD_maxCLevel"]
