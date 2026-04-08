@@ -329,6 +329,7 @@ final class KvStoreConfig {
     this.fsyncOnWrite = true,
     this.watchDebounce = const Duration(milliseconds: 50),
     this.maxClockSkew = const Duration(seconds: 60),
+    this.maxValueBytes = 1024 * 1024,
   });
 
   /// Memtable flush threshold in bytes.
@@ -363,6 +364,19 @@ final class KvStoreConfig {
 
   /// Maximum allowable clock skew for HLC updates.
   final Duration maxClockSkew;
+
+  /// Maximum encoded value size in bytes.
+  ///
+  /// [KvStore.put] and [KvStore.writeBatch] throw [ArgumentError] when a value
+  /// exceeds this limit. The check applies to the post-encoding bytes (CBOR +
+  /// optional compression) that the Query Layer passes down. For large payloads
+  /// such as file attachments, use the vault facility instead.
+  ///
+  /// Defaults to 1 MiB. Set to [maxValueBytesUnlimited] to disable the check.
+  final int maxValueBytes;
+
+  /// Sentinel value for [maxValueBytes] that disables the size check entirely.
+  static const int maxValueBytesUnlimited = -1;
 
   /// Configuration for unit tests: tiny thresholds, no fsync, small cache.
   factory KvStoreConfig.forTesting() => const KvStoreConfig(

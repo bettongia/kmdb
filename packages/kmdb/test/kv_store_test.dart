@@ -428,4 +428,82 @@ void main() {
       await store.close();
     });
   });
+
+  // ── Value size limit ───────────────────────────────────────────────────────
+
+  group('KvStore — value size limit', () {
+    Future<KvStoreImpl> openWithLimit(int maxValueBytes) async {
+      final (store, _) = await KvStoreImpl.open(
+        _dbDir,
+        _newAdapter(),
+        config: KvStoreConfig(
+          memtableSizeBytes: 4096,
+          l1MaxBytes: 16 * 1024,
+          l2MaxBytes: 64 * 1024,
+          singleFileThresholdBytes: 8 * 1024,
+          fsyncOnWrite: false,
+          maxValueBytes: maxValueBytes,
+        ),
+        deviceId: _deviceId,
+      );
+      return store;
+    }
+
+    test('put: value at the limit is accepted', () async {
+      final store = await openWithLimit(10);
+      await store.put('ns', _key(1), Uint8List(10));
+      await store.close();
+    });
+
+    test('put: value over the limit throws ArgumentError', () async {
+      final store = await openWithLimit(10);
+      await expectLater(
+        store.put('ns', _key(1), Uint8List(11)),
+        throwsA(
+          isA<ArgumentError>().having(
+            (e) => e.message,
+            'message',
+            contains('maxValueBytes'),
+          ),
+        ),
+      );
+      await store.close();
+    });
+
+    test('writeBatch: oversized entry throws ArgumentError', () async {
+      final store = await openWithLimit(10);
+      final batch = WriteBatch()
+        ..put('ns', _key(1), Uint8List(5))
+        ..put('ns', _key(2), Uint8List(11));
+      await expectLater(store.writeBatch(batch), throwsA(isA<ArgumentError>()));
+      await store.close();
+    });
+
+    test('writeBatch: delete entries are not size-checked', () async {
+      final store = await openWithLimit(10);
+      await store.put('ns', _key(1), Uint8List(5));
+      final batch = WriteBatch()..delete('ns', _key(1));
+      await store.writeBatch(batch); // must not throw
+      await store.close();
+    });
+
+    test('maxValueBytesUnlimited disables the check', () async {
+      final (store, _) = await KvStoreImpl.open(
+        _dbDir,
+        _newAdapter(),
+        config: KvStoreConfig(
+          memtableSizeBytes: 4096,
+          l1MaxBytes: 16 * 1024,
+          l2MaxBytes: 64 * 1024,
+          singleFileThresholdBytes: 8 * 1024,
+          fsyncOnWrite: false,
+          maxValueBytes: KvStoreConfig.maxValueBytesUnlimited,
+        ),
+        deviceId: _deviceId,
+      );
+      // 2 MiB — well above the default 1 MiB limit, should succeed.
+      await store.put('ns', _key(1), Uint8List(2 * 1024 * 1024));
+      await store.close();
+    });
+  });
 }
