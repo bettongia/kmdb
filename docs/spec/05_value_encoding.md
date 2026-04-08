@@ -45,7 +45,7 @@ Each stored value is prefixed with a 1-byte compression flag:
 | :----- | :-------- | :-------------------------- | :------------------------------------------------------------- |
 | `0x00` | None      | All                         | Used when value is small or already compressed.                |
 | `0x01` | Zstd      | Native (FFI) + Web (WASM)   | Level 1 (fastest). Preferred on all platforms via `zstandard`. |
-| `0x02` | Deflate   | Web — WASM unavailable only | Pure Dart via `archive` package. ~10% worse ratio. Fallback.  |
+| `0x02` | Deflate   | Web — WASM unavailable only | Pure Dart via `archive` package. ~10% worse ratio. Fallback.   |
 
 The 1.1× threshold means compression is only applied when the compressed form
 is at least 9% smaller than the original. Values that do not compress well —
