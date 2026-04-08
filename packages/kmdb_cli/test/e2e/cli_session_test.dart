@@ -32,28 +32,32 @@ void main() {
   late String dbPath;
   late String exePath;
 
+  late Directory buildDir;
+
   setUpAll(() async {
-    // Compile CLI to exe so each invocation doesn't pay JIT startup cost and
-    // the build hooks for kmdb_zstd fire once rather than per-run.
-    final binPath = p.join(_packageRoot, 'bin', 'kmdb.dart');
-    exePath = p.join(_packageRoot, 'bin', 'kmdb_e2e.exe');
-    print('Compiling $binPath to $exePath...');
+    // Use `dart build cli` rather than `dart compile exe` because the
+    // kmdb_zstd package has native build hooks (native_toolchain_c) that are
+    // not supported by `dart compile`. `dart build cli` runs the hooks and
+    // places the executable + bundled dylibs under bundle/bin/.
+    buildDir = Directory.systemTemp.createTempSync('kmdb_e2e_build_');
+    print('Building CLI to ${buildDir.path}...');
     final result = await Process.run('dart', [
-      'compile',
-      'exe',
-      binPath,
+      'build',
+      'cli',
+      '-t',
+      p.join(_packageRoot, 'bin', 'kmdb.dart'),
       '-o',
-      exePath,
-    ]);
+      buildDir.path,
+    ], workingDirectory: _packageRoot);
     if (result.exitCode != 0) {
-      fail('Failed to compile CLI: ${result.stderr}');
+      fail('Failed to build CLI: ${result.stderr}');
     }
+    exePath = p.join(buildDir.path, 'bundle', 'bin', 'kmdb');
   });
 
   tearDownAll(() {
-    final file = File(exePath);
-    if (file.existsSync()) {
-      file.deleteSync();
+    if (buildDir.existsSync()) {
+      buildDir.deleteSync(recursive: true);
     }
   });
 
