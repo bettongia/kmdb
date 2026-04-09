@@ -398,6 +398,82 @@ final class LsmEngine {
     }
   }
 
+  /// Returns all distinct namespace strings currently present in storage
+  /// (including system namespaces such as `$meta` and `$index:*`).
+  ///
+  /// Only namespaces that have at least one live (non-tombstoned) entry are
+  /// returned. Tombstone-only namespaces are excluded.
+  ///
+  /// This is an expensive operation that merges the memtable and all SSTables.
+  /// It is intended for infrequent administrative operations such as index
+  /// removal. Production hot-paths should use [scan] instead.
+  Future<Set<String>> allStoredNamespaces() async {
+    // Build the full merged stream (all keys, all levels, no namespace filter).
+    final streams = <Stream<SstEntry>>[];
+
+    // Collect entries from memtable sources — use an empty prefix so the scan
+    // starts at the very beginning of the key space.
+    final unbounded = Uint8List(0);
+    streams.add(_skipListRangeToStream(_active, unbounded, null));
+    if (_frozen != null) {
+      streams.add(_skipListRangeToStream(_frozen!, unbounded, null));
+    }
+
+    // Collect entries from all SSTable levels.
+    final l0 = _levels[0] ?? [];
+    for (var i = l0.length - 1; i >= 0; i--) {
+      final reader = await _openReader('$_sstDir/${l0[i]}');
+      if (reader != null) {
+        streams.add(reader.scan(start: unbounded, end: null));
+      }
+    }
+    for (final level in [1, 2]) {
+      for (final filename in (_levels[level] ?? [])) {
+        final reader = await _openReader('$_sstDir/$filename');
+        if (reader != null) {
+          streams.add(reader.scan(start: unbounded, end: null));
+        }
+      }
+    }
+
+    // Merge and collect unique namespaces from live (non-tombstone) entries.
+    // The same deduplication logic used by [scan] applies here: buffer the last
+    // version per user key and only count it if it is not a tombstone.
+    final merge = MergeIterator(streams);
+    final namespaces = <String>{};
+
+    String? bufferedNs;
+    String? bufferedKey;
+    bool bufferedIsDelete = false;
+
+    await for (final entry in merge.entries) {
+      final ns = KeyCodec.decodeNamespace(entry.key);
+      final userKeyHex = KeyCodec.bytesToKey(KeyCodec.decodeUserKey(entry.key));
+      final isDelete =
+          KeyCodec.decodeRecordType(entry.key) == RecordType.delete;
+
+      if (ns != bufferedNs || userKeyHex != bufferedKey) {
+        // Emit previously buffered entry (if live).
+        if (bufferedKey != null && !bufferedIsDelete && bufferedNs != null) {
+          namespaces.add(bufferedNs);
+        }
+        bufferedNs = ns;
+        bufferedKey = userKeyHex;
+        bufferedIsDelete = isDelete;
+      } else {
+        // Same key — newer version supersedes previous.
+        bufferedIsDelete = isDelete;
+      }
+    }
+
+    // Emit the last buffered entry.
+    if (bufferedKey != null && !bufferedIsDelete && bufferedNs != null) {
+      namespaces.add(bufferedNs);
+    }
+
+    return namespaces;
+  }
+
   // ── Flush ─────────────────────────────────────────────────────────────────
 
   /// Checks whether the active memtable has reached the flush threshold and

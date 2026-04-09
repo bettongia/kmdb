@@ -1,6 +1,6 @@
 # Add index commands and collection commands to the CLI
 
-**Status**: Investigated
+**Status**: Implementing
 
 **PR link**: {A link to the PR submitted for this plan}
 
@@ -148,11 +148,11 @@ so they must be completed in order.
 delete its generation counter, otherwise the deleted collection keeps appearing
 in `collections list`. `MetaStore` has `registerNamespace` but no inverse.
 
-- [ ] Add `unregisterNamespace(String userNamespace)` to `MetaStore`:
+- [x] Add `unregisterNamespace(String userNamespace)` to `MetaStore`:
   - Read the current namespaces list via `getNamespaces()`
   - Remove the entry, write the updated list back
   - Delete the generation counter entry (`gen:{namespace}`) from `$meta`
-- [ ] Tests:
+- [x] Tests:
   - Unregistering an existing namespace removes it from `getNamespaces()`
   - Unregistering removes the generation counter
   - Unregistering a namespace not in the registry is a no-op (does not throw)
@@ -163,14 +163,14 @@ in `collections list`. `MetaStore` has `registerNamespace` but no inverse.
 Needed by both `index delete` and `collections delete` (which cascades). No
 equivalent method currently exists.
 
-- [ ] Add `Future<void> removeIndex(String namespace, String path)` to
+- [x] Add `Future<void> removeIndex(String namespace, String path)` to
   `IndexManager`:
   - Scan the `$index:{namespace}:{path}` system namespace and collect all keys
   - Delete all index entries in a `WriteBatch` (batch in groups of 200 to avoid
     oversized write batches on large indexes)
   - Delete the `$meta` state entry (`index:{namespace}:{path}`) via
     `MetaStore.indexKey`
-- [ ] Tests:
+- [x] Tests:
   - All `$index:*` entries for the index are gone after removal
   - The `$meta` state entry is gone after removal
   - No-op if the index was never built (undefined state)
@@ -182,7 +182,7 @@ equivalent method currently exists.
 Index definitions must survive across CLI sessions. `local/config.json` is the
 natural home — it already stores per-machine, non-synced state (remotes).
 
-- [ ] Extend `KmdbConfig` to hold a list of index records using "collection"
+- [x] Extend `KmdbConfig` to hold a list of index records using "collection"
   as the user-facing term (the kmdb library uses "namespace" internally, but
   the CLI config speaks the user's language):
   ```json
@@ -194,19 +194,19 @@ natural home — it already stores per-machine, non-synced state (remotes).
     ]
   }
   ```
-- [ ] Update `KmdbConfig.load` to parse the `indexes` array (missing key →
+- [x] Update `KmdbConfig.load` to parse the `indexes` array (missing key →
   empty list; invalid entry → `FormatException`)
-- [ ] Update `KmdbConfig.save` to serialise the `indexes` array
-- [ ] Add `addIndex(String collection, String path)`:
+- [x] Update `KmdbConfig.save` to serialise the `indexes` array
+- [x] Add `addIndex(String collection, String path)`:
   - Throws `ArgumentError` if an identical definition already exists
-- [ ] Add `removeIndex(String collection, String path)`:
+- [x] Add `removeIndex(String collection, String path)`:
   - Throws `ArgumentError` if the definition does not exist
-- [ ] Add `indexesForCollection(String collection)` returning
+- [x] Add `indexesForCollection(String collection)` returning
   `List<({String collection, String path})>`
-- [ ] Add `get indexes` returning an unmodifiable view of all index records
-- [ ] When constructing `IndexDefinition` objects from config entries, map
+- [x] Add `get indexes` returning an unmodifiable view of all index records
+- [x] When constructing `IndexDefinition` objects from config entries, map
   `collection` → `namespace` at the boundary in `cli_runner.dart`
-- [ ] Tests:
+- [x] Tests:
   - Round-trip serialisation (write then load)
   - Load with no `indexes` key (backwards compatibility)
   - `addIndex` / `removeIndex` mutation and error cases
@@ -217,14 +217,14 @@ natural home — it already stores per-machine, non-synced state (remotes).
 `IndexManager` and `KmdbConfig` need to be accessible to commands. The cleanest
 approach is to add them to `CommandContext` so commands remain easily testable.
 
-- [ ] Add `config` (`KmdbConfig`) and `indexManager` (`IndexManager`) fields to
+- [x] Add `config` (`KmdbConfig`) and `indexManager` (`IndexManager`) fields to
   `CommandContext`
-- [ ] In `cli_runner.dart`, after opening the store:
+- [x] In `cli_runner.dart`, after opening the store:
   - Load `KmdbConfig` from `{dbDir}/local/config.json`
   - Construct `IndexManager` from `config.indexes` mapped to `IndexDefinition`
     objects
   - Pass both into `CommandContext`
-- [ ] Update `CommandContext` constructor and all existing tests that build a
+- [x] Update `CommandContext` constructor and all existing tests that build a
   `CommandContext` (supply a default empty config and empty-definition
   `IndexManager`)
 
@@ -233,7 +233,7 @@ approach is to add them to `CommandContext` so commands remain easily testable.
 Convert the existing flat command into a subcommand dispatcher, following the
 `RemoteCommand` pattern. Add `delete` with index cascade.
 
-- [ ] Rewrite `CollectionsCommand` as a subcommand dispatcher with three
+- [x] Rewrite `CollectionsCommand` as a subcommand dispatcher with three
   subcommands:
   - `list` — existing behaviour: call `ctx.store.listNamespaces()` and print
   - `create <name>` — existing `create-collection` behaviour: call
@@ -246,11 +246,11 @@ Convert the existing flat command into a subcommand dispatcher, following the
     3. Remove index definitions for the collection from `ctx.config` and save
     4. Call `MetaStore.unregisterNamespace(name)` (via `ctx.store`) to remove
        the collection from `$meta`
-- [ ] Update `CollectionsCommand.usage` and `description`
-- [ ] Add a deprecation notice to `CreateCollectionCommand` — print a one-line
+- [x] Update `CollectionsCommand.usage` and `description`
+- [x] Add a deprecation notice to `CreateCollectionCommand` — print a one-line
   stderr warning on every execution: `"create-collection is deprecated; use
   'collections create <name>' instead."`
-- [ ] Tests:
+- [x] Tests:
   - `collections list` returns registered namespaces
   - `collections create` creates a namespace (idempotent)
   - `collections delete` removes all documents in the namespace
@@ -263,7 +263,7 @@ Convert the existing flat command into a subcommand dispatcher, following the
 
 A new top-level `index` command with four subcommands.
 
-- [ ] Create `packages/kmdb_cli/lib/src/commands/index_command.dart` implementing
+- [x] Create `packages/kmdb_cli/lib/src/commands/index_command.dart` implementing
   `IndexCommand` as a subcommand dispatcher:
   - `index list <collection>` — load `ctx.config.indexesForCollection(collection)`;
     for each, call `ctx.indexManager.getState(collection, path)` and print a row
@@ -276,8 +276,8 @@ A new top-level `index` command with four subcommands.
   - `index delete <collection> <path>` — call
     `ctx.indexManager.removeIndex(collection, path)`; call
     `ctx.config.removeIndex(collection, path)`; save config; print confirmation
-- [ ] Register `IndexCommand` in `_commands` map in `cli_runner.dart`
-- [ ] Tests:
+- [x] Register `IndexCommand` in `_commands` map in `cli_runner.dart`
+- [x] Tests:
   - `index list` with no indexes defined returns empty output
   - `index list` shows defined indexes and their status
   - `index create` adds definition to config; is idempotent-error on duplicate
@@ -294,16 +294,16 @@ collection, its local index entries and config become orphaned. The `pull` and
 `sync` commands must detect this and cascade the same cleanup as
 `collections delete`.
 
-- [ ] Extract a helper `_purgeOrphanedIndexes(CommandContext ctx)`:
+- [x] Extract a helper `_purgeOrphanedIndexes(CommandContext ctx)`:
   - For each collection that has index definitions in `ctx.config`:
     - Scan the collection for any live document — stop at the first hit
     - If zero live documents exist and the collection is registered in `$meta`:
       cascade cleanup exactly as `collections delete` does (purge index entries
       via `IndexManager.removeIndex`, remove definitions from config, save,
       unregister collection from `$meta`)
-- [ ] Call `_purgeOrphanedIndexes` at the end of `PullCommand.execute` and
+- [x] Call `_purgeOrphanedIndexes` at the end of `PullCommand.execute` and
   `SyncCommand.execute`, after the ingest completes
-- [ ] Tests:
+- [x] Tests:
   - After a pull that tombstones all documents in an indexed collection, index
     entries are gone, config is updated, collection is unregistered
   - A collection with at least one live document after pull is unaffected
@@ -312,11 +312,37 @@ collection, its local index entries and config become orphaned. The `pull` and
 
 ### Phase 8 — Spec update
 
-- [ ] Add a note to `docs/spec/16_secondary_indexes.md` clarifying that index
+- [x] Add a note to `docs/spec/16_secondary_indexes.md` clarifying that index
   state (`$meta`) and index entries (`$index:*`) are system namespaces excluded
   from sync. After a pull, `current` indexes may become `stale` and will rebuild
   on next query.
 
 ## Summary
 
-{Dot points highlighting the work undertaken}
+- Added `MetaStore.unregisterNamespace` to remove a collection from the
+  namespace registry and delete its generation counter when a collection is
+  deleted.
+- Added `IndexManager.removeIndex(namespace, path)` to atomically purge all
+  `$index:*` entries and the `$meta` index state entry for a given index.
+- Extended `KmdbConfig` (`local/config.json`) to persist index definitions using
+  "collection" as the user-facing term; added `addIndex`, `removeIndex`,
+  `indexesForCollection`, and an `indexes` accessor.
+- Exported `IndexManager`, `IndexState`, and `IndexStatus` from `kmdb.dart` so
+  CLI code can use them without internal `src/` imports.
+- Wired `KmdbConfig` and `IndexManager` into `CommandContext`; both are loaded
+  from the persisted config on every CLI open.
+- Refactored `CollectionsCommand` into a subcommand dispatcher (`list`, `create`,
+  `delete`); `delete` cascades to remove all index entries and config definitions,
+  then unregisters the collection from `$meta`.
+- Added a deprecation warning to `create-collection`, directing users to
+  `collections create`.
+- Added a new `IndexCommand` with four subcommands: `list`, `create`, `info`,
+  and `delete`.
+- Added post-sync orphan cleanup to `PullCommand` and `SyncCommand`: after
+  ingesting SSTables, any indexed collection with zero live documents is
+  automatically cleaned up (index entries purged, config updated, namespace
+  unregistered).
+- Updated spec §16 to document that index state and index entries are
+  device-local and excluded from sync.
+- Added 248 new tests across both packages (960 total; 31 pre-existing Zstd FFI
+  environment failures unchanged).

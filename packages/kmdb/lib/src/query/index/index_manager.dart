@@ -152,6 +152,56 @@ final class IndexManager {
     return _loadState(def);
   }
 
+  /// Removes all stored data for the index on [namespace]/[path].
+  ///
+  /// This method:
+  /// 1. Enumerates every `$index:{namespace}:{path}:*` sub-namespace in
+  ///    storage (one sub-namespace per distinct indexed value).
+  /// 2. Deletes all entries in each sub-namespace in batches of 200.
+  /// 3. Deletes the `$meta` state entry for the index.
+  ///
+  /// It is a no-op if the index was never built (undefined state) — the method
+  /// still deletes any sub-namespaces that might exist from a partial build.
+  ///
+  /// Other indexes on the same collection or on other collections are
+  /// unaffected.
+  Future<void> removeIndex(String namespace, String path) async {
+    // Compute the prefix that all sub-namespaces for this index share.
+    // Each sub-namespace has the form: $index:{namespace}:{path}:{hexValue}
+    final def = IndexDefinition(namespace, path);
+    final subNsPrefix = '${def.indexNamespace}:';
+
+    // Collect all sub-namespaces that belong to this index.
+    final all = await _store.allStoredNamespaces();
+    final indexSubNamespaces = all
+        .where((ns) => ns.startsWith(subNsPrefix))
+        .toList();
+
+    // Delete entries from each sub-namespace in batches of 200.
+    for (final subNs in indexSubNamespaces) {
+      const batchSize = 200;
+      var batch = WriteBatch();
+      var count = 0;
+
+      await for (final entry in _store.scan(subNs)) {
+        batch.delete(subNs, entry.key);
+        count++;
+        if (count >= batchSize) {
+          await _store.writeBatchInternal(batch);
+          batch = WriteBatch();
+          count = 0;
+        }
+      }
+      if (!batch.isEmpty) {
+        await _store.writeBatchInternal(batch);
+      }
+    }
+
+    // Delete the $meta state entry for this index.
+    final symbolicName = 'index:$namespace:$path';
+    await _store.meta.deleteRawByName(symbolicName);
+  }
+
   /// Adds index entry operations to [batch] for a document write.
   ///
   /// Call this for every active index on [namespace] before committing a

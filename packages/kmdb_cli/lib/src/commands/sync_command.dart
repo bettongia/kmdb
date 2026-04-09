@@ -114,6 +114,11 @@ final class SyncCommand implements CliCommand {
       return false;
     }
 
+    // After ingesting peer SSTables, check whether any indexed collection has
+    // been entirely tombstoned. If so, cascade the same cleanup as
+    // `collections delete` to keep index entries and config in sync.
+    await SyncHelpers.purgeOrphanedIndexes(ctx, dbDir);
+
     ctx.out.writeln('sync: complete (device: $deviceId).');
     return true;
   }

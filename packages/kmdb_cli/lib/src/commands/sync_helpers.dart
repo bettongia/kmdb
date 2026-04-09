@@ -16,6 +16,7 @@ import 'package:kmdb/kmdb.dart';
 
 import '../config/kmdb_config.dart';
 import '../config/remote_config.dart';
+import 'command.dart';
 
 /// Shared logic for `push`, `pull`, and `sync` commands.
 abstract final class SyncHelpers {
@@ -113,5 +114,101 @@ abstract final class SyncHelpers {
     // Default: all user (non-$) collections.
     final all = await store.listNamespaces();
     return all.where((coll) => !coll.startsWith(r'$')).toSet();
+  }
+
+  /// Removes index entries and config definitions for collections whose
+  /// documents were entirely tombstoned by an incoming pull.
+  ///
+  /// After a `pull` or `sync`, peer tombstones may have deleted every document
+  /// in a locally-indexed collection. The `$index:*` entries and CLI config
+  /// definitions become orphaned in that case. This method detects and purges
+  /// them so that subsequent `index list` and `collections list` reflect reality.
+  ///
+  /// Algorithm (for each collection that has at least one index in
+  /// [CommandContext.config]):
+  ///
+  /// 1. Scan for the first live document. If any exist, the collection is
+  ///    still active — skip it.
+  /// 2. Check whether the collection is still registered in `$meta`. If it is
+  ///    not, it was already cleaned up or never registered — skip it.
+  /// 3. Delete all documents (there are none, so this is a no-op), remove all
+  ///    index entries via [IndexManager.removeIndex], remove the index config
+  ///    entries, persist the config, and unregister the collection from `$meta`.
+  ///
+  /// The method is intentionally non-throwing: errors are reported to
+  /// [CommandContext.err] but do not stop processing other collections.
+  ///
+  /// [dbDir] must be the database root directory so that the updated config
+  /// can be persisted.
+  static Future<void> purgeOrphanedIndexes(
+    CommandContext ctx,
+    String dbDir,
+  ) async {
+    // Enumerate all collections that have at least one index definition.
+    // We work from the config rather than the store so that even collections
+    // that have already been unregistered from $meta are considered.
+    final configuredCollections = ctx.config.indexes
+        .map((r) => r.collection)
+        .toSet();
+
+    if (configuredCollections.isEmpty) return;
+
+    // Get the currently registered user collections from $meta so we can skip
+    // collections that are already gone.
+    final registered = await ctx.store.listNamespaces();
+
+    var configMutated = false;
+
+    for (final collection in configuredCollections) {
+      // Only clean up collections still registered in $meta — if the collection
+      // was never registered it has no namespace entry to unregister, and if it
+      // was already unregistered by an earlier cleanup pass, we skip it.
+      if (!registered.contains(collection)) continue;
+
+      // Fast path: scan for a single live document. If any document exists the
+      // collection is still active — nothing to purge.
+      var hasLiveDoc = false;
+      await for (final _ in ctx.store.scan(collection)) {
+        hasLiveDoc = true;
+        break; // stop immediately on first hit
+      }
+      if (hasLiveDoc) continue;
+
+      // No live documents remain. Cascade cleanup.
+
+      // 1. Remove all secondary index entries via IndexManager.
+      final indexRecords = ctx.config.indexesForCollection(collection);
+      for (final record in indexRecords) {
+        try {
+          await ctx.indexManager.removeIndex(collection, record.path);
+        } catch (e) {
+          ctx.err.writeln(
+            'Warning: purge: failed to remove index '
+            "'$collection.${record.path}': $e",
+          );
+          continue;
+        }
+        ctx.config.removeIndex(collection, record.path);
+        configMutated = true;
+      }
+
+      // 2. Unregister the collection from $meta.
+      try {
+        await ctx.store.unregisterNamespace(collection);
+      } catch (e) {
+        ctx.err.writeln(
+          "Warning: purge: failed to unregister '$collection' from \$meta: $e",
+        );
+      }
+    }
+
+    // 3. Persist the updated config once after all mutations.
+    if (configMutated) {
+      try {
+        await ctx.config.save(dbDir);
+      } catch (e) {
+        ctx.err.writeln('Warning: purge: failed to save config: $e');
+      }
+    }
   }
 }

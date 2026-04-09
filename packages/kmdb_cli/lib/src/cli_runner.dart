@@ -42,7 +42,9 @@ import 'commands/push_command.dart';
 import 'commands/remote_command.dart';
 import 'commands/sync_command.dart';
 import 'commands/util_command.dart';
+import 'commands/index_command.dart';
 import 'commands/verify_command.dart';
+import 'config/kmdb_config.dart';
 import 'database_opener.dart';
 import 'output/output_mode.dart';
 
@@ -79,6 +81,7 @@ final _commands = <String, CliCommand>{
     const PushCommand(),
     const PullCommand(),
     const SyncCommand(),
+    const IndexCommand(),
   ])
     cmd.name: cmd,
 };
@@ -233,8 +236,32 @@ abstract final class KmdbCli {
       return 1;
     }
 
+    // Load the per-database CLI config so index definitions are available to
+    // every command. Failures here are non-fatal — we log a warning and use an
+    // empty config so the user can still run non-index commands.
+    final dbDir = (await store.storeInfo()).dbDir;
+    KmdbConfig config;
+    try {
+      config = await KmdbConfig.load(dbDir);
+    } on FormatException catch (e) {
+      io.stderr.writeln('Warning: could not load config: ${e.message}');
+      config = KmdbConfig.empty();
+    }
+
+    // Construct IndexManager from the configured index definitions, mapping the
+    // user-facing "collection" name to the library-internal "namespace".
+    final indexDefinitions = config.indexes
+        .map((r) => IndexDefinition(r.collection, r.path))
+        .toList();
+    final indexManager = IndexManager(
+      store: store,
+      definitions: indexDefinitions,
+    );
+
     final ctx = CommandContext(
       store: store,
+      config: config,
+      indexManager: indexManager,
       mode: mode,
       out: outSink,
       dbCreated: dbCreated,

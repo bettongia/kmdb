@@ -55,6 +55,34 @@ final class _ContactCodec implements KmdbCodec<_Contact> {
   );
 }
 
+/// Minimal codec for raw [Map<String,dynamic>] documents.
+///
+/// [keyOf] reads `_id`; [encode] strips `_id` so the collection can manage it;
+/// [decode] passes through the decoded map (which already has `_id` added by
+/// the collection layer).
+final class _IdentityCodec implements KmdbCodec<Map<String, dynamic>> {
+  const _IdentityCodec();
+
+  @override
+  String keyOf(Map<String, dynamic> v) => v['_id'] as String;
+
+  @override
+  Map<String, dynamic> withKey(Map<String, dynamic> v, String key) => {
+    ...v,
+    '_id': key,
+  };
+
+  @override
+  Map<String, dynamic> encode(Map<String, dynamic> v) {
+    // Exclude '_id' — the collection layer manages it separately.
+    final out = Map<String, dynamic>.from(v)..remove('_id');
+    return out;
+  }
+
+  @override
+  Map<String, dynamic> decode(Map<String, dynamic> j) => j;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const _codec = _ContactCodec();
@@ -427,6 +455,131 @@ void main() {
       final ns = IndexWriter.indexNamespaceForValue(_cityIndex, 'London')!;
       final indexKeys = await db.store.scan(ns).toList();
       expect(indexKeys, isEmpty);
+      await db.close();
+    });
+  });
+
+  // ── IndexManager.removeIndex ──────────────────────────────────────────────
+
+  group('IndexManager.removeIndex', () {
+    test(r'removes all $index entries after a build', () async {
+      final (db, col) = await _openWithIndexes();
+      final k1 = _key();
+      final k2 = _key();
+      await col.put(_Contact(id: k1, city: 'London'));
+      await col.put(_Contact(id: k2, city: 'Paris'));
+
+      // Activate and wait for build to complete.
+      await db.indexManager.getOrActivate('contacts', 'city');
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      final stateBefore = await db.indexManager.getState('contacts', 'city');
+      expect(stateBefore.status, equals(IndexStatus.current));
+
+      // Remove the index.
+      await db.indexManager.removeIndex('contacts', 'city');
+
+      // All index sub-namespaces should be gone.
+      final londonKeys = await IndexReader.lookupByValue(
+        store: db.store,
+        definition: _cityIndex,
+        value: 'London',
+      );
+      expect(londonKeys, isEmpty);
+
+      final parisKeys = await IndexReader.lookupByValue(
+        store: db.store,
+        definition: _cityIndex,
+        value: 'Paris',
+      );
+      expect(parisKeys, isEmpty);
+      await db.close();
+    });
+
+    test(r'removes $meta state entry after removal', () async {
+      final (db, col) = await _openWithIndexes();
+      await col.put(_Contact(id: _key(), city: 'London'));
+      await db.indexManager.getOrActivate('contacts', 'city');
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      await db.indexManager.removeIndex('contacts', 'city');
+
+      // State should now be undefined (no persisted state).
+      final stateAfter = await db.indexManager.getState('contacts', 'city');
+      expect(stateAfter.status, equals(IndexStatus.undefined));
+      await db.close();
+    });
+
+    test('no-op for an index that was never built', () async {
+      final (db, _) = await _openWithIndexes();
+
+      // Index is in undefined state — removeIndex should complete without error.
+      await expectLater(
+        db.indexManager.removeIndex('contacts', 'city'),
+        completes,
+      );
+      // State is still undefined.
+      final state = await db.indexManager.getState('contacts', 'city');
+      expect(state.status, equals(IndexStatus.undefined));
+      await db.close();
+    });
+
+    test('other indexes on same collection are unaffected', () async {
+      final (db, col) = await _openWithIndexes();
+      final k1 = _key();
+      await col.put(_Contact(id: k1, city: 'London', tags: ['flutter']));
+
+      await db.indexManager.getOrActivate('contacts', 'city');
+      await db.indexManager.getOrActivate('contacts', 'tags[]');
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      // Remove only the city index.
+      await db.indexManager.removeIndex('contacts', 'city');
+
+      // The tags[] index should still have its entry.
+      final tagKeys = await IndexReader.lookupByValue(
+        store: db.store,
+        definition: _tagsIndex,
+        value: 'flutter',
+      );
+      expect(tagKeys, contains(k1));
+
+      // tags[] index state should still be current (or stale, but not gone).
+      final tagsState = await db.indexManager.getState('contacts', 'tags[]');
+      expect(tagsState.status, isNot(equals(IndexStatus.undefined)));
+      await db.close();
+    });
+
+    test('removing index on one collection does not affect another', () async {
+      final adapter = MemoryStorageAdapter();
+      final db = await KmdbDatabase.open(
+        path: '/db',
+        adapter: adapter,
+        indexes: [
+          IndexDefinition('contacts', 'city'),
+          IndexDefinition('items', 'city'),
+        ],
+        config: KvStoreConfig.forTesting(),
+      );
+      final itemsCol = db.collection<Map<String, dynamic>>(
+        name: 'items',
+        codec: _IdentityCodec(),
+      );
+      final k1 = _key();
+      await itemsCol.put({'_id': k1, 'city': 'London'});
+
+      await db.indexManager.getOrActivate('items', 'city');
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      // Remove contacts/city (which has no entries) — items/city should be fine.
+      await db.indexManager.removeIndex('contacts', 'city');
+
+      final itemsKeys = await IndexReader.lookupByValue(
+        store: db.store,
+        definition: IndexDefinition('items', 'city'),
+        value: 'London',
+      );
+      expect(itemsKeys, contains(k1));
       await db.close();
     });
   });
