@@ -10,7 +10,6 @@ resolution: workspace
 
 dependencies:
   kmdb:
-    path: ../kmdb
   args: ^2.6.0
 
 dev_dependencies:
