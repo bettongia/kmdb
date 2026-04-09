@@ -1,6 +1,6 @@
 # Add index commands and collection commands to the CLI
 
-**Status**: Open
+**Status**: Investigated
 
 **PR link**: {A link to the PR submitted for this plan}
 
@@ -38,75 +38,281 @@ work as it also operates at the collection level.
 
 ## Open questions
 
-### How are indexes synchronised?
-
-The actual index is constructed locally when first used but:
-
-1. Is the index definition synchronised to remotes?
-1. Is the index content synchronized to remotes or only even built locally?
-1. Are these points clearly outlined in the spec?
-
-### What's the best command line structure?
-
-Can the CLI be simplified in terms of the collection-centric commands? For
-example (consider if singular/plural usage is better):
-
-1. `collections create <coll>` : to create an empty collection (replacing
-   `create-collection`)
-2. `collections list` : to list collections in the database (as per the current
-   `collections` command)
-3. `collections info <coll>` : to get info regarding a collection
-4. `collections delete <coll>` : to delete a collection and all documents within
-   it.
-5. `collections <coll> indexes list` : to list all indexes
-6. `collections <coll> indexes create ...` : to create an index
-7. `collections <coll> indexes info <index_name>` : to get info regarding an
-   index
-8. `collections <coll> indexes delete <index_name>` : to delete an index
-
-For the example commands above we need to be aware of any possibility where the
-user can create names for collections or indexes that could intersect with
-command names. Whilst the above examples present a "telescoping" command format,
-having a name-by-name approach (e.g. `<db> <coll> <index> info`) presents a
-greater intersection risk. Alternatively, a dot point approach
-(`<db>.<coll>.<index>`) may be useful.
-
-SQL uses a `CREATE INDEX <name> ON ...` and there could be an argument that the
-kmdb command line support something more like `<db> index create <coll> <name>`
-but this feels clunky.
-
-### Should composite indexes be supported?
-
-Is it much more work to allow for indexes to be defined with more than 1 index
-entry key?
-
-### Should we maintain index stats?
-
-The approach to indexing (build on first access) can help reduce the impact of
-indexing when a write occurs.
-
-We expect the database to be of a small-to-medium size and not very write-heavy.
-However, having a lot of indexes on a collection may start to have a negative
-effect on searching and general performance. Maintaining index usage stats can
-help in advising a user that some indexes can be dropped but, given the
-distributed approach to kmdb, this may not be as useful as it is to a
-traditional server-based RDBMS.
-
-### Should we support `unique`, `not null` or filtered indexes?
-
-This helps set at least some basic constraints on the database but should be
-deferred to later work that looks to adopt schemas. Work on this plan shouldn't
-look to implement features that overlay schema-style constraints or advanced
-indexing (such as an SQL-based `CREATE INDEX ... WHERE <expr>`). However, the
-model for schema configuration should allow for future features.
+All questions resolved — see Investigation section.
 
 ## Investigation
 
-{Investigation notes}
+### How are indexes synchronized?
+
+**Index definitions and content are intentionally not synchronized.**
+
+The `$meta` namespace (where index state lives, keyed as `index:{namespace}:{path}`) and the `$index:*` namespaces (where index entries live) are both system namespaces prefixed with `$`. The sync engine explicitly filters these out during SSTable upload — only user namespaces are synced (see `packages/kmdb/lib/src/sync/sync_engine.dart`).
+
+This is by design and clearly stated in spec §12: index data is device-local. When a device pulls SSTables from a remote, the documents arrive in user namespaces and are indexed locally on the next query. In practice:
+
+- **Index definitions** (the `IndexDefinition` list at `KmdbDatabase.open()`) must be re-supplied on each open. They are not stored in a synced location.
+- **Index entries** (`$index:*`) are built locally from the locally-held documents. After a sync pull, any indexes in `current` state may transition to `stale` (generation mismatch) and will be rebuilt on next query.
+- The spec does not currently document this behaviour explicitly in §16 — a spec clarification note is worth raising.
+
+### What's the best command line structure?
+
+**A critical architectural constraint shapes this decision:** the CLI currently opens `KvStoreImpl` directly, bypassing the Query Layer and its `IndexManager` (see `packages/kmdb_cli/lib/src/database_opener.dart`). Index definitions are supplied to `KmdbDatabase.open()` as a `List<IndexDefinition>` and are not persisted by the library itself. The CLI would therefore need to:
+
+1. **Persist index definitions** in a CLI-managed config file (natural fit: `local/config.json`, which already stores remote configuration).
+2. **Load those definitions** when opening the database so `IndexManager` can maintain them across sessions.
+
+Given this, the flat subcommand pattern used by the existing `remote` command is the recommended approach for collections and indexes:
+
+```
+# Collection commands (replacing/extending current commands)
+kmdb <db> collections list
+kmdb <db> collections create <name>
+kmdb <db> collections delete <name>
+
+# Index commands
+kmdb <db> index list <collection>
+kmdb <db> index create <collection> <path>
+kmdb <db> index info <collection> <path>
+kmdb <db> index delete <collection> <path>
+```
+
+This uses the plural `collections` for collection management (as a top-level command with subcommands, extending the existing `collections` command) and the singular `index` for index management. Keeping `index` flat avoids the "telescoping" problem (`collections <name> indexes ...`) where a user-supplied collection name could shadow the `indexes` keyword.
+
+**Naming notes:**
+- The existing `collections` command becomes a subcommand dispatcher (like `remote`). The existing `create-collection` command can be retained as an alias or removed.
+- Path arguments (dot-notation, e.g. `address.city` or `tags[]`) should be clearly distinguished from positional args in usage strings.
+- Shell quoting guides should accompany `tags[]` examples since `[]` has special meaning in some shells.
+
+### Should composite indexes be supported?
+
+**No — defer to later schema work.**
+
+`IndexDefinition` accepts a single `path` string. The entire index entry key encoding (§16) is designed around one value per entry. Supporting composite indexes would require a new key encoding scheme (concatenating multiple encoded values), a new API surface, and coordination with future schema work. The incremental benefit for the CLI CRUD commands is low. Single-field and array fan-out indexes (e.g. `tags[]`) cover the common filtering use-cases.
+
+### Should we maintain index stats?
+
+**No additional stats infrastructure is needed for this plan.**
+
+The existing `IndexState` (status, `builtThrough`, `builtAt`) is sufficient to implement a useful `index info` command. For the small-to-medium databases KMDB targets, and given that write interception is synchronous and co-located with the document write, the risk of index degradation is low. Stats can be revisited when the benchmarking roadmap item is addressed.
+
+### Should we support `unique`, `not null` or filtered indexes?
+
+**No — explicitly out of scope.**
+
+The current write path silently skips null/missing values (no index entry written) and there is no enforcement mechanism. Unique and `not null` constraints belong to a future schema layer. The `IndexDefinition` model should not be extended in this plan.
+
+### Additional open questions
+
+#### How does `index delete` clean up index data?
+
+`IndexManager` needs a new `removeIndex(namespace, path)` method. Removing an index requires:
+1. Removing the definition from the CLI config so it is no longer passed to the `IndexManager` on next open.
+2. Scanning and deleting all entries in the corresponding `$index:{ns}:{path}` namespace.
+3. Deleting the `$meta` state entry (`index:{namespace}:{path}`).
+
+This method will be needed by both `index delete` and `collections delete` (which cascades to all indexes on the collection).
+
+#### Does the CLI need to open `KmdbDatabase` or just `KvStoreImpl`?
+
+Index commands that read or build index state need `IndexManager`, which requires either:
+- Opening via `KmdbDatabase` (adds a `KmdbCodec` dependency — the CLI currently avoids typed codecs), or
+- Instantiating `IndexManager` directly on top of the `KvStoreImpl` the CLI already opens (requires the CLI to persist and load `IndexDefinition` objects).
+
+The second approach is more self-contained and avoids changing how the CLI opens the database. The CLI config (`local/config.json`) should be extended to store index definitions as `{namespace, path}` pairs.
+
+#### What happens to index definitions when `collections delete` is called?
+
+Deleting a collection will also cascade to delete all associated index definitions from the CLI config and all `$index:*` and `$meta` entries via the new `IndexManager.removeIndex` method. Ordering: remove collection documents first, then remove each index (config + storage entries).
+
+#### What happens on Device B when Device A deletes a collection and syncs?
+
+When `SyncEngine` ingests SSTables on Device B, it calls `ingestSstable` directly — this bypasses the `KvStore` write path entirely. No `IndexManager` intercept fires, no generation counters are updated, and Device B's `$meta` namespace registry and `$index:*` entries are untouched. After the pull:
+
+- All documents in the collection are tombstoned (correct)
+- The namespace still appears in `collections list` on Device B (stale registry)
+- The `$index:*` entries on Device B now point to tombstoned document keys (orphaned)
+- The CLI `local/config.json` on Device B still holds the index definitions
+
+There is no collection-level delete signal in the sync protocol, so Device B cannot automatically detect that a collection was intentionally deleted rather than having its documents individually removed.
+
+**Fix:** the `pull` and `sync` commands must run a post-ingest check: for each namespace that has index definitions in the CLI config, scan for live (non-tombstoned) documents. If zero live documents remain and the namespace was previously registered, trigger the same cascade as `collections delete` (purge index entries, remove from config, unregister from `$meta`). This check is scoped only to namespaces with configured indexes, so it has no impact on unindexed collections.
 
 ## Implementation plan
 
-{Checklists and notes for the implementation work}
+The work falls into six sequential phases. Later phases depend on earlier ones,
+so they must be completed in order.
+
+### Phase 1 — `MetaStore.unregisterNamespace` (kmdb package)
+
+`collections delete` must remove the collection from the namespace registry and
+delete its generation counter, otherwise the deleted collection keeps appearing
+in `collections list`. `MetaStore` has `registerNamespace` but no inverse.
+
+- [ ] Add `unregisterNamespace(String userNamespace)` to `MetaStore`:
+  - Read the current namespaces list via `getNamespaces()`
+  - Remove the entry, write the updated list back
+  - Delete the generation counter entry (`gen:{namespace}`) from `$meta`
+- [ ] Tests:
+  - Unregistering an existing namespace removes it from `getNamespaces()`
+  - Unregistering removes the generation counter
+  - Unregistering a namespace not in the registry is a no-op (does not throw)
+  - Other namespaces are unaffected
+
+### Phase 2 — `IndexManager.removeIndex` (kmdb package)
+
+Needed by both `index delete` and `collections delete` (which cascades). No
+equivalent method currently exists.
+
+- [ ] Add `Future<void> removeIndex(String namespace, String path)` to
+  `IndexManager`:
+  - Scan the `$index:{namespace}:{path}` system namespace and collect all keys
+  - Delete all index entries in a `WriteBatch` (batch in groups of 200 to avoid
+    oversized write batches on large indexes)
+  - Delete the `$meta` state entry (`index:{namespace}:{path}`) via
+    `MetaStore.indexKey`
+- [ ] Tests:
+  - All `$index:*` entries for the index are gone after removal
+  - The `$meta` state entry is gone after removal
+  - No-op if the index was never built (undefined state)
+  - Other indexes on the same collection are unaffected
+  - Other collections are unaffected
+
+### Phase 3 — `KmdbConfig` index storage (kmdb_cli package)
+
+Index definitions must survive across CLI sessions. `local/config.json` is the
+natural home — it already stores per-machine, non-synced state (remotes).
+
+- [ ] Extend `KmdbConfig` to hold a list of index records:
+  ```json
+  {
+    "remotes": { ... },
+    "indexes": [
+      { "namespace": "contacts", "path": "address.city" },
+      { "namespace": "contacts", "path": "tags[]" }
+    ]
+  }
+  ```
+- [ ] Update `KmdbConfig.load` to parse the `indexes` array (missing key →
+  empty list; invalid entry → `FormatException`)
+- [ ] Update `KmdbConfig.save` to serialise the `indexes` array
+- [ ] Add `addIndex(String namespace, String path)`:
+  - Throws `ArgumentError` if an identical definition already exists
+- [ ] Add `removeIndex(String namespace, String path)`:
+  - Throws `ArgumentError` if the definition does not exist
+- [ ] Add `indexesForNamespace(String namespace)` returning
+  `List<({String namespace, String path})>`
+- [ ] Add `get indexes` returning an unmodifiable view of all index records
+- [ ] Tests:
+  - Round-trip serialisation (write then load)
+  - Load with no `indexes` key (backwards compatibility)
+  - `addIndex` / `removeIndex` mutation and error cases
+  - `indexesForNamespace` filtering
+
+### Phase 4 — `CommandContext` wiring (kmdb_cli package)
+
+`IndexManager` and `KmdbConfig` need to be accessible to commands. The cleanest
+approach is to add them to `CommandContext` so commands remain easily testable.
+
+- [ ] Add `config` (`KmdbConfig`) and `indexManager` (`IndexManager`) fields to
+  `CommandContext`
+- [ ] In `cli_runner.dart`, after opening the store:
+  - Load `KmdbConfig` from `{dbDir}/local/config.json`
+  - Construct `IndexManager` from `config.indexes` mapped to `IndexDefinition`
+    objects
+  - Pass both into `CommandContext`
+- [ ] Update `CommandContext` constructor and all existing tests that build a
+  `CommandContext` (supply a default empty config and empty-definition
+  `IndexManager`)
+
+### Phase 5 — Refactor `CollectionsCommand` (kmdb_cli package)
+
+Convert the existing flat command into a subcommand dispatcher, following the
+`RemoteCommand` pattern. Add `delete` with index cascade.
+
+- [ ] Rewrite `CollectionsCommand` as a subcommand dispatcher with three
+  subcommands:
+  - `list` — existing behaviour: call `ctx.store.listNamespaces()` and print
+  - `create <name>` — existing `create-collection` behaviour: call
+    `ctx.store.createNamespace(name)` and print result
+  - `delete <name>` — new:
+    1. Scan the namespace via `ctx.store.scan(name)` and delete all keys in
+       batches of 200 via `WriteBatch`
+    2. For each index in `ctx.config.indexesForNamespace(name)`: call
+       `ctx.indexManager.removeIndex(namespace, path)`
+    3. Remove index definitions for the namespace from `ctx.config` and save
+    4. Call `MetaStore.unregisterNamespace(name)` (via `ctx.store`) to remove
+       the namespace from `$meta`
+- [ ] Update `CollectionsCommand.usage` and `description`
+- [ ] Add a deprecation notice to `CreateCollectionCommand` — print a one-line
+  stderr warning on every execution: `"create-collection is deprecated; use
+  'collections create <name>' instead."`
+- [ ] Tests:
+  - `collections list` returns registered namespaces
+  - `collections create` creates a namespace (idempotent)
+  - `collections delete` removes all documents in the namespace
+  - `collections delete` cascades to remove index entries and config entries
+  - `collections delete` unregisters the namespace from `$meta`
+  - `collections delete` on an unknown namespace returns a clear error
+  - All subcommand error paths (missing args, etc.)
+
+### Phase 6 — New `IndexCommand` (kmdb_cli package)
+
+A new top-level `index` command with four subcommands.
+
+- [ ] Create `packages/kmdb_cli/lib/src/commands/index_command.dart` implementing
+  `IndexCommand` as a subcommand dispatcher:
+  - `index list <collection>` — load `ctx.config.indexesForNamespace(collection)`;
+    for each, call `ctx.indexManager.getState(namespace, path)` and print a row
+    with path and status
+  - `index create <collection> <path>` — validate `path` does not start with `_`;
+    call `ctx.config.addIndex(collection, path)`; save config; print confirmation
+  - `index info <collection> <path>` — call
+    `ctx.indexManager.getState(collection, path)`; print path, status,
+    `builtThrough`, `builtAt`
+  - `index delete <collection> <path>` — call
+    `ctx.indexManager.removeIndex(collection, path)`; call
+    `ctx.config.removeIndex(collection, path)`; save config; print confirmation
+- [ ] Register `IndexCommand` in `_commands` map in `cli_runner.dart`
+- [ ] Tests:
+  - `index list` with no indexes defined returns empty output
+  - `index list` shows defined indexes and their status
+  - `index create` adds definition to config; is idempotent-error on duplicate
+  - `index create` rejects paths starting with `_`
+  - `index info` shows correct status for undefined/built indexes
+  - `index delete` removes entries and config definition
+  - `index delete` on a non-existent index returns a clear error
+  - All subcommand error paths (missing args, unknown collection, etc.)
+
+### Phase 7 — Post-sync index cleanup (kmdb_cli package)
+
+When Device B pulls SSTables that contain tombstones for all documents in a
+collection, its local index entries and config become orphaned. The `pull` and
+`sync` commands must detect this and cascade the same cleanup as
+`collections delete`.
+
+- [ ] Extract a helper `_purgeOrphanedIndexes(CommandContext ctx)`:
+  - For each namespace that has index definitions in `ctx.config`:
+    - Scan the namespace for any live (non-tombstoned) document — stop at the
+      first hit
+    - If zero live documents exist and the namespace is registered in `$meta`:
+      cascade cleanup exactly as `collections delete` does (purge index entries
+      via `IndexManager.removeIndex`, remove definitions from config, save,
+      unregister namespace from `$meta`)
+- [ ] Call `_purgeOrphanedIndexes` at the end of `PullCommand.execute` and
+  `SyncCommand.execute`, after the ingest completes
+- [ ] Tests:
+  - After a pull that tombstones all documents in an indexed collection, index
+    entries are gone, config is updated, namespace is unregistered
+  - A collection with at least one live document after pull is unaffected
+  - A namespace with no configured indexes is unaffected (no scan performed)
+  - Cleanup runs correctly when multiple collections are affected in one pull
+
+### Phase 8 — Spec update
+
+- [ ] Add a note to `docs/spec/16_secondary_indexes.md` clarifying that index
+  state (`$meta`) and index entries (`$index:*`) are system namespaces excluded
+  from sync. After a pull, `current` indexes may become `stale` and will rebuild
+  on next query.
 
 ## Summary
 
