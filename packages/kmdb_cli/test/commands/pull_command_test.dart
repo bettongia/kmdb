@@ -15,7 +15,6 @@
 import 'dart:io' as io;
 
 import 'package:kmdb/kmdb.dart';
-import 'package:kmdb/src/query/index/index_manager.dart';
 import 'package:kmdb_cli/src/commands/command.dart';
 import 'package:kmdb_cli/src/commands/pull_command.dart';
 import 'package:kmdb_cli/src/commands/remote_command.dart';

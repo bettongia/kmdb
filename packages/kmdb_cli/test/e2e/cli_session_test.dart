@@ -13,6 +13,8 @@
 // limitations under the License.
 
 @Tags(['e2e'])
+library;
+
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -79,9 +81,6 @@ void main() {
 
       // Phase 1: Ingestion
       print('Phase 1: Ingestion (3000 records)...');
-      final notes = <Map<String, dynamic>>[];
-      final readingList = <Map<String, dynamic>>[];
-      final shoppingList = <Map<String, dynamic>>[];
 
       final random = Random(42);
 

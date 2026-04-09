@@ -10,11 +10,16 @@ KMDB_UI_PKG=packages/kmdb_ui
 
 ADDLICENSE_CONFIG=addlicense_config.txt
 
-default: site/ format checks site
+default: site/ format analyze checks site
+
+analyze:
+	melos run analyze
+
+.PHONY: analyze
 
 pre_commit: clean default
 
-cicd: test e2e_test default
+cicd: clean test default e2e_test
 
 tests_all: test e2e_test
 

@@ -21,7 +21,6 @@ import 'package:kmdb_cli/src/commands/command.dart';
 import 'package:kmdb_cli/src/commands/create_collection_command.dart';
 import 'package:kmdb_cli/src/commands/index_command.dart';
 import 'package:kmdb_cli/src/config/kmdb_config.dart';
-import 'package:kmdb/src/query/index/index_manager.dart';
 import 'package:kmdb_cli/src/commands/compact_command.dart';
 import 'package:kmdb_cli/src/commands/count_command.dart';
 import 'package:kmdb_cli/src/commands/delete_command.dart';
