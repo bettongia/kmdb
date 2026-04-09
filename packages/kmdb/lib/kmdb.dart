@@ -73,3 +73,5 @@ export 'src/query/exceptions.dart'
 export 'src/query/filter/filter.dart' show Filter;
 export 'src/query/filter/field_filter.dart' show Field;
 export 'src/query/index/index_definition.dart' show IndexDefinition;
+export 'src/query/index/index_manager.dart'
+    show IndexManager, IndexState, IndexStatus;

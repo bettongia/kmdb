@@ -324,4 +324,219 @@ void main() {
       );
     });
   });
+
+  // ── Index definitions ──────────────────────────────────────────────────────
+
+  group('KmdbConfig — indexes empty', () {
+    test('empty() has no indexes', () {
+      expect(KmdbConfig.empty().indexes, isEmpty);
+    });
+
+    test('load returns empty indexes when key absent', () async {
+      // Backwards-compatible: a config file without "indexes" should load fine.
+      final localDir = io.Directory('${tmpDir.path}/local');
+      localDir.createSync();
+      final file = io.File('${tmpDir.path}/local/config.json');
+      file.writeAsStringSync(
+        jsonEncode({
+          'remotes': {
+            'origin': {'type': 'local', 'path': '/mnt/nas/sync'},
+          },
+        }),
+      );
+
+      final config = await KmdbConfig.load(tmpDir.path);
+      expect(config.indexes, isEmpty);
+    });
+  });
+
+  group('KmdbConfig — indexes load', () {
+    test('round-trips indexes through save/load', () async {
+      final config = KmdbConfig.empty();
+      config.addIndex('contacts', 'address.city');
+      config.addIndex('contacts', 'tags[]');
+      await config.save(tmpDir.path);
+
+      final reloaded = await KmdbConfig.load(tmpDir.path);
+      expect(reloaded.indexes, hasLength(2));
+      expect(reloaded.indexes[0].collection, equals('contacts'));
+      expect(reloaded.indexes[0].path, equals('address.city'));
+      expect(reloaded.indexes[1].collection, equals('contacts'));
+      expect(reloaded.indexes[1].path, equals('tags[]'));
+    });
+
+    test('throws FormatException when indexes is not a list', () async {
+      final localDir = io.Directory('${tmpDir.path}/local');
+      localDir.createSync();
+      io.File(
+        '${tmpDir.path}/local/config.json',
+      ).writeAsStringSync(jsonEncode({'indexes': 'oops'}));
+      expect(
+        () => KmdbConfig.load(tmpDir.path),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains("'indexes' must be a JSON array"),
+          ),
+        ),
+      );
+    });
+
+    test(
+      'throws FormatException when an index entry is not an object',
+      () async {
+        final localDir = io.Directory('${tmpDir.path}/local');
+        localDir.createSync();
+        io.File('${tmpDir.path}/local/config.json').writeAsStringSync(
+          jsonEncode({
+            'indexes': ['not-an-object'],
+          }),
+        );
+        expect(
+          () => KmdbConfig.load(tmpDir.path),
+          throwsA(isA<FormatException>()),
+        );
+      },
+    );
+
+    test('throws FormatException when collection field is missing', () async {
+      final localDir = io.Directory('${tmpDir.path}/local');
+      localDir.createSync();
+      io.File('${tmpDir.path}/local/config.json').writeAsStringSync(
+        jsonEncode({
+          'indexes': [
+            {'path': 'city'},
+          ],
+        }),
+      );
+      expect(
+        () => KmdbConfig.load(tmpDir.path),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains("missing required string field 'collection'"),
+          ),
+        ),
+      );
+    });
+
+    test('throws FormatException when path field is missing', () async {
+      final localDir = io.Directory('${tmpDir.path}/local');
+      localDir.createSync();
+      io.File('${tmpDir.path}/local/config.json').writeAsStringSync(
+        jsonEncode({
+          'indexes': [
+            {'collection': 'contacts'},
+          ],
+        }),
+      );
+      expect(
+        () => KmdbConfig.load(tmpDir.path),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains("missing required string field 'path'"),
+          ),
+        ),
+      );
+    });
+  });
+
+  group('addIndex', () {
+    test('adds an index', () {
+      final config = KmdbConfig.empty();
+      config.addIndex('contacts', 'city');
+      expect(config.indexes, hasLength(1));
+      expect(config.indexes.first.collection, equals('contacts'));
+      expect(config.indexes.first.path, equals('city'));
+    });
+
+    test('throws on duplicate (collection, path) pair', () {
+      final config = KmdbConfig.empty();
+      config.addIndex('contacts', 'city');
+      expect(
+        () => config.addIndex('contacts', 'city'),
+        throwsA(
+          isA<ArgumentError>().having(
+            (e) => e.message,
+            'message',
+            contains("contacts.city"),
+          ),
+        ),
+      );
+    });
+
+    test('allows same path on different collections', () {
+      final config = KmdbConfig.empty();
+      config.addIndex('contacts', 'city');
+      config.addIndex('items', 'city');
+      expect(config.indexes, hasLength(2));
+    });
+
+    test('allows different paths on same collection', () {
+      final config = KmdbConfig.empty();
+      config.addIndex('contacts', 'city');
+      config.addIndex('contacts', 'email');
+      expect(config.indexes, hasLength(2));
+    });
+  });
+
+  group('removeIndex', () {
+    test('removes an existing index', () {
+      final config = KmdbConfig.empty();
+      config.addIndex('contacts', 'city');
+      config.removeIndex('contacts', 'city');
+      expect(config.indexes, isEmpty);
+    });
+
+    test('throws when the index does not exist', () {
+      final config = KmdbConfig.empty();
+      expect(
+        () => config.removeIndex('contacts', 'city'),
+        throwsA(
+          isA<ArgumentError>().having(
+            (e) => e.message,
+            'message',
+            contains("No index on 'contacts.city' found"),
+          ),
+        ),
+      );
+    });
+
+    test('leaves other indexes unaffected', () {
+      final config = KmdbConfig.empty();
+      config.addIndex('contacts', 'city');
+      config.addIndex('contacts', 'email');
+      config.removeIndex('contacts', 'city');
+      expect(config.indexes, hasLength(1));
+      expect(config.indexes.first.path, equals('email'));
+    });
+  });
+
+  group('indexesForCollection', () {
+    test('returns empty list when no indexes configured', () {
+      final config = KmdbConfig.empty();
+      expect(config.indexesForCollection('contacts'), isEmpty);
+    });
+
+    test('returns only indexes for the requested collection', () {
+      final config = KmdbConfig.empty();
+      config.addIndex('contacts', 'city');
+      config.addIndex('contacts', 'email');
+      config.addIndex('items', 'name');
+
+      final contactIndexes = config.indexesForCollection('contacts');
+      expect(contactIndexes, hasLength(2));
+      expect(contactIndexes.map((r) => r.path), containsAll(['city', 'email']));
+    });
+
+    test('returns empty list for unknown collection', () {
+      final config = KmdbConfig.empty();
+      config.addIndex('contacts', 'city');
+      expect(config.indexesForCollection('unknowncoll'), isEmpty);
+    });
+  });
 }

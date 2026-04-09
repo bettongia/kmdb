@@ -45,6 +45,12 @@ final class CreateCollectionCommand implements CliCommand {
     List<String> args,
     Map<String, dynamic> flags,
   ) async {
+    // Print a one-line deprecation notice to stderr so scripts that parse
+    // stdout are unaffected.
+    ctx.err.writeln(
+      "create-collection is deprecated; use 'collections create <name>' instead.",
+    );
+
     if (args.isEmpty) {
       ctx.writeError('create-collection requires a collection name.');
       return false;

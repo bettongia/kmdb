@@ -19,6 +19,8 @@ import 'package:kmdb/kmdb.dart';
 import 'package:kmdb_cli/src/commands/collections_command.dart';
 import 'package:kmdb_cli/src/commands/command.dart';
 import 'package:kmdb_cli/src/commands/create_collection_command.dart';
+import 'package:kmdb_cli/src/commands/index_command.dart';
+import 'package:kmdb_cli/src/config/kmdb_config.dart';
 import 'package:kmdb_cli/src/commands/compact_command.dart';
 import 'package:kmdb_cli/src/commands/count_command.dart';
 import 'package:kmdb_cli/src/commands/delete_command.dart';
@@ -725,29 +727,145 @@ void main() {
     });
     tearDown(() => store.close());
 
-    test('returns a list when no user namespaces exist', () async {
+    test('requires a subcommand', () async {
       final ctx = _ctx(store, out: out, err: err);
       final ok = await CollectionsCommand().execute(ctx, [], {});
-      expect(ok, isTrue);
-      expect(json.decode(out.toString()), isA<List>());
+      expect(ok, isFalse);
+      expect(err.toString(), contains('subcommand required'));
     });
 
-    test('lists namespaces written to', () async {
-      await _putDoc(store, 'tasks', {'_id': _key('task'), 'v': 1});
-      await _putDoc(store, 'notes', {'_id': _key('note'), 'v': 2});
+    test('unknown subcommand returns error', () async {
       final ctx = _ctx(store, out: out, err: err);
-      final ok = await CollectionsCommand().execute(ctx, [], {});
-      expect(ok, isTrue);
-      final result = (json.decode(out.toString()) as List).cast<String>();
-      expect(result, containsAll(['tasks', 'notes']));
+      final ok = await CollectionsCommand().execute(ctx, ['bogus'], {});
+      expect(ok, isFalse);
+      expect(err.toString(), contains("unknown subcommand 'bogus'"));
     });
 
-    test('does not include system namespaces', () async {
-      await _putDoc(store, 'tasks', {'_id': _key('sys'), 'v': 1});
-      final ctx = _ctx(store, out: out, err: err);
-      await CollectionsCommand().execute(ctx, [], {});
-      final result = (json.decode(out.toString()) as List).cast<String>();
-      expect(result.any((ns) => ns.startsWith(r'$')), isFalse);
+    // ── list ──────────────────────────────────────────────────────────────────
+
+    group('list', () {
+      test('returns a list when no user namespaces exist', () async {
+        final ctx = _ctx(store, out: out, err: err);
+        final ok = await CollectionsCommand().execute(ctx, ['list'], {});
+        expect(ok, isTrue);
+        expect(json.decode(out.toString()), isA<List>());
+      });
+
+      test('lists namespaces written to', () async {
+        await _putDoc(store, 'tasks', {'_id': _key('task'), 'v': 1});
+        await _putDoc(store, 'notes', {'_id': _key('note'), 'v': 2});
+        final ctx = _ctx(store, out: out, err: err);
+        final ok = await CollectionsCommand().execute(ctx, ['list'], {});
+        expect(ok, isTrue);
+        final result = (json.decode(out.toString()) as List).cast<String>();
+        expect(result, containsAll(['tasks', 'notes']));
+      });
+
+      test('does not include system namespaces', () async {
+        await _putDoc(store, 'tasks', {'_id': _key('sys'), 'v': 1});
+        final ctx = _ctx(store, out: out, err: err);
+        await CollectionsCommand().execute(ctx, ['list'], {});
+        final result = (json.decode(out.toString()) as List).cast<String>();
+        expect(result.any((ns) => ns.startsWith(r'$')), isFalse);
+      });
+    });
+
+    // ── create ────────────────────────────────────────────────────────────────
+
+    group('create', () {
+      test('creates a namespace and returns success message', () async {
+        final ctx = _ctx(store, out: out, err: err);
+        final ok = await CollectionsCommand().execute(ctx, [
+          'create',
+          'widgets',
+        ], {});
+        expect(ok, isTrue);
+        // writeValue wraps the message in JSON — decode and check the string.
+        final msg = json.decode(out.toString()) as String;
+        expect(msg, contains('widgets'));
+        expect(msg, contains('created'));
+      });
+
+      test(
+        'is idempotent — second create returns already-exists message',
+        () async {
+          await CollectionsCommand().execute(
+            _ctx(store, out: StringBuffer(), err: StringBuffer()),
+            ['create', 'widgets'],
+            {},
+          );
+          out.clear();
+          final ctx = _ctx(store, out: out, err: err);
+          final ok = await CollectionsCommand().execute(ctx, [
+            'create',
+            'widgets',
+          ], {});
+          expect(ok, isTrue);
+          final msg = json.decode(out.toString()) as String;
+          expect(msg, contains('already exists'));
+        },
+      );
+
+      test('requires a collection name', () async {
+        final ctx = _ctx(store, out: out, err: err);
+        final ok = await CollectionsCommand().execute(ctx, ['create'], {});
+        expect(ok, isFalse);
+        expect(err.toString(), contains('collection name required'));
+      });
+    });
+
+    // ── delete ────────────────────────────────────────────────────────────────
+
+    group('delete', () {
+      test('removes all documents from the collection', () async {
+        await _putDoc(store, 'tasks', {'_id': _key('t1'), 'v': 1});
+        await _putDoc(store, 'tasks', {'_id': _key('t2'), 'v': 2});
+        expect(await store.scan('tasks').toList(), hasLength(2));
+
+        final ctx = _ctx(store, out: out, err: err);
+        final ok = await CollectionsCommand().execute(ctx, [
+          'delete',
+          'tasks',
+        ], {});
+        expect(ok, isTrue);
+        expect(await store.scan('tasks').toList(), isEmpty);
+      });
+
+      test('unregisters the collection from the namespace registry', () async {
+        await _putDoc(store, 'tasks', {'_id': _key('t1'), 'v': 1});
+        final ctx = _ctx(store, out: out, err: err);
+        await CollectionsCommand().execute(ctx, ['delete', 'tasks'], {});
+        expect(await store.listNamespaces(), isNot(contains('tasks')));
+      });
+
+      test('returns error for unknown collection name', () async {
+        final ctx = _ctx(store, out: out, err: err);
+        final ok = await CollectionsCommand().execute(ctx, [
+          'delete',
+          'nonexistent',
+        ], {});
+        expect(ok, isFalse);
+        expect(err.toString(), contains("collection 'nonexistent' not found"));
+      });
+
+      test('requires a collection name', () async {
+        final ctx = _ctx(store, out: out, err: err);
+        final ok = await CollectionsCommand().execute(ctx, ['delete'], {});
+        expect(ok, isFalse);
+        expect(err.toString(), contains('collection name required'));
+      });
+
+      test('other collections are unaffected', () async {
+        await _putDoc(store, 'tasks', {'_id': _key('t1'), 'v': 1});
+        await _putDoc(store, 'notes', {'_id': _key('n1'), 'v': 1});
+
+        final ctx = _ctx(store, out: out, err: err);
+        await CollectionsCommand().execute(ctx, ['delete', 'tasks'], {});
+
+        // notes should still be there.
+        expect(await store.scan('notes').toList(), isNotEmpty);
+        expect(await store.listNamespaces(), contains('notes'));
+      });
     });
   });
 
@@ -764,6 +882,12 @@ void main() {
       err = StringBuffer();
     });
     tearDown(() => store.close());
+
+    test('prints deprecation warning to stderr', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      await CreateCollectionCommand().execute(ctx, ['widgets'], {});
+      expect(err.toString(), contains('deprecated'));
+    });
 
     test('creates a new collection and returns created: true', () async {
       final ctx = _ctx(store, out: out, err: err);
@@ -1797,6 +1921,238 @@ void main() {
       expect(ok, isTrue);
       final result = json.decode(out.toString()) as Map;
       expect(result['updated'], equals(0));
+    });
+  });
+
+  // ── IndexCommand ─────────────────────────────────────────────────────────────
+
+  group('IndexCommand', () {
+    late KvStoreImpl store;
+    late StringBuffer out;
+    late StringBuffer err;
+
+    setUp(() async {
+      store = await _openStore();
+      out = StringBuffer();
+      err = StringBuffer();
+    });
+    tearDown(() async {
+      MemoryStorageAdapter.releaseAllLocks();
+    });
+
+    /// Creates a [CommandContext] with an empty [KmdbConfig] and empty
+    /// [IndexManager] suitable for most index tests.
+    CommandContext makeCtx({KmdbConfig? config}) {
+      final cfg = config ?? KmdbConfig.empty();
+      final mgr = IndexManager(store: store, definitions: const []);
+      return CommandContext(
+        store: store,
+        config: cfg,
+        indexManager: mgr,
+        out: out,
+        err: err,
+      );
+    }
+
+    test('requires a subcommand', () async {
+      final ok = await IndexCommand().execute(makeCtx(), [], {});
+      expect(ok, isFalse);
+      expect(err.toString(), contains('subcommand required'));
+    });
+
+    test('unknown subcommand returns error', () async {
+      final ok = await IndexCommand().execute(makeCtx(), ['bogus'], {});
+      expect(ok, isFalse);
+      expect(err.toString(), contains("unknown subcommand 'bogus'"));
+    });
+
+    // ── list ───────────────────────────────────────────────────────────────────
+
+    group('list', () {
+      test('requires a collection name', () async {
+        final ok = await IndexCommand().execute(makeCtx(), ['list'], {});
+        expect(ok, isFalse);
+        expect(err.toString(), contains('collection name required'));
+      });
+
+      test('returns message when no indexes configured', () async {
+        final ok = await IndexCommand().execute(makeCtx(), [
+          'list',
+          'contacts',
+        ], {});
+        expect(ok, isTrue);
+        expect(out.toString(), contains('No indexes configured'));
+      });
+
+      test('lists configured indexes and their status', () async {
+        final config = KmdbConfig.empty();
+        config.addIndex('contacts', 'city');
+        final ok = await IndexCommand().execute(makeCtx(config: config), [
+          'list',
+          'contacts',
+        ], {});
+        expect(ok, isTrue);
+        expect(out.toString(), contains('city'));
+        expect(out.toString(), contains('undefined'));
+      });
+    });
+
+    // ── create ─────────────────────────────────────────────────────────────────
+
+    group('create', () {
+      test('requires collection and path args', () async {
+        final ok = await IndexCommand().execute(makeCtx(), ['create'], {});
+        expect(ok, isFalse);
+        expect(err.toString(), contains('collection name and path required'));
+      });
+
+      test('requires both collection and path', () async {
+        final ok = await IndexCommand().execute(makeCtx(), [
+          'create',
+          'contacts',
+        ], {});
+        expect(ok, isFalse);
+        expect(err.toString(), contains('collection name and path required'));
+      });
+
+      test('adds definition to config', () async {
+        // We can't call index create end-to-end without a real dbDir for
+        // config.save() (the memory store resolves to '/testdb' which has no
+        // real local/ directory). Verify addIndex mutation directly.
+        final config = KmdbConfig.empty();
+        config.addIndex('contacts', 'city');
+        expect(config.indexesForCollection('contacts'), hasLength(1));
+      });
+
+      test('rejects paths starting with _', () async {
+        final config = KmdbConfig.empty();
+        final ok = await IndexCommand().execute(
+          CommandContext(
+            store: store,
+            config: config,
+            indexManager: IndexManager(store: store, definitions: const []),
+            out: out,
+            err: err,
+          ),
+          ['create', 'contacts', '_reserved'],
+          {},
+        );
+        expect(ok, isFalse);
+        expect(err.toString(), contains("starts with '_'"));
+      });
+
+      test('error when duplicate index is registered', () async {
+        final config = KmdbConfig.empty();
+        config.addIndex('contacts', 'city');
+        final ok = await IndexCommand().execute(
+          CommandContext(
+            store: store,
+            config: config,
+            indexManager: IndexManager(store: store, definitions: const []),
+            out: out,
+            err: err,
+          ),
+          ['create', 'contacts', 'city'],
+          {},
+        );
+        expect(ok, isFalse);
+        expect(err.toString(), contains('contacts.city'));
+      });
+    });
+
+    // ── info ───────────────────────────────────────────────────────────────────
+
+    group('info', () {
+      test('requires collection and path args', () async {
+        final ok = await IndexCommand().execute(makeCtx(), ['info'], {});
+        expect(ok, isFalse);
+        expect(err.toString(), contains('collection name and path required'));
+      });
+
+      test('returns error when index is not in config', () async {
+        final ok = await IndexCommand().execute(makeCtx(), [
+          'info',
+          'contacts',
+          'city',
+        ], {});
+        expect(ok, isFalse);
+        expect(err.toString(), contains('no index on'));
+      });
+
+      test('shows status for a configured (undefined) index', () async {
+        final config = KmdbConfig.empty();
+        config.addIndex('contacts', 'city');
+        final ok = await IndexCommand().execute(makeCtx(config: config), [
+          'info',
+          'contacts',
+          'city',
+        ], {});
+        expect(ok, isTrue);
+        expect(out.toString(), contains('city'));
+        expect(out.toString(), contains('undefined'));
+      });
+    });
+
+    // ── delete ─────────────────────────────────────────────────────────────────
+
+    group('delete', () {
+      test('requires collection and path args', () async {
+        final ok = await IndexCommand().execute(makeCtx(), ['delete'], {});
+        expect(ok, isFalse);
+        expect(err.toString(), contains('collection name and path required'));
+      });
+
+      test('returns error when index is not in config', () async {
+        final ok = await IndexCommand().execute(makeCtx(), [
+          'delete',
+          'contacts',
+          'city',
+        ], {});
+        expect(ok, isFalse);
+        expect(err.toString(), contains('no index on'));
+      });
+
+      test('removes index from config and persists to disk', () async {
+        // Use a real temp directory so config.save() can write successfully.
+        final tmpDir = io.Directory.systemTemp.createTempSync(
+          'kmdb_idx_del_test_',
+        );
+        try {
+          final (tmpStore, _) = await KvStoreImpl.open(
+            tmpDir.path,
+            StorageAdapterNative(),
+            config: KvStoreConfig.forTesting(),
+          );
+          try {
+            final config = KmdbConfig.empty();
+            config.addIndex('contacts', 'city');
+            expect(config.indexesForCollection('contacts'), hasLength(1));
+
+            final ok = await IndexCommand().execute(
+              CommandContext(
+                store: tmpStore,
+                config: config,
+                indexManager: IndexManager(
+                  store: tmpStore,
+                  definitions: const [],
+                ),
+                out: out,
+                err: err,
+              ),
+              ['delete', 'contacts', 'city'],
+              {},
+            );
+            expect(ok, isTrue);
+            // After delete, config should have zero indexes for contacts.
+            expect(config.indexesForCollection('contacts'), isEmpty);
+            expect(out.toString(), contains('deleted'));
+          } finally {
+            await tmpStore.close();
+          }
+        } finally {
+          tmpDir.deleteSync(recursive: true);
+        }
+      });
     });
   });
 

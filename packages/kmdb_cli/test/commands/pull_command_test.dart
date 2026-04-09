@@ -18,6 +18,8 @@ import 'package:kmdb/kmdb.dart';
 import 'package:kmdb_cli/src/commands/command.dart';
 import 'package:kmdb_cli/src/commands/pull_command.dart';
 import 'package:kmdb_cli/src/commands/remote_command.dart';
+import 'package:kmdb_cli/src/commands/sync_helpers.dart';
+import 'package:kmdb_cli/src/config/kmdb_config.dart';
 import 'package:kmdb_cli/src/database_opener.dart';
 import 'package:test/test.dart';
 
@@ -220,5 +222,114 @@ void main() {
     });
     expect(ok, isFalse);
     expect(err.toString(), contains('system collection'));
+  });
+
+  // ── purgeOrphanedIndexes ──────────────────────────────────────────────────
+
+  group('purgeOrphanedIndexes', () {
+    /// Creates a [CommandContext] backed by [store] with the given [config].
+    CommandContext makeCtx(KvStoreImpl s, KmdbConfig config) => CommandContext(
+      store: s,
+      config: config,
+      indexManager: IndexManager(store: s, definitions: const []),
+      out: out,
+      err: err,
+    );
+
+    test('no-op when no index definitions are configured', () async {
+      // A collection with documents but no index config — nothing should happen.
+      await store.put('notes', _key(), ValueCodec.encode({'x': 1}));
+      final config = KmdbConfig.empty();
+      final ctx = makeCtx(store, config);
+      await SyncHelpers.purgeOrphanedIndexes(ctx, dbDir.path);
+      // Collection should still be registered.
+      final namespaces = await store.listNamespaces();
+      expect(namespaces, contains('notes'));
+    });
+
+    test(
+      'collection with live docs is unaffected even when indexes configured',
+      () async {
+        // Register a collection with a live document and configure an index.
+        await store.put(
+          'contacts',
+          _key(),
+          ValueCodec.encode({'city': 'Sydney'}),
+        );
+        final config = KmdbConfig.empty();
+        config.addIndex('contacts', 'city');
+        final ctx = makeCtx(store, config);
+
+        await SyncHelpers.purgeOrphanedIndexes(ctx, dbDir.path);
+
+        // Collection must still be registered and index config untouched.
+        final namespaces = await store.listNamespaces();
+        expect(namespaces, contains('contacts'));
+        expect(config.indexesForCollection('contacts'), hasLength(1));
+      },
+    );
+
+    test(
+      'orphaned collection is unregistered and config cleared when all docs tombstoned',
+      () async {
+        // Simulate a collection that has been entirely deleted (all tombstones).
+        // We can achieve this by registering the namespace without inserting any
+        // documents — createNamespace registers it but leaves it empty.
+        await store.createNamespace('contacts');
+        final config = KmdbConfig.empty();
+        config.addIndex('contacts', 'city');
+        expect(config.indexesForCollection('contacts'), hasLength(1));
+
+        final ctx = makeCtx(store, config);
+        await SyncHelpers.purgeOrphanedIndexes(ctx, dbDir.path);
+
+        // Index config should be cleared.
+        expect(config.indexesForCollection('contacts'), isEmpty);
+        // Namespace should be unregistered.
+        final namespaces = await store.listNamespaces();
+        expect(namespaces, isNot(contains('contacts')));
+      },
+    );
+
+    test(
+      'cleanup runs for multiple orphaned collections in one pass',
+      () async {
+        // Two collections: both empty after "full tombstone" scenario.
+        await store.createNamespace('collA');
+        await store.createNamespace('collB');
+        final config = KmdbConfig.empty();
+        config.addIndex('collA', 'field1');
+        config.addIndex('collB', 'field2');
+
+        final ctx = makeCtx(store, config);
+        await SyncHelpers.purgeOrphanedIndexes(ctx, dbDir.path);
+
+        // Both index definitions should be removed.
+        expect(config.indexesForCollection('collA'), isEmpty);
+        expect(config.indexesForCollection('collB'), isEmpty);
+        // Both namespaces should be unregistered.
+        final namespaces = await store.listNamespaces();
+        expect(namespaces, isNot(contains('collA')));
+        expect(namespaces, isNot(contains('collB')));
+      },
+    );
+
+    test('collection not registered in meta is silently skipped', () async {
+      // A collection is in config but was never registered in $meta (e.g. it
+      // was added to config on another device and then sync'd, but the
+      // namespace registry was never set). purgeOrphanedIndexes should be a
+      // no-op and not throw.
+      final config = KmdbConfig.empty();
+      config.addIndex('ghost', 'field');
+      final ctx = makeCtx(store, config);
+
+      // Should not throw.
+      await expectLater(
+        SyncHelpers.purgeOrphanedIndexes(ctx, dbDir.path),
+        completes,
+      );
+      // Config is untouched because the collection was not in $meta.
+      expect(config.indexesForCollection('ghost'), hasLength(1));
+    });
   });
 }

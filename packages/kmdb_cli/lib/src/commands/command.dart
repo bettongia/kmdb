@@ -17,25 +17,44 @@ import 'dart:io' as io;
 
 import 'package:kmdb/kmdb.dart';
 
+import '../config/kmdb_config.dart';
 import '../output/document_formatter.dart';
 import '../output/output_mode.dart';
 
 /// Execution context passed to every CLI command.
 ///
-/// Carries the open store, the chosen output mode, and output sinks so
-/// commands can be tested without real disk I/O or stdout.
+/// Carries the open store, the CLI config, the index manager, the chosen
+/// output mode, and output sinks so commands can be tested without real
+/// disk I/O or stdout.
 final class CommandContext {
   CommandContext({
     required this.store,
+    KmdbConfig? config,
+    IndexManager? indexManager,
     this.mode = OutputMode.json,
     this.dbCreated = false,
     StringSink? out,
     StringSink? err,
-  }) : out = out ?? _StdoutSink(),
+  }) : config = config ?? KmdbConfig.empty(),
+       indexManager =
+           indexManager ?? IndexManager(store: store, definitions: const []),
+       out = out ?? _StdoutSink(),
        err = err ?? _StderrSink();
 
   /// The open key-value store.
   final KvStoreImpl store;
+
+  /// The per-database CLI configuration loaded from `local/config.json`.
+  ///
+  /// Holds named sync remotes and secondary index definitions that persist
+  /// across CLI sessions. Commands that mutate this config must call
+  /// [KmdbConfig.save] to persist the changes.
+  final KmdbConfig config;
+
+  /// The [IndexManager] constructed from the configured index definitions.
+  ///
+  /// Commands that read or modify index state use this manager directly.
+  final IndexManager indexManager;
 
   /// The active output format.
   final OutputMode mode;

@@ -18,12 +18,18 @@ import 'dart:math' as math;
 
 import 'remote_config.dart';
 
+/// A single index definition stored in the CLI config.
+///
+/// Uses the user-facing term "collection" (rather than the library-internal
+/// "namespace") so the config file speaks the user's language.
+typedef IndexRecord = ({String collection, String path});
+
 /// Manages the per-database CLI configuration file at
 /// `{dbDir}/local/config.json`.
 ///
-/// The config file stores named sync remotes. This class provides atomic read
-/// and write operations, lazy directory creation, and a clean API for
-/// adding/removing remotes.
+/// The config file stores named sync remotes and secondary index definitions.
+/// This class provides atomic read and write operations, lazy directory
+/// creation, and a clean API for adding/removing both.
 ///
 /// ## File format
 ///
@@ -34,7 +40,11 @@ import 'remote_config.dart';
 ///       "type": "local",
 ///       "path": "/Volumes/NAS/myapp-sync"
 ///     }
-///   }
+///   },
+///   "indexes": [
+///     { "collection": "contacts", "path": "address.city" },
+///     { "collection": "contacts", "path": "tags[]" }
+///   ]
 /// }
 /// ```
 ///
@@ -43,22 +53,33 @@ import 'remote_config.dart';
 /// ```dart
 /// final config = await KmdbConfig.load('/path/to/db');
 /// config.addRemote('origin', LocalRemoteConfig(path: '/mnt/nas/kmdb'));
+/// config.addIndex('contacts', 'address.city');
 /// await config.save('/path/to/db');
 /// ```
 final class KmdbConfig {
-  /// Creates a [KmdbConfig] with the given mutable [remotes] map.
-  KmdbConfig._({required Map<String, RemoteConfig> remotes})
-    : _remotes = remotes;
+  /// Creates a [KmdbConfig] with the given mutable [remotes] map and
+  /// [indexes] list.
+  KmdbConfig._({
+    required Map<String, RemoteConfig> remotes,
+    required List<IndexRecord> indexes,
+  }) : _remotes = remotes,
+       _indexes = indexes;
 
-  /// An empty config with no remotes.
-  KmdbConfig.empty() : _remotes = {};
+  /// An empty config with no remotes or indexes.
+  KmdbConfig.empty() : _remotes = {}, _indexes = [];
 
   // Mutable backing map.  All public mutation goes through [addRemote] /
   // [removeRemote] so invariants are enforced centrally.
   final Map<String, RemoteConfig> _remotes;
 
+  // Mutable backing list for index definitions.
+  final List<IndexRecord> _indexes;
+
   /// Returns an unmodifiable view of the remotes map, keyed by name.
   Map<String, RemoteConfig> get remotes => Map.unmodifiable(_remotes);
+
+  /// Returns an unmodifiable view of all index definitions.
+  List<IndexRecord> get indexes => List.unmodifiable(_indexes);
 
   // ── Factory ────────────────────────────────────────────────────────────────
 
@@ -127,7 +148,43 @@ final class KmdbConfig {
       }
     }
 
-    return KmdbConfig._(remotes: remotes);
+    // Parse indexes section — missing key → empty list (backwards compatible).
+    final indexesRaw = decoded['indexes'];
+    final indexes = <IndexRecord>[];
+    if (indexesRaw != null) {
+      if (indexesRaw is! List) {
+        throw FormatException(
+          'Corrupt config.json at "${file.path}": '
+          "'indexes' must be a JSON array.",
+        );
+      }
+      for (var i = 0; i < indexesRaw.length; i++) {
+        final entry = indexesRaw[i];
+        if (entry is! Map<String, dynamic>) {
+          throw FormatException(
+            'Corrupt config.json at "${file.path}": '
+            "indexes[$i] must be a JSON object.",
+          );
+        }
+        final collection = entry['collection'];
+        final path = entry['path'];
+        if (collection is! String || collection.isEmpty) {
+          throw FormatException(
+            'Corrupt config.json at "${file.path}": '
+            "indexes[$i] missing required string field 'collection'.",
+          );
+        }
+        if (path is! String || path.isEmpty) {
+          throw FormatException(
+            'Corrupt config.json at "${file.path}": '
+            "indexes[$i] missing required string field 'path'.",
+          );
+        }
+        indexes.add((collection: collection, path: path));
+      }
+    }
+
+    return KmdbConfig._(remotes: remotes, indexes: indexes);
   }
 
   // ── Mutation ───────────────────────────────────────────────────────────────
@@ -156,6 +213,42 @@ final class KmdbConfig {
     _remotes.remove(name);
   }
 
+  // ── Index mutations ────────────────────────────────────────────────────────
+
+  /// Adds an index definition for [path] on [collection].
+  ///
+  /// Throws [ArgumentError] if an identical `(collection, path)` pair already
+  /// exists in the config. Use [removeIndex] first if you want to re-add it.
+  void addIndex(String collection, String path) {
+    if (_indexes.any((r) => r.collection == collection && r.path == path)) {
+      throw ArgumentError(
+        "An index on '$collection.$path' already exists in the config.",
+      );
+    }
+    _indexes.add((collection: collection, path: path));
+  }
+
+  /// Removes the index definition for [path] on [collection].
+  ///
+  /// Throws [ArgumentError] if no matching definition is found.
+  void removeIndex(String collection, String path) {
+    final idx = _indexes.indexWhere(
+      (r) => r.collection == collection && r.path == path,
+    );
+    if (idx == -1) {
+      throw ArgumentError(
+        "No index on '$collection.$path' found in the config.",
+      );
+    }
+    _indexes.removeAt(idx);
+  }
+
+  /// Returns all index definitions for [collection].
+  ///
+  /// Returns an empty list when the collection has no configured indexes.
+  List<IndexRecord> indexesForCollection(String collection) =>
+      _indexes.where((r) => r.collection == collection).toList();
+
   // ── Persistence ────────────────────────────────────────────────────────────
 
   /// Atomically writes the config to `{dbDir}/local/config.json`.
@@ -175,6 +268,10 @@ final class KmdbConfig {
       'remotes': {
         for (final entry in _remotes.entries) entry.key: entry.value.toJson(),
       },
+      'indexes': [
+        for (final idx in _indexes)
+          {'collection': idx.collection, 'path': idx.path},
+      ],
     };
     final content = const JsonEncoder.withIndent('  ').convert(payload);
 

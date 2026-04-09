@@ -236,4 +236,77 @@ void main() {
       await store2.close();
     });
   });
+
+  // ── unregisterNamespace ─────────────────────────────────────────────────────
+
+  group('MetaStore — unregisterNamespace', () {
+    test('removes namespace from getNamespaces', () async {
+      final adapter = MemoryStorageAdapter();
+      final (store, _) = await _open(adapter);
+      await store.put('tasks', _key(1), _bytes('v'));
+      await store.put('notes', _key(1), _bytes('v'));
+      expect(await store.meta.getNamespaces(), containsAll(['tasks', 'notes']));
+
+      await store.meta.unregisterNamespace('tasks');
+      final ns = await store.meta.getNamespaces();
+      expect(ns, isNot(contains('tasks')));
+      expect(ns, contains('notes'));
+      await store.close();
+    });
+
+    test('removes the generation counter for the namespace', () async {
+      final adapter = MemoryStorageAdapter();
+      final (store, _) = await _open(adapter);
+      await store.put('tasks', _key(1), _bytes('v'));
+      await store.put('tasks', _key(2), _bytes('v'));
+      expect(await store.meta.getGenerationCounter('tasks'), equals(2));
+
+      await store.meta.unregisterNamespace('tasks');
+      // After unregister the generation counter should be gone (reads as 0).
+      expect(await store.meta.getGenerationCounter('tasks'), equals(0));
+      await store.close();
+    });
+
+    test('is a no-op when namespace is not registered', () async {
+      final adapter = MemoryStorageAdapter();
+      final (store, _) = await _open(adapter);
+      await store.put('notes', _key(1), _bytes('v'));
+
+      // 'tasks' was never written — unregister should not throw.
+      await expectLater(store.meta.unregisterNamespace('tasks'), completes);
+      // notes should still be present.
+      expect(await store.meta.getNamespaces(), contains('notes'));
+      await store.close();
+    });
+
+    test('leaves other namespaces unaffected', () async {
+      final adapter = MemoryStorageAdapter();
+      final (store, _) = await _open(adapter);
+      await store.put('a', _key(1), _bytes('v'));
+      await store.put('b', _key(1), _bytes('v'));
+      await store.put('c', _key(1), _bytes('v'));
+
+      await store.meta.unregisterNamespace('b');
+      final ns = await store.meta.getNamespaces();
+      expect(ns, containsAll(['a', 'c']));
+      expect(ns, isNot(contains('b')));
+
+      // Generation counters for a and c should be unaffected.
+      expect(await store.meta.getGenerationCounter('a'), equals(1));
+      expect(await store.meta.getGenerationCounter('c'), equals(1));
+      await store.close();
+    });
+
+    test('unregistered namespace does not reappear after reopen', () async {
+      final adapter = MemoryStorageAdapter();
+      final (store, _) = await _open(adapter);
+      await store.put('tasks', _key(1), _bytes('v'));
+      await store.meta.unregisterNamespace('tasks');
+      await store.close();
+
+      final (store2, _) = await _open(adapter);
+      expect(await store2.meta.getNamespaces(), isNot(contains('tasks')));
+      await store2.close();
+    });
+  });
 }
