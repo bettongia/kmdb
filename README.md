@@ -34,7 +34,12 @@ insertion and index locality.
 
 ## Features
 
-TODO: List what your package can do. Maybe include images, gifs, or videos.
+- **LSM-Tree Storage**: High-performance storage engine using Log-Structured Merge Trees.
+- **Zstandard Compression**: Integrated Zstd compression for SSTables and WAL.
+- **Reactive Queries**: Watch collections and queries for real-time updates.
+- **Typed API**: Fully-typed document collections with JSON serialization.
+- **Cloud Sync**: Multi-device synchronization via Google Drive and iCloud.
+- **UUIDv7 Keys**: Time-ordered, unique document identifiers.
 
 ## Getting started
 
