@@ -46,7 +46,7 @@ class _AddDocumentDialogState extends State<AddDocumentDialog> {
         ElevatedButton(
           onPressed: () async {
             await widget.onAddJson(_textController.text);
-            if (mounted) {
+            if (context.mounted) {
               Navigator.of(context).pop();
             }
           },

@@ -114,7 +114,7 @@ class _NewCollectionDialogState extends State<NewCollectionDialog> {
     if (name.isEmpty) return;
 
     await provider.createCollection(name);
-    if (mounted) {
+    if (context.mounted) {
       Navigator.pop(context);
     }
   }
