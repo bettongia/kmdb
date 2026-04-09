@@ -35,8 +35,10 @@ class DatabaseProvider with ChangeNotifier {
   ThemeMode _themeMode = ThemeMode.system;
 
   bool _isOpening = false;
+  final StorageAdapter _adapter;
 
-  DatabaseProvider(this.prefs) {
+  DatabaseProvider(this.prefs, {StorageAdapter? adapter})
+    : _adapter = adapter ?? StorageAdapterNative() {
     _loadFromPrefs();
   }
 
@@ -139,10 +141,9 @@ class DatabaseProvider with ChangeNotifier {
       _selectedDocument = null;
       notifyListeners(); // Let the UI show the loading state for the new path
 
-      final adapter = StorageAdapterNative();
       final (store, _) = await KvStoreImpl.open(
         _selectedDatabasePath!,
-        adapter,
+        _adapter,
       );
       _store = store;
 
@@ -264,7 +265,8 @@ class DatabaseProvider with ChangeNotifier {
     }
   }
 
-  Future<void> refreshCollections() => _loadCollections().then((_) => notifyListeners());
+  Future<void> refreshCollections() =>
+      _loadCollections().then((_) => notifyListeners());
 
   @override
   void dispose() {

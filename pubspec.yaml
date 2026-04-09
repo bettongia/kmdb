@@ -23,6 +23,14 @@ melos:
       exec: dart test
       packageFilters:
         dirExists: test
+        flutter: false
+
+    flutter-test:
+      description: Test all packages that use Flutter SDK
+      exec: flutter test
+      packageFilters:
+        dirExists: test
+        flutter: true
 
     e2e-test:
       description: Run the e2e tests
@@ -34,6 +42,7 @@ melos:
       steps:
         - coverage:clean
         - coverage:generate
+        - coverage:generate-flutter
         - coverage:combine
         - coverage:report
 
@@ -48,8 +57,20 @@ melos:
         dart pub global run coverage:test_with_coverage &&
         lcov --summary coverage/lcov.info
       exec:
-        concurrency: 1
+        concurrency: 4
         dir-exists: test
+      packageFilters:
+        flutter: false
+
+    coverage:generate-flutter:
+      description: Test all packages with coverage
+      run: |
+        flutter test --coverage
+      exec:
+        concurrency: 4
+        dir-exists: test
+      packageFilters:
+        flutter: true
 
     coverage:combine:
       description: Combine coverage across packages

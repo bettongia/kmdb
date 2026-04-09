@@ -389,6 +389,44 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
                             : FontWeight.normal,
                       ),
                     ),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.delete_outline, size: 18),
+                      tooltip: 'Delete Document',
+                      onPressed: () {
+                        showDialog(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            title: const Text('Delete Document'),
+                            content: const Text(
+                              'Are you sure you want to delete this document? This action cannot be undone.',
+                            ),
+                            actions: [
+                              TextButton(
+                                child: const Text('Cancel'),
+                                onPressed: () => Navigator.pop(context),
+                              ),
+                              TextButton(
+                                child: const Text(
+                                  'Delete',
+                                  style: TextStyle(color: Colors.red),
+                                ),
+                                onPressed: () async {
+                                  Navigator.pop(context);
+                                  final id = document['_id'];
+                                  if (id != null) {
+                                    await collectionProvider.deleteDocument(id);
+                                    await databaseProvider.refreshCollections();
+                                    if (isSelected) {
+                                      databaseProvider.selectDocument(null);
+                                    }
+                                  }
+                                },
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
                     onTap: () => databaseProvider.selectDocument(document),
                   ),
                 );

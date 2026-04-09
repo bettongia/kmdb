@@ -6,6 +6,7 @@
 COVERAGE_DIR=site/coverage
 KMDB_PKG=packages/kmdb
 KMDB_CLI_PKG=packages/kmdb_cli
+KMDB_UI_PKG=packages/kmdb_ui
 
 ADDLICENSE_CONFIG=addlicense_config.txt
 
@@ -22,7 +23,14 @@ prepare:
 	dart pub global activate coverage
 	melos bootstrap
 
-test: test.log cli_test.log
+test: test.log cli_test.log ui_test.log
+
+
+ui_test: ui_test.log
+.PHONY: ui_test
+
+ui_test.log: $(KMDB_UI_PKG)/**/*.dart
+	melos flutter-test --scope=kmdb_ui | tee ui_test.log
 
 test.log: $(KMDB_PKG)/**/*.dart
 	melos test --scope=kmdb | tee test.log
@@ -106,6 +114,7 @@ clean:
 	rm -rf site
 	rm -f e2e_test.log
 	rm -f test.log
+	rm -f ui_test.log
 	rm -f cli_test.log
 	rm -f coverage.log
 	melos bootstrap

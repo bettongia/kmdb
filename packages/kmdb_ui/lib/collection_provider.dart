@@ -96,4 +96,14 @@ class CollectionProvider with ChangeNotifier {
       notifyListeners();
     }
   }
+
+  Future<void> deleteDocument(String id) async {
+    try {
+      await _store.delete(_collectionName, id);
+      await loadDocuments();
+    } catch (e) {
+      _documents.add({'error': 'Failed to delete document: $e'});
+      notifyListeners();
+    }
+  }
 }
