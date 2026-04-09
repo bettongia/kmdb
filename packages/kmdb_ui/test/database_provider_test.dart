@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import 'package:flutter/material.dart';
-import 'dart:typed_data';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
