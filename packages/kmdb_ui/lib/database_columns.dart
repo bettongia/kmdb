@@ -34,7 +34,7 @@ class DatabaseHistoryColumn extends StatelessWidget {
       decoration: BoxDecoration(
         color: Theme.of(
           context,
-        ).colorScheme.surfaceContainerHighest.withOpacity(0.3),
+        ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
         border: Border(right: BorderSide(color: Colors.grey.shade300)),
       ),
       child: Column(
@@ -103,7 +103,7 @@ class DatabaseHistoryColumn extends StatelessWidget {
                       selected: isSelected,
                       selectedTileColor: Theme.of(
                         context,
-                      ).colorScheme.primaryContainer.withOpacity(0.4),
+                      ).colorScheme.primaryContainer.withValues(alpha: 0.4),
                       title: Text(
                         p.basename(path),
                         style: TextStyle(
@@ -243,9 +243,10 @@ class CollectionListColumn extends StatelessWidget {
                             borderRadius: BorderRadius.circular(8),
                           ),
                           selected: isSelected,
-                          selectedTileColor: Theme.of(
-                            context,
-                          ).colorScheme.secondaryContainer.withOpacity(0.4),
+                          selectedTileColor: Theme.of(context)
+                              .colorScheme
+                              .secondaryContainer
+                              .withValues(alpha: 0.4),
                           title: Text(
                             name,
                             style: TextStyle(
@@ -368,7 +369,7 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
                     selected: isSelected,
                     selectedTileColor: Theme.of(
                       context,
-                    ).colorScheme.tertiaryContainer.withOpacity(0.4),
+                    ).colorScheme.tertiaryContainer.withValues(alpha: 0.4),
                     title: Text(
                       title,
                       style: TextStyle(
