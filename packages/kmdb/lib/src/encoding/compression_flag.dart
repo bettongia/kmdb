@@ -26,11 +26,8 @@ enum CompressionFlag {
   /// No compression — payload is raw CBOR bytes.
   none(0x00),
 
-  /// Zstandard compression (native FFI or WASM).
-  zstd(0x01),
-
-  /// Deflate compression — fallback when Zstd/WASM is unavailable.
-  deflate(0x02);
+  /// Zstandard compression (native FFI via kmdb_zstd).
+  zstd(0x01);
 
   const CompressionFlag(this.byte);
 
@@ -39,11 +36,11 @@ enum CompressionFlag {
 
   /// Parses a [CompressionFlag] from its byte value.
   ///
-  /// Throws [ArgumentError] for unrecognised bytes.
+  /// Throws [ArgumentError] for unrecognised bytes, including the legacy
+  /// Deflate byte (`0x02`) which is no longer supported.
   static CompressionFlag fromByte(int byte) => switch (byte) {
     0x00 => none,
     0x01 => zstd,
-    0x02 => deflate,
     _ => throw ArgumentError.value(
       byte,
       'byte',

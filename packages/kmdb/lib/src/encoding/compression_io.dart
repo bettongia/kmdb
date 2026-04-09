@@ -14,14 +14,14 @@
 
 // Native compression implementation.
 //
-// Uses Zstd (via es_compression's prebuilt FFI bindings) for encoding.
-// Deflate decode is retained so that values written by older builds or web
-// clients (flag 0x02) can still be read on native.
+// Uses Zstd (via kmdb_zstd's FFI bindings compiled from source) for encoding
+// and decoding. Deflate is no longer supported — values written with flag
+// 0x02 by older builds will cause an ArgumentError at the CompressionFlag
+// decode boundary, surfacing the incompatibility clearly.
 
 import 'dart:typed_data';
 
-import 'package:archive/archive.dart';
-import 'package:es_compression/zstd.dart';
+import 'package:kmdb_zstd/zstd.dart';
 
 import 'compression_flag.dart';
 
@@ -30,7 +30,7 @@ import 'compression_flag.dart';
 /// Returns `(CompressionFlag.zstd, compressed)` when the compressed output is
 /// smaller than the input, or `(CompressionFlag.none, data)` otherwise.
 (CompressionFlag, Uint8List) tryCompress(Uint8List data) {
-  final compressed = Uint8List.fromList(ZstdCodec(level: 3).encode(data));
+  final compressed = ZstdSimple(level: 3).compress(data);
   if (compressed.length < data.length) {
     return (CompressionFlag.zstd, compressed);
   }
@@ -39,15 +39,9 @@ import 'compression_flag.dart';
 
 /// Decompresses [data] according to [flag].
 ///
-/// Handles all three flags so that values written with any algorithm —
-/// including Deflate from web clients — can be decoded on native.
-///
 /// Throws [UnsupportedError] for unrecognised flags (guarded upstream by
 /// [CompressionFlag.fromByte]).
 Uint8List decompress(CompressionFlag flag, Uint8List data) => switch (flag) {
   CompressionFlag.none => data,
-  CompressionFlag.zstd => Uint8List.fromList(ZstdCodec().decode(data)),
-  CompressionFlag.deflate => Uint8List.fromList(
-    ZLibDecoder().decodeBytes(data),
-  ),
+  CompressionFlag.zstd => ZstdSimple().decompress(data),
 };

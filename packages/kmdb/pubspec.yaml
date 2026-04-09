@@ -10,12 +10,11 @@ environment:
 resolution: workspace
 
 dependencies:
-  archive: ^4.0.9
   cbor: ^6.5.1
+  kmdb_zstd: any
   meta: any
   uuid: ^4.5.3
   web: ^1.0.0
-  es_compression: ^2.0.15
 
 dev_dependencies:
   build_runner: ^2.13.1
