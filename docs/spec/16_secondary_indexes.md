@@ -137,3 +137,29 @@ When a query includes a filter on an indexed field:
 
 If the index is `building` or `stale`, fall back to a full namespace scan and
 apply all filters in memory.
+
+## Indexes and Sync
+
+Index state and index entries are **device-local** and are **never synced**:
+
+- `$meta` (where index status is stored as `index:{namespace}:{path}`) is a
+  system namespace prefixed with `$`. The sync engine filters out all
+  `$`-prefixed namespaces during SSTable upload, so index state never leaves the
+  device.
+- `$index:*` namespaces (where index entries are stored) are also `$`-prefixed
+  and are therefore excluded from sync by the same rule.
+
+When a device receives SSTables via `pull` or `sync`, documents arrive in user
+namespaces and are indexed locally on the next query that uses the index:
+
+- Indexes that were `current` before the pull may transition to `stale` if the
+  incoming SSTables modified documents in the indexed namespace. A `stale` index
+  is automatically rebuilt on the next query.
+- If incoming SSTables contain tombstones that delete every document in an
+  indexed collection, the CLI's post-pull cleanup (`purgeOrphanedIndexes`)
+  detects this and cascades the same cleanup as `collections delete`: it purges
+  `$index:*` entries, removes the index definitions from `local/config.json`,
+  and unregisters the now-empty collection from `$meta`.
+
+This design keeps index management simple and deterministic: each device
+independently maintains its own indexes based on the documents it holds.

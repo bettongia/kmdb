@@ -285,6 +285,22 @@ final class KvStoreImpl implements KvStore {
     return true;
   }
 
+  /// Removes [namespace] from the persisted namespace registry and deletes its
+  /// generation counter.
+  ///
+  /// This is the inverse of [createNamespace]. It does **not** delete any
+  /// documents — callers should delete all documents in the namespace via
+  /// [writeBatch] before calling this method.
+  ///
+  /// It is a no-op if the namespace is not currently registered.
+  ///
+  /// [namespace] must not start with `$` (system namespaces are reserved).
+  /// Throws [ArgumentError] if that constraint is violated.
+  Future<void> unregisterNamespace(String namespace) async {
+    _guardNamespace(namespace);
+    await _meta.unregisterNamespace(namespace);
+  }
+
   @override
   Future<StoreStats> stats() async {
     final ls = await _engine.levelStats();
@@ -346,6 +362,15 @@ final class KvStoreImpl implements KvStore {
     }
     await _engine.writeBatch(batch);
   }
+
+  /// Returns every distinct namespace string present in storage, including
+  /// system namespaces like `$meta` and `$index:…`.
+  ///
+  /// This is an expensive full-merge scan intended only for infrequent
+  /// administrative operations such as [IndexManager.removeIndex]. Application
+  /// code should use [listNamespaces] for user-visible namespaces.
+  @internal
+  Future<Set<String>> allStoredNamespaces() => _engine.allStoredNamespaces();
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 

@@ -163,6 +163,31 @@ final class MetaStore {
     );
   }
 
+  /// Removes [userNamespace] from the persisted set of known namespaces and
+  /// deletes its generation counter from `$meta`.
+  ///
+  /// Called when a collection is deleted so it no longer appears in
+  /// [getNamespaces]. This is a no-op if the namespace is not currently
+  /// registered.
+  ///
+  /// Other namespaces are unaffected.
+  Future<void> unregisterNamespace(String userNamespace) async {
+    final current = await getNamespaces();
+    if (!current.contains(userNamespace)) return; // already absent — no-op
+
+    // Write the updated namespace list without [userNamespace].
+    final updated = current.where((ns) => ns != userNamespace).toList()..sort();
+    final encoded = cbor.encode(CborList(updated.map(CborString.new).toList()));
+    await _engine.put(
+      kNamespace,
+      _nameToKey(_kNamespacesKey),
+      Uint8List.fromList(encoded),
+    );
+
+    // Remove the generation counter for this namespace.
+    await _engine.delete(kNamespace, _genKey(userNamespace));
+  }
+
   // ── Index state ────────────────────────────────────────────────────────────
 
   /// Returns the `$meta` key for the index state entry of [namespace]/[path].
@@ -184,6 +209,14 @@ final class MetaStore {
   /// Used by the Query Layer to persist index state atomically.
   Future<void> putRawByName(String name, Uint8List bytes) =>
       _engine.put(kNamespace, _nameToKey(name), bytes);
+
+  /// Deletes the entry stored under the symbolic [name] in `$meta`.
+  ///
+  /// This is a no-op if [name] has never been written. Used by
+  /// [IndexManager.removeIndex] to clear the persisted index state for a
+  /// deleted index.
+  Future<void> deleteRawByName(String name) =>
+      _engine.delete(kNamespace, _nameToKey(name));
 
   // ── Key encoding ───────────────────────────────────────────────────────────
 

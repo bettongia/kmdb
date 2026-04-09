@@ -18,6 +18,14 @@ dev_dependencies:
 
 melos:
   scripts:
+    analyze:
+      description: Analyze all packages
+      exec: dart analyze
+
+    format:
+      description: Format dart code
+      exec: dart format lib test
+
     test:
       description: Test all packages
       exec: dart test
