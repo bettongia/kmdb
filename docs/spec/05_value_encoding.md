@@ -31,47 +31,44 @@ Dart object (T)
 Map<String, dynamic>
     ↓  cbor.encode()              // ~20–30% smaller than JSON; native Uint8List support
 Uint8List (CBOR bytes)
-    ↓  Zstd (preferred) or Deflate (web fallback)   // further 30–50% reduction on typical documents
-Uint8List (compressed, if ratio > 1.1×)
-    ↓  1-byte compression flag    // prepended: 0x00 = raw, 0x01 = Zstd, 0x02 = Deflate
+    ↓  Zstd (native only)        // further 30–50% reduction on typical documents
+Uint8List (compressed, if ratio > 1.1×, else original CBOR bytes)
+    ↓  1-byte compression flag    // prepended: 0x00 = raw, 0x01 = Zstd
 SSTable slot value
 ```
+
+Web clients always use flag `0x00` (uncompressed). The WASM Zstd path is
+reserved for a future release (see §Zstd Dictionary Compression below).
 
 ## Compression Flag
 
 Each stored value is prefixed with a 1-byte compression flag:
 
-| Flag   | Algorithm | Platform                    | Notes                                                          |
-| :----- | :-------- | :-------------------------- | :------------------------------------------------------------- |
-| `0x00` | None      | All                         | Used when value is small or already compressed.                |
-| `0x01` | Zstd      | Native (FFI) + Web (WASM)   | Level 1 (fastest). Preferred on all platforms via `zstandard`. |
-| `0x02` | Deflate   | Web — WASM unavailable only | Pure Dart via `archive` package. ~10% worse ratio. Fallback.   |
+| Flag   | Algorithm | Platform       | Notes                                                              |
+| :----- | :-------- | :------------- | :----------------------------------------------------------------- |
+| `0x00` | None      | All            | Used when value is small, already compressed, or written on web.   |
+| `0x01` | Zstd      | Native (FFI)   | Level 3. Via `kmdb_zstd` (compiles libzstd from source via `native_toolchain_c`). |
+
+Any other flag byte is rejected with `ArgumentError` — unknown flags indicate
+data written by a future version of KMDB or silent corruption.
 
 The 1.1× threshold means compression is only applied when the compressed form
 is at least 9% smaller than the original. Values that do not compress well —
 already-compressed images, encrypted blobs — are stored raw with flag `0x00`.
 
-The flag makes the compression choice self-describing. A database can contain a
-mix of values compressed by different algorithms, and cross-platform reads are
-transparent: a value written with Zstd on a native device is correctly
-decompressed by a web client because the flag identifies the algorithm.
+## Cross-Platform Reads
 
-## Cross-Platform Transparency
+Native clients write Zstd (`0x01`); web clients write uncompressed (`0x00`).
+Both can read `0x00` values transparently. Web clients receiving an SSTable
+written by a native client will encounter `0x01` values; attempting to decode
+these throws `UnsupportedError` — WASM Zstd decompression is not yet
+implemented on web (tracked in the roadmap). For the current release, sync
+between native and web clients requires the web client to operate in a
+native-primary setup where it only reads documents it wrote itself.
 
-All platforms prefer Zstd. On native, this is `dart:ffi` to libzstd. On web, this
-is the `zstandard` WASM module. Both produce identical output for the same input,
-so cross-device reads are transparent:
-
-1. Native client writes a value → Zstd (flag `0x01`) → uploaded to sync folder
-2. Web client downloads the SSTable
-3. Reads the 1-byte flag: `0x01` (Zstd)
-4. Decompresses using the WASM Zstd module (identical algorithm, identical output)
-5. Decodes the CBOR bytes → passes `Map<String, dynamic>` to `codec.decode()`
-
-The Deflate fallback (`0x02`) is used only on web browsers where WASM is
-unavailable. Native clients reading a `0x02` value use `archive`'s Inflate
-decompressor. This path should be rare in practice — all modern browsers support
-WASM.
+Cross-native reads are fully transparent: any native device can decompress any
+other native device's Zstd values because `kmdb_zstd` produces standard Zstd
+frames.
 
 ## CBOR Boundary
 

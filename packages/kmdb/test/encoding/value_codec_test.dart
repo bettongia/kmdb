@@ -14,7 +14,6 @@
 
 import 'dart:typed_data';
 
-import 'package:archive/archive.dart';
 import 'package:cbor/cbor.dart';
 import 'package:test/test.dart';
 
@@ -27,20 +26,23 @@ void main() {
   group('CompressionFlag', () {
     test('none byte is 0x00', () => expect(CompressionFlag.none.byte, 0x00));
     test('zstd byte is 0x01', () => expect(CompressionFlag.zstd.byte, 0x01));
-    test(
-      'deflate byte is 0x02',
-      () => expect(CompressionFlag.deflate.byte, 0x02),
-    );
 
     test('fromByte round-trips all known values', () {
       expect(CompressionFlag.fromByte(0x00), CompressionFlag.none);
       expect(CompressionFlag.fromByte(0x01), CompressionFlag.zstd);
-      expect(CompressionFlag.fromByte(0x02), CompressionFlag.deflate);
     });
 
     test('fromByte throws on unknown byte', () {
       expect(
         () => CompressionFlag.fromByte(0xFF),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
+    test('fromByte throws on legacy Deflate byte (0x02)', () {
+      // Deflate is no longer supported — clean break for pre-release.
+      expect(
+        () => CompressionFlag.fromByte(0x02),
         throwsA(isA<ArgumentError>()),
       );
     });
@@ -149,24 +151,18 @@ void main() {
       expect(() => CompressionFlag.fromByte(bytes[0]), returnsNormally);
     });
 
-    test('cross-flag: Deflate-encoded value decodes correctly on native', () {
-      // Manually construct a payload encoded with Deflate (flag 0x02) as a
-      // web client would produce, then verify native can decode it.
+    test('legacy Deflate-encoded payload (flag 0x02) throws ArgumentError', () {
+      // Deflate (flag 0x02) is no longer supported — clean break.
+      // Any stored value bearing the legacy flag must surface a clear error.
       final doc = {for (var i = 0; i < 20; i++) 'k$i': 'v' * 10};
       final cborBytes = Uint8List.fromList(cbor.encode(CborValue(doc)));
-      final deflated = Uint8List.fromList(ZLibEncoder().encode(cborBytes));
 
-      // Build the on-disk byte sequence: [0x02][deflated CBOR].
-      final stored = Uint8List(1 + deflated.length);
-      stored[0] = CompressionFlag.deflate.byte;
-      stored.setAll(1, deflated);
+      // Build the on-disk byte sequence: [0x02][raw CBOR].
+      final stored = Uint8List(1 + cborBytes.length);
+      stored[0] = 0x02; // legacy Deflate flag byte
+      stored.setAll(1, cborBytes);
 
-      final decoded = ValueCodec.decode(stored);
-      // CBOR round-trips integers as int; list values come back as List.
-      expect(decoded.keys, containsAll(doc.keys));
-      for (final k in doc.keys) {
-        expect(decoded[k], equals(doc[k]));
-      }
+      expect(() => ValueCodec.decode(stored), throwsA(isA<ArgumentError>()));
     });
 
     test('compression threshold boundary: 63-byte CBOR is uncompressed', () {
@@ -214,10 +210,11 @@ void main() {
       expect(() => ValueCodec.decode(bad), throwsA(isA<ArgumentError>()));
     });
 
-    test('throws on truncated deflate payload', () {
-      // 0x02 = deflate, followed by garbage bytes that cannot be inflated.
+    test('throws ArgumentError on legacy deflate flag byte (0x02)', () {
+      // 0x02 = legacy Deflate flag — no longer supported. CompressionFlag
+      // .fromByte throws ArgumentError before decompression is even attempted.
       final bad = Uint8List.fromList([0x02, 0xDE, 0xAD, 0xBE, 0xEF]);
-      expect(() => ValueCodec.decode(bad), throwsA(anything));
+      expect(() => ValueCodec.decode(bad), throwsA(isA<ArgumentError>()));
     });
 
     test('throws on truncated zstd payload', () {

@@ -23,13 +23,14 @@ import 'package:native_toolchain_c/native_toolchain_c.dart';
 void main(List<String> args) async {
   print('hello');
   await build(args, (input, output) async {
+    // Always use dynamic linking. dart build cli bundles the resulting dylib
+    // alongside the executable in the output bundle's lib/ directory, so the
+    // binary can locate it at runtime without any link-hook step.
     final cBuilder = CBuilder.library(
       name: 'zstd',
       assetName: 'src/zstd_base.dart',
       sources: ['third_party/zstd/src/zstd.c'],
-      linkModePreference: input.config.linkingEnabled
-          ? LinkModePreference.static
-          : LinkModePreference.dynamic,
+      linkModePreference: LinkModePreference.dynamic,
     );
     await cBuilder.run(
       input: input,
@@ -37,9 +38,7 @@ void main(List<String> args) async {
       logger: Logger('')
         ..level = Level.ALL
         ..onRecord.listen((record) => print(record.message)),
-      routing: input.config.linkingEnabled
-          ? [ToLinkHook(input.packageName)]
-          : [const ToAppBundle()],
+      routing: [const ToAppBundle()],
     );
   });
 }
