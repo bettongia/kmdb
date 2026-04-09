@@ -32,7 +32,9 @@ class DatabaseHistoryColumn extends StatelessWidget {
     final provider = context.watch<DatabaseProvider>();
     return Container(
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
+        color: Theme.of(
+          context,
+        ).colorScheme.surfaceContainerHighest.withOpacity(0.3),
         border: Border(right: BorderSide(color: Colors.grey.shade300)),
       ),
       child: Column(
