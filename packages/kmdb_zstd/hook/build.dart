@@ -21,7 +21,6 @@ import 'package:native_toolchain_c/native_toolchain_c.dart';
 ///
 /// Compiles the Zstd C library for the target platform.
 void main(List<String> args) async {
-  print('hello');
   await build(args, (input, output) async {
     // Always use dynamic linking. dart build cli bundles the resulting dylib
     // alongside the executable in the output bundle's lib/ directory, so the

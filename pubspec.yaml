@@ -89,6 +89,7 @@ melos:
         - lcov --summary site/coverage/lcov.info
 
     coverage:aggregate:
+      description: Combine the package coverage files
       run: $MELOS_ROOT_PATH/scripts/combine_coverage.sh
       exec:
         file-exists: coverage/lcov.info
