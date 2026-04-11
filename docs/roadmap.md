@@ -4,9 +4,9 @@ subtitle: Ideas, unfilfilled
 toc-title: "Contents"
 ...
 
-# Command line interface (CLI) (High priority)
+# Command line interface REPL (Low priority)
 
-Implement a CLI that allows users to interact with the KMDB database via either batch operations or in an interactive REPL. The CLI should be its own package and may require the current codebase to move to a monorepo that utilises Pub Workspaces.
+Implement interactive REPL in the CLI that allows users to interact with the KMDB database in an interactive way.
 
 # SAHPool OPFS (High priority)
 
