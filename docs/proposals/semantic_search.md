@@ -4,127 +4,106 @@ Semantic search handles "intent" and "themes," allowing a search for "memory
 leak" to find documents discussing "garbage collection issues" even if the words
 don't match.
 
-### Phase A — Research Spike
+The approach used in kmdb will be to use a small embedding model to generate
+vectors.
 
-Resolve the blocking unknowns that gate all subsequent phases. No implementation
-work should begin on Phases B–E until the questions below are answered.
+## Example
 
-#### A.1 Embedding Model Selection
+A [spike solution (bge_embeddings)](../../spikes/bge_embeddings/) has been
+prepared in order to validate the viability of the approach and configure the
+FFI bindings against the ONNX runtime.
 
-Semantic search requires converting document text to floating-point vector
-arrays (embeddings) using a local transformer model, hosted via
-[LiteRT](https://ai.google.dev/edge/litert). The model choice is not yet
-decided.
+Running the following command provides the normalized 384-dim vector (as a JSON
+array) constructed from the input text:
 
-A model such as Gemma 4 has been suggested, which would allow for "swapping in"
-other models at a future date.
+```sh
+cat sample.txt | dart bin/embed.dart >sample.out
+```
 
-> **[Review]:** Gemma is a _generative_ (decoder-only) model, not an embedding
-> model. Using it to produce document embeddings is non-standard and would
-> require techniques like mean-pooling over the last hidden state, which yields
-> lower-quality embeddings than purpose-built bi-encoder models. Since
-> generative model use cases (summarisation, agents) are explicitly out of scope
-> (§3), there is no longer a reason to prefer Gemma. For local embedding
-> generation, consider purpose-built encoder-only models instead:
->
-> - [`all-MiniLM-L6-v2`](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2)
->   (~22MB, 384d, English) — smallest production-quality option
-> - [`multilingual-e5-small`](https://huggingface.co/intfloat/multilingual-e5-small)
->   (~120MB, 384d) — if multi-language support is needed
->
-> Both can be exported to TFLite/LiteRT format and are a fraction of Gemma's
-> size, which matters significantly on mobile where bundle size and memory are
-> constrained.
+The first entries in `sample.out` appear as follows:
 
-#### A.2 LiteRT FFI Evaluation
+```json
+[-0.07721628383415412,0.03673409050198489,0.03330454097121675,0.02108989652240076,-0.031751226672150155,-0.002696639549431111,-0.04909326037047926,-0.012217435974202587,0.021918372141368304,-0.04907746934157675,-0.051221672782060725,-0.07480958737533583,0.006425653074367868,0.04452357794339675,0.09581140635971289,0.019036522849333732,-0.00844384495910596,0.10933875708540869,-0.017508018680764223,-0.049802242625170634,0.09278090358391061,-0.10388749391167917,0.0490493211316716,-0.01149763019952789,0.011815127116102553,0.028726760708876573,-0.018008032568614954,...]
+```
 
-Hosting a transformer model requires FFI work to create a Dart library that
-interfaces with LiteRT.
+With an input size of 1.5Kb (sample.txt), the resulting output is about 9Kb.
 
-> **[Review]:** The FFI requirement is a significant undertaking and likely
-> warrants its own plan. Key questions:
->
-> 1. LiteRT is a C++ library. The FFI binding will need to be written and
->    maintained for each target platform (Android, iOS, macOS, Windows, Linux).
->    Is there an existing Dart/Flutter package (e.g. `tflite_flutter`) that
->    could provide this, or is a custom binding required? Note that the
->    constraint in §2 (no Flutter) rules out Flutter-dependent packages — a
->    pure-Dart or custom native binding is likely required.
-> 2. How is the model file distributed? Bundled with the app (inflating install
->    size), downloaded on first use (requires network, latency), or provided by
->    the platform (reduces portability)? This is a critical UX and
->    infrastructure decision.
-> 3. What is the inference latency budget? Embedding a query on-device before
->    each search adds latency. On a low-end mobile device, how long does a
->    single embedding call take with a small model like `all-MiniLM`?
+Running the following will output the token count and token list:
 
-#### C.1 Embeddings & Similarity Metric
+```sh
+cat sample.txt | dart bin/tokens.dart
+```
 
-Text is converted into floating-point arrays (embeddings) using the model
-selected in Phase A. The similarity between the query vector ($A$) and a
-document vector ($B$) is measured using cosine similarity:
+Output:
+
+```sh
+Count : 290
+Tokens: ["[CLS]","b","##ge","landmark","em","##bed","##ding","a","chunk","##ing","##-","##free","em","##bed","##ding","method","for","retrieval","augmented","long","##-","##con","##text","large","language","models","https","ar","##xi","##v","org","abs","240","##2","115","##7","##3","large","language","models","ll","##ms","call","for","extension","of","context","to","handle","many","critical","applications","however","the","existing","approaches","are","prone","to","expensive","costs","and","inferior","quality","of","context","extension","in","this","work","we","propose","##ex","##tens","##ible","em","##bed","##ding","which","realizes","high","##-","##qual","##ity","extension","of","ll","##m","##'","##s","context","with","strong","flexibility","and","cost","##-","##ef","##fect","##ive","##ness","ex","##tens","##ible","em","##bed","##ding","stand","as","an","enhancement","of","typical","token","em","##bed","##ding","which","represents","the","information","for","an","ex","##tens","##ible","scope","of","context","instead","of","a","single","token","by","lever","##aging","such","compact","input","units","of","higher","information","density","the","ll","##m","can","access","to","a","vast","scope","of","context","even","with","a","small","context","window","ex","##tens","##ible","em","##bed","##ding","is","systematically","opt","##imi","##zed","in","architecture","and","training","method","which","leads","to","multiple","advantages","1","high","flexibility","of","context","extension","which","flex","##ibly","supports","ad","##-","##ho","##c","extension","of","diverse","context","lengths","2","strong","sample","efficiency","of","training","which","enables","the","em","##bed","##ding","model","to","be","learned","in","a","cost","##-","##ef","##fect","##ive","way","3","superior","compatibility","with","the","existing","ll","##ms","where","the","ex","##tens","##ible","em","##bed","##ding","can","be","seam","##lessly","introduced","as","a","plug","##-","##in","component","comprehensive","evaluation","##s","on","long","##-","##con","##text","language","modeling","and","understanding","tasks","verify","ex","##tens","##ible","em","##bed","##ding","as","an","effective","efficient","flexible","and","compatible","method","to","extend","the","ll","##m","##'","##s","context","[SEP]"]
+```
+
+## Design
+
+### Embedding Model Selection
+
+The [BGE Small En v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5) model
+will be used in this work. The rationale for this is based on a reasonable token
+limit that should be able to handle article-length tests of around 10 pages. The
+model features:
+
+- ~130MB, 384 dimensions, handles up to 512 tokens
+- Consistently outperforms MiniLM-L6 on retrieval benchmarks despite similar
+  size
+- Specifically strong on passage retrieval, which maps well to academic search
+
+### Tokenisation
+
+The same tokenisation process will be used in this work and the
+[Lexical Search](lexical_search.md) part of this proposal. The
+[icu_tokenizer](../..spikes/icu_tokenizer) spike solution has proven out the
+tokeniser approach.
+
+### Chunking
+
+Chunking by ~512 tokens with overlap will be utilised in this body of work. The
+spike solution implements a very basic chunking solution
+
+Future work may look to chunk by sentence, paragraph or section (intro, methods,
+results, etc.).
+
+### Embeddings & Similarity Metric
+
+Text is converted into floating-point arrays (embeddings) using the selected
+model. The similarity between the query vector ($A$) and a document vector ($B$)
+is measured using cosine similarity:
 
 $$\text{similarity} = \cos(\theta) = \frac{\sum_{i=1}^{n} A_i B_i}{\sqrt{\sum_{i=1}^{n} A_i^2} \sqrt{\sum_{i=1}^{n} B_i^2}}$$
 
-> **[Review]:** If SQ8 quantization (§C.2) is applied, cosine similarity on
-> 8-bit integer vectors requires adapted arithmetic. Clarify whether the
-> similarity computation happens on the quantized or dequantized vectors, and
-> what the accuracy impact is.
+This is implemented in the
+[`cosineSimilarity`](../../spikes/bge_embeddings/lib/src/math_utils.dart)
+function.
 
-#### C.2 Optimizations: Matryoshka & Quantization
-
-There are a few optimisation approaches to consider:
-
-- [Matryoshka Embeddings](https://arxiv.org/abs/2205.13147): Allows truncating
-  768d vectors to 128d with \<2% accuracy loss, reducing memory usage by 6x.
-- Scalar Quantization (SQ8): Converts 32-bit floats to 8-bit integers. This
-  allows for SIMD (Single Instruction, Multiple Data) acceleration on ARM/x86
-  CPUs.
-
-See also:
-[Vector Quantization Survey and Selection Guide](https://doris.apache.org/docs/dev/ai/vector-search/quantization-survey)
-
-> **[Review]:** Matryoshka requires the _model_ to have been trained with
-> Matryoshka Representation Learning (MRL). Not all models support it — confirm
-> that the chosen embedding model was trained with MRL before relying on this
-> optimization. If starting from 384d (e.g. `all-MiniLM`) rather than 768d, the
-> memory saving is smaller but the baseline is already compact.
-
-#### C.3 Cross-Platform Index Strategy
+### Index Strategy
 
 As kmdb is designed to operate across mobile, web and desktop platforms, and
 that the database is not expected to be large, it is likely that the "Flat
 Index + SQ8" approach will provide the best approach.
 
-Further investigation is needed.
+At <50k items, brute-force scanning quantized vectors is faster and likely more
+battery-efficient than building complex graphs.
 
-| Platform | Vector Indexing Algorithm | Rationale                                                                                                                 |
-| :------- | :------------------------ | :------------------------------------------------------------------------------------------------------------------------ |
-| Mobile   | Flat Index + SQ8          | At \<50k items, brute-force scanning quantized vectors is faster and more battery-efficient than building complex graphs. |
-| Desktop  | HNSW (Graph-based)        | Fast O(log n) retrieval. Desktop RAM allows for the high memory overhead of the hierarchical graph.                       |
-| Web      | IVF-Flat (Clustering)     | Groups vectors into clusters. Only searches the N closest clusters to keep the main thread responsive. _See Phase E._     |
+### Open design questions
 
-> **[Review]:** The table and the preceding paragraph contradict each other. The
-> paragraph states the database "is not expected to be large" and that Flat
-> Index + SQ8 "will provide the best approach," yet the table then proposes HNSW
-> for desktop and IVF-Flat for web. If the data size assumptions hold (< 50k
-> items, as stated for mobile), the same reasoning applies on desktop and web —
-> HNSW and IVF-Flat add implementation and maintenance complexity with no
-> benefit at this scale.
->
-> **Question:** What is the evidence that desktop databases will be
-> substantially larger than mobile? If the data is synced across devices, the
-> item counts should be comparable. The simpler approach would be to commit to
-> Flat Index + SQ8 across all platforms for the initial implementation, with a
-> clear upgrade path documented for when item counts warrant it.
+Many questions that arise in this design are also applicable to the
+[Lexical Search](lexical_search.md) sub-proposal and are answered in that
+document.
 
-#### C.4 Open Questions for Phase C
+#### Q: How are inserts, updates and deletes handled?
 
-2. Can the vector index be built lazily, on first query? (Shared with Phase B.)
-3. Should the vectors be stored using the [vault](vault.md) rather than in the
-   KV/Storage Engine?
-4. Can users opt out of vector search specifically? (Shared with Phase A Q4 —
-   the opt-out design must be decided before the storage strategy is locked.)
-5. As the keyword and vector indexes can be expensive to create, do we need to
-   consider an approach where the indexes are synchronised so that other devices
-   don't need to generate the index locally?
+Each document write must update the index. Modifications that include the
+indexed field as well as the deletion of documents present the need to update
+the index.
+
+##### A:?
+
+Can the Base index + overlay pattern used in the Lexical Search proposal also
+work here?

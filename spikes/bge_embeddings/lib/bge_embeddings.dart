@@ -22,3 +22,5 @@ export 'src/ort_library.dart';
 export 'src/math_utils.dart';
 
 export 'src/embedding.dart';
+
+export 'src/tokenizer.dart';

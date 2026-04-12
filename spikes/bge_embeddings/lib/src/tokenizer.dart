@@ -76,6 +76,13 @@ class BertTokenizer {
     );
   }
 
+  /// Map token IDs back to their original strings from the vocabulary.
+  List<String> decode(List<int> ids) {
+    final inverse = <int, String>{};
+    _vocab.forEach((k, v) => inverse[v] = k);
+    return ids.map((id) => inverse[id] ?? '[UNK]').toList();
+  }
+
   String _normalize(String text) {
     final buf = StringBuffer();
     for (final char in text.toLowerCase().runes) {
