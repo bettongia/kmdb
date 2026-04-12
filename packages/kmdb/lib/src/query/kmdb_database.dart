@@ -16,6 +16,9 @@ import '../cache/cache_layer.dart';
 import '../engine/kvstore/kv_store.dart';
 import '../engine/kvstore/kv_store_impl.dart';
 import '../engine/platform/storage_adapter_interface.dart';
+import '../search/embedding_model.dart';
+import '../search/fts_index_definition.dart';
+import '../search/vec_index_definition.dart';
 import 'exceptions.dart';
 import 'index/index_definition.dart';
 import 'index/index_manager.dart';
@@ -44,6 +47,20 @@ import 'kmdb_collection.dart';
 /// );
 /// ```
 ///
+/// ## Text Search
+///
+/// Text search indexes are configured at open time:
+///
+/// ```dart
+/// final db = await KmdbDatabase.open(
+///   path: '/path/to/database',
+///   adapter: MemoryStorageAdapter(),
+///   ftsIndexes: [FtsIndexDefinition(collection: 'docs', field: 'body')],
+///   vecIndexes: [VecIndexDefinition(collection: 'docs', field: 'body')],
+///   embeddingModel: await OnnxEmbeddingModel.load(), // required for vecIndexes
+/// );
+/// ```
+///
 /// ## Collections
 ///
 /// ```dart
@@ -61,13 +78,22 @@ final class KmdbDatabase {
     required CacheLayer cache,
     required KvStoreImpl store,
     required IndexManager indexManager,
+    required List<FtsIndexDefinition> ftsIndexes,
+    required List<VecIndexDefinition> vecIndexes,
+    required EmbeddingModel? embeddingModel,
   }) : _cache = cache,
        _store = store,
-       _indexManager = indexManager;
+       _indexManager = indexManager,
+       _ftsIndexes = ftsIndexes,
+       _vecIndexes = vecIndexes,
+       _embeddingModel = embeddingModel;
 
   final CacheLayer _cache;
   final KvStoreImpl _store;
   final IndexManager _indexManager;
+  final List<FtsIndexDefinition> _ftsIndexes;
+  final List<VecIndexDefinition> _vecIndexes;
+  final EmbeddingModel? _embeddingModel;
 
   // ── Factory ─────────────────────────────────────────────────────────────────
 
@@ -86,6 +112,22 @@ final class KmdbDatabase {
   /// index build was interrupted by an unclean shutdown. The application
   /// decides when to trigger a rebuild.
   ///
+  /// [ftsIndexes] declares full-text search (BM25) indexes. These are built
+  /// lazily by `FtsManager` (implemented in plan 2). Defaults to empty.
+  ///
+  /// [vecIndexes] declares vector (semantic) search indexes. These are built
+  /// lazily by `VecManager` (implemented in plan 3). Requires [embeddingModel]
+  /// to be non-null when this list is non-empty. Defaults to empty.
+  ///
+  /// [embeddingModel] is the text-to-vector embedding model used by
+  /// `VecManager`. Must be supplied when [vecIndexes] is non-empty.
+  /// Throws [ArgumentError] if [vecIndexes] is non-empty and this is null.
+  ///
+  /// [onSearchIndexReady] is called when all text search indexes (FTS and
+  /// vector) have transitioned out of `syncing` or `building` state to
+  /// `current`. Intended for Flutter apps to re-enable search UI after a sync
+  /// delta has been fully applied.
+  ///
   /// [deviceId] must be an 8-character lowercase hex string. Defaults to
   /// `'00000000'` for tests; production code should supply a stable per-device
   /// identifier via `DeviceId.load`.
@@ -100,7 +142,19 @@ final class KmdbDatabase {
     onIndexRebuildRequired,
     KvStoreConfig config = const KvStoreConfig(),
     String deviceId = '00000000',
+    List<FtsIndexDefinition> ftsIndexes = const [],
+    List<VecIndexDefinition> vecIndexes = const [],
+    EmbeddingModel? embeddingModel,
+    void Function()? onSearchIndexReady,
   }) async {
+    // Validate that an embedding model is provided when vector indexes are
+    // requested. We check this before any I/O so the error is immediate.
+    if (vecIndexes.isNotEmpty && embeddingModel == null) {
+      throw ArgumentError(
+        'embeddingModel is required when vecIndexes is non-empty',
+      );
+    }
+
     final (store, openResult) = await KvStoreImpl.open(
       path,
       adapter,
@@ -130,6 +184,9 @@ final class KmdbDatabase {
       cache: cache,
       store: store,
       indexManager: indexManager,
+      ftsIndexes: ftsIndexes,
+      vecIndexes: vecIndexes,
+      embeddingModel: embeddingModel,
     );
   }
 
@@ -164,6 +221,20 @@ final class KmdbDatabase {
   /// After [close] returns, this instance must not be used again.
   Future<void> close({bool flush = true}) => _cache.close(flush: flush);
 
+  // ── Text search — stubbed until plans 2 and 3 are implemented ─────────────
+
+  /// The full-text search (FTS) manager.
+  ///
+  /// Returns `null` in this stub implementation. Will be populated by plan 2
+  /// (lexical search) with a `FtsManager` instance.
+  dynamic get ftsManager => null;
+
+  /// The vector (semantic) search manager.
+  ///
+  /// Returns `null` in this stub implementation. Will be populated by plan 3
+  /// (semantic search) with a `VecManager` instance.
+  dynamic get vecManager => null;
+
   // ── Internal (used by KmdbCollection) ─────────────────────────────────────
 
   /// The cache-aware read path.
@@ -174,4 +245,13 @@ final class KmdbDatabase {
 
   /// The index manager for write interception and lazy build.
   IndexManager get indexManager => _indexManager;
+
+  /// The FTS index definitions configured at open time.
+  List<FtsIndexDefinition> get ftsIndexes => _ftsIndexes;
+
+  /// The vector index definitions configured at open time.
+  List<VecIndexDefinition> get vecIndexes => _vecIndexes;
+
+  /// The embedding model configured at open time (null if no vector indexes).
+  EmbeddingModel? get embeddingModel => _embeddingModel;
 }

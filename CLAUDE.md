@@ -41,8 +41,12 @@ only; all source code lives under `packages/`:
 
 ```
 packages/
-  kmdb/        — the core library (lib/, test/, example/)
-  kmdb_cli/    — the CLI tool (bin/, lib/, test/)
+  kmdb/                — the core library (lib/, test/, example/)
+  kmdb_cli/            — the CLI tool (bin/, lib/, test/)
+  kmdb_zstd/           — Zstd FFI compression provider
+  kmdb_ui/             — Flutter UI widgets
+  kmdb_tokenizer_icu/  — ICU FFI word tokeniser for lexical search
+  kmdb_inferencing/    — ONNX Runtime + BGE embedding model for semantic search
 ```
 
 Run `dart pub get` once from the workspace root to resolve dependencies for all
