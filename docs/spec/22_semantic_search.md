@@ -152,11 +152,17 @@ more battery-efficient than maintaining a graph-based approximate nearest
 neighbour index (HNSW, IVF-Flat, etc.):
 
 1. Run inference on the query string using the same pipeline as indexing.
-2. Prefix-scan `$vec:{ns}:{field}:` to retrieve all `(docId, Uint8List)` pairs.
-3. Dequantize each stored vector to float32.
-4. Compute the dot product of the dequantized document vector with the query
+2. If a `filter` was provided, resolve the set of matching docIds using
+   secondary indexes (§16) if available, or a full namespace scan with
+   in-memory filter evaluation otherwise. This produces a `candidateIds` set.
+3. Fetch `(docId, Uint8List)` vector entries: if `candidateIds` is set, perform
+   targeted key lookups (`$vec:{ns}:{field}:{docId}` per id) rather than a full
+   prefix scan. When no filter is present, prefix-scan `$vec:{ns}:{field}:` to
+   retrieve all entries.
+4. Dequantize each stored vector to float32.
+5. Compute the dot product of the dequantized document vector with the query
    vector. Because both are L2-normalized, dot product equals cosine similarity.
-5. Rank by score descending. Return the top-`--candidates` results for hybrid
+6. Rank by score descending. Return the top-`--candidates` results for hybrid
    RRF (§23) or top-`--limit` for semantic-only queries.
 
 When multiple fields are searched, take the highest per-field cosine similarity
@@ -168,3 +174,36 @@ All `$vec:` system namespaces are exempt from the session object cache and the
 materialised view cache. Semantic index data does not pass through these caches
 and therefore does not trigger namespace generation counter churn on document
 writes.
+
+## Post-Sync Delta Rebuild
+
+When documents arrive via sync, `VecManager` receives a `SyncDelta` event
+carrying the `(docId, changeType)` pairs for the namespace (§20.8). Processing
+follows the same structure as FTS delta processing (§21) with ONNX inference
+replacing tokenisation.
+
+For each entry in the delta:
+
+- **Added / updated** — fetch the current document value, run inference to
+  produce a 384-dim embedding, quantize to SQ8, and write using the same insert
+  / update path as §22 Write Behaviour.
+- **Deleted** — write DELETE entries and decrement corpus stats as per the
+  delete path in §22 Write Behaviour. No inference is required.
+
+Each document is committed in its own `WriteBatch`.
+
+**Inference is asynchronous for delta processing.** For local writes, inference
+runs synchronously before the document `WriteBatch` is committed — this is
+necessary to guarantee that a document and its embedding are never out of sync.
+For delta processing, the `WriteBatch` for the document itself has already been
+committed by the LSM engine during SSTable ingestion; there is no consistency
+risk in running inference asynchronously in the calling isolate. Applications
+must ensure delta processing runs on a background isolate (§20.8) so that
+ONNX inference does not block the UI thread.
+
+ONNX inference is the throughput bottleneck for vec delta processing.
+First-load scenarios on mobile devices — where the full collection arrives via
+sync — can take from several seconds to several minutes depending on collection
+size and device capability. Applications should surface a progress indicator
+for collections of meaningful size and allow search to begin against the
+(pre-sync) index while the delta is applied.

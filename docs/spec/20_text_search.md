@@ -166,7 +166,7 @@ All text search functionality is surfaced under the `search` command:
 ```
 # Index management
 kmdb <db> search list   <collection> [--semantic]
-kmdb <db> search create <collection> <field> [--lazy] [--semantic]
+kmdb <db> search create <collection> <field> [--lazy] [--stopwords] [--semantic]
 kmdb <db> search info   <collection> <field> [--semantic]
 kmdb <db> search delete <collection> <field> [--semantic]
 kmdb <db> search build  <collection> <field> [--force] [--semantic]
@@ -176,7 +176,7 @@ kmdb <db> search <collection> "<query terms>"
           [--fields <field1,field2,...>]
           [--filter <json>]
           [--select <field1,field2,...>]
-          [--mode auto|lexical|semantic]
+          [--mode auto|lexical|semantic]   (default: auto)
           [--candidates <n>]
           [--limit <n>] [--offset <n>]
           [--verbose]
@@ -185,6 +185,11 @@ kmdb <db> search <collection> "<query terms>"
 
 The `--semantic` flag on management subcommands targets semantic (vector)
 indexes. Without it, the subcommand targets lexical (FTS) indexes.
+
+The `--stopwords` flag on `create` enables the Stopwords ISO `en` stop-word
+list for the new lexical index (Stage 3 of the preprocessing pipeline). It is
+silently ignored when `--semantic` is also present, since vector indexes have
+no stop-word filtering stage.
 
 The first positional argument after `search` is inspected: if it matches a known
 subcommand name (`list`, `create`, `info`, `delete`, `build`) the invocation is
@@ -208,3 +213,84 @@ $vec:truncated: — semantic truncation markers
 Text search indexes are rebuilt locally on each device from the documents that
 device holds. They are never uploaded in SSTables or referenced in high-water
 mark files.
+
+## Post-Sync Index Maintenance
+
+Text search indexes are device-local and are never synced (§20.7). When
+documents arrive via sync they bypass the Query Layer's write interception path
+and are written directly into the LSM engine as SSTables. FTS and vector indexes
+are therefore not updated inline and must be brought current as a separate
+post-sync step.
+
+### The `syncing` Lifecycle State
+
+Text search indexes extend the four-state lifecycle shared with secondary indexes
+(`undefined` → `building` → `current` / `stale`) with a fifth state: `syncing`.
+This state indicates that a sync pull has delivered documents the index has not
+yet processed.
+
+| State     | Description                                              | Search behaviour                                                                                                                     |
+| :-------- | :------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------- |
+| `syncing` | A sync delta is being applied to an otherwise current index | Serve directly from the pre-sync index. Results are correct for all locally-written documents; recently synced documents may not yet appear. |
+
+`syncing` is deliberately distinct from `stale`:
+
+- A `stale` index may have missed an unbounded number of writes (e.g. a failed
+  build, or writes that arrived while the index was in `building` state).
+  Queries fall back to a full namespace scan.
+- A `syncing` index is fully current for all local writes; only the bounded sync
+  delta is pending. Queries serve directly from the index — the small, temporary
+  omission is preferable to the cost of a full scan.
+
+### SyncDelta Events
+
+After ingesting a set of remote SSTables, the sync engine emits a `SyncDelta`
+event per affected user namespace. Each event carries the set of
+`(docId, changeType)` pairs — one entry per document that was added, updated,
+or deleted by the incoming SSTables.
+
+`FtsManager` and `VecManager` subscribe to `SyncDelta` events. On receipt for a
+namespace with a `current` index:
+
+1. Transition the index state from `current` → `syncing` in `$meta`.
+2. Process each entry in the delta using the same insert / update / delete logic
+   as write interception (§21 and §22 respectively).
+3. Transition `syncing` → `current` on completion.
+
+### Delta Size and Expected Latency
+
+The delta is always bounded by the number of documents modified on peer devices
+since the last sync. For the typical single-user pattern — writing on one device
+while another is offline — the delta is the set of documents modified in that
+session, which is usually small. FTS delta processing is fast (pure Dart
+tokenisation); vec delta processing is bounded by ONNX inference throughput.
+
+The exception is a **first-time device load**, where all documents arrive via
+sync against an empty local database. The delta equals the full collection. A
+one-time indexing delay is expected and proportional to collection size. For vec
+indexes on large collections this can be significant; the application should
+surface a progress indicator and process the delta in a background isolate so
+the UI remains responsive (see Isolate Recommendation below).
+
+### Crash Recovery
+
+If the process is killed while an index is in `syncing` state, `$meta` retains
+the state. On the next `open()`, any index found in `syncing` is transitioned
+to `stale`. The next `search()` on that index triggers a full rebuild — the
+same recovery path used by secondary indexes (§16).
+
+### Isolate Recommendation (Flutter)
+
+Both delta types are CPU-bound. Applications should run `SyncEngine.sync()` on
+a dedicated background isolate. Because `FtsManager` and `VecManager` are
+registered listeners on the sync engine, `SyncDelta` processing occurs on the
+same isolate — the UI thread is never blocked by tokenisation or ONNX inference.
+
+```dart
+// Run sync (and any resulting delta indexing) off the main isolate.
+await Isolate.run(() => db.syncEngine.sync());
+```
+
+For first-load scenarios on Flutter, consider displaying a progress indicator
+and awaiting an `onSearchIndexReady` callback before enabling search in the UI.
+The callback fires when all `syncing` indexes transition to `current`.

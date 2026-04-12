@@ -191,3 +191,10 @@ would require a separate proposal.
 ## 6. Open Questions
 
 _None at this time._
+
+## 7. Implementation plans
+
+- [Text Search — Phase 1: Shared Foundations](../../plans/plan_text_search_shared.md)
+- [Text Search — Phase 2: Lexical Search](../../plans/plan_text_search_lexical.md)
+- [Text Search — Phase 3: Semantic Search](../../plans/plan_text_search_semantic.md)
+- [Text Search — Phase 4: Hybrid Search](../../plans/plan_text_search_hybrid.md)

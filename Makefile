@@ -71,7 +71,7 @@ site/styles/styles.css: docs/styles/styles.css | site/
 
 
 site/spec.html:  docs/spec/*.md docs/spec/.pandoc docs/template/header.html | site/
-	pandoc --defaults="docs/spec/.pandoc" docs/spec/*.md -o "site/spec.html";
+	pandoc --defaults="docs/spec/.pandoc" --mathml docs/spec/*.md -o "site/spec.html";
 
 site/index.html:  docs/index.md docs/.pandoc docs/template/header.html | site/
 	pandoc --defaults="docs/.pandoc" docs/index.md -o "site/index.html";
