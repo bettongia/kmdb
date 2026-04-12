@@ -73,6 +73,9 @@ Importantly, case folding depends on the language in use. The
 [Unicode Case Folding Properties](https://www.unicode.org/Public/12.1.0/ucd/CaseFolding.txt)
 provides a mapping of characters to their other case.
 
+The [icu_tokenizer](../..spikes/icu_tokenizer) spike solution has proven out the
+tokeniser approach.
+
 ### 3. Remove stop words (maybe)
 
 Traditionally, a set of words were removed due to their frequency and perceived
@@ -200,12 +203,12 @@ The preferred approach is a `dart:ffi` binding to the ICU C library using the
 `UBRK_WORD` break iterator. ICU is a system library on all of kmdb's target
 platforms, so no bundling is required:
 
-| Platform       | ICU availability                              |
-| :------------- | :-------------------------------------------- |
-| macOS / iOS    | `libicucore.dylib` — ships with the OS        |
-| Android        | Available via the NDK                         |
-| Linux          | `libicu` — standard, widely packaged          |
-| Windows        | Bundled with Windows 10+                      |
+| Platform    | ICU availability                       |
+| :---------- | :------------------------------------- |
+| macOS / iOS | `libicucore.dylib` — ships with the OS |
+| Android     | Available via the NDK                  |
+| Linux       | `libicu` — standard, widely packaged   |
+| Windows     | Bundled with Windows 10+               |
 
 This makes the FFI surface narrow and the deployment story clean — the binding
 calls three functions (`ubrk_open()`, `ubrk_next()`, `ubrk_previous()`) against

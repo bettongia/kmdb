@@ -20,12 +20,12 @@ import 'package:bge_embeddings/bge_embeddings.dart';
 
 Future<void> main(List<String> args) async {
   if (args.isEmpty && stdin.hasTerminal) {
-    print('BGE Embedding Utility');
+    print('Tokenising Utility');
     print('---------------------');
     print('Usage:');
-    print('  dart bin/embed.dart "<text>"');
-    print('  dart bin/embed.dart <file_path>');
-    print('  echo "text" | dart bin/embed.dart');
+    print('  dart bin/tokens.dart "<text>"');
+    print('  dart bin/tokens.dart <file_path>');
+    print('  echo "text" | dart bin/tokens.dart');
     return;
   }
 
@@ -46,10 +46,9 @@ Future<void> main(List<String> args) async {
 
   // Resolve assets path relative to the current working directory.
   final assetDir = p.join(Directory.current.path, 'assets');
-  final modelPath = p.join(assetDir, 'bge_small.onnx');
   final vocabPath = p.join(assetDir, 'vocab.txt');
 
-  if (!File(modelPath).existsSync() || !File(vocabPath).existsSync()) {
+  if (!File(vocabPath).existsSync()) {
     stderr.writeln('Error: Assets not found in $assetDir.');
     stderr.writeln(
       'Ensure bge_small.onnx and vocab.txt exist in the assets/ directory.',
@@ -57,17 +56,13 @@ Future<void> main(List<String> args) async {
     exit(1);
   }
 
-  // Load the model
-  final embedder = await BgeEmbedder.load(
-    modelPath: modelPath,
-    vocabPath: vocabPath,
-  );
+  final tokenizer = await BertTokenizer.load(vocabPath, maxLength: 512);
+  final tokens = tokenizer.encode(input);
 
-  try {
-    final embedding = embedder.embed(input);
-    // Output the vector as a JSON array of doubles.
-    stdout.writeln(jsonEncode(embedding));
-  } finally {
-    embedder.dispose();
-  }
+  final tokenCount = tokens.attentionMask.where((m) => m == 1).length;
+  final inputIds = tokens.inputIds.take(tokenCount).toList();
+  final decoded = tokenizer.decode(inputIds);
+
+  print('Count : ${decoded.length}');
+  print('Tokens: ${jsonEncode(decoded)}');
 }
