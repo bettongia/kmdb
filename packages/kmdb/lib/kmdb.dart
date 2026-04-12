@@ -75,3 +75,13 @@ export 'src/query/filter/field_filter.dart' show Field;
 export 'src/query/index/index_definition.dart' show IndexDefinition;
 export 'src/query/index/index_manager.dart'
     show IndexManager, IndexState, IndexStatus;
+
+// ── Text search — shared foundations ─────────────────────────────────────────
+export 'src/search/tokeniser.dart' show Tokeniser;
+export 'src/search/regexp_tokeniser.dart' show RegExpTokeniser;
+export 'src/search/search_mode.dart' show SearchMode;
+export 'src/search/search_result.dart'
+    show SearchResult, SearchMetadata, SearchHit;
+export 'src/search/embedding_model.dart' show EmbeddingModel;
+export 'src/search/fts_index_definition.dart' show FtsIndexDefinition;
+export 'src/search/vec_index_definition.dart' show VecIndexDefinition;

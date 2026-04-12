@@ -17,6 +17,8 @@ import 'dart:async';
 import '../encoding/value_codec.dart';
 import '../engine/kvstore/kv_store.dart';
 import '../engine/util/key_codec.dart';
+import '../search/search_mode.dart';
+import '../search/search_result.dart';
 import 'exceptions.dart';
 import 'filter/filter.dart';
 import 'kmdb_codec.dart';
@@ -247,6 +249,55 @@ final class KmdbCollection<T> {
 
   /// Shorthand for `all().where(filter)`.
   KmdbQuery<T> where(Filter filter) => all().where(filter);
+
+  // ── Text search ─────────────────────────────────────────────────────────────
+
+  /// Searches this collection for documents matching [query].
+  ///
+  /// This method is **stubbed** in Phase 1. It returns an empty [SearchResult]
+  /// with all requested [fields] listed in [SearchMetadata.skipped]. Plans 2
+  /// (lexical) and 3 (semantic) replace this stub with real implementations.
+  ///
+  /// ## Parameters
+  ///
+  /// - [query] — the search query string. An empty query returns an empty
+  ///   result without error.
+  /// - [fields] — the document field names to search. If `null`, all indexed
+  ///   fields for this collection are searched.
+  /// - [filter] — an optional [Filter] to restrict the candidate set before
+  ///   ranking.
+  /// - [mode] — the [SearchMode] to use. Defaults to [SearchMode.auto].
+  /// - [candidates] — the number of candidate documents to consider during
+  ///   ranking. Higher values improve recall at the cost of performance.
+  ///   Default: 100.
+  /// - [limit] — the maximum number of hits to return. Default: 10.
+  /// - [offset] — number of hits to skip (for pagination). Default: 0.
+  ///
+  /// ## Returns
+  ///
+  /// A [SearchResult] with [SearchResult.hits] in descending score order.
+  /// Fields that could not be searched (no matching index) appear in
+  /// [SearchMetadata.skipped].
+  Future<SearchResult<T>> search(
+    String query, {
+    List<String>? fields,
+    Filter? filter,
+    SearchMode mode = SearchMode.auto,
+    int candidates = 100,
+    int limit = 10,
+    int offset = 0,
+  }) async {
+    // Phase 1 stub: no indexes exist yet. Return an empty result with all
+    // requested fields in `skipped`. Plans 2 and 3 replace this stub.
+    final requestedFields = fields ?? const <String>[];
+    final metadata = SearchMetadata(
+      query: query,
+      searched: const [],
+      skipped: requestedFields.toList(),
+      total: 0,
+    );
+    return SearchResult<T>(metadata: metadata, hits: const []);
+  }
 
   // ── Internal ───────────────────────────────────────────────────────────────
 
