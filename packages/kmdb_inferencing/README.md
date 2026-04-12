@@ -1,39 +1,92 @@
-<!-- 
-This README describes the package. If you publish this package to pub.dev,
-this README's contents appear on the landing page for your package.
+# kmdb_inferencing
 
-For information about how to write a good package README, see the guide for
-[writing package pages](https://dart.dev/tools/pub/writing-package-pages). 
+ONNX Runtime bindings and BGE Small En v1.5 embedding model for KMDB semantic
+search.
 
-For general information about developing packages, see the Dart guide for
-[creating packages](https://dart.dev/guides/libraries/create-packages)
-and the Flutter guide for
-[developing packages and plugins](https://flutter.dev/to/develop-packages). 
--->
+This package provides `OnnxEmbeddingModel`, an implementation of the
+`EmbeddingModel` interface (defined in `package:kmdb`) that generates
+384-dimensional dense vector embeddings using the
+[BGE Small En v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5) model. It
+is the inference backend for `VecManager` in KMDB semantic and hybrid search.
 
-TODO: Put a short description of the package here that helps potential users
-know whether this package might be useful for them.
+## Model assets
 
-## Features
+The model binary (`bge_small.onnx`, ~127 MB) is tracked in the repository
+using **Git LFS**. Supporting assets (`vocab.txt`, `tokenizer_config.json`,
+`tokenizer.json`, `config.json`, `special_tokens_map.json`) are tracked
+normally. All assets live under `assets/models/bge-small-en/`.
 
-TODO: List what your package can do. Maybe include images, gifs, or videos.
+Run `git lfs pull` after cloning to fetch the model binary before running
+tests that require inference.
 
 ## Getting started
 
-TODO: List prerequisites and provide or point to information on how to
-start using the package.
+This package is part of the KMDB pub workspace and is not published to pub.dev.
+Add it to your workspace `pubspec.yaml`:
+
+```yaml
+workspace:
+  - packages/kmdb
+  - packages/kmdb_inferencing
+  # ...
+```
+
+The ONNX Runtime native library must be available on the host system. See the
+[ONNX Runtime release page](https://github.com/microsoft/onnxruntime/releases)
+for pre-built binaries. Construction throws `UnsupportedError` if the library
+or model file cannot be loaded.
 
 ## Usage
 
-TODO: Include short and useful examples for package users. Add longer examples
-to `/example` folder. 
+Pass an `OnnxEmbeddingModel` to `KmdbDatabase.open()` when using semantic or
+hybrid search:
 
 ```dart
-const like = 'sample';
+import 'package:kmdb/kmdb.dart';
+import 'package:kmdb_inferencing/kmdb_inferencing.dart';
+
+final model = await OnnxEmbeddingModel.load();
+
+final db = await KmdbDatabase.open(
+  store,
+  vecIndexes: [
+    VecIndexDefinition(collection: 'books', field: 'description'),
+  ],
+  embeddingModel: model,
+);
+
+// Search using semantic similarity
+final results = await db.collection<Book>('books').search(
+  'memory management issues',
+  mode: SearchMode.semantic,
+);
+
+// Always dispose the model when the database is closed
+await db.close(); // calls model.dispose() automatically
 ```
 
-## Additional information
+`OnnxEmbeddingModel` can also be used directly to generate embeddings:
 
-TODO: Tell users more about the package: where to find more information, how to 
-contribute to the package, how to file issues, what response they can expect 
-from the package authors, and more.
+```dart
+final (embedding, truncated) = await model.embed('The quick brown fox');
+// embedding: Float32List of length 384, L2-normalised
+// truncated: true if the input exceeded 510 BERT tokens
+```
+
+## Notes
+
+- Inference runs synchronously on the calling isolate. For production Flutter
+  applications, run `SyncEngine.sync()` and any delta indexing on a background
+  isolate to keep the UI thread responsive.
+- Field values exceeding 510 BERT tokens are truncated; the first 510 tokens
+  are embedded. A truncation marker is recorded in the index.
+- `KmdbDatabase.close()` calls `model.dispose()` automatically — do not call
+  `dispose()` separately if the model was passed to `open()`.
+
+## See also
+
+- `package:kmdb` — core library; defines `EmbeddingModel`, `VecIndexDefinition`,
+  and `VecManager`
+- `package:kmdb_tokenizer_icu` — ICU-backed word tokeniser, accepted by
+  `OnnxEmbeddingModel` as a substitute for the default `RegExpTokeniser`
+- KMDB specification §22 — semantic search index structure and query path
