@@ -1,5 +1,9 @@
 # Building a BGE Embedding Application in Dart
 
+_Please note that this tutorial may be out of date regarding the code samples
+below. Please refer to the code files in this package for the final
+implementation._
+
 This tutorial walks you through building a self-contained Dart application that
 takes text input and produces 384-dimensional semantic embeddings using the
 `BAAI/bge-small-en-v1.5` model via ONNX Runtime. The code is **pure Dart with no
