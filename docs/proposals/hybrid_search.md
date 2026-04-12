@@ -27,13 +27,51 @@ $$RRFscore(d \in D) = \sum_{r \in R} \frac{1}{k + r(d)}$$
 | **$k$**    | Smoothing constant (default = 60).           |
 | **$\sum$** | Summation across all ranking systems.        |
 
-Document fields that are indexed with only a lexical or a semantic index will
-not be given an RRF score.
+### Candidate set size
+
+Before RRF is applied, each index contributes a ranked candidate list. The
+default candidate limit is **100 results per index**, giving a pool of up to 200
+documents for fusion. This is configurable via `--candidates <n>` on the search
+command; the default of 100 covers the realistic result space at kmdb's expected
+scale without memory pressure.
+
+```
+kmdb <db> search <collection> "<query terms>" [--candidates 100]
+```
+
+The final result set is then reduced to `--limit` after RRF scoring.
+
+### Candidate eligibility
+
+Any document that scores in **either** index is included in the RRF pool — it
+does not need to appear in both. A document absent from one list is treated as
+having rank ∞ for that list, contributing 1/(k+∞) = 0 from it. This means
+documents that score in both indexes naturally rank higher than those that score
+in only one, but single-index matches are still returned rather than silently
+dropped.
+
+This guarantees correctness in partial-index states — for example, if the
+semantic index was added after some documents were written and the index has not
+yet been fully rebuilt, those documents still appear in results via their BM25
+score alone rather than being suppressed.
 
 ### CLI
 
-If a field is indexed both by the lexical and semantic approaches, results from
-the `search` command will return the hybrid search result. No option will be
-made available to select a specific index.
+The `search` command accepts a `--mode` flag to control which index (or
+combination of indexes) is used for ranking:
+
+```
+kmdb <db> search <collection> "<query terms>" [--mode auto|lexical|semantic]
+```
+
+| Mode         | Behaviour                                                                 |
+| :----------- | :------------------------------------------------------------------------ |
+| `auto`       | Default. Uses hybrid RRF if both indexes exist on the searched fields; falls back to whichever single index is available. |
+| `lexical`    | BM25 only. Returns an error if no lexical index exists on the field.      |
+| `semantic`   | Cosine similarity only. Returns an error if no semantic index exists on the field. |
+
+The `auto` mode allows users to add a second index later without changing their
+queries. The explicit modes are useful for debugging, benchmarking, or cases
+where one ranking approach is known to be more appropriate for the query type.
 
 ## Open Questions
