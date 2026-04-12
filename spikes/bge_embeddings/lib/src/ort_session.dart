@@ -1,4 +1,4 @@
-// Copyright 2026 The Aurochs KMesh Authors
+// Copyright 2026 The KMDB Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,12 +20,6 @@ import 'ort_bindings.dart';
 
 /// Reads one function-pointer slot from an OrtApi (or OrtApiBase) struct,
 /// returning a typed native function pointer.
-///
-/// Each slot is a native pointer-sized word. [slotIndex] is zero-based from
-/// the start of the struct, matching the field order in onnxruntime_c_api.h.
-/// Call `.asFunction<D>()` on the result with the corresponding Dart typedef
-/// to get a callable Dart function — `asFunction` requires a compile-time
-/// constant type, so it cannot be called inside this generic helper.
 Pointer<NativeFunction<T>> _slotPtr<T extends Function>(
   Pointer<Void> struct,
   int slotIndex,
@@ -34,9 +28,10 @@ Pointer<NativeFunction<T>> _slotPtr<T extends Function>(
 class OrtInferenceSession {
   final Pointer<OrtSession> _session;
   final Pointer<OrtMemoryInfo> _memInfo;
-  final Pointer<Void> _api; // OrtApi* — kept for release calls
+  final Pointer<OrtEnv> _env;
+  final Pointer<Void> _api; // OrtApi* — kept for binding functions
 
-  OrtInferenceSession._(this._session, this._memInfo, this._api);
+  OrtInferenceSession._(this._session, this._memInfo, this._env, this._api);
 
   /// Load [modelPath] and create a session using the vtable API.
   static OrtInferenceSession create(DynamicLibrary lib, String modelPath) {
@@ -53,22 +48,24 @@ class OrtInferenceSession {
       final api = getApi(ortApiVersion);
       if (api == nullptr) {
         throw Exception(
-          'OrtApi v$ortApiVersion not supported by this library. '
-          'Check that _ortVersion in ort_library.dart matches ortApiVersion here.',
+          'OrtApi v$ortApiVersion not supported by this library.',
         );
       }
 
-      // ── Step 3: bind the functions we need from OrtApi ───────────────────
-      // Slot numbers match struct OrtApi field order in onnxruntime_c_api.h
-
+      // ── Step 3: bind the functions we need ──────────────────────────────
       final getErrorMessage = _slotPtr<GetErrorMessageC>(
         api,
         2,
       ).asFunction<GetErrorMessageDart>();
+      final releaseStatus = _slotPtr<ReleaseStatusC>(
+        api,
+        93,
+      ).asFunction<ReleaseStatusDart>();
 
       void check(Pointer<OrtStatus> status) {
         if (status == nullptr) return;
         final msg = getErrorMessage(status).toDartString();
+        releaseStatus(status);
         throw Exception('ONNX Runtime: $msg');
       }
 
@@ -85,6 +82,7 @@ class OrtInferenceSession {
           envPtr,
         ),
       );
+      final env = envPtr.value;
 
       // slot 10: CreateSessionOptions
       final createOpts = _slotPtr<CreateSessionOptionsC>(
@@ -93,9 +91,9 @@ class OrtInferenceSession {
       ).asFunction<CreateSessionOptionsDart>();
       final optsPtr = arena<Pointer<OrtSessionOptions>>();
       check(createOpts(optsPtr));
+      final opts = optsPtr.value;
 
-      // Disable the intra-op and inter-op thread pools so that ReleaseSession
-      // does not race against worker threads that may still be quiescing.
+      // Disable thread pools if needed — setting to 1 avoids most teardown races.
       final setIntra = _slotPtr<SetIntraOpNumThreadsC>(
         api,
         24,
@@ -104,8 +102,8 @@ class OrtInferenceSession {
         api,
         25,
       ).asFunction<SetInterOpNumThreadsDart>();
-      check(setIntra(optsPtr.value, 1));
-      check(setInter(optsPtr.value, 1));
+      check(setIntra(opts, 1));
+      check(setInter(opts, 1));
 
       // slot 7: CreateSession
       final createSess = _slotPtr<CreateSessionC>(
@@ -115,9 +113,9 @@ class OrtInferenceSession {
       final sessPtr = arena<Pointer<OrtSession>>();
       check(
         createSess(
-          envPtr.value,
+          env,
           modelPath.toNativeUtf8(allocator: arena),
-          optsPtr.value,
+          opts,
           sessPtr,
         ),
       );
@@ -130,26 +128,37 @@ class OrtInferenceSession {
       final memPtr = arena<Pointer<OrtMemoryInfo>>();
       check(createMem(ortDeviceAllocator, ortMemTypeCpuInput, memPtr));
 
-      return OrtInferenceSession._(sessPtr.value, memPtr.value, api);
+      // Release session options now that the session is created (slot 100)
+      final releaseOpts = _slotPtr<ReleaseSessionOptionsC>(
+        api,
+        100,
+      ).asFunction<ReleaseSessionOptionsDart>();
+      releaseOpts(opts);
+
+      return OrtInferenceSession._(sessPtr.value, memPtr.value, env, api);
     });
   }
 
-  /// Run inference. Returns the flattened float output tensor.
   List<double> run({
     required List<String> inputNames,
     required List<Int64List> inputData,
-    required List<int> inputShape, // [batch, seqLen]
+    required List<int> inputShape,
     required String outputName,
   }) {
     return using((arena) {
-      // Bind the functions we need from OrtApi
       final getErrorMessage = _slotPtr<GetErrorMessageC>(
         _api,
         2,
       ).asFunction<GetErrorMessageDart>();
+      final releaseStatus = _slotPtr<ReleaseStatusC>(
+        _api,
+        93,
+      ).asFunction<ReleaseStatusDart>();
       void check(Pointer<OrtStatus> s) {
         if (s == nullptr) return;
-        throw Exception('ONNX Runtime: ${getErrorMessage(s).toDartString()}');
+        final msg = getErrorMessage(s).toDartString();
+        releaseStatus(s);
+        throw Exception('ONNX Runtime: $msg');
       }
 
       final createTensor = _slotPtr<CreateTensorC>(
@@ -163,16 +172,14 @@ class OrtInferenceSession {
       ).asFunction<GetTensorDataDart>();
       final releaseValue = _slotPtr<ReleaseValueC>(
         _api,
-        /* ReleaseValue slot */ 96,
+        96,
       ).asFunction<ReleaseValueDart>();
 
-      // Build shape array
       final shapePtr = arena<Int64>(inputShape.length);
       for (var i = 0; i < inputShape.length; i++) {
         shapePtr[i] = inputShape[i];
       }
 
-      // Build input tensors
       final inputPtrs = arena<Pointer<OrtValue>>(inputNames.length);
       for (var i = 0; i < inputNames.length; i++) {
         final data = inputData[i];
@@ -196,7 +203,6 @@ class OrtInferenceSession {
         inputPtrs[i] = valPtr.value;
       }
 
-      // Input and output name arrays
       final inNames = arena<Pointer<Utf8>>(inputNames.length);
       for (var i = 0; i < inputNames.length; i++) {
         inNames[i] = inputNames[i].toNativeUtf8(allocator: arena);
@@ -208,7 +214,7 @@ class OrtInferenceSession {
       check(
         run(
           _session,
-          nullptr, // default OrtRunOptions
+          nullptr,
           inNames,
           inputPtrs,
           inputNames.length,
@@ -218,7 +224,6 @@ class OrtInferenceSession {
         ),
       );
 
-      // Extract float32 data from output [1, seqLen, 384]
       final rawPtr = arena<Pointer<Void>>();
       check(getTensorData(outputPtrs[0], rawPtr));
 
@@ -230,7 +235,12 @@ class OrtInferenceSession {
         (i) => floatPtr[i].toDouble(),
       );
 
+      // Release all values
       releaseValue(outputPtrs[0]);
+      for (var i = 0; i < inputNames.length; i++) {
+        releaseValue(inputPtrs[i]);
+      }
+
       return result;
     });
   }
@@ -238,8 +248,19 @@ class OrtInferenceSession {
   void dispose() {
     final releaseSession = _slotPtr<ReleaseSessionC>(
       _api,
-      /* ReleaseSession slot */ 95,
+      95,
     ).asFunction<ReleaseSessionDart>();
+    final releaseMem = _slotPtr<ReleaseMemoryInfoC>(
+      _api,
+      94,
+    ).asFunction<ReleaseMemoryInfoDart>();
+    final releaseEnv = _slotPtr<ReleaseEnvC>(
+      _api,
+      92,
+    ).asFunction<ReleaseEnvDart>();
+
     releaseSession(_session);
+    releaseMem(_memInfo);
+    releaseEnv(_env);
   }
 }
