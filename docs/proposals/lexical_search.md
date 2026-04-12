@@ -646,7 +646,7 @@ await db.ftsManager.deleteIndex('books', 'description');
 
 #### Search
 
-`search()` returns a `Future<FtsSearchResult<T>>`. A streaming variant is not
+`search()` returns a `Future<SearchResult<T>>`. A streaming variant is not
 provided in this implementation — at kmdb's expected scale, full result sets fit
 comfortably in memory and `limit`/`offset` mitigate any concern about large
 pages. Reactive search (re-executing on writes, analogous to `watch()`) is noted
@@ -664,39 +664,56 @@ final results = await db.collection<Book>('books').search(
 
 #### Result types
 
+These types are shared across lexical, semantic, and hybrid search. The
+interpretation of `score` and `fieldScores` depends on the active search mode:
+lexical search uses BM25 scores, semantic search uses cosine similarity, and
+hybrid search uses RRF scores (with per-field BM25 and cosine scores also
+available in `fieldScores`).
+
 ```dart
-/// The result of an FTS search, including metadata and ranked hits.
-class FtsSearchResult<T> {
-  final FtsSearchMetadata metadata;
-  final List<FtsSearchHit<T>> hits;
+/// The result of a search, including metadata and ranked hits.
+///
+/// Returned by lexical, semantic, and hybrid search. The scoring values in
+/// [SearchHit] carry mode-specific scores — see [SearchHit.score] for details.
+class SearchResult<T> {
+  final SearchMetadata metadata;
+  final List<SearchHit<T>> hits;
 }
 
 /// Metadata describing how the search was executed.
-class FtsSearchMetadata {
+class SearchMetadata {
   /// The original query string.
   final String query;
 
   /// Fields that were successfully searched.
   final List<String> searched;
 
-  /// Fields requested (via [FtsSearchOptions.fields]) that had no FTS index
-  /// and were therefore skipped.
+  /// Fields that were requested but skipped because no matching index exists.
   final List<String> skipped;
 
-  /// Total number of matching documents before [FtsSearchOptions.limit] and
-  /// [FtsSearchOptions.offset] are applied.
+  /// Total number of matching documents before [limit] and [offset] are applied.
   final int total;
 }
 
 /// A single ranked result.
-class FtsSearchHit<T> {
+class SearchHit<T> {
   /// 1-based rank position.
   final int rank;
 
-  /// The highest per-field BM25 score for this document.
+  /// The document's overall relevance score.
+  ///
+  /// - Lexical search: the highest per-field BM25 score.
+  /// - Semantic search: the highest per-field cosine similarity score.
+  /// - Hybrid search: the RRF score combining BM25 and cosine similarity ranks.
   final double score;
 
-  /// BM25 score for each field in which this document matched.
+  /// Per-field scores for each field in which this document matched.
+  ///
+  /// - Lexical search: BM25 score per field.
+  /// - Semantic search: cosine similarity per field.
+  /// - Hybrid search: RRF score per field. Individual BM25 and cosine scores
+  ///   are available under the keys `"{field}:bm25"` and `"{field}:cosine"`.
+  ///
   /// Fields where the document did not score are absent from the map.
   final Map<String, double> fieldScores;
 

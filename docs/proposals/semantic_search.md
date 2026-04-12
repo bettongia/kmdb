@@ -99,29 +99,92 @@ tokens × ~5 bytes ≈ 2KB per chunk for the text.
 ### Embedding Model Selection
 
 The [BGE Small En v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5) model
-will be used in this work. The rationale for this is based on a reasonable token
-limit that should be able to handle article-length tests of around 10 pages. The
-model features:
+will be used in this work. The model features:
 
-- ~130MB, 384 dimensions, handles up to 512 tokens
+- ~127MB ONNX, 384 dimensions, handles up to 512 tokens
 - Consistently outperforms MiniLM-L6 on retrieval benchmarks despite similar
   size
-- Specifically strong on passage retrieval, which maps well to academic search
+- Specifically strong on passage retrieval, which maps well to document field
+  search
+
+### Model Distribution
+
+The model and its supporting assets (`vocab.txt`, `tokenizer_config.json`) are
+bundled directly within the `kmdb` package under `assets/models/bge-small-en/`.
+
+This is practical because all kmdb packages carry `publish_to: none` — they are
+distributed as source dependencies rather than through pub.dev, so the pub.dev
+100MB package size limit does not apply.
+
+The binary model file (`bge_small.onnx`, ~127MB) is tracked in the repository
+using **Git LFS** to avoid bloating the git object store. Supporting text files
+(`vocab.txt`, `tokenizer_config.json`) are tracked normally.
+
+The ONNX runtime loads the model from its bundled path at `KmdbDatabase.open()`
+time. No internet access or user configuration is required.
+
+#### Future work
+
+The bundled approach is appropriate while kmdb is in active development and
+`publish_to: none`. Once the package is ready for broader distribution the
+following options should be evaluated:
+
+- **Configurable model path** — allow the caller to supply an alternative ONNX
+  file at `open()` time, enabling custom or updated models without a package
+  update.
+- **On-demand download** — fetch the model on first use and cache it in the
+  device's application support directory, reducing the package footprint for
+  users who do not use semantic search.
+
+> **pub.dev publishing note:** The bundled model (~127MB) exceeds pub.dev's
+> 100MB package archive limit. Publishing `kmdb` to pub.dev will require
+> resolving this first — likely by moving to on-demand download or splitting
+> the model into a separate package that is excluded from the pub.dev tarball.
+> This must be addressed before any pub.dev release is attempted.
 
 ### Tokenisation
 
-The same tokenisation process will be used in this work and the
-[Lexical Search](lexical_search.md) part of this proposal. The
-[icu_tokenizer](../..spikes/icu_tokenizer) spike solution has proven out the
-tokeniser approach.
+The BERT tokenizer pipeline has two stages:
 
-### Chunking
+1. **Word segmentation** — the text is split into whole words using a
+   `Tokeniser` implementation (UAX #29 / [`icu_tokenizer`](../../spikes/icu_tokenizer)
+   spike). This stage is shared with the lexical search pipeline.
+2. **WordPiece subword splitting** — each word is further split against the
+   model vocabulary, producing subword token IDs (e.g. `[CLS]`, `##vest`,
+   `##ig`) consumed by the ONNX model.
 
-Chunking by ~512 tokens with overlap will be utilised in this body of work. The
-spike solution implements a very basic chunking solution
+The two stages produce fundamentally different output: lexical search ends at
+normalised whole-word stems (`investig`), while the BERT pipeline continues to
+numeric subword IDs for model inference.
 
-Future work may look to chunk by sentence, paragraph or section (intro, methods,
-results, etc.).
+`BertTokenizer` accepts a `Tokeniser` in its constructor; `RegExpTokeniser` is
+the default. The `IcuTokeniser` (ICU FFI, full UAX #29 compliance) can be
+substituted where available — both produce equivalent results for English-language
+prose and technical identifiers (see
+[icu_tokenizer spike](../../spikes/icu_tokenizer) for the investigation findings).
+
+### Token limit and truncation
+
+BGE Small En v1.5 accepts at most 512 tokens (510 usable after `[CLS]` and
+`[SEP]`). At roughly 1.3 subword tokens per word, this covers approximately
+350–400 words — sufficient for the document field values this proposal is scoped
+to (titles, descriptions, abstracts, notes).
+
+If a field value exceeds the token limit, the first 510 tokens are embedded and
+the remainder is discarded. A `truncated: true` flag is recorded in the index
+metadata for that entry so the information loss is visible.
+
+#### Chunking is out of scope
+
+Chunking (splitting a value into multiple overlapping windows and storing one
+vector per chunk) is explicitly out of scope for this proposal. It is the
+appropriate strategy for large attachments such as articles and documents, which
+are the domain of the [vault](vault.md) proposal. The
+[bge_embeddings spike](../../spikes/bge_embeddings) implements a basic chunking
+approach as a preview of what vault-level semantic search will require.
+
+Users who need to semantically search article-length text should store that
+content as a vault attachment rather than a document field value.
 
 ### Embeddings & Similarity Metric
 
@@ -135,17 +198,60 @@ This is implemented in the
 [`cosineSimilarity`](../../spikes/bge_embeddings/lib/src/math_utils.dart)
 function.
 
-### Index Strategy
+### Index Structure
 
-As kmdb is designed to operate across mobile, web and desktop platforms, and
-that the database is not expected to be large, it is likely that the "Flat
-Index + SQ8" approach will provide the best approach.
+The index uses three key types in the KV store, all in `$vec:` system namespaces
+exempt from the session object cache and materialised view cache (for the same
+reasons as `$fts:` — see [Lexical Search §Cache exemption](lexical_search.md)):
 
-At <50k items, brute-force scanning quantized vectors is faster and likely more
-battery-efficient than building complex graphs.
+```
+$vec:{ns}:{field}:{docId}           →  Uint8List (384 bytes, SQ8 quantized)
+$vec:corpus:{ns}:{field}            →  { n: int }
+$vec:truncated:{ns}:{field}:{docId} →  present (key existence = truncation occurred)
+```
 
-It is expected that the embeddings will be stored within the kmdb structure,
-similar to the approach taken by the lexical search index.
+**Vector entry** stores the SQ8-quantized embedding for a single
+`(document, field)` pair. At 384 bytes per entry (one byte per dimension) this
+is a 4× reduction from float32 (1,536 bytes), with negligible accuracy loss for
+cosine similarity ranking (see SQ8 Quantization below).
+
+**Corpus stats** maintains the count of indexed documents (`n`) for index
+metadata and state reporting. Unlike the lexical index, no `totalTokens`
+equivalent is needed — cosine similarity scoring requires only the stored vectors
+and the query vector.
+
+**Truncation marker** is written only when a field value exceeded the 510-token
+limit and was truncated before embedding. The key's presence is sufficient; the
+value is empty. This is a diagnostic entry only and is not read on the query
+path.
+
+#### SQ8 Quantization
+
+BGE Small En v1.5 outputs L2-normalized vectors — each vector has unit length,
+so individual dimension values lie within $[-1, 1]$. This fixed, known range
+makes quantization straightforward without per-vector or per-dimension
+calibration:
+
+- **Encode:** $u = \text{clamp}(\text{round}((f + 1.0) / 2.0 \times 255), 0, 255)$
+- **Decode:** $f = u / 255.0 \times 2.0 - 1.0$
+
+No calibration metadata (per-dimension min/max) needs to be stored. If a future
+model produces non-normalized outputs, per-dimension calibration can be added to
+`$vec:corpus:` at that point.
+
+#### Query behaviour
+
+At kmdb's expected scale (<50k documents), a brute-force flat scan is faster and
+more battery-efficient than maintaining a graph-based index (HNSW etc.):
+
+1. Embed the query string using the same pipeline as indexing (word segmentation
+   → WordPiece → ONNX → mean pool → normalize → truncate at 510 tokens).
+2. Prefix scan `$vec:{ns}:{field}:` to retrieve all `(docId, Uint8List)` pairs.
+3. Dequantize each stored vector to float32.
+4. Compute the dot product of each document vector with the query vector. Because
+   both are L2-normalized, dot product equals cosine similarity.
+5. Rank by score descending; return the top-`--candidates` results for RRF (or
+   top-`--limit` directly for semantic-only queries).
 
 ### Open design questions
 
@@ -159,10 +265,48 @@ Each document write must update the index. Modifications that include the
 indexed field as well as the deletion of documents present the need to update
 the index.
 
-##### A:?
+##### A: Direct overwrite — no overlay needed
 
-Can the Base index + overlay pattern used in the Lexical Search proposal also
-work here?
+Each `(docId, field)` maps to exactly one vector, so there are no stale term
+entries and no overlay is required. The base index + overlay pattern from
+[Lexical Search](lexical_search.md) does not apply here.
+
+All writes are included in the same `WriteBatch` as the document write, making
+them atomic. ONNX inference runs synchronously before the batch is committed —
+the same pattern as lexical tokenization.
+
+- **Insert:** run inference on the new field value; quantize the result to SQ8.
+  In the WriteBatch: `PUT $vec:{ns}:{field}:{docId}` → quantized vector; if the
+  value was truncated `PUT $vec:truncated:{ns}:{field}:{docId}` → empty;
+  increment `n` in `$vec:corpus:{ns}:{field}`.
+
+- **Update:** run inference on the new field value; quantize the result. In the
+  WriteBatch: `PUT $vec:{ns}:{field}:{docId}` → new quantized vector (atomically
+  replacing the old one); `DELETE $vec:truncated:{ns}:{field}:{docId}` (safe
+  no-op if the key is absent, removes the marker if the new value no longer
+  truncates, and is superseded by the subsequent `PUT` if it still does); if the
+  new value was truncated `PUT $vec:truncated:{ns}:{field}:{docId}` → empty. `n`
+  is unchanged.
+
+- **Delete:** no inference needed. In the WriteBatch: `DELETE
+  $vec:{ns}:{field}:{docId}`; `DELETE $vec:truncated:{ns}:{field}:{docId}`
+  (safe no-op if absent); decrement `n` in `$vec:corpus:{ns}:{field}`.
+
+##### Inference failure
+
+If ONNX inference fails before the WriteBatch is committed, the entire operation
+is rejected — the document write does not proceed. This keeps the document store
+and the semantic index always consistent: a document either has a vector entry or
+it was never written.
+
+Inference failures indicate a systemic problem (model not loaded, out of memory)
+rather than a data error. At kmdb's expected scale, inference on BGE Small is
+fast and failures are rare; failing the write is the correct response.
+
+A future enhancement (Option B) would write the document and mark it as pending
+indexing, deferring inference to the next index build. This aligns with the
+index lifecycle states from the secondary index design and is the right approach
+once lazy build and background repair paths are in place.
 
 ## CLI
 

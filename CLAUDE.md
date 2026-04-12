@@ -83,6 +83,9 @@ make docs
 | 6     | Cache layer (LruMap, SessionCache, CacheTier, CacheLayer with generation invalidation)           | ✅ Complete |
 | 7     | Query layer (KmdbDatabase, KmdbCollection, KmdbQuery, Filter DSL, secondary indexes, reactivity) | ✅ Complete |
 | 8     | Platform hardening (OPFS web storage, Zstd FFI/WASM, cloud adapters, performance benchmarks)     | ✅ Complete |
+| 9a    | Lexical search (BM25 inverted index, tokenisation pipeline, FtsManager, `search` CLI command)    | 🔲 Planned  |
+| 9b    | Semantic search (BGE Small En v1.5, SQ8 vector index, VecManager, ONNX inference)               | 🔲 Planned  |
+| 9c    | Hybrid search (Reciprocal Rank Fusion, `--mode` flag, unified SearchResult types)                | 🔲 Planned  |
 
 All 600 kmdb + 112 kmdb_cli tests pass as of 2026-03-30.
 
@@ -207,6 +210,15 @@ All index writes are in the same `WriteBatch` as the document write — always
 consistent. Dot-path syntax supports nested fields (`address.city`) and array
 fan-out (`tags[]`).
 
+### Text Search (§20–23)
+
+Three modes: **lexical** (BM25 inverted index, `$fts:` namespaces), **semantic**
+(BGE Small En v1.5 embeddings, SQ8 quantization, `$vec:` namespaces), and
+**hybrid** (Reciprocal Rank Fusion combining both). All `$fts:` and `$vec:`
+namespaces are excluded from sync and cache. Managed via `FtsManager` and
+`VecManager`; queried via `KmdbCollection.search()`. English-language only;
+web browser excluded. See §20 for shared types and CLI, §21–23 for each mode.
+
 ### Sync Protocol (§12)
 
 - Each device has a stable UUID identity
@@ -243,3 +255,7 @@ HTML lives in [site/](site/) and is generated via `make docs`. Key spec files:
 - `17_crash_recovery.md` — recovery sequence and failure scenarios
 - `18_concurrency.md` — synchronous model and performance targets
 - `19_platform.md` — platform conditional exports and package layout
+- `20_text_search.md` — text search overview, shared types, CLI, sync exclusion
+- `21_lexical_search.md` — BM25 inverted index, preprocessing pipeline, write/query/compaction
+- `22_semantic_search.md` — BGE model, SQ8 quantization, vector index, write/query paths
+- `23_hybrid_search.md` — Reciprocal Rank Fusion, candidate set, mode flag, score structure
