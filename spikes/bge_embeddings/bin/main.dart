@@ -1,4 +1,4 @@
-// Copyright 2026 The Aurochs KMesh Authors
+// Copyright 2026 The KMDB Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -44,6 +44,10 @@ Future<void> main() async {
     'Higher temperatures increase molecular kinetic energy, accelerating '
         'reaction rates until the enzyme structure is disrupted.',
     'Photosynthesis converts light energy into chemical energy stored in glucose.',
+    'I like dogs because they are funny',
+    'wiible wibble I am a tree.',
+    'boop',
+    'Temperature significantly impacts enzyme activity by influencing the kinetic energy of molecules',
   ];
 
   final passageEmbeddings = embedder.embedAll(passages);

@@ -1,4 +1,4 @@
-// Copyright 2026 The Aurochs KMesh Authors
+// Copyright 2026 The KMDB Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -165,6 +165,18 @@ typedef CreateMemoryInfoDart =
 // slots 70-94: various functions we don't use here
 
 // Release functions (void, no OrtStatus return)
+// slot 92: ReleaseEnv
+typedef ReleaseEnvC = Void Function(Pointer<OrtEnv>);
+typedef ReleaseEnvDart = void Function(Pointer<OrtEnv>);
+
+// slot 93: ReleaseStatus
+typedef ReleaseStatusC = Void Function(Pointer<OrtStatus>);
+typedef ReleaseStatusDart = void Function(Pointer<OrtStatus>);
+
+// slot 94: ReleaseMemoryInfo
+typedef ReleaseMemoryInfoC = Void Function(Pointer<OrtMemoryInfo>);
+typedef ReleaseMemoryInfoDart = void Function(Pointer<OrtMemoryInfo>);
+
 // slot 95: ReleaseSession
 typedef ReleaseSessionC = Void Function(Pointer<OrtSession>);
 typedef ReleaseSessionDart = void Function(Pointer<OrtSession>);
@@ -172,6 +184,12 @@ typedef ReleaseSessionDart = void Function(Pointer<OrtSession>);
 // slot 96: ReleaseValue
 typedef ReleaseValueC = Void Function(Pointer<OrtValue>);
 typedef ReleaseValueDart = void Function(Pointer<OrtValue>);
+
+// slot 97: ReleaseRunOptions (unused here)
+
+// slot 100: ReleaseSessionOptions
+typedef ReleaseSessionOptionsC = Void Function(Pointer<OrtSessionOptions>);
+typedef ReleaseSessionOptionsDart = void Function(Pointer<OrtSessionOptions>);
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 

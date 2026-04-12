@@ -1,4 +1,4 @@
-// Copyright 2026 The Aurochs KMesh Authors
+// Copyright 2026 The KMDB Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -58,8 +58,7 @@ class BgeEmbedder {
   /// via [Isolate.run] causes ORT's internal thread-pool to tear down when the
   /// spawned thread exits, corrupting shared mutex state. Keep all ORT calls on
   /// the same thread that created the session.
-  List<List<double>> embedAll(List<String> texts) =>
-      texts.map(embed).toList();
+  List<List<double>> embedAll(List<String> texts) => texts.map(embed).toList();
 
   void dispose() => _session.dispose();
 }

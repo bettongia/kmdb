@@ -1,4 +1,4 @@
-// Copyright 2026 The Aurochs KMesh Authors
+// Copyright 2026 The KMDB Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,10 +42,13 @@ void main() {
 
   setUpAll(() async {
     tempDir = await Directory.systemTemp.createTemp('bge_test_');
-    vocabPath = await _writeMinimalVocab(
-      tempDir,
-      ['hello', 'world', 'dart', 'is', 'great'],
-    );
+    vocabPath = await _writeMinimalVocab(tempDir, [
+      'hello',
+      'world',
+      'dart',
+      'is',
+      'great',
+    ]);
   });
 
   tearDownAll(() async {
@@ -79,10 +82,18 @@ void main() {
       final out = tok.encode('hello world');
       final sepIdx = out.inputIds.indexOf(102);
       for (var i = 0; i <= sepIdx; i++) {
-        expect(out.attentionMask[i], equals(1), reason: 'slot $i should be attended');
+        expect(
+          out.attentionMask[i],
+          equals(1),
+          reason: 'slot $i should be attended',
+        );
       }
       for (var i = sepIdx + 1; i < 16; i++) {
-        expect(out.attentionMask[i], equals(0), reason: 'slot $i should be padding');
+        expect(
+          out.attentionMask[i],
+          equals(0),
+          reason: 'slot $i should be padding',
+        );
       }
     });
 
@@ -119,12 +130,15 @@ void main() {
       }
     });
 
-    test('text longer than maxLength is truncated to maxLength tokens', () async {
-      // maxLength=8 → [CLS] + 6 tokens + [SEP]
-      final tok = await BertTokenizer.load(vocabPath, maxLength: 8);
-      final out = tok.encode('hello world dart is great hello world dart');
-      expect(out.inputIds.length, equals(8));
-      expect(out.inputIds.last, equals(102)); // ends with [SEP]
-    });
+    test(
+      'text longer than maxLength is truncated to maxLength tokens',
+      () async {
+        // maxLength=8 → [CLS] + 6 tokens + [SEP]
+        final tok = await BertTokenizer.load(vocabPath, maxLength: 8);
+        final out = tok.encode('hello world dart is great hello world dart');
+        expect(out.inputIds.length, equals(8));
+        expect(out.inputIds.last, equals(102)); // ends with [SEP]
+      },
+    );
   });
 }
