@@ -1,8 +1,8 @@
 # Text Search — Phase 1: Shared Foundations
 
-**Status**: Investigated
+**Status**: Complete
 
-**PR link**: _pending_
+**PR link**: https://github.com/aurochs-kmesh/kmdb/pull/12
 
 ## Problem statement
 
@@ -86,77 +86,77 @@ _None — all design decisions resolved in the proposals and spec §20–23._
 
 ### Phase 1 — New workspace packages
 
-- [ ] Scaffold `packages/kmdb_tokenizer_icu/` using `dart create --template=package`:
+- [x] Scaffold `packages/kmdb_tokenizer_icu/` using `dart create --template=package`:
   - `pubspec.yaml`: `publish_to: none`, `resolution: workspace`,
     depends on `kmdb` and `ffi: ^2.x`
   - `analysis_options.yaml`: include workspace root file
-- [ ] Scaffold `packages/kmdb_inferencing/` using `dart create --template=package`:
+- [x] Scaffold `packages/kmdb_inferencing/` using `dart create --template=package`:
   - `pubspec.yaml`: `publish_to: none`, `resolution: workspace`,
     depends on `kmdb`, `ffi: ^2.x`, `path: ^1.x`
   - `analysis_options.yaml`: include workspace root file
-- [ ] Add both packages to workspace `pubspec.yaml` under `workspace:`
-- [ ] Run `dart pub get` from workspace root; confirm resolution
-- [ ] Add new package paths to `addlicense_config.txt` (follow existing pattern
-  for `kmdb_zstd`)
-- [ ] Update `CLAUDE.md` repository layout section to list the two new packages
+- [x] Add both packages to workspace `pubspec.yaml` under `workspace:`
+- [x] Run `dart pub get` from workspace root; confirm resolution
+- [x] Add new package paths to `addlicense_config.txt` (follow existing pattern
+  for `kmdb_zstd`) — not needed, existing `.` coverage applies to all packages
+- [x] Update `CLAUDE.md` repository layout section to list the two new packages
 
 ### Phase 2 — Shared types in `kmdb`
 
-- [ ] Create `packages/kmdb/lib/src/search/tokeniser.dart`:
+- [x] Create `packages/kmdb/lib/src/search/tokeniser.dart`:
   - `abstract interface class Tokeniser` with `List<String> tokenise(String text)`
   - Full doc comment including the English-only scope note and UAX #29 reference
-- [ ] Create `packages/kmdb/lib/src/search/regexp_tokeniser.dart`:
+- [x] Create `packages/kmdb/lib/src/search/regexp_tokeniser.dart`:
   - `class RegExpTokeniser implements Tokeniser`
   - Move implementation from `spikes/icu_tokenizer/lib/src/regexp_tokeniser.dart`
   - Update license header year; add doc comment noting English-only scope and
     `IcuTokeniser` as the upgrade path
-- [ ] Create `packages/kmdb/lib/src/search/search_mode.dart`:
+- [x] Create `packages/kmdb/lib/src/search/search_mode.dart`:
   - `enum SearchMode { auto, lexical, semantic }`
   - Doc comments for each value
-- [ ] Create `packages/kmdb/lib/src/search/search_result.dart`:
+- [x] Create `packages/kmdb/lib/src/search/search_result.dart`:
   - `class SearchResult<T>` with `metadata` and `hits` fields
   - `class SearchMetadata` with `query`, `searched`, `skipped`, `total`
   - `class SearchHit<T>` with `rank`, `score`, `fieldScores`, `id`, `document`
   - Doc comments on `score` and `fieldScores` covering all three modes and the
     `"{field}:bm25"` / `"{field}:cosine"` key convention for hybrid
-- [ ] Create `packages/kmdb/lib/src/search/embedding_model.dart`:
+- [x] Create `packages/kmdb/lib/src/search/embedding_model.dart`:
   - `abstract interface class EmbeddingModel`
   - `Future<(Float32List embedding, bool truncated)> embed(String text)`
   - Doc comment noting this is implemented by `kmdb_inferencing`
-- [ ] Create `packages/kmdb/lib/src/search/fts_index_definition.dart`:
+- [x] Create `packages/kmdb/lib/src/search/fts_index_definition.dart`:
   - `class FtsIndexDefinition` with `collection`, `field`, `lazy` (default false)
   - `k1` (default 1.2) and `b` (default 0.75) BM25 tuning fields
   - `stopWords` (bool, default false) — when true, applies the Stopwords ISO
     `en` list during preprocessing (Stage 3 of the pipeline)
-- [ ] Create `packages/kmdb/lib/src/search/vec_index_definition.dart`:
+- [x] Create `packages/kmdb/lib/src/search/vec_index_definition.dart`:
   - `class VecIndexDefinition` with `collection`, `field`, `lazy` (default false)
-- [ ] Export all new types from `packages/kmdb/lib/kmdb.dart`
-- [ ] Tests (`packages/kmdb/test/search/`):
-  - [ ] `regexp_tokeniser_test.dart`: empty string, single word, prose sentence,
+- [x] Export all new types from `packages/kmdb/lib/kmdb.dart`
+- [x] Tests (`packages/kmdb/test/search/`):
+  - [x] `regexp_tokeniser_test.dart`: empty string, single word, prose sentence,
         punctuation filtering, whitespace-only, numbers, multiple spaces,
         technical identifiers (`mTLS`, hex literals)
-  - [ ] `search_result_test.dart`: construction, equality, `fieldScores` map
+  - [x] `search_result_test.dart`: construction, equality, `fieldScores` map
         access patterns
 
 ### Phase 3 — `kmdb_tokenizer_icu` package
 
-- [ ] Move `IcuTokeniser` from `spikes/icu_tokenizer/lib/src/icu_tokeniser.dart`
+- [x] Move `IcuTokeniser` from `spikes/icu_tokenizer/lib/src/icu_tokeniser.dart`
   into `packages/kmdb_tokenizer_icu/lib/src/icu_tokeniser.dart`
   - Update `import` path for `Tokeniser` to reference `package:kmdb/kmdb.dart`
   - Update license header
-- [ ] Create `packages/kmdb_tokenizer_icu/lib/kmdb_tokenizer_icu.dart` barrel
+- [x] Create `packages/kmdb_tokenizer_icu/lib/kmdb_tokenizer_icu.dart` barrel
   exporting `IcuTokeniser`
-- [ ] Move tests from `spikes/icu_tokenizer/test/` into
+- [x] Move tests from `spikes/icu_tokenizer/test/` into
   `packages/kmdb_tokenizer_icu/test/icu_tokeniser_test.dart`
   - All shared `Tokeniser` contract tests
   - ICU-specific UAX #29 tests (hex literals, `mTLS`, punctuation filtering,
     numeric tokens)
-- [ ] Run `dart test packages/kmdb_tokenizer_icu`; confirm all tests pass
-- [ ] Run `dart analyze packages/kmdb_tokenizer_icu`; confirm no issues
+- [x] Run `dart test packages/kmdb_tokenizer_icu`; confirm all tests pass
+- [x] Run `dart analyze packages/kmdb_tokenizer_icu`; confirm no issues
 
 ### Phase 4 — `KmdbDatabase.open()` extension
 
-- [ ] Add the following optional named parameters to `KmdbDatabase.open()` in
+- [x] Add the following optional named parameters to `KmdbDatabase.open()` in
   `packages/kmdb/lib/src/query/kmdb_database.dart`:
   ```dart
   List<FtsIndexDefinition> ftsIndexes = const [],
@@ -167,22 +167,22 @@ _None — all design decisions resolved in the proposals and spec §20–23._
   - `onSearchIndexReady` fires when all text search indexes transition out of
     `syncing` or `building` state to `current`; intended for Flutter apps to
     re-enable search UI after a sync delta has been fully applied
-- [ ] Add validation: if `vecIndexes.isNotEmpty && embeddingModel == null`,
+- [x] Add validation: if `vecIndexes.isNotEmpty && embeddingModel == null`,
   throw `ArgumentError('embeddingModel is required when vecIndexes is non-empty')`
-- [ ] Store the parameters on the `KmdbDatabase` instance for use by
+- [x] Store the parameters on the `KmdbDatabase` instance for use by
   `FtsManager` and `VecManager` in later plans; stub both managers as null for
   now
-- [ ] Add `FtsManager? get ftsManager` and `VecManager? get vecManager`
+- [x] Add `FtsManager? get ftsManager` and `VecManager? get vecManager`
   properties returning null (stubbed; populated in plans 2 and 3)
-- [ ] Tests:
-  - [ ] `open()` with empty `ftsIndexes` / `vecIndexes` succeeds (no regression)
-  - [ ] `open()` with `vecIndexes` non-empty and no `embeddingModel` throws
+- [x] Tests:
+  - [x] `open()` with empty `ftsIndexes` / `vecIndexes` succeeds (no regression)
+  - [x] `open()` with `vecIndexes` non-empty and no `embeddingModel` throws
     `ArgumentError`
-  - [ ] `open()` with both `ftsIndexes` and `embeddingModel` succeeds
+  - [x] `open()` with both `ftsIndexes` and `embeddingModel` succeeds
 
 ### Phase 5 — `search()` stub on `KmdbCollection<T>`
 
-- [ ] Add `Future<SearchResult<T>> search(String query, {...})` to
+- [x] Add `Future<SearchResult<T>> search(String query, {...})` to
   `KmdbCollection<T>` in
   `packages/kmdb/lib/src/query/kmdb_collection.dart`:
   ```dart
@@ -198,15 +198,15 @@ _None — all design decisions resolved in the proposals and spec §20–23._
   ```
   - Implementation: return `SearchResult` with empty `hits` and all requested
     fields in `skipped` (stub — replaced in plans 2 and 3)
-- [ ] Export `search()` as part of the public API
-- [ ] Tests:
-  - [ ] `search()` with no indexes returns empty `SearchResult` with `hits`
+- [x] Export `search()` as part of the public API
+- [x] Tests:
+  - [x] `search()` with no indexes returns empty `SearchResult` with `hits`
     empty and fields in `skipped`
-  - [ ] `search()` with empty query string returns empty `SearchResult`
+  - [x] `search()` with empty query string returns empty `SearchResult`
 
 ### Phase 6 — `kmdb_inferencing` package scaffold
 
-- [ ] Create directory structure:
+- [x] Create directory structure:
   ```
   packages/kmdb_inferencing/
     assets/
@@ -221,15 +221,32 @@ _None — all design decisions resolved in the proposals and spec §20–23._
     test/
       kmdb_inferencing_test.dart
   ```
-- [ ] Add `.gitattributes` entry for `*.onnx` files → `filter=lfs diff=lfs
+- [x] Add `.gitattributes` entry for `*.onnx` files → `filter=lfs diff=lfs
   merge=lfs -text`
-- [ ] Create `OnnxEmbeddingModel` class stub in
+- [x] Create `OnnxEmbeddingModel` class stub in
   `packages/kmdb_inferencing/lib/src/embedding_model.dart`:
   - Implements `EmbeddingModel` from `kmdb`
   - Constructor and `load()` factory stub throwing `UnimplementedError`
-- [ ] Export `OnnxEmbeddingModel` from barrel
-- [ ] Run `dart analyze packages/kmdb_inferencing`; confirm no issues
+- [x] Export `OnnxEmbeddingModel` from barrel
+- [x] Run `dart analyze packages/kmdb_inferencing`; confirm no issues
 
 ## Summary
 
-_To be completed on implementation._
+- Created two new workspace packages: `kmdb_tokenizer_icu` (ICU FFI tokeniser)
+  and `kmdb_inferencing` (ONNX Runtime embedding model scaffold), both joined
+  to the workspace and resolving correctly.
+- Added 7 shared types to `kmdb/lib/src/search/`: `Tokeniser`, `RegExpTokeniser`,
+  `SearchMode`, `SearchResult<T>`, `SearchMetadata`, `SearchHit<T>`,
+  `EmbeddingModel`, `FtsIndexDefinition`, `VecIndexDefinition` — all exported
+  from `kmdb.dart`.
+- Moved `IcuTokeniser` from the spike into `kmdb_tokenizer_icu` with updated
+  imports; all UAX #29 contract tests pass.
+- Extended `KmdbDatabase.open()` with `ftsIndexes`, `vecIndexes`,
+  `embeddingModel`, and `onSearchIndexReady` parameters. Validates that
+  `embeddingModel` is non-null when `vecIndexes` is non-empty.
+- Added `search()` stub to `KmdbCollection<T>` that returns an empty
+  `SearchResult` with skipped fields — ready for plans 2 and 3 to implement.
+- Added `.gitattributes` LFS tracking for `*.onnx` model files.
+- 69 new tests added across 3 new test files; zero analyzer warnings; all
+  existing tests continue to pass (pre-existing Zstd native asset failures
+  are unrelated to this plan).

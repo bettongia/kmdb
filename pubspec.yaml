@@ -9,6 +9,8 @@ workspace:
   - packages/kmdb_cli
   - packages/kmdb_zstd
   - packages/kmdb_ui
+  - packages/kmdb_tokenizer_icu
+  - packages/kmdb_inferencing
 
 dev_dependencies:
   lints: ^6.0.0
