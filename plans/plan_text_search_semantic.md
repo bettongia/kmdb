@@ -197,24 +197,29 @@ _None — all design decisions resolved in spec §22._
   - [ ] `embed()` of empty string does not throw
   - [ ] `dispose()` can be called without error
 
-### Phase 5 — Git LFS setup for model assets
+### Phase 5 — Git LFS setup and model asset migration
 
 - [ ] Confirm `.gitattributes` has `*.onnx filter=lfs diff=lfs merge=lfs -text`
   (added in Phase 1 scaffold; verify it is present)
-- [ ] Add placeholder `.gitkeep` in
-  `packages/kmdb_inferencing/assets/models/bge-small-en/` (already scaffolded;
-  confirm it exists)
-- [ ] Document in `packages/kmdb_inferencing/README.md` that `vocab.txt`,
-  `tokenizer_config.json`, and `bge_small.onnx` must be placed in
-  `assets/models/bge-small-en/` before tests that require the model can pass.
-  Include a URL to the Hugging Face model page.
-  (Note: this is the one README exception allowed — it is package-level
-  developer setup docs, not auto-generated documentation.)
+- [ ] Copy all model assets from `spikes/bge_embeddings/assets/` into
+  `packages/kmdb_inferencing/assets/models/bge-small-en/`:
+  - `bge_small.onnx` — model binary (~127 MB, tracked via Git LFS)
+  - `vocab.txt` — WordPiece vocabulary (30k entries)
+  - `tokenizer_config.json` — tokenizer settings
+  - `tokenizer.json` — full tokenizer definition
+  - `config.json` — model configuration
+  - `special_tokens_map.json` — special token definitions
+- [ ] Remove the `.gitkeep` placeholder that was added during the Phase 1
+  scaffold (it is superseded by the real asset files)
+- [ ] Confirm `git lfs track` lists `*.onnx` and that `git lfs status` shows
+  `bge_small.onnx` as a tracked LFS file after staging
 
 ### Phase 6 — Vec index state and key codec
 
 - [ ] Create `packages/kmdb/lib/src/search/semantic/vec_index_state.dart`:
-  - `VecIndexStatus` enum: `undefined`, `building`, `current`
+  - `VecIndexStatus` enum: `undefined`, `building`, `current`, `stale`,
+    `syncing` — `syncing` indicates a sync delta is being applied; queries
+    serve from the pre-sync index while catch-up proceeds asynchronously
   - `VecIndexState` class: `namespace`, `field`, `status`, `builtThrough`,
     `builtAt`
   - CBOR encode/decode helpers (`toMap` / `fromMap`) for persistence in `$meta`
@@ -250,6 +255,12 @@ _None — all design decisions resolved in spec §22._
     - `n` unchanged
   - `Future<void> ensureBuilt(String ns, String field)` — builds index from
     existing documents; updates `$meta:vec:{ns}:{field}` when done
+  - `Future<void> applyDelta(String ns, SyncDelta delta)` — processes a
+    post-sync delta (§20.8): transitions index to `syncing`, runs inference
+    on each added/updated document and writes the quantised vector, deletes
+    entries for removed documents, then transitions to `current`; each
+    document committed in its own `WriteBatch`; intended to run in a
+    background isolate (inference is CPU-bound)
   - `Future<SearchResult<T>> search<T>(...)` — see Phase 8
 
 ### Phase 8 — Flat-scan cosine similarity query
@@ -258,14 +269,16 @@ _None — all design decisions resolved in spec §22._
   - Accept `String query`, `List<String> fields`, `Filter? filter`,
     `SearchMode mode`, `int candidates`, `int limit`, `int offset`
   - Call `model.embed(query)` to get the query float32 vector
-  - For each field, prefix-scan `$vec:{ns}:{field}:` to retrieve all
-    `(docId, Uint8List)` pairs
+  - If `filter` is supplied, resolve `candidateIds` first via secondary index
+    lookup (§16) or full namespace scan — this is the pre-filter step
+  - For each field: if `candidateIds` is set, fetch vectors via targeted
+    key lookups (`$vec:{ns}:{field}:{docId}` per id); otherwise prefix-scan
+    `$vec:{ns}:{field}:` to retrieve all `(docId, Uint8List)` pairs
   - Dequantise each stored vector; compute dot product with query vector
     (dot product of L2-normalised vectors = cosine similarity)
   - Keep top-`candidates` results by score descending
   - When multiple fields searched, take max per-field score as document score;
     carry per-field scores in `SearchHit.fieldScores` as `"{field}:cosine"`
-  - Apply `Filter` predicate if supplied (load document via `KvStore.get`)
   - Sort descending; apply `offset` and `limit`; return `SearchResult<T>`
 - [ ] Modify `packages/kmdb/lib/src/query/kmdb_collection.dart`:
   - Wire `VecManager` into `KmdbDatabase` (replace stub `get vecManager => null`)
@@ -284,8 +297,18 @@ _None — all design decisions resolved in spec §22._
         model assets; skip if absent)
   - [ ] Deleted document does not appear in results
   - [ ] Updated document uses new embedding
-  - [ ] `filter:` predicate excludes non-matching documents
+  - [ ] `filter:` predicate resolves `candidateIds` before fetching vectors;
+        only matching documents are scored
+  - [ ] Filtered search with secondary index uses targeted key lookups, not
+        full prefix scan
   - [ ] `offset` and `limit` applied correctly
+  - [ ] `applyDelta` with added documents runs inference and stores vectors;
+        they appear in subsequent search results
+  - [ ] `applyDelta` with deleted documents removes vector entries
+  - [ ] `applyDelta` transitions index `current` → `syncing` → `current`;
+        searches during `syncing` serve from the pre-delta index
+  - [ ] Process killed during `applyDelta` leaves index in `syncing`; next
+        `open()` transitions to `stale` and full rebuild is triggered
   - [ ] Empty query string returns empty `SearchResult` without error
   - [ ] Field not indexed appears in `SearchMetadata.skipped`
   - [ ] `ensureBuilt` indexes pre-existing documents correctly

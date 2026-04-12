@@ -41,8 +41,10 @@ values and query strings.
 
 Disabled by default. All tokens pass through unchanged. A pre-defined English
 stop-word list (Stopwords ISO `en`) is available and can be opted into at index
-creation time. When enabled, high-frequency low-information words (`the`, `and`,
-`is`) are removed before stemming.
+creation time via the `stopWords: true` field on `FtsIndexDefinition` (Dart API)
+or the `--stopwords` flag on `kmdb search create` (CLI). When enabled,
+high-frequency low-information words (`the`, `and`, `is`) are removed before
+stemming.
 
 ### Stage 4 — Stemming
 
@@ -88,6 +90,14 @@ corpus stats. This is the only read-before-write in the design.
 All index writes are included in the same `WriteBatch` as the document write,
 making them atomic. WAL provides crash recovery with no additional work (§7).
 
+This guarantee applies to the **write interception path** — individual insert,
+update, and delete operations that arrive after the index is in place. It does
+not extend to the **initial bulk build** (the scan of existing documents that
+runs at first `search()` when `lazy: false`). The bulk build processes documents
+sequentially across multiple batches; a crash mid-build leaves the index in the
+`building` lifecycle state, which is detected and re-triggered at the next
+`open()`.
+
 ### Insert
 
 1. Tokenise, normalise, and stem the field value.
@@ -124,22 +134,27 @@ Stale base index keys are left in place and cleaned up at compaction.
 
 ## Query Behaviour
 
-For each query term (after the same tokenise → normalise → stem pipeline):
-
-1. Prefix-scan `$fts:{ns}:{field}:{term}:` to collect `(docId, tf)` pairs.
-2. Filter each result through the overlay:
-   - No overlay entry → trust the base index tf.
-   - Overlay entry present → include only if the term appears in the overlay map;
-     use the overlay tf (supersedes the base index value).
-   - TOMBSTONE present → exclude unconditionally.
+1. If a `filter` was provided, resolve the set of matching docIds using
+   secondary indexes (§16) if available, or a full namespace scan with
+   in-memory filter evaluation otherwise. This produces a `candidateIds` set
+   used to restrict all subsequent steps.
+2. For each query term (after the same tokenise → normalise → stem pipeline):
+   a. Prefix-scan `$fts:{ns}:{field}:{term}:` to collect `(docId, tf)` pairs,
+      restricting to `candidateIds` when present.
+   b. Filter each result through the overlay:
+      - No overlay entry → trust the base index tf.
+      - Overlay entry present → include only if the term appears in the overlay
+        map; use the overlay tf (supersedes the base index value).
+      - TOMBSTONE present → exclude unconditionally.
 3. `df` for the term is the count of surviving results — derived from the scan,
    not stored separately.
 4. Read `$fts:corpus:{ns}:{field}` once per query to obtain `n` and
    `totalTokens`. Compute `avgdl = totalTokens / n`.
-5. Score each document using BM25 (see Ranking Algorithm).
+5. Score each surviving candidate using BM25 (see Ranking Algorithm).
 6. When multiple fields are searched, take the highest per-field score as the
    document's overall score. Per-field scores are carried in
    `SearchHit.fieldScores`.
+7. Apply `limit` and `offset` to the ranked results.
 
 ## Ranking Algorithm — BM25
 
@@ -193,3 +208,26 @@ The unsafe state — overlay cleared but stale entries remaining — cannot occu
 All `$fts:` system namespaces are exempt from the session object cache and the
 materialised view cache. FTS index data does not pass through these caches and
 therefore does not trigger namespace generation counter churn on document writes.
+
+## Post-Sync Delta Rebuild
+
+When documents arrive via sync, `FtsManager` receives a `SyncDelta` event
+carrying the `(docId, changeType)` pairs for the namespace (§20.8). Processing
+is identical to write interception with one difference: the delta is applied as
+a catch-up batch outside any document `WriteBatch`.
+
+For each entry in the delta:
+
+- **Added / updated** — fetch the current document value from the KV store, run
+  the preprocessing pipeline (tokenise → normalise → [stop-word filter] → stem),
+  and write FTS entries using the same overlay-based update path as §21 Write
+  Behaviour.
+- **Deleted** — write a TOMBSTONE to `$fts:overlay:{ns}:{field}:{docId}` and
+  update corpus stats, identical to the delete path in §21 Write Behaviour.
+
+Each document in the delta is committed in its own `WriteBatch` for crash
+safety. If the process is killed mid-delta, the `syncing` → `stale` transition
+on next `open()` (§20.8) ensures a full rebuild cleans up any partial state.
+
+FTS tokenisation is fast enough that even a first-load delta of several thousand
+documents completes in well under a second on any supported device.

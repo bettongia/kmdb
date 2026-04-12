@@ -153,6 +153,10 @@ _None — all design decisions resolved in spec §23._
   - Determine which indexes are available for each requested field:
     - `hasFts = _db.ftsManager?.hasIndex(namespace, field) ?? false`
     - `hasVec = _db.vecManager?.hasIndex(namespace, field) ?? false`
+  - If `filter` is supplied, resolve `candidateIds` once via secondary index
+    (§16) or namespace scan before any index leg runs; pass `candidateIds` to
+    both `FtsManager` and `VecManager` so neither re-fetches documents for
+    filtering
   - Routing logic per field:
     - `mode == SearchMode.lexical` → use `FtsManager` only (error if no FTS
       index; field goes to `skipped`)
@@ -188,7 +192,8 @@ _None — all design decisions resolved in spec §23._
   - [ ] `SearchHit.fieldScores` map has only `":bm25"` key for BM25-only hit
   - [ ] `SearchHit.fieldScores` map has only `":cosine"` key for cosine-only
         hit
-  - [ ] `filter:` predicate correctly excludes documents after RRF merge
+  - [ ] `filter:` predicate resolves `candidateIds` once before both legs;
+        non-matching documents are excluded from both FTS and vec candidate sets
   - [ ] `candidates: 5` limits each leg to 5 candidates (10 total pool)
   - [ ] `rrfK: 1` produces valid (extreme) scores without error
   - [ ] Multi-field hybrid: per-field scores tracked independently
@@ -217,8 +222,11 @@ _None — all design decisions resolved in spec §23._
 
 ### Phase 5 — Final cleanup and CLAUDE.md update
 
-- [ ] Update `CLAUDE.md` implementation status table: set phases 9a, 9b, 9c
-  to `✅ Complete`
+- [ ] Update the implementation status table in `CLAUDE.md` — rows 9a, 9b,
+  and 9c — from `🔲 Planned` to `✅ Complete`:
+  - 9a: Lexical search (BM25 inverted index, tokenisation pipeline, FtsManager, `search` CLI command)
+  - 9b: Semantic search (BGE Small En v1.5, SQ8 vector index, VecManager, ONNX inference)
+  - 9c: Hybrid search (Reciprocal Rank Fusion, `--mode` flag, unified SearchResult types)
 - [ ] Run full test suite: `dart test packages/kmdb` and
   `dart test packages/kmdb_cli`; confirm all tests pass and coverage ≥ 90%
 - [ ] Run `dart analyze packages/kmdb packages/kmdb_cli

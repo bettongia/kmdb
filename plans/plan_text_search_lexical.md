@@ -138,8 +138,10 @@ _None — all design decisions resolved in spec §21._
 ### Phase 3 — FTS index state and key codec
 
 - [ ] Create `packages/kmdb/lib/src/search/lexical/fts_index_state.dart`:
-  - `FtsIndexStatus` enum: `undefined`, `building`, `current`, `stale`
-    (mirrors `IndexStatus` in `index_manager.dart`)
+  - `FtsIndexStatus` enum: `undefined`, `building`, `current`, `stale`,
+    `syncing` — `syncing` indicates a sync delta is being applied; queries
+    serve from the pre-sync index while catch-up is in progress (mirrors
+    `IndexStatus` in `index_manager.dart`, plus the text-search-specific state)
   - `FtsIndexState` class: `namespace`, `field`, `status`, `builtThrough`
     (key cursor), `builtAt` (ISO timestamp string)
   - CBOR encode/decode helpers (`toMap` / `fromMap`) for persistence in `$meta`
@@ -173,6 +175,11 @@ _None — all design decisions resolved in spec §21._
   - `Future<SearchResult<T>> search<T>(...)` — see Phase 6
   - `Future<void> compact(String ns, String field)` — reconciles overlay with
     base index; each document processed as one `WriteBatch`
+  - `Future<void> applyDelta(String ns, SyncDelta delta)` — processes a
+    post-sync delta (§20.8): transitions index to `syncing`, applies each
+    added/updated/deleted `(docId, changeType)` pair using the same
+    insert/update/delete write paths as write interception, then transitions
+    to `current`; each document committed in its own `WriteBatch`
 
 ### Phase 5 — Write interception in `KmdbCollection`
 
@@ -200,15 +207,16 @@ _None — all design decisions resolved in spec §21._
 - [ ] Add `Future<SearchResult<T>> search<T>(...)` to `FtsManager`:
   - Accept `String query`, `List<String> fields`, `Filter? filter`,
     `SearchMode mode`, `int limit`, `int offset`, `Tokeniser tokeniser`
+  - If `filter` is supplied, resolve `candidateIds` first via secondary index
+    lookup (§16) or full namespace scan — this is the pre-filter step
   - Apply preprocessing pipeline to query string
-  - For each query term, prefix-scan `$fts:{ns}:{field}:{term}:` and collect
-    `(docId, tf)` pairs
+  - For each query term, prefix-scan `$fts:{ns}:{field}:{term}:`, restricting
+    to `candidateIds` when present, and collect `(docId, tf)` pairs
   - Filter results through overlay (no entry → use base tf; overlay → use
     overlay tf if term present; TOMBSTONE → exclude)
   - Read corpus stats once (`$fts:corpus:{ns}:{field}`) per field
   - Score using BM25; when multiple fields are searched, take max per-field
     score as document score; carry per-field scores in `SearchHit.fieldScores`
-  - Apply `Filter` predicate if supplied (load document via `KvStore.get`)
   - Sort descending by score; apply `offset` and `limit`
   - Return `SearchResult<T>` with `SearchMetadata` populated
 - [ ] Replace stub in `packages/kmdb/lib/src/query/kmdb_collection.dart`:
@@ -221,13 +229,24 @@ _None — all design decisions resolved in spec §21._
   - [ ] Multi-field search: correct per-field scores in `fieldScores`
   - [ ] Deleted document does not appear in results
   - [ ] Updated document reflects new content (overlay supersedes base)
-  - [ ] `filter:` predicate excludes non-matching documents
+  - [ ] `filter:` predicate resolves `candidateIds` before scanning; only
+        matching documents are scored
+  - [ ] Filtered search returns correct results when secondary index is
+        available vs. full-scan fallback
   - [ ] `offset` and `limit` applied correctly
   - [ ] Query with all stop words (filtering on) returns empty result
   - [ ] Empty query returns empty result
   - [ ] Field not indexed appears in `SearchMetadata.skipped`
   - [ ] `ensureBuilt` builds index from pre-existing documents correctly
   - [ ] BM25 scores increase when term frequency increases
+  - [ ] `applyDelta` with added documents indexes them correctly; they appear
+        in subsequent search results
+  - [ ] `applyDelta` with deleted documents writes TOMBSTONE; they are excluded
+        from results
+  - [ ] `applyDelta` transitions index `current` → `syncing` → `current`;
+        searches during `syncing` serve from the pre-delta index
+  - [ ] Process killed during `applyDelta` leaves index in `syncing`; next
+        `open()` transitions to `stale` and full rebuild is triggered
 
 ### Phase 7 — CLI `search` command
 
@@ -236,8 +255,7 @@ _None — all design decisions resolved in spec §21._
   - Named options:
     - `--fields <field1,field2>` — comma-separated list; defaults to all FTS
       indexed fields for the collection
-    - `--mode auto|lexical` — search mode (semantic/auto with vec available in
-      Phase 3); default `auto`
+    - `--mode auto|lexical|semantic` — search mode; default `auto`
     - `--limit <n>` — default 10
     - `--offset <n>` — default 0
     - `--output table|json|ids` — default `table`
@@ -247,15 +265,21 @@ _None — all design decisions resolved in spec §21._
     chars)
   - JSON output: full `SearchResult` serialized to JSON
   - IDs output: one document id per line
+- [ ] Implement `search create` subcommand flags:
+  - `--lazy` — sets `FtsIndexDefinition.lazy = true`
+  - `--stopwords` — sets `FtsIndexDefinition.stopWords = true`; silently ignored
+    when `--semantic` is also present (vector indexes have no stop-word stage)
 - [ ] Register command in `packages/kmdb_cli/lib/src/kmdb_cli.dart`
 - [ ] Update `local/config.json` schema to accept `ftsIndexes` array (each entry:
-  `{ "collection": "...", "field": "...", "k1": 1.2, "b": 0.75 }`)
+  `{ "collection": "...", "field": "...", "k1": 1.2, "b": 0.75, "stopWords": false }`)
 - [ ] Tests:
   - [ ] `search_command_test.dart`: command runs against a test database with
     pre-seeded documents; verifies ranked output
   - [ ] `--output json` produces valid JSON with correct structure
   - [ ] Missing `--fields` defaults to all FTS-indexed fields
   - [ ] Collection with no FTS index prints error, exits 1
+  - [ ] `search create` with `--stopwords` creates index with `stopWords: true`
+  - [ ] `search create` with `--stopwords --semantic` silently ignores `--stopwords`
 
 ## Summary
 

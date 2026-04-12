@@ -126,6 +126,8 @@ _None — all design decisions resolved in the proposals and spec §20–23._
 - [ ] Create `packages/kmdb/lib/src/search/fts_index_definition.dart`:
   - `class FtsIndexDefinition` with `collection`, `field`, `lazy` (default false)
   - `k1` (default 1.2) and `b` (default 0.75) BM25 tuning fields
+  - `stopWords` (bool, default false) — when true, applies the Stopwords ISO
+    `en` list during preprocessing (Stage 3 of the pipeline)
 - [ ] Create `packages/kmdb/lib/src/search/vec_index_definition.dart`:
   - `class VecIndexDefinition` with `collection`, `field`, `lazy` (default false)
 - [ ] Export all new types from `packages/kmdb/lib/kmdb.dart`
@@ -160,7 +162,11 @@ _None — all design decisions resolved in the proposals and spec §20–23._
   List<FtsIndexDefinition> ftsIndexes = const [],
   List<VecIndexDefinition> vecIndexes = const [],
   EmbeddingModel? embeddingModel,
+  void Function()? onSearchIndexReady,
   ```
+  - `onSearchIndexReady` fires when all text search indexes transition out of
+    `syncing` or `building` state to `current`; intended for Flutter apps to
+    re-enable search UI after a sync delta has been fully applied
 - [ ] Add validation: if `vecIndexes.isNotEmpty && embeddingModel == null`,
   throw `ArgumentError('embeddingModel is required when vecIndexes is non-empty')`
 - [ ] Store the parameters on the `KmdbDatabase` instance for use by
