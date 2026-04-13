@@ -17,6 +17,7 @@ import 'dart:async';
 import '../encoding/value_codec.dart';
 import '../engine/kvstore/kv_store.dart';
 import '../engine/util/key_codec.dart';
+import '../search/hybrid/hybrid_manager.dart';
 import '../search/search_mode.dart';
 import '../search/search_result.dart';
 import 'exceptions.dart';
@@ -261,15 +262,23 @@ final class KmdbCollection<T> {
   /// - [fields] — the document field names to search. If `null` or empty, all
   ///   FTS-indexed fields for this collection are searched.
   /// - [filter] — an optional [Filter] to restrict the candidate set. The
-  ///   candidate set is resolved before the inverted-index scan; only
+  ///   candidate set is resolved once before both index legs run; only
   ///   documents that pass the filter are scored.
   /// - [mode] — the [SearchMode] to use. Defaults to [SearchMode.auto], which
   ///   activates lexical search when only an FTS index is available, semantic
   ///   when only a vector index is available, and hybrid (RRF) when both are
-  ///   present (plan 4 implements hybrid).
-  /// - [candidates] — the maximum candidate documents per index leg. Default: 100.
+  ///   present.
+  /// - [candidates] — the maximum candidate documents per index leg. Default:
+  ///   100. In hybrid mode, each leg (BM25 and cosine) independently fetches
+  ///   up to [candidates] documents, for a pool of up to `2 × candidates`
+  ///   before RRF merging.
   /// - [limit] — the maximum number of hits to return. Default: 10.
   /// - [offset] — number of hits to skip (for pagination). Default: 0.
+  /// - [rrfK] — the Reciprocal Rank Fusion smoothing constant (default 60).
+  ///   Only used in hybrid mode. Must be >= 1. Higher values reduce the
+  ///   advantage of top-ranked documents. The default of 60 is from the
+  ///   original RRF paper (Cormack et al. 2009). To tune the blending
+  ///   between lexical and semantic results, adjust this value per query.
   ///
   /// ## Returns
   ///
@@ -277,14 +286,27 @@ final class KmdbCollection<T> {
   /// Fields that could not be searched (no matching index) appear in
   /// [SearchMetadata.skipped].
   ///
+  /// ## Hybrid mode fieldScores keys
+  ///
+  /// In hybrid mode, [SearchHit.fieldScores] contains:
+  ///
+  /// - `"{field}:bm25"` — raw BM25 score for documents in the lexical results.
+  /// - `"{field}:cosine"` — raw cosine similarity for documents in the
+  ///   semantic results.
+  /// - `"{field}"` — per-field RRF score.
+  ///
+  /// A document absent from one leg has no key for that leg's component.
+  ///
   /// ## Example
   ///
   /// ```dart
+  /// // Hybrid search — both FTS and vector indexes are configured.
   /// final results = await articles.search(
   ///   'full text search engine',
   ///   fields: ['title', 'body'],
   ///   filter: Filter.field('published').equals(true),
   ///   limit: 20,
+  ///   rrfK: 60,
   /// );
   /// for (final hit in results.hits) {
   ///   print('${hit.rank}. [${hit.score.toStringAsFixed(3)}] ${hit.id}');
@@ -298,13 +320,21 @@ final class KmdbCollection<T> {
     int candidates = 100,
     int limit = 10,
     int offset = 0,
+    int rrfK = 60,
   }) async {
     final fts = _db.ftsManager;
 
     // Determine the effective field list.
+    // When no explicit fields are given, union the FTS-indexed and vec-indexed
+    // field lists so that a vec-only configuration is still auto-discoverable.
     List<String> effectiveFields;
     if (fields == null || fields.isEmpty) {
-      effectiveFields = fts?.indexedFieldsFor(namespace) ?? [];
+      final ftsFields = fts?.indexedFieldsFor(namespace) ?? const <String>[];
+      final vecFields =
+          _db.vecManager?.indexedFieldsFor(namespace) ?? const <String>[];
+      // Preserve order: FTS fields first, then any vec-only fields.
+      final merged = {...ftsFields, ...vecFields}.toList();
+      effectiveFields = merged;
     } else {
       effectiveFields = fields;
     }
@@ -391,17 +421,56 @@ final class KmdbCollection<T> {
       final hasVec = vec != null && vec.hasAnyIndex(namespace);
 
       if (hasFts && hasVec) {
-        // Hybrid path (Phase 4 — RRF combination). For now, delegate to
-        // lexical as the primary index until the hybrid manager is wired up.
-        // TODO(phase4): replace with hybrid RRF search.
-        return fts.search<T>(
+        // Hybrid path: run both index legs independently, then merge via RRF.
+        // Each leg fetches up to `candidates` results. The merged pool is at
+        // most 2×candidates before RRF scoring and pagination (spec §23).
+        //
+        // candidateIds (pre-filter) is passed to both legs so neither
+        // re-scans the collection for filtering — the filter is resolved once.
+        final lexResult = await fts.search<T>(
           namespace: namespace,
           query: query,
           fields: effectiveFields,
           fetchDoc: (id) => get(id),
           candidateIds: candidateIds,
+          limit: candidates,
+          offset: 0,
+        );
+
+        final vecResult = await vec.search<T>(
+          namespace: namespace,
+          query: query,
+          fields: effectiveFields,
+          fetchDoc: (id) => get(id),
+          candidateIds: candidateIds,
+          candidates: candidates,
+          limit: candidates,
+          offset: 0,
+        );
+
+        // Determine the union of searched/skipped across both legs.
+        final bothSearched = {
+          ...lexResult.metadata.searched,
+          ...vecResult.metadata.searched,
+        }.toList();
+        final bothSkipped = effectiveFields
+            .where((f) => !bothSearched.contains(f))
+            .toList();
+
+        final hybridMeta = SearchMetadata(
+          query: query,
+          searched: bothSearched,
+          skipped: bothSkipped,
+          total: 0, // updated by mergeWithRrf
+        );
+
+        return mergeWithRrf<T>(
+          lexicalHits: lexResult.hits,
+          semanticHits: vecResult.hits,
           limit: limit,
           offset: offset,
+          metadata: hybridMeta,
+          rrfK: rrfK,
         );
       } else if (hasFts) {
         return fts.search<T>(

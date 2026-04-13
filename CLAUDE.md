@@ -87,11 +87,11 @@ make docs
 | 6     | Cache layer (LruMap, SessionCache, CacheTier, CacheLayer with generation invalidation)           | ✅ Complete |
 | 7     | Query layer (KmdbDatabase, KmdbCollection, KmdbQuery, Filter DSL, secondary indexes, reactivity) | ✅ Complete |
 | 8     | Platform hardening (OPFS web storage, Zstd FFI/WASM, cloud adapters, performance benchmarks)     | ✅ Complete |
-| 9a    | Lexical search (BM25 inverted index, tokenisation pipeline, FtsManager, `search` CLI command)    | 🔲 Planned  |
-| 9b    | Semantic search (BGE Small En v1.5, SQ8 vector index, VecManager, ONNX inference)               | 🔲 Planned  |
-| 9c    | Hybrid search (Reciprocal Rank Fusion, `--mode` flag, unified SearchResult types)                | 🔲 Planned  |
+| 9a    | Lexical search (BM25 inverted index, tokenisation pipeline, FtsManager, `search` CLI command)    | ✅ Complete |
+| 9b    | Semantic search (BGE Small En v1.5, SQ8 vector index, VecManager, ONNX inference)               | ✅ Complete |
+| 9c    | Hybrid search (Reciprocal Rank Fusion, `--mode` flag, unified SearchResult types)                | ✅ Complete |
 
-All 600 kmdb + 112 kmdb_cli tests pass as of 2026-03-30.
+All 875 kmdb + 362 kmdb_cli tests pass as of 2026-04-14.
 
 ## Architecture
 

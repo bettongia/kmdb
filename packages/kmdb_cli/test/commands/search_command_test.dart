@@ -279,15 +279,18 @@ void main() {
         {'limit': '1'},
       );
       expect(ok, isTrue);
-      // Only one document row should appear (plus header + separator + summary).
+      // Only one document row should appear (plus header + separator +
+      // mode line + summary).
       final lines = out2.toString().trim().split('\n');
-      // 1 header + 1 separator + 1 hit row + 1 summary = 4 lines (at least)
+      // Filter to the actual hit rows only (exclude header, separator, mode
+      // label, and summary lines).
       final hitLines = lines
           .where(
             (l) =>
                 l.trim().isNotEmpty &&
                 !l.startsWith('rank') &&
                 !l.startsWith('---') &&
+                !l.startsWith('mode:') &&
                 !l.contains('results'),
           )
           .toList();
