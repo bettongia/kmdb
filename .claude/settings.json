@@ -1,17 +1,6 @@
 {
   "permissions": {
-    "allow": [
-      "Bash(make pre_commit)",
-      "Write",
-      "Edit",
-      "Bash(dart *)",
-      "Bash(git *)",
-      "Bash(find *)",
-      "Bash(ls *)",
-      "Bash(cat *)",
-      "Bash(cp *)",
-      "Bash(mkdir *)"
-    ]
+    "allow": []
   },
   "hooks": {
     "PreToolUse": [
@@ -29,17 +18,9 @@
   "sandbox": {
     "enabled": true,
     "filesystem": {
-      "allowWrite": [
-        "./"
-      ],
-      "denyRead": [
-        "~/"
-      ],
-      "allowRead": [
-        "./",
-        "~/.pub-cache",
-        "~/.gitconfig"
-      ]
+      "allowWrite": ["./"],
+      "denyRead": ["~/"],
+      "allowRead": ["./", "~/.pub-cache", "~/.gitconfig"]
     }
   }
 }
