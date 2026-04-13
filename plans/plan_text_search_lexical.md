@@ -1,6 +1,6 @@
 # Text Search — Phase 2: Lexical Search
 
-**Status**: Investigated
+**Status**: Implementing
 
 **PR link**: _pending_
 
