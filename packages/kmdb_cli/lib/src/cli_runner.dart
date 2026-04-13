@@ -15,6 +15,7 @@
 import 'dart:convert';
 import 'dart:io' as io;
 
+import 'package:args/command_runner.dart';
 import 'package:kmdb/kmdb.dart';
 
 import 'commands/collections_command.dart';
@@ -494,67 +495,62 @@ abstract final class KmdbCli {
 
   // ── Help ──────────────────────────────────────────────────────────────────
 
+  /// Builds a [CommandRunner] populated with thin wrappers for every registered
+  /// [CliCommand].
+  ///
+  /// The runner is used only for its [CommandRunner.usage] property — it is
+  /// never used to parse or dispatch commands. Global options are added to its
+  /// [ArgParser] so they appear in the generated help text.
+  static CommandRunner<void> _buildCommandRunner() {
+    final runner = CommandRunner<void>(
+      'kmdb',
+      'KMDB local-first document database.',
+    )
+      ..argParser.addOption(
+        'mode',
+        abbr: 'm',
+        help: 'Output format: json (default), compact, ndjson, table, csv, line',
+        valueHelp: 'mode',
+      )
+      ..argParser.addOption(
+        'output',
+        abbr: 'o',
+        help: 'Write output to file instead of stdout',
+        valueHelp: 'file',
+      )
+      ..argParser.addOption(
+        'read',
+        abbr: 'r',
+        help: 'Read commands from a script file',
+        valueHelp: 'file',
+      )
+      ..argParser.addFlag(
+        'continue-on-error',
+        negatable: false,
+        help: 'Keep running after a command error',
+      )
+      ..argParser.addFlag(
+        'flush',
+        defaultsTo: true,
+        help: 'Flush memtable to SSTable on exit (default: on)',
+      )
+      ..argParser.addFlag(
+        'version',
+        negatable: false,
+        help: 'Print version and exit',
+      );
+
+    for (final cmd in _commands.values) {
+      runner.addCommand(_UsageCommand(cmd));
+    }
+
+    return runner;
+  }
+
   static void _printUsage() {
+    final runner = _buildCommandRunner();
+    io.stdout.writeln(runner.usage);
     io.stdout.writeln('''
-Usage: kmdb [options] <database-path> <command> [args...]
-       kmdb [options] <database-path> --read <script>
-
-Options:
-  --mode, -m <mode>    Output format: json (default), compact, ndjson, table, csv, line
-  --output, -o <file>  Write output to file instead of stdout
-  --read, -r <file>    Read commands from a script file
-  --continue-on-error  Keep running after a command error
-  --flush              Flush memtable to SSTable on exit (default)
-  --no-flush           Skip flush on exit (data remains in WAL)
-  --version            Print version and exit
-  --help, -h           Print this help and exit
-
-Commands:
-  Database:
-    init
-
-  Data:
-    get <coll> <key> [--select <fields>]
-    insert <coll> [--value <json>] [--file <path>]
-    update <coll> [<id> | --id <id1,id2,...> | --filter <json> | --all] --set <json>
-    delete <coll> <key>
-    scan <coll> [--filter <json>] [--order-by <field>] [--desc]
-              [--limit <n>] [--offset <n>] [--key-prefix <str>]
-              [--select <field1,field2,...>]
-    count <coll> [--filter <json>]
-    put <coll> [--value <json>] [--file <path>]   (deprecated — use insert)
-
-  Introspection:
-    collections
-    create-collection <name>
-    stats
-    info
-
-  Import / Export:
-    export <coll>                        (use --output <file> to write to a file)
-    import <coll> [--input <file>] [--on-conflict ignore|replace|error]
-    dump                                 (use --output <file> to write to a file)
-    restore [--input <file>]
-
-  Maintenance:
-    flush
-    compact
-    verify
-    new-device-id
-
-  Sync:
-    remote add <name> --path <path>  Add a named sync remote
-    remote remove <name>             Remove a named sync remote
-    remote list                      List all sync remotes
-    push [<remote>] [--collection <coll>]...   Push local SSTables to sync folder
-    pull [<remote>] [--sync-dir <path>] [--collection <coll>]...   Pull peer SSTables from sync folder
-    sync [<remote>] [--sync-dir <path>] [--collection <coll>]...   Push then pull
-
-  Diagnostics:
-    util sstable <filename>          Inspect SSTable file
-    util wal <filename>              Inspect WAL file
-    util manifest                    Inspect active Manifest
-
 Examples:
   kmdb mydb get notes 019abc...
   kmdb mydb scan notes --filter '{"field":"status","op":"eq","value":"active"}' --limit 10
@@ -563,4 +559,28 @@ Examples:
   echo "collections" | kmdb mydb
 ''');
   }
+}
+
+// ── CommandRunner helper ──────────────────────────────────────────────────────
+
+/// Thin [Command] wrapper around a [CliCommand] used solely to populate a
+/// [CommandRunner] for help-text generation.
+///
+/// [run] is a no-op because commands are never dispatched through this runner.
+final class _UsageCommand extends Command<void> {
+  _UsageCommand(this._cmd);
+
+  final CliCommand _cmd;
+
+  @override
+  String get name => _cmd.name;
+
+  @override
+  String get description => _cmd.description;
+
+  @override
+  String get invocation => _cmd.usage;
+
+  @override
+  void run() {}
 }
