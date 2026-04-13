@@ -4,6 +4,8 @@
 
 **PR link**: _pending_
 
+**Proposal**: [Text Indexing and Search](../docs/proposals/text_search.md)
+
 ## Problem statement
 
 Phase 4 delivers hybrid search by combining BM25 lexical results (Phase 2) and
@@ -65,15 +67,15 @@ _None — all design decisions resolved in spec §23._
 
 ### Key files to create / modify
 
-| Action | Path |
-| :----- | :--- |
-| Create | `packages/kmdb/lib/src/search/hybrid/hybrid_manager.dart` |
-| Modify | `packages/kmdb/lib/src/query/kmdb_collection.dart` |
-| Modify | `packages/kmdb/lib/kmdb.dart` |
-| Create | `packages/kmdb/test/search/hybrid/hybrid_manager_test.dart` |
+| Action | Path                                                                   |
+| :----- | :--------------------------------------------------------------------- |
+| Create | `packages/kmdb/lib/src/search/hybrid/hybrid_manager.dart`              |
+| Modify | `packages/kmdb/lib/src/query/kmdb_collection.dart`                     |
+| Modify | `packages/kmdb/lib/kmdb.dart`                                          |
+| Create | `packages/kmdb/test/search/hybrid/hybrid_manager_test.dart`            |
 | Create | `packages/kmdb/test/search/hybrid/hybrid_search_integration_test.dart` |
-| Modify | `packages/kmdb_cli/lib/src/commands/search_command.dart` |
-| Create | `packages/kmdb_cli/test/search_hybrid_command_test.dart` |
+| Modify | `packages/kmdb_cli/lib/src/commands/search_command.dart`               |
+| Create | `packages/kmdb_cli/test/search_hybrid_command_test.dart`               |
 
 ### Edge cases
 
@@ -109,17 +111,14 @@ _None — all design decisions resolved in spec §23._
     1-based)
   - `SearchResult<T> mergeWithRrf<T>({`
     `  required List<SearchHit<T>> lexicalHits,`
-    `  required List<SearchHit<T>> semanticHits,`
-    `  required int limit,`
-    `  required int offset,`
-    `  required SearchMetadata metadata,`
-    `  int rrfK = 60,`
-    `})` — core merge function:
-    1. Build a `Map<String, ({double bm25, double cosine, int bm25Rank,
-       int cosineRank})>` keyed by `docId` from both lists
-    2. For each unique `docId`, compute RRF score: sum of
-       `1 / (rrfK + rank)` from each list the document appears in (absent list
-       contributes 0)
+    `  required List<SearchHit<T>> semanticHits,` `  required int limit,`
+    `  required int offset,` `  required SearchMetadata metadata,`
+    `  int rrfK = 60,` `})` — core merge function:
+    1. Build a
+       `Map<String, ({double bm25, double cosine, int bm25Rank, int cosineRank})>`
+       keyed by `docId` from both lists
+    2. For each unique `docId`, compute RRF score: sum of `1 / (rrfK + rank)`
+       from each list the document appears in (absent list contributes 0)
     3. Merge per-field `fieldScores` from both hits (BM25 fields under
        `"{field}:bm25"`, cosine under `"{field}:cosine"`, field RRF under
        `"{field}"`)
@@ -127,8 +126,8 @@ _None — all design decisions resolved in spec §23._
     5. Reconstruct `SearchHit<T>` entries with merged `fieldScores` and RRF
        `score`
     6. Return `SearchResult<T>` with the supplied `metadata`
-  - Full doc comment covering the RRF formula, the absent-list convention,
-    and the `fieldScores` key structure
+  - Full doc comment covering the RRF formula, the absent-list convention, and
+    the `fieldScores` key structure
 - [ ] Tests (`packages/kmdb/test/search/hybrid/hybrid_manager_test.dart`):
   - [ ] Document in both lists ranks higher than document in only one list
   - [ ] Document absent from BM25 list contributes 0 from that leg
@@ -139,8 +138,8 @@ _None — all design decisions resolved in spec §23._
   - [ ] Empty both lists returns empty `SearchResult`
   - [ ] `rrfK: 0` throws `ArgumentError`
   - [ ] `rrfK: 1` produces valid scores (no division by zero for rank ≥ 1)
-  - [ ] Two documents with identical RRF scores preserve stable ordering
-        (by `docId` as tiebreaker)
+  - [ ] Two documents with identical RRF scores preserve stable ordering (by
+        `docId` as tiebreaker)
   - [ ] Multi-field: per-field scores for field A and field B are tracked
         independently; overall score is sum of per-field RRF contributions
   - [ ] Document that appears in both indexes for one field but only BM25 for
@@ -149,7 +148,7 @@ _None — all design decisions resolved in spec §23._
 ### Phase 2 — Wire hybrid into `KmdbCollection.search()`
 
 - [ ] Modify `packages/kmdb/lib/src/query/kmdb_collection.dart` `search()`
-  implementation:
+      implementation:
   - Determine which indexes are available for each requested field:
     - `hasFts = _db.ftsManager?.hasIndex(namespace, field) ?? false`
     - `hasVec = _db.vecManager?.hasIndex(namespace, field) ?? false`
@@ -168,19 +167,19 @@ _None — all design decisions resolved in spec §23._
       - Only FTS → lexical path
       - Only vec → semantic path
       - Neither → field goes to `SearchMetadata.skipped`
-  - Add optional `rrfK` named parameter to `search()` (default 60); pass
-    through to `mergeWithRrf()`
+  - Add optional `rrfK` named parameter to `search()` (default 60); pass through
+    to `mergeWithRrf()`
   - Update public API doc comment on `search()` to document `rrfK`
 - [ ] Export `HybridManager` (or just `mergeWithRrf`) if needed by external
-  consumers; otherwise keep package-private
+      consumers; otherwise keep package-private
 
 ### Phase 3 — Integration tests
 
 - [ ] Create
-  `packages/kmdb/test/search/hybrid/hybrid_search_integration_test.dart`:
-  - Setup: open database with both `ftsIndexes` and `vecIndexes` for the
-    same field; use a mock `EmbeddingModel` that returns deterministic
-    float32 vectors for test inputs (avoids ONNX dependency in unit tests)
+      `packages/kmdb/test/search/hybrid/hybrid_search_integration_test.dart`:
+  - Setup: open database with both `ftsIndexes` and `vecIndexes` for the same
+    field; use a mock `EmbeddingModel` that returns deterministic float32
+    vectors for test inputs (avoids ONNX dependency in unit tests)
   - [ ] `SearchMode.auto` with both indexes activates hybrid path
   - [ ] `SearchMode.auto` with only FTS index activates lexical path
   - [ ] `SearchMode.auto` with only vec index activates semantic path
@@ -190,23 +189,22 @@ _None — all design decisions resolved in spec §23._
         results
   - [ ] `SearchHit.fieldScores` map has correct keys for hybrid results
   - [ ] `SearchHit.fieldScores` map has only `":bm25"` key for BM25-only hit
-  - [ ] `SearchHit.fieldScores` map has only `":cosine"` key for cosine-only
-        hit
+  - [ ] `SearchHit.fieldScores` map has only `":cosine"` key for cosine-only hit
   - [ ] `filter:` predicate resolves `candidateIds` once before both legs;
         non-matching documents are excluded from both FTS and vec candidate sets
   - [ ] `candidates: 5` limits each leg to 5 candidates (10 total pool)
   - [ ] `rrfK: 1` produces valid (extreme) scores without error
   - [ ] Multi-field hybrid: per-field scores tracked independently
-  - [ ] `SearchMetadata.searched` contains fields that were searched;
-        `skipped` contains fields with no matching index
+  - [ ] `SearchMetadata.searched` contains fields that were searched; `skipped`
+        contains fields with no matching index
   - [ ] Deleting a document removes it from both legs; not in hybrid results
 
 ### Phase 4 — CLI: `--mode auto` routing and `--candidates`
 
 - [ ] Modify `packages/kmdb_cli/lib/src/commands/search_command.dart`:
-  - Confirm `--mode auto` is the default and routes to hybrid when both
-    indexes present (this was scaffolded in Phase 2 of Plan 2 and Phase 9 of
-    Plan 3; this phase verifies the full routing chain works end to end)
+  - Confirm `--mode auto` is the default and routes to hybrid when both indexes
+    present (this was scaffolded in Phase 2 of Plan 2 and Phase 9 of Plan 3;
+    this phase verifies the full routing chain works end to end)
   - Add `--rrf-k <n>` option (default 60) — advanced option; document in help
     text
   - When `--mode auto` and both FTS and vec indexes are configured, the output
@@ -222,15 +220,19 @@ _None — all design decisions resolved in spec §23._
 
 ### Phase 5 — Final cleanup and CLAUDE.md update
 
-- [ ] Update the implementation status table in `CLAUDE.md` — rows 9a, 9b,
-  and 9c — from `🔲 Planned` to `✅ Complete`:
-  - 9a: Lexical search (BM25 inverted index, tokenisation pipeline, FtsManager, `search` CLI command)
-  - 9b: Semantic search (BGE Small En v1.5, SQ8 vector index, VecManager, ONNX inference)
-  - 9c: Hybrid search (Reciprocal Rank Fusion, `--mode` flag, unified SearchResult types)
+- [ ] Update the implementation status table in `CLAUDE.md` — rows 9a, 9b, and
+      9c — from `🔲 Planned` to `✅ Complete`:
+  - 9a: Lexical search (BM25 inverted index, tokenisation pipeline, FtsManager,
+    `search` CLI command)
+  - 9b: Semantic search (BGE Small En v1.5, SQ8 vector index, VecManager, ONNX
+    inference)
+  - 9c: Hybrid search (Reciprocal Rank Fusion, `--mode` flag, unified
+    SearchResult types)
 - [ ] Run full test suite: `dart test packages/kmdb` and
-  `dart test packages/kmdb_cli`; confirm all tests pass and coverage ≥ 90%
-- [ ] Run `dart analyze packages/kmdb packages/kmdb_cli
-  packages/kmdb_tokenizer_icu packages/kmdb_inferencing`; confirm no issues
+      `dart test packages/kmdb_cli`; confirm all tests pass and coverage ≥ 90%
+- [ ] Run
+      `dart analyze packages/kmdb packages/kmdb_cli packages/kmdb_tokenizer_icu packages/kmdb_inferencing`;
+      confirm no issues
 - [ ] Run `dart format packages/`; confirm no formatting changes needed
 
 ## Summary
