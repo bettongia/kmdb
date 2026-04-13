@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'package:kmdb/src/search/lexical/pipeline.dart';
-import 'package:kmdb/src/search/regexp_tokeniser.dart';
+import 'package:kmdb/kmdb.dart';
 import 'package:test/test.dart';
 
 void main() {

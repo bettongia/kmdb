@@ -85,3 +85,11 @@ export 'src/search/search_result.dart'
 export 'src/search/embedding_model.dart' show EmbeddingModel;
 export 'src/search/fts_index_definition.dart' show FtsIndexDefinition;
 export 'src/search/vec_index_definition.dart' show VecIndexDefinition;
+export 'src/search/sync_delta.dart' show SyncDelta, DeltaChangeType, DeltaEntry;
+
+// ── Text search — lexical (BM25) ─────────────────────────────────────────────
+export 'src/search/lexical/pipeline.dart'
+    show tokeniseAndNormalise, filterStopWords, stem, preprocess, kEnglishStopWords;
+export 'src/search/lexical/fts_index_state.dart'
+    show FtsIndexStatus, FtsIndexState, kFtsTombstone;
+export 'src/search/lexical/fts_manager.dart' show FtsManager;

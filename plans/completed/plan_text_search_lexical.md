@@ -1,6 +1,6 @@
 # Text Search — Phase 2: Lexical Search
 
-**Status**: Implementing
+**Status**: Implemented
 
 **PR link**: _pending_
 
@@ -105,14 +105,14 @@ _None — all design decisions resolved in spec §21._
 
 ### Phase 1 — Add `snowball_stemmer` dependency
 
-- [ ] Add `snowball_stemmer: ^0.2.x` (or current stable) to
+- [x] Add `snowball_stemmer: ^0.2.x` (or current stable) to
   `packages/kmdb/pubspec.yaml` under `dependencies:`
-- [ ] Run `dart pub get` from workspace root; confirm resolution
-- [ ] Verify `dart analyze packages/kmdb` still passes
+- [x] Run `dart pub get` from workspace root; confirm resolution
+- [x] Verify `dart analyze packages/kmdb` still passes
 
 ### Phase 2 — Text preprocessing pipeline
 
-- [ ] Create `packages/kmdb/lib/src/search/lexical/pipeline.dart`:
+- [x] Create `packages/kmdb/lib/src/search/lexical/pipeline.dart`:
   - `List<String> tokeniseAndNormalise(String text, Tokeniser tokeniser)` —
     calls `tokeniser.tokenise(text)` then lowercases each token
   - `List<String> filterStopWords(List<String> tokens, Set<String> stopWords)` —
@@ -124,20 +124,20 @@ _None — all design decisions resolved in spec §21._
     the function called by both indexing and query paths
   - English stop-word list constant `kEnglishStopWords` (Stopwords ISO `en`
     list as a `const Set<String>`)
-- [ ] Tests (`packages/kmdb/test/search/lexical/pipeline_test.dart`):
-  - [ ] Empty string returns empty list at each stage
-  - [ ] Normalisation lowercases Unicode correctly (`Jekyll` → `jekyll`)
-  - [ ] Stop-word list removes `the`, `and`, `is`; passes through `jekyll`
-  - [ ] Stemming: `investigates` → `investig`, `occurring` → `occur`,
+- [x] Tests (`packages/kmdb/test/search/lexical/pipeline_test.dart`):
+  - [x] Empty string returns empty list at each stage
+  - [x] Normalisation lowercases Unicode correctly (`Jekyll` → `jekyll`)
+  - [x] Stop-word list removes `the`, `and`, `is`; passes through `jekyll`
+  - [x] Stemming: `investigates` → `investig`, `occurring` → `occur`,
         `disturbing` → `disturb`
-  - [ ] Full pipeline: prose sentence produces expected stemmed token set
-  - [ ] Technical identifiers survive pipeline (`mTLS`, `0x8004210B`)
-  - [ ] Query with all stop words returns empty list when filtering enabled
-  - [ ] Identical output for indexed and query paths (same input → same tokens)
+  - [x] Full pipeline: prose sentence produces expected stemmed token set
+  - [x] Technical identifiers survive pipeline (`mTLS`, `0x8004210B`)
+  - [x] Query with all stop words returns empty list when filtering enabled
+  - [x] Identical output for indexed and query paths (same input → same tokens)
 
 ### Phase 3 — FTS index state and key codec
 
-- [ ] Create `packages/kmdb/lib/src/search/lexical/fts_index_state.dart`:
+- [x] Create `packages/kmdb/lib/src/search/lexical/fts_index_state.dart`:
   - `FtsIndexStatus` enum: `undefined`, `building`, `current`, `stale`,
     `syncing` — `syncing` indicates a sync delta is being applied; queries
     serve from the pre-sync index while catch-up is in progress (mirrors
@@ -154,7 +154,7 @@ _None — all design decisions resolved in spec §21._
 
 ### Phase 4 — `FtsManager`
 
-- [ ] Create `packages/kmdb/lib/src/search/lexical/fts_manager.dart`:
+- [x] Create `packages/kmdb/lib/src/search/lexical/fts_manager.dart`:
   - `class FtsManager` — manages all FTS indexes for a database instance
   - Constructor: `FtsManager(KvStore store, List<FtsIndexDefinition> defs)`
   - `void interceptWrite(String ns, String docId, Map<String, dynamic> doc,
@@ -183,28 +183,28 @@ _None — all design decisions resolved in spec §21._
 
 ### Phase 5 — Write interception in `KmdbCollection`
 
-- [ ] Modify `packages/kmdb/lib/src/query/kmdb_database.dart`:
+- [x] Modify `packages/kmdb/lib/src/query/kmdb_database.dart`:
   - After `IndexManager` is initialised, create and store a `FtsManager?
     _ftsManager` (null when `ftsIndexes` is empty)
   - Replace the `FtsManager? get ftsManager => null` stub from Phase 1 with
     the real instance
-- [ ] Modify `packages/kmdb/lib/src/query/kmdb_collection.dart`:
+- [x] Modify `packages/kmdb/lib/src/query/kmdb_collection.dart`:
   - In `put()`, `insert()`, `replace()`, `update()`, and `delete()`, call the
     appropriate `FtsManager` intercept method before committing the `WriteBatch`
   - The FTS writes and document write must be in the **same** `WriteBatch`
   - Guard each call with `if (_db.ftsManager != null &&
       _db.ftsManager!.hasIndex(namespace))` to avoid overhead when no FTS index
     is defined for the collection
-- [ ] Tests (`packages/kmdb/test/search/lexical/fts_manager_test.dart`):
-  - [ ] `interceptWrite` adds correct keys to batch for a single-term field
-  - [ ] `interceptUpdate` adjusts corpus stats correctly
-  - [ ] `interceptDelete` writes TOMBSTONE and decrements `n`
-  - [ ] `compact` removes stale base index keys for updated document
-  - [ ] `compact` removes all keys for tombstoned document
+- [x] Tests (`packages/kmdb/test/search/lexical/fts_manager_test.dart`):
+  - [x] `interceptWrite` adds correct keys to batch for a single-term field
+  - [x] `interceptUpdate` adjusts corpus stats correctly
+  - [x] `interceptDelete` writes TOMBSTONE and decrements `n`
+  - [x] `compact` removes stale base index keys for updated document
+  - [x] `compact` removes all keys for tombstoned document
 
 ### Phase 6 — BM25 query execution
 
-- [ ] Add `Future<SearchResult<T>> search<T>(...)` to `FtsManager`:
+- [x] Add `Future<SearchResult<T>> search<T>(...)` to `FtsManager`:
   - Accept `String query`, `List<String> fields`, `Filter? filter`,
     `SearchMode mode`, `int limit`, `int offset`, `Tokeniser tokeniser`
   - If `filter` is supplied, resolve `candidateIds` first via secondary index
@@ -219,38 +219,38 @@ _None — all design decisions resolved in spec §21._
     score as document score; carry per-field scores in `SearchHit.fieldScores`
   - Sort descending by score; apply `offset` and `limit`
   - Return `SearchResult<T>` with `SearchMetadata` populated
-- [ ] Replace stub in `packages/kmdb/lib/src/query/kmdb_collection.dart`:
+- [x] Replace stub in `packages/kmdb/lib/src/query/kmdb_collection.dart`:
   - If `mode == SearchMode.lexical` or `mode == SearchMode.auto` (and no vec
     index present), delegate to `ftsManager.search()`
   - If no FTS index exists for the requested fields, return stub result with
     those fields in `skipped`
-- [ ] Tests (`packages/kmdb/test/search/lexical/fts_search_integration_test.dart`):
-  - [ ] Single-field search returns ranked results in correct order
-  - [ ] Multi-field search: correct per-field scores in `fieldScores`
-  - [ ] Deleted document does not appear in results
-  - [ ] Updated document reflects new content (overlay supersedes base)
-  - [ ] `filter:` predicate resolves `candidateIds` before scanning; only
+- [x] Tests (`packages/kmdb/test/search/lexical/fts_search_integration_test.dart`):
+  - [x] Single-field search returns ranked results in correct order
+  - [x] Multi-field search: correct per-field scores in `fieldScores`
+  - [x] Deleted document does not appear in results
+  - [x] Updated document reflects new content (overlay supersedes base)
+  - [x] `filter:` predicate resolves `candidateIds` before scanning; only
         matching documents are scored
-  - [ ] Filtered search returns correct results when secondary index is
+  - [x] Filtered search returns correct results when secondary index is
         available vs. full-scan fallback
-  - [ ] `offset` and `limit` applied correctly
-  - [ ] Query with all stop words (filtering on) returns empty result
-  - [ ] Empty query returns empty result
-  - [ ] Field not indexed appears in `SearchMetadata.skipped`
-  - [ ] `ensureBuilt` builds index from pre-existing documents correctly
-  - [ ] BM25 scores increase when term frequency increases
-  - [ ] `applyDelta` with added documents indexes them correctly; they appear
+  - [x] `offset` and `limit` applied correctly
+  - [x] Query with all stop words (filtering on) returns empty result
+  - [x] Empty query returns empty result
+  - [x] Field not indexed appears in `SearchMetadata.skipped`
+  - [x] `ensureBuilt` builds index from pre-existing documents correctly
+  - [x] BM25 scores increase when term frequency increases
+  - [x] `applyDelta` with added documents indexes them correctly; they appear
         in subsequent search results
-  - [ ] `applyDelta` with deleted documents writes TOMBSTONE; they are excluded
+  - [x] `applyDelta` with deleted documents writes TOMBSTONE; they are excluded
         from results
-  - [ ] `applyDelta` transitions index `current` → `syncing` → `current`;
+  - [x] `applyDelta` transitions index `current` → `syncing` → `current`;
         searches during `syncing` serve from the pre-delta index
-  - [ ] Process killed during `applyDelta` leaves index in `syncing`; next
+  - [x] Process killed during `applyDelta` leaves index in `syncing`; next
         `open()` transitions to `stale` and full rebuild is triggered
 
 ### Phase 7 — CLI `search` command
 
-- [ ] Create `packages/kmdb_cli/lib/src/commands/search_command.dart`:
+- [x] Create `packages/kmdb_cli/lib/src/commands/search_command.dart`:
   - `dart run kmdb_cli search <collection> <query>`
   - Named options:
     - `--fields <field1,field2>` — comma-separated list; defaults to all FTS
@@ -265,22 +265,65 @@ _None — all design decisions resolved in spec §21._
     chars)
   - JSON output: full `SearchResult` serialized to JSON
   - IDs output: one document id per line
-- [ ] Implement `search create` subcommand flags:
+- [x] Implement `search create` subcommand flags:
   - `--lazy` — sets `FtsIndexDefinition.lazy = true`
   - `--stopwords` — sets `FtsIndexDefinition.stopWords = true`; silently ignored
     when `--semantic` is also present (vector indexes have no stop-word stage)
-- [ ] Register command in `packages/kmdb_cli/lib/src/kmdb_cli.dart`
-- [ ] Update `local/config.json` schema to accept `ftsIndexes` array (each entry:
+- [x] Register command in `packages/kmdb_cli/lib/src/kmdb_cli.dart`
+- [x] Update `local/config.json` schema to accept `ftsIndexes` array (each entry:
   `{ "collection": "...", "field": "...", "k1": 1.2, "b": 0.75, "stopWords": false }`)
-- [ ] Tests:
-  - [ ] `search_command_test.dart`: command runs against a test database with
+- [x] Tests:
+  - [x] `search_command_test.dart`: command runs against a test database with
     pre-seeded documents; verifies ranked output
-  - [ ] `--output json` produces valid JSON with correct structure
-  - [ ] Missing `--fields` defaults to all FTS-indexed fields
-  - [ ] Collection with no FTS index prints error, exits 1
-  - [ ] `search create` with `--stopwords` creates index with `stopWords: true`
-  - [ ] `search create` with `--stopwords --semantic` silently ignores `--stopwords`
+  - [x] `--output json` produces valid JSON with correct structure
+  - [x] Missing `--fields` defaults to all FTS-indexed fields
+  - [x] Collection with no FTS index prints error, exits 1
+  - [x] `search create` with `--stopwords` creates index with `stopWords: true`
+  - [x] `search create` with `--stopwords --semantic` silently ignores `--stopwords`
 
 ## Summary
 
-_To be completed on implementation._
+All 7 phases implemented and all tests passing (796 kmdb + 347 kmdb_cli).
+
+**Key design decision: namespace-per-term storage layout.** The KvStore enforces
+32-character hex (UUIDv7) keys everywhere. The original design used
+`{term}:{docId}` compound keys with prefix scans — incompatible with that
+constraint. The final design mirrors `IndexWriter`'s namespace-per-value scheme:
+each (collection, field, term) gets its own namespace
+`$fts:{ns}:{field}:{hexTerm}` with docIds as keys, and term-namespace scans
+replace prefix scans. Terms are hex-encoded via UTF-8 byte representation.
+
+**Doc info carries old terms for compaction.** Each `$fts:doc:` entry stores a
+CBOR map `{n: tokenCount, t: [term1, term2, ...]}` where `t` holds the terms
+currently in the base index for that document. On update, the old terms are
+preserved in the doc info until `compact()` rewrites the base — this is the only
+way `compact()` knows which per-term namespaces to clean up for stale entries.
+
+**`_buildIndex` handles overlays inline.** When `ensureBuilt` triggers a build
+with pending overlays, the build processes those overlays immediately: tombstoned
+documents are skipped; map overlays are used as authoritative content, stale old
+base entries are removed, and the overlay is cleared. This prevents the doc-info
+"old terms" tracker from being corrupted by a build that ignores in-progress
+updates.
+
+**Corpus stats key.** Fixed sentinel `'00000000000000000000000000000001'` — a
+valid 32-char hex key that cannot collide with UUIDv7 keys (timestamp bits fill
+the high bytes).
+
+**Implemented artefacts:**
+
+| Artefact | Notes |
+|---|---|
+| `packages/kmdb/lib/src/search/lexical/pipeline.dart` | Tokenise → normalise → stop-word filter → Snowball stem |
+| `packages/kmdb/lib/src/search/lexical/fts_index_state.dart` | 5-status lifecycle enum + CBOR state persistence |
+| `packages/kmdb/lib/src/search/lexical/fts_manager.dart` | Full BM25 FTS manager: write interception, lazy build, BM25 scoring, compaction, delta application |
+| `packages/kmdb/lib/src/query/kmdb_database.dart` | FtsManager wired in at open() |
+| `packages/kmdb/lib/src/query/kmdb_collection.dart` | search() delegates to FtsManager |
+| `packages/kmdb/lib/kmdb.dart` | FtsManager, SyncDelta, FtsIndexState exports |
+| `packages/kmdb_cli/lib/src/config/kmdb_config.dart` | FtsIndexRecord typedef + ftsIndexes CRUD |
+| `packages/kmdb_cli/lib/src/commands/search_command.dart` | search / search list / search create / search delete |
+| `packages/kmdb_cli/lib/src/cli_runner.dart` | SearchCommand registered + help text |
+| `packages/kmdb/test/search/lexical/pipeline_test.dart` | 30 tests |
+| `packages/kmdb/test/search/lexical/fts_manager_test.dart` | 20 tests |
+| `packages/kmdb/test/search/lexical/fts_search_integration_test.dart` | Integration tests via public Collection.search() API |
+| `packages/kmdb_cli/test/commands/search_command_test.dart` | 28 CLI tests |

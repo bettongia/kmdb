@@ -43,6 +43,7 @@ import 'commands/remote_command.dart';
 import 'commands/sync_command.dart';
 import 'commands/util_command.dart';
 import 'commands/index_command.dart';
+import 'commands/search_command.dart';
 import 'commands/verify_command.dart';
 import 'config/kmdb_config.dart';
 import 'database_opener.dart';
@@ -82,6 +83,7 @@ final _commands = <String, CliCommand>{
     const PullCommand(),
     const SyncCommand(),
     const IndexCommand(),
+    const SearchCommand(),
   ])
     cmd.name: cmd,
 };
@@ -541,6 +543,12 @@ Commands:
     compact
     verify
     new-device-id
+
+  Search:
+    search <coll> <query> [--fields f1,f2] [--limit n] [--offset n] [--output table|json|ids]
+    search list <coll>
+    search create <coll> <field> [--stopwords] [--k1 n] [--b n]
+    search delete <coll> <field>
 
   Sync:
     remote add <name> --path <path>  Add a named sync remote
