@@ -25,12 +25,17 @@ void main() {
       // Actual instantiation throws UnimplementedError (see next test).
     });
 
-    test('OnnxEmbeddingModel.load() throws UnimplementedError', () async {
-      await expectLater(
-        OnnxEmbeddingModel.load,
-        throwsA(isA<UnimplementedError>()),
-      );
-    });
+    test(
+      'OnnxEmbeddingModel.load() throws when model assets are absent',
+      () async {
+        // When the BGE model file is not present (e.g. in CI without assets),
+        // load() throws an UnsupportedError with a descriptive message.
+        await expectLater(
+          OnnxEmbeddingModel.load,
+          throwsA(isA<UnsupportedError>()),
+        );
+      },
+    );
 
     test('OnnxEmbeddingModel is exported from barrel', () {
       // If this file compiles, the export is correct.

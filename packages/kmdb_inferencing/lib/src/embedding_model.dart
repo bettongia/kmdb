@@ -93,10 +93,7 @@ class OnnxEmbeddingModel implements EmbeddingModel {
 
     final lib = await openOrtLibrary();
     final session = OrtInferenceSession.create(lib, resolvedModelPath);
-    final tok = await BertTokenizer.load(
-      vocabPath,
-      tokeniser: tokeniser,
-    );
+    final tok = await BertTokenizer.load(vocabPath, tokeniser: tokeniser);
     return OnnxEmbeddingModel._(session, tok);
   }
 
@@ -122,21 +119,13 @@ class OnnxEmbeddingModel implements EmbeddingModel {
     // Run ONNX inference. Output shape: [1, seqLen, 384].
     final raw = _session.run(
       inputNames: ['input_ids', 'attention_mask', 'token_type_ids'],
-      inputData: [
-        tokens.inputIds,
-        tokens.attentionMask,
-        tokens.tokenTypeIds,
-      ],
+      inputData: [tokens.inputIds, tokens.attentionMask, tokens.tokenTypeIds],
       inputShape: [1, seqLen],
       outputName: 'last_hidden_state',
     );
 
     // Mean-pool over non-padding token positions, then L2-normalise.
-    final pooled = meanPool(
-      raw,
-      tokens.attentionMask.toList(),
-      seqLen: seqLen,
-    );
+    final pooled = meanPool(raw, tokens.attentionMask.toList(), seqLen: seqLen);
     final embedding = l2Normalize(pooled);
 
     return (embedding, tokens.truncated);
@@ -146,6 +135,7 @@ class OnnxEmbeddingModel implements EmbeddingModel {
   ///
   /// Must be called exactly once when the model is no longer needed.
   /// After [dispose], [embed] must not be called.
+  @override
   void dispose() => _session.dispose();
 
   // ── Private helpers ────────────────────────────────────────────────────────
@@ -153,7 +143,13 @@ class OnnxEmbeddingModel implements EmbeddingModel {
   /// Returns the default model path relative to the compiled executable.
   static String _defaultModelPath() {
     final execDir = File(Platform.resolvedExecutable).parent.path;
-    return p.join(execDir, 'assets', 'models', 'bge-small-en', 'bge_small.onnx');
+    return p.join(
+      execDir,
+      'assets',
+      'models',
+      'bge-small-en',
+      'bge_small.onnx',
+    );
   }
 
   static void _assertModelExists(String path) {

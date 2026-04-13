@@ -31,6 +31,8 @@
 /// the `.so` is bundled by Gradle.
 library;
 
+export 'package:kmdb/kmdb.dart' show Tokeniser;
+
 export 'src/bert_tokenizer.dart' show BertTokenizer, TokenizerOutput;
 export 'src/embedding_model.dart' show OnnxEmbeddingModel;
 export 'src/sq8.dart' show quantise, dequantise;

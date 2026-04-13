@@ -36,9 +36,11 @@ void main() {
   // Skip all tests if the model assets have not been copied yet.
   if (!_vocabAvailable) {
     group('BertTokenizer', () {
-      test('vocab.txt is present', () {
-        skip = 'vocab.txt not found at $_vocabPath — copy model assets first.';
-      });
+      test(
+        'vocab.txt is present',
+        skip: 'vocab.txt not found at $_vocabPath — copy model assets first.',
+        () {},
+      );
     });
     return;
   }
@@ -76,16 +78,13 @@ void main() {
   });
 
   group('BertTokenizer — known token IDs', () {
-    test(
-      'hello and world have correct vocabulary IDs',
-      () {
-        // Known BGE Small En v1.5 vocab IDs: hello=7592, world=2088
-        final out = tokenizer.encode('hello world');
-        // inputIds[0] = CLS, inputIds[1] = hello, inputIds[2] = world, inputIds[3] = SEP
-        expect(out.inputIds[1], equals(7592)); // 'hello'
-        expect(out.inputIds[2], equals(2088)); // 'world'
-      },
-    );
+    test('hello and world have correct vocabulary IDs', () {
+      // Known BGE Small En v1.5 vocab IDs: hello=7592, world=2088
+      final out = tokenizer.encode('hello world');
+      // inputIds[0] = CLS, inputIds[1] = hello, inputIds[2] = world, inputIds[3] = SEP
+      expect(out.inputIds[1], equals(7592)); // 'hello'
+      expect(out.inputIds[2], equals(2088)); // 'world'
+    });
 
     test(
       'jekyll WordPiece splits to [je, ##ky, ##ll] = [15333, 4801, 3363]',
@@ -159,18 +158,21 @@ void main() {
   });
 
   group('BertTokenizer — tokeniser substitution', () {
-    test('custom Tokeniser is used for word segmentation without error', () async {
-      // Provide a trivially correct Tokeniser — same contract as RegExpTokeniser.
-      // We just verify that BertTokenizer.load accepts the parameter and
-      // encode() runs without error.
-      final customTokenizer = await BertTokenizer.load(
-        _vocabPath,
-        tokeniser: const _WhitespaceTokeniser(),
-      );
-      final out = customTokenizer.encode('hello world');
-      expect(out.inputIds[0], equals(BertTokenizer.clsId));
-      expect(out.truncated, isFalse);
-    });
+    test(
+      'custom Tokeniser is used for word segmentation without error',
+      () async {
+        // Provide a trivially correct Tokeniser — same contract as RegExpTokeniser.
+        // We just verify that BertTokenizer.load accepts the parameter and
+        // encode() runs without error.
+        final customTokenizer = await BertTokenizer.load(
+          _vocabPath,
+          tokeniser: const _WhitespaceTokeniser(),
+        );
+        final out = customTokenizer.encode('hello world');
+        expect(out.inputIds[0], equals(BertTokenizer.clsId));
+        expect(out.truncated, isFalse);
+      },
+    );
   });
 }
 
@@ -180,5 +182,6 @@ final class _WhitespaceTokeniser implements Tokeniser {
   const _WhitespaceTokeniser();
 
   @override
-  List<String> tokenise(String text) => text.split(RegExp(r'\s+')).where((s) => s.isNotEmpty).toList();
+  List<String> tokenise(String text) =>
+      text.split(RegExp(r'\s+')).where((s) => s.isNotEmpty).toList();
 }

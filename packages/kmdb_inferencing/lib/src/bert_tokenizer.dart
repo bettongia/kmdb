@@ -130,11 +130,7 @@ class BertTokenizer {
     tokenIds.add(sepId);
 
     // Build attention mask: 1 for real tokens, 0 for padding.
-    final attentionMask = List<int>.filled(
-      tokenIds.length,
-      1,
-      growable: true,
-    );
+    final attentionMask = List<int>.filled(tokenIds.length, 1, growable: true);
     while (tokenIds.length < _maxLength) {
       tokenIds.add(padId);
       attentionMask.add(0);

@@ -507,42 +507,6 @@ abstract final class KmdbCli {
     final runner =
         CommandRunner<void>('kmdb', 'KMDB local-first document database.')
           ..argParser.addOption(
-            'mode',
-            abbr: 'm',
-            help:
-                'Output format: json (default), compact, ndjson, table, csv, line',
-            valueHelp: 'mode',
-          )
-          ..argParser.addOption(
-            'output',
-            abbr: 'o',
-            help: 'Write output to file instead of stdout',
-            valueHelp: 'file',
-          )
-          ..argParser.addOption(
-            'read',
-            abbr: 'r',
-            help: 'Read commands from a script file',
-            valueHelp: 'file',
-          )
-          ..argParser.addFlag(
-            'continue-on-error',
-            negatable: false,
-            help: 'Keep running after a command error',
-          )
-          ..argParser.addFlag(
-            'flush',
-            defaultsTo: true,
-            help: 'Flush memtable to SSTable on exit (default: on)',
-          )
-          ..argParser.addFlag(
-            'version',
-            negatable: false,
-            help: 'Print version and exit',
-          );
-    final runner =
-        CommandRunner<void>('kmdb', 'KMDB local-first document database.')
-          ..argParser.addOption(
             'format',
             abbr: 'f',
             help:

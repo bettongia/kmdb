@@ -111,8 +111,9 @@ $(KMDB_PKG)/**/*.dart:
 
 $(KMDB_CLI_PKG)/**/*.dart:
 
-format: $(KMDB_PKG)/**/*.dart $(KMDB_CLI_PKG)/**/*.dart
+format:
 	melos format
+.PHONY: format
 
 clean:
 	melos clean

@@ -54,4 +54,13 @@ abstract interface class EmbeddingModel {
   /// - [truncated] is `true` if [text] exceeded the model's context window and
   ///   was silently truncated before embedding.
   Future<(Float32List embedding, bool truncated)> embed(String text);
+
+  /// Releases any native resources held by this model.
+  ///
+  /// Called by [KmdbDatabase.close] after all other cleanup. Implementations
+  /// backed by native libraries (e.g. ONNX Runtime) must release their session
+  /// handle here. Pure-Dart implementations may leave this as a no-op.
+  ///
+  /// After [dispose] is called, [embed] must not be called.
+  void dispose();
 }

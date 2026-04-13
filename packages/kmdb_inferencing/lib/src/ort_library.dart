@@ -51,7 +51,9 @@ Future<String> _ensureLibraryPresent() async {
   if (File(libPath).existsSync()) return libPath;
 
   // Library not cached — download from GitHub Releases.
-  print('[kmdb_inferencing] Native ORT library not found, downloading $_ortVersion...');
+  print(
+    '[kmdb_inferencing] Native ORT library not found, downloading $_ortVersion...',
+  );
   await _downloadAndExtract(libDir, libName);
   print('[kmdb_inferencing] Download complete: $libPath');
 

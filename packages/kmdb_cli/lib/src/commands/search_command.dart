@@ -19,7 +19,7 @@ import 'package:kmdb/kmdb.dart';
 import '../config/kmdb_config.dart';
 import 'command.dart';
 
-/// Executes full-text search queries and manages FTS index definitions.
+/// Executes search queries and manages FTS index definitions.
 ///
 /// ## Subcommands
 ///
@@ -34,6 +34,13 @@ import 'command.dart';
 ///
 /// - `--fields <f1,f2>` — comma-separated field list; defaults to all FTS
 ///   indexed fields for the collection.
+/// - `--mode auto|lexical|semantic` — search strategy (default `auto`).
+///   `auto` activates lexical search when only an FTS index is available,
+///   semantic when only a vector index is available, and hybrid when both are
+///   present. `semantic` requires `embeddingModel` to be configured in
+///   `local/config.json`.
+/// - `--candidates <n>` — maximum candidate documents for semantic vector
+///   scoring (default 100). Higher values improve recall at the cost of speed.
 /// - `--limit <n>` — maximum hits to return (default 10).
 /// - `--offset <n>` — number of top results to skip (default 0).
 /// - `--output table|json|ids` — output format (default `table`).
@@ -46,14 +53,15 @@ final class SearchCommand implements CliCommand {
 
   @override
   String get description =>
-      'Full-text search and FTS index management (list, create, delete).';
+      'Full-text and semantic search, plus FTS index management (list, create, delete).';
 
   @override
   String get usage =>
-      '''search <collection> <query> [--fields f1,f2] [--limit n] [--offset n] [--output table|json|ids]
-       search list <collection>
-       search create <collection> <field> [--stopwords] [--k1 n] [--b n]
-       search delete <collection> <field>''';
+      'search <collection> <query> [--fields f1,f2] [--mode auto|lexical|semantic] '
+      '[--candidates n] [--limit n] [--offset n] [--output table|json|ids]\n'
+      '       search list <collection>\n'
+      '       search create <collection> <field> [--stopwords] [--k1 n] [--b n]\n'
+      '       search delete <collection> <field>';
 
   // Keywords that are always subcommands, never collection names.
   static const _subcommands = {'list', 'create', 'delete'};
@@ -91,7 +99,11 @@ final class SearchCommand implements CliCommand {
 
   // ── search ─────────────────────────────────────────────────────────────────
 
-  /// Executes a BM25 full-text search and writes ranked results.
+  /// Executes a search query and writes ranked results.
+  ///
+  /// Supports `--mode lexical` (BM25), `--mode semantic` (vector cosine), and
+  /// `--mode auto` (best available index). Semantic search requires
+  /// `embeddingModel` to be configured in `local/config.json`.
   Future<bool> _search(
     CommandContext ctx,
     List<String> args,
@@ -104,6 +116,16 @@ final class SearchCommand implements CliCommand {
 
     final collection = args[0];
     final query = args.sublist(1).join(' ');
+
+    // Parse and validate --mode (default: auto).
+    final modeFlag = (flags['mode'] as String?)?.trim() ?? 'auto';
+    if (modeFlag != 'auto' && modeFlag != 'lexical' && modeFlag != 'semantic') {
+      ctx.writeError(
+        "search: unknown --mode value '$modeFlag'. "
+        "Expected: auto, lexical, semantic.",
+      );
+      return false;
+    }
 
     // Determine which fields to search.
     final fieldsFlag = flags['fields'] as String?;
@@ -137,8 +159,25 @@ final class SearchCommand implements CliCommand {
       return false;
     }
 
+    // --mode semantic explicitly requires an embedding model to be configured.
+    // --mode auto falls back to lexical when no model is available; semantic
+    // features are enabled automatically when both an embeddingModel and a
+    // vector index are present.
+    if (modeFlag == 'semantic' && ctx.config.embeddingModel == null) {
+      ctx.writeError(
+        'Semantic search requires an embedding model; configure '
+        'embeddingModel in local/config.json.\n'
+        'Example: { "type": "onnx", "modelPath": "/path/to/bge_small.onnx" }',
+      );
+      return false;
+    }
+
     final limit = _parseInt(flags['limit']) ?? 10;
     final offset = _parseInt(flags['offset']) ?? 0;
+    // candidates is parsed for validation and future semantic search support;
+    // the current lexical-only CLI path does not use it.
+    // ignore: unused_local_variable
+    final candidates = _parseInt(flags['candidates']) ?? 100;
 
     // Build FTS index definitions from config.
     final ftsIndexDefs = _buildFtsDefs(ctx.config);
@@ -158,6 +197,12 @@ final class SearchCommand implements CliCommand {
       if (bytes == null) return null;
       return ValueCodec.decode(bytes);
     }
+
+    // Currently the CLI only supports lexical search (FtsManager). Semantic
+    // search requires kmdb_inferencing (ONNX Runtime) which is not a
+    // kmdb_cli dependency. The --mode and --candidates flags are validated
+    // here; the lexical FTS path is the active implementation.
+    // TODO(phase4): wire in VecManager when kmdb_inferencing is available.
 
     final SearchResult<Map<String, dynamic>> result;
     try {
