@@ -14,21 +14,23 @@
 
 /// ONNX Runtime inference for KMDB semantic search.
 ///
-/// Provides [OnnxEmbeddingModel], which implements the [EmbeddingModel]
-/// interface using the BGE Small En v1.5 model via the ONNX Runtime C API.
-///
-/// This package is a scaffold — plan 3 (semantic search) adds the full FFI
-/// implementation. For now, constructing [OnnxEmbeddingModel] throws
-/// [UnimplementedError].
+/// Provides [OnnxEmbeddingModel] (implements [EmbeddingModel]) backed by the
+/// BGE Small En v1.5 model via the ONNX Runtime C API, a [BertTokenizer]
+/// for BERT WordPiece tokenisation, and [quantise]/[dequantise] helpers for
+/// SQ8 vector quantisation.
 ///
 /// ## Platform support
 ///
-/// This package is native-only. It must not be used on the web platform.
+/// This package is **native-only** (macOS, Linux, Windows, Android). It must
+/// not be imported on the web platform.
 ///
 /// ## FFI dependency
 ///
-/// The ONNX Runtime shared library must be available on the target platform.
-/// Plan 3 will add the native build hooks and bundling configuration.
+/// The ONNX Runtime shared library is downloaded automatically on first use
+/// by [openOrtLibrary] and cached next to the compiled executable. On Android
+/// the `.so` is bundled by Gradle.
 library;
 
+export 'src/bert_tokenizer.dart' show BertTokenizer, TokenizerOutput;
 export 'src/embedding_model.dart' show OnnxEmbeddingModel;
+export 'src/sq8.dart' show quantise, dequantise;

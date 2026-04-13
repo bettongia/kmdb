@@ -1,6 +1,6 @@
 # Text Search — Phase 3: Semantic Search
 
-**Status**: Investigated
+**Status**: Implementing
 
 **PR link**: _pending_
 
