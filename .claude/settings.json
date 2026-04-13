@@ -1,7 +1,16 @@
 {
   "permissions": {
     "allow": [
-      "Bash(make pre_commit)"
+      "Bash(make pre_commit)",
+      "Write",
+      "Edit",
+      "Bash(dart *)",
+      "Bash(git *)",
+      "Bash(find *)",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(cp *)",
+      "Bash(mkdir *)"
     ]
   },
   "hooks": {

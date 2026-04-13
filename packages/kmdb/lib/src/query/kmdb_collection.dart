@@ -254,22 +254,20 @@ final class KmdbCollection<T> {
 
   /// Searches this collection for documents matching [query].
   ///
-  /// This method is **stubbed** in Phase 1. It returns an empty [SearchResult]
-  /// with all requested [fields] listed in [SearchMetadata.skipped]. Plans 2
-  /// (lexical) and 3 (semantic) replace this stub with real implementations.
-  ///
   /// ## Parameters
   ///
   /// - [query] — the search query string. An empty query returns an empty
   ///   result without error.
-  /// - [fields] — the document field names to search. If `null`, all indexed
-  ///   fields for this collection are searched.
-  /// - [filter] — an optional [Filter] to restrict the candidate set before
-  ///   ranking.
-  /// - [mode] — the [SearchMode] to use. Defaults to [SearchMode.auto].
-  /// - [candidates] — the number of candidate documents to consider during
-  ///   ranking. Higher values improve recall at the cost of performance.
-  ///   Default: 100.
+  /// - [fields] — the document field names to search. If `null` or empty, all
+  ///   FTS-indexed fields for this collection are searched.
+  /// - [filter] — an optional [Filter] to restrict the candidate set. The
+  ///   candidate set is resolved before the inverted-index scan; only
+  ///   documents that pass the filter are scored.
+  /// - [mode] — the [SearchMode] to use. Defaults to [SearchMode.auto], which
+  ///   activates lexical search when only an FTS index is available, semantic
+  ///   when only a vector index is available, and hybrid (RRF) when both are
+  ///   present (plan 4 implements hybrid).
+  /// - [candidates] — the maximum candidate documents per index leg. Default: 100.
   /// - [limit] — the maximum number of hits to return. Default: 10.
   /// - [offset] — number of hits to skip (for pagination). Default: 0.
   ///
@@ -278,6 +276,20 @@ final class KmdbCollection<T> {
   /// A [SearchResult] with [SearchResult.hits] in descending score order.
   /// Fields that could not be searched (no matching index) appear in
   /// [SearchMetadata.skipped].
+  ///
+  /// ## Example
+  ///
+  /// ```dart
+  /// final results = await articles.search(
+  ///   'full text search engine',
+  ///   fields: ['title', 'body'],
+  ///   filter: Filter.field('published').equals(true),
+  ///   limit: 20,
+  /// );
+  /// for (final hit in results.hits) {
+  ///   print('${hit.rank}. [${hit.score.toStringAsFixed(3)}] ${hit.id}');
+  /// }
+  /// ```
   Future<SearchResult<T>> search(
     String query, {
     List<String>? fields,
@@ -287,16 +299,86 @@ final class KmdbCollection<T> {
     int limit = 10,
     int offset = 0,
   }) async {
-    // Phase 1 stub: no indexes exist yet. Return an empty result with all
-    // requested fields in `skipped`. Plans 2 and 3 replace this stub.
-    final requestedFields = fields ?? const <String>[];
-    final metadata = SearchMetadata(
-      query: query,
-      searched: const [],
-      skipped: requestedFields.toList(),
-      total: 0,
+    final fts = _db.ftsManager;
+
+    // Determine the effective field list.
+    List<String> effectiveFields;
+    if (fields == null || fields.isEmpty) {
+      effectiveFields = fts?.indexedFieldsFor(namespace) ?? [];
+    } else {
+      effectiveFields = fields;
+    }
+
+    if (effectiveFields.isEmpty || query.isEmpty) {
+      return SearchResult<T>(
+        metadata: SearchMetadata(
+          query: query,
+          searched: const [],
+          skipped: effectiveFields,
+          total: 0,
+        ),
+        hits: const [],
+      );
+    }
+
+    // When a filter is provided, resolve candidateIds by scanning the
+    // collection and applying the filter. This is the pre-filter step (spec
+    // §21.6): only candidate documents are passed to the inverted-index scan,
+    // avoiding scoring of irrelevant documents.
+    Set<String>? candidateIds;
+    if (filter != null) {
+      final ids = <String>{};
+      await for (final entry in _db.store.scan(namespace)) {
+        Map<String, dynamic> doc;
+        try {
+          doc = ValueCodec.decode(entry.value);
+        } catch (_) {
+          continue;
+        }
+        doc['_id'] = entry.key;
+        if (filter.evaluate(doc)) {
+          ids.add(entry.key);
+        }
+      }
+      candidateIds = ids;
+      if (candidateIds.isEmpty) {
+        return SearchResult<T>(
+          metadata: SearchMetadata(
+            query: query,
+            searched: const [],
+            skipped: effectiveFields,
+            total: 0,
+          ),
+          hits: const [],
+        );
+      }
+    }
+
+    // Route based on mode and available indexes.
+    if (mode == SearchMode.lexical || mode == SearchMode.auto) {
+      if (fts != null && fts.hasAnyIndex(namespace)) {
+        return fts.search<T>(
+          namespace: namespace,
+          query: query,
+          fields: effectiveFields,
+          fetchDoc: (id) => get(id),
+          candidateIds: candidateIds,
+          limit: limit,
+          offset: offset,
+        );
+      }
+    }
+
+    // No index available — return stub result with all fields skipped.
+    return SearchResult<T>(
+      metadata: SearchMetadata(
+        query: query,
+        searched: const [],
+        skipped: effectiveFields,
+        total: 0,
+      ),
+      hits: const [],
     );
-    return SearchResult<T>(metadata: metadata, hits: const []);
   }
 
   // ── Internal ───────────────────────────────────────────────────────────────
@@ -315,10 +397,11 @@ final class KmdbCollection<T> {
     }
   }
 
-  /// Encodes and writes [newDoc], removing old index entries for [oldDoc].
+  /// Encodes and writes [newDoc], updating index entries for [oldDoc].
   ///
   /// Validates that [newDoc] contains no `_`-prefixed top-level keys before
-  /// any I/O is performed.
+  /// any I/O is performed. Both secondary index and FTS index writes are
+  /// included in the same [WriteBatch] as the document write (atomicity).
   Future<void> _writeDocument({
     required String key,
     required Map<String, dynamic> newDoc,
@@ -329,6 +412,8 @@ final class KmdbCollection<T> {
     _validateNoReservedKeys(newDoc);
     final encodedValue = ValueCodec.encode(newDoc);
     final batch = WriteBatch()..put(namespace, key, encodedValue);
+
+    // Secondary index interception.
     await _db.indexManager.interceptWrite(
       batch: batch,
       namespace: namespace,
@@ -336,15 +421,30 @@ final class KmdbCollection<T> {
       oldDoc: oldDoc,
       newDoc: newDoc,
     );
+
+    // FTS index interception (no-op when no FTS indexes are configured).
+    final fts = _db.ftsManager;
+    if (fts != null && fts.hasAnyIndex(namespace)) {
+      await fts.interceptWrite(
+        namespace: namespace,
+        docId: key,
+        newDoc: newDoc,
+        oldDoc: oldDoc,
+        batch: batch,
+      );
+    }
+
     await _db.store.writeBatchInternal(batch);
   }
 
-  /// Removes a document and its index entries.
+  /// Removes a document and its index entries (secondary and FTS).
   Future<void> _deleteDocument({
     required String key,
     required Map<String, dynamic> oldDoc,
   }) async {
     final batch = WriteBatch()..delete(namespace, key);
+
+    // Secondary index interception.
     await _db.indexManager.interceptWrite(
       batch: batch,
       namespace: namespace,
@@ -352,6 +452,19 @@ final class KmdbCollection<T> {
       oldDoc: oldDoc,
       newDoc: null,
     );
+
+    // FTS index interception.
+    final fts = _db.ftsManager;
+    if (fts != null && fts.hasAnyIndex(namespace)) {
+      await fts.interceptWrite(
+        namespace: namespace,
+        docId: key,
+        newDoc: null,
+        oldDoc: oldDoc,
+        batch: batch,
+      );
+    }
+
     await _db.store.writeBatchInternal(batch);
   }
 }
