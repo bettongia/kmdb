@@ -149,10 +149,10 @@ abstract final class KmdbCli {
           flushOnExit = true;
         case '--no-flush':
           flushOnExit = false;
-        case '--mode' || '-m':
+        case '--format' || '-f':
           i++;
           if (i >= args.length) {
-            io.stderr.writeln('Error: --mode requires a value.');
+            io.stderr.writeln('Error: --format requires a value.');
             return 1;
           }
           modeStr = args[i];
@@ -507,11 +507,11 @@ abstract final class KmdbCli {
     final runner =
         CommandRunner<void>('kmdb', 'KMDB local-first document database.')
           ..argParser.addOption(
-            'mode',
-            abbr: 'm',
+            'format',
+            abbr: 'f',
             help:
                 'Output format: json (default), compact, ndjson, table, csv, line',
-            valueHelp: 'mode',
+            valueHelp: 'format',
           )
           ..argParser.addOption(
             'output',

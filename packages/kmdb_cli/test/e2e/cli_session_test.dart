@@ -177,7 +177,7 @@ void main() {
       // Test NDJSON mode
       print('  Testing NDJSON mode...');
       final ndjsonResult = await harness.run([
-        '--mode',
+        '--format',
         'ndjson',
         'scan',
         'shopping_list',
@@ -194,7 +194,7 @@ void main() {
       // Test Table mode
       print('  Testing Table mode...');
       final tableResult = await harness.run([
-        '--mode',
+        '--format',
         'table',
         'scan',
         'shopping_list',

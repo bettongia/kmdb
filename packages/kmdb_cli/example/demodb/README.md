@@ -84,9 +84,9 @@ dart run ../../bin/kmdb.dart demodb scan weather_stations --filter '{"field":"St
 ```
 
 ```sh
-dart run ../../bin/kmdb.dart demodb scan weather_stations --filter '{"field":"Station Name","op":"eq","value":"MAWSON"}' --mode table
+dart run ../../bin/kmdb.dart demodb scan weather_stations --filter '{"field":"Station Name","op":"eq","value":"MAWSON"}' --format table
 
-dart run ../../bin/kmdb.dart demodb scan weather_stations --filter '{"field":"Station Name","op":"eq","value":"MAWSON"}' --mode csv
+dart run ../../bin/kmdb.dart demodb scan weather_stations --filter '{"field":"Station Name","op":"eq","value":"MAWSON"}' --format csv
 ```
 
 You can use `jq` to manipulate the default JSON-based output:
@@ -99,7 +99,7 @@ But using `--select` and the table mode will give you some nicely formatted
 output:
 
 ```sh
-dart run ../../bin/kmdb.dart demodb scan elements --filter '{"field":"Name","op":"startsWith","value":"H"}' --select Name,Symbol,Atomic_Number --mode table
+dart run ../../bin/kmdb.dart demodb scan elements --filter '{"field":"Name","op":"startsWith","value":"H"}' --select Name,Symbol,Atomic_Number --format table
 ```
 
 ## Export/Import

@@ -354,8 +354,11 @@ final class KmdbCollection<T> {
       }
     }
 
+    final vec = _db.vecManager;
+
     // Route based on mode and available indexes.
-    if (mode == SearchMode.lexical || mode == SearchMode.auto) {
+    if (mode == SearchMode.lexical) {
+      // Lexical-only: delegate to FTS if available.
       if (fts != null && fts.hasAnyIndex(namespace)) {
         return fts.search<T>(
           namespace: namespace,
@@ -367,9 +370,64 @@ final class KmdbCollection<T> {
           offset: offset,
         );
       }
+    } else if (mode == SearchMode.semantic) {
+      // Semantic-only: delegate to VecManager if available.
+      if (vec != null && vec.hasAnyIndex(namespace)) {
+        return vec.search<T>(
+          namespace: namespace,
+          query: query,
+          fields: effectiveFields,
+          fetchDoc: (id) => get(id),
+          candidateIds: candidateIds,
+          candidates: candidates,
+          limit: limit,
+          offset: offset,
+        );
+      }
+    } else {
+      // auto: prefer hybrid when both indexes are available; fall back to
+      // whichever single index is present.
+      final hasFts = fts != null && fts.hasAnyIndex(namespace);
+      final hasVec = vec != null && vec.hasAnyIndex(namespace);
+
+      if (hasFts && hasVec) {
+        // Hybrid path (Phase 4 — RRF combination). For now, delegate to
+        // lexical as the primary index until the hybrid manager is wired up.
+        // TODO(phase4): replace with hybrid RRF search.
+        return fts.search<T>(
+          namespace: namespace,
+          query: query,
+          fields: effectiveFields,
+          fetchDoc: (id) => get(id),
+          candidateIds: candidateIds,
+          limit: limit,
+          offset: offset,
+        );
+      } else if (hasFts) {
+        return fts.search<T>(
+          namespace: namespace,
+          query: query,
+          fields: effectiveFields,
+          fetchDoc: (id) => get(id),
+          candidateIds: candidateIds,
+          limit: limit,
+          offset: offset,
+        );
+      } else if (hasVec) {
+        return vec.search<T>(
+          namespace: namespace,
+          query: query,
+          fields: effectiveFields,
+          fetchDoc: (id) => get(id),
+          candidateIds: candidateIds,
+          candidates: candidates,
+          limit: limit,
+          offset: offset,
+        );
+      }
     }
 
-    // No index available — return stub result with all fields skipped.
+    // No index available — return empty result with all fields skipped.
     return SearchResult<T>(
       metadata: SearchMetadata(
         query: query,
@@ -434,10 +492,23 @@ final class KmdbCollection<T> {
       );
     }
 
+    // Vector index interception. Inference runs synchronously before the
+    // WriteBatch is committed; a StateError from inference aborts the write.
+    final vec = _db.vecManager;
+    if (vec != null && vec.hasAnyIndex(namespace)) {
+      await vec.interceptWrite(
+        namespace: namespace,
+        docId: key,
+        newDoc: newDoc,
+        oldDoc: oldDoc,
+        batch: batch,
+      );
+    }
+
     await _db.store.writeBatchInternal(batch);
   }
 
-  /// Removes a document and its index entries (secondary and FTS).
+  /// Removes a document and its index entries (secondary, FTS, and vector).
   Future<void> _deleteDocument({
     required String key,
     required Map<String, dynamic> oldDoc,
@@ -457,6 +528,18 @@ final class KmdbCollection<T> {
     final fts = _db.ftsManager;
     if (fts != null && fts.hasAnyIndex(namespace)) {
       await fts.interceptWrite(
+        namespace: namespace,
+        docId: key,
+        newDoc: null,
+        oldDoc: oldDoc,
+        batch: batch,
+      );
+    }
+
+    // Vector index interception.
+    final vec = _db.vecManager;
+    if (vec != null && vec.hasAnyIndex(namespace)) {
+      await vec.interceptWrite(
         namespace: namespace,
         docId: key,
         newDoc: null,
