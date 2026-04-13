@@ -2,7 +2,7 @@
 
 **Status**: Complete
 
-**PR link**: _pending_
+**PR link**: https://github.com/aurochs-kmesh/kmdb/pull/15
 
 **Proposal**: [Text Indexing and Search](../docs/proposals/text_search.md)
 
