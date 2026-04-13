@@ -37,10 +37,7 @@ void main() {
     });
 
     test('lowercases mixed-case identifier (Jekyll → jekyll)', () {
-      expect(
-        tokeniseAndNormalise('Jekyll', tokeniser),
-        equals(['jekyll']),
-      );
+      expect(tokeniseAndNormalise('Jekyll', tokeniser), equals(['jekyll']));
     });
 
     test('lowercases sentence with punctuation', () {
@@ -50,7 +47,10 @@ void main() {
 
     test('produces same result as calling tokeniser + lowercase manually', () {
       const text = 'The Quick Brown Fox';
-      final expected = tokeniser.tokenise(text).map((t) => t.toLowerCase()).toList();
+      final expected = tokeniser
+          .tokenise(text)
+          .map((t) => t.toLowerCase())
+          .toList();
       expect(tokeniseAndNormalise(text, tokeniser), equals(expected));
     });
   });
@@ -77,10 +77,7 @@ void main() {
 
     test('passes through non-stop-words intact', () {
       const word = 'jekyll';
-      expect(
-        filterStopWords([word], kEnglishStopWords),
-        equals([word]),
-      );
+      expect(filterStopWords([word], kEnglishStopWords), equals([word]));
     });
 
     test('all tokens are stop words → empty result', () {
@@ -159,18 +156,24 @@ void main() {
       expect(result, contains('run'));
     });
 
-    test('prose sentence produces expected stemmed token set (with stop words)', () {
-      final result = preprocess(
-        'The quick brown fox jumps over the lazy dog',
-        tokeniser,
-        stopWords: kEnglishStopWords,
-      );
-      // 'the', 'over' are stop words; remaining: quick→quick, brown→brown,
-      // fox→fox, jumps→jump, lazy→lazi, dog→dog
-      expect(result, containsAll(['quick', 'brown', 'fox', 'jump', 'lazi', 'dog']));
-      expect(result, isNot(contains('the')));
-      expect(result, isNot(contains('over')));
-    });
+    test(
+      'prose sentence produces expected stemmed token set (with stop words)',
+      () {
+        final result = preprocess(
+          'The quick brown fox jumps over the lazy dog',
+          tokeniser,
+          stopWords: kEnglishStopWords,
+        );
+        // 'the', 'over' are stop words; remaining: quick→quick, brown→brown,
+        // fox→fox, jumps→jump, lazy→lazi, dog→dog
+        expect(
+          result,
+          containsAll(['quick', 'brown', 'fox', 'jump', 'lazi', 'dog']),
+        );
+        expect(result, isNot(contains('the')));
+        expect(result, isNot(contains('over')));
+      },
+    );
 
     test('technical identifiers survive pipeline (mTLS)', () {
       // 'mTLS' → normalise → 'mtls' → stem → 'mtl' (acceptable) or 'mtls'
@@ -197,16 +200,8 @@ void main() {
 
     test('identical input produces identical output (index == query path)', () {
       const text = 'full text search is powerful';
-      final indexed = preprocess(
-        text,
-        tokeniser,
-        stopWords: kEnglishStopWords,
-      );
-      final queried = preprocess(
-        text,
-        tokeniser,
-        stopWords: kEnglishStopWords,
-      );
+      final indexed = preprocess(text, tokeniser, stopWords: kEnglishStopWords);
+      final queried = preprocess(text, tokeniser, stopWords: kEnglishStopWords);
       expect(indexed, equals(queried));
     });
   });

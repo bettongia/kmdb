@@ -55,7 +55,11 @@ Future<void> _putDoc(
   Map<String, dynamic> doc,
 ) async {
   final id = doc['_id'] as String;
-  await store.put(collection, id, ValueCodec.encode(Map.of(doc)..remove('_id')));
+  await store.put(
+    collection,
+    id,
+    ValueCodec.encode(Map.of(doc)..remove('_id')),
+  );
 }
 
 /// A minimal codec for raw map documents.
@@ -73,8 +77,10 @@ final class _MapCodec implements KmdbCodec<Map<String, dynamic>> {
   String keyOf(Map<String, dynamic> value) => value['_id'] as String;
 
   @override
-  Map<String, dynamic> withKey(Map<String, dynamic> value, String key) =>
-      {...value, '_id': key};
+  Map<String, dynamic> withKey(Map<String, dynamic> value, String key) => {
+    ...value,
+    '_id': key,
+  };
 }
 
 /// Builds a fresh [KmdbDatabase] with an FTS index on [collection].[field] and
@@ -127,20 +133,27 @@ void main() {
     tearDown(() => store.close());
 
     test('no args prints error and returns false', () async {
-      final ok = await SearchCommand().execute(_ctx(store, out: out, err: err), [], {});
-      expect(ok, isFalse);
-      expect(err.toString(), contains('collection and query required'));
-    });
-
-    test('single arg (collection only) prints error and returns false', () async {
       final ok = await SearchCommand().execute(
         _ctx(store, out: out, err: err),
-        ['docs'],
+        [],
         {},
       );
       expect(ok, isFalse);
       expect(err.toString(), contains('collection and query required'));
     });
+
+    test(
+      'single arg (collection only) prints error and returns false',
+      () async {
+        final ok = await SearchCommand().execute(
+          _ctx(store, out: out, err: err),
+          ['docs'],
+          {},
+        );
+        expect(ok, isFalse);
+        expect(err.toString(), contains('collection and query required'));
+      },
+    );
 
     test('unknown --output value returns error', () async {
       final config = KmdbConfig.empty();
@@ -164,17 +177,20 @@ void main() {
       expect(err.toString(), contains('no FTS indexes configured'));
     });
 
-    test('unknown subcommand is treated as collection name (falls through)', () async {
-      // 'bogus query' — 'bogus' is not a reserved subcommand, so args[0] is
-      // the collection name.  No FTS index → error about missing indexes.
-      final ok = await SearchCommand().execute(
-        _ctx(store, out: out, err: err),
-        ['bogus', 'query'],
-        {},
-      );
-      expect(ok, isFalse);
-      expect(err.toString(), contains('no FTS indexes configured'));
-    });
+    test(
+      'unknown subcommand is treated as collection name (falls through)',
+      () async {
+        // 'bogus query' — 'bogus' is not a reserved subcommand, so args[0] is
+        // the collection name.  No FTS index → error about missing indexes.
+        final ok = await SearchCommand().execute(
+          _ctx(store, out: out, err: err),
+          ['bogus', 'query'],
+          {},
+        );
+        expect(ok, isFalse);
+        expect(err.toString(), contains('no FTS indexes configured'));
+      },
+    );
   });
 
   // ── search — main query path ──────────────────────────────────────────────────
@@ -252,7 +268,15 @@ void main() {
       // Only one document row should appear (plus header + separator + summary).
       final lines = out2.toString().trim().split('\n');
       // 1 header + 1 separator + 1 hit row + 1 summary = 4 lines (at least)
-      final hitLines = lines.where((l) => l.trim().isNotEmpty && !l.startsWith('rank') && !l.startsWith('---') && !l.contains('results')).toList();
+      final hitLines = lines
+          .where(
+            (l) =>
+                l.trim().isNotEmpty &&
+                !l.startsWith('rank') &&
+                !l.startsWith('---') &&
+                !l.contains('results'),
+          )
+          .toList();
       expect(hitLines, hasLength(1));
       await seeded.store.close();
     });
@@ -482,22 +506,25 @@ void main() {
       expect(err.toString(), contains('collection name and field required'));
     });
 
-    test('registers index in config (mutation only, no real disk write)', () async {
-      // We test the config mutation, not the disk save (memory store).
-      final config = KmdbConfig.empty();
-      final ctx = _ctx(store, config: config, out: out, err: err);
+    test(
+      'registers index in config (mutation only, no real disk write)',
+      () async {
+        // We test the config mutation, not the disk save (memory store).
+        final config = KmdbConfig.empty();
+        final ctx = _ctx(store, config: config, out: out, err: err);
 
-      // Directly call addFtsIndex to verify the config mutation path.
-      config.addFtsIndex('docs', 'body');
-      expect(config.ftsIndexesForCollection('docs'), hasLength(1));
-      final record = config.ftsIndexesForCollection('docs').first;
-      expect(record.field, equals('body'));
-      expect(record.stopWords, isFalse);
-      expect(record.k1, equals(1.2));
-      expect(record.b, equals(0.75));
-      // ctx is not used in this test (no disk save possible with memory store).
-      expect(ctx.config, isNotNull);
-    });
+        // Directly call addFtsIndex to verify the config mutation path.
+        config.addFtsIndex('docs', 'body');
+        expect(config.ftsIndexesForCollection('docs'), hasLength(1));
+        final record = config.ftsIndexesForCollection('docs').first;
+        expect(record.field, equals('body'));
+        expect(record.stopWords, isFalse);
+        expect(record.k1, equals(1.2));
+        expect(record.b, equals(0.75));
+        // ctx is not used in this test (no disk save possible with memory store).
+        expect(ctx.config, isNotNull);
+      },
+    );
 
     test('--stopwords creates index with stopWords=true', () async {
       final config = KmdbConfig.empty();
@@ -510,10 +537,7 @@ void main() {
       final config = KmdbConfig.empty();
       config.addFtsIndex('docs', 'body');
       // Adding again should fail via ArgumentError.
-      expect(
-        () => config.addFtsIndex('docs', 'body'),
-        throwsArgumentError,
-      );
+      expect(() => config.addFtsIndex('docs', 'body'), throwsArgumentError);
     });
 
     test('invalid --b value returns error', () async {
@@ -570,7 +594,10 @@ void main() {
         {},
       );
       expect(ok, isFalse);
-      expect(err.toString(), contains("no FTS index on 'docs.body' found in config"));
+      expect(
+        err.toString(),
+        contains("no FTS index on 'docs.body' found in config"),
+      );
     });
 
     test('removes index from config (mutation verified directly)', () async {

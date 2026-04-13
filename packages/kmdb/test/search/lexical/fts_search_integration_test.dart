@@ -56,8 +56,10 @@ final class _MapCodec implements KmdbCodec<Map<String, dynamic>> {
   String keyOf(Map<String, dynamic> value) => value['_id'] as String;
 
   @override
-  Map<String, dynamic> withKey(Map<String, dynamic> value, String key) =>
-      {...value, '_id': key};
+  Map<String, dynamic> withKey(Map<String, dynamic> value, String key) => {
+    ...value,
+    '_id': key,
+  };
 }
 
 const _codec = _MapCodec();
@@ -137,7 +139,10 @@ void main() {
       );
       final col = db.collection(name: 'articles', codec: _codec);
 
-      await col.insert({'title': 'search engine', 'body': 'full text retrieval'});
+      await col.insert({
+        'title': 'search engine',
+        'body': 'full text retrieval',
+      });
 
       final result = await col.search('search', fields: ['title', 'body']);
       expect(result.hits, hasLength(1));
@@ -160,13 +165,19 @@ void main() {
       );
       final col = db.collection(name: 'docs', codec: _codec);
 
-      await col.insert({'title': 'the quick fox', 'body': 'the quick fox jumped'});
+      await col.insert({
+        'title': 'the quick fox',
+        'body': 'the quick fox jumped',
+      });
 
       final result = await col.search('quick', fields: ['title', 'body']);
       expect(result.hits, hasLength(1));
 
       final hit = result.hits.first;
-      final perFieldMax = hit.fieldScores.values.fold(0.0, (a, b) => a > b ? a : b);
+      final perFieldMax = hit.fieldScores.values.fold(
+        0.0,
+        (a, b) => a > b ? a : b,
+      );
       // Overall score equals the max per-field score.
       expect(hit.score, equals(perFieldMax));
     });
@@ -224,23 +235,26 @@ void main() {
       expect(after.hits.map((h) => h.id), isNot(contains(id)));
     });
 
-    test('updated document reflects new content; old terms are excluded', () async {
-      final db = await _openDb();
-      final col = db.collection(name: 'docs', codec: _codec);
+    test(
+      'updated document reflects new content; old terms are excluded',
+      () async {
+        final db = await _openDb();
+        final col = db.collection(name: 'docs', codec: _codec);
 
-      final doc = await col.insert({'body': 'original topic cats'});
-      final id = doc['_id'] as String;
+        final doc = await col.insert({'body': 'original topic cats'});
+        final id = doc['_id'] as String;
 
-      // Update to entirely different content.
-      await col.put({...doc, 'body': 'new topic dogs'});
+        // Update to entirely different content.
+        await col.put({...doc, 'body': 'new topic dogs'});
 
-      final dogs = await col.search('dogs', fields: ['body']);
-      expect(dogs.hits.map((h) => h.id), contains(id));
+        final dogs = await col.search('dogs', fields: ['body']);
+        expect(dogs.hits.map((h) => h.id), contains(id));
 
-      // 'cats' no longer in the document — must not appear in results.
-      final cats = await col.search('cats', fields: ['body']);
-      expect(cats.hits.map((h) => h.id), isNot(contains(id)));
-    });
+        // 'cats' no longer in the document — must not appear in results.
+        final cats = await col.search('cats', fields: ['body']);
+        expect(cats.hits.map((h) => h.id), isNot(contains(id)));
+      },
+    );
 
     test('overlay supersedes stale base entries before compaction', () async {
       final db = await _openDb();
@@ -267,7 +281,10 @@ void main() {
       final db = await _openDb();
       final col = db.collection(name: 'docs', codec: _codec);
 
-      final published = await col.insert({'body': 'published article', 'status': 'published'});
+      final published = await col.insert({
+        'body': 'published article',
+        'status': 'published',
+      });
       final pubId = published['_id'] as String;
       await col.insert({'body': 'draft article', 'status': 'draft'});
 
@@ -294,23 +311,29 @@ void main() {
       expect(result.hits, isEmpty);
     });
 
-    test('full-scan fallback returns correct results when no secondary index', () async {
-      // No IndexDefinition — filter resolved via full namespace scan.
-      final db = await _openDb();
-      final col = db.collection(name: 'docs', codec: _codec);
+    test(
+      'full-scan fallback returns correct results when no secondary index',
+      () async {
+        // No IndexDefinition — filter resolved via full namespace scan.
+        final db = await _openDb();
+        final col = db.collection(name: 'docs', codec: _codec);
 
-      final target = await col.insert({'body': 'scan fallback', 'flag': true});
-      final targetId = target['_id'] as String;
-      await col.insert({'body': 'scan fallback', 'flag': false});
+        final target = await col.insert({
+          'body': 'scan fallback',
+          'flag': true,
+        });
+        final targetId = target['_id'] as String;
+        await col.insert({'body': 'scan fallback', 'flag': false});
 
-      final result = await col.search(
-        'scan',
-        fields: ['body'],
-        filter: Field('flag').equals(true),
-      );
-      expect(result.hits, hasLength(1));
-      expect(result.hits.first.id, equals(targetId));
-    });
+        final result = await col.search(
+          'scan',
+          fields: ['body'],
+          filter: Field('flag').equals(true),
+        );
+        expect(result.hits, hasLength(1));
+        expect(result.hits.first.id, equals(targetId));
+      },
+    );
   });
 
   // ── Pagination ────────────────────────────────────────────────────────────
@@ -324,11 +347,7 @@ void main() {
         await col.insert({'body': 'pagination document $i content'});
       }
 
-      final result = await col.search(
-        'pagination',
-        fields: ['body'],
-        limit: 3,
-      );
+      final result = await col.search('pagination', fields: ['body'], limit: 3);
       expect(result.hits, hasLength(3));
       expect(result.metadata.total, equals(5));
     });
@@ -386,15 +405,18 @@ void main() {
   // ── Stop words ────────────────────────────────────────────────────────────
 
   group('stop words', () {
-    test('query with all stop words returns empty result when filtering on', () async {
-      final db = await _openDb(stopWords: true);
-      final col = db.collection(name: 'docs', codec: _codec);
+    test(
+      'query with all stop words returns empty result when filtering on',
+      () async {
+        final db = await _openDb(stopWords: true);
+        final col = db.collection(name: 'docs', codec: _codec);
 
-      await col.insert({'body': 'regular content here'});
-      // 'the' and 'is' are stop words.
-      final result = await col.search('the is', fields: ['body']);
-      expect(result.hits, isEmpty);
-    });
+        await col.insert({'body': 'regular content here'});
+        // 'the' and 'is' are stop words.
+        final result = await col.search('the is', fields: ['body']);
+        expect(result.hits, isEmpty);
+      },
+    );
 
     test('stop-word query without filtering returns results', () async {
       // stopWords: false (default) — 'the' is indexed and queryable.
@@ -430,7 +452,9 @@ void main() {
       final db = await _openDb();
       final col = db.collection(name: 'docs', codec: _codec);
 
-      final doc1 = await col.insert({'body': 'pre-existing document about kittens'});
+      final doc1 = await col.insert({
+        'body': 'pre-existing document about kittens',
+      });
       final id1 = doc1['_id'] as String;
       await col.insert({'body': 'pre-existing document about puppies'});
 
@@ -440,34 +464,38 @@ void main() {
     });
 
     test(
-        'ensureBuilt is idempotent — calling it twice does not corrupt index',
-        () async {
-      final db = await _openDb();
-      final col = db.collection(name: 'docs', codec: _codec);
+      'ensureBuilt is idempotent — calling it twice does not corrupt index',
+      () async {
+        final db = await _openDb();
+        final col = db.collection(name: 'docs', codec: _codec);
 
-      await col.insert({'body': 'idempotent test content'});
+        await col.insert({'body': 'idempotent test content'});
 
-      await db.ftsManager!.ensureBuilt('docs', 'body');
-      await db.ftsManager!.ensureBuilt('docs', 'body');
+        await db.ftsManager!.ensureBuilt('docs', 'body');
+        await db.ftsManager!.ensureBuilt('docs', 'body');
 
-      final result = await col.search('idempotent', fields: ['body']);
-      expect(result.hits, hasLength(1));
-    });
+        final result = await col.search('idempotent', fields: ['body']);
+        expect(result.hits, hasLength(1));
+      },
+    );
 
-    test('documents inserted after ensureBuilt are found immediately', () async {
-      final db = await _openDb();
-      final col = db.collection(name: 'docs', codec: _codec);
+    test(
+      'documents inserted after ensureBuilt are found immediately',
+      () async {
+        final db = await _openDb();
+        final col = db.collection(name: 'docs', codec: _codec);
 
-      await col.insert({'body': 'before build'});
-      await db.ftsManager!.ensureBuilt('docs', 'body');
+        await col.insert({'body': 'before build'});
+        await db.ftsManager!.ensureBuilt('docs', 'body');
 
-      // Insert after build is complete.
-      final late = await col.insert({'body': 'after build document'});
-      final lateId = late['_id'] as String;
+        // Insert after build is complete.
+        final late = await col.insert({'body': 'after build document'});
+        final lateId = late['_id'] as String;
 
-      final result = await col.search('after', fields: ['body']);
-      expect(result.hits.map((h) => h.id), contains(lateId));
-    });
+        final result = await col.search('after', fields: ['body']);
+        expect(result.hits.map((h) => h.id), contains(lateId));
+      },
+    );
   });
 
   // ── BM25 score properties ─────────────────────────────────────────────────
@@ -517,8 +545,7 @@ void main() {
       // Simulate a document arriving via sync by writing directly to the store.
       final newId = const UuidV7KeyGenerator().next();
       final newDoc = {'body': 'delta synced content'};
-      final batch = WriteBatch()
-        ..put('docs', newId, ValueCodec.encode(newDoc));
+      final batch = WriteBatch()..put('docs', newId, ValueCodec.encode(newDoc));
       await db.store.writeBatchInternal(batch);
 
       await db.ftsManager!.applyDelta(
@@ -578,35 +605,36 @@ void main() {
     });
 
     test(
-        'crash during applyDelta leaves index in stale state after re-open',
-        () async {
-      // This simulates a crash by artificially setting the state to syncing
-      // and then calling checkAndTransitionOnOpen (the crash-recovery path).
-      final db = await _openDb();
-      final col = db.collection(name: 'docs', codec: _codec);
+      'crash during applyDelta leaves index in stale state after re-open',
+      () async {
+        // This simulates a crash by artificially setting the state to syncing
+        // and then calling checkAndTransitionOnOpen (the crash-recovery path).
+        final db = await _openDb();
+        final col = db.collection(name: 'docs', codec: _codec);
 
-      await col.insert({'body': 'crash recovery test'});
-      await db.ftsManager!.ensureBuilt('docs', 'body');
+        await col.insert({'body': 'crash recovery test'});
+        await db.ftsManager!.ensureBuilt('docs', 'body');
 
-      // Forcibly set state to syncing (as would happen if a crash occurred
-      // during applyDelta).
-      await db.ftsManager!.forceStateForTesting(
-        'docs',
-        'body',
-        FtsIndexStatus.syncing,
-      );
+        // Forcibly set state to syncing (as would happen if a crash occurred
+        // during applyDelta).
+        await db.ftsManager!.forceStateForTesting(
+          'docs',
+          'body',
+          FtsIndexStatus.syncing,
+        );
 
-      // Simulate re-open by calling checkAndTransitionOnOpen.
-      await db.ftsManager!.checkAndTransitionOnOpen();
+        // Simulate re-open by calling checkAndTransitionOnOpen.
+        await db.ftsManager!.checkAndTransitionOnOpen();
 
-      // The index should now be stale (crash recovery path).
-      final state = await db.ftsManager!.stateFor('docs', 'body');
-      expect(state?.status, equals(FtsIndexStatus.stale));
+        // The index should now be stale (crash recovery path).
+        final state = await db.ftsManager!.stateFor('docs', 'body');
+        expect(state?.status, equals(FtsIndexStatus.stale));
 
-      // After ensureBuilt is called again (triggered by next search), the
-      // index rebuilds and the document is still findable.
-      final result = await col.search('crash', fields: ['body']);
-      expect(result.hits, hasLength(1));
-    });
+        // After ensureBuilt is called again (triggered by next search), the
+        // index rebuilds and the document is still findable.
+        final result = await col.search('crash', fields: ['body']);
+        expect(result.hits, hasLength(1));
+      },
+    );
   });
 }

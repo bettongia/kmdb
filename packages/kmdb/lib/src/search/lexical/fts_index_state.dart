@@ -147,12 +147,8 @@ final class FtsIndexState {
   /// One entry per (term, document) pair. The value is the term frequency
   /// (number of times the term appears in the document field) encoded as a
   /// CBOR integer.
-  static String baseKey(
-    String ns,
-    String field,
-    String term,
-    String docId,
-  ) => '\$fts:$ns:$field:$term:$docId';
+  static String baseKey(String ns, String field, String term, String docId) =>
+      '\$fts:$ns:$field:$term:$docId';
 
   /// Key for an overlay entry (tracks updates/deletes since last compaction).
   ///
@@ -170,8 +166,7 @@ final class FtsIndexState {
   /// The value is a CBOR map with keys:
   /// - `n` (int) — total number of indexed documents
   /// - `totalTokens` (int) — sum of field lengths across all documents
-  static String corpusKey(String ns, String field) =>
-      '\$fts:corpus:$ns:$field';
+  static String corpusKey(String ns, String field) => '\$fts:corpus:$ns:$field';
 
   /// Key for per-document token count (field length).
   ///

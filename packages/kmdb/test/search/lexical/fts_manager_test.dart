@@ -47,8 +47,10 @@ final class _MapCodec implements KmdbCodec<Map<String, dynamic>> {
   String keyOf(Map<String, dynamic> value) => value['_id'] as String;
 
   @override
-  Map<String, dynamic> withKey(Map<String, dynamic> value, String key) =>
-      {...value, '_id': key};
+  Map<String, dynamic> withKey(Map<String, dynamic> value, String key) => {
+    ...value,
+    '_id': key,
+  };
 }
 
 const _codec = _MapCodec();
@@ -124,7 +126,9 @@ void main() {
       final col = db.collection(name: 'docs', codec: _codec);
 
       await col.insert({'body': 'word'});
-      final doc2 = await col.insert({'body': 'another long document with many words'});
+      final doc2 = await col.insert({
+        'body': 'another long document with many words',
+      });
 
       await col.put({...doc2, 'body': 'short'});
 
@@ -178,18 +182,21 @@ void main() {
       await expectLater(col.delete(doc['_id'] as String), completes);
     });
 
-    test('corpus stats decremented; other documents remain searchable', () async {
-      final db = await _openDb();
-      final col = db.collection(name: 'docs', codec: _codec);
+    test(
+      'corpus stats decremented; other documents remain searchable',
+      () async {
+        final db = await _openDb();
+        final col = db.collection(name: 'docs', codec: _codec);
 
-      final doc1 = await col.insert({'body': 'document one here'});
-      await col.insert({'body': 'document two here'});
+        final doc1 = await col.insert({'body': 'document one here'});
+        await col.insert({'body': 'document two here'});
 
-      await col.delete(doc1['_id'] as String);
+        await col.delete(doc1['_id'] as String);
 
-      final result = await col.search('document', fields: ['body']);
-      expect(result.hits, hasLength(1));
-    });
+        final result = await col.search('document', fields: ['body']);
+        expect(result.hits, hasLength(1));
+      },
+    );
   });
 
   // ── compact ──────────────────────────────────────────────────────────────────
@@ -222,10 +229,7 @@ void main() {
       await db.ftsManager!.ensureBuilt('docs', 'body');
       await db.ftsManager!.compact('docs', 'body');
 
-      expect(
-        (await col.search('compacted', fields: ['body'])).hits,
-        isEmpty,
-      );
+      expect((await col.search('compacted', fields: ['body'])).hits, isEmpty);
     });
   });
 
@@ -242,8 +246,7 @@ void main() {
       // Write a new document directly into the store (simulating a remote add).
       final newId = const UuidV7KeyGenerator().next();
       final newDoc = {'body': 'delta added document'};
-      final batch = WriteBatch()
-        ..put('docs', newId, ValueCodec.encode(newDoc));
+      final batch = WriteBatch()..put('docs', newId, ValueCodec.encode(newDoc));
       await db.store.writeBatchInternal(batch);
 
       await db.ftsManager!.applyDelta(
@@ -332,12 +335,15 @@ void main() {
   // ── hasIndex / hasAnyIndex / indexedFieldsFor ────────────────────────────────
 
   group('index metadata', () {
-    test('hasIndex returns true only for configured collection/field', () async {
-      final db = await _openDb(collection: 'articles', field: 'content');
-      expect(db.ftsManager!.hasIndex('articles', 'content'), isTrue);
-      expect(db.ftsManager!.hasIndex('articles', 'other'), isFalse);
-      expect(db.ftsManager!.hasIndex('other', 'content'), isFalse);
-    });
+    test(
+      'hasIndex returns true only for configured collection/field',
+      () async {
+        final db = await _openDb(collection: 'articles', field: 'content');
+        expect(db.ftsManager!.hasIndex('articles', 'content'), isTrue);
+        expect(db.ftsManager!.hasIndex('articles', 'other'), isFalse);
+        expect(db.ftsManager!.hasIndex('other', 'content'), isFalse);
+      },
+    );
 
     test('hasAnyIndex returns true when collection has any index', () async {
       final db = await _openDb();

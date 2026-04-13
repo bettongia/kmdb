@@ -246,7 +246,11 @@ final class KmdbConfig {
       }
     }
 
-    return KmdbConfig._(remotes: remotes, indexes: indexes, ftsIndexes: ftsIndexes);
+    return KmdbConfig._(
+      remotes: remotes,
+      indexes: indexes,
+      ftsIndexes: ftsIndexes,
+    );
   }
 
   // ── Mutation ───────────────────────────────────────────────────────────────

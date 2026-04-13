@@ -89,7 +89,12 @@ export 'src/search/sync_delta.dart' show SyncDelta, DeltaChangeType, DeltaEntry;
 
 // ── Text search — lexical (BM25) ─────────────────────────────────────────────
 export 'src/search/lexical/pipeline.dart'
-    show tokeniseAndNormalise, filterStopWords, stem, preprocess, kEnglishStopWords;
+    show
+        tokeniseAndNormalise,
+        filterStopWords,
+        stem,
+        preprocess,
+        kEnglishStopWords;
 export 'src/search/lexical/fts_index_state.dart'
     show FtsIndexStatus, FtsIndexState, kFtsTombstone;
 export 'src/search/lexical/fts_manager.dart' show FtsManager;

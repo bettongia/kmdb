@@ -143,11 +143,10 @@ final class FtsManager {
       _defs.any((d) => d.collection == namespace);
 
   /// Returns all field names that have FTS indexes in [namespace].
-  List<String> indexedFieldsFor(String namespace) =>
-      _defs
-          .where((d) => d.collection == namespace)
-          .map((d) => d.field)
-          .toList();
+  List<String> indexedFieldsFor(String namespace) => _defs
+      .where((d) => d.collection == namespace)
+      .map((d) => d.field)
+      .toList();
 
   // ── Write interception ───────────────────────────────────────────────────
 
@@ -208,7 +207,11 @@ final class FtsManager {
     if (fieldValue == null) return; // field absent — nothing to index
 
     final stopWords = def.stopWords ? kEnglishStopWords : const <String>{};
-    final tokens = preprocess(fieldValue, RegExpTokeniser(), stopWords: stopWords);
+    final tokens = preprocess(
+      fieldValue,
+      RegExpTokeniser(),
+      stopWords: stopWords,
+    );
     if (tokens.isEmpty) return;
 
     final tf = _termFrequencies(tokens);
@@ -268,7 +271,11 @@ final class FtsManager {
       return;
     }
 
-    final newTokens = preprocess(newFieldValue, RegExpTokeniser(), stopWords: stopWords);
+    final newTokens = preprocess(
+      newFieldValue,
+      RegExpTokeniser(),
+      stopWords: stopWords,
+    );
     final newTf = _termFrequencies(newTokens);
     final newTokenCount = newTokens.length;
 
@@ -360,7 +367,11 @@ final class FtsManager {
     // 1. Mark as building. Write interception is active during the scan
     //    (activeDefinitionsFor includes `building` indexes).
     await _saveState(
-      FtsIndexState(namespace: ns, field: field, status: FtsIndexStatus.building),
+      FtsIndexState(
+        namespace: ns,
+        field: field,
+        status: FtsIndexStatus.building,
+      ),
       ns,
       field,
     );
@@ -400,8 +411,9 @@ final class FtsManager {
         _overlayNamespace(ns, field),
         docId,
       );
-      final overlay =
-          overlayBytes != null ? _decodeOverlayBytes(overlayBytes) : null;
+      final overlay = overlayBytes != null
+          ? _decodeOverlayBytes(overlayBytes)
+          : null;
 
       if (overlay is String && overlay == kFtsTombstone) {
         // Document was deleted — skip; the overlay and doc info will remain
@@ -565,9 +577,11 @@ final class FtsManager {
     // matched definition (all defs for the same ns share stop-word config).
     final firstDef = _find(namespace, searched.first)!;
     final stopWords = firstDef.stopWords ? kEnglishStopWords : const <String>{};
-    final queryTerms = preprocess(query, RegExpTokeniser(), stopWords: stopWords)
-        .toSet()
-        .toList();
+    final queryTerms = preprocess(
+      query,
+      RegExpTokeniser(),
+      stopWords: stopWords,
+    ).toSet().toList();
 
     if (queryTerms.isEmpty) {
       return _emptyResult(query: query, searched: searched, skipped: skipped);
@@ -596,13 +610,19 @@ final class FtsManager {
     }
 
     // Overall document score: max across all searched fields (spec §21).
-    final docScores = docFieldScores.entries
-        .map((e) => (docId: e.key, score: e.value.values.fold(0.0, _maxDouble)))
-        .toList()
-      ..sort((a, b) {
-        final cmp = b.score.compareTo(a.score);
-        return cmp != 0 ? cmp : a.docId.compareTo(b.docId); // stable tiebreak
-      });
+    final docScores =
+        docFieldScores.entries
+            .map(
+              (e) =>
+                  (docId: e.key, score: e.value.values.fold(0.0, _maxDouble)),
+            )
+            .toList()
+          ..sort((a, b) {
+            final cmp = b.score.compareTo(a.score);
+            return cmp != 0
+                ? cmp
+                : a.docId.compareTo(b.docId); // stable tiebreak
+          });
 
     final total = docScores.length;
     final page = docScores.skip(offset).take(limit);
@@ -625,13 +645,15 @@ final class FtsManager {
         fieldScores['${fe.key}:bm25'] = fe.value;
       }
 
-      hits.add(SearchHit<T>(
-        rank: rank++,
-        score: scored.score,
-        fieldScores: fieldScores,
-        id: scored.docId,
-        document: doc,
-      ));
+      hits.add(
+        SearchHit<T>(
+          rank: rank++,
+          score: scored.score,
+          fieldScores: fieldScores,
+          id: scored.docId,
+          document: doc,
+        ),
+      );
     }
 
     return SearchResult<T>(
@@ -931,8 +953,7 @@ final class FtsManager {
     if (df <= 0 || n <= 0 || docLen <= 0 || avgdl <= 0) return 0.0;
     final idf = log((n - df + 0.5) / (df + 0.5) + 1);
     if (idf <= 0) return 0.0;
-    final tfNorm =
-        tf * (k1 + 1) / (tf + k1 * (1 - b + b * docLen / avgdl));
+    final tfNorm = tf * (k1 + 1) / (tf + k1 * (1 - b + b * docLen / avgdl));
     return idf * tfNorm;
   }
 
@@ -1020,10 +1041,12 @@ final class FtsManager {
     WriteBatch batch,
   ) {
     final encoded = Uint8List.fromList(
-      cbor.encode(CborMap({
-        CborString('n'): CborSmallInt(count),
-        CborString('t'): CborList(terms.map(CborString.new).toList()),
-      })),
+      cbor.encode(
+        CborMap({
+          CborString('n'): CborSmallInt(count),
+          CborString('t'): CborList(terms.map(CborString.new).toList()),
+        }),
+      ),
     );
     batch.put(_docNamespace(namespace, field), docId, encoded);
   }
@@ -1036,10 +1059,12 @@ final class FtsManager {
     required WriteBatch batch,
   }) {
     final encoded = Uint8List.fromList(
-      cbor.encode(CborMap({
-        CborString('n'): CborSmallInt(n),
-        CborString('totalTokens'): CborSmallInt(totalTokens),
-      })),
+      cbor.encode(
+        CborMap({
+          CborString('n'): CborSmallInt(n),
+          CborString('totalTokens'): CborSmallInt(totalTokens),
+        }),
+      ),
     );
     batch.put(_corpusNamespace(namespace, field), _corpusKey, encoded);
   }
@@ -1155,10 +1180,7 @@ final class FtsManager {
     String field,
     String docId,
   ) async {
-    final bytes = await _store.get(
-      _overlayNamespace(namespace, field),
-      docId,
-    );
+    final bytes = await _store.get(_overlayNamespace(namespace, field), docId);
     if (bytes == null || bytes.isEmpty) return null;
     return _decodeOverlayBytes(bytes);
   }

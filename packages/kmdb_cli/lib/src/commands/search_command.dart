@@ -49,7 +49,8 @@ final class SearchCommand implements CliCommand {
       'Full-text search and FTS index management (list, create, delete).';
 
   @override
-  String get usage => '''search <collection> <query> [--fields f1,f2] [--limit n] [--offset n] [--output table|json|ids]
+  String get usage =>
+      '''search <collection> <query> [--fields f1,f2] [--limit n] [--offset n] [--output table|json|ids]
        search list <collection>
        search create <collection> <field> [--stopwords] [--k1 n] [--b n]
        search delete <collection> <field>''';
@@ -108,8 +109,11 @@ final class SearchCommand implements CliCommand {
     final fieldsFlag = flags['fields'] as String?;
     final List<String> fields;
     if (fieldsFlag != null && fieldsFlag.trim().isNotEmpty) {
-      fields =
-          fieldsFlag.split(',').map((f) => f.trim()).where((f) => f.isNotEmpty).toList();
+      fields = fieldsFlag
+          .split(',')
+          .map((f) => f.trim())
+          .where((f) => f.isNotEmpty)
+          .toList();
     } else {
       // Default: all FTS-indexed fields configured for this collection.
       final configured = ctx.config.ftsIndexesForCollection(collection);
@@ -307,15 +311,14 @@ final class SearchCommand implements CliCommand {
     Map<String, dynamic> flags,
   ) async {
     if (args.length < 2) {
-      ctx.writeError(
-        'search create: collection name and field required.',
-      );
+      ctx.writeError('search create: collection name and field required.');
       return false;
     }
     final collection = args[0];
     final field = args[1];
 
-    final stopWords = flags['stopwords'] == true || flags['stopwords'] == 'true';
+    final stopWords =
+        flags['stopwords'] == true || flags['stopwords'] == 'true';
     final k1 = _parseDouble(flags['k1']) ?? 1.2;
     final b = _parseDouble(flags['b']) ?? 0.75;
 
@@ -332,7 +335,13 @@ final class SearchCommand implements CliCommand {
     final dbDir = (await ctx.store.storeInfo()).dbDir;
 
     try {
-      ctx.config.addFtsIndex(collection, field, stopWords: stopWords, k1: k1, b: b);
+      ctx.config.addFtsIndex(
+        collection,
+        field,
+        stopWords: stopWords,
+        k1: k1,
+        b: b,
+      );
     } on ArgumentError catch (e) {
       ctx.writeError(e.message as String);
       return false;
@@ -358,9 +367,7 @@ final class SearchCommand implements CliCommand {
   /// Removes an FTS index definition from the config.
   Future<bool> _delete(CommandContext ctx, List<String> args) async {
     if (args.length < 2) {
-      ctx.writeError(
-        'search delete: collection name and field required.',
-      );
+      ctx.writeError('search delete: collection name and field required.');
       return false;
     }
     final collection = args[0];
