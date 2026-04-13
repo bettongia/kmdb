@@ -18,11 +18,23 @@ import 'dart:math' as math;
 
 import 'remote_config.dart';
 
-/// A single index definition stored in the CLI config.
+/// A single secondary-index definition stored in the CLI config.
 ///
 /// Uses the user-facing term "collection" (rather than the library-internal
 /// "namespace") so the config file speaks the user's language.
 typedef IndexRecord = ({String collection, String path});
+
+/// A single FTS index definition stored in the CLI config.
+///
+/// Mirrors [FtsIndexDefinition] but is stored as a plain Dart record so the
+/// CLI config module has no dependency on the `kmdb` library.
+typedef FtsIndexRecord = ({
+  String collection,
+  String field,
+  bool stopWords,
+  double k1,
+  double b,
+});
 
 /// Manages the per-database CLI configuration file at
 /// `{dbDir}/local/config.json`.
@@ -57,29 +69,37 @@ typedef IndexRecord = ({String collection, String path});
 /// await config.save('/path/to/db');
 /// ```
 final class KmdbConfig {
-  /// Creates a [KmdbConfig] with the given mutable [remotes] map and
-  /// [indexes] list.
+  /// Creates a [KmdbConfig] with the given mutable [remotes] map, [indexes]
+  /// list, and [ftsIndexes] list.
   KmdbConfig._({
     required Map<String, RemoteConfig> remotes,
     required List<IndexRecord> indexes,
+    required List<FtsIndexRecord> ftsIndexes,
   }) : _remotes = remotes,
-       _indexes = indexes;
+       _indexes = indexes,
+       _ftsIndexes = ftsIndexes;
 
-  /// An empty config with no remotes or indexes.
-  KmdbConfig.empty() : _remotes = {}, _indexes = [];
+  /// An empty config with no remotes, indexes, or FTS indexes.
+  KmdbConfig.empty() : _remotes = {}, _indexes = [], _ftsIndexes = [];
 
   // Mutable backing map.  All public mutation goes through [addRemote] /
   // [removeRemote] so invariants are enforced centrally.
   final Map<String, RemoteConfig> _remotes;
 
-  // Mutable backing list for index definitions.
+  // Mutable backing list for secondary index definitions.
   final List<IndexRecord> _indexes;
+
+  // Mutable backing list for FTS index definitions.
+  final List<FtsIndexRecord> _ftsIndexes;
 
   /// Returns an unmodifiable view of the remotes map, keyed by name.
   Map<String, RemoteConfig> get remotes => Map.unmodifiable(_remotes);
 
-  /// Returns an unmodifiable view of all index definitions.
+  /// Returns an unmodifiable view of all secondary index definitions.
   List<IndexRecord> get indexes => List.unmodifiable(_indexes);
+
+  /// Returns an unmodifiable view of all FTS index definitions.
+  List<FtsIndexRecord> get ftsIndexes => List.unmodifiable(_ftsIndexes);
 
   // ── Factory ────────────────────────────────────────────────────────────────
 
@@ -184,7 +204,53 @@ final class KmdbConfig {
       }
     }
 
-    return KmdbConfig._(remotes: remotes, indexes: indexes);
+    // Parse ftsIndexes section — missing key → empty list (backwards compatible).
+    final ftsIndexesRaw = decoded['ftsIndexes'];
+    final ftsIndexes = <FtsIndexRecord>[];
+    if (ftsIndexesRaw != null) {
+      if (ftsIndexesRaw is! List) {
+        throw FormatException(
+          'Corrupt config.json at "${file.path}": '
+          "'ftsIndexes' must be a JSON array.",
+        );
+      }
+      for (var i = 0; i < ftsIndexesRaw.length; i++) {
+        final entry = ftsIndexesRaw[i];
+        if (entry is! Map<String, dynamic>) {
+          throw FormatException(
+            'Corrupt config.json at "${file.path}": '
+            "ftsIndexes[$i] must be a JSON object.",
+          );
+        }
+        final collection = entry['collection'];
+        final field = entry['field'];
+        if (collection is! String || collection.isEmpty) {
+          throw FormatException(
+            'Corrupt config.json at "${file.path}": '
+            "ftsIndexes[$i] missing required string field 'collection'.",
+          );
+        }
+        if (field is! String || field.isEmpty) {
+          throw FormatException(
+            'Corrupt config.json at "${file.path}": '
+            "ftsIndexes[$i] missing required string field 'field'.",
+          );
+        }
+        ftsIndexes.add((
+          collection: collection,
+          field: field,
+          stopWords: entry['stopWords'] as bool? ?? false,
+          k1: (entry['k1'] as num?)?.toDouble() ?? 1.2,
+          b: (entry['b'] as num?)?.toDouble() ?? 0.75,
+        ));
+      }
+    }
+
+    return KmdbConfig._(
+      remotes: remotes,
+      indexes: indexes,
+      ftsIndexes: ftsIndexes,
+    );
   }
 
   // ── Mutation ───────────────────────────────────────────────────────────────
@@ -243,11 +309,59 @@ final class KmdbConfig {
     _indexes.removeAt(idx);
   }
 
-  /// Returns all index definitions for [collection].
+  /// Returns all secondary index definitions for [collection].
   ///
   /// Returns an empty list when the collection has no configured indexes.
   List<IndexRecord> indexesForCollection(String collection) =>
       _indexes.where((r) => r.collection == collection).toList();
+
+  // ── FTS index mutations ────────────────────────────────────────────────────
+
+  /// Adds an FTS index definition for [field] on [collection].
+  ///
+  /// Throws [ArgumentError] if an identical `(collection, field)` pair already
+  /// exists in the config.
+  void addFtsIndex(
+    String collection,
+    String field, {
+    bool stopWords = false,
+    double k1 = 1.2,
+    double b = 0.75,
+  }) {
+    if (_ftsIndexes.any(
+      (r) => r.collection == collection && r.field == field,
+    )) {
+      throw ArgumentError(
+        "An FTS index on '$collection.$field' already exists in the config.",
+      );
+    }
+    _ftsIndexes.add((
+      collection: collection,
+      field: field,
+      stopWords: stopWords,
+      k1: k1,
+      b: b,
+    ));
+  }
+
+  /// Removes the FTS index definition for [field] on [collection].
+  ///
+  /// Throws [ArgumentError] if no matching definition is found.
+  void removeFtsIndex(String collection, String field) {
+    final idx = _ftsIndexes.indexWhere(
+      (r) => r.collection == collection && r.field == field,
+    );
+    if (idx == -1) {
+      throw ArgumentError(
+        "No FTS index on '$collection.$field' found in the config.",
+      );
+    }
+    _ftsIndexes.removeAt(idx);
+  }
+
+  /// Returns all FTS index definitions for [collection].
+  List<FtsIndexRecord> ftsIndexesForCollection(String collection) =>
+      _ftsIndexes.where((r) => r.collection == collection).toList();
 
   // ── Persistence ────────────────────────────────────────────────────────────
 
@@ -271,6 +385,16 @@ final class KmdbConfig {
       'indexes': [
         for (final idx in _indexes)
           {'collection': idx.collection, 'path': idx.path},
+      ],
+      'ftsIndexes': [
+        for (final idx in _ftsIndexes)
+          {
+            'collection': idx.collection,
+            'field': idx.field,
+            'stopWords': idx.stopWords,
+            'k1': idx.k1,
+            'b': idx.b,
+          },
       ],
     };
     final content = const JsonEncoder.withIndent('  ').convert(payload);

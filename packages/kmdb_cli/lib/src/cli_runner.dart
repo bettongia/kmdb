@@ -44,6 +44,7 @@ import 'commands/remote_command.dart';
 import 'commands/sync_command.dart';
 import 'commands/util_command.dart';
 import 'commands/index_command.dart';
+import 'commands/search_command.dart';
 import 'commands/verify_command.dart';
 import 'config/kmdb_config.dart';
 import 'database_opener.dart';
@@ -83,6 +84,7 @@ final _commands = <String, CliCommand>{
     const PullCommand(),
     const SyncCommand(),
     const IndexCommand(),
+    const SearchCommand(),
   ])
     cmd.name: cmd,
 };
@@ -502,43 +504,78 @@ abstract final class KmdbCli {
   /// never used to parse or dispatch commands. Global options are added to its
   /// [ArgParser] so they appear in the generated help text.
   static CommandRunner<void> _buildCommandRunner() {
-    final runner = CommandRunner<void>(
-      'kmdb',
-      'KMDB local-first document database.',
-    )
-      ..argParser.addOption(
-        'format',
-        abbr: 'f',
-        help: 'Output format: json (default), compact, ndjson, table, csv, line',
-        valueHelp: 'format',
-      )
-      ..argParser.addOption(
-        'output',
-        abbr: 'o',
-        help: 'Write output to file instead of stdout',
-        valueHelp: 'file',
-      )
-      ..argParser.addOption(
-        'read',
-        abbr: 'r',
-        help: 'Read commands from a script file',
-        valueHelp: 'file',
-      )
-      ..argParser.addFlag(
-        'continue-on-error',
-        negatable: false,
-        help: 'Keep running after a command error',
-      )
-      ..argParser.addFlag(
-        'flush',
-        defaultsTo: true,
-        help: 'Flush memtable to SSTable on exit (default: on)',
-      )
-      ..argParser.addFlag(
-        'version',
-        negatable: false,
-        help: 'Print version and exit',
-      );
+    final runner =
+        CommandRunner<void>('kmdb', 'KMDB local-first document database.')
+          ..argParser.addOption(
+            'mode',
+            abbr: 'm',
+            help:
+                'Output format: json (default), compact, ndjson, table, csv, line',
+            valueHelp: 'mode',
+          )
+          ..argParser.addOption(
+            'output',
+            abbr: 'o',
+            help: 'Write output to file instead of stdout',
+            valueHelp: 'file',
+          )
+          ..argParser.addOption(
+            'read',
+            abbr: 'r',
+            help: 'Read commands from a script file',
+            valueHelp: 'file',
+          )
+          ..argParser.addFlag(
+            'continue-on-error',
+            negatable: false,
+            help: 'Keep running after a command error',
+          )
+          ..argParser.addFlag(
+            'flush',
+            defaultsTo: true,
+            help: 'Flush memtable to SSTable on exit (default: on)',
+          )
+          ..argParser.addFlag(
+            'version',
+            negatable: false,
+            help: 'Print version and exit',
+          );
+    final runner =
+        CommandRunner<void>('kmdb', 'KMDB local-first document database.')
+          ..argParser.addOption(
+            'format',
+            abbr: 'f',
+            help:
+                'Output format: json (default), compact, ndjson, table, csv, line',
+            valueHelp: 'format',
+          )
+          ..argParser.addOption(
+            'output',
+            abbr: 'o',
+            help: 'Write output to file instead of stdout',
+            valueHelp: 'file',
+          )
+          ..argParser.addOption(
+            'read',
+            abbr: 'r',
+            help: 'Read commands from a script file',
+            valueHelp: 'file',
+          )
+          ..argParser.addFlag(
+            'continue-on-error',
+            negatable: false,
+            help: 'Keep running after a command error',
+          )
+          ..argParser.addFlag(
+            'flush',
+            defaultsTo: true,
+            help: 'Flush memtable to SSTable on exit (default: on)',
+          )
+          ..argParser.addFlag(
+            'version',
+            negatable: false,
+            help: 'Print version and exit',
+          );
 
     for (final cmd in _commands.values) {
       runner.addCommand(_UsageCommand(cmd));

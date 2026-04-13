@@ -57,33 +57,47 @@ Examples: `investigates` → `investig`, `occurring` → `occur`,
 
 ## Index Structure
 
-Four key types are written to the KV store, all exempt from the session object
-cache and materialised view cache (§15):
+Four namespace types are written to the KV store, all exempt from the session
+object cache and materialised view cache (§15). Because the KvStore enforces
+32-char hex (UUIDv7) keys, compound `{term}:{docId}` keys are not possible.
+The solution mirrors the secondary index design: each term gets its own
+namespace, with document IDs as keys within it.
 
-```
-$fts:{ns}:{field}:{term}:{docId}   →  tf (int)
-$fts:overlay:{ns}:{field}:{docId}  →  Map<String,int> | TOMBSTONE
-$fts:corpus:{ns}:{field}           →  { n: int, totalTokens: int }
-$fts:doc:{ns}:{field}:{docId}      →  tokenCount (int)
-```
+Terms are hex-encoded from their UTF-8 byte representation
+(`utf8.encode(term).map(toHex).join()`), satisfying the KvStore namespace
+naming constraint.
 
-**Base index** — one entry per `(term, document)` pair. The value is the term
-frequency (tf): the number of times the stemmed term appears in the indexed
-field value. Required for BM25 scoring.
+| Namespace | Key | Value |
+| :--- | :--- | :--- |
+| `$fts:{ns}:{field}:{hexTerm}` | `{docId}` (32-char hex) | CBOR int — term frequency (tf) |
+| `$fts:overlay:{ns}:{field}` | `{docId}` (32-char hex) | CBOR map (term→tf) \| TOMBSTONE string |
+| `$fts:corpus:{ns}:{field}` | fixed 32-char hex sentinel | CBOR map `{n, totalTokens}` |
+| `$fts:doc:{ns}:{field}` | `{docId}` (32-char hex) | CBOR map `{n: tokenCount, t: [terms]}` |
+
+**Base index** — one entry per `(term, document)` pair. The namespace encodes
+the hex term; the key is the document ID. The value is the term frequency (tf):
+the number of times the stemmed term appears in the indexed field value.
+Required for BM25 scoring.
 
 **Overlay** — the authoritative state for documents modified since the last
 compaction. Stores the current `term → tf` map for updated documents, or a
-`TOMBSTONE` sentinel for deleted documents. Query time filters base index results
-through the overlay to ensure correctness without a read-before-write on the
-write path.
+`TOMBSTONE` sentinel for deleted documents. Query time filters base index
+results through the overlay to ensure correctness without a read-before-write
+on the write path.
 
 **Corpus stats** — maintained across all writes. `n` is the total number of
 indexed documents; `totalTokens` is the sum of all document token counts.
-`avgdl = totalTokens / n` is derived at query time for BM25 scoring.
+`avgdl = totalTokens / n` is derived at query time for BM25 scoring. A single
+entry is stored per `(ns, field)` under a fixed sentinel key
+(`01900000000070009000000000000000`), which is safe because UUIDv7 keys begin
+with a 48-bit millisecond timestamp and never collide with this all-zero-prefix
+value.
 
-**Per-doc forward index** — the token count of the most recently indexed value
-for each document. Read once on update and delete to adjust `totalTokens` in the
-corpus stats. This is the only read-before-write in the design.
+**Per-doc forward index** — the token count and the list of indexed terms for
+the most recently indexed value for each document. The token count is read once
+on update and delete to adjust `totalTokens` in the corpus stats (the only
+read-before-write in the design). The terms list is used during compaction to
+enumerate the per-term namespaces that need stale entries removed.
 
 ## Write Behaviour
 
@@ -102,33 +116,35 @@ sequentially across multiple batches; a crash mid-build leaves the index in the
 
 1. Tokenise, normalise, and stem the field value.
 2. In the `WriteBatch`:
-   - `PUT $fts:{ns}:{field}:{term}:{docId}` → tf, for each term.
-   - `PUT $fts:doc:{ns}:{field}:{docId}` → token count.
-   - Increment `n` and add token count to `totalTokens` in `$fts:corpus:`.
+   - `PUT $fts:{ns}:{field}:{hexTerm}` / key=`{docId}` → tf, for each unique term.
+   - `PUT $fts:doc:{ns}:{field}` / key=`{docId}` → `{n: tokenCount, t: [terms]}`.
+   - Increment `n` and add token count to `totalTokens` in corpus stats.
 
 No overlay entry is written on insert — there is no prior state to invalidate.
 
 ### Update
 
-1. Read `$fts:doc:{ns}:{field}:{docId}` to obtain the old token count (one
-   targeted read, outside the batch).
+1. Read `$fts:doc:{ns}:{field}` / key=`{docId}` to obtain the old token count
+   (one targeted read, outside the batch).
 2. Tokenise, normalise, and stem the new field value.
 3. In the `WriteBatch`:
-   - `PUT $fts:{ns}:{field}:{term}:{docId}` → tf, for each term in the new value
-     (additive — stale keys from the old value are left in place for compaction).
-   - `PUT $fts:overlay:{ns}:{field}:{docId}` → new `term → tf` map.
-   - `PUT $fts:doc:{ns}:{field}:{docId}` → new token count.
-   - Adjust `totalTokens` by `newCount − oldCount` in `$fts:corpus:`. `n` is
+   - `PUT $fts:{ns}:{field}:{hexTerm}` / key=`{docId}` → tf, for each term in
+     the new value (additive — stale entries in old per-term namespaces are left
+     in place for compaction).
+   - `PUT $fts:overlay:{ns}:{field}` / key=`{docId}` → new `term → tf` map.
+   - `PUT $fts:doc:{ns}:{field}` / key=`{docId}` → updated `{n, t}` map
+     (retains old terms list so compaction can enumerate stale namespaces).
+   - Adjust `totalTokens` by `newCount − oldCount` in corpus stats. `n` is
      unchanged.
 
 ### Delete
 
-1. Read `$fts:doc:{ns}:{field}:{docId}` to obtain the old token count.
+1. Read `$fts:doc:{ns}:{field}` / key=`{docId}` to obtain the old token count.
 2. In the `WriteBatch`:
-   - `PUT $fts:overlay:{ns}:{field}:{docId}` → TOMBSTONE.
-   - `DELETE $fts:doc:{ns}:{field}:{docId}`.
-   - Decrement `n` and subtract old token count from `totalTokens` in
-     `$fts:corpus:`.
+   - `PUT $fts:overlay:{ns}:{field}` / key=`{docId}` → TOMBSTONE.
+   - `DELETE $fts:doc:{ns}:{field}` / key=`{docId}`.
+   - Decrement `n` and subtract old token count from `totalTokens` in corpus
+     stats.
 
 Stale base index keys are left in place and cleaned up at compaction.
 
@@ -139,17 +155,18 @@ Stale base index keys are left in place and cleaned up at compaction.
    in-memory filter evaluation otherwise. This produces a `candidateIds` set
    used to restrict all subsequent steps.
 2. For each query term (after the same tokenise → normalise → stem pipeline):
-   a. Prefix-scan `$fts:{ns}:{field}:{term}:` to collect `(docId, tf)` pairs,
-      restricting to `candidateIds` when present.
-   b. Filter each result through the overlay:
+   a. Scan the per-term namespace `$fts:{ns}:{field}:{hexTerm}` to collect
+      `(docId, tf)` pairs (all keys in the namespace are docIds), restricting to
+      `candidateIds` when present.
+   b. Filter each result through the overlay (`$fts:overlay:{ns}:{field}`):
       - No overlay entry → trust the base index tf.
       - Overlay entry present → include only if the term appears in the overlay
         map; use the overlay tf (supersedes the base index value).
       - TOMBSTONE present → exclude unconditionally.
 3. `df` for the term is the count of surviving results — derived from the scan,
    not stored separately.
-4. Read `$fts:corpus:{ns}:{field}` once per query to obtain `n` and
-   `totalTokens`. Compute `avgdl = totalTokens / n`.
+4. Read corpus stats from `$fts:corpus:{ns}:{field}` once per query to obtain
+   `n` and `totalTokens`. Compute `avgdl = totalTokens / n`.
 5. Score each surviving candidate using BM25 (see Ranking Algorithm).
 6. When multiple fields are searched, take the highest per-field score as the
    document's overall score. Per-field scores are carried in
@@ -175,22 +192,27 @@ $k_1$ and $b$ are configurable per index at creation time.
 Compaction reconciles the overlay with the base index, removing stale entries.
 Each document in the overlay is processed as a single atomic `WriteBatch`.
 
+The per-doc forward index (`$fts:doc:{ns}:{field}`) stores the terms list from
+the *previous* write, which lets compaction enumerate all per-term namespaces
+that may hold stale entries for the document.
+
 **Live overlay entry** (term → tf map):
 
 ```
 WriteBatch:
-  DELETE $fts:{ns}:{field}:{stale_term}:{docId}  ← terms absent from overlay map
-  PUT    $fts:{ns}:{field}:{live_term}:{docId}   ← update tf if changed
-  DELETE $fts:overlay:{ns}:{field}:{docId}
+  DELETE $fts:{ns}:{field}:{hexStale}  / key={docId}  ← terms absent from overlay map
+  PUT    $fts:{ns}:{field}:{hexLive}   / key={docId}  ← update tf if changed
+  DELETE $fts:overlay:{ns}:{field}     / key={docId}
+  PUT    $fts:doc:{ns}:{field}         / key={docId}  ← update terms list to live set
 ```
 
 **Tombstone entry**:
 
 ```
 WriteBatch:
-  DELETE $fts:{ns}:{field}:{term}:{docId}        ← all terms for this document
-  DELETE $fts:doc:{ns}:{field}:{docId}
-  DELETE $fts:overlay:{ns}:{field}:{docId}
+  DELETE $fts:{ns}:{field}:{hexTerm}   / key={docId}  ← for every term in doc forward index
+  DELETE $fts:doc:{ns}:{field}         / key={docId}
+  DELETE $fts:overlay:{ns}:{field}     / key={docId}
 ```
 
 Because all removals and the overlay clearance are in the same `WriteBatch`, a
@@ -222,8 +244,8 @@ For each entry in the delta:
   the preprocessing pipeline (tokenise → normalise → [stop-word filter] → stem),
   and write FTS entries using the same overlay-based update path as §21 Write
   Behaviour.
-- **Deleted** — write a TOMBSTONE to `$fts:overlay:{ns}:{field}:{docId}` and
-  update corpus stats, identical to the delete path in §21 Write Behaviour.
+- **Deleted** — write a TOMBSTONE to `$fts:overlay:{ns}:{field}` / key=`{docId}`
+  and update corpus stats, identical to the delete path in §21 Write Behaviour.
 
 Each document in the delta is committed in its own `WriteBatch` for crash
 safety. If the process is killed mid-delta, the `syncing` → `stale` transition

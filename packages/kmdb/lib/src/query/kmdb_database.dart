@@ -18,6 +18,7 @@ import '../engine/kvstore/kv_store_impl.dart';
 import '../engine/platform/storage_adapter_interface.dart';
 import '../search/embedding_model.dart';
 import '../search/fts_index_definition.dart';
+import '../search/lexical/fts_manager.dart';
 import '../search/vec_index_definition.dart';
 import 'exceptions.dart';
 import 'index/index_definition.dart';
@@ -78,12 +79,14 @@ final class KmdbDatabase {
     required CacheLayer cache,
     required KvStoreImpl store,
     required IndexManager indexManager,
+    required FtsManager? ftsManager,
     required List<FtsIndexDefinition> ftsIndexes,
     required List<VecIndexDefinition> vecIndexes,
     required EmbeddingModel? embeddingModel,
   }) : _cache = cache,
        _store = store,
        _indexManager = indexManager,
+       _ftsManager = ftsManager,
        _ftsIndexes = ftsIndexes,
        _vecIndexes = vecIndexes,
        _embeddingModel = embeddingModel;
@@ -91,6 +94,7 @@ final class KmdbDatabase {
   final CacheLayer _cache;
   final KvStoreImpl _store;
   final IndexManager _indexManager;
+  final FtsManager? _ftsManager;
   final List<FtsIndexDefinition> _ftsIndexes;
   final List<VecIndexDefinition> _vecIndexes;
   final EmbeddingModel? _embeddingModel;
@@ -180,10 +184,20 @@ final class KmdbDatabase {
       }
     }
 
+    // Initialise FTS manager if any FTS indexes are configured.
+    final ftsManager = ftsIndexes.isNotEmpty
+        ? FtsManager(store, ftsIndexes)
+        : null;
+
+    // Recover from any unclean shutdown during a delta sync (transitions
+    // any index left in `syncing` state to `stale`).
+    await ftsManager?.checkAndTransitionOnOpen();
+
     return KmdbDatabase._(
       cache: cache,
       store: store,
       indexManager: indexManager,
+      ftsManager: ftsManager,
       ftsIndexes: ftsIndexes,
       vecIndexes: vecIndexes,
       embeddingModel: embeddingModel,
@@ -221,13 +235,14 @@ final class KmdbDatabase {
   /// After [close] returns, this instance must not be used again.
   Future<void> close({bool flush = true}) => _cache.close(flush: flush);
 
-  // ── Text search — stubbed until plans 2 and 3 are implemented ─────────────
+  // ── Text search ────────────────────────────────────────────────────────────
 
   /// The full-text search (FTS) manager.
   ///
-  /// Returns `null` in this stub implementation. Will be populated by plan 2
-  /// (lexical search) with a `FtsManager` instance.
-  dynamic get ftsManager => null;
+  /// Non-null when at least one [FtsIndexDefinition] was supplied to [open].
+  /// Used by [KmdbCollection.search] to execute lexical (BM25) queries and
+  /// to intercept document writes for index maintenance.
+  FtsManager? get ftsManager => _ftsManager;
 
   /// The vector (semantic) search manager.
   ///
