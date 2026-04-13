@@ -48,6 +48,9 @@ final class _FakeEmbeddingModel implements EmbeddingModel {
   @override
   Future<(Float32List, bool)> embed(String text) async =>
       (Float32List(384), false);
+
+  @override
+  void dispose() {}
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

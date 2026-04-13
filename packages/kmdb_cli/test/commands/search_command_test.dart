@@ -46,22 +46,6 @@ CommandContext _ctx(
   );
 }
 
-/// Writes a document into [store] under [collection].
-///
-/// [doc] must contain an `'_id'` field whose value is a 32-char hex UUID key.
-Future<void> _putDoc(
-  KvStoreImpl store,
-  String collection,
-  Map<String, dynamic> doc,
-) async {
-  final id = doc['_id'] as String;
-  await store.put(
-    collection,
-    id,
-    ValueCodec.encode(Map.of(doc)..remove('_id')),
-  );
-}
-
 /// A minimal codec for raw map documents.
 final class _MapCodec implements KmdbCodec<Map<String, dynamic>> {
   const _MapCodec();
@@ -191,6 +175,36 @@ void main() {
         expect(err.toString(), contains('no FTS indexes configured'));
       },
     );
+
+    test('--mode semantic without embeddingModel returns error', () async {
+      final config = KmdbConfig.empty();
+      config.addFtsIndex('docs', 'body');
+      final ok = await SearchCommand().execute(
+        _ctx(store, config: config, out: out, err: err),
+        ['docs', 'hello'],
+        {'mode': 'semantic'},
+      );
+      expect(ok, isFalse);
+      expect(
+        err.toString(),
+        contains('Semantic search requires an embedding model'),
+      );
+    });
+
+    test('--candidates flag is accepted without error', () async {
+      // The --candidates flag is validated and accepted; the CLI uses lexical
+      // search regardless (semantic is a future TODO). We test that the flag
+      // does not cause an argument error.
+      final config = KmdbConfig.empty();
+      config.addFtsIndex('docs', 'body');
+      final ok = await SearchCommand().execute(
+        _ctx(store, config: config, out: out, err: err),
+        ['docs', 'hello'],
+        {'candidates': '200'},
+      );
+      // No FTS match for 'hello' → zero results, but returns true (not an error).
+      expect(ok, isTrue);
+    });
   });
 
   // ── search — main query path ──────────────────────────────────────────────────

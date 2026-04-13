@@ -19,6 +19,7 @@ import '../engine/platform/storage_adapter_interface.dart';
 import '../search/embedding_model.dart';
 import '../search/fts_index_definition.dart';
 import '../search/lexical/fts_manager.dart';
+import '../search/semantic/vec_manager.dart';
 import '../search/vec_index_definition.dart';
 import 'exceptions.dart';
 import 'index/index_definition.dart';
@@ -80,6 +81,7 @@ final class KmdbDatabase {
     required KvStoreImpl store,
     required IndexManager indexManager,
     required FtsManager? ftsManager,
+    required VecManager? vecManager,
     required List<FtsIndexDefinition> ftsIndexes,
     required List<VecIndexDefinition> vecIndexes,
     required EmbeddingModel? embeddingModel,
@@ -87,6 +89,7 @@ final class KmdbDatabase {
        _store = store,
        _indexManager = indexManager,
        _ftsManager = ftsManager,
+       _vecManager = vecManager,
        _ftsIndexes = ftsIndexes,
        _vecIndexes = vecIndexes,
        _embeddingModel = embeddingModel;
@@ -95,6 +98,7 @@ final class KmdbDatabase {
   final KvStoreImpl _store;
   final IndexManager _indexManager;
   final FtsManager? _ftsManager;
+  final VecManager? _vecManager;
   final List<FtsIndexDefinition> _ftsIndexes;
   final List<VecIndexDefinition> _vecIndexes;
   final EmbeddingModel? _embeddingModel;
@@ -193,11 +197,20 @@ final class KmdbDatabase {
     // any index left in `syncing` state to `stale`).
     await ftsManager?.checkAndTransitionOnOpen();
 
+    // Initialise VecManager if any vector indexes are configured.
+    final vecManager = (vecIndexes.isNotEmpty && embeddingModel != null)
+        ? VecManager(store, vecIndexes, embeddingModel)
+        : null;
+
+    // Recover from any unclean sync shutdown for vector indexes.
+    await vecManager?.checkAndTransitionOnOpen();
+
     return KmdbDatabase._(
       cache: cache,
       store: store,
       indexManager: indexManager,
       ftsManager: ftsManager,
+      vecManager: vecManager,
       ftsIndexes: ftsIndexes,
       vecIndexes: vecIndexes,
       embeddingModel: embeddingModel,
@@ -232,8 +245,15 @@ final class KmdbDatabase {
   /// Closes the database, optionally flushing the active memtable and
   /// releasing the lock.
   ///
-  /// After [close] returns, this instance must not be used again.
-  Future<void> close({bool flush = true}) => _cache.close(flush: flush);
+  /// If an [embeddingModel] was supplied to [open], its [EmbeddingModel.dispose]
+  /// equivalent is called after all other cleanup so that native ORT resources
+  /// are released. After [close] returns, this instance must not be used again.
+  Future<void> close({bool flush = true}) async {
+    await _cache.close(flush: flush);
+    // Release native embedding model resources (no-op when embeddingModel is
+    // null or when the implementation's dispose() is a no-op).
+    _embeddingModel?.dispose();
+  }
 
   // ── Text search ────────────────────────────────────────────────────────────
 
@@ -246,9 +266,11 @@ final class KmdbDatabase {
 
   /// The vector (semantic) search manager.
   ///
-  /// Returns `null` in this stub implementation. Will be populated by plan 3
-  /// (semantic search) with a `VecManager` instance.
-  dynamic get vecManager => null;
+  /// Non-null when at least one [VecIndexDefinition] was supplied to [open]
+  /// alongside an [embeddingModel]. Used by [KmdbCollection.search] to execute
+  /// semantic (cosine similarity) queries and to intercept document writes for
+  /// index maintenance.
+  VecManager? get vecManager => _vecManager;
 
   // ── Internal (used by KmdbCollection) ─────────────────────────────────────
 

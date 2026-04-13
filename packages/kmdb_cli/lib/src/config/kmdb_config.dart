@@ -36,6 +36,16 @@ typedef FtsIndexRecord = ({
   double b,
 });
 
+/// An embedding model configuration stored in the CLI config.
+///
+/// The model is referenced by its ONNX file path so the CLI can validate
+/// that semantic search is possible before attempting to open the database.
+///
+/// ```json
+/// "embeddingModel": { "type": "onnx", "modelPath": "/path/to/bge_small.onnx" }
+/// ```
+typedef EmbeddingModelConfig = ({String type, String modelPath});
+
 /// Manages the per-database CLI configuration file at
 /// `{dbDir}/local/config.json`.
 ///
@@ -75,12 +85,17 @@ final class KmdbConfig {
     required Map<String, RemoteConfig> remotes,
     required List<IndexRecord> indexes,
     required List<FtsIndexRecord> ftsIndexes,
+    required this.embeddingModel,
   }) : _remotes = remotes,
        _indexes = indexes,
        _ftsIndexes = ftsIndexes;
 
   /// An empty config with no remotes, indexes, or FTS indexes.
-  KmdbConfig.empty() : _remotes = {}, _indexes = [], _ftsIndexes = [];
+  KmdbConfig.empty()
+    : _remotes = {},
+      _indexes = [],
+      _ftsIndexes = [],
+      embeddingModel = null;
 
   // Mutable backing map.  All public mutation goes through [addRemote] /
   // [removeRemote] so invariants are enforced centrally.
@@ -100,6 +115,12 @@ final class KmdbConfig {
 
   /// Returns an unmodifiable view of all FTS index definitions.
   List<FtsIndexRecord> get ftsIndexes => List.unmodifiable(_ftsIndexes);
+
+  /// The configured embedding model, or `null` if none has been set.
+  ///
+  /// Required for semantic search (`--mode semantic` or `--mode auto` when a
+  /// vector index is present). Set via `embeddingModel` in `local/config.json`.
+  EmbeddingModelConfig? embeddingModel;
 
   // ── Factory ────────────────────────────────────────────────────────────────
 
@@ -246,10 +267,38 @@ final class KmdbConfig {
       }
     }
 
+    // Parse optional embeddingModel section.
+    EmbeddingModelConfig? embeddingModel;
+    final emRaw = decoded['embeddingModel'];
+    if (emRaw != null) {
+      if (emRaw is! Map<String, dynamic>) {
+        throw FormatException(
+          'Corrupt config.json at "${file.path}": '
+          "'embeddingModel' must be a JSON object.",
+        );
+      }
+      final type = emRaw['type'];
+      final modelPath = emRaw['modelPath'];
+      if (type is! String || type.isEmpty) {
+        throw FormatException(
+          'Corrupt config.json at "${file.path}": '
+          "'embeddingModel.type' must be a non-empty string.",
+        );
+      }
+      if (modelPath is! String || modelPath.isEmpty) {
+        throw FormatException(
+          'Corrupt config.json at "${file.path}": '
+          "'embeddingModel.modelPath' must be a non-empty string.",
+        );
+      }
+      embeddingModel = (type: type, modelPath: modelPath);
+    }
+
     return KmdbConfig._(
       remotes: remotes,
       indexes: indexes,
       ftsIndexes: ftsIndexes,
+      embeddingModel: embeddingModel,
     );
   }
 
@@ -378,7 +427,7 @@ final class KmdbConfig {
     final configFile = io.File(_configPath(dbDir));
 
     // Build the JSON payload.
-    final payload = {
+    final payload = <String, Object?>{
       'remotes': {
         for (final entry in _remotes.entries) entry.key: entry.value.toJson(),
       },
@@ -396,6 +445,11 @@ final class KmdbConfig {
             'b': idx.b,
           },
       ],
+      if (embeddingModel != null)
+        'embeddingModel': {
+          'type': embeddingModel!.type,
+          'modelPath': embeddingModel!.modelPath,
+        },
     };
     final content = const JsonEncoder.withIndent('  ').convert(payload);
 

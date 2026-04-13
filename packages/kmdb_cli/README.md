@@ -51,7 +51,7 @@ dart run bin/kmdb.dart mydb scan notes
 
 | Flag                  | Short | Description                                        |
 | --------------------- | ----- | -------------------------------------------------- |
-| `--mode <mode>`       | `-m`  | Output format (default: `json`)                    |
+| `--format <format>`   | `-f`  | Output format (default: `json`)                    |
 | `--output <file>`     | `-o`  | Write output to a file instead of stdout           |
 | `--read <file>`       | `-r`  | Read commands from a script file                   |
 | `--continue-on-error` |       | Keep running after a command error (default: stop) |
@@ -487,7 +487,7 @@ for db in shard1 shard2; do
 done
 
 # Export, transform with jq, and re-import
-kmdb mydb export notes --mode ndjson \
+kmdb mydb export notes --format ndjson \
   | jq -c '. + {"migrated": true}' \
   | kmdb mydb import notes_v2
 

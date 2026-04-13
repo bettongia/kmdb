@@ -98,3 +98,8 @@ export 'src/search/lexical/pipeline.dart'
 export 'src/search/lexical/fts_index_state.dart'
     show FtsIndexStatus, FtsIndexState, kFtsTombstone;
 export 'src/search/lexical/fts_manager.dart' show FtsManager;
+
+// ── Text search — semantic (vector) ──────────────────────────────────────────
+export 'src/search/semantic/vec_index_state.dart'
+    show VecIndexStatus, VecIndexState;
+export 'src/search/semantic/vec_manager.dart' show VecManager;

@@ -192,7 +192,7 @@ void main() {
       // 2. Export using --mode ndjson to stdout, and capture it.
       final exportResult = await run([
         dbPath,
-        '--mode',
+        '--format',
         'ndjson',
         'export',
         'tasks',
