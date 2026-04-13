@@ -103,3 +103,6 @@ export 'src/search/lexical/fts_manager.dart' show FtsManager;
 export 'src/search/semantic/vec_index_state.dart'
     show VecIndexStatus, VecIndexState;
 export 'src/search/semantic/vec_manager.dart' show VecManager;
+
+// ── Text search — hybrid (RRF) ────────────────────────────────────────────────
+export 'src/search/hybrid/hybrid_manager.dart' show rrfScore, mergeWithRrf;

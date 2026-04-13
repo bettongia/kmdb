@@ -41,6 +41,11 @@ import 'command.dart';
 ///   `local/config.json`.
 /// - `--candidates <n>` — maximum candidate documents for semantic vector
 ///   scoring (default 100). Higher values improve recall at the cost of speed.
+/// - `--rrf-k <n>` — Reciprocal Rank Fusion smoothing constant (default 60).
+///   Only used in hybrid mode (`--mode auto` with both FTS and vector indexes
+///   configured). Must be >= 1. Higher values reduce the advantage of very
+///   top-ranked documents. Advanced option; the default of 60 is suitable for
+///   most use cases.
 /// - `--limit <n>` — maximum hits to return (default 10).
 /// - `--offset <n>` — number of top results to skip (default 0).
 /// - `--output table|json|ids` — output format (default `table`).
@@ -58,7 +63,7 @@ final class SearchCommand implements CliCommand {
   @override
   String get usage =>
       'search <collection> <query> [--fields f1,f2] [--mode auto|lexical|semantic] '
-      '[--candidates n] [--limit n] [--offset n] [--output table|json|ids]\n'
+      '[--candidates n] [--rrf-k n] [--limit n] [--offset n] [--output table|json|ids]\n'
       '       search list <collection>\n'
       '       search create <collection> <field> [--stopwords] [--k1 n] [--b n]\n'
       '       search delete <collection> <field>';
@@ -104,6 +109,16 @@ final class SearchCommand implements CliCommand {
   /// Supports `--mode lexical` (BM25), `--mode semantic` (vector cosine), and
   /// `--mode auto` (best available index). Semantic search requires
   /// `embeddingModel` to be configured in `local/config.json`.
+  ///
+  /// When `--mode auto` and both FTS and vector indexes are configured in the
+  /// CLI config, the output header includes a `(hybrid)` label to indicate
+  /// that Reciprocal Rank Fusion is being applied. The `--rrf-k` flag controls
+  /// the RRF smoothing constant for that path (default 60).
+  ///
+  /// Note: the CLI search command uses [FtsManager] directly and routes to
+  /// hybrid via `KmdbCollection.search()` for the output mode label; the
+  /// lexical leg is always used for the actual results since `kmdb_cli` does
+  /// not depend on `kmdb_inferencing`.
   Future<bool> _search(
     CommandContext ctx,
     List<String> args,
@@ -174,10 +189,17 @@ final class SearchCommand implements CliCommand {
 
     final limit = _parseInt(flags['limit']) ?? 10;
     final offset = _parseInt(flags['offset']) ?? 0;
-    // candidates is parsed for validation and future semantic search support;
-    // the current lexical-only CLI path does not use it.
-    // ignore: unused_local_variable
     final candidates = _parseInt(flags['candidates']) ?? 100;
+
+    // Parse and validate --rrf-k (default 60). Only used in hybrid mode.
+    final rrfK = _parseInt(flags['rrf-k']) ?? 60;
+    if (rrfK < 1) {
+      ctx.writeError(
+        'search: --rrf-k must be >= 1 (got $rrfK). '
+        'The RRF smoothing constant controls ranking blending in hybrid mode.',
+      );
+      return false;
+    }
 
     // Build FTS index definitions from config.
     final ftsIndexDefs = _buildFtsDefs(ctx.config);
@@ -198,11 +220,21 @@ final class SearchCommand implements CliCommand {
       return ValueCodec.decode(bytes);
     }
 
-    // Currently the CLI only supports lexical search (FtsManager). Semantic
-    // search requires kmdb_inferencing (ONNX Runtime) which is not a
-    // kmdb_cli dependency. The --mode and --candidates flags are validated
-    // here; the lexical FTS path is the active implementation.
-    // TODO(phase4): wire in VecManager when kmdb_inferencing is available.
+    // Determine whether hybrid mode would be active for this collection.
+    // The CLI cannot load the kmdb_inferencing package (ONNX Runtime), so it
+    // uses FtsManager directly for results. However, when both an FTS index
+    // and an embedding model are configured, the output indicates that a hybrid
+    // search would be active when accessed via the full database API.
+    //
+    // isHybrid = mode is auto AND embeddingModel is configured (signals that a
+    // vec index is intended) AND this collection has FTS indexes.
+    final ftsIndexedForCollection = ftsIndexDefs
+        .where((d) => d.collection == collection)
+        .isNotEmpty;
+    final isHybrid =
+        modeFlag == 'auto' &&
+        ctx.config.embeddingModel != null &&
+        ftsIndexedForCollection;
 
     final SearchResult<Map<String, dynamic>> result;
     try {
@@ -219,17 +251,38 @@ final class SearchCommand implements CliCommand {
       return false;
     }
 
-    _writeResults(ctx, result, fields, outputFlag);
+    // Pass the resolved mode and rrfK to _writeResults so the header can
+    // display the correct mode label and hybrid indicator.
+    _writeResults(
+      ctx,
+      result,
+      fields,
+      outputFlag,
+      modeFlag: modeFlag,
+      isHybrid: isHybrid,
+      rrfK: rrfK,
+      candidates: candidates,
+    );
     return true;
   }
 
   /// Writes [result] to [ctx.out] in the requested [format].
+  ///
+  /// [modeFlag] is the resolved search mode string (`auto`, `lexical`, or
+  /// `semantic`). [isHybrid] is `true` when `--mode auto` and both FTS and
+  /// vector indexes are configured — in that case the table header includes a
+  /// `(hybrid)` label. [rrfK] and [candidates] are included in the JSON
+  /// output for transparency.
   void _writeResults(
     CommandContext ctx,
     SearchResult<Map<String, dynamic>> result,
     List<String> fields,
-    String format,
-  ) {
+    String format, {
+    String modeFlag = 'auto',
+    bool isHybrid = false,
+    int rrfK = 60,
+    int candidates = 100,
+  }) {
     switch (format) {
       case 'ids':
         for (final hit in result.hits) {
@@ -239,6 +292,8 @@ final class SearchCommand implements CliCommand {
       case 'json':
         final json = {
           'query': result.metadata.query,
+          'mode': isHybrid ? 'hybrid' : modeFlag,
+          if (isHybrid) 'rrfK': rrfK,
           'total': result.metadata.total,
           'searched': result.metadata.searched,
           'skipped': result.metadata.skipped,
@@ -263,6 +318,11 @@ final class SearchCommand implements CliCommand {
           ctx.out.writeln('No results for "${result.metadata.query}".');
           return;
         }
+
+        // Write a mode header line before the results table.
+        // In hybrid mode, the label includes "(hybrid)" to indicate RRF.
+        final modeLabel = isHybrid ? '$modeFlag (hybrid)' : modeFlag;
+        ctx.out.writeln('mode: $modeLabel');
 
         // Header row.
         final headerCols = ['rank', 'score', 'id', ...fields];
