@@ -65,6 +65,16 @@ Device-local storage only. Never shared with any other device. Contains:
     {otherDeviceId}-{minHlc}-{maxHlc}.sst   ← SSTables ingested from peers
   local/
     config.json               ← CLI-only: named sync remotes (never synced)
+  vault/
+    staging/                  ← in-progress vault writes; swept on open (§24)
+    blobs/
+      sha256/
+        {2-char-prefix}/
+          {62-char-suffix}/
+            manifest.json     ← always present for a known vault object
+            blob              ← absent if object is a stub
+            tombstone.json    ← present if object has zero references
+  VAULT_OFFLINE               ← device-local pin list; never synced (§24)
 ```
 
 The local database directory is protected by an exclusive file lock
@@ -86,9 +96,16 @@ the sync folder are:
     {deviceId}-{epoch}-{minHlc}-{maxHlc}.sst    ← consolidation output (4 segments)
   .consolidation-lease                           ← coordinator lock (§12)
   .consolidation-manifest                        ← coordinator output record (§12)
+  vault/
+    sha256/
+      {2-char-prefix}/
+        {62-char-suffix}/
+          manifest.json                          ← first-writer-wins (§24)
+          blob
+          tombstone.json
 ```
 
-**Each device writes only to files it owns.** No two devices ever write to the
+**Each device writes only to files it owns** (for SSTables and `.hwm` files). No two devices ever write to the
 same file in the sync folder. This eliminates all write-conflict scenarios at
 the file level and is the reason the sync protocol needs no central server.
 
@@ -98,6 +115,11 @@ The sync engine's job is to move immutable SSTables from Tier 1 into Tier 2
 (upload) and from Tier 2 into Tier 1 (download and ingest at L0). Everything
 else — WAL files, the Manifest, in-progress compaction output — stays in Tier 1
 and is invisible to the sync layer.
+
+The vault subsystem (§24) adds a parallel sync path for binary objects via
+`VaultStorageAdapter`. Vault objects in Tier 2 use a single shared directory
+(any device can write the same content-addressed object), unlike SSTables which
+are device-scoped. See §24 for the full vault sync design.
 
 ## Why LSM, Not SQLite?
 

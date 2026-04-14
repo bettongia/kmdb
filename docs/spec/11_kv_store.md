@@ -168,6 +168,7 @@ User code cannot write to system namespaces directly.
 | `$meta`                | KvStore / QueryLayer | Per-namespace generation counters (`gen:{ns}`), index definitions, device ID, last sync timestamps, dirty-open flag. |
 | `$index:{ns}:{path}`   | Query Layer        | Secondary index entries for namespace `{ns}` on dot-path `{path}`. Keys encode the indexed value + document key. |
 | `$cache:{ns}:{query}`  | Cache Layer        | Materialised scan results. Entries include the generation counter at compute time for staleness detection. |
+| `$vault:{sha256}`      | Vault subsystem    | Reference count for the vault object identified by `{sha256}`. Incremented/decremented in the same `WriteBatch` as the document write. Zero-valued entries are GC candidates. See §24. |
 
 ## KvStoreConfig
 
