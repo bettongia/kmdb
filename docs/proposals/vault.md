@@ -152,15 +152,8 @@ user.
 
 The system will determine the media type through the use of file signatures
 (magic numbers) and various means beyond just accepting the file extension. A
-library will be added to the system to perform this and won't need to be
-developed here.
-
-> **[Review]:** Name the library candidates now (e.g. `mime`, `file_magic`, or a
-> custom magic-number table) so the dependency decision is made deliberately and
-> not at implementation time.
-
-Response: let's use an interface for now. I will bring in the code before we
-start any implementation work.
+media type detection interface will be defined; the concrete library will be
+selected and integrated before implementation begins.
 
 ### 2.4 Manifest Schema
 
@@ -173,7 +166,7 @@ Below is an example `manifest.json`:
 
 ```jsonc
 {
-  "schemaVersion": 1,
+  "schemaVersion": "1",
   "sha256": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
   "size": 12345,
   "crc32c": "a1b2c3d4",
@@ -242,22 +235,20 @@ schema below is used to describe the structure:
 }
 ```
 
-**[Follow-up — HLC source]:** `manifest.json` is written by the vault subsystem,
-which lives outside the KV store. The HLC clock lives inside `LsmEngine`. The
-vault writer will need a way to read the current HLC at write time — either by
-being passed the clock value from the caller, or by reading it from the KV store
-after the fact. Passing the HLC at call time is cleaner. Define this in the
-vault write API (§7).
+The HLC clock lives inside `LsmEngine`, outside the vault subsystem. The vault
+write API receives the current HLC value from the caller at write time rather
+than reading it from the KV store after the fact, keeping the API clean and
+the dependency one-directional.
 
 ### 2.5 Pinned files
 
 An end-user may elect to "pin" an object so that it is available on the device
 even when offline. A pin is marked by the existence of an entry in a file named
-`<VAULT_OFFLINE>` located in the top-level directory of the database. The
-`<VAULT_OFFLINE>` file consists of a vault path per-line of those objects that
-the user has asked to be made available offline.
+`VAULT_OFFLINE` located in the top-level directory of the database. The
+`VAULT_OFFLINE` file consists of a vault path per-line of those objects that the
+user has asked to be made available offline.
 
-Example `<VAULT_OFFLINE>` file
+Example `VAULT_OFFLINE` file
 
 ```
 sha256/dd/92c2600e28b5f44e9c7de81a629e1dd4cfd2eff61a68ddb53777357d3414b8/
@@ -267,20 +258,65 @@ sha256/ed/.../
 The pin files are only of interest on the specific device and are not
 synchronised.
 
-Pinned objects are deleted when the the object is no longer referenced by a
-database document. Keeping them in the vault with no linking documents would
-create orphaned files.
+A pin controls only whether the `blob` is kept downloaded on the local device
+(i.e. not stubbed). It does not affect the object's lifecycle. When an object
+reaches zero document references it is tombstoned and deleted by the GC sweep
+regardless of any pin entry. The GC sweep removes the corresponding entry from
+`VAULT_OFFLINE` when it deletes the hash directory.
 
-## 3. Deletion & Maintenance
+## 3. Write Path
 
-### 3.1 Asynchronous Sweep Logic
+The vault write (§3.2, steps 1–4) must complete in full before the KV Store is
+updated. Only once the blob and `manifest.json` are in their final hash
+directory does the system write the document to the KV Store. The ref count
+increment in `$vault` and the document write are committed together in the same
+`WriteBatch`, ensuring the two are always consistent.
 
-1. **Reference Counting:** kmdb will know of active links to hashes (objects,
-   files) through the use of a reference count.
-2. **Tombstoning:** Zero-ref hashes will be marked as `Unreferenced` in their
-   `manifest.json`.
-3. **Compaction Thread:** Background process verifies unreferenced objects and
-   purges the directory storing the file and `manifest.json`.
+### 3.1 Atomicity and Crash Safety
+
+Proposed ordering that minimises risk:
+
+1. Write blob to a staging path (e.g. `vault/staging/{uuidv4}`)
+2. Verify hash
+3. Rename/move blob to final path (atomic on local filesystems)
+4. Write `manifest.json` to the final hash directory
+5. Update KV Store
+
+| Crash after step | State | Recovery action |
+|---|---|---|
+| 1 or 2 | Orphaned staging file, no final directory | Delete staging file |
+| 3 | Blob in final directory, no `manifest.json`, no KV ref | Delete hash directory |
+| 4 | `manifest.json` + blob in final directory, no KV ref | Delete hash directory |
+
+On `open()`, the recovery sweep runs in the following order:
+
+1. **Staging sweep first:** delete all files and directories under
+   `vault/staging/`. These are always incomplete writes and are safe to
+   delete unconditionally — the LOCK file guarantees no other process is
+   mid-write.
+2. **Hash directory sweep:** inspect each hash directory under
+   `vault/blobs/sha256/`:
+   - Blob present, no `manifest.json`, no KV ref → delete hash directory
+     (incomplete write — not a stub).
+   - `manifest.json` present, no KV ref → delete hash directory (orphaned
+     vault object).
+
+Running staging-first ensures that debris from a previous crash is cleared
+before the hash directory sweep, so the two passes do not interfere with each
+other. This is analogous to how WAL replay and orphan SSTable deletion work
+today (§17).
+
+## 4. Deletion & Maintenance
+
+### 4.1 Asynchronous Sweep Logic
+
+1. **Reference Counting:** kmdb tracks active links to vault objects via a
+   reference count in the `$vault` system namespace.
+2. **Tombstoning:** When a vault object reaches zero references, a
+   `tombstone.json` file is created alongside `manifest.json`. Its presence
+   signals unreferenced state without mutating `manifest.json`.
+3. **GC Sweep:** A background process scans for `tombstone.json` files and
+   deletes the entire hash directory.
 
 Write-time reference tracking is used to maintain a reference count in a
 separate `$vault` system namespace, incremented/decremented at write time
@@ -297,31 +333,14 @@ So as to avoid a manifest mutation: when a vault object reaches zero references,
 create a `tombstone.json` alongside `manifest.json`. Its presence (not its
 content) signals unreferenced state. This is a pure file creation — atomic, and
 consistent with the sync design principle. The GC sweep deletes the entire hash
-directory only when `tombstone.json` is older than the grace period. To
-un-tombstone (a new document references the hash), simply delete
-`tombstone.json`. This also gives sync a clean signal: uploading
-`tombstone.json` to the sync folder tells peer devices this object is GC
-candidates on their side too.
+directory on its next pass after `tombstone.json` is found. To un-tombstone (a
+new document references the hash), simply delete `tombstone.json`. This also
+gives sync a clean signal: uploading `tombstone.json` to the sync folder tells
+peer devices this object is a GC candidate on their side too.
 
-There is no grace period for deletion.
+## 5. Distributed Sync & Lazy Hydration
 
-### 3.2 Atomicity and Crash Safety
-
-Proposed ordering that minimises risk:
-
-1. Write blob to a staging path (e.g. `vault/staging/{uuidv4}`)
-2. Verify hash
-3. Rename/move to final path (atomic on local filesystems)
-4. Write `manifest.json`
-5. Update KV Store
-
-On open/recovery, any orphaned staging files and any vault paths with a manifest
-but no corresponding KV reference should be swept. This is analogous to how WAL
-replay and orphan SSTable deletion work today (§17).
-
-## 4. Distributed Sync & Lazy Hydration
-
-### 4.1 Metadata-First Replication
+### 5.1 Metadata-First Replication
 
 The existing sync protocol (§12) is SSTable-based. Vault objects are not
 SSTables and cannot travel through the existing `sstables/` sync folder. The
@@ -335,30 +354,51 @@ to sync:
 Files are only downloaded on demand - such as when they are pinned or
 specifically requested.
 
-There a single shared vault in the sync folder that all devices read from/write
-to How does the `.hwm` mechanism extend to vault objects. Unlike SSTables (which
-are device-scoped and never shared), vault objects are content-addressed and
-identical across all devices. This means a **single shared vault directory** in
-the sync folder makes sense — any device can write a vault object and all
-devices read from the same path. There are no conflicts because two devices
-writing the same SHA-256 produce identical bytes.
+There is a single shared vault in the sync folder that all devices read from and
+write to. Unlike SSTables (which are device-scoped and never shared), vault
+objects are content-addressed and identical across all devices. This means a
+**single shared vault directory** in the sync folder makes sense — any device
+can write a vault object and all devices read from the same path.
+
+`blob` files have no conflict: two devices writing the same SHA-256 produce
+identical bytes. `manifest.json` files differ only in their `createdAt` HLC
+timestamp, but are otherwise semantically equivalent. A **first-writer-wins**
+policy applies: before uploading `manifest.json`, the device checks whether it
+already exists in the sync vault. If it does, the upload is skipped. This
+exploits the immutability guarantee (§2.4) and requires no clock comparison or
+conflict resolution.
 
 The `.hwm` mechanism does not extend to vault objects. A device knows whether it
 has a vault object locally by checking whether the `blob` exists in the local
 hash directory. No separate progress tracking is needed.
 
-A `VaultStorageAdapter` interface will provide two new methods:
-`uploadVaultObject` and `downloadVaultObject`. Whilst these could be provided
-via the `SyncStorageAdapter`, the preference is to maintain abstraction for the
-vault subsystem. Note, however, that most implementations are expected to
-provide for both interfaces and an approach that allows synchronisation to be
-split across two locations (e.g. SSTables in Google Drive and vault in Google
-Cloud Storage) is not considered in this proposal. The 2 storage methods are
-simpler than SSTable sync — no HLC ordering, no high-water marks, just existence
-checks and file transfer. The SHA256 hash will be used to validate that the file
-has been successfully downloaded to the device and uploaded to the sync vault.
+A `VaultStorageAdapter` interface provides vault sync independently of
+`SyncStorageAdapter`, maintaining a clean abstraction boundary. Most
+implementations are expected to provide both interfaces. Splitting sync across
+two locations (e.g. SSTables in Google Drive, vault in Google Cloud Storage) is
+not considered in this proposal.
 
-### 4.2 On-Demand Hydration (Stubs)
+`VaultStorageAdapter` is initialized with the local vault root and resolves all
+paths from the SHA256 hash internally. It exposes four methods:
+
+- `uploadVaultObject(String sha256)` — uploads the full hash directory
+  (`manifest.json` + `blob`) to the sync vault. Applies FWW: checks whether
+  `manifest.json` already exists before uploading it; skips if present. Called
+  by push/sync after a new file is ingested.
+- `syncVaultMetadata(String sha256)` — downloads `manifest.json` (and
+  `tombstone.json` if present) from the sync vault to the local vault, creating
+  a stub. Called during normal sync.
+- `hydrateVaultBlob(String sha256)` — downloads the `blob` from the sync vault
+  into local staging for hash verification, then renames to the final path.
+  Called on-demand when a user requests or pins a file.
+- `vaultObjectExists(String sha256)` — checks whether the object exists in the
+  sync vault. Used by `hydrateVaultBlob` before attempting a download, and
+  internally by `uploadVaultObject` for the FWW check.
+
+There are no HLC orderings or high-water marks — existence checks and file
+transfer are sufficient.
+
+### 5.2 On-Demand Hydration (Stubs)
 
 Devices will store "Stubs" (Metadata only), with files being downloaded
 "on-demand".
@@ -368,10 +408,9 @@ out of scope and will be considered in a later proposal/plan.
 
 For those using the "on-demand" approach, the following process takes place
 
-- **Request:** User clicks a file in an app ui or requests the file via the CLI.
-- **Hydrate:** Stream from the remote to a staging location for verification
-  (check the SHA etc).
-- **Verify:** Hash incoming data; move to local vault on success.
+- **Request:** User clicks a file in an app UI or requests the file via the CLI.
+- **Hydrate:** Write from the remote to a staging location for verification.
+- **Verify:** Verify the SHA256 hash; move to local vault on success.
 - **Pinning:** Users can select "Make Available Offline" to prevent the file
   being stubbed locally.
 
@@ -392,10 +431,11 @@ As such, the object directory in the vault can be in one of three states:
 - Hash directory absent → **unknown** (not yet seen by this device)
 
 `VaultStore.get()` checks for `blob` presence; if absent and a sync remote is
-configured, it triggers on-demand hydration. This requires no sentinel file and
-falls out naturally from the staged write approach in §3.2 (a crashed write
-leaves `manifest.json` without `blob`, which is exactly the stub state —
-recovery just cleans up the staging directory).
+configured, it triggers on-demand hydration. This requires no sentinel file.
+Note that a stub is always the result of sync (via `syncVaultMetadata`) — it
+has a KV reference. An incomplete local write that leaves `manifest.json`
+without `blob` has no KV reference and is deleted by the crash recovery sweep
+on `open()` (§3.1), not treated as a stub.
 
 Note that files attached from a specific device should already exist in the
 vault. The file will only be removed (leaving the stub behind) when explicitly
@@ -411,7 +451,7 @@ directly using standard tools such as Finder or the `rm` command. No effort will
 be made by kmdb to rectify such actions and the database will be in an unstable
 state. The `verify` command in the CLI should report missing files.
 
-## 5. Document + attachment packaging
+## 6. Document + Attachment Packaging
 
 The vault approach requires that functions such as `insert`, `update`,
 backup/restore, and import/export will need more than just the JSON defining the
@@ -435,7 +475,7 @@ An example layout of the package is provided below
 document.json
 vault/
   file1/
-    manifest.json. # with `"originalName": "mydoc.pdf"`
+    manifest.json # with `"originalName": "mydoc.pdf"`
     mydoc.pdf
   file2/
     blob
@@ -469,7 +509,7 @@ sub-directory under `vault` as per the following:
 If the package contains any other files or directories it will not be accepted
 for processing.
 
-### `manifest.json` schema for uploads
+### 6.1 `manifest.json` schema for uploads
 
 The `manifest.json` file provided in an upload needs to be different to the one
 housed in a `vault` as the user uploading the data will not have the ability to
@@ -482,7 +522,7 @@ indicate which file is being attached and a `schemaVersion`:
 
 ```jsonc
 {
-  "schemaVersion": 1,
+  "schemaVersion": "1",
   "originalName": "photo.jpg",
 }
 ```
@@ -505,7 +545,7 @@ structure:
   "title": "KMDB Vault Manifest - Upload",
   "description": "Metadata for files uploaded to the kmdb_vault system.",
   "type": "object",
-  "required": ["schemaVersion", "originalName"],
+  "required": ["schemaVersion"],
   "properties": {
     "schemaVersion": {
       "type": "string",
@@ -543,32 +583,35 @@ structure:
 
 Based on such information:
 
-- If the `version` is anything but "1", fail
+- If `schemaVersion` is anything but `"1"`, fail
 - If `sha256` is provided, match it against the SHA256 generated for the file -
   if they don't match, fail
 - If `crc32c` is provided, match it against the CRC32C generated for the file -
   if they don't match, fail
-- If `size` is provided, match it against the calaculated file size up the
+- If `size` is provided, match it against the calculated file size of the
   uploaded file - if they don't match, fail
-- If `mediaType` is provided, match it against the Media Type determined by the
+- If `mediaType` is provided, match it against the media type determined by the
   vault subsystem - if they don't match, fail
 - If `originalName` is provided, the sub-directory must have a file that matches
-  that file name _exactly_ (case senstive). If such a file doesn't exist, fail.
+  that file name _exactly_ (case sensitive). If such a file doesn't exist, fail.
 
 Processes such as export and backup must produce a `manifest.json` file that
 adheres to the schema defined as "KMDB Vault Manifest".
 
-### CLI
+## 7. CLI
+
+### 7.1 insert and update
 
 The `insert` command already has an existing `--file` parameter to allow for
 uploading the JSON document and the intent is to not overload this through the
 use of a check to see if the value of `--file` points to a JSON or Zstandard
 file. Instead, an `--import` parameter will be added to the `insert` command to
 allow the user to provide the location of the Zstandard package to be inserted.
-If `--import` is provided then `--value` and `--file` are ignored.
+`--import` is mutually exclusive with `--value` and `--file`; providing any
+combination is an error.
 
 The `update` command will also provide an `--import` parameter. The command will
-need to handle handle the following scenarios:
+need to handle the following scenarios:
 
 1. The package contains no attachments (i.e. no `vault` directory or an empty
    `vault` directory) and:
@@ -593,7 +636,7 @@ the expected package contents and the files linked from properties in
 `document.json`, this will cause an error and no change to the database will
 occur.
 
-#### Backups and restores
+### 7.2 Backups and restores
 
 Databases using the vault will cause backups (dumps) to be more than a simple
 output of JSON records.
@@ -620,7 +663,7 @@ A `--vault` flag will indicate that the backup output should include vault
 objects. By default, the backup process will be purely a backup of the documents
 in the database, producing the list of documents to a file or STDOUT.
 
-#### Exports and imports
+### 7.3 Exports and imports
 
 Much like backups, exports (which are specific to a collection) presently
 produces a series of JSON documents, 1-per line (NDJSON):
@@ -645,18 +688,20 @@ By default, exports will not include the vault data and will operate as it does
 now: producing an output that consists of a list of documents to a file or
 STDOUT
 
-A `--vault` flag will indicate that the export output should not include any
-vault objects - it is a conscious request for the effort of collecting the vault
+A `--vault` flag will indicate that the export output should include any vault
+objects - it is a conscious request for the effort of collecting the vault
 objects for the export archive.
 
 The export process will make no attempt to resolve "stubs" - only files
 currently on the local device will be included in the export archive.
 
-### Get, queries and scans
+### 7.4 get, search and scan
 
 The CLI operations `get`, `search`, `scan` will return results as they currently
 do, displaying the vault links as appropriate but making no effort to resolve or
 otherwise provide the file object to the user.
+
+### 7.5 vault get
 
 A `vault` command will be added to the CLI to allow users to access vault files.
 A single sub-command `get` will accept the URI for the vault object:
@@ -666,130 +711,97 @@ kmdb mydb vault get kmdb-vault://sha256/dd92c2600e28b5f44e9c7de81a629e1dd4cfd2ef
 ```
 
 The CLI will access the object (downloading it if there is only a stub) and
-stream the output to the user. Use of the `--output` global parameter will allow
+write the output to the user. Use of the `--output` global parameter will allow
 the user to elect that the object be saved to the designated output file.
 
-## 6. Storage Workflow
+## 8. Query Layer Integration
 
-1. **Write Blob:** Stream to vault.
-1. **Write Manifest:** Finalize metadata file.
-1. **Update DB:** Increment Ref-Count and map logical names to the Vault Path.
+**Typed codec integration:** Where a document field value is a valid
+`kmdb-vault://` URI, it is represented as a `VaultRef` wrapper type rather than
+a raw string. `VaultRef` provides:
 
-## 7. Open Questions
+- a `toString` implementation that returns the URI
+- a `getBlob` method to obtain the file object
+- a `getMetadata` method to obtain the metadata (`manifest.json`)
 
-Questions marked ✅ are resolved. Remaining questions must be answered before
-this proposal moves to a plan.
+`VaultRef` is immutable. The Query Layer treats it as opaque — `KmdbCodec<T>` is
+responsible for mapping between `VaultRef` and the typed model.
 
-1. **Scope of v1:** Primary usage (explicit file attachments) only, or does v1
-   also include secondary usage (auto-promotion of large document fields)?
+**Secondary indexes on vault fields:** The index entry is the URI string. This
+is sufficient for "find all documents referencing this vault object" queries.
+Querying file metadata via an index is out of scope.
 
-2. **Reference counting strategy:** Write-time `$vault` namespace is recommended
-   (see §3.1 follow-up). Confirm.
+**`watch()` and hydration:** Vault hydration is invisible to the Query Layer. A
+stub transitioning to fully hydrated does not emit a `watch()` event.
 
-3. **Sync folder structure:** Single shared `vault/` directory in the sync
-   folder, with `uploadVaultObject`/`downloadVaultObject` on `CloudAdapter`.
-   Confirm and define the method signatures.
+**`count()` and `any()`:** These operations do not access blob data. Vault stubs
+do not block them.
 
-4. **Stub representation on disk:** `manifest.json` present + `blob` absent =
-   stub. Confirm (contingent on §2.3 blob-naming decision).
+## 9. Open Questions
 
-5. **Encryption:** In scope or deferred?
+All questions are resolved. This proposal is ready to move to a plan.
+
+1. ✅ **Scope of v1:** Explicit file attachments only. Auto-promotion of large
+   document fields is out of scope.
+
+2. ✅ **Reference counting strategy:** Write-time `$vault` namespace (see §4.1).
+
+3. ✅ **Sync folder structure:** Single shared `vault/` directory in the sync
+   folder. `VaultStorageAdapter` is initialized with the local vault root and
+   resolves all paths from the SHA256 hash internally. Interface:
+   - `uploadVaultObject(String sha256)` — uploads the full hash directory
+     (`manifest.json` + `blob`) to the sync vault; applies FWW for
+     `manifest.json`. Called by push/sync.
+   - `syncVaultMetadata(String sha256)` — downloads `manifest.json` (and
+     `tombstone.json` if present) to the local vault, creating a stub. Called
+     during normal sync.
+   - `hydrateVaultBlob(String sha256)` — downloads the `blob` only into local
+     staging for verification and rename. Called on-demand.
+   - `vaultObjectExists(String sha256)` — checks whether the object exists in
+     the sync vault. Used before hydration and internally by `uploadVaultObject`
+     for the FWW check.
+
+4. ✅ **Stub representation on disk:** `manifest.json` present + `blob` absent =
+   stub. Covered in §5.2.
+
+5. ✅ **Encryption:** Out of scope. See §10.
 
 6. ✅ **Secondary hash algorithm:** CRC32C.
 
-7. **Atomicity model:** Staging-then-rename confirmed in principle (§3.2).
-   Confirm crash recovery sweeps `vault/staging/` on `open()`.
+7. ✅ **Atomicity model:** Staging-then-rename (§3.1). Recovery on `open()`
+   sweeps `vault/staging/` first, then hash directories. See §3.1 for the
+   full recovery sequence.
 
-8. **`kmdb-vault://` URI formal spec:** `kmdb-vault://sha256/{hex}` proposed.
-   Eager or lazy validation?
+8. ✅ **`kmdb-vault://` URI formal spec:** `kmdb-vault://sha256/{hex}`. Eager
+   validation — `VaultRef` validates the URI format at construction time and
+   throws immediately if malformed.
 
-9. **Web/OPFS:** Is vault supported on web in v1, or native-only?
+9. ✅ **Web/OPFS:** Out of scope. See §10.
 
-10. **Compression:** Opt-in per object, automatic based on media type, or always
-    off?
+10. ✅ **Compression:** Out of scope. See §10.
 
-11. **Blob naming in hash directory:** `obj/<originalName>` (current proposal)
-    vs. fixed name `blob` (see §2.3 follow-up). Decide before schema is
-    finalised.
+11. ✅ **Blob naming in hash directory:** Fixed name `blob` as used throughout
+    the proposal.
 
-12. **`pinnedBy` semantics:** Pin blocks deletion indefinitely, or extends grace
-    period? Recommendation: blocks indefinitely (see §2.4 follow-up).
+12. ✅ **Directory sharding depth:** Single 2-character prefix as per §2.2.
 
-13. **Directory sharding depth:** Two prefix levels (current) vs. single prefix
-    (recommended). Decide before directory layout is finalised.
-
-### Query Layer Integration questions
-
-> **[Review — missing section]:** The proposal is mostly silent on how the vault
-> integrates with the Query Layer (§13). Critical questions:
->
-> **Typed codec integration:** A `KmdbCodec<T>` encodes a
-> `Map<String, dynamic>`. If a document field contains a `kmdb-vault://` URI,
-> the typed model likely needs a wrapper type (e.g. `VaultRef`) rather than a
-> raw string. How does `KmdbCodec<T>` express this? Does the Query Layer need to
-> understand `VaultRef`, or is it opaque to it?
-
-The `VaultRef` wrapper will be used where the value of a field is a valid vault
-URI. The wrapper will provide:
-
-- a `toString` implementation that displays the URI
-- a `get` method to obtain the file object
-- a `get` method to obtain the metadata (`manifest.json`)
-
-Note that `VaultRef` is immutable - no changes are allowed to the instance.
-
-> **Secondary indexes on vault fields:** If a document field containing a vault
-> URI is indexed, the index entry would be the URI string — useful for "find all
-> documents referencing this vault object" but not for querying the file's
-> metadata. Is that sufficient?
-
-It is sufficient for the index entry to be the URI string.
-
-> **`watch()` and hydration:** If a user `watch()`es a collection and a vault
-> field transitions from stub to hydrated, should the stream emit a new event?
-> Or is vault hydration invisible to the query layer?
-
-Hydration is invisible to the query layer
-
-> **Count and `any()`:** Queries like `count()` and `any()` do not access blob
-> data. Vault stubs should not block these operations.
-
-## 8. Future work
+## 10. Future work
 
 ### Encryption at Rest
 
-> **[Review — missing section]:** The proposal does not address encryption. The
-> KV Store stores CBOR-encoded documents; vault blobs are raw binary. For users
-> storing sensitive files (documents, photos), at-rest encryption is a
-> reasonable expectation. Questions to address:
->
-> - Is encryption in scope for v1?
-> - If yes: key management strategy (per-device key, per-vault key,
->   user-supplied passphrase)?
-> - How does encryption interact with de-duplication? Two devices encrypting the
->   same file with different keys will produce different ciphertexts and
->   therefore different SHA-256 hashes — de-duplication breaks. This is a known
->   trade-off in encrypted CAS systems.
-> - How does encryption interact with the sync folder? Cloud providers may
->   already encrypt at rest — is a second layer necessary?
-
-Encryption at rest is out of scope for this proposal.
+Encryption at rest is out of scope for this proposal. Key considerations for a
+future proposal include: key management strategy (per-device, per-vault, or
+passphrase-based), the interaction between encryption and de-duplication (two
+devices encrypting the same file with different keys produce different SHA-256
+hashes, breaking de-duplication), and whether a second encryption layer adds
+value over cloud provider at-rest encryption.
 
 ### Compression Policy
 
-> **[Review — missing section]:** KMDB already applies Zstd (native) or Deflate
-> (web) compression to KV values (§5). Vault blobs need a separate, explicit
-> compression policy:
->
-> - Already-compressed formats (JPEG, MP4, PDF, ZIP, PNG) must **not** be
->   re-compressed — the result will be larger than the input.
-> - Text-based formats (plain text, source code, HTML, XML) compress well and
->   should be compressed.
-> - The media type detection from §2.3 should inform the compression decision.
-> - Consider storing whether the blob is compressed in `manifest.json` so the
->   read path knows whether to decompress.
-
-Vault will not provide compression features for files stored in the vault.
+Vault blobs are stored uncompressed. Compression is out of scope for this
+proposal. A future proposal should address the policy for already-compressed
+formats (JPEG, MP4, PDF, ZIP, PNG) versus compressible formats (plain text,
+source code, HTML), and whether a compression flag is needed in `manifest.json`.
 
 ### Web platform
 
@@ -797,7 +809,7 @@ The web platform is out of scope for this proposal.
 
 The web platform uses OPFS (Origin Private File System) which supports directory
 operations but has different performance characteristics than native IO.
-Streaming a large file from a remote into OPFS staging needs explicit handling —
+Writing a large file from a remote into OPFS staging needs explicit handling —
 the same approach used on native (dart:io) won't work on web (dart:js_interop).
 This needs a conditional platform export similar to the existing platform layer
 (§19).
