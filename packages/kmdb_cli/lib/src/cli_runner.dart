@@ -186,6 +186,17 @@ abstract final class KmdbCli {
       return 0;
     }
 
+    // Allow `kmdb help` or `kmdb help <command>` without a database path.
+    if (remaining.isNotEmpty && remaining[0] == 'help') {
+      if (remaining.length >= 2) {
+        final runner = _buildCommandRunner();
+        await runner.run(['help', remaining[1]]);
+      } else {
+        _printUsage();
+      }
+      return 0;
+    }
+
     if (remaining.isEmpty) {
       io.stderr.writeln('Error: database path required.');
       _printUsage();
