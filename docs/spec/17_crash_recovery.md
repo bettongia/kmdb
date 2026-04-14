@@ -31,7 +31,17 @@
    `WriteBatch` on this session so that a crash before any write leaves the
    flag unset.
 
-9. Resume normal operation. Return an `OpenResult` describing any recovery.
+9. Run vault crash recovery (if the vault directory exists):
+   a. **Staging sweep:** delete all files and directories under
+      `vault/staging/`. The LOCK file guarantees no other process is
+      mid-write, so these are unconditionally incomplete and safe to delete.
+   b. **Hash directory sweep:** for each hash directory under
+      `vault/blobs/sha256/`: delete if it contains a blob but no
+      `manifest.json` (incomplete write), or a `manifest.json` with no
+      corresponding KV reference in `$vault` (orphaned vault object).
+   See §24 for the full vault recovery sequence and crash table.
+
+10. Resume normal operation. Return an `OpenResult` describing any recovery.
 
 ## Failure Scenarios
 

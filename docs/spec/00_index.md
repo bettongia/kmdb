@@ -11,6 +11,8 @@ abstract: |
   SSTable-based primary sync, per-device high-water mark files, Dart platform modernisation
   (dart:js_interop, build hooks, WASM), and specific technical recommendations (XXH64
   checksums, Zstd dictionary compression, Xor filters). v2.1 adds §20–23: text search
-  (BM25 inverted index, BGE embedding model, Reciprocal Rank Fusion).
+  (BM25 inverted index, BGE embedding model, Reciprocal Rank Fusion). v2.2 adds §24:
+  vault — content-addressable binary object store with deduplication, stub-based sync,
+  on-demand hydration, and GC via reference counting.
 ...
 ---

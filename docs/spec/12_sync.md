@@ -43,10 +43,21 @@ equivalent). The primary sync unit is the immutable SSTable file.
     {deviceA-id}-{epoch}-{minHlc}-{maxHlc}.sst         # Consolidation output (4 segments)
   .consolidation-lease                                  # Coordinator lock
   .consolidation-manifest                               # Coordinator output record
+  vault/
+    sha256/
+      {2-char-prefix}/
+        {62-char-suffix}/
+          manifest.json                                 # first-writer-wins
+          blob                                          # content-identical across devices
+          tombstone.json                                # present if zero-ref on any device
 ```
 
-Each device writes only to its own files. No two devices ever write to the same
-file. This eliminates all conflict-on-write scenarios at the file level.
+For SSTables and `.hwm` files, each device writes only to its own files —
+no two devices ever write to the same file. Vault objects are the exception:
+vault files are content-addressed and identical across all devices, so the
+vault directory is shared. Conflicts are avoided by content-identity (`blob`)
+and first-writer-wins (`manifest.json`). See §24 for the full vault sync
+design and `VaultStorageAdapter` interface.
 
 ## Per-Device High-Water Mark Files
 

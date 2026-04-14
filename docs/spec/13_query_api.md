@@ -62,6 +62,34 @@ abstract interface class KmdbCodec<T> {
 }
 ```
 
+### Vault Fields and `VaultRef`
+
+Where a document field value is a valid `kmdb-vault://` URI, the Query Layer
+represents it as a `VaultRef` rather than a raw string. `KmdbCodec<T>` is
+responsible for mapping between `VaultRef` and the typed model field.
+
+```dart
+// In a codec for a document with a photo attachment:
+@override
+Map<String, dynamic> encode(Person value) => {
+  'name': value.name,
+  'photo': value.photo,  // VaultRef — its toString() returns the URI
+};
+
+@override
+Person decode(Map<String, dynamic> json) => Person(
+  id: json['_id'] as String,
+  name: json['name'] as String,
+  photo: json['photo'] is VaultRef
+      ? json['photo'] as VaultRef
+      : VaultRef(json['photo'] as String),
+);
+```
+
+URI format is validated eagerly at `VaultRef` construction time.
+`VaultRef.getBlob()` and `VaultRef.getMetadata()` trigger on-demand hydration
+if the object is a stub. See §24 for the full `VaultRef` API.
+
 ### Reserved `_` Field Prefix
 
 The `_` prefix is reserved for KMDB system-managed fields. Currently defined:
