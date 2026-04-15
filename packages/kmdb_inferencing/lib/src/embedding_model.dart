@@ -16,6 +16,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:kmdb/kmdb.dart';
+import 'package:kmdb_lexical/lexical.dart' show Tokeniser;
 import 'package:path/path.dart' as p;
 
 import 'bert_tokenizer.dart';

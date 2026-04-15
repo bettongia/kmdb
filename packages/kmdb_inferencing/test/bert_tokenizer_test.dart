@@ -18,6 +18,7 @@ library;
 import 'dart:io';
 
 import 'package:kmdb_inferencing/kmdb_inferencing.dart';
+import 'package:kmdb_lexical/lexical.dart' show Tokeniser;
 import 'package:test/test.dart';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

@@ -18,7 +18,7 @@
 --ignore="**/coverage/**"
 --ignore="site/**"
 --ignore="vendor/**"
---ignore=".claude"
+--ignore=".claude/**"
 --ignore="**/packages/kmdb_ui/build/**"
 --ignore="**/packages/kmdb_ui/macos/**"
 --ignore="**/third_party/**"

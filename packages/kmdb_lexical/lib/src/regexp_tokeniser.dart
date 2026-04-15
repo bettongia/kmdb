@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'tokeniser.dart';
+import 'tokenizer.dart';
 
 /// The default [Tokeniser] implementation, written in pure Dart using [RegExp].
 ///

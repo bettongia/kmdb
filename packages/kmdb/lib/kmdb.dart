@@ -77,8 +77,6 @@ export 'src/query/index/index_manager.dart'
     show IndexManager, IndexState, IndexStatus;
 
 // ── Text search — shared foundations ─────────────────────────────────────────
-export 'src/search/tokeniser.dart' show Tokeniser;
-export 'src/search/regexp_tokeniser.dart' show RegExpTokeniser;
 export 'src/search/search_mode.dart' show SearchMode;
 export 'src/search/search_result.dart'
     show SearchResult, SearchMetadata, SearchHit;

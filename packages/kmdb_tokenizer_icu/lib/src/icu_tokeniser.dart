@@ -16,7 +16,7 @@ import 'dart:ffi';
 import 'dart:io';
 
 import 'package:ffi/ffi.dart';
-import 'package:kmdb/kmdb.dart';
+import 'package:kmdb_lexical/lexical.dart' show Tokeniser;
 
 // ---------------------------------------------------------------------------
 // ICU constants

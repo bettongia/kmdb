@@ -127,8 +127,13 @@ _Foundational types and write path. No KV store integration yet._
       (`FormatException` on malformed input), `toString()`, `getBlob()` stub,
       `getMetadata()` stub
 - [ ] Create `media_type_detector.dart`: `MediaTypeDetector` abstract interface
-      with a `detect(Uint8List bytes, String? fileName)` method; provide a
-      stub/noop implementation for now
+      with a `detect(Uint8List bytes, String? fileName) → String?` method
+      (returns the best-match MIME type string, or `null` if nothing matched);
+      provide a `FreedesktopMediaTypeDetector` concrete implementation backed by
+      `Registry.detect` from `aurochs_registry_freedesktop_mimeinfo` — returns
+      `results.firstOrNull?.mediaType.mediaType`. Add
+      `aurochs_registry_freedesktop_mimeinfo` as a dependency to
+      `packages/kmdb/pubspec.yaml`.
 - [ ] Create `vault_store.dart`: `VaultStore` with:
   - `ingest(File file, String hlcTimestamp)` — full write path (stage →
     verify SHA-256 → verify CRC32C → rename → write manifest)

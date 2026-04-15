@@ -9,10 +9,11 @@ environment:
   sdk: ^3.10.0
 
 dependencies:
-  archive: ^3.6.1
-  ffi: ^2.1.4
-  http: ^1.4.0
-  kmdb: any
+  archive: ^4.0.0
+  ffi: ^2.2.0
+  http: ^1.6.0
+  kmdb:
+  kmdb_lexical:
   path: ^1.9.1
 
 dev_dependencies:

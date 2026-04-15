@@ -11,6 +11,16 @@ workspace:
   - packages/kmdb_ui
   - packages/kmdb_tokenizer_icu
   - packages/kmdb_inferencing
+  - packages/kmdb_mediatype
+  - packages/kmdb_lexical
+  # These are symlinks as kmesh is not yet published:
+  - packages/registry_freedesktop_mimeinfo
+  - packages/formats_mediatype
+  - packages/strings
+  - packages/registry_unicodedata
+  - packages/core
+  - packages/formats
+  - packages/dev_loader
 
 dev_dependencies:
   lints: ^6.0.0

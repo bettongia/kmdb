@@ -16,19 +16,21 @@ import 'dart:convert' show utf8;
 import 'dart:math' show log;
 import 'dart:typed_data';
 
-import 'package:meta/meta.dart' show visibleForTesting;
-
 import 'package:cbor/cbor.dart';
+import 'package:intl/locale.dart' show Locale;
+import 'package:kmdb_lexical/lexical.dart' show RegExpTokeniser, getStopWords;
+import 'package:meta/meta.dart' show visibleForTesting;
 
 import '../../encoding/value_codec.dart';
 import '../../engine/kvstore/kv_store.dart';
 import '../../engine/kvstore/kv_store_impl.dart';
 import '../fts_index_definition.dart';
-import '../regexp_tokeniser.dart';
 import '../search_result.dart';
 import '../sync_delta.dart';
 import 'fts_index_state.dart';
 import 'pipeline.dart';
+
+final defaultStopwords = getStopWords(Locale.fromSubtags(languageCode: 'en'));
 
 /// Manages all full-text search (FTS) indexes for a [KmdbDatabase] instance.
 ///
@@ -206,7 +208,9 @@ final class FtsManager {
     final fieldValue = _extractFieldValue(doc, def.field);
     if (fieldValue == null) return; // field absent — nothing to index
 
-    final stopWords = def.stopWords ? kEnglishStopWords : const <String>{};
+    final stopWords = def.stopWords
+        ? defaultStopwords.listing
+        : const <String>{};
     final tokens = preprocess(
       fieldValue,
       RegExpTokeniser(),
@@ -254,7 +258,9 @@ final class FtsManager {
     }
 
     final newFieldValue = _extractFieldValue(newDoc, def.field);
-    final stopWords = def.stopWords ? kEnglishStopWords : const <String>{};
+    final stopWords = def.stopWords
+        ? defaultStopwords.listing
+        : const <String>{};
 
     if (newFieldValue == null) {
       // Field was removed in the update — treat as a delete of the FTS entry.
@@ -391,7 +397,9 @@ final class FtsManager {
     //      This performs an inline compact for pre-existing overlay entries,
     //      ensuring buildIndex always produces a consistent base index.
     //    - No overlay → read and index the current document content normally.
-    final stopWords = def.stopWords ? kEnglishStopWords : const <String>{};
+    final stopWords = def.stopWords
+        ? defaultStopwords.listing
+        : const <String>{};
     const batchSize = 200;
     var writeBatch = WriteBatch();
     var batchCount = 0;
@@ -576,7 +584,9 @@ final class FtsManager {
     // Pre-process the query string. Use stop-word settings from the first
     // matched definition (all defs for the same ns share stop-word config).
     final firstDef = _find(namespace, searched.first)!;
-    final stopWords = firstDef.stopWords ? kEnglishStopWords : const <String>{};
+    final stopWords = firstDef.stopWords
+        ? defaultStopwords.listing
+        : const <String>{};
     final queryTerms = preprocess(
       query,
       RegExpTokeniser(),

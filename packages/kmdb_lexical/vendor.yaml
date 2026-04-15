@@ -1,0 +1,17 @@
+# see: https://pub.dev/packages/vendor
+import_rewrites:
+  # Map of rewrites that should be applied to lib/, bin/ and test/ in project.
+  # Example:
+  #   import "package:<package>/..."
+  # is rewritten to:
+  #   import "package:myapp/src/third_party/<name>/lib/..."
+  # where 'myapp' is the root project name.
+  snowball_stemmer: snowball_stemmer
+vendored_dependencies:
+  # Specification of which packages to be vendor into:
+  #   lib/src/third_party/<name>/
+  snowball_stemmer:
+    package: snowball_stemmer
+    version: 0.1.0
+    #import_rewrites:
+    #include:
