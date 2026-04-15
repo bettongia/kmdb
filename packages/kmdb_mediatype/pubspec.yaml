@@ -1,0 +1,28 @@
+name: kmdb_mediatype
+description: A starting point for Dart libraries or applications.
+version: 1.0.0
+publish_to: none
+
+resolution: workspace
+
+environment:
+  sdk: ^3.11.4
+
+# Add regular dependencies here.
+dependencies:
+  aurochs_registry_freedesktop_mimeinfo:
+    #path: ../../../kmesh/packages/registry_freedesktop_mimeinfo
+  aurochs_formats_mediatype:
+    #path: ../../../kmesh/packages/formats_mediatype
+  aurochs_strings:
+    #path: ../../../kmesh/packages/strings
+  aurochs_registry_unicodedata:
+    #path: ../../../kmesh/packages/registry_unicodedata
+  aurochs_core:
+    #path: ../../../kmesh/packages/core
+  aurochs_formats:
+    #path: ../../../kmesh/packages/formats
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.6

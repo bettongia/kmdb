@@ -12,8 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'package:intl/locale.dart';
 import 'package:kmdb/kmdb.dart';
+import 'package:kmdb_lexical/lexical.dart' show RegExpTokeniser, getStopWords;
 import 'package:test/test.dart';
+
+final defaultStopwords = getStopWords(Locale.fromSubtags(languageCode: 'en'));
 
 void main() {
   final tokeniser = RegExpTokeniser();
@@ -59,7 +63,7 @@ void main() {
 
   group('filterStopWords', () {
     test('empty token list returns empty list', () {
-      expect(filterStopWords([], kEnglishStopWords), isEmpty);
+      expect(filterStopWords([], defaultStopwords.listing), isEmpty);
     });
 
     test('empty stop-word set returns tokens unchanged', () {
@@ -70,19 +74,19 @@ void main() {
     test('removes common stop words (the, and, is)', () {
       final tokens = ['the', 'quick', 'and', 'is', 'fox'];
       expect(
-        filterStopWords(tokens, kEnglishStopWords),
+        filterStopWords(tokens, defaultStopwords.listing),
         equals(['quick', 'fox']),
       );
     });
 
     test('passes through non-stop-words intact', () {
       const word = 'jekyll';
-      expect(filterStopWords([word], kEnglishStopWords), equals([word]));
+      expect(filterStopWords([word], defaultStopwords.listing), equals([word]));
     });
 
     test('all tokens are stop words → empty result', () {
       expect(
-        filterStopWords(['the', 'and', 'is', 'a'], kEnglishStopWords),
+        filterStopWords(['the', 'and', 'is', 'a'], defaultStopwords.listing),
         isEmpty,
       );
     });
@@ -147,7 +151,7 @@ void main() {
       final result = preprocess(
         'the dog is running',
         tokeniser,
-        stopWords: kEnglishStopWords,
+        stopWords: defaultStopwords.listing,
       );
       // 'the' and 'is' removed; 'dog' and 'run' remain.
       expect(result, isNot(contains('the')));
@@ -162,7 +166,7 @@ void main() {
         final result = preprocess(
           'The quick brown fox jumps over the lazy dog',
           tokeniser,
-          stopWords: kEnglishStopWords,
+          stopWords: defaultStopwords.listing,
         );
         // 'the', 'over' are stop words; remaining: quick→quick, brown→brown,
         // fox→fox, jumps→jump, lazy→lazi, dog→dog
@@ -193,32 +197,24 @@ void main() {
       final result = preprocess(
         'the and is',
         tokeniser,
-        stopWords: kEnglishStopWords,
+        stopWords: defaultStopwords.listing,
       );
       expect(result, isEmpty);
     });
 
     test('identical input produces identical output (index == query path)', () {
       const text = 'full text search is powerful';
-      final indexed = preprocess(text, tokeniser, stopWords: kEnglishStopWords);
-      final queried = preprocess(text, tokeniser, stopWords: kEnglishStopWords);
+      final indexed = preprocess(
+        text,
+        tokeniser,
+        stopWords: defaultStopwords.listing,
+      );
+      final queried = preprocess(
+        text,
+        tokeniser,
+        stopWords: defaultStopwords.listing,
+      );
       expect(indexed, equals(queried));
-    });
-  });
-
-  // ── kEnglishStopWords constant ─────────────────────────────────────────────
-
-  group('kEnglishStopWords', () {
-    test('contains common function words', () {
-      for (final word in ['the', 'is', 'and', 'a', 'an', 'in', 'of', 'to']) {
-        expect(kEnglishStopWords, contains(word));
-      }
-    });
-
-    test('does not contain content words', () {
-      for (final word in ['dog', 'run', 'fast', 'database', 'search']) {
-        expect(kEnglishStopWords, isNot(contains(word)));
-      }
     });
   });
 }
