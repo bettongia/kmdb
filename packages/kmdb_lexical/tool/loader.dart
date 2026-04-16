@@ -19,7 +19,6 @@ import 'dart:io';
 
 import 'package:aurochs_dev_loader/dev_loader.dart';
 import 'package:code_builder/code_builder.dart';
-import 'package:test/test.dart';
 
 final copyrightHeader = '''
  Copyright 2026 The Aurochs KMesh Authors
