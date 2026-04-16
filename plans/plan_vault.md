@@ -127,13 +127,20 @@ _Foundational types and write path. No KV store integration yet._
       (`FormatException` on malformed input), `toString()`, `getBlob()` stub,
       `getMetadata()` stub
 - [ ] Create `media_type_detector.dart`: `MediaTypeDetector` abstract interface
-      with a `detect(Uint8List bytes, String? fileName) → String?` method
-      (returns the best-match MIME type string, or `null` if nothing matched);
-      provide a `FreedesktopMediaTypeDetector` concrete implementation backed by
-      `Registry.detect` from `aurochs_registry_freedesktop_mimeinfo` — returns
-      `results.firstOrNull?.mediaType.mediaType`. Add
-      `aurochs_registry_freedesktop_mimeinfo` as a dependency to
-      `packages/kmdb/pubspec.yaml`.
+      with a `detect(Uint8List bytes, String? fileName) → MatchList` method
+      (returns the full `MatchList` from `kmdb_mediatype`, giving callers access
+      to both `bestMatch` and the prioritised `candidates` iterable); provide a
+      `FreedesktopMediaTypeDetector` concrete implementation that delegates to
+      `detect()` from `package:kmdb_mediatype/kmdb_mediatype.dart`. Add
+      `kmdb_mediatype` as a dependency to `packages/kmdb/pubspec.yaml`.
+      — When storing the detected media type in `VaultManifest`, use
+        `matchList.bestMatch` as the canonical value.
+      — When validating a caller-supplied media type (e.g. an explicit MIME type
+        passed to `ingest()`), accept it if it appears anywhere in
+        `matchList.candidates`; reject with a descriptive error only if it is
+        absent from `candidates` entirely. This allows a valid subtype or
+        alternative match to be used even when it is not the highest-priority
+        detection result.
 - [ ] Create `vault_store.dart`: `VaultStore` with:
   - `ingest(File file, String hlcTimestamp)` — full write path (stage →
     verify SHA-256 → verify CRC32C → rename → write manifest)
