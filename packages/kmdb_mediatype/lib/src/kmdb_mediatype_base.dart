@@ -14,9 +14,18 @@
 
 import 'dart:typed_data';
 
-import 'package:aurochs_registry_freedesktop_mimeinfo/registry.dart';
+import 'package:aurochs_registry_freedesktop_mimeinfo/registry.dart'
+    as registry
+    show MatchList, detect;
 
-List<MatchResult> detect(Uint8List bytes, String? fileName) {
-  final registry = Registry();
-  return registry.detect(bytes, fileName);
+registry.MatchList detect({
+  Uint8List? bytes,
+  String? fileName,
+  bool caseSensitive = false,
+}) {
+  return registry.detect(
+    bytes: bytes,
+    fileName: fileName,
+    caseSensitive: caseSensitive,
+  );
 }
