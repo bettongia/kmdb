@@ -87,12 +87,7 @@ export 'src/search/sync_delta.dart' show SyncDelta, DeltaChangeType, DeltaEntry;
 
 // ── Text search — lexical (BM25) ─────────────────────────────────────────────
 export 'src/search/lexical/pipeline.dart'
-    show
-        tokeniseAndNormalise,
-        filterStopWords,
-        stem,
-        preprocess,
-        kEnglishStopWords;
+    show tokeniseAndNormalise, filterStopWords, stem, preprocess;
 export 'src/search/lexical/fts_index_state.dart'
     show FtsIndexStatus, FtsIndexState, kFtsTombstone;
 export 'src/search/lexical/fts_manager.dart' show FtsManager;
@@ -104,3 +99,18 @@ export 'src/search/semantic/vec_manager.dart' show VecManager;
 
 // ── Text search — hybrid (RRF) ────────────────────────────────────────────────
 export 'src/search/hybrid/hybrid_manager.dart' show rrfScore, mergeWithRrf;
+
+// ── Vault — content-addressable binary object store ───────────────────────────
+export 'src/vault/vault_ref.dart' show VaultRef;
+export 'src/vault/vault_manifest.dart' show VaultManifest;
+export 'src/vault/vault_store.dart'
+    show VaultStore, VaultCrcMismatchException, VaultObjectNotFoundException;
+export 'src/vault/vault_gc.dart' show VaultGc;
+export 'src/vault/vault_ref_interceptor.dart' show VaultRefInterceptor;
+export 'src/vault/vault_package.dart'
+    show VaultPackage, VaultPackageContents, VaultAttachment;
+export 'src/vault/vault_recovery.dart' show kVaultNamespace;
+export 'src/vault/vault_storage_adapter.dart' show VaultStorageAdapter;
+export 'src/vault/local_directory_vault_adapter_stub.dart'
+    if (dart.library.io) 'src/vault/local_directory_vault_adapter.dart'
+    show LocalDirectoryVaultAdapter;

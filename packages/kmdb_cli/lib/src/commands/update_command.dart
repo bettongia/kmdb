@@ -18,6 +18,7 @@ import 'package:kmdb/kmdb.dart';
 
 import '../filter/filter_parser.dart';
 import 'command.dart';
+import 'vault/vault_import_helper.dart';
 
 /// Partially updates one or more existing documents in a collection.
 ///
@@ -47,6 +48,9 @@ import 'command.dart';
 ///
 /// # All documents (explicit opt-in)
 /// kmdb <db> update <collection> --all --set '{"archived":true}'
+///
+/// # Vault package import (requires --id or positional <id>; replaces document)
+/// kmdb <db> update <collection> <id> --import package.kvlt
 /// ```
 ///
 /// Reports `{"updated": N}` on success.
@@ -66,7 +70,7 @@ final class UpdateCommand implements CliCommand {
   @override
   String get usage =>
       'update <collection> [<id> | --id <id>... | --filter <json> | --all] '
-      '--set <json>';
+      '--set <json> | --import <package.kvlt>';
 
   @override
   Future<bool> execute(
@@ -79,6 +83,16 @@ final class UpdateCommand implements CliCommand {
       return false;
     }
     final collection = args[0];
+
+    // ── Handle --import flag (mutually exclusive with --set) ──────────────────
+    final importPath = flags['import'] as String?;
+    if (importPath != null) {
+      if (flags['set'] != null) {
+        ctx.writeError('--import is mutually exclusive with --set.');
+        return false;
+      }
+      return _executeImport(ctx, collection, args, flags, importPath);
+    }
 
     // ── Parse --set ──────────────────────────────────────────────────────────
     final setJson = flags['set'] as String?;
@@ -200,6 +214,121 @@ final class UpdateCommand implements CliCommand {
     }
 
     ctx.writeValue({'updated': updated});
+    return true;
+  }
+
+  // ── Vault package import ───────────────────────────────────────────────────
+
+  /// Imports a KVLT vault package and replaces an existing document.
+  ///
+  /// The target document is identified by a positional `<id>` argument or
+  /// `--id <id>`. For bulk targeting (--filter, --all), use --set instead.
+  ///
+  /// The update scenarios from §24 are:
+  /// 1. No vault dir in package, document has no vault URIs → replace document.
+  /// 2. No vault dir, document has URIs already in vault → replace document,
+  ///    adjusting ref counts (old doc URIs decremented, new doc URIs incremented).
+  /// 3. No vault dir, document has URIs not in vault → failure.
+  /// 4. Vault dir present, all URIs resolved → ingest blobs, replace document.
+  /// 5. Vault dir present, some URIs unresolvable → failure.
+  Future<bool> _executeImport(
+    CommandContext ctx,
+    String collection,
+    List<String> args,
+    Map<String, dynamic> flags,
+    String importPath,
+  ) async {
+    final vaultStore = ctx.vaultStore;
+    if (vaultStore == null) {
+      ctx.writeError(
+        '--import requires vault to be configured for this database.',
+      );
+      return false;
+    }
+
+    // --import requires a single target document (positional <id> or --id).
+    final positionalId = args.length > 1 ? args[1] : null;
+    final idFlag = flags['id'] as String?;
+    if (positionalId == null && idFlag == null) {
+      ctx.writeError(
+        '--import requires a target document ID. '
+        'Specify a positional <id> or --id <id>.\n'
+        'Usage: $usage',
+      );
+      return false;
+    }
+    if (positionalId != null && idFlag != null) {
+      ctx.writeError(
+        'Specify either a positional <id> or --id <id>, not both.',
+      );
+      return false;
+    }
+    final targetId = positionalId ?? idFlag!;
+
+    // Read and parse the vault package.
+    final contents = readVaultPackage(
+      packagePath: importPath,
+      packageBytes: null,
+      errSink: ctx.err,
+    );
+    if (contents == null) return false;
+
+    // Validate: all vault URIs in document are covered by attachments or vault.
+    // First check what's already in the vault so we can pass existingHashes.
+    final docUris = extractVaultUrisFromDoc(contents.documentJson);
+    final existingHashes = <String>{};
+    for (final sha256 in docUris) {
+      if (await vaultStore.exists(sha256)) {
+        existingHashes.add(sha256);
+      }
+    }
+
+    try {
+      VaultPackage.validate(
+        documentJson: contents.documentJson,
+        attachments: contents.attachments,
+        existingHashes: existingHashes,
+      );
+    } on FormatException catch (e) {
+      ctx.writeError('Invalid vault package: ${e.message}');
+      return false;
+    }
+
+    // Check target document exists.
+    final rawOld = await ctx.store.get(collection, targetId);
+    if (rawOld == null) {
+      ctx.writeError('Document not found: $targetId');
+      return false;
+    }
+    final oldDoc = ValueCodec.decode(rawOld);
+
+    // Ingest all vault blobs from the package.
+    final info = await ctx.store.storeInfo();
+    final ingestedHashes = await ingestVaultAttachments(
+      vaultStore: vaultStore,
+      attachments: contents.attachments,
+      hlcTimestamp: info.currentHlc,
+      errSink: ctx.err,
+    );
+    if (ingestedHashes == null) return false;
+
+    // Build the replacement document, preserving the existing _id.
+    final doc = Map<String, dynamic>.of(contents.documentJson);
+    doc['_id'] = targetId;
+
+    // Build a WriteBatch: document replace + vault ref count adjustments.
+    final batch = WriteBatch();
+    batch.put(collection, targetId, ValueCodec.encode(doc));
+    await applyVaultRefCounts(
+      doc: doc,
+      oldDoc: oldDoc,
+      store: ctx.store,
+      vaultStore: vaultStore,
+      batch: batch,
+    );
+    await ctx.store.writeBatch(batch);
+
+    ctx.writeValue({'updated': 1});
     return true;
   }
 

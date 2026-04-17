@@ -38,20 +38,22 @@ const int _ubrkDone = -1;
 ///
 /// Passing address 0 for [locale] selects ICU's default (root) locale, which
 /// is sufficient for script-level word boundary rules.
-typedef _UbrkOpenNative = Pointer<Void> Function(
-  Int32 type,
-  Pointer<Utf8> locale,
-  Pointer<Uint16> text,
-  Int32 textLength,
-  Pointer<Int32> status,
-);
-typedef _UbrkOpen = Pointer<Void> Function(
-  int type,
-  Pointer<Utf8> locale,
-  Pointer<Uint16> text,
-  int textLength,
-  Pointer<Int32> status,
-);
+typedef _UbrkOpenNative =
+    Pointer<Void> Function(
+      Int32 type,
+      Pointer<Utf8> locale,
+      Pointer<Uint16> text,
+      Int32 textLength,
+      Pointer<Int32> status,
+    );
+typedef _UbrkOpen =
+    Pointer<Void> Function(
+      int type,
+      Pointer<Utf8> locale,
+      Pointer<Uint16> text,
+      int textLength,
+      Pointer<Int32> status,
+    );
 
 /// ubrk_next — advance to the next boundary; returns position or [_ubrkDone].
 typedef _UbrkNextNative = Int32 Function(Pointer<Void> bi);
@@ -179,12 +181,11 @@ class IcuTokeniser implements Tokeniser {
 
   IcuTokeniser._fromLib(DynamicLibrary lib)
     : _lib = lib,
-      _ubrkOpen =
-          lib.lookupFunction<_UbrkOpenNative, _UbrkOpen>('ubrk_open'),
-      _ubrkNext =
-          lib.lookupFunction<_UbrkNextNative, _UbrkNext>('ubrk_next'),
-      _ubrkClose =
-          lib.lookupFunction<_UbrkCloseNative, _UbrkClose>('ubrk_close');
+      _ubrkOpen = lib.lookupFunction<_UbrkOpenNative, _UbrkOpen>('ubrk_open'),
+      _ubrkNext = lib.lookupFunction<_UbrkNextNative, _UbrkNext>('ubrk_next'),
+      _ubrkClose = lib.lookupFunction<_UbrkCloseNative, _UbrkClose>(
+        'ubrk_close',
+      );
 
   // Matches any Unicode letter or digit — used to classify ICU spans.
   //

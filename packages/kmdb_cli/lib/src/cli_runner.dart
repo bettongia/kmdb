@@ -46,6 +46,7 @@ import 'commands/util_command.dart';
 import 'commands/index_command.dart';
 import 'commands/search_command.dart';
 import 'commands/verify_command.dart';
+import 'commands/vault/vault_command.dart';
 import 'config/kmdb_config.dart';
 import 'database_opener.dart';
 import 'output/output_mode.dart';
@@ -85,6 +86,7 @@ final _commands = <String, CliCommand>{
     const SyncCommand(),
     const IndexCommand(),
     const SearchCommand(),
+    const VaultCommand(),
   ])
     cmd.name: cmd,
 };
@@ -272,10 +274,19 @@ abstract final class KmdbCli {
       definitions: indexDefinitions,
     );
 
+    // Open a VaultStore for the database path. The vault is always available
+    // on native platforms — it is initialised lazily on first use and is
+    // always a no-op when vault features are not needed.
+    final vaultStore = VaultStore(
+      dbDir: dbPath,
+      adapter: StorageAdapterNative(),
+    );
+
     final ctx = CommandContext(
       store: store,
       config: config,
       indexManager: indexManager,
+      vaultStore: vaultStore,
       mode: mode,
       out: outSink,
       dbCreated: dbCreated,
