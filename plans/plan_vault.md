@@ -181,28 +181,33 @@ _`$vault` namespace integration and tombstone-based GC._
 
 _Write interception, `VaultRef` in codec pipeline._
 
-- [ ] Modify `kmdb_collection.dart` `writeBatchInternal`:
+- [x] Modify `kmdb_collection.dart` `writeBatchInternal`:
   - After encoding the document, scan the map for `VaultRef` values (or
     strings matching the `kmdb-vault://` pattern)
   - Diff old document vault URIs vs new document vault URIs
   - Increment ref counts for added URIs, decrement for removed URIs
   - Call `VaultGc.onZeroRefs` / `VaultGc.onRefRestored` as appropriate
   - All changes land in the same `WriteBatch` as the document write
-- [ ] Modify `kmdb_database.dart`:
+  - Implemented via `VaultRefInterceptor` (new file) called from
+    `_writeDocument` and `_deleteDocument`
+- [x] Modify `kmdb_database.dart`:
   - Accept an optional `VaultStore` at `open()` time
   - Pass `VaultStore` and `VaultGc` to collections that need them
   - Include vault recovery in the open sequence
-- [ ] Ensure `$vault` namespace entries are excluded from the session object
-      cache and materialised view cache (same `$`-prefix exclusion already
-      applied to `$meta`, `$index`, `$cache`)
-- [ ] Wire `VaultRef.getBlob()` and `VaultRef.getMetadata()` to `VaultStore`
-- [ ] Write tests:
+- [x] Ensure `$vault` namespace entries are excluded from the session object
+      cache and materialised view cache — already handled by the existing
+      `if (namespace.startsWith(r'$')) return;` guard in `CacheLayer._onWriteEvent`
+- [x] Wire `VaultRef.getBlob()` and `VaultRef.getMetadata()` to `VaultStore`
+      — implemented in `KmdbCollection.decodeDoc()` which replaces vault URI
+      strings with wired `VaultRef` instances before calling `codec.decode`
+- [x] Write tests:
   - `vault_write_interception_test.dart` — insert document with vault ref
     (ref count = 1), update (old ref decremented, new ref incremented),
     delete (ref count = 0, tombstone created)
-  - `vault_integration_test.dart` — end-to-end: ingest file, insert document
-    referencing it, verify ref count, delete document, verify tombstone,
-    run GC sweep, verify hash directory deleted
+  - `vault_integration_test.dart` — end-to-end: open DB with VaultStore,
+    verify getters, insert/delete/update with vault refs, GC sweep.
+    Tests requiring Zstd native are tagged `@Tags(['e2e'])` and skipped
+    in normal CI runs (same as semantic search integration tests)
 
 ### Phase 4 — Packaging format
 

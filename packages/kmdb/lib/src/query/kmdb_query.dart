@@ -343,8 +343,9 @@ final class KmdbQuery<T> {
     }
 
     // Decode to typed T. '_id' was already injected into each map above, so
-    // codec.decode() receives the full fromJson-style representation.
-    return results.map((pair) => _collection.codec.decode(pair.$2)).toList();
+    // decodeDoc() receives the full fromJson-style representation and also
+    // wires any vault URI strings to the active VaultStore.
+    return results.map((pair) => _collection.decodeDoc(pair.$2)).toList();
   }
 
   /// Checks that all secondary indexes for this collection's namespace are
