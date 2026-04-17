@@ -165,14 +165,15 @@ _Foundational types and write path. No KV store integration yet._
 
 _`$vault` namespace integration and tombstone-based GC._
 
-- [ ] Add `$vault` system namespace constant alongside existing `$meta`,
-      `$index`, `$cache` constants
-- [ ] Create `vault_gc.dart`: `VaultGc` with:
+- [x] Add `$vault` system namespace constant alongside existing `$meta`,
+      `$index`, `$cache` constants — defined as `kVaultNamespace` in
+      `vault_recovery.dart` (top-level constant, re-exported to `vault_gc.dart`)
+- [x] Create `vault_gc.dart`: `VaultGc` with:
   - `onZeroRefs(String sha256)` — creates `tombstone.json`
   - `onRefRestored(String sha256)` — deletes `tombstone.json`
   - `sweep()` — scans for `tombstone.json` files, verifies KV ref count is
     still zero, deletes hash directory, cleans `VAULT_OFFLINE`
-- [ ] Write tests:
+- [x] Write tests:
   - `vault_gc_test.dart` — zero-ref tombstoning, un-tombstoning, sweep
     (including the guard: tombstone present but ref count restored before sweep)
 
