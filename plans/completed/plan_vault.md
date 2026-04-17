@@ -2,7 +2,7 @@
 
 **Status**: Complete
 
-**PR link**: _pending_
+**PR link**: https://github.com/aurochs-kmesh/kmdb/pull/16
 
 **Proposal**: [docs/proposals/vault.md](../docs/proposals/vault.md)
 
