@@ -8,6 +8,7 @@
 ├────────────────────────────────────────────────────────────────────┤
 │  Query Layer    KmdbCollection<T> · KmdbQuery<T> · Filter DSL      │
 │                 Index definitions · Write interception             │
+│                 search() · VaultRef interception                   │
 ├────────────────────────────────────────────────────────────────────┤
 │  Cache Layer    Session object cache · $cache materialised views   │
 │                 Platform-aware sizing · Generation counter reads   │
@@ -23,7 +24,24 @@
 │  Platform Layer StorageAdapter: native (dart:io+FFI) / web (OPFS)  │
 │                 / memory (tests)                                   │
 └────────────────────────────────────────────────────────────────────┘
+
+        ┌──────────────────────────┐   ┌──────────────────────────┐
+        │  Text Search Subsystem   │   │  Vault Subsystem         │
+        │  (native-only, §20–23)   │   │  (native-only, §24)      │
+        │                          │   │                          │
+        │  FtsManager   (§21)      │   │  VaultStore              │
+        │  VecManager   (§22)      │   │  VaultGc · VaultRecovery │
+        │  HybridManager (§23)     │   │  VaultStorageAdapter     │
+        │                          │   │                          │
+        │  $fts: / $vec: namespaces│   │  vault/ directory tree   │
+        │  in KvStore (no sync)    │   │  $vault: ref counts in   │
+        │                          │   │  KvStore (no sync)       │
+        └──────────────────────────┘   └──────────────────────────┘
 ```
+
+Both subsystems sit alongside the main stack rather than inside it. They use
+the KvStore (for index/ref-count entries) and the platform layer (for blob
+file I/O) but do not participate in SSTable sync.
 
 **CBOR encoding and decoding** occurs at the Query Layer boundary on writes
 (before `KvStore.writeBatch`) and at the Cache Layer boundary on reads (after

@@ -205,7 +205,9 @@ signal that this object is a GC candidate on their side too.
 ### Pin behaviour
 
 A pin (see §24.8) does not affect the GC lifecycle. A pinned object with zero
-references is tombstoned and deleted like any other zero-ref object.
+references is tombstoned and deleted like any other zero-ref object. The GC
+sweep does **not** remove deleted hashes from `VAULT_OFFLINE` automatically —
+stale pin entries are silently ignored on startup.
 
 ## Distributed Sync
 
