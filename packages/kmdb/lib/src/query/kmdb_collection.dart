@@ -20,6 +20,8 @@ import '../engine/util/key_codec.dart';
 import '../search/hybrid/hybrid_manager.dart';
 import '../search/search_mode.dart';
 import '../search/search_result.dart';
+import '../vault/vault_ref.dart';
+import '../vault/vault_store.dart';
 import 'exceptions.dart';
 import 'filter/filter.dart';
 import 'kmdb_codec.dart';
@@ -106,7 +108,7 @@ final class KmdbCollection<T> {
     // the system key without it being persisted in the value bytes.
     final doc = ValueCodec.decode(bytes);
     doc['_id'] = key;
-    return codec.decode(doc);
+    return decodeDoc(doc);
   }
 
   /// Returns a map of documents for each key in [keys].
@@ -510,6 +512,59 @@ final class KmdbCollection<T> {
 
   // ── Internal ───────────────────────────────────────────────────────────────
 
+  /// Decodes a document map [doc] to [T], wiring any vault URI strings to the
+  /// active [VaultStore] so that [VaultRef.getBlob] and [VaultRef.getMetadata]
+  /// work on the decoded objects.
+  ///
+  /// When no [VaultStore] is configured, vault URI strings are left as plain
+  /// strings in the map (the codec is responsible for wrapping them in
+  /// [VaultRef] instances with no store — those instances will throw
+  /// [StateError] if blob/metadata access is attempted).
+  ///
+  /// When a [VaultStore] is configured, vault URI strings in [doc] are
+  /// replaced with wired [VaultRef] instances before the map is passed to
+  /// [KmdbCodec.decode]. This allows codec implementations to call
+  /// `json['avatar'] as VaultRef` safely in their `decode` method.
+  T decodeDoc(Map<String, dynamic> doc) {
+    final vaultStore = _db.vaultStore;
+    if (vaultStore != null) {
+      _wireVaultRefsInMap(doc, vaultStore);
+    }
+    return codec.decode(doc);
+  }
+
+  /// Recursively replaces vault URI strings in [map] with wired [VaultRef]
+  /// instances backed by [store].
+  static void _wireVaultRefsInMap(Map<String, dynamic> map, VaultStore store) {
+    for (final entry in map.entries.toList()) {
+      final value = entry.value;
+      if (value is String && VaultRef.isVaultUri(value)) {
+        final ref = VaultRef(value)..wire(store);
+        map[entry.key] = ref;
+      } else if (value is Map<String, dynamic>) {
+        _wireVaultRefsInMap(value, store);
+      } else if (value is List<dynamic>) {
+        _wireVaultRefsInList(value, store);
+      }
+    }
+  }
+
+  /// Recursively replaces vault URI strings in [list] with wired [VaultRef]
+  /// instances backed by [store].
+  static void _wireVaultRefsInList(List<dynamic> list, VaultStore store) {
+    for (var i = 0; i < list.length; i++) {
+      final value = list[i];
+      if (value is String && VaultRef.isVaultUri(value)) {
+        final ref = VaultRef(value)..wire(store);
+        list[i] = ref;
+      } else if (value is Map<String, dynamic>) {
+        _wireVaultRefsInMap(value, store);
+      } else if (value is List<dynamic>) {
+        _wireVaultRefsInList(value, store);
+      }
+    }
+  }
+
   /// Validates that [doc] contains no top-level keys starting with `_`.
   ///
   /// The `_` prefix is reserved for KMDB system-managed fields (e.g. `_id`).
@@ -574,6 +629,18 @@ final class KmdbCollection<T> {
       );
     }
 
+    // Vault reference-count interception (no-op when no VaultStore is
+    // configured). Diffs old vs new vault URIs and adjusts `$vault` counters
+    // in the same WriteBatch, preserving atomicity with the document write.
+    final vaultInterceptor = _db.vaultRefInterceptor;
+    if (vaultInterceptor != null) {
+      await vaultInterceptor.interceptWrite(
+        batch: batch,
+        oldDoc: oldDoc,
+        newDoc: newDoc,
+      );
+    }
+
     await _db.store.writeBatchInternal(batch);
   }
 
@@ -614,6 +681,17 @@ final class KmdbCollection<T> {
         newDoc: null,
         oldDoc: oldDoc,
         batch: batch,
+      );
+    }
+
+    // Vault reference-count interception. A delete is a full removal of the
+    // old document, so newDoc is null — all vault URIs are decremented.
+    final vaultInterceptor = _db.vaultRefInterceptor;
+    if (vaultInterceptor != null) {
+      await vaultInterceptor.interceptWrite(
+        batch: batch,
+        oldDoc: oldDoc,
+        newDoc: null,
       );
     }
 

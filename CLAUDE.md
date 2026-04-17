@@ -90,8 +90,9 @@ make docs
 | 9a    | Lexical search (BM25 inverted index, tokenisation pipeline, FtsManager, `search` CLI command)    | ✅ Complete |
 | 9b    | Semantic search (BGE Small En v1.5, SQ8 vector index, VecManager, ONNX inference)               | ✅ Complete |
 | 9c    | Hybrid search (Reciprocal Rank Fusion, `--mode` flag, unified SearchResult types)                | ✅ Complete |
+| 10    | Vault (content-addressable blob store, KVLT packaging, ref-counted GC, distributed sync)         | ✅ Complete |
 
-All 875 kmdb + 362 kmdb_cli tests pass as of 2026-04-14.
+All 1018 kmdb + 403 kmdb_cli tests pass as of 2026-04-17.
 
 ## Architecture
 

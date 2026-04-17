@@ -18,6 +18,9 @@ import 'package:aurochs_registry_freedesktop_mimeinfo/registry.dart'
     as registry
     show MatchList, detect;
 
+export 'package:aurochs_registry_freedesktop_mimeinfo/registry.dart'
+    show MatchList;
+
 registry.MatchList detect({
   Uint8List? bytes,
   String? fileName,

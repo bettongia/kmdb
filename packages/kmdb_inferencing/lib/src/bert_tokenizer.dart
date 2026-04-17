@@ -15,7 +15,6 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:kmdb/kmdb.dart';
 import 'package:kmdb_lexical/lexical.dart' show Tokeniser, RegExpTokeniser;
 
 /// A BERT WordPiece tokeniser backed by a `vocab.txt` file.

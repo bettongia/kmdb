@@ -21,6 +21,10 @@ import '../search/fts_index_definition.dart';
 import '../search/lexical/fts_manager.dart';
 import '../search/semantic/vec_manager.dart';
 import '../search/vec_index_definition.dart';
+import '../vault/vault_gc.dart';
+import '../vault/vault_recovery.dart';
+import '../vault/vault_ref_interceptor.dart';
+import '../vault/vault_store.dart';
 import 'exceptions.dart';
 import 'index/index_definition.dart';
 import 'index/index_manager.dart';
@@ -85,6 +89,8 @@ final class KmdbDatabase {
     required List<FtsIndexDefinition> ftsIndexes,
     required List<VecIndexDefinition> vecIndexes,
     required EmbeddingModel? embeddingModel,
+    VaultStore? vaultStore,
+    VaultGc? vaultGc,
   }) : _cache = cache,
        _store = store,
        _indexManager = indexManager,
@@ -92,7 +98,13 @@ final class KmdbDatabase {
        _vecManager = vecManager,
        _ftsIndexes = ftsIndexes,
        _vecIndexes = vecIndexes,
-       _embeddingModel = embeddingModel;
+       _embeddingModel = embeddingModel,
+       _vaultStore = vaultStore,
+       // Build the interceptor only when both a VaultStore and VaultGc are
+       // present; if either is absent, vault reference counting is disabled.
+       _vaultRefInterceptor = (vaultStore != null && vaultGc != null)
+           ? VaultRefInterceptor(kvStore: store, gc: vaultGc)
+           : null;
 
   final CacheLayer _cache;
   final KvStoreImpl _store;
@@ -102,6 +114,8 @@ final class KmdbDatabase {
   final List<FtsIndexDefinition> _ftsIndexes;
   final List<VecIndexDefinition> _vecIndexes;
   final EmbeddingModel? _embeddingModel;
+  final VaultStore? _vaultStore;
+  final VaultRefInterceptor? _vaultRefInterceptor;
 
   // ── Factory ─────────────────────────────────────────────────────────────────
 
@@ -136,6 +150,10 @@ final class KmdbDatabase {
   /// `current`. Intended for Flutter apps to re-enable search UI after a sync
   /// delta has been fully applied.
   ///
+  /// [vaultStore] is the optional vault content-addressable store. When
+  /// supplied, vault reference counting and GC are activated and vault
+  /// recovery runs during open. If `null`, vault features are disabled.
+  ///
   /// [deviceId] must be an 8-character lowercase hex string. Defaults to
   /// `'00000000'` for tests; production code should supply a stable per-device
   /// identifier via `DeviceId.load`.
@@ -154,6 +172,7 @@ final class KmdbDatabase {
     List<VecIndexDefinition> vecIndexes = const [],
     EmbeddingModel? embeddingModel,
     void Function()? onSearchIndexReady,
+    VaultStore? vaultStore,
   }) async {
     // Validate that an embedding model is provided when vector indexes are
     // requested. We check this before any I/O so the error is immediate.
@@ -205,6 +224,17 @@ final class KmdbDatabase {
     // Recover from any unclean sync shutdown for vector indexes.
     await vecManager?.checkAndTransitionOnOpen();
 
+    // Run vault recovery if a VaultStore is supplied. This sweeps the staging
+    // directory and removes any incomplete or orphaned hash directories left
+    // by a prior crash (§24 crash table). Runs after LSM recovery because it
+    // uses the already-opened KvStore to validate ref counts.
+    VaultGc? vaultGc;
+    if (vaultStore != null) {
+      final recovery = VaultRecovery(store: vaultStore, kvStore: store);
+      await recovery.recover();
+      vaultGc = VaultGc(store: vaultStore, kvStore: store);
+    }
+
     return KmdbDatabase._(
       cache: cache,
       store: store,
@@ -214,6 +244,8 @@ final class KmdbDatabase {
       ftsIndexes: ftsIndexes,
       vecIndexes: vecIndexes,
       embeddingModel: embeddingModel,
+      vaultStore: vaultStore,
+      vaultGc: vaultGc,
     );
   }
 
@@ -291,4 +323,18 @@ final class KmdbDatabase {
 
   /// The embedding model configured at open time (null if no vector indexes).
   EmbeddingModel? get embeddingModel => _embeddingModel;
+
+  /// The vault store configured at open time.
+  ///
+  /// Non-null when a [VaultStore] was supplied to [open]. Used by
+  /// [KmdbCollection] to wire vault URIs in decoded documents to the active
+  /// store so that [VaultRef.getBlob] and [VaultRef.getMetadata] work.
+  VaultStore? get vaultStore => _vaultStore;
+
+  /// The vault reference count interceptor.
+  ///
+  /// Non-null when both a [VaultStore] and [VaultGc] are active. Called by
+  /// [KmdbCollection] on every document write to maintain `$vault` ref counts
+  /// atomically alongside the document write.
+  VaultRefInterceptor? get vaultRefInterceptor => _vaultRefInterceptor;
 }

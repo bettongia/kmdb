@@ -44,7 +44,11 @@ void _section(String label, Tokeniser t) {
     'Error code 0x8004210B occurred in mTLS handshake; see RFC 8446 §4.2.11.',
   );
 
-  _demo(t, 'Mixed punctuation & numbers', "It's a well-known fact that 3.14 ≈ π, isn't it?");
+  _demo(
+    t,
+    'Mixed punctuation & numbers',
+    "It's a well-known fact that 3.14 ≈ π, isn't it?",
+  );
 
   _demo(t, 'Empty string', '');
 
