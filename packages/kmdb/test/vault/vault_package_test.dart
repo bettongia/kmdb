@@ -28,10 +28,7 @@ Uint8List _utf8(String s) => Uint8List.fromList(utf8.encode(s));
 Uint8List _buildPackage({
   required Map<String, dynamic> documentJson,
   List<VaultAttachment> attachments = const [],
-}) => VaultPackage.write(
-  documentJson: documentJson,
-  attachments: attachments,
-);
+}) => VaultPackage.write(documentJson: documentJson, attachments: attachments);
 
 /// A simple document with no vault references.
 final _simpleDoc = {'title': 'Hello'};
@@ -56,9 +53,7 @@ void main() {
         final blobData = _utf8('binary blob data');
         final bytes = _buildPackage(
           documentJson: {'file': _fakeUri},
-          attachments: [
-            VaultAttachment(subdirName: '0', bytes: blobData),
-          ],
+          attachments: [VaultAttachment(subdirName: '0', bytes: blobData)],
         );
 
         final contents = VaultPackage.read(bytes);

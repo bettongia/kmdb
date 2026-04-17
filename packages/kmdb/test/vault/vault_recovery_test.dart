@@ -129,11 +129,8 @@ class _FakeKvStore implements KvStore {
   );
 
   @override
-  Future<StoreInfo> storeInfo() async => const StoreInfo(
-    dbDir: '/test',
-    deviceId: '00000000',
-    currentHlc: '0',
-  );
+  Future<StoreInfo> storeInfo() async =>
+      const StoreInfo(dbDir: '/test', deviceId: '00000000', currentHlc: '0');
 
   @override
   Future<void> reassignDeviceId(String newDeviceId) async {}
@@ -176,7 +173,10 @@ void main() {
 
         final result = await makeRecovery().recover();
         expect(result.stagingFilesDeleted, equals(1));
-        expect(adapter.files.containsKey('/db/vault/staging/crash-uuid'), isFalse);
+        expect(
+          adapter.files.containsKey('/db/vault/staging/crash-uuid'),
+          isFalse,
+        );
       });
 
       test('deletes multiple staging files', () async {
@@ -195,18 +195,19 @@ void main() {
 
     group('hash directory sweep', () {
       test(
-          'crash after step 3: blob present, no manifest, no KV ref → delete',
-          () async {
-        // Simulate crash after step 3: blob exists in final path, no manifest.
-        final sha256 =
-            'aabbcc1234567890aabbcc1234567890aabbcc1234567890aabbcc1234567890';
-        adapter.files[store.blobPath(sha256)] = Uint8List(20);
-        // No manifest, no KV ref.
+        'crash after step 3: blob present, no manifest, no KV ref → delete',
+        () async {
+          // Simulate crash after step 3: blob exists in final path, no manifest.
+          final sha256 =
+              'aabbcc1234567890aabbcc1234567890aabbcc1234567890aabbcc1234567890';
+          adapter.files[store.blobPath(sha256)] = Uint8List(20);
+          // No manifest, no KV ref.
 
-        final result = await makeRecovery().recover();
-        expect(result.hashDirsDeleted, equals(1));
-        expect(await store.isHydrated(sha256), isFalse);
-      });
+          final result = await makeRecovery().recover();
+          expect(result.hashDirsDeleted, equals(1));
+          expect(await store.isHydrated(sha256), isFalse);
+        },
+      );
 
       test('crash after step 4: manifest + blob, no KV ref → delete', () async {
         final bytes = Uint8List.fromList('content'.codeUnits);
@@ -267,24 +268,26 @@ void main() {
         expect(await store.exists(sha256), isFalse);
       });
 
-      test('tombstoned object with zero ref count is preserved (GC handles it)',
-          () async {
-        final bytes = Uint8List.fromList('tombstone'.codeUnits);
-        final ref = await store.ingest(bytes: bytes, hlcTimestamp: 't1');
-        await store.writeTombstone(ref.sha256);
-        // Set ref count to 0 in KV store — this simulates the tombstone path.
-        // However, recovery checks for presence, not tombstone state.
-        // A tombstoned object with a valid manifest is still "present in KV"
-        // only if the WriteBatch that tombstoned it also cleared the ref.
-        // Recovery should NOT delete tombstoned objects — that's GC's job.
-        // If ref count is 0 and manifest is present, delete it.
-        // (This tests that we don't accidentally preserve a zero-ref object.)
-        kvStore.setRefCount(ref.sha256, 0);
+      test(
+        'tombstoned object with zero ref count is preserved (GC handles it)',
+        () async {
+          final bytes = Uint8List.fromList('tombstone'.codeUnits);
+          final ref = await store.ingest(bytes: bytes, hlcTimestamp: 't1');
+          await store.writeTombstone(ref.sha256);
+          // Set ref count to 0 in KV store — this simulates the tombstone path.
+          // However, recovery checks for presence, not tombstone state.
+          // A tombstoned object with a valid manifest is still "present in KV"
+          // only if the WriteBatch that tombstoned it also cleared the ref.
+          // Recovery should NOT delete tombstoned objects — that's GC's job.
+          // If ref count is 0 and manifest is present, delete it.
+          // (This tests that we don't accidentally preserve a zero-ref object.)
+          kvStore.setRefCount(ref.sha256, 0);
 
-        final result = await makeRecovery().recover();
-        // With ref count 0, the recovery should delete it.
-        expect(result.hashDirsDeleted, equals(1));
-      });
+          final result = await makeRecovery().recover();
+          // With ref count 0, the recovery should delete it.
+          expect(result.hashDirsDeleted, equals(1));
+        },
+      );
     });
 
     group('VaultRecoveryResult', () {

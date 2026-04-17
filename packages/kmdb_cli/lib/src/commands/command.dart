@@ -16,6 +16,7 @@ import 'dart:convert';
 import 'dart:io' as io;
 
 import 'package:kmdb/kmdb.dart';
+import 'package:kmdb/src/vault/vault_store.dart';
 
 import '../config/kmdb_config.dart';
 import '../output/document_formatter.dart';
@@ -23,14 +24,15 @@ import '../output/output_mode.dart';
 
 /// Execution context passed to every CLI command.
 ///
-/// Carries the open store, the CLI config, the index manager, the chosen
-/// output mode, and output sinks so commands can be tested without real
-/// disk I/O or stdout.
+/// Carries the open store, the CLI config, the index manager, the optional
+/// vault store, the chosen output mode, and output sinks so commands can be
+/// tested without real disk I/O or stdout.
 final class CommandContext {
   CommandContext({
     required this.store,
     KmdbConfig? config,
     IndexManager? indexManager,
+    this.vaultStore,
     this.mode = OutputMode.json,
     this.dbCreated = false,
     StringSink? out,
@@ -43,6 +45,13 @@ final class CommandContext {
 
   /// The open key-value store.
   final KvStoreImpl store;
+
+  /// The open vault store, or `null` when vault is not configured.
+  ///
+  /// Set by the CLI runner when the database directory contains a vault
+  /// subdirectory. Vault commands that require this field should check for
+  /// `null` and report an error to the user rather than crashing.
+  final VaultStore? vaultStore;
 
   /// The per-database CLI configuration loaded from `local/config.json`.
   ///

@@ -58,14 +58,12 @@ final class _NoOpDetector implements MediaTypeDetector {
   const _NoOpDetector();
 
   @override
-  MatchList detect(Uint8List bytes, {String? fileName}) =>
-      MatchList(); // empty match list
+  MatchList detect(Uint8List bytes, {String? fileName}) => MatchList(); // empty match list
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-Uint8List _bytes(String content) =>
-    Uint8List.fromList(content.codeUnits);
+Uint8List _bytes(String content) => Uint8List.fromList(content.codeUnits);
 
 /// Returns a 64-char lower-case hex hash of [data] using VaultStore.
 String _sha256Of(Uint8List data) => VaultStore.computeSha256ForTest(data);
@@ -90,17 +88,16 @@ void main() {
             'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890';
         expect(
           store.hashDir(sha256),
-          equals('/db/vault/blobs/sha256/ab/cdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890'),
+          equals(
+            '/db/vault/blobs/sha256/ab/cdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
+          ),
         );
       });
 
       test('blobPath is inside hashDir', () {
         const sha256 =
             'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890';
-        expect(
-          store.blobPath(sha256),
-          endsWith('/blob'),
-        );
+        expect(store.blobPath(sha256), endsWith('/blob'));
         expect(store.blobPath(sha256), startsWith(store.hashDir(sha256)));
       });
 
@@ -117,10 +114,7 @@ void main() {
       });
 
       test('stagingPath is inside stagingDir', () {
-        expect(
-          store.stagingPath('abc'),
-          equals('/db/vault/staging/abc'),
-        );
+        expect(store.stagingPath('abc'), equals('/db/vault/staging/abc'));
       });
     });
 
@@ -179,7 +173,10 @@ void main() {
       test('manifest is written to correct path', () async {
         final bytes = _bytes('manifest test');
         final ref = await store.ingest(bytes: bytes, hlcTimestamp: 't1');
-        expect(adapter.files.containsKey(store.manifestPath(ref.sha256)), isTrue);
+        expect(
+          adapter.files.containsKey(store.manifestPath(ref.sha256)),
+          isTrue,
+        );
       });
 
       test('blob is written to correct path', () async {
@@ -229,16 +226,19 @@ void main() {
         );
       });
 
-      test('explicit media type is accepted when candidates are empty', () async {
-        final bytes = _bytes('explicit type');
-        final ref = await store.ingest(
-          bytes: bytes,
-          hlcTimestamp: 't1',
-          explicitMediaType: 'text/plain',
-        );
-        final manifest = await store.getManifest(ref.sha256);
-        expect(manifest.mediaType, equals('text/plain'));
-      });
+      test(
+        'explicit media type is accepted when candidates are empty',
+        () async {
+          final bytes = _bytes('explicit type');
+          final ref = await store.ingest(
+            bytes: bytes,
+            hlcTimestamp: 't1',
+            explicitMediaType: 'text/plain',
+          );
+          final manifest = await store.getManifest(ref.sha256);
+          expect(manifest.mediaType, equals('text/plain'));
+        },
+      );
     });
 
     group('ingest — deduplication', () {
@@ -296,8 +296,9 @@ void main() {
           createdAt: 't0',
         );
         final manifestBytes = fakeManifest.toJsonString().codeUnits;
-        adapter.files[store.manifestPath(sha256)] =
-            Uint8List.fromList(manifestBytes);
+        adapter.files[store.manifestPath(sha256)] = Uint8List.fromList(
+          manifestBytes,
+        );
 
         // Ingest the same bytes again — the stored CRC32C is now different.
         expect(
@@ -320,8 +321,9 @@ void main() {
           originalName: 'fake.bin',
           createdAt: 't0',
         );
-        adapter.files[store.manifestPath(sha256)] =
-            Uint8List.fromList(fakeManifest.toJsonString().codeUnits);
+        adapter.files[store.manifestPath(sha256)] = Uint8List.fromList(
+          fakeManifest.toJsonString().codeUnits,
+        );
 
         try {
           await store.ingest(bytes: bytes, hlcTimestamp: 't2');
@@ -344,7 +346,7 @@ void main() {
 
       test('throws VaultObjectNotFoundException for unknown hash', () async {
         expect(
-          () => store.getBytes('a' * 64),  // ignore: avoid_dynamic_calls
+          () => store.getBytes('a' * 64), // ignore: avoid_dynamic_calls
           throwsA(isA<VaultObjectNotFoundException>()),
         );
       });
@@ -424,15 +426,17 @@ void main() {
 
         // Write a VAULT_OFFLINE file with the hash entry.
         final line = VaultStore.vaultOfflineLine(ref.sha256);
-        adapter.files[store.vaultOfflinePath] =
-            Uint8List.fromList('$line\n'.codeUnits);
+        adapter.files[store.vaultOfflinePath] = Uint8List.fromList(
+          '$line\n'.codeUnits,
+        );
 
         await store.deleteHashDir(ref.sha256);
 
         // VAULT_OFFLINE should no longer contain the entry.
         if (adapter.files.containsKey(store.vaultOfflinePath)) {
-          final content =
-              String.fromCharCodes(adapter.files[store.vaultOfflinePath]!);
+          final content = String.fromCharCodes(
+            adapter.files[store.vaultOfflinePath]!,
+          );
           expect(content, isNot(contains(line)));
         }
       });
@@ -475,9 +479,12 @@ void main() {
       test('SHA-256 of empty bytes', () {
         final hash = _sha256Of(Uint8List(0));
         // Known SHA-256 of empty input
-        expect(hash, equals(
-          'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-        ));
+        expect(
+          hash,
+          equals(
+            'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+          ),
+        );
       });
 
       test('CRC32C of known input', () {

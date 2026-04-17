@@ -104,3 +104,13 @@ export 'src/search/semantic/vec_manager.dart' show VecManager;
 
 // ── Text search — hybrid (RRF) ────────────────────────────────────────────────
 export 'src/search/hybrid/hybrid_manager.dart' show rrfScore, mergeWithRrf;
+
+// ── Vault — content-addressable binary object store ───────────────────────────
+export 'src/vault/vault_ref.dart' show VaultRef;
+export 'src/vault/vault_manifest.dart' show VaultManifest;
+export 'src/vault/vault_store.dart'
+    show VaultStore, VaultCrcMismatchException, VaultObjectNotFoundException;
+export 'src/vault/vault_storage_adapter.dart' show VaultStorageAdapter;
+export 'src/vault/local_directory_vault_adapter_stub.dart'
+    if (dart.library.io) 'src/vault/local_directory_vault_adapter.dart'
+    show LocalDirectoryVaultAdapter;

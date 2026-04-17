@@ -163,13 +163,19 @@ void main() {
   group('VaultGc', () {
     group('onZeroRefs', () {
       test('creates tombstone.json for the hash', () async {
-        final ref = await store.ingest(bytes: _bytes('test'), hlcTimestamp: 't1');
+        final ref = await store.ingest(
+          bytes: _bytes('test'),
+          hlcTimestamp: 't1',
+        );
         await gc.onZeroRefs(ref.sha256);
         expect(await store.isTombstoned(ref.sha256), isTrue);
       });
 
       test('does not affect the blob or manifest', () async {
-        final ref = await store.ingest(bytes: _bytes('intact'), hlcTimestamp: 't1');
+        final ref = await store.ingest(
+          bytes: _bytes('intact'),
+          hlcTimestamp: 't1',
+        );
         await gc.onZeroRefs(ref.sha256);
         expect(await store.exists(ref.sha256), isTrue);
         expect(await store.isHydrated(ref.sha256), isTrue);
@@ -178,7 +184,10 @@ void main() {
 
     group('onRefRestored', () {
       test('removes tombstone.json', () async {
-        final ref = await store.ingest(bytes: _bytes('restore'), hlcTimestamp: 't1');
+        final ref = await store.ingest(
+          bytes: _bytes('restore'),
+          hlcTimestamp: 't1',
+        );
         await gc.onZeroRefs(ref.sha256);
         expect(await store.isTombstoned(ref.sha256), isTrue);
 
@@ -187,7 +196,10 @@ void main() {
       });
 
       test('blob and manifest remain after un-tombstoning', () async {
-        final ref = await store.ingest(bytes: _bytes('un-tomb'), hlcTimestamp: 't1');
+        final ref = await store.ingest(
+          bytes: _bytes('un-tomb'),
+          hlcTimestamp: 't1',
+        );
         await gc.onZeroRefs(ref.sha256);
         await gc.onRefRestored(ref.sha256);
 
@@ -198,7 +210,10 @@ void main() {
 
     group('sweep', () {
       test('deletes tombstoned object with zero ref count', () async {
-        final ref = await store.ingest(bytes: _bytes('sweep me'), hlcTimestamp: 't1');
+        final ref = await store.ingest(
+          bytes: _bytes('sweep me'),
+          hlcTimestamp: 't1',
+        );
         kvStore.clearRefCount(ref.sha256); // no ref count = 0
         await gc.onZeroRefs(ref.sha256);
 
@@ -230,7 +245,10 @@ void main() {
       });
 
       test('skips non-tombstoned objects', () async {
-        final ref = await store.ingest(bytes: _bytes('keep'), hlcTimestamp: 't1');
+        final ref = await store.ingest(
+          bytes: _bytes('keep'),
+          hlcTimestamp: 't1',
+        );
         kvStore.setRefCount(ref.sha256, 1);
         // No tombstone.
 
@@ -240,22 +258,31 @@ void main() {
         expect(await store.exists(ref.sha256), isTrue);
       });
 
-      test('guard: tombstone present but ref count restored before sweep', () async {
-        // This tests the TOCTOU guard: a tombstone was created when ref=0,
-        // but before the sweep ran, the object was re-referenced.
-        final ref = await store.ingest(bytes: _bytes('guard test'), hlcTimestamp: 't1');
-        await gc.onZeroRefs(ref.sha256); // tombstone created when ref=0
+      test(
+        'guard: tombstone present but ref count restored before sweep',
+        () async {
+          // This tests the TOCTOU guard: a tombstone was created when ref=0,
+          // but before the sweep ran, the object was re-referenced.
+          final ref = await store.ingest(
+            bytes: _bytes('guard test'),
+            hlcTimestamp: 't1',
+          );
+          await gc.onZeroRefs(ref.sha256); // tombstone created when ref=0
 
-        // Before sweep, ref count is restored (new document references this object).
-        kvStore.setRefCount(ref.sha256, 1);
+          // Before sweep, ref count is restored (new document references this object).
+          kvStore.setRefCount(ref.sha256, 1);
 
-        final result = await gc.sweep();
-        expect(result.examined, equals(1)); // tombstoned so examined
-        expect(result.deleted, equals(0)); // but NOT deleted
-        expect(result.skipped, equals(1)); // re-referenced, tombstone removed
-        expect(await store.exists(ref.sha256), isTrue); // object preserved
-        expect(await store.isTombstoned(ref.sha256), isFalse); // tombstone cleaned up
-      });
+          final result = await gc.sweep();
+          expect(result.examined, equals(1)); // tombstoned so examined
+          expect(result.deleted, equals(0)); // but NOT deleted
+          expect(result.skipped, equals(1)); // re-referenced, tombstone removed
+          expect(await store.exists(ref.sha256), isTrue); // object preserved
+          expect(
+            await store.isTombstoned(ref.sha256),
+            isFalse,
+          ); // tombstone cleaned up
+        },
+      );
 
       test('empty vault returns empty result', () async {
         final result = await gc.sweep();

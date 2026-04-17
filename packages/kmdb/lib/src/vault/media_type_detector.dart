@@ -14,7 +14,8 @@
 
 import 'dart:typed_data';
 
-import 'package:kmdb_mediatype/kmdb_mediatype.dart' as kmdb_mediatype
+import 'package:kmdb_mediatype/kmdb_mediatype.dart'
+    as kmdb_mediatype
     show detect;
 import 'package:kmdb_mediatype/kmdb_mediatype.dart' show MatchList;
 

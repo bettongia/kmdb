@@ -17,7 +17,10 @@ import 'dart:io' as io;
 
 import 'package:kmdb/kmdb.dart';
 
+import 'package:kmdb/src/vault/vault_package.dart';
+
 import 'command.dart';
+import 'vault/vault_import_helper.dart';
 
 /// Inserts one or more new documents into a collection.
 ///
@@ -38,9 +41,17 @@ import 'command.dart';
 /// 2. `--file <path>` — file path. Files with a `.ndjson` or `.jsonl`
 ///    extension are parsed as NDJSON; all other files are parsed as JSON
 ///    (object or array).
-/// 3. stdin — JSON (object or array) or NDJSON auto-detected.
+/// 3. `--import <path>` — KVLT vault package file. Ingests vault blobs and
+///    inserts the document from the package. Mutually exclusive with `--value`
+///    and `--file`. Requires vault to be configured.
+/// 4. stdin — JSON (object or array) or NDJSON auto-detected.
 ///
-/// Usage: `kmdb <db> insert <collection> [--value <json>] [--file <path>]`
+/// Usage:
+/// ```
+/// kmdb <db> insert <collection> [--value <json>]
+/// kmdb <db> insert <collection> [--file <path>]
+/// kmdb <db> insert <collection> [--import <package.kvlt>]
+/// ```
 final class InsertCommand implements CliCommand {
   const InsertCommand();
 
@@ -53,7 +64,9 @@ final class InsertCommand implements CliCommand {
       'from --value, --file, or stdin.';
 
   @override
-  String get usage => 'insert <collection> [--value <json>] [--file <path>]';
+  String get usage =>
+      'insert <collection> [--value <json>] [--file <path>] '
+      '[--import <package.kvlt>]';
 
   @override
   Future<bool> execute(
@@ -66,6 +79,18 @@ final class InsertCommand implements CliCommand {
       return false;
     }
     final collection = args[0];
+
+    // ── Mutual exclusion check for --import ────────────────────────────────
+    final importPath = flags['import'] as String?;
+    if (importPath != null) {
+      if (flags['value'] != null || flags['file'] != null) {
+        ctx.writeError(
+          '--import is mutually exclusive with --value and --file.',
+        );
+        return false;
+      }
+      return _executeImport(ctx, collection, importPath);
+    }
 
     final docs = await _readDocuments(ctx, flags);
     if (docs == null) return false;
@@ -81,6 +106,76 @@ final class InsertCommand implements CliCommand {
     }
 
     ctx.writeDocuments(inserted);
+    return true;
+  }
+
+  // ── Vault package import ───────────────────────────────────────────────────
+
+  /// Reads a KVLT vault package from [packagePath], ingests vault blobs, and
+  /// inserts the document into [collection].
+  ///
+  /// The ref counts for all vault URIs in the document are incremented
+  /// atomically with the document write in a single [WriteBatch].
+  Future<bool> _executeImport(
+    CommandContext ctx,
+    String collection,
+    String packagePath,
+  ) async {
+    final vaultStore = ctx.vaultStore;
+    if (vaultStore == null) {
+      ctx.writeError(
+        '--import requires vault to be configured for this database.',
+      );
+      return false;
+    }
+
+    // Read and parse the vault package.
+    final contents = readVaultPackage(
+      packagePath: packagePath,
+      packageBytes: null,
+      errSink: ctx.err,
+    );
+    if (contents == null) return false;
+
+    // Validate: all vault URIs in document are covered by attachments.
+    try {
+      VaultPackage.validate(
+        documentJson: contents.documentJson,
+        attachments: contents.attachments,
+      );
+    } on FormatException catch (e) {
+      ctx.writeError('Invalid vault package: ${e.message}');
+      return false;
+    }
+
+    // Ingest all vault blobs.
+    final info = await ctx.store.storeInfo();
+    final ingestedHashes = await ingestVaultAttachments(
+      vaultStore: vaultStore,
+      attachments: contents.attachments,
+      hlcTimestamp: info.currentHlc,
+      errSink: ctx.err,
+    );
+    if (ingestedHashes == null) return false;
+
+    // Assign a new document key and build the document map.
+    final doc = Map<String, dynamic>.of(contents.documentJson);
+    final key = const UuidV7KeyGenerator().next();
+    doc['_id'] = key;
+
+    // Build a WriteBatch: document write + vault ref count increments.
+    final batch = WriteBatch();
+    batch.put(collection, key, ValueCodec.encode(doc));
+    await applyVaultRefCounts(
+      doc: doc,
+      oldDoc: null,
+      store: ctx.store,
+      vaultStore: vaultStore,
+      batch: batch,
+    );
+    await ctx.store.writeBatch(batch);
+
+    ctx.writeDocuments([doc]);
     return true;
   }
 

@@ -219,8 +219,7 @@ final class VaultPackage {
     for (final uri in docVaultUris) {
       final sha256 = uri.substring('kmdb-vault://sha256/'.length);
       final hasAttachment = attachments.any(
-        (a) =>
-            a.uploadManifest?.sha256 == sha256 || attachments.isEmpty,
+        (a) => a.uploadManifest?.sha256 == sha256 || attachments.isEmpty,
       );
       if (!existingHashes.contains(sha256) && !hasAttachment) {
         throw FormatException(
@@ -293,13 +292,12 @@ final class VaultPackage {
         'Vault package is missing required "document.json".',
       );
     }
-    final documentJson = json.decode(utf8.decode(docBytes)) as Map<String, dynamic>;
+    final documentJson =
+        json.decode(utf8.decode(docBytes)) as Map<String, dynamic>;
 
     // Collect all vault subdirectories.
-    final vaultPaths = entries.keys
-        .where((k) => k.startsWith('vault/'))
-        .toList()
-      ..sort();
+    final vaultPaths =
+        entries.keys.where((k) => k.startsWith('vault/')).toList()..sort();
 
     final subdirs = <String>{};
     for (final p in vaultPaths) {
@@ -316,7 +314,9 @@ final class VaultPackage {
       VaultManifest? uploadManifest;
       final manifestBytes = entries['${prefix}manifest.json'];
       if (manifestBytes != null) {
-        uploadManifest = VaultManifest.fromJsonString(utf8.decode(manifestBytes));
+        uploadManifest = VaultManifest.fromJsonString(
+          utf8.decode(manifestBytes),
+        );
       }
 
       // Resolve the blob file per §24 file resolution rules.

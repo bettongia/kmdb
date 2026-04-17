@@ -191,9 +191,7 @@ final class VaultManifest {
       throw FormatException('VaultManifest: invalid JSON: ${e.message}');
     }
     if (decoded is! Map<String, dynamic>) {
-      throw const FormatException(
-        'VaultManifest: JSON root must be an object',
-      );
+      throw const FormatException('VaultManifest: JSON root must be an object');
     }
     return VaultManifest.fromJson(decoded);
   }

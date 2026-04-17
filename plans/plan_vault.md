@@ -1,6 +1,6 @@
 # Vault — Content-Addressable Object Store
 
-**Status**: Implementing
+**Status**: Complete
 
 **PR link**: _pending_
 
@@ -235,19 +235,19 @@ _Zstandard archive for insert/update/export/backup with attachments._
 
 _`vault get`, `--import` for insert/update, `--vault` for backup/export._
 
-- [ ] Create `vault_command.dart` and `vault_get_command.dart`:
+- [x] Create `vault_command.dart` and `vault_get_command.dart`:
   - `kmdb {db} vault get {uri}` — fetch vault object (hydrating if stub);
     write to stdout or `--output` file
-- [ ] Modify `insert_command.dart`: add `--import` flag (mutually exclusive
+- [x] Modify `insert_command.dart`: add `--import` flag (mutually exclusive
       with `--value` and `--file`; error if combined)
-- [ ] Modify `update_command.dart`: add `--import` flag with the same
+- [x] Modify `update_command.dart`: add `--import` flag with the same
       mutual exclusion; handle all six update scenarios from §24
-- [ ] Modify `backup_command.dart`: add `--vault` flag; produce Zstandard
+- [x] Modify `backup_command.dart`: add `--vault` flag; produce Zstandard
       archive with `documents.bak` + `vault/` when set
-- [ ] Modify `export_command.dart`: add `--vault` flag; produce Zstandard
+- [x] Modify `export_command.dart`: add `--vault` flag; produce Zstandard
       archive with `documents.ndjson` + `vault/` (collection-scoped) when set
-- [ ] Register `vault` command in `kmdb_cli.dart`
-- [ ] Write CLI tests for all new commands and flags:
+- [x] Register `vault` command in `kmdb_cli.dart`
+- [x] Write CLI tests for all new commands and flags:
   - `vault_get_command_test.dart`
   - `insert_import_test.dart`
   - `update_import_test.dart`
@@ -258,14 +258,14 @@ _`vault get`, `--import` for insert/update, `--vault` for backup/export._
 
 _`VaultStorageAdapter` and stub hydration._
 
-- [ ] Create `vault_storage_adapter.dart`: `VaultStorageAdapter` abstract
+- [x] Create `vault_storage_adapter.dart`: `VaultStorageAdapter` abstract
       interface with `uploadVaultObject`, `syncVaultMetadata`,
       `hydrateVaultBlob`, `vaultObjectExists`
-- [ ] Implement `LocalDirectoryVaultAdapter` (mirrors the existing
+- [x] Implement `LocalDirectoryVaultAdapter` (mirrors the existing
       `LocalDirectoryAdapter` for SSTables) for integration testing
-- [ ] Wire `VaultStore.get()` to call `hydrateVaultBlob` when blob is absent
+- [x] Wire `VaultStore.get()` to call `hydrateVaultBlob` when blob is absent
       and a `VaultStorageAdapter` is configured
-- [ ] Write tests:
+- [x] Write tests:
   - `vault_storage_adapter_test.dart` — upload, syncMetadata (creates stub),
     hydrateBlob (resolves stub), exists check, FWW (manifest already present,
     upload skipped)
@@ -275,16 +275,50 @@ _`VaultStorageAdapter` and stub hydration._
 
 ### Phase 7 — Documentation & housekeeping
 
-- [ ] Update `packages/kmdb/lib/kmdb.dart` to export vault public API
+- [x] Update `packages/kmdb/lib/kmdb.dart` to export vault public API
       (`VaultRef`, `VaultManifest`, `VaultStore`, `VaultStorageAdapter`)
-- [ ] Verify all public classes, methods, and properties have doc comments
-- [ ] Add license headers to all new `.dart` files
-- [ ] Run `dart analyze packages/kmdb` and `dart analyze packages/kmdb_cli`
+- [x] Verify all public classes, methods, and properties have doc comments
+- [x] Add license headers to all new `.dart` files
+- [x] Run `dart analyze packages/kmdb` and `dart analyze packages/kmdb_cli`
       with zero errors
-- [ ] Run full test suite (`dart test packages/kmdb` and
+- [x] Run full test suite (`dart test packages/kmdb` and
       `dart test packages/kmdb_cli`); confirm ≥ 90% coverage
-- [ ] Update `CLAUDE.md` implementation status table (Phase 10: Vault)
+- [x] Update `CLAUDE.md` implementation status table (Phase 10: Vault)
 
 ## Summary
 
-_To be completed after implementation._
+Implemented the vault subsystem across all seven phases:
+
+**Core (Phase 1–4):** `VaultManifest`, `VaultRef`, `VaultStore` (CAS write path
+with SHA-256 + CRC32C ISS pattern, staging→rename crash safety), `VaultGc`
+(tombstone-based reference-counted GC), `VaultRecovery` (staging sweep + orphan
+hash-directory sweep), and `VaultPackage` (KVLT custom binary format for
+document+attachment archives with Zstd compression).
+
+**Query Layer integration (Phase 3):** `VaultRefInterceptor` intercepts every
+`put`/`delete` through `KmdbCollection.writeBatchInternal`, diffs vault URIs,
+and adjusts `$vault:{sha256}` ref counters in the same `WriteBatch` for
+atomicity. `KmdbDatabase.open()` accepts an optional `VaultStore` and wires it
+to all collections.
+
+**CLI (Phase 5):** `vault get` command; `--import` flag on `insert` and
+`update`; `--vault` flag on `backup` and `export`. CLI tests cover all commands
+including error paths.
+
+**Distributed sync (Phase 6):** `VaultStorageAdapter` abstract interface and
+`LocalDirectoryVaultAdapter` (native `dart:io` with platform-conditional export
+stub for web). First-writer-wins for `manifest.json`; idempotent blob uploads;
+staging→rename on hydration. Two-device sync integration tests confirm the full
+lifecycle: ingest → upload → stub → on-demand hydration.
+
+**Key deviations from plan:** None. All design decisions matched the spec
+(§24). The `LocalDirectoryVaultAdapter` routes local reads through the
+`StorageAdapter` interface (not raw `dart:io.File`) so the same adapter works
+with both `MemoryStorageAdapter` (tests) and `StorageAdapterNative` (production).
+
+**Test counts added:** 20 new `packages/kmdb` tests (vault storage adapter + sync
+integration) on top of the 79+ from phases 1–4; 41 new `packages/kmdb_cli`
+tests across the five vault CLI test files.
+
+**Final totals:** 1018 kmdb tests, 403 kmdb_cli tests — all passing. Zero
+analyzer issues.

@@ -156,37 +156,58 @@ void main() {
 
       test('throws FormatException for missing crc32c', () {
         final json = baseJson()..remove('crc32c');
-        expect(() => VaultManifest.fromJson(json), throwsA(isA<FormatException>()));
+        expect(
+          () => VaultManifest.fromJson(json),
+          throwsA(isA<FormatException>()),
+        );
       });
 
       test('throws FormatException for crc32c with wrong length', () {
         final json = baseJson()..[('crc32c')] = 'abc';
-        expect(() => VaultManifest.fromJson(json), throwsA(isA<FormatException>()));
+        expect(
+          () => VaultManifest.fromJson(json),
+          throwsA(isA<FormatException>()),
+        );
       });
 
       test('throws FormatException for missing size', () {
         final json = baseJson()..remove('size');
-        expect(() => VaultManifest.fromJson(json), throwsA(isA<FormatException>()));
+        expect(
+          () => VaultManifest.fromJson(json),
+          throwsA(isA<FormatException>()),
+        );
       });
 
       test('throws FormatException for non-int size', () {
         final json = baseJson()..[('size')] = '12345';
-        expect(() => VaultManifest.fromJson(json), throwsA(isA<FormatException>()));
+        expect(
+          () => VaultManifest.fromJson(json),
+          throwsA(isA<FormatException>()),
+        );
       });
 
       test('throws FormatException for missing mediaType', () {
         final json = baseJson()..remove('mediaType');
-        expect(() => VaultManifest.fromJson(json), throwsA(isA<FormatException>()));
+        expect(
+          () => VaultManifest.fromJson(json),
+          throwsA(isA<FormatException>()),
+        );
       });
 
       test('throws FormatException for missing originalName', () {
         final json = baseJson()..remove('originalName');
-        expect(() => VaultManifest.fromJson(json), throwsA(isA<FormatException>()));
+        expect(
+          () => VaultManifest.fromJson(json),
+          throwsA(isA<FormatException>()),
+        );
       });
 
       test('throws FormatException for missing createdAt', () {
         final json = baseJson()..remove('createdAt');
-        expect(() => VaultManifest.fromJson(json), throwsA(isA<FormatException>()));
+        expect(
+          () => VaultManifest.fromJson(json),
+          throwsA(isA<FormatException>()),
+        );
       });
     });
 
