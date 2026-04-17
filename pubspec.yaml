@@ -75,7 +75,7 @@ melos:
     coverage:clean:
       run: rm -rf coverage
       exec:
-        dir-exists: coverage
+        dirExists: coverage
 
     coverage:generate:
       description: Test all packages with coverage
@@ -84,9 +84,9 @@ melos:
         lcov --summary coverage/lcov.info
       exec:
         concurrency: 4
-        dir-exists: test
       packageFilters:
         flutter: false
+        dirExists: test
 
     coverage:generate-flutter:
       description: Test all packages with coverage
@@ -94,9 +94,9 @@ melos:
         flutter test --coverage
       exec:
         concurrency: 4
-        dir-exists: test
       packageFilters:
         flutter: true
+        dirExists: test
 
     coverage:combine:
       description: Combine coverage across packages
@@ -110,8 +110,10 @@ melos:
       description: Combine the package coverage files
       run: $MELOS_ROOT_PATH/scripts/combine_coverage.sh
       exec:
-        file-exists: coverage/lcov.info
+        fileExists: coverage/lcov.info
         concurrency: 1
+      packageFilters:
+        dirExists: test
 
     coverage:report:
       run: |

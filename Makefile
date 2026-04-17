@@ -1,8 +1,5 @@
 .DEFAULT_GOAL := default
 
-.PHONY: default cicd pre_commit test e2e_test tests_all cli_test site dart_doc default checks coverage license_check license_add styles clean format
-
-
 COVERAGE_DIR=site/coverage
 KMDB_PKG=packages/kmdb
 KMDB_CLI_PKG=packages/kmdb_cli
@@ -11,46 +8,42 @@ KMDB_UI_PKG=packages/kmdb_ui
 ADDLICENSE_CONFIG=addlicense_config.txt
 
 default: site/ format analyze checks site
+.PHONY: default
 
 analyze:
 	melos run analyze
-
 .PHONY: analyze
 
 pre_commit: clean default
+.PHONY: pre_commit
 
 cicd: clean test default e2e_test
+.PHONY: cicd
 
 tests_all: test e2e_test
+.PHONY: tests_all
 
 prepare:
 	dart pub global activate melos
 	dart pub global activate coverage
 	melos bootstrap
+.PHONY: prepare
 
-test: test.log cli_test.log ui_test.log
+test: test.log
+.PHONY: test
 
+test.log: packages/**
+	melos test --no-select | tee test.log
 
-ui_test: ui_test.log
-.PHONY: ui_test
-
-ui_test.log: $(KMDB_UI_PKG)/**/*.dart
-	melos flutter-test --scope=kmdb_ui | tee ui_test.log
-
-test.log: $(KMDB_PKG)/**/*.dart
-	melos test --scope=kmdb | tee test.log
-
-cli_test: cli_test.log
-
-cli_test.log: $(KMDB_CLI_PKG)/**/*.dart $(KMDB_PKG)/**/*.dart
-	melos test --scope=kmdb_cli | tee cli_test.log
 
 e2e_test: e2e_test.log
+.PHONY: e2e_test
 
-e2e_test.log: $(KMDB_CLI_PKG)/**/*.dart $(KMDB_PKG)/**/*.dart packages/kmdb_cli/test/e2e/cli_session_test.dart
+e2e_test.log: packages/**
 	melos e2e-test | tee e2e_test.log
 
 checks: coverage.log license_check
+.PHONY: checks
 
 license_check:
 	melos licenses
@@ -58,12 +51,16 @@ license_check:
 license_add:
 	melos licenses:add
 
+.PHONY: license_add license_check
+
 site: styles site/index.html site/spec.html site/api/index.html site/roadmap.html site/primer.html site/spec.pdf site/primer.pdf | site/
+.PHONY: site
 
 site/:
 	mkdir -p site
 
 styles: site/styles/styles.css
+.PHONY: styles
 
 site/styles/styles.css: docs/styles/styles.css | site/
 	mkdir -p site/styles/
@@ -90,8 +87,9 @@ site/spec.epub: docs/spec/*.md | site/
 		--include-before-body docs/template/preface.md
 
 coverage: coverage.log
+.PHONY: coverage
 
-coverage.log: $(KMDB_PKG)/**/*.dart $(KMDB_CLI_PKG)/**/*.dart | site/
+coverage.log: packages/** | site/
 	melos coverage | tee coverage.log
 
 site/spec.pdf: docs/spec/*.md | site/
@@ -107,10 +105,6 @@ site/primer.pdf: docs/primer.md | site/
   		-V monofont="DejaVu Sans Mono" \
 		-H docs/template/header.tex
 
-$(KMDB_PKG)/**/*.dart:
-
-$(KMDB_CLI_PKG)/**/*.dart:
-
 format:
 	melos format
 .PHONY: format
@@ -118,9 +112,6 @@ format:
 clean:
 	melos clean
 	rm -rf site
-	rm -f e2e_test.log
-	rm -f test.log
-	rm -f ui_test.log
-	rm -f cli_test.log
-	rm -f coverage.log
+	rm -f *.log
 	melos bootstrap
+.PHONY: clean
