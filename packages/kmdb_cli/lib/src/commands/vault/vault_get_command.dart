@@ -15,7 +15,7 @@
 import 'dart:io' as io;
 import 'dart:typed_data';
 
-import 'package:kmdb/src/vault/vault_ref.dart';
+import 'package:kmdb/kmdb.dart';
 
 import '../command.dart';
 

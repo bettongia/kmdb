@@ -17,7 +17,6 @@ import 'dart:io' as io;
 
 import 'package:args/command_runner.dart';
 import 'package:kmdb/kmdb.dart';
-import 'package:kmdb/src/vault/vault_store.dart';
 
 import 'commands/collections_command.dart';
 import 'commands/command.dart';

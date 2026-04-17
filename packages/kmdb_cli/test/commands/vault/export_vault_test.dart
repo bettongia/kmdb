@@ -17,8 +17,6 @@ import 'dart:io' as io;
 import 'dart:typed_data';
 
 import 'package:kmdb/kmdb.dart';
-import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
-import 'package:kmdb/src/vault/vault_store.dart';
 import 'package:kmdb_cli/src/commands/command.dart';
 import 'package:kmdb_cli/src/commands/export_command.dart';
 import 'package:test/test.dart';

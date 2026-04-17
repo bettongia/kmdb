@@ -17,8 +17,6 @@ import 'dart:io' as io;
 
 import 'package:kmdb/kmdb.dart';
 
-import 'package:kmdb/src/vault/vault_package.dart';
-
 import 'command.dart';
 import 'vault/vault_import_helper.dart';
 

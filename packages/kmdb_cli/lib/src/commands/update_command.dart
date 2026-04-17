@@ -16,8 +16,6 @@ import 'dart:convert';
 
 import 'package:kmdb/kmdb.dart';
 
-import 'package:kmdb/src/vault/vault_package.dart';
-
 import '../filter/filter_parser.dart';
 import 'command.dart';
 import 'vault/vault_import_helper.dart';

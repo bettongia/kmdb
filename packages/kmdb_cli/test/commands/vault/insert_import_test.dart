@@ -17,9 +17,6 @@ import 'dart:io' as io;
 import 'dart:typed_data';
 
 import 'package:kmdb/kmdb.dart';
-import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
-import 'package:kmdb/src/vault/vault_package.dart';
-import 'package:kmdb/src/vault/vault_store.dart';
 import 'package:kmdb_cli/src/commands/command.dart';
 import 'package:kmdb_cli/src/commands/insert_command.dart';
 import 'package:test/test.dart';
@@ -66,40 +63,6 @@ CommandContext _ctx(
   out: out ?? StringBuffer(),
   err: err ?? StringBuffer(),
 );
-
-/// Builds a minimal KVLT package file on disk at [path] using [doc] and
-/// [attachmentBytes]. Returns the sha256 of the attachment.
-///
-/// If [doc] is null, a default document referencing the attachment is built.
-/// If [attachmentBytes] is null, no attachment is added to the package.
-String _writeKvltFile(
-  String path, {
-  Map<String, dynamic>? doc,
-  Uint8List? attachmentBytes,
-}) {
-  late String sha256;
-  final attachments = <VaultAttachment>[];
-
-  if (attachmentBytes != null) {
-    sha256 = VaultStore.computeSha256ForTest(attachmentBytes);
-    final crc32c = VaultStore.computeCrc32cForTest(attachmentBytes);
-    attachments.add(
-      VaultAttachment(
-        subdirName: '0',
-        bytes: attachmentBytes,
-        uploadManifest: null,
-      ),
-    );
-    doc ??= {'attachment': 'kmdb-vault://sha256/$sha256'};
-  } else {
-    sha256 = 'a' * 64;
-    doc ??= {'title': 'no attachments'};
-  }
-
-  final bytes = VaultPackage.write(documentJson: doc, attachments: attachments);
-  io.File(path).writeAsBytesSync(bytes);
-  return sha256;
-}
 
 void main() {
   group('InsertCommand --import', () {

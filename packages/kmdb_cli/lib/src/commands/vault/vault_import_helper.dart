@@ -16,13 +16,6 @@ import 'dart:io' as io;
 import 'dart:typed_data';
 
 import 'package:kmdb/kmdb.dart';
-import 'package:kmdb/src/encoding/value_codec.dart';
-import 'package:kmdb/src/vault/vault_gc.dart';
-import 'package:kmdb/src/vault/vault_package.dart';
-import 'package:kmdb/src/vault/vault_recovery.dart' show kVaultNamespace;
-import 'package:kmdb/src/vault/vault_ref.dart';
-import 'package:kmdb/src/vault/vault_ref_interceptor.dart';
-import 'package:kmdb/src/vault/vault_store.dart';
 
 /// Reads and parses a KVLT vault package from [packagePath] or [packageBytes].
 ///

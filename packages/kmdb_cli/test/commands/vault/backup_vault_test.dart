@@ -17,8 +17,6 @@ import 'dart:io' as io;
 import 'dart:typed_data';
 
 import 'package:kmdb/kmdb.dart';
-import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
-import 'package:kmdb/src/vault/vault_store.dart';
 import 'package:kmdb_cli/src/commands/command.dart';
 import 'package:kmdb_cli/src/commands/dump_command.dart';
 import 'package:test/test.dart';
@@ -192,7 +190,6 @@ void main() {
       // No KVLT packages written because document has no vault refs.
       // The summary is written as a multi-line JSON object by writeValue.
       // Parse all JSON objects from the output and find the summary.
-      final lines = out.toString().split('\n');
       // DumpCommand --vault writes a summary object at the end of output.
       // Find it by looking for a line with 'packagesWritten'.
       expect(out.toString(), contains('packagesWritten'));
