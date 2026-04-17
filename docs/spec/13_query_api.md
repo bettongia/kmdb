@@ -10,20 +10,39 @@ the Cache Layer and is the only layer that encodes and decodes CBOR (see §5).
 ```dart
 final db = await KmdbDatabase.open(
   path: '/path/to/database',
+  adapter: adapter,             // StorageAdapter for the platform
+  deviceId: deviceId,          // 8-char hex device identifier
   indexes: [
     IndexDefinition('contacts', 'address.city'),
     IndexDefinition('contacts', 'tags[]'),
     IndexDefinition('notes', 'metadata.createdAt'),
   ],
   onIndexReady: (namespace, path) {
-    // Index build complete — re-run any queries that fell back to full scan.
+    // Secondary index build complete.
   },
   onIndexRebuildRequired: (List<IndexRebuildEvent> events) async {
     // Interrupted build detected on open — application decides when to rebuild.
   },
-  config: KvStoreConfig.defaults(),
+  config: KvStoreConfig(),
+  // ── Text search (§20–23) ──────────────────────────────────────────────────
+  ftsIndexes: [
+    FtsIndexDefinition(collection: 'books', field: 'description'),
+  ],
+  vecIndexes: [
+    VecIndexDefinition(collection: 'books', field: 'description'),
+  ],
+  embeddingModel: model,        // Required when vecIndexes is non-empty
+  onSearchIndexReady: () {
+    // All search indexes are current — safe to enable search UI.
+  },
+  // ── Vault (§24) ──────────────────────────────────────────────────────────
+  vaultStore: vaultStore,       // null → vault features disabled
 );
 ```
+
+`adapter` provides the platform file I/O backend (`StorageAdapter`).
+`deviceId` is an 8-character lowercase hex string identifying this device;
+production code should supply a stable value via `DeviceId.load`.
 
 Indexes are **declared, not built**. The `indexes` list registers dot-path
 definitions so the write interception path knows which fields to maintain. No
@@ -206,6 +225,38 @@ KmdbQuery<T> all();
 // Shorthand: all().where(filter)
 KmdbQuery<T> where(Filter filter);
 ```
+
+### Text Search
+
+`search()` is the entry point for all text search modes (§20). It returns a
+`Future<SearchResult<T>>` containing ranked hits and query metadata.
+
+```dart
+final results = await collection.search(
+  'flutter local database',
+  fields: ['title', 'description'],   // omit → search all indexed fields
+  filter: Filter.eq('status', 'published'),  // optional pre-filter
+  mode: SearchMode.auto,              // default; auto-selects best mode
+  limit: 10,
+  offset: 0,
+  candidates: 100,                    // per-index candidate limit for hybrid
+);
+
+for (final hit in results.hits) {
+  print('${hit.rank}. [${hit.score.toStringAsFixed(4)}] ${hit.id}');
+}
+```
+
+`SearchMode.auto` selects hybrid (RRF) when both lexical and semantic indexes
+exist on the field, lexical-only when only an FTS index is configured, and
+semantic-only when only a vector index is configured. If no index is available
+for a requested field, the field is listed in `SearchMetadata.skipped` and
+the search proceeds over the remaining fields. See §20 for full mode semantics
+and §23 for the RRF algorithm.
+
+Search indexes are declared at `KmdbDatabase.open()` time alongside secondary
+indexes (see `ftsIndexes` and `vecIndexes` above). See §20–23 for the full
+text search specification.
 
 ## `KmdbQuery<T>` — Pipeline Methods
 

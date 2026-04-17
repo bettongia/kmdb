@@ -35,7 +35,8 @@ the system.
 ```
 Application
     ↓
-Query Layer       — KmdbCollection<T> API, filter DSL, reactive watch()
+Query Layer       — KmdbCollection<T> API, filter DSL, reactive watch(),
+                    search(), VaultRef interception
     ↓
 Cache Layer       — session object cache + materialised views ($cache)
     ↓
@@ -44,10 +45,24 @@ KvStore           — public LSM API boundary (untyped bytes, String keys)
 Storage Engine    — WAL + memtable + SSTables + compaction
     ↓
 Platform Layer    — dart:io (native) | OPFS (web) | HashMap (tests)
+
+    ┌──────────────────────────┐   ┌──────────────────────────┐
+    │  Text Search Subsystem   │   │  Vault Subsystem         │
+    │  (native-only, §20–23)   │   │  (native-only, §24)      │
+    │                          │   │                          │
+    │  FtsManager  (BM25)      │   │  VaultStore              │
+    │  VecManager  (vectors)   │   │  VaultGc                 │
+    │  HybridManager (RRF)     │   │  VaultStorageAdapter     │
+    │                          │   │                          │
+    │  $fts: / $vec: in KvStore│   │  vault/ directory + $vault│
+    │  never synced            │   │  ref-counts in KvStore   │
+    └──────────────────────────┘   └──────────────────────────┘
 ```
 
-Work from the bottom up when debugging storage issues. Work from the top down
-when adding new features to the query API.
+Both subsystems sit alongside the main vertical stack. They use KvStore and
+the Platform Layer but are not part of SSTable sync. Work from the bottom up
+when debugging storage issues. Work from the top down when adding new features
+to the query API.
 
 ---
 
@@ -434,6 +449,11 @@ sync folder has this layout:
     {deviceId}-{minHlc}-{maxHlc}.sst          ← regular flush file
     {deviceId}-{epoch}-{minHlc}-{maxHlc}.sst  ← consolidated file
   .consolidation-lease     ← coordinator lock
+  vault/
+    sha256/{2-char}/{62-char}/
+      manifest.json        ← first-writer-wins; immutable after creation
+      blob                 ← binary content
+      tombstone.json       ← present when GC candidate
 ```
 
 **Push:** flush the memtable → identify new local SSTables → upload each one to
@@ -454,20 +474,200 @@ producing a merged SSTable. Other devices see this as a regular ingestible file.
 
 ---
 
+# Text Search
+
+[lib/src/search/](lib/src/search/)
+
+Text search extends the Query Layer with two complementary index types and a
+hybrid mode that combines them. All three operate through a single entry point:
+`KmdbCollection.search()`.
+
+## Three Modes
+
+| Mode       | Index type        | Algorithm              | Best for                           |
+| :--------- | :---------------- | :--------------------- | :--------------------------------- |
+| `lexical`  | Inverted index    | BM25                   | Exact keywords, technical terms    |
+| `semantic` | Flat vector index | Cosine similarity      | Conceptual meaning, paraphrases    |
+| `auto`     | Both (if present) | Reciprocal Rank Fusion | General-purpose; the safe default  |
+
+`SearchMode.auto` automatically selects hybrid when both indexes exist on the
+field, lexical-only or semantic-only if only one is available, and returns an
+empty result (field listed in `SearchMetadata.skipped`) if neither exists.
+There is no separate `hybrid` enum value.
+
+## Lexical Search — BM25
+
+[fts_manager.dart](lib/src/search/lexical/fts_manager.dart),
+[pipeline.dart](lib/src/search/lexical/pipeline.dart)
+
+The inverted index stores one KV namespace per term:
+`$fts:{ns}:{field}:{hexTerm}` → `{docId}` → term frequency.
+
+Write path: every document write runs the four-stage preprocessing pipeline
+(tokenise → lowercase → optional stop-word filter → Snowball stem) and writes
+index entries in the same `WriteBatch` as the document — the index is always
+consistent.
+
+Query path: for each query term, scan the per-term namespace, filter through
+the overlay (which carries authoritative state for recently updated/deleted
+documents), compute BM25 scores using corpus statistics (`n`, `avgdl`), and
+rank.
+
+An overlay namespace (`$fts:overlay:{ns}:{field}`) absorbs updates and deletes
+without a read-before-write on the hot path. A background compaction step
+reconciles the overlay back into the base index periodically.
+
+## Semantic Search — BGE + SQ8
+
+[vec_manager.dart](lib/src/search/semantic/vec_manager.dart)
+
+Uses the [BGE Small En v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5)
+ONNX model (bundled, ~127 MB, 384 dimensions). ONNX inference runs
+synchronously before the `WriteBatch` is committed on the write path — a
+document and its embedding are never out of sync.
+
+Vectors are SQ8-quantized before storage: each float32 dimension is mapped to
+a uint8 (4× size reduction, 384 bytes per vector). Cosine similarity is
+computed as a dot product at query time (both vectors are L2-normalized, so
+dot product equals cosine). The search is a brute-force flat scan — no
+approximate nearest-neighbour graph — which is the correct trade-off at
+KMDB's target scale (< 50K documents).
+
+## Hybrid Search — RRF
+
+[hybrid_manager.dart](lib/src/search/hybrid/hybrid_manager.dart)
+
+Combines BM25 and cosine result lists using Reciprocal Rank Fusion:
+
+```
+RRF(d) = Σ_{r ∈ R}  1 / (k + rank_r(d))     where k = 60
+```
+
+RRF works on ranks, not raw scores, so the unbounded BM25 scale and the
+`[−1, 1]` cosine scale are naturally compatible. A document absent from one
+list contributes 0 from it — single-index matches are still returned.
+
+## Platform and Sync Constraints
+
+- **Native platforms only.** Semantic search (ONNX inference) and vault are
+  deferred on web.
+- **English-language only.** The tokeniser, stop-word list, and Snowball
+  stemmer are tuned for English.
+- **Never synced.** All `$fts:` and `$vec:` namespaces are excluded from
+  SSTable sync. Each device independently rebuilds its indexes from its local
+  documents. After a sync pull, `FtsManager` and `VecManager` receive a
+  `SyncDelta` event and apply incremental updates without a full rebuild.
+
+---
+
+# The Vault
+
+[lib/src/vault/](lib/src/vault/)
+
+The vault is KMDB's content-addressable binary object store — file attachment
+support for documents, analogous to a BLOB column in an RDBMS.
+
+## Content-Addressing
+
+Files are stored outside the LSM engine, identified by their SHA-256 hash:
+
+```
+kmdb-vault://sha256/dd92c2600e28b5f44e9c7de81a629e1dd4cfd2eff61a68ddb53777357d3414b8
+```
+
+Two documents referencing identical files share one vault object — deduplication
+is automatic and cross-collection. The shared object is reference-counted; it
+is only deleted when no document references it.
+
+## Storage Layout
+
+```
+{db-dir}/vault/
+  staging/          ← in-progress writes (swept on open)
+  blobs/sha256/
+    {2-char prefix}/
+      {62-char suffix}/
+        manifest.json   ← always present for a known object
+        blob            ← absent if stub
+        tombstone.json  ← present when ref-count = 0
+  VAULT_OFFLINE       ← device-local pin list (not synced)
+```
+
+The two-level prefix shards the SHA-256 space to avoid large flat directories
+(same approach as Git's object store).
+
+## Write Path
+
+Writes follow a strict ordering to support crash recovery without a separate
+journal:
+
+1. Write blob to `vault/staging/{uuid}`.
+2. Verify SHA-256 hash.
+3. Rename blob to final path (atomic on local filesystems).
+4. Write `manifest.json`.
+5. Commit `WriteBatch`: increment `$vault` ref-count + write document.
+
+Steps 1–4 complete before the KV store is touched. On crash recovery, any
+hash directory without a KV ref-count entry is deleted as an incomplete write.
+
+## Stubs and On-Demand Hydration
+
+During sync, only `manifest.json` is copied to peer devices — the blob is not
+downloaded eagerly. A hash directory with `manifest.json` but no `blob` is a
+**stub**. Calling `VaultRef.getBlob()` on a stub triggers on-demand hydration:
+the blob is fetched from the sync remote, verified, and written to the final
+path.
+
+## Reference-Counted GC
+
+The `$vault:{sha256}` key in KvStore tracks the reference count for each vault
+URI. The Query Layer intercepts every document write via `VaultRefInterceptor`,
+diffs the vault URIs in the old and new document, and adjusts counters in the
+same `WriteBatch` — the ref-count and the document are always consistent.
+
+When the count reaches zero, `VaultGc.onZeroRefs()` writes `tombstone.json`.
+The GC sweep (`VaultGc.sweep()`) deletes the hash directory after re-validating
+that the count is still zero (TOCTOU guard).
+
+## VaultRef
+
+[vault_ref.dart](lib/src/vault/vault_ref.dart)
+
+`VaultRef` is the typed handle for vault objects in document models. The URI
+is validated eagerly at construction. `getBlob()` and `getMetadata()` are the
+two access methods; both trigger on-demand hydration if needed.
+
+```dart
+final ref = VaultRef('kmdb-vault://sha256/dd92c2...');
+final bytes = await ref.getBlob();         // Uint8List
+final meta  = await ref.getMetadata();     // VaultManifest
+```
+
+`KmdbCodec<T>` is responsible for mapping between `VaultRef` and the typed
+model. The Query Layer treats `VaultRef` as opaque.
+
+---
+
 # Navigating the Code
 
 If you want to trace a specific path, start at these files:
 
-| Goal                            | Start here                                                           |
-| :------------------------------ | :------------------------------------------------------------------- |
-| Understand a write end-to-end   | [lsm_engine.dart](lib/src/engine/kvstore/lsm_engine.dart)            |
-| Understand crash recovery       | [crash_recovery.dart](lib/src/engine/kvstore/crash_recovery.dart)    |
-| Understand a query end-to-end   | [kmdb_query.dart](lib/src/query/kmdb_query.dart)                     |
-| Understand how indexes work     | [index_manager.dart](lib/src/query/index/index_manager.dart)         |
-| Understand sync                 | [sync_engine.dart](lib/src/sync/sync_engine.dart)                    |
-| Understand compaction / merging | [compaction_job.dart](lib/src/engine/compaction/compaction_job.dart) |
-| Understand the SSTable format   | [sstable_writer.dart](lib/src/engine/sstable/sstable_writer.dart)    |
-| Understand cache invalidation   | [cache_layer.dart](lib/src/cache/cache_layer.dart)                   |
+| Goal                            | Start here                                                                       |
+| :------------------------------ | :------------------------------------------------------------------------------- |
+| Understand a write end-to-end   | [lsm_engine.dart](lib/src/engine/kvstore/lsm_engine.dart)                        |
+| Understand crash recovery       | [crash_recovery.dart](lib/src/engine/kvstore/crash_recovery.dart)                |
+| Understand a query end-to-end   | [kmdb_query.dart](lib/src/query/kmdb_query.dart)                                 |
+| Understand how indexes work     | [index_manager.dart](lib/src/query/index/index_manager.dart)                     |
+| Understand sync                 | [sync_engine.dart](lib/src/sync/sync_engine.dart)                                |
+| Understand compaction / merging | [compaction_job.dart](lib/src/engine/compaction/compaction_job.dart)             |
+| Understand the SSTable format   | [sstable_writer.dart](lib/src/engine/sstable/sstable_writer.dart)                |
+| Understand cache invalidation   | [cache_layer.dart](lib/src/cache/cache_layer.dart)                               |
+| Understand lexical search       | [fts_manager.dart](lib/src/search/lexical/fts_manager.dart)                      |
+| Understand semantic search      | [vec_manager.dart](lib/src/search/semantic/vec_manager.dart)                     |
+| Understand hybrid search (RRF)  | [hybrid_manager.dart](lib/src/search/hybrid/hybrid_manager.dart)                 |
+| Understand the vault            | [vault_store.dart](lib/src/vault/vault_store.dart)                               |
+| Understand vault GC             | [vault_gc.dart](lib/src/vault/vault_gc.dart)                                     |
+| Understand vault crash recovery | [vault_recovery.dart](lib/src/vault/vault_recovery.dart)                         |
 
 The [docs/spec/](docs/spec/) directory has detailed specification documents for
 each subsystem, useful when you need the precise on-disk format or protocol
@@ -483,9 +683,18 @@ semantics.
 | **Memtable**           | In-memory sorted write buffer (skip list); flushed to disk at 64 KB                   |
 | **SSTable**            | Sorted String Table — an immutable file on disk; the fundamental sync unit            |
 | **Manifest**           | Append-only log of which SSTables are live at which level                             |
-| **Tombstone**          | A delete marker; kept until all devices have seen the deletion                        |
+| **Tombstone (LSM)**    | A delete marker in the LSM engine; kept until all devices have seen the deletion      |
 | **Bloom Filter**       | Probabilistic bitset per SSTable; eliminates disk reads for absent keys               |
 | **HLC**                | Hybrid Logical Clock — 48-bit physical + 16-bit logical; orders events across devices |
 | **Compaction**         | Merging multiple SSTables to remove duplicates, tombstones, and level overlap         |
 | **LWW**                | Last-Write-Wins — conflict resolution strategy; higher HLC value wins                 |
 | **Generation counter** | Monotonic integer per namespace; incremented on write; drives cache invalidation      |
+| **BM25**               | Best Match 25 — probabilistic term-frequency ranking function used by lexical search  |
+| **Inverted index**     | Data structure mapping terms → documents; basis of lexical search (`$fts:` namespaces)|
+| **Embedding**          | Dense vector representing text meaning; produced by BGE model for semantic search     |
+| **SQ8**                | 8-bit scalar quantisation; compresses 384-dim float32 vectors from 1,536 → 384 bytes |
+| **RRF**                | Reciprocal Rank Fusion — rank-based score combiner for hybrid search                  |
+| **Vault**              | Content-addressable binary object store; files identified by SHA-256 hash             |
+| **Stub**               | Vault object whose metadata is present locally but whose blob has not been downloaded |
+| **Tombstone (vault)**  | `tombstone.json` written when a vault object's ref-count reaches zero; GC signal      |
+| **KVLT**               | Zstandard archive format bundling a document with its vault attachments               |

@@ -105,9 +105,9 @@ final results = await db.collection<Book>('books').search(
 
 | Value           | Behaviour                                                                    |
 | :-------------- | :--------------------------------------------------------------------------- |
-| `SearchMode.auto`     | Default. Hybrid if both indexes exist; falls back to whichever is available. |
-| `SearchMode.lexical`  | BM25 only. Error if no lexical index exists on the field.                    |
-| `SearchMode.semantic` | Cosine similarity only. Error if no semantic index exists on the field.      |
+| `SearchMode.auto`     | Default. Hybrid if both indexes exist; falls back to whichever is available. No index available → empty result, field listed in `SearchMetadata.skipped`. |
+| `SearchMode.lexical`  | BM25 only. No lexical index available → empty result, field listed in `SearchMetadata.skipped`. |
+| `SearchMode.semantic` | Cosine similarity only. No semantic index available → empty result, field listed in `SearchMetadata.skipped`. |
 
 ### Result Types
 
@@ -147,8 +147,13 @@ class SearchHit<T> {
 
   /// Per-field scores. Fields where the document did not score are absent.
   ///
-  /// In hybrid mode, individual component scores are available under the keys
-  /// "{field}:bm25" and "{field}:cosine" alongside the per-field RRF score.
+  /// Keys follow these conventions across modes:
+  ///
+  /// | Mode    | Keys present                                                                 |
+  /// | :------ | :--------------------------------------------------------------------------- |
+  /// | Lexical | `"{field}:bm25"` — BM25 score for that field                                |
+  /// | Semantic | `"{field}:cosine"` — cosine similarity for that field                       |
+  /// | Hybrid  | `"{field}:bm25"` and/or `"{field}:cosine"` (raw component scores) plus `"{field}"` (per-field RRF contribution) |
   final Map<String, double> fieldScores;
 
   /// The document key.
