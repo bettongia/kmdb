@@ -213,18 +213,19 @@ _Write interception, `VaultRef` in codec pipeline._
 
 _Zstandard archive for insert/update/export/backup with attachments._
 
-- [ ] Create `vault_package.dart`: `VaultPackage` with:
-  - `read(File archive)` — parse Zstandard archive; extract `document.json`
+- [x] Create `vault_package.dart`: `VaultPackage` with:
+  - `read(Uint8List archiveBytes)` — parse KVLT archive; extract `document.json`
     and resolve vault subdirectories per the §24 file resolution rules
-  - `write(Map<String, dynamic> document, List<VaultAttachment> attachments)`
-    — produce a Zstandard archive
-  - `validate(Map<String, dynamic> document, List<VaultAttachment> attachments)`
-    — verify all vault URIs in document are covered; fail if unreferenced
-    objects exist in the package
-- [ ] Validate upload `manifest.json` fields when present (schema version,
+  - `write({documentJson, attachments})` — produce a KVLT-format archive
+  - `validate({documentJson, attachments, existingHashes})` — verify all vault
+    URIs in document are covered; fail if unreferenced objects exist
+  - Note: KVLT is a custom length-prefixed binary format (magic "KVLT" + version
+    1) since `kmdb_zstd` provides raw compression only, not a container format.
+    Zstd frame compression can be layered on top transparently at CLI time.
+- [x] Validate upload `manifest.json` fields when present (schema version,
       SHA-256 match, CRC32C match, size match, media type match,
-      originalName file existence)
-- [ ] Write tests:
+      originalName file existence) — validation done during read() and validate()
+- [x] Write tests:
   - `vault_package_test.dart` — read valid package, missing blob, extra
     files (should fail), unreferenced vault objects (should fail), missing
     referenced vault object (should fail), minimal manifest (schemaVersion
