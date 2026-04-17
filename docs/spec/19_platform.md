@@ -48,51 +48,64 @@ than WAL on OPFS) and increase page cache to 8–16MB.
 
 ## Package Structure
 
-```
-kmdb/
+KMDB is published as a **Pub workspace**. The root `pubspec.yaml` is a
+workspace coordinator only; all source code lives under `packages/`:
 
- lib/
-  kmdb.dart                    # Public export
-  src/
-   engine/                     # Platform-agnostic
-    btree/
-    storage/
-     page_manager.dart
-     superblock.dart
-     compressor.dart
-    transaction/
-     commit.dart
-     recovery.dart
-    memtable/
-     skip_list.dart
-    sstable/
-     writer.dart
-     reader.dart
-     bloom_filter.dart
-    compaction/
-     merge_iterator.dart
-     compaction_job.dart
-    sync/
-     hlc.dart
-     sync_engine.dart
-     highwater.dart
-    api/
-     kv_store.dart
-  query/                      # Query layer
-   collection.dart
-   query.dart
-   filter.dart
-   field_path.dart
-   codec.dart
-   watcher.dart
-  io/                          # Platform adapters storage_adapter.dart
-   storage_adapter_native.dart # Abstract + conditional export
-   storage_adapter_web.dart
-   storage_adapter_stub.dart
-   cloud/
-    sync_storage_adapter.dart  # Abstract (SyncStorageAdapter interface)
-    cloud/
-     google_drive_adapter.dart icloud_adapter.dart  # Cloud implementations
-hook/
- build.dart                    # Native build hooks
 ```
+packages/
+  kmdb/                    — core library (engine, query, cache, sync,
+  |                           search, vault)
+  |  lib/src/
+  |   engine/              — LSM: WAL, memtable, SSTable, compaction, manifest
+  |   cache/               — session cache, materialised views
+  |   encoding/            — CBOR + compression pipeline
+  |   query/               — KmdbDatabase, KmdbCollection, Filter DSL, indexes
+  |   search/              — FtsManager, VecManager, HybridManager (§20–23)
+  |   sync/                — SyncEngine, ConsolidationCoordinator
+  |   vault/               — VaultStore, VaultGc, VaultRecovery, VaultRef (§24)
+  |
+  kmdb_cli/                — CLI tool (bin/, lib/, test/)
+  |
+  kmdb_zstd/               — Zstd FFI compression provider
+  |                          (native only; kmdb depends on it conditionally)
+  |
+  kmdb_ui/                 — Flutter UI widgets
+  |
+  kmdb_lexical/            — tokeniser pipeline and English stop-word list
+  |                          (RegExpTokeniser, IcuTokeniser, Snowball stemmer)
+  |                          used by FtsManager (§21) and VecManager (§22)
+  |
+  kmdb_tokenizer_icu/      — ICU FFI word tokeniser (UAX #29; optional
+  |                          substitute for RegExpTokeniser)
+  |
+  kmdb_inferencing/        — ONNX Runtime + BGE Small En v1.5 embedding model
+  |                          used by VecManager (§22); native only
+  |
+  kmdb_mediatype/          — MIME-type detection by file-signature inspection
+                             used by VaultStore (§24)
+```
+
+### Conditional Export Pattern
+
+The platform adapter is selected at compile time via Dart conditional exports:
+
+```dart
+// packages/kmdb/lib/src/engine/platform/storage_adapter.dart
+export 'storage_adapter_impl.dart'
+    if (dart.library.io) 'storage_adapter_native.dart'
+    if (dart.library.js_interop) 'storage_adapter_web.dart';
+```
+
+`dart.library.js_interop` is tested (not the deprecated `dart.library.html`)
+for correct WASM targeting.
+
+### Feature Constraints by Platform
+
+| Feature              | Native (iOS/Android/macOS/Windows/Linux) | Web (OPFS) |
+| :------------------- | :--------------------------------------- | :--------- |
+| Core LSM engine      | ✓                                        | ✓          |
+| Zstd compression     | ✓ (FFI via kmdb_zstd)                    | ✓ (WASM fallback: Deflate) |
+| Sync                 | ✓                                        | ✓          |
+| Lexical text search  | ✓                                        | ✗ (deferred) |
+| Semantic search      | ✓ (ONNX via kmdb_inferencing)            | ✗ (deferred) |
+| Vault                | ✓                                        | ✗ (deferred) |
