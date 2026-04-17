@@ -1,6 +1,6 @@
 # Vault — Content-Addressable Object Store
 
-**Status**: Investigated
+**Status**: Implementing
 
 **PR link**: _pending_
 
@@ -121,12 +121,12 @@ the KV store. The two are joined in the same `WriteBatch` for atomicity (§24).
 
 _Foundational types and write path. No KV store integration yet._
 
-- [ ] Create `vault_manifest.dart`: `VaultManifest` class with JSON
+- [x] Create `vault_manifest.dart`: `VaultManifest` class with JSON
       serialisation/deserialisation; schema validation on read
-- [ ] Create `vault_ref.dart`: `VaultRef` with eager URI format validation
+- [x] Create `vault_ref.dart`: `VaultRef` with eager URI format validation
       (`FormatException` on malformed input), `toString()`, `getBlob()` stub,
       `getMetadata()` stub
-- [ ] Create `media_type_detector.dart`: `MediaTypeDetector` abstract interface
+- [x] Create `media_type_detector.dart`: `MediaTypeDetector` abstract interface
       with a `detect(Uint8List bytes, String? fileName) → MatchList` method
       (returns the full `MatchList` from `kmdb_mediatype`, giving callers access
       to both `bestMatch` and the prioritised `candidates` iterable); provide a
@@ -141,7 +141,7 @@ _Foundational types and write path. No KV store integration yet._
         absent from `candidates` entirely. This allows a valid subtype or
         alternative match to be used even when it is not the highest-priority
         detection result.
-- [ ] Create `vault_store.dart`: `VaultStore` with:
+- [x] Create `vault_store.dart`: `VaultStore` with:
   - `ingest(File file, String hlcTimestamp)` — full write path (stage →
     verify SHA-256 → verify CRC32C → rename → write manifest)
   - `get(String sha256)` — returns `Uint8List` or triggers hydration
@@ -150,11 +150,11 @@ _Foundational types and write path. No KV store integration yet._
   - `isHydrated(String sha256)` — checks blob presence
   - Path resolution helpers (`hashDir`, `blobPath`, `manifestPath`,
     `tombstonePath`, `stagingPath`)
-- [ ] Create `vault_recovery.dart`: staging sweep + hash directory sweep
+- [x] Create `vault_recovery.dart`: staging sweep + hash directory sweep
       (see §24 crash table); returns a `VaultRecoveryResult`
 - [ ] Add vault recovery call to `crash_recovery.dart` after the existing
-      LSM recovery (step 9)
-- [ ] Write tests:
+      LSM recovery (step 9) — deferred to Phase 3 (KmdbDatabase.open integration)
+- [x] Write tests:
   - `vault_manifest_test.dart` — serialisation, validation, round-trip
   - `vault_ref_test.dart` — valid URIs, malformed URIs, toString
   - `vault_store_test.dart` — ingest (new file, duplicate, CRC32C clash),

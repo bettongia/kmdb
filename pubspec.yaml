@@ -28,6 +28,12 @@ dev_dependencies:
   test: ^1.25.6
   pubspec_checker: ^1.3.0
 
+dependency_overrides:
+  # Override meta to resolve conflict between aurochs_registry_freedesktop_mimeinfo
+  # (requires ^1.18.2) and flutter_test from sdk (pins 1.17.0). This override
+  # allows the non-Flutter packages to build while keeping Flutter UI tests working.
+  meta: ^1.18.2
+
 melos:
   scripts:
     analyze:
