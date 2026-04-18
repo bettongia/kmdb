@@ -24,3 +24,4 @@ packages/kmdb_cli/bin/kmdb*.exe
 cli_e2e_test.log
 doc/
 build/
+demodb/

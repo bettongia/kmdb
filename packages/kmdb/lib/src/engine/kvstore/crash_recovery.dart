@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'dart:convert';
 import 'dart:typed_data';
 
 import '../manifest/current_file.dart';
@@ -82,6 +83,16 @@ final class CrashRecovery {
       final initPath = '$dbDir/$manifestName';
       final initWriter = ManifestWriter(path: initPath, adapter: adapter);
       await initWriter.append(const VersionEdit(logNumber: 0, nextSeq: 0));
+      await adapter.writeFile(
+        '$dbDir/README.txt',
+        Uint8List.fromList(
+          utf8.encode(
+            'This directory is managed by KMDB. '
+            'Please DO NOT interact with these files directly '
+            'or your database will be corrupted.\n',
+          ),
+        ),
+      );
     }
     final manifestPath = '$dbDir/$manifestName';
 
