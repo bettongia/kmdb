@@ -227,6 +227,16 @@ abstract final class KmdbCli {
     // ── Open database ────────────────────────────────────────────────────────
     final dbPath = remaining[0];
 
+    // Guard: reject anything that looks like an unrecognised flag in the
+    // database-path position.  Without this check, `kmdb -v` would silently
+    // create a directory named "-v".
+    if (dbPath.startsWith('-')) {
+      io.stderr.writeln(
+        "Error: unknown flag '$dbPath'. Run 'kmdb --help' for usage.",
+      );
+      return 1;
+    }
+
     // Guard: when the inline command is 'init', refuse to proceed if the
     // target directory already contains files that are not part of a KMDB
     // database.  This prevents accidental pollution of foreign directories
