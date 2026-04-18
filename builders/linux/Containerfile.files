@@ -1,2 +1,0 @@
-FROM docker.io/dart:stable
-COPY --from=PROJECT_DIR ./ $HOME_DIR/kmdb
