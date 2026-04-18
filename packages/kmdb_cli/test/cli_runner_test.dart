@@ -101,6 +101,26 @@ void main() {
     });
   });
 
+  group('KmdbCli — unknown flag guard', () {
+    test('rejects short unknown flag in db-path position', () async {
+      final result = await run(['-v']);
+      expect(result.exitCode, equals(1));
+      expect(result.stderr, contains("unknown flag '-v'"));
+    });
+
+    test('rejects long unknown flag in db-path position', () async {
+      final result = await run(['--unknown-flag']);
+      expect(result.exitCode, equals(1));
+      expect(result.stderr, contains("unknown flag '--unknown-flag'"));
+    });
+
+    test('does not create a directory for the rejected flag', () async {
+      final cwd = io.Directory.current.path;
+      await run(['-v']);
+      expect(io.Directory(p.join(cwd, '-v')).existsSync(), isFalse);
+    });
+  });
+
   group('KmdbCli — integration', () {
     test('shows help when no args provided', () async {
       final result = await run([]);
