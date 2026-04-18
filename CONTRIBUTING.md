@@ -21,6 +21,14 @@ engine.
 - [site](site) is built from the markdown in the `docs` directory using
   `make docs`.
 
+## Makefile
+
+The default task is configured to provide useful tasks for development and you
+can just run `make`.
+
+To generate a release, use `make release` - you'll find the output in the `dist`
+directory.
+
 ## Tricky things
 
 ### PDF generation of docs
