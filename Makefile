@@ -151,7 +151,7 @@ format:
 .PHONY: format
 
 ## Build the CLI binary with native assets (for local development).
-## Binary output: packages/kmdb_cli/build/bundle/bin/kmdb
+## Binary output: packages/kmdb_cli/build/cli/<platform>/bundle/bin/kmdb
 build_cli:
 	cd $(KMDB_CLI_PKG) && dart build cli
 .PHONY: build_cli
