@@ -114,11 +114,10 @@ make release
 This produces `dist/cli/<os>-<arch>/kmdb-<version>-<os>-<arch>.tar.gz`.
 Extract it and add the `bin/` directory to your path as above.
 
-For local development without building a full release archive:
+For local development you can run the CLI directly without a full release build:
 
 ```sh
-make build_cli
-export PATH="$PWD/packages/kmdb_cli/build/bundle/bin:$PATH"
+dart run packages/kmdb_cli/bin/kmdb.dart
 ```
 
 You should be able to run `kmdb`:
