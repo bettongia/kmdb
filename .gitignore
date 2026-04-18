@@ -25,3 +25,5 @@ cli_e2e_test.log
 doc/
 build/
 demodb/
+dist/
+packages/kmdb_inferencing/assets/native/

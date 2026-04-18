@@ -80,24 +80,45 @@ You can find some other KMDB documentation as your interest directs you:
 
 # Get started with the CLI
 
-We'll start by looking at the KMDB CLI on a desktop device. At some point you'll
-be able to grab the release via your system's standard approach and get started.
+We'll start by looking at the KMDB CLI on a desktop device.
 
-For now though we'll build the CLI tool - don't worry, as long as you have a
-current Dart installation you'll find this pretty easy.
+## Getting the CLI
 
-Start by creating a directory for the tutorial and then building the executable:
+**From a release archive (recommended)**
+
+Download the latest release archive for your platform from the releases page,
+then extract it and add the `bin/` directory to your path:
 
 ```sh
-mkdir sandbox
-dart compile exe packages/kmdb_cli/bin/kmdb.dart -o sandbox/kmdb
-cd sandbox
+tar -xzf kmdb-<version>-<os>-<arch>.tar.gz
+export PATH="$PWD/kmdb-<version>-<os>-<arch>/bin:$PATH"
 ```
 
-To make the tutorial easier, add the `sandbox` directory to your path:
+**Building from source**
+
+If you have cloned the repository you can build the CLI directly. You will
+need a current Dart SDK installation and Git LFS.
+
+First pull the large model assets tracked with Git LFS:
 
 ```sh
-export PATH="$PWD:$PATH"
+git lfs pull
+```
+
+Then build and package the CLI for the current platform:
+
+```sh
+make release
+```
+
+This produces `dist/cli/<os>-<arch>/kmdb-<version>-<os>-<arch>.tar.gz`.
+Extract it and add the `bin/` directory to your path as above.
+
+For local development without building a full release archive:
+
+```sh
+make build_cli
+export PATH="$PWD/packages/kmdb_cli/build/bundle/bin:$PATH"
 ```
 
 You should be able to run `kmdb`:
