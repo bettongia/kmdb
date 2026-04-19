@@ -434,6 +434,45 @@ void main() {
       final decoded = json.decode(out.toString()) as List;
       expect(decoded, isEmpty);
     });
+
+    test('rejects document with reserved "_"-prefixed field', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await InsertCommand().execute(
+        ctx,
+        ['notes'],
+        {'value': '{"_title": "hack"}'},
+      );
+      expect(ok, isFalse);
+      expect(err.toString(), contains('"_title"'));
+      expect(err.toString(), contains('reserved'));
+    });
+
+    test('rejects batch when any document has a reserved field', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await InsertCommand().execute(
+        ctx,
+        ['notes'],
+        {'value': '[{"name":"ok"},{"_title":"hack","name":"bad"}]'},
+      );
+      expect(ok, isFalse);
+      expect(err.toString(), contains('"_title"'));
+      // No documents should have been written (pre-validated before any I/O).
+      final keys = await store.scan('notes').toList();
+      expect(keys, isEmpty);
+    });
+
+    test('allows document with no reserved fields', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await InsertCommand().execute(
+        ctx,
+        ['notes'],
+        {'value': '{"title": "no underscore prefix"}'},
+      );
+      expect(ok, isTrue);
+      final decoded = json.decode(out.toString()) as List;
+      expect(decoded, hasLength(1));
+      expect((decoded.first as Map)['title'], equals('no underscore prefix'));
+    });
   });
 
   // ── DeleteCommand ───────────────────────────────────────────────────────────

@@ -93,10 +93,28 @@ final class InsertCommand implements CliCommand {
     final docs = await _readDocuments(ctx, flags);
     if (docs == null) return false;
 
+    // Validate all documents before any I/O to prevent partial writes.
+    // _id is silently replaced by the system-generated key (documented);
+    // all other _-prefixed keys are rejected as reserved.
+    for (var i = 0; i < docs.length; i++) {
+      final offending = docs[i]
+          .keys
+          .where((k) => k.startsWith('_') && k != '_id')
+          .toList(growable: false);
+      if (offending.isNotEmpty) {
+        ctx.writeError(
+          'Document ${docs.length > 1 ? '#${i + 1} ' : ''}contains reserved '
+          '"_"-prefixed field(s): '
+          '${offending.map((k) => '"$k"').join(', ')}. '
+          'The "_" prefix is reserved for KMDB system fields (e.g. "_id").',
+        );
+        return false;
+      }
+    }
+
     final inserted = <Map<String, dynamic>>[];
     for (final doc in docs) {
       final key = const UuidV7KeyGenerator().next();
-      // Always assign a fresh system key; any caller-supplied _id is replaced.
       doc['_id'] = key;
       final encoded = ValueCodec.encode(doc);
       await ctx.store.put(collection, key, encoded);
@@ -158,6 +176,17 @@ final class InsertCommand implements CliCommand {
 
     // Assign a new document key and build the document map.
     final doc = Map<String, dynamic>.of(contents.documentJson);
+    final offending = doc.keys
+        .where((k) => k.startsWith('_') && k != '_id')
+        .toList(growable: false);
+    if (offending.isNotEmpty) {
+      ctx.writeError(
+        'Vault package document contains reserved "_"-prefixed field(s): '
+        '${offending.map((k) => '"$k"').join(', ')}. '
+        'The "_" prefix is reserved for KMDB system fields (e.g. "_id").',
+      );
+      return false;
+    }
     final key = const UuidV7KeyGenerator().next();
     doc['_id'] = key;
 
