@@ -1,0 +1,3815 @@
+[
+  {
+    "id": "88963",
+    "name": {
+      "en": "Base Esperanza"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "88963",
+      "icao": null
+    },
+    "location": {
+      "latitude": -63.4,
+      "longitude": -56.9833,
+      "elevation": 13
+    },
+    "timezone": "Antarctica/Palmer",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1961-01-01",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 1961,
+        "end": 2021
+      },
+      "normals": {
+        "start": 1961,
+        "end": 2020
+      }
+    }
+  },
+  {
+    "id": "88968",
+    "name": {
+      "en": "Base Orcadas"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "88968",
+      "icao": null
+    },
+    "location": {
+      "latitude": -60.75,
+      "longitude": -44.7167,
+      "elevation": 6
+    },
+    "timezone": "Antarctica/Rothera",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1957-01-01",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 1950,
+        "end": 2021
+      },
+      "normals": {
+        "start": 1961,
+        "end": 2020
+      }
+    }
+  },
+  {
+    "id": "89001",
+    "name": {
+      "en": "S. A. N. A. E. Station"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89001",
+      "icao": null
+    },
+    "location": {
+      "latitude": -70.3,
+      "longitude": -2.35,
+      "elevation": 62
+    },
+    "timezone": "Antarctica/Syowa",
+    "inventory": {
+      "model": {
+        "start": null,
+        "end": null
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1973-01-02",
+        "end": "1992-11-30"
+      },
+      "monthly": {
+        "start": 1890,
+        "end": 2014
+      },
+      "normals": {
+        "start": 1961,
+        "end": 2020
+      }
+    }
+  },
+  {
+    "id": "89002",
+    "name": {
+      "en": "Neumayer"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89002",
+      "icao": null
+    },
+    "location": {
+      "latitude": -70.6667,
+      "longitude": -8.25,
+      "elevation": 50
+    },
+    "timezone": "Antarctica/Syowa",
+    "inventory": {
+      "model": {
+        "start": "2018-01-28",
+        "end": "2026-03-20"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1981-01-28",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 1981,
+        "end": 2021
+      },
+      "normals": {
+        "start": 1971,
+        "end": 2010
+      }
+    }
+  },
+  {
+    "id": "89003",
+    "name": {
+      "en": "Halvfarryggen Ep11"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89003",
+      "icao": null
+    },
+    "location": {
+      "latitude": -71.15,
+      "longitude": -6.6833,
+      "elevation": -9999
+    },
+    "timezone": "Antarctica/Syowa",
+    "inventory": {
+      "model": {
+        "start": null,
+        "end": null
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "2008-03-31",
+        "end": "2026-01-14"
+      },
+      "monthly": {
+        "start": 2008,
+        "end": 2021
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89004",
+    "name": {
+      "en": "Sanae Aws"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89004",
+      "icao": null
+    },
+    "location": {
+      "latitude": -71.7,
+      "longitude": -2.8,
+      "elevation": 815
+    },
+    "timezone": "Antarctica/Syowa",
+    "inventory": {
+      "model": {
+        "start": "2018-01-28",
+        "end": "2026-03-20"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1997-01-01",
+        "end": "2026-01-31"
+      },
+      "monthly": {
+        "start": 1998,
+        "end": 2022
+      },
+      "normals": {
+        "start": 1991,
+        "end": 2020
+      }
+    }
+  },
+  {
+    "id": "89009",
+    "name": {
+      "en": "Amundsen-Scott South Pole Station"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89009",
+      "icao": "NZSP"
+    },
+    "location": {
+      "latitude": -90.0,
+      "longitude": 0.0,
+      "elevation": 2830
+    },
+    "timezone": "Antarctica/South_Pole",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": "1957-01-09",
+        "end": "2026-03-09"
+      },
+      "daily": {
+        "start": "1957-01-11",
+        "end": "2025-08-23"
+      },
+      "monthly": {
+        "start": 1957,
+        "end": 2021
+      },
+      "normals": {
+        "start": 1961,
+        "end": 2010
+      }
+    }
+  },
+  {
+    "id": "89013",
+    "name": {
+      "en": "Baldrick Aws"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89013",
+      "icao": null
+    },
+    "location": {
+      "latitude": -82.7667,
+      "longitude": -13.05,
+      "elevation": -9999
+    },
+    "timezone": null,
+    "inventory": {
+      "model": {
+        "start": null,
+        "end": null
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "2008-03-01",
+        "end": "2025-12-16"
+      },
+      "monthly": {
+        "start": 2008,
+        "end": 2017
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89016",
+    "name": {
+      "en": "Wasa Ep5"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89016",
+      "icao": null
+    },
+    "location": {
+      "latitude": -73.1,
+      "longitude": -13.15,
+      "elevation": -9999
+    },
+    "timezone": "Antarctica/McMurdo",
+    "inventory": {
+      "model": {
+        "start": null,
+        "end": null
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "2008-01-16",
+        "end": "2014-11-30"
+      },
+      "monthly": {
+        "start": 2008,
+        "end": 2014
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89022",
+    "name": {
+      "en": "Halley"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89022",
+      "icao": null
+    },
+    "location": {
+      "latitude": -75.5,
+      "longitude": -26.65,
+      "elevation": 30
+    },
+    "timezone": "America/Fortaleza",
+    "inventory": {
+      "model": {
+        "start": "2018-07-20",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1956-06-18",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 1957,
+        "end": 2021
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89034",
+    "name": {
+      "en": "Base Belgrano Ii"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89034",
+      "icao": null
+    },
+    "location": {
+      "latitude": -77.8667,
+      "longitude": -34.6167,
+      "elevation": 251
+    },
+    "timezone": "Antarctica/South_Pole",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1956-09-01",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 1984,
+        "end": 2021
+      },
+      "normals": {
+        "start": 1971,
+        "end": 2020
+      }
+    }
+  },
+  {
+    "id": "89042",
+    "name": {
+      "en": "Signy Island"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89042",
+      "icao": null
+    },
+    "location": {
+      "latitude": -60.7167,
+      "longitude": -45.6,
+      "elevation": 6
+    },
+    "timezone": "Antarctica/Rothera",
+    "inventory": {
+      "model": {
+        "start": "2018-01-28",
+        "end": "2023-09-12"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": null,
+        "end": null
+      },
+      "monthly": {
+        "start": null,
+        "end": null
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89050",
+    "name": {
+      "en": "Bellingshausen"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89050",
+      "icao": null
+    },
+    "location": {
+      "latitude": -62.2,
+      "longitude": -58.9333,
+      "elevation": 16
+    },
+    "timezone": "Antarctica/Palmer",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1973-01-01",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 1969,
+        "end": 2021
+      },
+      "normals": {
+        "start": 1961,
+        "end": 2020
+      }
+    }
+  },
+  {
+    "id": "89053",
+    "name": {
+      "en": "Base Jubany"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89053",
+      "icao": "SAYJ"
+    },
+    "location": {
+      "latitude": -62.2333,
+      "longitude": -58.6333,
+      "elevation": 4
+    },
+    "timezone": "Antarctica/Palmer",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1981-01-02",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 1985,
+        "end": 2021
+      },
+      "normals": {
+        "start": 1981,
+        "end": 2020
+      }
+    }
+  },
+  {
+    "id": "89054",
+    "name": {
+      "en": "Dinamet-Uruguay"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89054",
+      "icao": null
+    },
+    "location": {
+      "latitude": -62.1833,
+      "longitude": -58.85,
+      "elevation": 10
+    },
+    "timezone": "Antarctica/Palmer",
+    "inventory": {
+      "model": {
+        "start": "2024-06-26",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1985-03-03",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 1986,
+        "end": 2014
+      },
+      "normals": {
+        "start": 1981,
+        "end": 2020
+      }
+    }
+  },
+  {
+    "id": "89055",
+    "name": {
+      "en": "Base Marambio Centro Met. Antartico"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89055",
+      "icao": "SAWB"
+    },
+    "location": {
+      "latitude": -64.2333,
+      "longitude": -56.7167,
+      "elevation": 198
+    },
+    "timezone": "Antarctica/Palmer",
+    "inventory": {
+      "model": {
+        "start": "2018-01-28",
+        "end": "2026-03-20"
+      },
+      "hourly": {
+        "start": "2020-01-15",
+        "end": "2026-03-10"
+      },
+      "daily": {
+        "start": "1971-01-01",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 1971,
+        "end": 2021
+      },
+      "normals": {
+        "start": 1961,
+        "end": 2020
+      }
+    }
+  },
+  {
+    "id": "89056",
+    "name": {
+      "en": "Centro Met. Antartico \" Pdte. Eduardo Frei \""
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89056",
+      "icao": null
+    },
+    "location": {
+      "latitude": -62.4167,
+      "longitude": -58.8833,
+      "elevation": 10
+    },
+    "timezone": "Antarctica/Palmer",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1985-04-09",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 1983,
+        "end": 2021
+      },
+      "normals": {
+        "start": 1961,
+        "end": 2020
+      }
+    }
+  },
+  {
+    "id": "89057",
+    "name": {
+      "en": "Base Arturo Prat"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89057",
+      "icao": null
+    },
+    "location": {
+      "latitude": -62.5,
+      "longitude": -59.6833,
+      "elevation": 5
+    },
+    "timezone": "Antarctica/Palmer",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1985-07-01",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 1983,
+        "end": 2021
+      },
+      "normals": {
+        "start": 1961,
+        "end": 2020
+      }
+    }
+  },
+  {
+    "id": "89058",
+    "name": {
+      "en": "Great Wall"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89058",
+      "icao": null
+    },
+    "location": {
+      "latitude": -62.2167,
+      "longitude": -58.9667,
+      "elevation": 10
+    },
+    "timezone": "Antarctica/Palmer",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1986-01-02",
+        "end": "2026-02-27"
+      },
+      "monthly": {
+        "start": 1990,
+        "end": 2021
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89059",
+    "name": {
+      "en": "Base Bernardo O'Higgins"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89059",
+      "icao": null
+    },
+    "location": {
+      "latitude": -63.3167,
+      "longitude": -56.6833,
+      "elevation": 10
+    },
+    "timezone": "Antarctica/Palmer",
+    "inventory": {
+      "model": {
+        "start": "2018-01-28",
+        "end": "2026-03-20"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1985-07-01",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 1983,
+        "end": 2021
+      },
+      "normals": {
+        "start": 1961,
+        "end": 2020
+      }
+    }
+  },
+  {
+    "id": "89061",
+    "name": {
+      "en": "Palmer Station"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89061",
+      "icao": null
+    },
+    "location": {
+      "latitude": -64.7667,
+      "longitude": -64.0833,
+      "elevation": 8
+    },
+    "timezone": "Antarctica/Palmer",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1976-08-16",
+        "end": "2025-08-24"
+      },
+      "monthly": {
+        "start": 1982,
+        "end": 2022
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89062",
+    "name": {
+      "en": "Rothera Point"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89062",
+      "icao": null
+    },
+    "location": {
+      "latitude": -67.5667,
+      "longitude": -68.1333,
+      "elevation": 16
+    },
+    "timezone": "Antarctica/Rothera",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1977-02-01",
+        "end": "2025-08-24"
+      },
+      "monthly": {
+        "start": 1978,
+        "end": 2022
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89063",
+    "name": {
+      "en": "Vernadsky"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89063",
+      "icao": null
+    },
+    "location": {
+      "latitude": -65.25,
+      "longitude": -64.2667,
+      "elevation": 11
+    },
+    "timezone": "Antarctica/Palmer",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1985-07-08",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 1983,
+        "end": 2022
+      },
+      "normals": {
+        "start": 1981,
+        "end": 2020
+      }
+    }
+  },
+  {
+    "id": "89065",
+    "name": {
+      "en": "Fossil Bluff"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89065",
+      "icao": null
+    },
+    "location": {
+      "latitude": -71.3333,
+      "longitude": -68.35,
+      "elevation": 55
+    },
+    "timezone": "Antarctica/Rothera",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "2003-01-23",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 2006,
+        "end": 2021
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89066",
+    "name": {
+      "en": "Base San Martin"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89066",
+      "icao": "SAYS"
+    },
+    "location": {
+      "latitude": -68.1333,
+      "longitude": -67.1333,
+      "elevation": 4
+    },
+    "timezone": "Antarctica/Palmer",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1976-10-09",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 1980,
+        "end": 2021
+      },
+      "normals": {
+        "start": 1971,
+        "end": 2020
+      }
+    }
+  },
+  {
+    "id": "89083",
+    "name": {
+      "en": "Siple Station"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89083",
+      "icao": null
+    },
+    "location": {
+      "latitude": -75.9167,
+      "longitude": -83.9167,
+      "elevation": 914
+    },
+    "timezone": "Antarctica/Rothera",
+    "inventory": {
+      "model": {
+        "start": null,
+        "end": null
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1979-01-01",
+        "end": "1988-01-25"
+      },
+      "monthly": {
+        "start": 1979,
+        "end": 1987
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89087",
+    "name": {
+      "en": "Thiel Mountains Aws"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89087",
+      "icao": null
+    },
+    "location": {
+      "latitude": -85.2,
+      "longitude": -87.8833,
+      "elevation": -9999
+    },
+    "timezone": null,
+    "inventory": {
+      "model": {
+        "start": null,
+        "end": null
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "2009-01-13",
+        "end": "2025-08-18"
+      },
+      "monthly": {
+        "start": 2009,
+        "end": 2014
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89125",
+    "name": {
+      "en": "Byrd Station"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89125",
+      "icao": null
+    },
+    "location": {
+      "latitude": -80.0167,
+      "longitude": -119.5333,
+      "elevation": 1515
+    },
+    "timezone": "Antarctica/South_Pole",
+    "inventory": {
+      "model": {
+        "start": null,
+        "end": null
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1957-01-10",
+        "end": "1988-01-31"
+      },
+      "monthly": {
+        "start": 1957,
+        "end": 1988
+      },
+      "normals": {
+        "start": 1961,
+        "end": 1990
+      }
+    }
+  },
+  {
+    "id": "89132",
+    "name": {
+      "en": "Russkaya (RUS)"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89132",
+      "icao": null
+    },
+    "location": {
+      "latitude": -74.7658,
+      "longitude": -136.7989,
+      "elevation": 140
+    },
+    "timezone": "Antarctica/McMurdo",
+    "inventory": {
+      "model": {
+        "start": null,
+        "end": null
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": null,
+        "end": null
+      },
+      "monthly": {
+        "start": null,
+        "end": null
+      },
+      "normals": {
+        "start": 1961,
+        "end": 1990
+      }
+    }
+  },
+  {
+    "id": "89251",
+    "name": {
+      "en": "King Sejong"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89251",
+      "icao": null
+    },
+    "location": {
+      "latitude": -62.2167,
+      "longitude": -58.75,
+      "elevation": 10
+    },
+    "timezone": "Antarctica/Palmer",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1991-02-08",
+        "end": "2025-08-17"
+      },
+      "monthly": {
+        "start": 2012,
+        "end": 2020
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89257",
+    "name": {
+      "en": "University of Wisconsin ID 8925 (Limbert Aws)"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89257",
+      "icao": null
+    },
+    "location": {
+      "latitude": -75.8667,
+      "longitude": -59.15,
+      "elevation": 40
+    },
+    "timezone": null,
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1998-03-01",
+        "end": "2025-08-24"
+      },
+      "monthly": {
+        "start": 1998,
+        "end": 2022
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89262",
+    "name": {
+      "en": "University Wi Id 8926"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89262",
+      "icao": null
+    },
+    "location": {
+      "latitude": -66.9667,
+      "longitude": -60.55,
+      "elevation": 17
+    },
+    "timezone": null,
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1990-05-12",
+        "end": "2025-05-04"
+      },
+      "monthly": {
+        "start": 1992,
+        "end": 2021
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89266",
+    "name": {
+      "en": "University Wi Id 8902"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89266",
+      "icao": null
+    },
+    "location": {
+      "latitude": -72.2167,
+      "longitude": -60.3333,
+      "elevation": 91
+    },
+    "timezone": "Antarctica/Palmer",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1990-05-10",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 1991,
+        "end": 2022
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89269",
+    "name": {
+      "en": "University Wi Id 8912 Bonaparte Park Point"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89269",
+      "icao": null
+    },
+    "location": {
+      "latitude": -64.7833,
+      "longitude": -63.0667,
+      "elevation": 8
+    },
+    "timezone": "Antarctica/Palmer",
+    "inventory": {
+      "model": {
+        "start": null,
+        "end": null
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1996-05-06",
+        "end": "2014-09-23"
+      },
+      "monthly": {
+        "start": 1996,
+        "end": 2010
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89272",
+    "name": {
+      "en": "University Wi Id 8917 Ski-Hi"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89272",
+      "icao": null
+    },
+    "location": {
+      "latitude": -74.9667,
+      "longitude": -70.7667,
+      "elevation": 0
+    },
+    "timezone": "Antarctica/Rothera",
+    "inventory": {
+      "model": {
+        "start": "2021-07-05",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1997-01-01",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 1997,
+        "end": 2022
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89314",
+    "name": {
+      "en": "University Wi Id 21358 Theresa"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89314",
+      "icao": null
+    },
+    "location": {
+      "latitude": -84.6,
+      "longitude": -115.8167,
+      "elevation": 0
+    },
+    "timezone": "Antarctica/South_Pole",
+    "inventory": {
+      "model": {
+        "start": "2021-07-05",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1997-01-01",
+        "end": "2024-12-30"
+      },
+      "monthly": {
+        "start": 1997,
+        "end": 2022
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89324",
+    "name": {
+      "en": "University Wi Id 8903"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89324",
+      "icao": null
+    },
+    "location": {
+      "latitude": -80.0,
+      "longitude": -120.0,
+      "elevation": 1530
+    },
+    "timezone": "Antarctica/South_Pole",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2024-11-16"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1990-05-10",
+        "end": "2021-11-08"
+      },
+      "monthly": {
+        "start": 1991,
+        "end": 2021
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89327",
+    "name": {
+      "en": "University Wi Id 8981 Mount Siple"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89327",
+      "icao": null
+    },
+    "location": {
+      "latitude": -72.2,
+      "longitude": -127.05,
+      "elevation": 30
+    },
+    "timezone": null,
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2022-10-24"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1994-06-01",
+        "end": "2019-10-16"
+      },
+      "monthly": {
+        "start": 1994,
+        "end": 2012
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89329",
+    "name": {
+      "en": "Univ. Wi (harry)"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89329",
+      "icao": null
+    },
+    "location": {
+      "latitude": -83.0,
+      "longitude": -121.3833,
+      "elevation": -9999
+    },
+    "timezone": null,
+    "inventory": {
+      "model": {
+        "start": null,
+        "end": null
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "2007-06-05",
+        "end": "2021-11-07"
+      },
+      "monthly": {
+        "start": 2007,
+        "end": 2014
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89332",
+    "name": {
+      "en": "University Wi Id 21356 Elizabeth"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89332",
+      "icao": null
+    },
+    "location": {
+      "latitude": -82.6167,
+      "longitude": -137.0833,
+      "elevation": 0
+    },
+    "timezone": "Antarctica/South_Pole",
+    "inventory": {
+      "model": {
+        "start": "2021-07-05",
+        "end": "2024-11-16"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1997-03-01",
+        "end": "2021-11-08"
+      },
+      "monthly": {
+        "start": 1997,
+        "end": 2021
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89345",
+    "name": {
+      "en": "University of Wisconsin ID 8900 (Siple Dome)"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89345",
+      "icao": null
+    },
+    "location": {
+      "latitude": -81.65,
+      "longitude": -148.7833,
+      "elevation": 620
+    },
+    "timezone": "Antarctica/South_Pole",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2024-11-16"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1997-06-01",
+        "end": "2021-11-08"
+      },
+      "monthly": {
+        "start": 1997,
+        "end": 2021
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89376",
+    "name": {
+      "en": "Gill"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89376",
+      "icao": null
+    },
+    "location": {
+      "latitude": -80.0167,
+      "longitude": -178.7333,
+      "elevation": 55
+    },
+    "timezone": null,
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2024-11-16"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1997-01-01",
+        "end": "2021-11-08"
+      },
+      "monthly": {
+        "start": 1997,
+        "end": 2021
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89377",
+    "name": {
+      "en": "University Wi Id 8908"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89377",
+      "icao": null
+    },
+    "location": {
+      "latitude": -82.5833,
+      "longitude": -174.2667,
+      "elevation": 55
+    },
+    "timezone": null,
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2024-11-16"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1990-05-10",
+        "end": "2021-11-08"
+      },
+      "monthly": {
+        "start": 1992,
+        "end": 2021
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89504",
+    "name": {
+      "en": "Troll"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89504",
+      "icao": null
+    },
+    "location": {
+      "latitude": -72.0,
+      "longitude": 2.5333,
+      "elevation": 1290
+    },
+    "timezone": "Antarctica/Syowa",
+    "inventory": {
+      "model": {
+        "start": "2018-07-20",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1994-08-01",
+        "end": "2025-03-05"
+      },
+      "monthly": {
+        "start": 1994,
+        "end": 2022
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89507",
+    "name": {
+      "en": "Kohnen Ep9"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89507",
+      "icao": null
+    },
+    "location": {
+      "latitude": -75.0,
+      "longitude": 0.0,
+      "elevation": -9999
+    },
+    "timezone": "Antarctica/Syowa",
+    "inventory": {
+      "model": {
+        "start": "2018-07-20",
+        "end": "2020-01-29"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "2007-08-22",
+        "end": "2024-12-30"
+      },
+      "monthly": {
+        "start": 2007,
+        "end": 2022
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89512",
+    "name": {
+      "en": "Novolazarevskaja"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89512",
+      "icao": null
+    },
+    "location": {
+      "latitude": -70.8,
+      "longitude": 11.8,
+      "elevation": 102
+    },
+    "timezone": "Antarctica/Syowa",
+    "inventory": {
+      "model": {
+        "start": "2018-01-28",
+        "end": "2026-03-20"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1973-01-01",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 1969,
+        "end": 2022
+      },
+      "normals": {
+        "start": 1961,
+        "end": 2020
+      }
+    }
+  },
+  {
+    "id": "89514",
+    "name": {
+      "en": "Maitri"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89514",
+      "icao": null
+    },
+    "location": {
+      "latitude": -70.7667,
+      "longitude": 11.75,
+      "elevation": 120
+    },
+    "timezone": "Antarctica/Syowa",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1990-02-03",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 2011,
+        "end": 2021
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89532",
+    "name": {
+      "en": "Syowa"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89532",
+      "icao": null
+    },
+    "location": {
+      "latitude": -69.0,
+      "longitude": 39.6,
+      "elevation": 18
+    },
+    "timezone": "Antarctica/Syowa",
+    "inventory": {
+      "model": {
+        "start": "2018-01-28",
+        "end": "2026-03-20"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1973-01-29",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 1983,
+        "end": 2021
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89542",
+    "name": {
+      "en": "Molodeznaja"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89542",
+      "icao": null
+    },
+    "location": {
+      "latitude": -67.6667,
+      "longitude": 45.85,
+      "elevation": 40
+    },
+    "timezone": "Antarctica/Syowa",
+    "inventory": {
+      "model": {
+        "start": "2018-01-28",
+        "end": "2026-03-20"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1973-01-02",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 1969,
+        "end": 2020
+      },
+      "normals": {
+        "start": 1961,
+        "end": 2010
+      }
+    }
+  },
+  {
+    "id": "89564",
+    "name": {
+      "en": "Mawson"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89564",
+      "icao": null
+    },
+    "location": {
+      "latitude": -67.6,
+      "longitude": 62.9,
+      "elevation": 10
+    },
+    "timezone": "Antarctica/Mawson",
+    "inventory": {
+      "model": {
+        "start": "2018-01-28",
+        "end": "2026-03-20"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1954-03-01",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 1954,
+        "end": 2021
+      },
+      "normals": {
+        "start": 1961,
+        "end": 2020
+      }
+    }
+  },
+  {
+    "id": "89570",
+    "name": {
+      "en": "Davis (whoop Whoop)"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89570",
+      "icao": null
+    },
+    "location": {
+      "latitude": -68.4692,
+      "longitude": 78.8169,
+      "elevation": 543
+    },
+    "timezone": "Antarctica/Mawson",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "2011-08-26",
+        "end": "2024-03-13"
+      },
+      "monthly": {
+        "start": 2011,
+        "end": 2018
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89571",
+    "name": {
+      "en": "Davis"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89571",
+      "icao": null
+    },
+    "location": {
+      "latitude": -68.6,
+      "longitude": 78.0,
+      "elevation": 18
+    },
+    "timezone": "Antarctica/Davis",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1957-03-01",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 1957,
+        "end": 2021
+      },
+      "normals": {
+        "start": 1961,
+        "end": 2020
+      }
+    }
+  },
+  {
+    "id": "89573",
+    "name": {
+      "en": "Zhongshan Weather Office"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89573",
+      "icao": null
+    },
+    "location": {
+      "latitude": -69.3667,
+      "longitude": 76.3667,
+      "elevation": 18
+    },
+    "timezone": "Antarctica/Davis",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2024-03-24"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1990-03-10",
+        "end": "2021-03-16"
+      },
+      "monthly": {
+        "start": 1993,
+        "end": 2021
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89575",
+    "name": {
+      "en": "Druzhnaya-4"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89575",
+      "icao": null
+    },
+    "location": {
+      "latitude": -69.7475,
+      "longitude": 73.7097,
+      "elevation": 45
+    },
+    "timezone": "Antarctica/Mawson",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "2010-02-03",
+        "end": "2026-02-13"
+      },
+      "monthly": {
+        "start": null,
+        "end": null
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89577",
+    "name": {
+      "en": "Davis Lgb 46 Aws"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89577",
+      "icao": null
+    },
+    "location": {
+      "latitude": -75.85,
+      "longitude": 71.4833,
+      "elevation": 2354
+    },
+    "timezone": null,
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1996-02-01",
+        "end": "2026-02-27"
+      },
+      "monthly": {
+        "start": 1996,
+        "end": 2022
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89578",
+    "name": {
+      "en": "Dome Plateau Eagle"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89578",
+      "icao": null
+    },
+    "location": {
+      "latitude": -76.4175,
+      "longitude": 77.0297,
+      "elevation": 2824
+    },
+    "timezone": "Antarctica/Vostok",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "2005-03-15",
+        "end": "2024-12-30"
+      },
+      "monthly": {
+        "start": 2005,
+        "end": 2022
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89592",
+    "name": {
+      "en": "Mirnyj"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89592",
+      "icao": null
+    },
+    "location": {
+      "latitude": -66.5,
+      "longitude": 93.0,
+      "elevation": 30
+    },
+    "timezone": "Antarctica/Mawson",
+    "inventory": {
+      "model": {
+        "start": "2018-01-28",
+        "end": "2026-03-20"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1973-01-01",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 1957,
+        "end": 2021
+      },
+      "normals": {
+        "start": 1961,
+        "end": 2020
+      }
+    }
+  },
+  {
+    "id": "89606",
+    "name": {
+      "en": "Vostok"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89606",
+      "icao": null
+    },
+    "location": {
+      "latitude": -78.45,
+      "longitude": 106.8667,
+      "elevation": 3420
+    },
+    "timezone": "Antarctica/Davis",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1973-01-01",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 1957,
+        "end": 2021
+      },
+      "normals": {
+        "start": 1961,
+        "end": 2020
+      }
+    }
+  },
+  {
+    "id": "89611",
+    "name": {
+      "en": "Casey"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89611",
+      "icao": null
+    },
+    "location": {
+      "latitude": -66.3,
+      "longitude": 110.5,
+      "elevation": 40
+    },
+    "timezone": "Antarctica/Davis",
+    "inventory": {
+      "model": {
+        "start": "2018-01-28",
+        "end": "2026-03-20"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1969-03-01",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 1957,
+        "end": 2021
+      },
+      "normals": {
+        "start": 1961,
+        "end": 2020
+      }
+    }
+  },
+  {
+    "id": "89615",
+    "name": {
+      "en": "Wilkins Runway East"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89615",
+      "icao": null
+    },
+    "location": {
+      "latitude": -66.6831,
+      "longitude": 111.5317,
+      "elevation": 753
+    },
+    "timezone": null,
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "2007-10-17",
+        "end": "2025-03-11"
+      },
+      "monthly": {
+        "start": 2007,
+        "end": 2019
+      },
+      "normals": {
+        "start": 1961,
+        "end": 2020
+      }
+    }
+  },
+  {
+    "id": "89625",
+    "name": {
+      "en": "Concordia"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89625",
+      "icao": null
+    },
+    "location": {
+      "latitude": -75.1017,
+      "longitude": 123.4119,
+      "elevation": 3233
+    },
+    "timezone": "Antarctica/Casey",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "2006-12-14",
+        "end": "2025-08-24"
+      },
+      "monthly": {
+        "start": 2007,
+        "end": 2021
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89642",
+    "name": {
+      "en": "Dumont D'urville"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89642",
+      "icao": null
+    },
+    "location": {
+      "latitude": -66.7,
+      "longitude": 140.0,
+      "elevation": 41
+    },
+    "timezone": "Antarctica/DumontDUrville",
+    "inventory": {
+      "model": {
+        "start": "2018-01-28",
+        "end": "2026-03-20"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1985-07-01",
+        "end": "2025-12-17"
+      },
+      "monthly": {
+        "start": 1992,
+        "end": 2022
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89646",
+    "name": {
+      "en": "Sitry Point"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89646",
+      "icao": null
+    },
+    "location": {
+      "latitude": -71.6525,
+      "longitude": 148.6556,
+      "elevation": 2094
+    },
+    "timezone": "Antarctica/DumontDUrville",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2022-05-05"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "2010-03-10",
+        "end": "2019-04-27"
+      },
+      "monthly": {
+        "start": 2010,
+        "end": 2019
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89648",
+    "name": {
+      "en": "Mid Point"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89648",
+      "icao": null
+    },
+    "location": {
+      "latitude": -72.5361,
+      "longitude": 145.8589,
+      "elevation": 2509
+    },
+    "timezone": "Antarctica/DumontDUrville",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "2006-02-07",
+        "end": "2024-12-30"
+      },
+      "monthly": {
+        "start": 2007,
+        "end": 2022
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89657",
+    "name": {
+      "en": "Leningradskaya (RUS)"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89657",
+      "icao": null
+    },
+    "location": {
+      "latitude": -69.5019,
+      "longitude": 159.3869,
+      "elevation": 292
+    },
+    "timezone": "Antarctica/DumontDUrville",
+    "inventory": {
+      "model": {
+        "start": "2022-04-16",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1973-01-01",
+        "end": "2024-05-06"
+      },
+      "monthly": {
+        "start": 1972,
+        "end": 1991
+      },
+      "normals": {
+        "start": 1961,
+        "end": 2000
+      }
+    }
+  },
+  {
+    "id": "89659",
+    "name": {
+      "en": "Priestley Glacier"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89659",
+      "icao": null
+    },
+    "location": {
+      "latitude": -73.6392,
+      "longitude": 160.6456,
+      "elevation": 1924
+    },
+    "timezone": "Antarctica/McMurdo",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "2006-02-07",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 2006,
+        "end": 2022
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89661",
+    "name": {
+      "en": "Cape Phillips"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89661",
+      "icao": null
+    },
+    "location": {
+      "latitude": -73.05,
+      "longitude": 169.6,
+      "elevation": 200
+    },
+    "timezone": "Antarctica/McMurdo",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1995-04-04",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 2001,
+        "end": 2021
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89662",
+    "name": {
+      "en": "Base Baia Terra Nova"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89662",
+      "icao": null
+    },
+    "location": {
+      "latitude": -74.7,
+      "longitude": 164.1,
+      "elevation": 80
+    },
+    "timezone": "Antarctica/McMurdo",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1995-04-05",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 2006,
+        "end": 2021
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89664",
+    "name": {
+      "en": "McMurdo"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89664",
+      "icao": null
+    },
+    "location": {
+      "latitude": -77.8,
+      "longitude": 166.7,
+      "elevation": 34
+    },
+    "timezone": "Antarctica/McMurdo",
+    "inventory": {
+      "model": {
+        "start": "2026-01-25",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1956-03-10",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 1956,
+        "end": 2021
+      },
+      "normals": {
+        "start": 1961,
+        "end": 2010
+      }
+    }
+  },
+  {
+    "id": "89666",
+    "name": {
+      "en": "Cape Ross"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89666",
+      "icao": null
+    },
+    "location": {
+      "latitude": -76.7167,
+      "longitude": 162.9667,
+      "elevation": 200
+    },
+    "timezone": "Antarctica/McMurdo",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1995-04-04",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 2001,
+        "end": 2021
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89667",
+    "name": {
+      "en": "University Wi Id 8927"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89667",
+      "icao": null
+    },
+    "location": {
+      "latitude": -77.95,
+      "longitude": 166.5167,
+      "elevation": 20
+    },
+    "timezone": "Antarctica/McMurdo",
+    "inventory": {
+      "model": {
+        "start": "2021-03-26",
+        "end": "2026-01-21"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1990-05-10",
+        "end": "2023-01-13"
+      },
+      "monthly": {
+        "start": 1991,
+        "end": 2014
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89668",
+    "name": {
+      "en": "University Wi Id 8915 Minna Bluff"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89668",
+      "icao": "NZPG"
+    },
+    "location": {
+      "latitude": -78.5,
+      "longitude": 166.5,
+      "elevation": 0
+    },
+    "timezone": "Antarctica/McMurdo",
+    "inventory": {
+      "model": {
+        "start": null,
+        "end": null
+      },
+      "hourly": {
+        "start": "2005-01-02",
+        "end": "2017-01-16"
+      },
+      "daily": {
+        "start": "2005-01-18",
+        "end": "2015-02-12"
+      },
+      "monthly": {
+        "start": null,
+        "end": null
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89669",
+    "name": {
+      "en": "University Wi Id 8909 Linda"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89669",
+      "icao": "NZIR"
+    },
+    "location": {
+      "latitude": -78.5,
+      "longitude": 168.35,
+      "elevation": 0
+    },
+    "timezone": "Antarctica/McMurdo",
+    "inventory": {
+      "model": {
+        "start": null,
+        "end": null
+      },
+      "hourly": {
+        "start": "2001-10-01",
+        "end": "2013-11-29"
+      },
+      "daily": {
+        "start": "2001-10-24",
+        "end": "2012-11-22"
+      },
+      "monthly": {
+        "start": null,
+        "end": null
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89670",
+    "name": {
+      "en": "McMurdo Station (USA)"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89670",
+      "icao": "NZWD"
+    },
+    "location": {
+      "latitude": -77.8833,
+      "longitude": 166.65,
+      "elevation": 12
+    },
+    "timezone": "Antarctica/McMurdo",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": "1980-11-06",
+        "end": "2026-02-16"
+      },
+      "daily": {
+        "start": "2000-01-03",
+        "end": "2022-02-01"
+      },
+      "monthly": {
+        "start": null,
+        "end": null
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89674",
+    "name": {
+      "en": "Williams Field"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89674",
+      "icao": "NZCM"
+    },
+    "location": {
+      "latitude": -77.8667,
+      "longitude": 166.9667,
+      "elevation": 8
+    },
+    "timezone": "Antarctica/McMurdo",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": "2006-01-01",
+        "end": "2026-03-10"
+      },
+      "daily": {
+        "start": "2021-07-25",
+        "end": "2022-04-25"
+      },
+      "monthly": {
+        "start": 2021,
+        "end": 2022
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89734",
+    "name": {
+      "en": "University Wi Id 8982 Dome Fuji"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89734",
+      "icao": null
+    },
+    "location": {
+      "latitude": -77.3167,
+      "longitude": 39.7,
+      "elevation": 0
+    },
+    "timezone": "Antarctica/Syowa",
+    "inventory": {
+      "model": {
+        "start": "2021-07-05",
+        "end": "2024-11-16"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1997-01-01",
+        "end": "2021-11-08"
+      },
+      "monthly": {
+        "start": 2010,
+        "end": 2012
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89744",
+    "name": {
+      "en": "University Wi Id 8918 Relay Stat"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89744",
+      "icao": null
+    },
+    "location": {
+      "latitude": -74.0167,
+      "longitude": 43.0,
+      "elevation": 0
+    },
+    "timezone": "Antarctica/Syowa",
+    "inventory": {
+      "model": {
+        "start": "2021-07-05",
+        "end": "2024-11-15"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1997-01-01",
+        "end": "2021-11-07"
+      },
+      "monthly": {
+        "start": 1997,
+        "end": 2012
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89767",
+    "name": {
+      "en": "Amery"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89767",
+      "icao": null
+    },
+    "location": {
+      "latitude": -70.9,
+      "longitude": 69.9,
+      "elevation": 84
+    },
+    "timezone": "Antarctica/Mawson",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "2001-08-16",
+        "end": "2025-11-10"
+      },
+      "monthly": {
+        "start": 2001,
+        "end": 2021
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89799",
+    "name": {
+      "en": "University Wi Id 8924 Nico"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89799",
+      "icao": null
+    },
+    "location": {
+      "latitude": -89.0,
+      "longitude": 90.1333,
+      "elevation": 2935
+    },
+    "timezone": "Antarctica/Vostok",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2024-11-16"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1994-06-01",
+        "end": "2021-11-08"
+      },
+      "monthly": {
+        "start": 1994,
+        "end": 2021
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89809",
+    "name": {
+      "en": "Casey Skiway South"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89809",
+      "icao": null
+    },
+    "location": {
+      "latitude": -66.2861,
+      "longitude": 110.7633,
+      "elevation": 390
+    },
+    "timezone": "Antarctica/Davis",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "2005-01-01",
+        "end": "2025-02-01"
+      },
+      "monthly": {
+        "start": 2005,
+        "end": 2022
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89811",
+    "name": {
+      "en": "Casey Law Dome Summit"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89811",
+      "icao": null
+    },
+    "location": {
+      "latitude": -66.7333,
+      "longitude": 112.75,
+      "elevation": 1366
+    },
+    "timezone": "Antarctica/Casey",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1993-08-01",
+        "end": "2024-12-14"
+      },
+      "monthly": {
+        "start": 1993,
+        "end": 2021
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89828",
+    "name": {
+      "en": "University Wi Id 8904"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89828",
+      "icao": null
+    },
+    "location": {
+      "latitude": -74.5,
+      "longitude": 123.0,
+      "elevation": 3280
+    },
+    "timezone": "Antarctica/Casey",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1990-05-10",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 1991,
+        "end": 2022
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89832",
+    "name": {
+      "en": "University Wi Id 8912"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89832",
+      "icao": null
+    },
+    "location": {
+      "latitude": -66.7,
+      "longitude": 139.8,
+      "elevation": 240
+    },
+    "timezone": "Antarctica/DumontDUrville",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2024-11-16"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1990-05-12",
+        "end": "2021-11-08"
+      },
+      "monthly": {
+        "start": 1991,
+        "end": 2012
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89834",
+    "name": {
+      "en": "University Wi Id 8916"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89834",
+      "icao": null
+    },
+    "location": {
+      "latitude": -67.3833,
+      "longitude": 138.7167,
+      "elevation": 1560
+    },
+    "timezone": "Antarctica/DumontDUrville",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-02-04"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1990-05-12",
+        "end": "2023-01-27"
+      },
+      "monthly": {
+        "start": 1992,
+        "end": 2012
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89864",
+    "name": {
+      "en": "University Wi Id 8905"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89864",
+      "icao": null
+    },
+    "location": {
+      "latitude": -74.9167,
+      "longitude": 163.6,
+      "elevation": 80
+    },
+    "timezone": "Antarctica/McMurdo",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2024-11-16"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1990-05-10",
+        "end": "2021-11-08"
+      },
+      "monthly": {
+        "start": 1991,
+        "end": 2021
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89865",
+    "name": {
+      "en": "University Wi Id 8913"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89865",
+      "icao": null
+    },
+    "location": {
+      "latitude": -76.2333,
+      "longitude": 168.7,
+      "elevation": 275
+    },
+    "timezone": "Antarctica/McMurdo",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2024-11-16"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1990-05-10",
+        "end": "2021-11-08"
+      },
+      "monthly": {
+        "start": 1991,
+        "end": 2021
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89866",
+    "name": {
+      "en": "University Wi Id 8906"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89866",
+      "icao": null
+    },
+    "location": {
+      "latitude": -77.4333,
+      "longitude": 163.75,
+      "elevation": 120
+    },
+    "timezone": "Antarctica/McMurdo",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2024-03-24"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1957-12-19",
+        "end": "2021-03-16"
+      },
+      "monthly": {
+        "start": 1958,
+        "end": 2021
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89868",
+    "name": {
+      "en": "University Wi Id 8924"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89868",
+      "icao": null
+    },
+    "location": {
+      "latitude": -79.9333,
+      "longitude": 169.8333,
+      "elevation": 60
+    },
+    "timezone": null,
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2024-11-16"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1990-05-10",
+        "end": "2021-11-08"
+      },
+      "monthly": {
+        "start": 1992,
+        "end": 2021
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89869",
+    "name": {
+      "en": "University Wi Id 8915"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89869",
+      "icao": null
+    },
+    "location": {
+      "latitude": -79.95,
+      "longitude": 164.9667,
+      "elevation": 75
+    },
+    "timezone": null,
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2024-08-08"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1990-05-13",
+        "end": "2021-07-31"
+      },
+      "monthly": {
+        "start": 1991,
+        "end": 2014
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89872",
+    "name": {
+      "en": "University Wi Id 8907"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89872",
+      "icao": null
+    },
+    "location": {
+      "latitude": -78.0167,
+      "longitude": 170.8,
+      "elevation": 45
+    },
+    "timezone": "Antarctica/McMurdo",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2024-11-16"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1990-05-10",
+        "end": "2021-11-08"
+      },
+      "monthly": {
+        "start": 1991,
+        "end": 2021
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89873",
+    "name": {
+      "en": "University Wi Id 8900 Elaine"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89873",
+      "icao": null
+    },
+    "location": {
+      "latitude": -83.15,
+      "longitude": 174.4667,
+      "elevation": 60
+    },
+    "timezone": null,
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2023-09-02"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1994-06-01",
+        "end": "2020-08-24"
+      },
+      "monthly": {
+        "start": 1994,
+        "end": 2012
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "89879",
+    "name": {
+      "en": "University Wi Id 8984 Possession Island"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": "89879",
+      "icao": null
+    },
+    "location": {
+      "latitude": -71.9,
+      "longitude": 171.1333,
+      "elevation": 30
+    },
+    "timezone": "Antarctica/McMurdo",
+    "inventory": {
+      "model": {
+        "start": "2021-01-01",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": null,
+        "end": null
+      },
+      "daily": {
+        "start": "1994-06-01",
+        "end": "2026-02-28"
+      },
+      "monthly": {
+        "start": 1994,
+        "end": 2022
+      },
+      "normals": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  {
+    "id": "SCRM0",
+    "name": {
+      "en": "Frei (CHL)  /  Base Presidente Eduardo Frei Montalva (CHL) / Teniente Rodolfo Marsh Martin / Isla Rey Jorge Antartica Chilena"
+    },
+    "country": "AQ",
+    "region": null,
+    "identifiers": {
+      "national": null,
+      "wmo": null,
+      "icao": "SCRM"
+    },
+    "location": {
+      "latitude": -62.1908,
+      "longitude": -58.9867,
+      "elevation": 45
+    },
+    "timezone": "Antarctica/Palmer",
+    "inventory": {
+      "model": {
+        "start": "2021-01-02",
+        "end": "2026-03-19"
+      },
+      "hourly": {
+        "start": "1985-04-08",
+        "end": "2026-03-10"
+      },
+      "daily": {
+        "start": "2010-01-22",
+        "end": "2021-04-17"
+      },
+      "monthly": {
+        "start": null,
+        "end": null
+      },
+      "normals": {
+        "start": 1961,
+        "end": 1990
+      }
+    }
+  }
+]

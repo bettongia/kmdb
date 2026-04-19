@@ -84,7 +84,7 @@ We'll start by looking at the KMDB CLI on a desktop device.
 
 ## Getting the CLI
 
-**From a release archive (recommended)**
+## From a release archive (recommended)
 
 Download the latest release archive for your platform from the releases page,
 then extract it and add the `bin/` directory to your path:
@@ -94,10 +94,22 @@ tar -xzf kmdb-<version>-<os>-<arch>.tar.gz
 export PATH="$PWD/kmdb-<version>-<os>-<arch>/bin:$PATH"
 ```
 
-**Building from source**
+### Using the source code
 
-If you have cloned the repository you can build the CLI directly. You will
-need a current Dart SDK installation and Git LFS.
+For local development you can run the CLI directly without a full release build:
+
+```sh
+cd packages/kmdb_cli
+dart run bin/kmdb.dart
+```
+
+_Running in the `packages/kmdb_cli` ensures that the various build hooks are
+run._
+
+#### Building from source
+
+If you have cloned the repository you can build the CLI directly. You will need
+a current Dart SDK installation and Git LFS.
 
 First pull the large model assets tracked with Git LFS:
 
@@ -111,14 +123,8 @@ Then build and package the CLI for the current platform:
 make release
 ```
 
-This produces `dist/cli/<os>-<arch>/kmdb-<version>-<os>-<arch>.tar.gz`.
-Extract it and add the `bin/` directory to your path as above.
-
-For local development you can run the CLI directly without a full release build:
-
-```sh
-dart run packages/kmdb_cli/bin/kmdb.dart
-```
+This produces `dist/cli/<os>-<arch>/kmdb-<version>-<os>-<arch>.tar.gz`. Extract
+it and add the `bin/` directory to your path as above.
 
 You should be able to run `kmdb`:
 
@@ -126,11 +132,19 @@ You should be able to run `kmdb`:
 kmdb --help
 ```
 
-## Create a database
+# Before you get started
+
+Working with `kmdb` will create directories that house the database. It's best
+to do this in a directory you can try things out. Consider creating a new
+directory somewhere handy and work from there.
+
+# Create a database
 
 You can create an empty database using the `init` command. In the call below,
 `demodb` provides the location of the database. In this case, a directory
 (database) named `demodb` will be created in the current directory.
+
+_Note: you can provide a path for the database such as `kmdb /tmp/mydb init`._
 
 ```sh
 kmdb demodb init
@@ -193,7 +207,7 @@ You'll see it's essentially a no-op:
 }
 ```
 
-## Inserting and retrieving documents
+# Inserting and retrieving documents
 
 KMDB uses Collections to help you organise documents. You could just dump all
 your documents into a single collection but that will make things like searching
@@ -204,6 +218,17 @@ collection:
 
 ```sh
 kmdb demodb insert notes --value '{"title": "My very first note."}'
+```
+
+The output will be the document added to the database collection:
+
+```json
+[
+  {
+    "title": "My very first note.",
+    "_id": "019da788e9dd72be90ebebb9508ebdfd"
+  }
+]
 ```
 
 Note: For the most part the pattern
@@ -223,21 +248,116 @@ The `scan` command returns all documents in the selected collection (e.g.
 kmdb demodb scan notes
 ```
 
-Scripts allow you to run multiple commands (`put`, `delete` etc) - the
-[`tags.data`](tags.data) script adds 2 new documents to the `categories`
+Now that you've created a new collection (`notes`) and added a document you can
+try adding some of your own notes to the database.
+
+# The Document ID
+
+When you created that first note you got the following output:
+
+```json
+[
+  {
+    "title": "My very first note.",
+    "_id": "019da788e9dd72be90ebebb9508ebdfd"
+  }
+]
+```
+
+Let's take a moment to understand the `_id` property. This is automatically
+created by KMDB as the unique identifier for the document. You can't change that
+ID. You also can't try to create a record with your own `_id` - run the
+following against your database:
+
+```sh
+kmdb demodb insert notes --value '{"_id": 1234, "title": "My ID hack."}'
+```
+
+The output will be something like:
+
+```json
+[
+  {
+    "_id": "019da7b033ce7a07a20f8e706d5402d8",
+    "title": "My ID hack."
+  }
+]
+```
+
+KMDB silently ignores your `_id` value. Refrain from using top-level properties
+with the underscore as a prefix as KMDB treats it as a system-managed property
+and will return an error. The `_id` field is a little different though - any
+attempt to use it is ignored.
+
+To illustrate, try to be sneaky:
+
+```sh
+kmdb demodb insert notes --value '{"_title": "My ID hack."}'
+```
+
+... and you'll get the following output:
+
+```
+Error: Document contains reserved "_"-prefixed field(s): "_title". The "_" prefix is reserved for KMDB system fields (e.g. "_id").
+```
+
+So what is that ID anyway? It's a
+[UUIDv7](https://www.rfc-editor.org/rfc/rfc9562.html#name-uuid-version-7) value.
+
+The KMDB spec goes into this topic in more detail.
+
+# Scripts
+
+Scripts allow you to run multiple commands (`insert`, `delete` etc) as a batch.
+
+Start by creating a file named `tags.data`:
+
+```sh
+cat <<EOM >tags.data
+insert categories --value '{"name":"Work"}'
+insert categories --value '{"name":"Personal"}'
+EOM
+```
+
+The [`tags.data`](tags.data) script adds 2 new documents to the `categories`
 collection:
 
 ```sh
 kmdb demodb --read tags.data
-
 ```
 
-You can also load documents from a JSON file - this next call creates a
-collection named `weather_stations` and adds details regarding a bunch of
-weather stations around the world:
+You'll see the
+
+```json
+[
+  {
+    "name": "Work",
+    "_id": "019da7a9ad44725e8df587e30bd14482"
+  }
+]
+[
+  {
+    "name": "Personal",
+    "_id": "019da7a9ad457009a5e13f9de93025d7"
+  }
+]
+```
+
+Don't forget you can also see all the documents in the `categories` collection
+by calling `scan`:
 
 ```sh
-kmdb demodb put weather_stations --file weather_stations.json
+kmdb demodb scan categories
+```
+
+# Importing data
+
+You can load documents from a JSON file - this next call creates a collection
+named `weather_stations` and adds details regarding a bunch of weather stations
+around the world.
+
+```sh
+kmdb demodb put weather_stations --file data/weather_stations/stations.json
 ```
 
 How many weather stations do we have?
