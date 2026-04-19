@@ -1,2 +1,2 @@
-put categories --value '{"name":"Work"}'
-put categories --value '{"name":"Personal"}'
+insert categories --value '{"name":"Work"}'
+insert categories --value '{"name":"Personal"}'
