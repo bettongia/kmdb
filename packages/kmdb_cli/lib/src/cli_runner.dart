@@ -139,7 +139,17 @@ abstract final class KmdbCli {
     final remaining = <String>[];
     var i = 0;
     while (i < args.length) {
-      final a = args[i];
+      // Split --flag=value into flag + inline value, leaving other args intact.
+      var a = args[i];
+      String? inlineValue;
+      if (a.startsWith('-')) {
+        final eqIdx = a.indexOf('=');
+        if (eqIdx != -1) {
+          inlineValue = a.substring(eqIdx + 1);
+          a = a.substring(0, eqIdx);
+        }
+      }
+
       switch (a) {
         case '--version':
           showVersion = true;
@@ -152,28 +162,40 @@ abstract final class KmdbCli {
         case '--no-flush':
           flushOnExit = false;
         case '--format' || '-f':
-          i++;
-          if (i >= args.length) {
-            io.stderr.writeln('Error: --format requires a value.');
-            return 1;
+          if (inlineValue != null) {
+            modeStr = inlineValue;
+          } else {
+            i++;
+            if (i >= args.length) {
+              io.stderr.writeln('Error: --format requires a value.');
+              return 1;
+            }
+            modeStr = args[i];
           }
-          modeStr = args[i];
         case '--output' || '-o':
-          i++;
-          if (i >= args.length) {
-            io.stderr.writeln('Error: --output requires a value.');
-            return 1;
+          if (inlineValue != null) {
+            outputPath = inlineValue;
+          } else {
+            i++;
+            if (i >= args.length) {
+              io.stderr.writeln('Error: --output requires a value.');
+              return 1;
+            }
+            outputPath = args[i];
           }
-          outputPath = args[i];
         case '--read' || '-r':
-          i++;
-          if (i >= args.length) {
-            io.stderr.writeln('Error: --read requires a file path.');
-            return 1;
+          if (inlineValue != null) {
+            readPath = inlineValue;
+          } else {
+            i++;
+            if (i >= args.length) {
+              io.stderr.writeln('Error: --read requires a file path.');
+              return 1;
+            }
+            readPath = args[i];
           }
-          readPath = args[i];
         default:
-          remaining.add(a);
+          remaining.add(args[i]); // preserve original (e.g. positional args)
       }
       i++;
     }
