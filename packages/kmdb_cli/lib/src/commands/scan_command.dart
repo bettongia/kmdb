@@ -103,25 +103,26 @@ final class ScanCommand implements CliCommand {
     return true;
   }
 
-  /// Parses a comma-separated `--select` value into a set of field names.
+  /// Parses a comma-separated `--select` value into an ordered list of field names.
   ///
   /// Returns `null` when [value] is null (no projection requested).
-  static Set<String>? _parseSelect(dynamic value) {
+  static List<String>? _parseSelect(dynamic value) {
     if (value == null) return null;
     final parts = '$value'
         .split(',')
         .map((s) => s.trim())
-        .where((s) => s.isNotEmpty);
-    return parts.isEmpty ? null : parts.toSet();
+        .where((s) => s.isNotEmpty)
+        .toList();
+    return parts.isEmpty ? null : parts;
   }
 
-  /// Returns a copy of [doc] containing only the keys in [fields].
+  /// Returns a copy of [doc] containing only the keys in [fields], in [fields] order.
   static Map<String, dynamic> _project(
     Map<String, dynamic> doc,
-    Set<String> fields,
+    List<String> fields,
   ) => {
-    for (final entry in doc.entries)
-      if (fields.contains(entry.key)) entry.key: entry.value,
+    for (final field in fields)
+      if (doc.containsKey(field)) field: doc[field],
   };
 
   static int? _parseInt(dynamic value) {
