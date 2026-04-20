@@ -106,11 +106,21 @@ final class ValueCodec {
     if (decoded is! CborMap) {
       throw FormatException('Expected CBOR map, got ${decoded.runtimeType}');
     }
-    // toObject() recursively converts the CBOR tree to plain Dart objects
-    // (String, int, double, bool, null, List, Map). The result is guaranteed
-    // to be a Map<dynamic, dynamic> when the top-level value is CborMap.
+    // toObject() returns Map<dynamic, dynamic> even for nested maps. Deep-cast
+    // to Map<String, dynamic> so that FieldPath.resolve() can traverse nested
+    // objects without hitting the Map<String, dynamic> type guard.
     final obj = decoded.toObject() as Map<dynamic, dynamic>;
-    return obj.map((k, v) => MapEntry(k as String, v));
+    return _deepCastMap(obj);
+  }
+
+  static Map<String, dynamic> _deepCastMap(Map<dynamic, dynamic> m) {
+    return m.map((k, v) => MapEntry(k as String, _deepCastValue(v)));
+  }
+
+  static dynamic _deepCastValue(dynamic v) {
+    if (v is Map<dynamic, dynamic>) return _deepCastMap(v);
+    if (v is List) return v.map(_deepCastValue).toList();
+    return v;
   }
 
   // ── Utility ─────────────────────────────────────────────────────────────────
