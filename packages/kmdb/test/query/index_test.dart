@@ -616,4 +616,73 @@ void main() {
       expect(ex.toString(), contains('users'));
     });
   });
+
+  // ── IndexDefinition path normalisation ───────────────────────────────────
+
+  group('IndexDefinition path normalisation', () {
+    test(r'$.-prefixed path is normalised to bare path', () {
+      // "$.address.city" must be stored as "address.city".
+      final def = IndexDefinition('contacts', r'$.address.city');
+      expect(def.path, equals('address.city'));
+    });
+
+    test(r'$.path produces the same indexNamespace as bare path', () {
+      final defBare = IndexDefinition('contacts', 'address.city');
+      final defSigil = IndexDefinition('contacts', r'$.address.city');
+      expect(defSigil.indexNamespace, equals(defBare.indexNamespace));
+    });
+
+    test('[*] is rewritten to [] in the stored path', () {
+      final def = IndexDefinition('contacts', 'tags[*]');
+      expect(def.path, equals('tags[]'));
+    });
+
+    test(r'bare $ path throws ArgumentError', () {
+      expect(() => IndexDefinition('contacts', r'$'), throwsArgumentError);
+    });
+
+    test(
+      r'$-prefixed path with dot child is queryable (integration)',
+      () async {
+        // Define an index using the $.city sigil path.
+        final sigilDef = IndexDefinition('contacts', r'$.city');
+        // The normalised path is 'city', so the index namespace must match
+        // a bare-path definition.
+        final bareDef = IndexDefinition('contacts', 'city');
+        expect(sigilDef.path, equals(bareDef.path));
+        expect(sigilDef.indexNamespace, equals(bareDef.indexNamespace));
+
+        // Full integration: insert a document, activate the index defined with
+        // the sigil path, and query it.
+        final db = await KmdbDatabase.open(
+          path: '/test_sigil',
+          adapter: MemoryStorageAdapter(),
+          indexes: [sigilDef],
+          config: KvStoreConfig.forTesting(),
+        );
+        addTearDown(db.close);
+        addTearDown(MemoryStorageAdapter.releaseAllLocks);
+
+        final col = db.collection<Map<String, dynamic>>(
+          name: 'contacts',
+          codec: _IdentityCodec(),
+        );
+
+        final k1 = _key();
+        await col.put({'_id': k1, 'city': 'London'});
+
+        // Activate the index and wait for the build to complete.
+        await db.indexManager.getOrActivate('contacts', 'city');
+        await Future.delayed(const Duration(milliseconds: 100));
+
+        // Query the index using the normalised (bare) definition.
+        final keys = await IndexReader.lookupByValue(
+          store: db.store,
+          definition: bareDef,
+          value: 'London',
+        );
+        expect(keys, contains(k1));
+      },
+    );
+  });
 }

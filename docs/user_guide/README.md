@@ -374,20 +374,36 @@ handy parameters to help us explore the data:
   compact, ndjson, table, csv, line
 - `--select` lets us list the fields we want to display
 
+`--select` accepts a comma-separated list of field paths. These paths support a
+JSONPath subset syntax:
+
+| Path form          | Example           | Output key in result           |
+| ------------------ | ----------------- | ------------------------------ |
+| Top-level field    | `name`            | `name`                         |
+| Dot-child path     | `address.city`    | `address` → `city` (re-nested) |
+| Optional root `$.` | `$.name`          | Same as `name`                 |
+| Array wildcard     | `tags[]` or `tags[*]` | `tags[]` (flat key)        |
+| Positional index   | `tags[0]`         | `tags[0]` (flat key)           |
+| Negative index     | `tags[-1]`        | `tags[-1]` (last element)      |
+
+Dot-child paths are re-nested in the output so `--select="address.city"` produces
+`{"address": {"city": "..."}}`. Array bracket selections use the raw path token
+as a flat key.
+
 We can get a more human-friendly output from `scan` using the following example:
 
 ```sh
 kmdb demodb scan weather_stations --format=table --select="id,name,location" --limit=20
 ```
 
-We can also filter for documents - we'll explore this deeper in a while but, for
-now, try this query:
+We can also filter for documents and project nested fields — the following query
+selects the `en` sub-field of the `name` object and returns it re-nested:
 
 ```sh
 kmdb demodb scan weather_stations --format=table --select="_id,id,name.en" --limit=20 --filter '{"field":"name.en","op":"eq","value":"McMurdo"}'
 ```
 
-You'll get a result similar to the one below but your `_id` will be different:
+You'll get a result similar to the one below (with a re-nested `name` object):
 
 ```
 _id                               id     name

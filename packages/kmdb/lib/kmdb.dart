@@ -72,6 +72,7 @@ export 'src/query/exceptions.dart'
         StaleIndexException;
 export 'src/query/filter/filter.dart' show Filter;
 export 'src/query/filter/field_filter.dart' show Field;
+export 'src/query/filter/field_path.dart' show FieldPath, missing;
 export 'src/query/index/index_definition.dart' show IndexDefinition;
 export 'src/query/index/index_manager.dart'
     show IndexManager, IndexState, IndexStatus;

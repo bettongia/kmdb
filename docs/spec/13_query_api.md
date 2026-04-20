@@ -293,6 +293,55 @@ Prefer `watch()` for reactive UI lists.
 an in-memory sort — the only `orderBy` with this optimisation. All other fields
 require a full in-memory sort after scan.
 
+## Field Path Syntax
+
+KMDB supports an ergonomic subset of RFC 9535 (JSONPath) for field selectors.
+The same path syntax is used in the Filter DSL, secondary index definitions
+(`IndexDefinition`), and the CLI `--select` flag.
+
+| Syntax              | Example               | Meaning                                  |
+| ------------------- | --------------------- | ---------------------------------------- |
+| Identifier          | `name`                | Top-level field                          |
+| Dot child           | `address.city`        | Nested object field                      |
+| Optional root sigil | `$.address.city`      | Same as `address.city`                   |
+| Array wildcard      | `tags[*]` or `tags[]` | All elements (fan-out) — returns a List  |
+| Positional index    | `tags[0]`             | Element at index 0                       |
+| Negative index      | `tags[-1]`            | Last element (`length - 1`)              |
+| Deeply nested       | `meta.stats.views`    | Three levels deep                        |
+
+### Notes
+
+- The `$` root sigil is **optional**. `$.address.city` and `address.city` are
+  equivalent. A bare `$` with no child path is rejected with `ArgumentError`.
+- `[*]` is a synonym for `[]` (array fan-out). Both are normalised to `[]`
+  internally before any processing.
+- Negative indices are resolved as `list[list.length + index]`. An
+  out-of-range negative index returns the `missing` sentinel.
+- `$$foo` is **not** normalised — only a single leading `$` is treated as a
+  root sigil. Double-`$` paths will not resolve.
+
+### Missing vs Null Semantics (field path resolution)
+
+`FieldPath.resolve()` returns the `missing` sentinel (a distinct constant, not
+`null`) when:
+
+- A path segment names a key that is absent from the document.
+- An intermediate segment is not a `Map` (for dot-child paths) or not a `List`
+  (for array access).
+- An array index is out of range (including out-of-range negative indices).
+
+`null` is returned only when the field is explicitly present with a `null` value.
+
+### Deferred features
+
+The following RFC 9535 features are intentionally not yet implemented:
+
+- **Filter expressions** (`$.policies[?(@.expired == true)]`) — overlap with the
+  Filter DSL and require a unified expression layer design.
+- **Recursive descent** (`$..name`) — useful but adds traversal cost with
+  non-obvious semantics for index fan-out.
+- **Cross-collection references** — deferred until cross-collection query design.
+
 ## Filter DSL
 
 Filters are composed via `and` / `or` / `not` and use dot-notation field paths.

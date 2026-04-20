@@ -225,6 +225,116 @@ void main() {
       final result = json.decode(out.toString()) as List;
       expect(result[0], isEmpty);
     });
+
+    test('--select with dot-path re-nests the value', () async {
+      final id = _key('xnest');
+      await _putDoc(store, 'notes', {
+        '_id': id,
+        'address': {'city': 'Paris', 'zip': '75001'},
+      });
+
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await GetCommand().execute(
+        ctx,
+        ['notes', id],
+        {'select': 'address.city'},
+      );
+      expect(ok, isTrue);
+      final result = json.decode(out.toString()) as List;
+      // The nested value is re-nested in the output.
+      expect(result[0]['address'], isA<Map>());
+      expect((result[0]['address'] as Map)['city'], equals('Paris'));
+      // zip was not selected.
+      expect((result[0]['address'] as Map).containsKey('zip'), isFalse);
+    });
+
+    test(r'--select with $.name works identically to name', () async {
+      final id = _key('xsigil');
+      await _putDoc(store, 'notes', {'_id': id, 'name': 'Alice', 'score': 10});
+
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await GetCommand().execute(
+        ctx,
+        ['notes', id],
+        {'select': r'$.name'},
+      );
+      expect(ok, isTrue);
+      final result = json.decode(out.toString()) as List;
+      expect(result[0]['name'], equals('Alice'));
+      expect(result[0].containsKey('score'), isFalse);
+    });
+
+    test('--select with array index returns flat key', () async {
+      final id = _key('xarr');
+      await _putDoc(store, 'notes', {
+        '_id': id,
+        'tags': ['dart', 'flutter', 'kmdb'],
+      });
+
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await GetCommand().execute(
+        ctx,
+        ['notes', id],
+        {'select': 'tags[0]'},
+      );
+      expect(ok, isTrue);
+      final result = json.decode(out.toString()) as List;
+      // Bracket selections use the raw path token as a flat key.
+      expect(result[0]['tags[0]'], equals('dart'));
+    });
+
+    test('--select with negative array index returns flat key', () async {
+      final id = _key('xarrn');
+      await _putDoc(store, 'notes', {
+        '_id': id,
+        'tags': ['dart', 'flutter', 'kmdb'],
+      });
+
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await GetCommand().execute(
+        ctx,
+        ['notes', id],
+        {'select': 'tags[-1]'},
+      );
+      expect(ok, isTrue);
+      final result = json.decode(out.toString()) as List;
+      expect(result[0]['tags[-1]'], equals('kmdb'));
+    });
+
+    test('--select with array wildcard returns flat key', () async {
+      final id = _key('xarrw');
+      await _putDoc(store, 'notes', {
+        '_id': id,
+        'tags': ['dart', 'flutter'],
+      });
+
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await GetCommand().execute(
+        ctx,
+        ['notes', id],
+        {'select': 'tags[]'},
+      );
+      expect(ok, isTrue);
+      final result = json.decode(out.toString()) as List;
+      expect(result[0]['tags[]'], equals(['dart', 'flutter']));
+    });
+
+    test('--select with absent path omits the key gracefully', () async {
+      final id = _key('xabsent');
+      await _putDoc(store, 'notes', {'_id': id, 'name': 'Bob'});
+
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await GetCommand().execute(
+        ctx,
+        ['notes', id],
+        {'select': 'name,address.city'},
+      );
+      expect(ok, isTrue);
+      final result = json.decode(out.toString()) as List;
+      // 'name' is present; 'address.city' is absent and must be omitted.
+      expect(result[0]['name'], equals('Bob'));
+      expect(result[0].containsKey('address'), isFalse);
+    });
   });
 
   // ── PutCommand ──────────────────────────────────────────────────────────────
@@ -711,6 +821,103 @@ void main() {
       expect(docs, hasLength(3));
       expect(docs.every((d) => (d as Map).isEmpty), isTrue);
     });
+
+    test('--select dot-path re-nests value on scan', () async {
+      // Insert a document with a nested address field into a new collection.
+      final id = _key('nestA');
+      await _putDoc(store, 'nested_items', {
+        '_id': id,
+        'address': {'city': 'London', 'zip': 'EC1'},
+        'name': 'Alice',
+      });
+
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await ScanCommand().execute(
+        ctx,
+        ['nested_items'],
+        {'select': 'name,address.city'},
+      );
+      expect(ok, isTrue);
+      final docs = json.decode(out.toString()) as List;
+      expect(docs, hasLength(1));
+      // 'name' is top-level — returned as-is.
+      expect(docs[0]['name'], equals('Alice'));
+      // 'address.city' is re-nested in the output.
+      expect(docs[0]['address'], isA<Map>());
+      expect((docs[0]['address'] as Map)['city'], equals('London'));
+      // 'zip' was not selected.
+      expect((docs[0]['address'] as Map).containsKey('zip'), isFalse);
+    });
+
+    test(r'--select $.name works identically to name on scan', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      // The items collection has 'tag' fields; use the root sigil form.
+      final ok = await ScanCommand().execute(
+        ctx,
+        ['items'],
+        {'select': r'$.tag'},
+      );
+      expect(ok, isTrue);
+      final docs = json.decode(out.toString()) as List;
+      expect(docs, hasLength(3));
+      expect(docs.every((d) => (d as Map).containsKey('tag')), isTrue);
+      expect(docs.every((d) => (d as Map).keys.length == 1), isTrue);
+    });
+
+    test('--select with array index returns flat key on scan', () async {
+      final id = _key('scanArr');
+      await _putDoc(store, 'arr_items', {
+        '_id': id,
+        'tags': ['dart', 'flutter', 'kmdb'],
+      });
+
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await ScanCommand().execute(
+        ctx,
+        ['arr_items'],
+        {'select': 'tags[0]'},
+      );
+      expect(ok, isTrue);
+      final docs = json.decode(out.toString()) as List;
+      expect(docs[0]['tags[0]'], equals('dart'));
+    });
+
+    test('--select with array wildcard returns flat key on scan', () async {
+      final id = _key('scanWild');
+      await _putDoc(store, 'wild_items', {
+        '_id': id,
+        'tags': ['a', 'b', 'c'],
+      });
+
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await ScanCommand().execute(
+        ctx,
+        ['wild_items'],
+        {'select': 'tags[]'},
+      );
+      expect(ok, isTrue);
+      final docs = json.decode(out.toString()) as List;
+      expect(docs[0]['tags[]'], equals(['a', 'b', 'c']));
+    });
+
+    test(
+      '--select with absent nested path omits key gracefully on scan',
+      () async {
+        final ctx = _ctx(store, out: out, err: err);
+        // items has 'score' and 'tag' but no 'address.city'.
+        final ok = await ScanCommand().execute(
+          ctx,
+          ['items'],
+          {'select': 'score,address.city'},
+        );
+        expect(ok, isTrue);
+        final docs = json.decode(out.toString()) as List;
+        expect(docs, hasLength(3));
+        // Every doc has score but NOT address (absent path omitted).
+        expect(docs.every((d) => (d as Map).containsKey('score')), isTrue);
+        expect(docs.every((d) => !(d as Map).containsKey('address')), isTrue);
+      },
+    );
   });
 
   // ── CountCommand ────────────────────────────────────────────────────────────

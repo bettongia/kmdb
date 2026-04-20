@@ -1,6 +1,6 @@
 # JSONPath Subset for Field Path Selectors
 
-**Status**: Investigated
+**Status**: Complete
 
 **PR link**: _pending_
 
@@ -148,17 +148,17 @@ The following RFC 9535 features are intentionally deferred:
 
 ### Phase 1 — Formalise and extend `FieldPath` (core library)
 
-- [ ] Add a `_normalise(String path)` private helper that strips a leading `$.`
+- [x] Add a `_normalise(String path)` private helper that strips a leading `$.`
       or bare `$.` prefix (exactly one `$`; `$$foo` must not become `foo`) and
       rewrites `[*]` → `[]`, so downstream code is unaffected.
-- [ ] Throw `ArgumentError` for a bare `$` with no child path (e.g. `$` or `$`
+- [x] Throw `ArgumentError` for a bare `$` with no child path (e.g. `$` or `$`
       followed immediately by a comma or end-of-string).
-- [ ] Call `_normalise()` at the top of `FieldPath.resolve()`.
-- [ ] Add support for negative indices: in the `_resolveSegments()` positional
+- [x] Call `_normalise()` at the top of `FieldPath.resolve()`.
+- [x] Add support for negative indices: in the `_resolveSegments()` positional
       branch, if `index < 0`, resolve as `list[list.length + index]`.
-- [ ] Update `FieldPath` doc comments with the complete supported syntax table
+- [x] Update `FieldPath` doc comments with the complete supported syntax table
       and a reference to spec §13 (query API).
-- [ ] Write tests covering:
+- [x] Write tests covering:
   - `$.address.city` equals `address.city`
   - `tags[*]` equals `tags[]`
   - `items[-1]` returns the last element
@@ -168,36 +168,38 @@ The following RFC 9535 features are intentionally deferred:
   - `$$foo` is NOT normalised (double-`$` is rejected or passed through as-is)
   - `$[0]` strips to `[0]`, which resolves to `missing` on a Map root
   - Bare `$` throws `ArgumentError`
+- [x] Export `FieldPath` and `missing` from `kmdb.dart` public API
 
 ### Phase 2 — Propagate to index definitions
 
-- [ ] Update `IndexDefinition` to normalise its stored path via `FieldPath`
+- [x] Update `IndexDefinition` to normalise its stored path via `FieldPath`
       normalisation (so `$.address.city` and `address.city` refer to the same
       index). Also reject a bare `$` path alongside the existing `_`-prefix
       guard.
-- [ ] Add an explicit note in the `IndexDefinition` doc comment confirming that
+- [x] Add an explicit note in the `IndexDefinition` doc comment confirming that
       `$`-prefixed paths were never previously valid input, so no existing
       database can contain a `$`-prefixed index namespace — normalisation is
       purely additive, no migration needed.
-- [ ] Confirm that `index_writer.dart`'s `_resolveValues` fan-out check
+- [x] Confirm that `index_writer.dart`'s `_resolveValues` fan-out check
       (`path.endsWith('[]')`) works unchanged after normalisation — since
       `_normalise()` rewrites `[*]` to `[]` before `resolve()` is called, the
       guard always sees the canonical form. Add a comment to this effect.
-- [ ] Write a test that defines an index with a `$`-prefixed path and queries it
+- [x] Write a test that defines an index with a `$`-prefixed path and queries it
       successfully, confirming the normalised namespace is used.
 
 ### Phase 3 — Fix CLI `--select` / `--fields`
 
-- [ ] Refactor `_project()` in `scan_command.dart` to call `FieldPath.resolve()`
+- [x] Refactor `_project()` in `scan_command.dart` to call `FieldPath.resolve()`
       per selected token and re-nest the result into the output document (e.g.
       `--select="id,address.city"` →
-      `{"id": "...", "address": {"city": "..."}}`).
-- [ ] Apply the same fix to `get_command.dart`.
-- [ ] Handle the case where a selected path resolves to `missing` — omit the key
+      `{"id": "...", "address": {"city": "..."}}`). Extracted to public
+      `projectDocument()` function shared by ScanCommand and GetCommand.
+- [x] Apply the same fix to `get_command.dart` (uses shared `projectDocument()`).
+- [x] Handle the case where a selected path resolves to `missing` — omit the key
       from the output document (consistent with existing filter behaviour).
-- [ ] Update the `--select` / `--fields` help text in both commands to document
+- [x] Update the `--select` / `--fields` help text in both commands to document
       the full syntax (dot-paths, optional `$.`, array access).
-- [ ] Write CLI integration tests covering:
+- [x] Write CLI integration tests covering:
   - `--select="id,address.city"` on nested documents → re-nested output
   - `--select="tags[0]"` → flat key `{"tags[0]": value}` output
   - `--select="tags[]"` → flat key `{"tags[]": [...]}` output
@@ -206,15 +208,45 @@ The following RFC 9535 features are intentionally deferred:
 
 ### Phase 4 — Documentation
 
-- [ ] Update `docs/spec/13_query_api.md` with the formal path syntax table.
-- [ ] Update the user guide (`docs/user_guide/README.md`) scan command examples
+- [x] Update `docs/spec/13_query_api.md` with the formal path syntax table.
+- [x] Update the user guide (`docs/user_guide/README.md`) scan command examples
       to show dot-path `--select` usage.
-- [ ] Add a note to `docs/roadmap.md` for the deferred items (filter
+- [x] Add a note to `docs/roadmap.md` for the deferred items (filter
       expressions, recursive descent, cross-collection references).
 
 ## Summary
 
-_To be completed after implementation._
+- **Phase 1 — `FieldPath` extensions:** Added `_normalise()` private helper
+  (also exposed as `normalisePath()`) that strips leading `$.`, handles `$[`
+  prefix, rewrites `[*]` to `[]`, and throws `ArgumentError` for bare `$`.
+  Added negative index support (`[-1]`, `[-2]`, etc.) in `_resolveSegments()`.
+  Updated doc comments to reference spec §13 and include the full syntax table.
+  Exported `FieldPath` and `missing` from `kmdb.dart` public API (removes the
+  need for implementation-level imports in consumers).
+
+- **Phase 2 — `IndexDefinition` normalisation:** Updated constructor to call
+  `FieldPath.normalisePath()`, ensuring `$.address.city` and `address.city`
+  map to the same `$index:` namespace. Added doc note confirming no migration
+  is needed. Added comment to `index_writer.dart` confirming the fan-out guard
+  (`path.endsWith('[]')`) always sees canonical `[]` after normalisation.
+
+- **Phase 3 — CLI `--select` fix:** Extracted a `projectDocument()` top-level
+  function in `scan_command.dart` shared by both `ScanCommand` and `GetCommand`.
+  Dot-child paths are re-nested in output (`address.city` →
+  `{"address": {"city": "London"}}`). Bracket selections use the normalised
+  path token as a flat key (`tags[0]` → `{"tags[0]": "dart"}`). The root sigil
+  is normalised before the output key is computed (`$.name` → key `name`).
+  Updated help text in both commands. Added 13 new CLI integration tests.
+
+- **Phase 4 — Documentation:** Added "Field Path Syntax" section to spec §13
+  with the full syntax table, normalisation rules, missing-vs-null semantics,
+  and deferred features. Updated user guide scan examples with the path syntax
+  table and corrected the `name.en` example. Added "JSONPath — Deferred
+  Extensions" section to the roadmap covering filter expressions, recursive
+  descent, and cross-collection references.
+
+- **Test results:** 1051 kmdb tests pass; 421 kmdb_cli tests pass; zero
+  analyzer issues; formatting clean.
 
 ---
 

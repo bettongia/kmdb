@@ -15,10 +15,19 @@
 import 'package:kmdb/kmdb.dart';
 
 import 'command.dart';
+import 'scan_command.dart';
 
 /// Retrieves a single document by key.
 ///
 /// Usage: `kmdb <db> get <coll> <key>`
+///
+/// The optional `--select` flag accepts a comma-separated list of field paths
+/// using the full JSONPath subset supported by KMDB. See [ScanCommand] for the
+/// complete path syntax documentation.
+///
+/// Dot-child paths are re-nested in the output (e.g. `address.city` →
+/// `{"address": {"city": "London"}}`). Bracket selections use the raw path
+/// token as a flat key.
 final class GetCommand implements CliCommand {
   const GetCommand();
 
@@ -29,7 +38,9 @@ final class GetCommand implements CliCommand {
   String get description => 'Retrieve a document by key.';
 
   @override
-  String get usage => 'get <coll> <key> [--select <field1,field2,...>]';
+  String get usage =>
+      'get <coll> <key> [--select <path1,path2,...>]  '
+      r'Paths: "name", "address.city", "$.name", "tags[0]", "tags[-1]", "tags[]"';
 
   @override
   Future<bool> execute(
@@ -50,19 +61,17 @@ final class GetCommand implements CliCommand {
       return false;
     }
 
-    var doc = ValueCodec.decode(bytes);
+    final doc = ValueCodec.decode(bytes);
     final selectValue = flags['select'];
     if (selectValue != null) {
       final fields = '$selectValue'
           .split(',')
           .map((s) => s.trim())
           .where((s) => s.isNotEmpty)
-          .toSet();
+          .toList();
       if (fields.isNotEmpty) {
-        doc = {
-          for (final entry in doc.entries)
-            if (fields.contains(entry.key)) entry.key: entry.value,
-        };
+        ctx.writeDocuments([projectDocument(doc, fields)]);
+        return true;
       }
     }
     ctx.writeDocuments([doc]);
