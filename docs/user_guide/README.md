@@ -357,7 +357,7 @@ named `weather_stations` and adds details regarding a bunch of weather stations
 around the world.
 
 ```sh
-kmdb demodb put weather_stations --file data/weather_stations/stations.json
+kmdb demodb insert weather_stations --file data/weather_stations/stations.json
 ```
 
 How many weather stations do we have?
@@ -366,12 +366,51 @@ How many weather stations do we have?
 kmdb demodb count weather_stations
 ```
 
+If we run a scan we'll get JSON output by default. However, there are three
+handy parameters to help us explore the data:
+
+- `--limit` will limit the number of documents to display
+- `--format` allows us to set the output format, including json (default),
+  compact, ndjson, table, csv, line
+- `--select` lets us list the fields we want to display
+
+We can get a more human-friendly output from `scan` using the following example:
+
+```sh
+kmdb demodb scan weather_stations --format=table --select="id,name,location" --limit=20
+```
+
+We can also filter for documents - we'll explore this deeper in a while but, for
+now, try this query:
+
+```sh
+kmdb demodb scan weather_stations --format=table --select="_id,id,name.en" --limit=20 --filter '{"field":"name.en","op":"eq","value":"McMurdo"}'
+```
+
+You'll get a result similar to the one below but your `_id` will be different:
+
+```
+_id                               id     name
+─────────────────────────────────────────────────────────
+019da7e30dce7d198a38d98b8eac9164  89664  {"en":"McMurdo"}
+```
+
+You can get a specific document using its `_id`. You'll need to adapt the
+command below by swapping in the value for `_id` you saw in the previous
+response:
+
+```sh
+kmdb demodb get weather_stations 019da7e30dce7d198a38d98b8eac9164
+```
+
 Let's check which collections we now have (we should have `notes`, `categories`
 and `weather_stations`):
 
 ```sh
-kmdb demodb collections
+kmdb demodb collections list
 ```
+
+## Import with NDJSON
 
 kmdb also supports loading from an NDJSON file - let's add in some country
 codes:
@@ -389,7 +428,7 @@ cat elements.ndjson| kmdb demodb put elements
 kmdb demodb count elements
 ```
 
-## Query
+# Query
 
 ```sh
 kmdb demodb scan weather_stations --filter '{"field":"Station Name","op":"eq","value":"MAWSON"}'
