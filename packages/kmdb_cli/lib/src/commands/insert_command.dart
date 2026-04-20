@@ -97,8 +97,7 @@ final class InsertCommand implements CliCommand {
     // _id is silently replaced by the system-generated key (documented);
     // all other _-prefixed keys are rejected as reserved.
     for (var i = 0; i < docs.length; i++) {
-      final offending = docs[i]
-          .keys
+      final offending = docs[i].keys
           .where((k) => k.startsWith('_') && k != '_id')
           .toList(growable: false);
       if (offending.isNotEmpty) {
