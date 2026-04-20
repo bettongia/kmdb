@@ -33,29 +33,31 @@ existing usage is fully backward-compatible.
 ## Open questions
 
 - [x] **Q1: `IndexDefinition` normalisation — migration risk?** No migration
-      needed. `$`-prefixed index paths were never documented or accepted as valid
-      input, so no existing database can contain a `$`-prefixed index namespace.
-      Normalisation is purely additive. Phase 2 will add an explicit note to this
-      effect.
+      needed. `$`-prefixed index paths were never documented or accepted as
+      valid input, so no existing database can contain a `$`-prefixed index
+      namespace. Normalisation is purely additive. Phase 2 will add an explicit
+      note to this effect.
 
-- [x] **Q2: `IndexWriter._resolveValues` fan-out detection after `[*]` normalisation?**
-      `_resolveValues` uses `path.endsWith('[]')`. Because `_normalise()` rewrites
-      `[*]` to `[]` before `FieldPath.resolve()` is called, this guard always sees
-      the canonical form. No change needed in `index_writer.dart`.
+- [x] **Q2: `IndexWriter._resolveValues` fan-out detection after `[*]`
+      normalisation?** `_resolveValues` uses `path.endsWith('[]')`. Because
+      `_normalise()` rewrites `[*]` to `[]` before `FieldPath.resolve()` is
+      called, this guard always sees the canonical form. No change needed in
+      `index_writer.dart`.
 
-- [x] **Q3: `--select` output shape for array path selections?**
-      Flat-key output: `--select="tags[0]"` → `{"tags[0]": "dart"}`. Re-nesting a
-      scalar back into an array structure is ambiguous (what length array?) and
-      fragile. Dot-child paths are re-nested (`address.city` → `{"address":
-      {"city": "..."}}`); bracket selections use the raw path token as the key.
+- [x] **Q3: `--select` output shape for array path selections?** Flat-key
+      output: `--select="tags[0]"` → `{"tags[0]": "dart"}`. Re-nesting a scalar
+      back into an array structure is ambiguous (what length array?) and
+      fragile. Dot-child paths are re-nested (`address.city` →
+      `{"address":     {"city": "..."}}`); bracket selections use the raw path
+      token as the key.
 
-- [x] **Q4: `$` bare path — valid or error?**
-      Treated as an `ArgumentError` at the `FieldPath` level: a bare `$` with no
-      child path is not a valid field selector in KMDB's document model. It is also
-      rejected in `IndexDefinition` alongside the existing `_`-prefix guard.
+- [x] **Q4: `$` bare path — valid or error?** Treated as an `ArgumentError` at
+      the `FieldPath` level: a bare `$` with no child path is not a valid field
+      selector in KMDB's document model. It is also rejected in
+      `IndexDefinition` alongside the existing `_`-prefix guard.
 
-- [x] **Q5: Spec citation in `FieldPath` doc comment?**
-      Reference §13 (query API), not §16.
+- [x] **Q5: Spec citation in `FieldPath` doc comment?** Reference §13 (query
+      API), not §16.
 
 ## Investigation
 
@@ -63,30 +65,40 @@ existing usage is fully backward-compatible.
 
 Path parsing is centralised in a single file:
 
-- **`packages/kmdb/lib/src/query/filter/field_path.dart`** — `FieldPath.resolve(String path, Map<String, dynamic> doc)`. Splits on `.`, then per-segment detects `[N]` (positional) and `[]` (fan-out). Returns a value or the `missing` sentinel. This is the single source of truth used by filters, index writers, and index readers.
+- **`packages/kmdb/lib/src/query/filter/field_path.dart`** —
+  `FieldPath.resolve(String path, Map<String, dynamic> doc)`. Splits on `.`,
+  then per-segment detects `[N]` (positional) and `[]` (fan-out). Returns a
+  value or the `missing` sentinel. This is the single source of truth used by
+  filters, index writers, and index readers.
 
-- **`packages/kmdb/lib/src/query/filter/field_filter.dart`** — `Field(path)` entry point for the filter DSL; delegates resolution to `FieldPath.resolve()`.
+- **`packages/kmdb/lib/src/query/filter/field_filter.dart`** — `Field(path)`
+  entry point for the filter DSL; delegates resolution to `FieldPath.resolve()`.
 
-- **`packages/kmdb/lib/src/query/index/index_definition.dart`** — stores the dot-path string as-is; uses it to form the `$index:{ns}:{path}` storage namespace.
+- **`packages/kmdb/lib/src/query/index/index_definition.dart`** — stores the
+  dot-path string as-is; uses it to form the `$index:{ns}:{path}` storage
+  namespace.
 
-- **`packages/kmdb/lib/src/query/index/index_writer.dart`** — calls `FieldPath.resolve()` to extract values at write time; handles array fan-out.
+- **`packages/kmdb/lib/src/query/index/index_writer.dart`** — calls
+  `FieldPath.resolve()` to extract values at write time; handles array fan-out.
 
-- **`packages/kmdb_cli/lib/src/commands/scan_command.dart`** — `_parseSelect()` / `_project()` handle `--select` but only split on commas and project top-level keys; no dot-path support.
+- **`packages/kmdb_cli/lib/src/commands/scan_command.dart`** — `_parseSelect()`
+  / `_project()` handle `--select` but only split on commas and project
+  top-level keys; no dot-path support.
 
 - **`packages/kmdb_cli/lib/src/commands/get_command.dart`** — same limitation.
 
 ### Syntax formalisation
 
-The target syntax is a strict, ergonomic subset of RFC 9535:
+The target syntax is an ergonomic subset of RFC 9535:
 
-| Syntax | Example | Meaning |
-|---|---|---|
-| Identifier | `name` | Top-level field |
-| Dot child | `address.city` | Nested field |
-| Optional root | `$.address.city` | Same as `address.city` |
-| Array wildcard | `tags[*]` or `tags[]` | All elements (fan-out) |
-| Positional index | `policies[0]` | Element at index |
-| Negative index | `policies[-1]` | Last element |
+| Syntax           | Example               | Meaning                |
+| ---------------- | --------------------- | ---------------------- |
+| Identifier       | `name`                | Top-level field        |
+| Dot child        | `address.city`        | Nested field           |
+| Optional root    | `$.address.city`      | Same as `address.city` |
+| Array wildcard   | `tags[*]` or `tags[]` | All elements (fan-out) |
+| Positional index | `policies[0]`         | Element at index       |
+| Negative index   | `policies[-1]`        | Last element           |
 
 `FieldPath` already supports `[]` fan-out and `[N]` positional access. The
 changes required are:
@@ -94,7 +106,8 @@ changes required are:
 1. Strip a leading `$.` (or bare `$`) before any further processing — this makes
    the root sigil optional without breaking existing paths.
 2. Accept `[*]` as a synonym for `[]` (fan-out).
-3. Support negative indices (e.g. `[-1]`) by converting to `list.length + index`.
+3. Support negative indices (e.g. `[-1]`) by converting to
+   `list.length + index`.
 
 ### CLI `--select` gap
 
@@ -126,10 +139,10 @@ The following RFC 9535 features are intentionally deferred:
 - **Cross-document / cross-collection references** — A future "foreign key"
   mechanism (e.g. `orders[*].customerId -> customers`) would need path syntax to
   describe the join key on both sides. The path grammar defined here is designed
-  to be composable with such a feature: a reference expression could be expressed
-  as two paths plus a join operator, with each individual path using this subset.
-  No grammar changes are needed now, but this should be revisited when
-  cross-collection queries are designed.
+  to be composable with such a feature: a reference expression could be
+  expressed as two paths plus a join operator, with each individual path using
+  this subset. No grammar changes are needed now, but this should be revisited
+  when cross-collection queries are designed.
 
 ## Implementation plan
 
@@ -138,8 +151,8 @@ The following RFC 9535 features are intentionally deferred:
 - [ ] Add a `_normalise(String path)` private helper that strips a leading `$.`
       or bare `$.` prefix (exactly one `$`; `$$foo` must not become `foo`) and
       rewrites `[*]` → `[]`, so downstream code is unaffected.
-- [ ] Throw `ArgumentError` for a bare `$` with no child path (e.g. `$` or
-      `$` followed immediately by a comma or end-of-string).
+- [ ] Throw `ArgumentError` for a bare `$` with no child path (e.g. `$` or `$`
+      followed immediately by a comma or end-of-string).
 - [ ] Call `_normalise()` at the top of `FieldPath.resolve()`.
 - [ ] Add support for negative indices: in the `_resolveSegments()` positional
       branch, if `index < 0`, resolve as `list[list.length + index]`.
@@ -160,11 +173,12 @@ The following RFC 9535 features are intentionally deferred:
 
 - [ ] Update `IndexDefinition` to normalise its stored path via `FieldPath`
       normalisation (so `$.address.city` and `address.city` refer to the same
-      index). Also reject a bare `$` path alongside the existing `_`-prefix guard.
+      index). Also reject a bare `$` path alongside the existing `_`-prefix
+      guard.
 - [ ] Add an explicit note in the `IndexDefinition` doc comment confirming that
-      `$`-prefixed paths were never previously valid input, so no existing database
-      can contain a `$`-prefixed index namespace — normalisation is purely
-      additive, no migration needed.
+      `$`-prefixed paths were never previously valid input, so no existing
+      database can contain a `$`-prefixed index namespace — normalisation is
+      purely additive, no migration needed.
 - [ ] Confirm that `index_writer.dart`'s `_resolveValues` fan-out check
       (`path.endsWith('[]')`) works unchanged after normalisation — since
       `_normalise()` rewrites `[*]` to `[]` before `resolve()` is called, the
@@ -176,7 +190,8 @@ The following RFC 9535 features are intentionally deferred:
 
 - [ ] Refactor `_project()` in `scan_command.dart` to call `FieldPath.resolve()`
       per selected token and re-nest the result into the output document (e.g.
-      `--select="id,address.city"` → `{"id": "...", "address": {"city": "..."}}`).
+      `--select="id,address.city"` →
+      `{"id": "...", "address": {"city": "..."}}`).
 - [ ] Apply the same fix to `get_command.dart`.
 - [ ] Handle the case where a selected path resolves to `missing` — omit the key
       from the output document (consistent with existing filter behaviour).
@@ -205,8 +220,7 @@ _To be completed after implementation._
 
 ## Review
 
-**Reviewer:** Plan Reviewer Agent
-**Date:** 2026-04-20
+**Reviewer:** Plan Reviewer Agent **Date:** 2026-04-20
 
 ### Problem Statement Assessment
 
@@ -235,7 +249,8 @@ supports. That is the right call.
   implementation path (`list.length + index`) and a clear contract (out-of-range
   returns `missing`).
 - The deferred items (filter expressions, recursive descent, cross-collection
-  references) are correctly identified as out-of-scope and the rationale is sound.
+  references) are correctly identified as out-of-scope and the rationale is
+  sound.
 - Backward-compatible: bare paths continue to work exactly as before.
 
 **Concerns**
@@ -255,14 +270,14 @@ supports. That is the right call.
    definition time and any pre-existing `$`-prefixed index namespace is
    effectively renamed is sufficient — but it must be stated.
 
-2. **`IndexWriter._resolveValues` fan-out detection uses `path.endsWith('[]')`.**
-   After `[*]` is normalised to `[]`, this check continues to work correctly. 
-   However, the plan should explicitly call out that `_resolveValues` does not
-   need to change, and why: normalisation runs in `FieldPath.resolve()` before
-   `_resolveValues` inspects the path, so the `endsWith('[]')` guard always sees
-   the canonical form. This is not a gap in the plan — just a detail worth
-   confirming in the implementation checklist so it is not overlooked during
-   code review.
+2. **`IndexWriter._resolveValues` fan-out detection uses
+   `path.endsWith('[]')`.** After `[*]` is normalised to `[]`, this check
+   continues to work correctly. However, the plan should explicitly call out
+   that `_resolveValues` does not need to change, and why: normalisation runs in
+   `FieldPath.resolve()` before `_resolveValues` inspects the path, so the
+   `endsWith('[]')` guard always sees the canonical form. This is not a gap in
+   the plan — just a detail worth confirming in the implementation checklist so
+   it is not overlooked during code review.
 
 3. **Re-nesting logic for `--select` in Phase 3 is underspecified.**
    `FieldPath.resolve('address.city', doc)` returns `'London'`, but the plan
@@ -275,16 +290,16 @@ supports. That is the right call.
    selections in `--select` before implementation starts, because the two
    reasonable choices (`{"tags": ["dart"]}` vs `{"tags[0]": "dart"}`) have
    meaningfully different implementation paths. The simpler and more consistent
-   option would be to use the path itself as a flat key in the output (`"tags[0]":
-   "dart"`) rather than attempting to reconstruct a nested structure — this avoids
-   rebuilding array structure from a scalar value.
+   option would be to use the path itself as a flat key in the output
+   (`"tags[0]": "dart"`) rather than attempting to reconstruct a nested
+   structure — this avoids rebuilding array structure from a scalar value.
 
 4. **`$ alone returns the full document` test case is unusual.** A bare `$` as a
    path is valid RFC 9535 (it selects the root node), but supporting it in a
    context where KMDB paths are always field selectors is an edge case with no
    practical use. It should still be handled gracefully (return the doc or
-   `missing`, consistently), but the test expectation should be documented in the
-   plan. If `$` returns the full document, using it as a `--select` path or
+   `missing`, consistently), but the test expectation should be documented in
+   the plan. If `$` returns the full document, using it as a `--select` path or
    index definition is confusing. Given that index definitions forbid paths
    starting with `_`, consider whether `$` alone should be treated as invalid
    input rather than silently returning the root.
@@ -296,16 +311,17 @@ supports. That is the right call.
 
 ### Architecture Fit
 
-The change is almost entirely contained within `field_path.dart` and the two
-CLI command files. It sits at the lowest layer of the query stack and propagates
-upward cleanly through the existing call graph. There is no impact on the storage
-engine, sync protocol, WAL, or SSTable format. The cache layer and reactivity
-machinery are untouched. This is exactly the right scope for the change.
+The change is almost entirely contained within `field_path.dart` and the two CLI
+command files. It sits at the lowest layer of the query stack and propagates
+upward cleanly through the existing call graph. There is no impact on the
+storage engine, sync protocol, WAL, or SSTable format. The cache layer and
+reactivity machinery are untouched. This is exactly the right scope for the
+change.
 
-The `indexNamespace` embedding concern (point 1 above) is the only place where
-a storage-layer artefact is affected, and only when a user passes a `$`-prefixed
-path to `IndexDefinition` — an input that has never previously been documented as
-valid.
+The `indexNamespace` embedding concern (point 1 above) is the only place where a
+storage-layer artefact is affected, and only when a user passes a `$`-prefixed
+path to `IndexDefinition` — an input that has never previously been documented
+as valid.
 
 ### Risk and Edge Cases
 
@@ -315,9 +331,10 @@ valid.
 - **`$` followed by a bracket, not a dot.** `$[0]` is valid JSONPath (root array
   index), but it is not meaningful in KMDB's document model where the root is
   always a Map. `_normalise` stripping `$` from `$[0]` would leave `[0]`, which
-  the current parser would treat as a segment with no field name and a positional
-  index on the document root — returning `missing` since the root is a Map, not a
-  List. This is the correct outcome. The plan should confirm this is tested.
+  the current parser would treat as a segment with no field name and a
+  positional index on the document root — returning `missing` since the root is
+  a Map, not a List. This is the correct outcome. The plan should confirm this
+  is tested.
 - **Negative index on a non-list.** Already handled by the existing `is! List`
   guard. No new risk here.
 - **Empty path after stripping.** `_normalise('$')` should return `''` or be
@@ -328,16 +345,16 @@ valid.
 
 ### Recommendations
 
-1. **Address the re-nesting output shape ambiguity before implementing Phase 3.**
-   Define what `--select="tags[0]"` outputs and add that definition to the plan.
-   Suggest adopting flat-key output (`"tags[0]": value`) for array selections
-   rather than attempting structural reconstruction.
+1. **Address the re-nesting output shape ambiguity before implementing
+   Phase 3.** Define what `--select="tags[0]"` outputs and add that definition
+   to the plan. Suggest adopting flat-key output (`"tags[0]": value`) for array
+   selections rather than attempting structural reconstruction.
 
 2. **Add the `IndexDefinition` normalisation caveat to Phase 2.** Note that
-   `indexNamespace` is constructed from the normalised path and that pre-existing
-   databases with `$`-prefixed index definitions (if any) would see their index
-   namespace change. Confirm this is a non-issue given the feature was never
-   documented or supported.
+   `indexNamespace` is constructed from the normalised path and that
+   pre-existing databases with `$`-prefixed index definitions (if any) would see
+   their index namespace change. Confirm this is a non-issue given the feature
+   was never documented or supported.
 
 3. **Add three missing test cases:** double-`$` input, `$[0]` input, and empty
    path after normalisation. These guard the normaliser against edge inputs.
