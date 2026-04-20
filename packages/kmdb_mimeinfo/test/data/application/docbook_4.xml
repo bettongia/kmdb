@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN" "http://oasis-open.org">
+<chapter>
+    <title>Chapter Title</title>
+    <para> Here is some text in a paragraph. <emphasis>Italics</emphasis> can be used. </para>
+</chapter>

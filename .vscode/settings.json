@@ -1,3 +1,4 @@
 {
-  "makefile.configureOnOpen": false
+  "makefile.configureOnOpen": false,
+  "copyrightInserter.holder": "The KMDB Authors"
 }

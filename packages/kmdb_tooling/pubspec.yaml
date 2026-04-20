@@ -1,0 +1,20 @@
+name: kmdb_tooling
+description: Helpful methods for loaders.
+version: 0.1.0
+repository: https://github.com/aurochs-kmesh/kmesh
+
+environment:
+  sdk: ">=3.10.0 <4.0.0"
+
+# Add regular dependencies here.
+dependencies:
+  http: ^1.6.0
+  code_builder: any
+  dart_style: any
+  archive: ^4.0.9
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.29.0
+
+resolution: workspace

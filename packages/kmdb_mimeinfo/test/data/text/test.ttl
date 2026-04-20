@@ -1,0 +1,6 @@
+@prefix dc: <http://purl.org> .
+@prefix ex: <http://example.org> .
+
+<http://example.org>
+    dc:title "An Example Resource" ;
+    ex:author "Jane Doe" .

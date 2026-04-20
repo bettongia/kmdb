@@ -25,7 +25,6 @@ import 'dart:typed_data';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
 import 'package:kmdb/src/vault/local_directory_vault_adapter.dart';
 import 'package:kmdb/src/vault/vault_store.dart';
-import 'package:kmdb_mediatype/kmdb_mediatype.dart' show MatchList;
 import 'package:test/test.dart';
 
 // ── Test doubles ──────────────────────────────────────────────────────────────
@@ -36,7 +35,7 @@ final class _NoOpDetector implements MediaTypeDetector {
   const _NoOpDetector();
 
   @override
-  MatchList detect(Uint8List bytes, {String? fileName}) => MatchList();
+  Iterable<String> detect(Uint8List bytes, {String? fileName}) => [];
 }
 
 /// A [VaultStore] backed by [MemoryStorageAdapter] for device A (ingestion).
