@@ -683,6 +683,22 @@ void main() {
       expect(docs.every((d) => (d as Map).keys.single == 'score'), isTrue);
     });
 
+    test('--select preserves field order from parameter', () async {
+      final ctx = _ctx(store, out: out, err: err);
+      final ok = await ScanCommand().execute(
+        ctx,
+        ['items'],
+        {'select': 'tag,score'},
+      );
+      expect(ok, isTrue);
+      final docs = json.decode(out.toString()) as List;
+      expect(docs, hasLength(3));
+      for (final doc in docs) {
+        final keys = (doc as Map).keys.toList();
+        expect(keys, equals(['tag', 'score']));
+      }
+    });
+
     test('--select with unknown field produces empty documents', () async {
       final ctx = _ctx(store, out: out, err: err);
       final ok = await ScanCommand().execute(
