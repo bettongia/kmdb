@@ -19,6 +19,7 @@ import 'package:test/test.dart';
 
 import 'package:kmdb/src/encoding/compression_flag.dart';
 import 'package:kmdb/src/encoding/value_codec.dart';
+import 'package:kmdb/src/query/filter/field_path.dart';
 
 void main() {
   // ── CompressionFlag ──────────────────────────────────────────────────────────
@@ -117,6 +118,35 @@ void main() {
       // Build a document large enough to exceed the 64-byte threshold.
       final doc = {for (var i = 0; i < 20; i++) 'field_$i': 'value_$i' * 3};
       expect(roundTrip(doc), equals(doc));
+    });
+
+    test('nested maps decode as Map<String, dynamic> (regression: CBOR toObject returns Map<dynamic, dynamic>)', () {
+      // CBOR's toObject() returns Map<dynamic,dynamic> for every level of
+      // nesting. Without the deep-cast in _fromCbor, FieldPath.resolve() would
+      // hit the `is! Map<String,dynamic>` guard and return `missing` for any
+      // path that traverses a nested object (e.g. "name.en").
+      final doc = {
+        'name': {'en': 'McMurdo', 'fr': 'Base McMurdo'},
+        'location': {'latitude': -77.8, 'longitude': 166.7},
+      };
+      final result = roundTrip(doc);
+      expect(result['name'], isA<Map<String, dynamic>>());
+      expect(result['location'], isA<Map<String, dynamic>>());
+      // Verify FieldPath can traverse the decoded nested maps.
+      expect(FieldPath.resolve('name.en', result), equals('McMurdo'));
+      expect(FieldPath.resolve('location.latitude', result), equals(-77.8));
+    });
+
+    test('lists containing maps decode inner maps as Map<String, dynamic>', () {
+      final doc = {
+        'policies': [
+          {'id': 1, 'expired': false},
+          {'id': 2, 'expired': true},
+        ],
+      };
+      final result = roundTrip(doc);
+      final policies = result['policies'] as List;
+      expect(policies[0], isA<Map<String, dynamic>>());
     });
   });
 
