@@ -21,7 +21,6 @@ import 'package:kmdb/src/vault/media_type_detector.dart';
 import 'package:kmdb/src/vault/vault_gc.dart';
 import 'package:kmdb/src/vault/vault_ref.dart';
 import 'package:kmdb/src/vault/vault_store.dart';
-import 'package:kmdb_mediatype/kmdb_mediatype.dart' show MatchList;
 import 'package:test/test.dart';
 
 // NOTE: Tests in the 'vault-e2e' group require the kmdb_zstd native library
@@ -107,7 +106,7 @@ final class _NoOpDetector implements MediaTypeDetector {
   const _NoOpDetector();
 
   @override
-  MatchList detect(Uint8List bytes, {String? fileName}) => MatchList();
+  Iterable<String> detect(Uint8List bytes, {String? fileName}) => [];
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

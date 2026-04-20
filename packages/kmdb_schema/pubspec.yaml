@@ -1,0 +1,19 @@
+name: kmdb_schema
+description: Provides functionality for validating data against a schema.
+version: 0.1.0
+# repository: https://github.com/my_org/my_repo
+
+environment:
+  sdk: ">=3.10.0 <4.0.0"
+
+resolution: workspace
+
+# Add regular dependencies here.
+dependencies:
+  characters: ^1.3.0
+  collection: ^1.19.1
+  kmdb_util:
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.29.0

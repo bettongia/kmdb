@@ -14,10 +14,7 @@
 
 import 'dart:typed_data';
 
-import 'package:kmdb_mediatype/kmdb_mediatype.dart'
-    as kmdb_mediatype
-    show detect;
-import 'package:kmdb_mediatype/kmdb_mediatype.dart' show MatchList;
+import 'package:kmdb_mimeinfo/registry.dart' as kmdb_mimeinfo;
 
 /// Abstract interface for detecting the MIME type of raw bytes.
 ///
@@ -52,7 +49,7 @@ abstract interface class MediaTypeDetector {
   ///
   /// Neither [bytes] nor [fileName] is required, but supplying at least one
   /// improves detection accuracy.
-  MatchList detect(Uint8List bytes, {String? fileName});
+  Iterable<String> detect(Uint8List bytes, {String? fileName});
 }
 
 /// Concrete [MediaTypeDetector] backed by the FreeDesktop shared-mime-info
@@ -69,13 +66,12 @@ abstract interface class MediaTypeDetector {
 /// final mime = matchList.bestMatch ?? 'application/octet-stream';
 /// ```
 final class FreedesktopMediaTypeDetector implements MediaTypeDetector {
-  /// Creates a [FreedesktopMediaTypeDetector].
   const FreedesktopMediaTypeDetector();
 
   /// The MIME type used when detection yields no candidates.
   static const String kFallbackType = 'application/octet-stream';
 
   @override
-  MatchList detect(Uint8List bytes, {String? fileName}) =>
-      kmdb_mediatype.detect(bytes: bytes, fileName: fileName);
+  Iterable<String> detect(Uint8List bytes, {String? fileName}) =>
+      kmdb_mimeinfo.detect(bytes: bytes, fileName: fileName).candidates;
 }

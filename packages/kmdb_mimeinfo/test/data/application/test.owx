@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<owl:Ontology xmlns:owl="http://www.w3.org/2002/07/owl#"
+              xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+              xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+              rdf:about="http://example.org">
+  <rdfs:comment>A simple example ontology</rdfs:comment>
+  <owl:Class rdf:about="http://example.org/Thing">
+    <rdfs:label>Thing</rdfs:label>
+  </owl:Class>
+</owl:Ontology>

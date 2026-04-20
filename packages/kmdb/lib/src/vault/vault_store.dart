@@ -212,7 +212,7 @@ class VaultStore {
     final String mediaType;
     if (explicitMediaType != null) {
       // Validate the caller-supplied type against detected candidates.
-      final candidates = matchList.candidates.toSet();
+      final candidates = matchList.toSet();
       if (candidates.isNotEmpty && !candidates.contains(explicitMediaType)) {
         throw FormatException(
           'Explicit media type "$explicitMediaType" is not among the detected '
@@ -223,7 +223,7 @@ class VaultStore {
       mediaType = explicitMediaType;
     } else {
       mediaType =
-          matchList.bestMatch ?? FreedesktopMediaTypeDetector.kFallbackType;
+          matchList.firstOrNull ?? FreedesktopMediaTypeDetector.kFallbackType;
     }
 
     // Step 4: create hash directory and rename staging blob to final path.

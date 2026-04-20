@@ -1,0 +1,10 @@
+{
+  "@@last_modified": "2024-09-15T14:25:28.740715",
+  "IntlStringException_noValueFound": "No value found for locale {languageTag}",
+  "@IntlStringException_noValueFound": {
+    "type": "text",
+    "placeholders": {
+      "languageTag": {}
+    }
+  }
+}
