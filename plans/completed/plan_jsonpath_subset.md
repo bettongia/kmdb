@@ -2,7 +2,7 @@
 
 **Status**: Complete
 
-**PR link**: _pending_
+**PR link**: https://github.com/aurochs-kmesh/kmdb/pull/17
 
 ## Problem statement
 
