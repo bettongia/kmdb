@@ -27,6 +27,7 @@ import 'filter/filter.dart';
 import 'kmdb_codec.dart';
 import 'kmdb_database.dart';
 import 'kmdb_query.dart';
+import 'query_plan.dart';
 
 /// A typed collection of documents within a [KmdbDatabase].
 ///
@@ -252,6 +253,15 @@ final class KmdbCollection<T> {
 
   /// Shorthand for `all().where(filter)`.
   KmdbQuery<T> where(Filter filter) => all().where(filter);
+
+  /// Executes [query] and returns results together with a [QueryPlan] that
+  /// describes the execution strategy, index usage, and document counts.
+  ///
+  /// Equivalent to calling [KmdbQuery.explainedGet] directly on the query.
+  /// Useful for diagnostic or EXPLAIN-style display from call sites that hold
+  /// a [KmdbCollection] reference rather than a [KmdbQuery] instance.
+  Future<(List<T>, QueryPlan)> explainedGet(KmdbQuery<T> query) =>
+      query.explainedGet();
 
   // ── Text search ─────────────────────────────────────────────────────────────
 

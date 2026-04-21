@@ -274,13 +274,45 @@ KmdbQuery<T> keyPrefix(String prefix);       // narrows the underlying LSM scan
 ## `KmdbQuery<T>` — Terminal Methods
 
 ```dart
-Future<List<T>>   get();     // eager; LSM snapshot closed immediately
-Stream<T>         stream();  // lazy; holds LSM snapshot for stream lifetime
-Stream<List<T>>   watch();   // reactive; re-runs on namespace writes (debounced 50ms)
-Future<T?>        first();
-Future<int>       count();   // avoids decoding documents
-Future<bool>      any();
+Future<List<T>>              get();           // eager; LSM snapshot closed immediately
+Stream<T>                    stream();        // lazy; holds LSM snapshot for stream lifetime
+Stream<List<T>>              watch();         // reactive; re-runs on namespace writes (debounced 50ms)
+Future<T?>                   first();
+Future<int>                  count();         // avoids decoding documents
+Future<bool>                 any();
+Future<(List<T>, QueryPlan)> explainedGet();  // get() plus execution metadata
 ```
+
+### `explainedGet()` and `QueryPlan`
+
+`explainedGet()` executes the query and returns results alongside a `QueryPlan`
+value that describes the execution strategy chosen:
+
+```dart
+final (results, plan) = await collection
+    .where(Field('city').equals('London'))
+    .orderBy('name')
+    .explainedGet();
+
+print(plan.strategy);          // ScanStrategy.indexScan or .fullScan
+print(plan.documentsScanned);  // documents examined before in-memory filters
+print(plan.documentsMatched);  // documents that passed all filters
+print(plan.documentsReturned); // documents returned after offset/limit
+print(plan.sorted);            // true when in-memory sort was applied
+for (final f in plan.filters) {
+  print('${f.fieldPath} ${f.operator} — index: ${f.indexUsed}');
+}
+```
+
+`QueryPlan` is a pure value type — it is not persisted or synced. See §16 for
+the full index selection algorithm and the semantics of each `QueryPlan` field.
+
+`KmdbCollection` also exposes a convenience wrapper:
+
+```dart
+final (results, plan) = await collection.explainedGet(
+  collection.where(Field('city').equals('London')),
+);
 
 **`stream()` implementation:** `stream()` is eagerly evaluated — identical to
 `get()` internally, but the result is emitted as a `Stream<T>` rather than

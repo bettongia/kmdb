@@ -469,6 +469,71 @@ output:
 kmdb demodb scan elements --filter '{"field":"Name","op":"startsWith","value":"H"}' --select Name,Symbol,Atomic_Number --format table
 ```
 
+## Query execution plans
+
+Add `--explain` to any `scan` command to see how the query was executed — which
+strategy was used, whether an index was consulted, and how many documents were
+examined at each stage.
+
+Without a secondary index the query always performs a full scan:
+
+```sh
+kmdb demodb scan weather_stations \
+  --filter '{"field":"Station Name","op":"eq","value":"MAWSON"}' \
+  --explain
+```
+
+```
+Query plan
+  Strategy : full scan
+  Filters  : Station Name eq [full scan]
+  Scanned  : 18684
+  Matched  : 1
+  Returned : 1
+```
+
+After registering an index (via `KmdbDatabase.open()` in application code) and
+waiting for it to reach `current` status, the same query uses the index and
+scans only the matching entries:
+
+```
+Query plan
+  Strategy : index scan
+  Filters  : Station Name eq [index: current]
+  Scanned  : 1
+  Matched  : 1
+  Returned : 1
+```
+
+In JSON output mode (`--format json`) the plan is emitted as a leading
+`_explain` object before the result documents:
+
+```sh
+kmdb demodb scan weather_stations \
+  --filter '{"field":"Station Name","op":"eq","value":"MAWSON"}' \
+  --explain --format json
+```
+
+```json
+{
+  "_explain": {
+    "strategy": "fullScan",
+    "filters": [
+      {
+        "field": "Station Name",
+        "operator": "eq",
+        "indexUsed": false,
+        "indexStatus": "none"
+      }
+    ],
+    "documentsScanned": 18684,
+    "documentsMatched": 1,
+    "documentsReturned": 1,
+    "sorted": false
+  }
+}
+```
+
 ## Export/Import
 
 Export lets you export a collection to NDJSON format:

@@ -192,6 +192,34 @@ References:
 - [SQLite FTS5](https://www.sqlite.org/fts5.html)
 - [Postgres Full Text Search](https://www.postgresql.org/docs/current/textsearch.html)
 
+# Range-predicate index scans (medium priority)
+
+Secondary indexes currently accelerate **equality predicates** only
+(`Field('x').equals(v)`). Range filters (`isGreaterThan`, `isLessThan`,
+`isBetween`, `startsWith`) are always evaluated in-memory after a full
+namespace scan.
+
+Because index entry keys are encoded with sort-order-preserving big-endian
+bytes for numbers and UTF-8 for strings (see §16), a prefix- or range-bounded
+`KvStore.scan()` over the `$index:` namespace could satisfy range queries
+directly — fetching only the candidate document keys that fall within the
+predicate bounds, then batch-fetching those documents.
+
+Planned extension points:
+
+- `Filter.rangePredicate` introspection — analogous to `equalityPredicate`
+  but returning `(path, lower, upper, inclusive flags)`.
+- `IndexReader.lookupByRange()` — wraps `KvStore.scan()` with encoded
+  start/end keys derived from the predicate bounds.
+- `_executeWithPlan()` in `KmdbQuery` — extend index-selection loop to
+  consider range predicates when `equalityPredicate` returns null.
+- `FilterPlan.operator` — extend to carry the range operator name so
+  `explainedGet()` / `--explain` can report `gt`, `lt`, `between`, etc.
+
+String `startsWith` can be implemented as a range scan using the prefix as the
+lower bound and `prefix + '￿'` (or byte `0xFF`) as the exclusive upper
+bound, following the standard prefix-range trick.
+
 # JSONPath — Deferred Extensions (low priority)
 
 KMDB currently supports a subset of RFC 9535 (JSONPath) for field path

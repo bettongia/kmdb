@@ -268,6 +268,43 @@ void main() {
       expect(f.evaluate({'status': 'archived', 'priority': 5}), isFalse);
     });
   });
+
+  // ── equalityPredicate ──────────────────────────────────────────────────────
+
+  group('equalityPredicate', () {
+    test('returns (path, value) for equals filter', () {
+      final f = Field('name').equals('Alice');
+      expect(f.equalityPredicate, equals(('name', 'Alice')));
+    });
+    test('returns (path, null) for equals(null)', () {
+      final f = Field('x').equals(null);
+      expect(f.equalityPredicate, equals(('x', null)));
+    });
+    test('returns null for isGreaterThan', () {
+      expect(Field('x').isGreaterThan(1).equalityPredicate, isNull);
+    });
+    test('returns null for isLessThan', () {
+      expect(Field('x').isLessThan(1).equalityPredicate, isNull);
+    });
+    test('returns null for contains', () {
+      expect(Field('x').contains('a').equalityPredicate, isNull);
+    });
+    test('returns null for notEquals', () {
+      expect(Field('x').notEquals(1).equalityPredicate, isNull);
+    });
+    test('AndFilter returns null', () {
+      final f = Filter.and([Field('x').equals(1), Field('y').equals(2)]);
+      expect(f.equalityPredicate, isNull);
+    });
+    test('OrFilter returns null', () {
+      final f = Filter.or([Field('x').equals(1)]);
+      expect(f.equalityPredicate, isNull);
+    });
+    test('NotFilter returns null', () {
+      final f = Filter.not(Field('x').equals(1));
+      expect(f.equalityPredicate, isNull);
+    });
+  });
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
