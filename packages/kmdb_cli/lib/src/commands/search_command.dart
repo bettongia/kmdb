@@ -63,7 +63,7 @@ final class SearchCommand implements CliCommand {
   @override
   String get usage =>
       'search <collection> <query> [--fields f1,f2] [--mode auto|lexical|semantic] '
-      '[--candidates n] [--rrf-k n] [--limit n] [--offset n] [--output table|json|ids]\n'
+      '[--candidates n] [--rrf-k n] [--limit n] [--offset n] [--output table|json|ids] [--explain]\n'
       '       search list <collection>\n'
       '       search create <collection> <field> [--stopwords] [--k1 n] [--b n]\n'
       '       search delete <collection> <field>';
@@ -190,6 +190,7 @@ final class SearchCommand implements CliCommand {
     final limit = _parseInt(flags['limit']) ?? 10;
     final offset = _parseInt(flags['offset']) ?? 0;
     final candidates = _parseInt(flags['candidates']) ?? 100;
+    final explain = flags['explain'] == true;
 
     // Parse and validate --rrf-k (default 60). Only used in hybrid mode.
     final rrfK = _parseInt(flags['rrf-k']) ?? 60;
@@ -262,6 +263,7 @@ final class SearchCommand implements CliCommand {
       isHybrid: isHybrid,
       rrfK: rrfK,
       candidates: candidates,
+      explain: explain,
     );
     return true;
   }
@@ -282,7 +284,38 @@ final class SearchCommand implements CliCommand {
     bool isHybrid = false,
     int rrfK = 60,
     int candidates = 100,
+    bool explain = false,
   }) {
+    // ── Explain block ─────────────────────────────────────────────────────────
+    if (explain) {
+      final meta = result.metadata;
+      if (format == 'json') {
+        final planMap = {
+          '_explain': {
+            'query': meta.query,
+            'mode': isHybrid ? 'hybrid' : modeFlag,
+            'searched': meta.searched,
+            'skipped': meta.skipped,
+            'total': meta.total,
+          },
+        };
+        ctx.out.writeln(const JsonEncoder.withIndent('  ').convert(planMap));
+      } else {
+        ctx.out.writeln('Search plan');
+        ctx.out.writeln(
+          '  Mode     : ${isHybrid ? "$modeFlag (hybrid)" : modeFlag}',
+        );
+        if (meta.searched.isNotEmpty) {
+          ctx.out.writeln('  Searched : ${meta.searched.join(", ")}');
+        }
+        if (meta.skipped.isNotEmpty) {
+          ctx.out.writeln('  Skipped  : ${meta.skipped.join(", ")} (no index)');
+        }
+        ctx.out.writeln('  Results  : ${meta.total}');
+        ctx.out.writeln('');
+      }
+    }
+
     switch (format) {
       case 'ids':
         for (final hit in result.hits) {

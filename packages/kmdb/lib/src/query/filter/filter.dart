@@ -37,6 +37,14 @@ abstract base class Filter {
   /// Returns `true` if [document] matches this filter.
   bool evaluate(Map<String, dynamic> document);
 
+  /// If this filter is a simple equality predicate (`field == value`), returns
+  /// the field path and operand value as a record. Returns `null` for all other
+  /// filter types, including composite filters and non-equality field filters.
+  ///
+  /// Used by the query engine to identify index-eligible predicates without
+  /// exposing the private `_FieldFilter` / `_Op` internals.
+  (String path, Object? value)? get equalityPredicate => null;
+
   // ── Composition ─────────────────────────────────────────────────────────────
 
   /// Returns a filter that matches documents that match **all** [filters].

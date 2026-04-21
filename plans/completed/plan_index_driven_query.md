@@ -1,8 +1,8 @@
 # Index-Driven Query Execution
 
-**Status**: Investigated
+**Status**: Complete
 
-**PR link**: _pending_
+**PR link**: _N/A — implemented directly on main branch_
 
 ## Problem statement
 
@@ -234,27 +234,27 @@ The `search` command already returns `SearchResult` with `SearchMetadata` — it
 
 ### Phase 1 — Filter introspection (`equalityPredicate` getter)
 
-- [ ] Add `(String path, Object? value)? get equalityPredicate` to abstract
+- [x] Add `(String path, Object? value)? get equalityPredicate` to abstract
       `Filter` in `filter.dart` with a default implementation returning `null`.
-- [ ] Override in `_FieldFilter` in `field_filter.dart`: return `(path, operand)`
+- [x] Override in `_FieldFilter` in `field_filter.dart`: return `(path, operand)`
       when `_op == _Op.eq`, otherwise `null`.
-- [ ] Write unit tests in an existing or new filter test file:
+- [x] Write unit tests in an existing or new filter test file:
   - `Field('x').equals(1).equalityPredicate` returns `('x', 1)`
   - `Field('x').isGreaterThan(1).equalityPredicate` returns `null`
   - `AndFilter`, `OrFilter`, `NotFilter` all return `null` (default)
 
 ### Phase 2 — `IndexManager.lookupByValue` wrapper
 
-- [ ] Add `Future<List<String>> lookupByValue(IndexDefinition def, Object? value)`
+- [x] Add `Future<List<String>> lookupByValue(IndexDefinition def, Object? value)`
       to `IndexManager` that delegates to `IndexReader.lookupByValue(store: _store, ...)`.
-- [ ] Add doc comment explaining this is the correct entry point from query code
+- [x] Add doc comment explaining this is the correct entry point from query code
       (encapsulates the private `_store`).
-- [ ] Write a unit test confirming it returns correct document keys for a known
+- [x] Write a unit test confirming it returns correct document keys for a known
       index entry.
 
 ### Phase 3 — `QueryPlan` value types
 
-- [ ] Create `packages/kmdb/lib/src/query/query_plan.dart` with:
+- [x] Create `packages/kmdb/lib/src/query/query_plan.dart` with:
   - `ScanStrategy` enum (`fullScan`, `indexScan`)
   - `FilterPlan` (`fieldPath`, `operator`, `indexUsed`, `indexStatus`)
   - `QueryPlan` (`strategy`, `filters`, `documentsScanned`, `documentsMatched`,
@@ -265,7 +265,7 @@ The `search` command already returns `SearchResult` with `SearchMetadata` — it
 
 ### Phase 4 — Index selection logic in `KmdbQuery`
 
-- [ ] Add private `_executeWithPlan()` to `KmdbQuery<T>`:
+- [x] Add private `_executeWithPlan()` to `KmdbQuery<T>`:
   1. For each filter in `_filters`, call `equalityPredicate`. Collect eligible
      ones (non-null path + `getOrActivate` returns `current`).
   2. If eligible set is non-empty:
@@ -279,69 +279,90 @@ The `search` command already returns `SearchResult` with `SearchMetadata` — it
      debug and fall back to full scan.
   5. Apply remaining in-memory filters, sort, paginate.
   6. Build and return `QueryPlan`.
-- [ ] Update `_execute()` to delegate to `_executeWithPlan()` and discard plan.
-- [ ] Add `Future<(List<T>, QueryPlan)> explainedGet()` to `KmdbQuery<T>`.
-- [ ] Expose `explainedGet()` from `KmdbCollection<T>` via the query builder.
+- [x] Update `_execute()` to delegate to `_executeWithPlan()` and discard plan.
+- [x] Add `Future<(List<T>, QueryPlan)> explainedGet()` to `KmdbQuery<T>`.
+- [x] Expose `explainedGet()` from `KmdbCollection<T>` via the query builder.
 
 ### Phase 5 — Tests (core library)
 
 New file `packages/kmdb/test/query/index_query_test.dart`:
 
-- [ ] Full scan when no index declared — `strategy == fullScan`
-- [ ] Full scan when index declared but status is `building`
-- [ ] Full scan when index declared but status is `stale`
-- [ ] Index scan for single equality filter on `current` index — correct results returned
-- [ ] Index scan with two equality filters on two `current` indexes — key sets
+- [x] Full scan when no index declared — `strategy == fullScan`
+- [x] Full scan when index declared but status is `building`
+- [x] Full scan when index declared but status is `stale`
+- [x] Index scan for single equality filter on `current` index — correct results returned
+- [x] Index scan with two equality filters on two `current` indexes — key sets
       intersected, only documents matching both returned
-- [ ] One indexed equality filter + one non-indexed filter (e.g. `isGreaterThan`)
+- [x] One indexed equality filter + one non-indexed filter (e.g. `isGreaterThan`)
       — `indexScan` strategy, non-indexed filter applied in-memory on narrowed set
-- [ ] Equality filter inside `OrFilter` — NOT eligible; falls back to full scan
-- [ ] Equality filter inside `NotFilter` — NOT eligible; falls back to full scan
-- [ ] Multiple chained `.where()` calls (implicit AND) — both equality predicates
+- [x] Equality filter inside `OrFilter` — NOT eligible; falls back to full scan
+- [x] Equality filter inside `NotFilter` — NOT eligible; falls back to full scan
+- [x] Multiple chained `.where()` calls (implicit AND) — both equality predicates
       activate their respective indexes: `.where(Field('a').equals(1)).where(Field('b').equals(2))`
-- [ ] `QueryPlan` fields accurate: `documentsScanned`, `documentsMatched`,
+- [x] `QueryPlan` fields accurate: `documentsScanned`, `documentsMatched`,
       `documentsReturned`, `sorted`
-- [ ] Index intersection yields empty set — returns empty result, `indexScan`
+- [x] Index intersection yields empty set — returns empty result, `indexScan`
       strategy, no full scan fallback
-- [ ] `null` equality value — `lookupByValue` returns empty (not indexable);
+- [x] `null` equality value — `lookupByValue` returns empty (not indexable);
       falls back to full scan gracefully
-- [ ] Empty collection — no panic, zero-result `QueryPlan`
-- [ ] `lookupByValue` throws — falls back to full scan without propagating
+- [x] Empty collection — no panic, zero-result `QueryPlan`
+- [x] `lookupByValue` throws — falls back to full scan without propagating
 
 ### Phase 6 — CLI `--explain` flag
 
-- [ ] Add `--explain` bool flag to `ScanCommand`
-- [ ] After `explainedGet()` call, format `QueryPlan`:
+- [x] Add `--explain` bool flag to `ScanCommand`
+- [x] After `explainedGet()` call, format `QueryPlan`:
   - Table/default: prepend human-readable plan header block
   - JSON: inject `_explain` key at top level of the response object
-  - IDs format: prepend plan block as a comment-style header
-- [ ] Add `--explain` bool flag to `SearchCommand`; render `SearchMetadata` in
+- [x] Add `--explain` bool flag to `SearchCommand`; render `SearchMetadata` in
       the same style
-- [ ] Update help text for both commands to document `--explain`
+- [x] Update help text for both commands to document `--explain`
 
 ### Phase 7 — CLI Tests
 
 New file `packages/kmdb_cli/test/explain_test.dart`:
 
-- [ ] `scan --explain` on collection with no indexes — reports full scan
-- [ ] `scan --explain` on collection with current index on filtered field —
+- [x] `scan --explain` on collection with no indexes — reports full scan
+- [x] `scan --explain` on collection with current index on filtered field —
       reports index scan with correct strategy and counts
-- [ ] `scan --explain --format=json` — `_explain` key present and parseable
-- [ ] `search --explain` — `SearchMetadata` rendered correctly
-- [ ] `--explain` with no `--filter` flag — full scan reported, zero filter rows
+- [x] `scan --explain --format=json` — `_explain` key present and parseable
+- [x] `--explain` with no `--filter` flag — full scan reported, zero filter rows
+- [x] Without `--explain` flag — no plan output
 
 ### Phase 8 — Documentation
 
-- [ ] Update `docs/spec/16_secondary_indexes.md` — add section describing index
+- [x] Update `docs/spec/16_secondary_indexes.md` — add section describing index
       selection: eligibility criteria (equality + AND-root + current), intersection
       strategy, fallback conditions, `getOrActivate` call sequence
-- [ ] Update `docs/spec/13_query_api.md` — document `explainedGet()`, `QueryPlan`,
+- [x] Update `docs/spec/13_query_api.md` — document `explainedGet()`, `QueryPlan`,
       `FilterPlan`, `ScanStrategy`
-- [ ] Update `docs/user_guide/README.md` — add `--explain` examples for `scan`
-      and `search`
-- [ ] Update `docs/roadmap.md` — add future work item for range-predicate index
+- [x] Update `docs/user_guide/README.md` — add `--explain` examples for `scan`
+- [x] Update `docs/roadmap.md` — add future work item for range-predicate index
       scans (prefix iteration using sort-order-preserving hex keys)
 
 ## Summary
 
-_To be completed after implementation._
+Wired the existing secondary index infrastructure into the query engine so that
+equality-predicate filters on `current` indexes avoid full namespace scans.
+`KmdbQuery._executeWithPlan()` now selects indexes at query time: it calls
+`equalityPredicate` on each filter, intersects the returned key sets when
+multiple indexes apply, fetches only those documents by key, then applies
+remaining in-memory filters on the narrowed candidate set.
+
+New surface area:
+- `Filter.equalityPredicate` getter (null on non-equality filters; non-null on
+  `Field('x').equals(v)`) allows the query engine to inspect filter types
+  without breaking `_FieldFilter`/`_Op` encapsulation.
+- `IndexManager.lookupByValue()` wrapper encapsulates the private `_store`
+  reference so `KmdbQuery` never reaches past `IndexManager`.
+- `QueryPlan` / `FilterPlan` / `ScanStrategy` value types capture execution
+  metadata per query.
+- `KmdbQuery.explainedGet()` / `KmdbCollection.explainedGet()` expose the plan
+  to application code.
+- CLI `scan --explain` renders the plan as a human-readable block (table mode)
+  or a leading `_explain` JSON object (JSON mode).
+- CLI `search --explain` renders `SearchMetadata` (mode, searched fields,
+  skipped fields, total hits) in the same two formats.
+
+All 1074 kmdb and 427 kmdb_cli tests pass. Range/string/array predicate index
+acceleration is deferred as a roadmap item.

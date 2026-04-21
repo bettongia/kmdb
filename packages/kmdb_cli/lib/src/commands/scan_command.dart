@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'dart:convert';
+
 import 'package:kmdb/kmdb.dart';
 
 import '../filter/filter_parser.dart';
@@ -56,7 +58,7 @@ final class ScanCommand implements CliCommand {
   String get usage =>
       'scan <collection> [--filter <json>] [--order-by <field>] [--desc] '
       '[--limit <n>] [--offset <n>] [--key-prefix <str>] '
-      '[--select <path1,path2,...>]';
+      '[--select <path1,path2,...>] [--explain]';
 
   @override
   Future<bool> execute(
@@ -91,19 +93,132 @@ final class ScanCommand implements CliCommand {
     final offset = _parseInt(flags['offset']);
     final keyPrefix = flags['key-prefix'] as String?;
     final selectFields = _parseSelect(flags['select']);
+    final explain = flags['explain'] == true;
 
-    // Collect all matching documents.
-    final docs = <Map<String, dynamic>>[];
+    // ── Candidate set ──────────────────────────────────────────────────────────
+    final List<Map<String, dynamic>> candidates;
+    int documentsScanned;
+    final List<FilterPlan> filterPlans;
+    final ScanStrategy strategy;
 
-    await for (final entry in ctx.store.scan(collection, startKey: keyPrefix)) {
-      final doc = ValueCodec.decode(entry.value);
-      if (filter != null && !filter.evaluate(doc)) continue;
-      docs.add(selectFields != null ? projectDocument(doc, selectFields) : doc);
+    if (explain && filter != null) {
+      // Attempt index selection for a top-level equality predicate.
+      final eq = filter.equalityPredicate;
+      if (eq != null) {
+        final (path, value) = eq;
+        final def = ctx.indexManager.definitions
+            .where((d) => d.namespace == collection && d.path == path)
+            .firstOrNull;
+        if (def != null) {
+          final state = await ctx.indexManager.getOrActivate(collection, path);
+          if (state.status == IndexStatus.current) {
+            List<String> keys;
+            try {
+              keys = await ctx.indexManager.lookupByValue(def, value);
+            } catch (_) {
+              keys = const [];
+            }
+            // Fetch and filter the narrowed candidate set.
+            final fetched = <Map<String, dynamic>>[];
+            for (final key in keys) {
+              final bytes = await ctx.store.get(collection, key);
+              if (bytes == null) continue;
+              final doc = ValueCodec.decode(bytes)..['_id'] = key;
+              if (!filter.evaluate(doc)) continue;
+              fetched.add(doc);
+            }
+            candidates = fetched;
+            documentsScanned = keys.length;
+            strategy = ScanStrategy.indexScan;
+            filterPlans = [
+              FilterPlan(fieldPath: path, operator: 'eq', indexUsed: true),
+            ];
+          } else {
+            // Index exists but not current — full scan.
+            (candidates, documentsScanned) = await _fullScan(
+              ctx,
+              collection,
+              filter,
+              keyPrefix,
+            );
+            strategy = ScanStrategy.fullScan;
+            filterPlans = [
+              FilterPlan(
+                fieldPath: path,
+                operator: 'eq',
+                indexUsed: false,
+                indexStatus: state.status.name,
+              ),
+            ];
+          }
+        } else {
+          // No index declared for this field — full scan.
+          (candidates, documentsScanned) = await _fullScan(
+            ctx,
+            collection,
+            filter,
+            keyPrefix,
+          );
+          strategy = ScanStrategy.fullScan;
+          filterPlans = [
+            FilterPlan(
+              fieldPath: path,
+              operator: 'eq',
+              indexUsed: false,
+              indexStatus: 'none',
+            ),
+          ];
+        }
+      } else {
+        // Non-equality or complex filter — full scan, no index info.
+        (candidates, documentsScanned) = await _fullScan(
+          ctx,
+          collection,
+          filter,
+          keyPrefix,
+        );
+        strategy = ScanStrategy.fullScan;
+        filterPlans = [
+          FilterPlan(
+            fieldPath: '(complex)',
+            operator: 'other',
+            indexUsed: false,
+            indexStatus: 'none',
+          ),
+        ];
+      }
+    } else {
+      // No explain flag or no filter — standard full scan.
+      (candidates, documentsScanned) = await _fullScan(
+        ctx,
+        collection,
+        filter,
+        keyPrefix,
+      );
+      strategy = ScanStrategy.fullScan;
+      filterPlans = filter == null
+          ? []
+          : [
+              FilterPlan(
+                fieldPath: filter.equalityPredicate?.$1 ?? '(filter)',
+                operator: filter.equalityPredicate != null ? 'eq' : 'other',
+                indexUsed: false,
+                indexStatus: 'none',
+              ),
+            ];
     }
 
-    // Sort.
-    if (orderBy != null) {
-      docs.sort((a, b) {
+    final documentsMatched = candidates.length;
+
+    // ── Project fields ─────────────────────────────────────────────────────────
+    final projected = selectFields == null
+        ? candidates
+        : candidates.map((doc) => projectDocument(doc, selectFields)).toList();
+
+    // ── Sort ───────────────────────────────────────────────────────────────────
+    final sorted = orderBy != null;
+    if (sorted) {
+      projected.sort((a, b) {
         final av = a[orderBy];
         final bv = b[orderBy];
         final cmp = _compareValues(av, bv);
@@ -111,15 +226,94 @@ final class ScanCommand implements CliCommand {
       });
     }
 
-    // Paginate.
+    // ── Paginate ───────────────────────────────────────────────────────────────
     final start = offset ?? 0;
     final end = limit != null
-        ? (start + limit).clamp(0, docs.length)
-        : docs.length;
-    final page = docs.sublist(start.clamp(0, docs.length), end);
+        ? (start + limit).clamp(0, projected.length)
+        : projected.length;
+    final page = projected.sublist(start.clamp(0, projected.length), end);
+
+    // ── Output ─────────────────────────────────────────────────────────────────
+    if (explain) {
+      final plan = QueryPlan(
+        strategy: strategy,
+        filters: filterPlans,
+        documentsScanned: documentsScanned,
+        documentsMatched: documentsMatched,
+        documentsReturned: page.length,
+        sorted: sorted,
+      );
+      _writePlan(ctx, plan);
+    }
 
     ctx.writeDocuments(page);
     return true;
+  }
+
+  /// Performs a full scan of [collection] filtered by [filter], returning
+  /// the matching documents and the total document count examined.
+  static Future<(List<Map<String, dynamic>>, int)> _fullScan(
+    CommandContext ctx,
+    String collection,
+    Filter? filter,
+    String? keyPrefix,
+  ) async {
+    final docs = <Map<String, dynamic>>[];
+    var count = 0;
+    await for (final entry in ctx.store.scan(collection, startKey: keyPrefix)) {
+      count++;
+      final doc = ValueCodec.decode(entry.value)..['_id'] = entry.key;
+      if (filter != null && !filter.evaluate(doc)) continue;
+      docs.add(doc);
+    }
+    return (docs, count);
+  }
+
+  /// Writes the query plan block to [ctx.out] in the appropriate format.
+  static void _writePlan(CommandContext ctx, QueryPlan plan) {
+    final isJson = ctx.mode.name == 'json';
+    if (isJson) {
+      // Prepend plan as a standalone JSON object before the results array.
+      final planMap = {
+        '_explain': {
+          'strategy': plan.strategy.name,
+          'filters': [
+            for (final f in plan.filters)
+              {
+                'field': f.fieldPath,
+                'operator': f.operator,
+                'indexUsed': f.indexUsed,
+                if (!f.indexUsed && f.indexStatus != null)
+                  'indexStatus': f.indexStatus,
+              },
+          ],
+          'documentsScanned': plan.documentsScanned,
+          'documentsMatched': plan.documentsMatched,
+          'documentsReturned': plan.documentsReturned,
+          'sorted': plan.sorted,
+        },
+      };
+      ctx.out.writeln(const JsonEncoder.withIndent('  ').convert(planMap));
+    } else {
+      // Human-readable plan block.
+      final strategyLabel = plan.strategy == ScanStrategy.indexScan
+          ? 'index scan'
+          : 'full scan';
+      ctx.out.writeln('Query plan');
+      ctx.out.writeln('  Strategy : $strategyLabel');
+      if (plan.filters.isNotEmpty) {
+        for (var i = 0; i < plan.filters.length; i++) {
+          final f = plan.filters[i];
+          final label = i == 0 ? '  Filters  :' : '            ';
+          final indexNote = f.indexUsed ? '[index: current]' : '[full scan]';
+          ctx.out.writeln('$label ${f.fieldPath} ${f.operator} $indexNote');
+        }
+      }
+      ctx.out.writeln('  Scanned  : ${plan.documentsScanned}');
+      ctx.out.writeln('  Matched  : ${plan.documentsMatched}');
+      ctx.out.writeln('  Returned : ${plan.documentsReturned}');
+      ctx.out.writeln('');
+    }
   }
 
   /// Parses a comma-separated `--select` value into an ordered list of path

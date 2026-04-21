@@ -20,6 +20,7 @@ import '../../engine/kvstore/kv_store.dart';
 import '../../engine/kvstore/kv_store_impl.dart';
 import '../../encoding/value_codec.dart';
 import 'index_definition.dart';
+import 'index_reader.dart';
 import 'index_writer.dart';
 
 /// The four lifecycle states of a secondary index (spec §16).
@@ -151,6 +152,24 @@ final class IndexManager {
     }
     return _loadState(def);
   }
+
+  /// Returns the document keys whose [definition]'s field equals [value].
+  ///
+  /// Delegates to [IndexReader.lookupByValue] using the private store,
+  /// keeping the [KvStore] reference encapsulated. Call [getOrActivate] before
+  /// this method to confirm the index is [IndexStatus.current]; this method
+  /// performs the lookup unconditionally.
+  ///
+  /// Returns an empty list when [value] is not indexable (null, Map, List) or
+  /// when no documents match.
+  Future<List<String>> lookupByValue(
+    IndexDefinition definition,
+    Object? value,
+  ) => IndexReader.lookupByValue(
+    store: _store,
+    definition: definition,
+    value: value,
+  );
 
   /// Removes all stored data for the index on [namespace]/[path].
   ///

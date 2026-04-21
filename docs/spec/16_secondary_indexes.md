@@ -126,17 +126,77 @@ affected index fall back to full-scan.
 
 ## Query Execution with Indexes
 
-When a query includes a filter on an indexed field:
+`KmdbQuery._executeWithPlan()` implements index selection at query time. It
+returns a `QueryPlan` alongside the result set, capturing which strategy was
+used and the per-stage document counts.
 
-1. Look up the index in `$meta`. If `current`, use the index.
-2. Perform a prefix scan on `$index:{ns}:{path}` with the encoded filter value
-   as the prefix, collecting matching document keys.
-3. Fetch each document by key (likely from the session cache).
-4. Apply any remaining in-memory filters (for compound `where` clauses).
-5. Sort, limit, and offset.
+### Index eligibility
 
-If the index is `building` or `stale`, fall back to a full namespace scan and
-apply all filters in memory.
+Only **equality predicates** (`Field('x').equals(v)`) that are at the AND-root
+of the query are eligible for index acceleration. Specifically:
+
+- Each `Filter` added via a chained `.where()` call is checked individually via
+  `Filter.equalityPredicate`. A non-null result signals an equality predicate on
+  a known field path with a concrete value.
+- Equality predicates nested inside `OrFilter` or `NotFilter` are **not**
+  eligible — using them would require union/complement key-set operations that
+  are out of scope for this iteration.
+- Range, string, and array predicates (e.g. `isGreaterThan`, `contains`,
+  `startsWith`) are always evaluated in-memory.
+
+### Selection sequence
+
+For each eligible equality predicate:
+
+1. Call `IndexManager.getOrActivate(namespace, path)`.
+   - `undefined` → triggers a background build; returns `building` → full scan
+     for this query.
+   - `building` or `stale` → full scan for this query; background rebuild may
+     already be running.
+   - `current` → index is usable; proceed to lookup.
+2. Call `IndexManager.lookupByValue(definition, value)` → `List<String>` of
+   matching document keys (wraps `IndexReader.lookupByValue` using the private
+   store reference).
+3. If multiple eligible predicates, **intersect** the key sets starting from the
+   smallest (short-circuits to empty if any intersection is empty).
+4. Fetch each document in the intersection by key via `CacheLayer.get()` (warms
+   the session cache; bypasses index namespaces).
+5. Apply **all** filters in-memory on the narrowed candidate set — including the
+   indexed predicates, which are cheap to re-evaluate and guard against any race
+   on the index.
+6. Sort, limit, and offset as usual.
+
+`IndexReader.lookupByValue` failures are caught defensively; the query falls
+back to a full namespace scan with a debug log entry.
+
+### Fallback to full scan
+
+The query falls back to a full namespace scan when:
+
+- No equality predicate with a `current` index exists.
+- Any index is in `building` or `stale` state.
+- `lookupByValue` throws an unexpected error.
+- The intersected key set is empty (fetch phase is skipped; result is empty
+  without doing a full scan).
+
+### `QueryPlan` — execution metadata
+
+Every call to `KmdbQuery.explainedGet()` returns a `(List<T>, QueryPlan)` pair.
+`QueryPlan` captures:
+
+| Field | Description |
+| :---- | :---------- |
+| `strategy` | `ScanStrategy.fullScan` or `ScanStrategy.indexScan` |
+| `filters` | Per-filter `FilterPlan` list: field path, operator, `indexUsed`, `indexStatus` |
+| `documentsScanned` | Namespace size (full scan) or intersection size (index scan) |
+| `documentsMatched` | After all in-memory filters |
+| `documentsReturned` | After offset/limit |
+| `sorted` | `true` when in-memory sort was applied |
+
+For `ScanStrategy.fullScan`, `documentsScanned` is the total number of documents
+decoded from the namespace before any filter evaluation. For
+`ScanStrategy.indexScan`, it is the size of the intersected key set — always ≤
+the full namespace size.
 
 ## Indexes and Sync
 

@@ -154,6 +154,10 @@ final class _FieldFilter extends Filter {
   final Object? _operand;
 
   @override
+  (String, Object?)? get equalityPredicate =>
+      _op == _Op.eq ? (_path, _operand) : null;
+
+  @override
   bool evaluate(Map<String, dynamic> document) {
     final value = FieldPath.resolve(_path, document);
 

@@ -76,6 +76,7 @@ export 'src/query/filter/field_path.dart' show FieldPath, missing;
 export 'src/query/index/index_definition.dart' show IndexDefinition;
 export 'src/query/index/index_manager.dart'
     show IndexManager, IndexState, IndexStatus;
+export 'src/query/query_plan.dart' show QueryPlan, FilterPlan, ScanStrategy;
 
 // ── Text search — shared foundations ─────────────────────────────────────────
 export 'src/search/search_mode.dart' show SearchMode;

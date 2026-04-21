@@ -14,12 +14,16 @@
 
 import 'dart:async';
 
+import 'dart:developer' as developer;
+
 import '../encoding/value_codec.dart';
 import 'exceptions.dart';
 import 'filter/field_path.dart';
 import 'filter/filter.dart';
+import 'index/index_definition.dart';
 import 'index/index_manager.dart';
 import 'kmdb_collection.dart';
+import 'query_plan.dart';
 
 /// An immutable, lazy query pipeline over a [KmdbCollection].
 ///
@@ -200,16 +204,22 @@ final class KmdbQuery<T> {
   /// Executes the query and returns all matching documents as a [List].
   ///
   /// The LSM snapshot is released immediately after the scan completes.
-  Future<List<T>> get() => _execute();
+  Future<List<T>> get() async => (await _executeWithPlan()).$1;
+
+  /// Executes the query and returns results together with a [QueryPlan]
+  /// describing the execution strategy, index usage, and document counts.
+  ///
+  /// Equivalent to [get] but also exposes the query execution metadata for
+  /// diagnostic or EXPLAIN-style display purposes.
+  Future<(List<T>, QueryPlan)> explainedGet() => _executeWithPlan();
 
   /// Executes the query and returns results as a [Stream].
   ///
   /// Eagerly evaluated — identical to [get] internally, but emits each
   /// document as a `Stream<T>`. No LSM snapshot is held open. Prefer [watch]
   /// for reactive UI lists.
-  Stream<T> stream() => Stream.fromFuture(
-    _execute(),
-  ).asyncExpand((list) => Stream.fromIterable(list));
+  Stream<T> stream() =>
+      Stream.fromFuture(get()).asyncExpand((list) => Stream.fromIterable(list));
 
   /// Returns the first matching document, or `null` if none match.
   Future<T?> first() async {
@@ -238,7 +248,7 @@ final class KmdbQuery<T> {
       return n;
     }
     // General path: decode and filter.
-    final results = await _execute();
+    final results = await get();
     return results.length;
   }
 
@@ -263,7 +273,7 @@ final class KmdbQuery<T> {
 
     Future<void> emitCurrent() async {
       try {
-        final results = await _execute();
+        final results = await get();
         if (!controller.isClosed) controller.add(results);
       } catch (e, st) {
         if (!controller.isClosed) controller.addError(e, st);
@@ -290,40 +300,171 @@ final class KmdbQuery<T> {
 
   // ── Execution ───────────────────────────────────────────────────────────────
 
-  Future<List<T>> _execute() async {
+  Future<(List<T>, QueryPlan)> _executeWithPlan() async {
     if (_requireFreshIndex) await _checkIndexFreshness();
-    final (startKey, endKey) = _scanRange();
-    final raw = <(String key, Map<String, dynamic> doc)>[];
 
-    // Scan and decode all candidate documents.
-    await for (final entry in _collection.database.cache.scan(
-      _collection.namespace,
-      startKey: startKey,
-      endKey: endKey,
-    )) {
-      final Map<String, dynamic> doc;
+    final ns = _collection.namespace;
+    final manager = _collection.database.indexManager;
+
+    // ── Index selection ────────────────────────────────────────────────────────
+    // For each equality predicate in _filters, attempt to find a current index.
+    // Only top-level filters (implicit AND via chained .where()) are eligible —
+    // predicates buried inside OrFilter / NotFilter are skipped.
+
+    final eligible =
+        <({IndexDefinition def, Object? value, int filterIndex})>[];
+    final filterPlans = <FilterPlan>[];
+
+    for (var i = 0; i < _filters.length; i++) {
+      final f = _filters[i];
+      final eq = f.equalityPredicate;
+      if (eq == null) {
+        // Non-equality filter — always full-scan for this predicate.
+        filterPlans.add(
+          FilterPlan(
+            fieldPath: '?',
+            operator: 'other',
+            indexUsed: false,
+            indexStatus: 'none',
+          ),
+        );
+        continue;
+      }
+      final (path, value) = eq;
+      IndexState state;
       try {
-        doc = ValueCodec.decode(entry.value);
-      } catch (_) {
-        continue; // skip corrupt values
+        state = await manager.getOrActivate(ns, path);
+      } catch (e) {
+        developer.log(
+          'IndexManager.getOrActivate failed for $ns/$path: $e',
+          name: 'kmdb.query',
+        );
+        filterPlans.add(
+          FilterPlan(
+            fieldPath: path,
+            operator: 'eq',
+            indexUsed: false,
+            indexStatus: 'none',
+          ),
+        );
+        continue;
       }
 
-      // Inject the document key as '_id' so that filters can match on it and
-      // codec.decode() receives the complete fromJson-style map.
-      doc['_id'] = entry.key;
-
-      // Apply all filters (AND-ed).
-      if (_filters.isNotEmpty) {
-        if (!_filters.every((f) => f.evaluate(doc))) continue;
+      if (state.status == IndexStatus.current) {
+        final def = manager.definitions.firstWhere(
+          (d) => d.namespace == ns && d.path == path,
+        );
+        eligible.add((def: def, value: value, filterIndex: i));
+        // Status is filled in after we confirm the lookup succeeds; mark now.
+        filterPlans.add(
+          FilterPlan(fieldPath: path, operator: 'eq', indexUsed: true),
+        );
+      } else {
+        developer.log(
+          'Index $ns/$path is ${state.status.name} — falling back to full scan',
+          name: 'kmdb.query',
+        );
+        filterPlans.add(
+          FilterPlan(
+            fieldPath: path,
+            operator: 'eq',
+            indexUsed: false,
+            indexStatus: state.status.name,
+          ),
+        );
       }
-
-      raw.add((entry.key, doc));
     }
 
-    // Sort.
+    // ── Candidate set ──────────────────────────────────────────────────────────
+    final List<(String key, Map<String, dynamic> doc)> raw;
+    final ScanStrategy strategy;
+    int documentsScanned;
+
+    if (eligible.isNotEmpty) {
+      // Index path: look up each eligible predicate, intersect key sets.
+      List<String>? keySet;
+      bool lookupFailed = false;
+
+      for (final e in eligible) {
+        List<String> keys;
+        try {
+          keys = await manager.lookupByValue(e.def, e.value);
+        } catch (err) {
+          developer.log(
+            'lookupByValue failed for ${e.def.namespace}/${e.def.path}: $err — '
+            'falling back to full scan',
+            name: 'kmdb.query',
+          );
+          lookupFailed = true;
+          break;
+        }
+        if (keySet == null) {
+          keySet = keys;
+        } else {
+          // Intersect: keep only keys present in both sets (smallest-first
+          // iteration to minimise work).
+          final smaller = keySet.length <= keys.length ? keySet : keys;
+          final larger = keySet.length <= keys.length ? keys : keySet;
+          final largerSet = larger.toSet();
+          keySet = smaller.where(largerSet.contains).toList();
+        }
+        if (keySet.isEmpty) break; // short-circuit
+      }
+
+      if (!lookupFailed) {
+        // Fetch only the documents in the intersected key set.
+        final candidates = <(String key, Map<String, dynamic> doc)>[];
+        for (final key in keySet!) {
+          final bytes = await _collection.database.cache.get(ns, key);
+          if (bytes == null) continue;
+          final Map<String, dynamic> doc;
+          try {
+            doc = ValueCodec.decode(bytes);
+          } catch (_) {
+            continue;
+          }
+          doc['_id'] = key;
+          candidates.add((key, doc));
+        }
+        raw = candidates;
+        strategy = ScanStrategy.indexScan;
+        documentsScanned = keySet.length;
+      } else {
+        // Lookup failed — fall back to full scan; fix up filter plans.
+        for (var i = 0; i < filterPlans.length; i++) {
+          if (filterPlans[i].indexUsed) {
+            filterPlans[i] = FilterPlan(
+              fieldPath: filterPlans[i].fieldPath,
+              operator: filterPlans[i].operator,
+              indexUsed: false,
+              indexStatus: 'error',
+            );
+          }
+        }
+        (raw, documentsScanned) = await _fullScan();
+        strategy = ScanStrategy.fullScan;
+      }
+    } else {
+      // No eligible indexes — full scan.
+      (raw, documentsScanned) = await _fullScan();
+      strategy = ScanStrategy.fullScan;
+    }
+
+    // ── In-memory filter pass ──────────────────────────────────────────────────
+    // For index scans, re-apply ALL filters (indexed predicates are cheap to
+    // re-evaluate and ensure correctness against any race on the index).
+    final filtered = _filters.isEmpty
+        ? raw
+        : raw
+              .where((pair) => _filters.every((f) => f.evaluate(pair.$2)))
+              .toList();
+
+    final documentsMatched = filtered.length;
+
+    // ── Sort ───────────────────────────────────────────────────────────────────
     final orderField = _orderByField;
     if (orderField != null) {
-      raw.sort((a, b) {
+      filtered.sort((a, b) {
         final va = FieldPath.resolve(orderField, a.$2);
         final vb = FieldPath.resolve(orderField, b.$2);
         final cmp = _compareValues(va, vb);
@@ -331,8 +472,8 @@ final class KmdbQuery<T> {
       });
     }
 
-    // Offset and limit.
-    var results = raw;
+    // ── Offset and limit ───────────────────────────────────────────────────────
+    var results = filtered;
     final off = _offsetCount;
     if (off != null && off > 0) {
       results = results.length <= off ? [] : results.sublist(off);
@@ -342,10 +483,43 @@ final class KmdbQuery<T> {
       results = results.sublist(0, lim);
     }
 
-    // Decode to typed T. '_id' was already injected into each map above, so
-    // decodeDoc() receives the full fromJson-style representation and also
-    // wires any vault URI strings to the active VaultStore.
-    return results.map((pair) => _collection.decodeDoc(pair.$2)).toList();
+    final plan = QueryPlan(
+      strategy: strategy,
+      filters: filterPlans,
+      documentsScanned: documentsScanned,
+      documentsMatched: documentsMatched,
+      documentsReturned: results.length,
+      sorted: orderField != null,
+    );
+
+    final typed = results
+        .map((pair) => _collection.decodeDoc(pair.$2))
+        .toList();
+    return (typed, plan);
+  }
+
+  /// Performs a full namespace scan and returns all decoded documents with the
+  /// total count of documents examined.
+  Future<(List<(String, Map<String, dynamic>)>, int)> _fullScan() async {
+    final (startKey, endKey) = _scanRange();
+    final docs = <(String key, Map<String, dynamic> doc)>[];
+    var count = 0;
+    await for (final entry in _collection.database.cache.scan(
+      _collection.namespace,
+      startKey: startKey,
+      endKey: endKey,
+    )) {
+      count++;
+      final Map<String, dynamic> doc;
+      try {
+        doc = ValueCodec.decode(entry.value);
+      } catch (_) {
+        continue;
+      }
+      doc['_id'] = entry.key;
+      docs.add((entry.key, doc));
+    }
+    return (docs, count);
   }
 
   /// Checks that all secondary indexes for this collection's namespace are
