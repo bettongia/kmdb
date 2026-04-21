@@ -215,17 +215,23 @@ implemented and tested**:
 | `MinProperties` / `MaxProperties` | `minProperties` / `maxProperties` |
 | `DependentRequired` | `dependentRequired` |
 
+Format validators are implemented separately in `formats_base.dart` via
+`StringFormatValidator`, which returns named `StringValidator` objects via
+`getValidator(name)`. Implemented formats: `email`, `uri`, `date`, `date-time`,
+`time`, `uuid`, `duration`, `regex`, `hex-string`, `digit-string`,
+`roman-numeral`, `isbn-13`.
+
 **Bug to fix:** `MinimumLength` uses `input.runes.length` while all other string
 validators use `input.characters.length` — make consistent.
 
 **Still to add to `kmdb_schema`** (generic, no KMDB dependency):
 
 - `TypeValidator` — maps JSON Schema `type` strings to Dart runtime type checks
-- `FormatValidator` — surface regex checks for `email`, `uri`, `date`,
-  `date-time`, `uuid`
 - `PropertiesValidator` — applies per-field child validators to a Map
 - `AdditionalPropertiesValidator` — rejects keys not declared in a properties set
 - `ItemsValidator` — applies a child validator to every element of a List
+
+Missing tests: no test file for `date`, `date-time`, or `time` format validators.
 
 The sealed `SchemaRule` hierarchy and `SchemaParser` also live in `kmdb_schema`
 (generic; no KMDB storage concepts). `SchemaManager` (persistence, MetaStore
@@ -241,14 +247,18 @@ subset, `schemaModelVersion` versioning, sync behaviour, and the
 
 ### Phase 1 — Complete `kmdb_schema` primitives
 
+Format validators (`email`, `uri`, `date`, `date-time`, `uuid`, plus 8 more) are
+already implemented in `StringFormatValidator` (accessed via
+`StringFormatValidator().getValidator(name)`). The following still need adding:
+
 - [ ] Fix `MinimumLength` — change `input.runes.length` to
       `input.characters.length`
-- [ ] Add `TypeValidator` to `validation.dart`
-- [ ] Add `FormatValidator` to `validation.dart` (email, uri, date, date-time,
-      uuid)
-- [ ] Add `PropertiesValidator` to `validation.dart`
-- [ ] Add `AdditionalPropertiesValidator` to `validation.dart`
-- [ ] Add `ItemsValidator` to `validation.dart`
+- [ ] Add `TypeValidator` to `schema_base.dart`
+- [ ] Add `PropertiesValidator` to `schema_base.dart`
+- [ ] Add `AdditionalPropertiesValidator` to `schema_base.dart`
+- [ ] Add `ItemsValidator` to `schema_base.dart`
+- [ ] Add tests for `date`, `date-time`, and `time` format validators (no test
+      file exists for these yet)
 - [ ] Update `validation_test.dart` with tests for all new validators
 - [ ] Export new validators from `schema.dart`
 
