@@ -18,7 +18,6 @@ Copyright 2026 The KMDB Authors
 // ignore_for_file: non_constant_identifier_names
 
 import '../registry_base.dart';
-import 'package:kmdb_util/util.dart';
 import 'package:meta/meta.dart';
 
 @internal
@@ -26,7 +25,7 @@ final Map<String, RegistryEntry> mimeinfoDbVideo = {
   "video/x-flv": const RegistryEntry(
     mediaType: 'video/x-flv',
     genericIcon: GenericIcon.videoXGeneric,
-    comments: [IntlString.constant('Flash video')],
+    comments: ['Flash video'],
     subclassOf: [],
     alias: [
       'application/x-flash-video',
@@ -46,7 +45,7 @@ final Map<String, RegistryEntry> mimeinfoDbVideo = {
   "video/x-javafx": const RegistryEntry(
     mediaType: 'video/x-javafx',
     genericIcon: GenericIcon.videoXGeneric,
-    comments: [IntlString.constant('JavaFX video')],
+    comments: ['JavaFX video'],
     subclassOf: ['video/x-flv'],
     alias: [],
     globs: [Glob(pattern: '*.fxm', weight: 50, caseSensitive: false)],
@@ -62,7 +61,7 @@ final Map<String, RegistryEntry> mimeinfoDbVideo = {
   "video/vnd.youtube.yt": const RegistryEntry(
     mediaType: 'video/vnd.youtube.yt',
     genericIcon: GenericIcon.videoXGeneric,
-    comments: [IntlString.constant('YouTube media archive')],
+    comments: ['YouTube media archive'],
     subclassOf: ['application/zip'],
     alias: ['application/vnd.youtube.yt'],
     globs: [Glob(pattern: '*.yt', weight: 50, caseSensitive: false)],
@@ -82,21 +81,21 @@ final Map<String, RegistryEntry> mimeinfoDbVideo = {
   ),
   "video/x-matroska": const RegistryEntry(
     mediaType: 'video/x-matroska',
-    comments: [IntlString.constant('Matroska video')],
+    comments: ['Matroska video'],
     subclassOf: ['application/x-matroska'],
     alias: [],
     globs: [Glob(pattern: '*.mkv', weight: 50, caseSensitive: false)],
   ),
   "video/x-matroska-3d": const RegistryEntry(
     mediaType: 'video/x-matroska-3d',
-    comments: [IntlString.constant('Matroska 3D video')],
+    comments: ['Matroska 3D video'],
     subclassOf: ['application/x-matroska'],
     alias: [],
     globs: [Glob(pattern: '*.mk3d', weight: 50, caseSensitive: false)],
   ),
   "video/webm": const RegistryEntry(
     mediaType: 'video/webm',
-    comments: [IntlString.constant('WebM video')],
+    comments: ['WebM video'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.webm', weight: 50, caseSensitive: false)],
@@ -132,7 +131,7 @@ final Map<String, RegistryEntry> mimeinfoDbVideo = {
   ),
   "video/annodex": const RegistryEntry(
     mediaType: 'video/annodex',
-    comments: [IntlString.constant('Annodex video')],
+    comments: ['Annodex video'],
     subclassOf: ['application/annodex'],
     alias: ['video/x-annodex'],
     globs: [Glob(pattern: '*.axv', weight: 50, caseSensitive: false)],
@@ -168,7 +167,7 @@ final Map<String, RegistryEntry> mimeinfoDbVideo = {
   ),
   "video/ogg": const RegistryEntry(
     mediaType: 'video/ogg',
-    comments: [IntlString.constant('Ogg video')],
+    comments: ['Ogg video'],
     subclassOf: ['application/ogg'],
     alias: ['video/x-ogg'],
     globs: [
@@ -186,7 +185,7 @@ final Map<String, RegistryEntry> mimeinfoDbVideo = {
   ),
   "video/x-theora+ogg": const RegistryEntry(
     mediaType: 'video/x-theora+ogg',
-    comments: [IntlString.constant('Ogg Theora video')],
+    comments: ['Ogg Theora video'],
     subclassOf: ['video/ogg'],
     alias: ['video/x-theora'],
     globs: [Glob(pattern: '*.ogg', weight: 50, caseSensitive: false)],
@@ -214,7 +213,7 @@ final Map<String, RegistryEntry> mimeinfoDbVideo = {
   ),
   "video/x-ogm+ogg": const RegistryEntry(
     mediaType: 'video/x-ogm+ogg',
-    comments: [IntlString.constant('OGM video')],
+    comments: ['OGM video'],
     subclassOf: ['video/ogg'],
     alias: ['video/x-ogm'],
     globs: [Glob(pattern: '*.ogm', weight: 50, caseSensitive: false)],
@@ -242,7 +241,7 @@ final Map<String, RegistryEntry> mimeinfoDbVideo = {
   ),
   "video/mp4": const RegistryEntry(
     mediaType: 'video/mp4',
-    comments: [IntlString.constant('MPEG-4 video')],
+    comments: ['MPEG-4 video'],
     subclassOf: [],
     alias: ['video/mp4v-es', 'video/x-m4v'],
     globs: [
@@ -297,9 +296,9 @@ final Map<String, RegistryEntry> mimeinfoDbVideo = {
   ),
   "video/3gpp": const RegistryEntry(
     mediaType: 'video/3gpp',
-    comments: [IntlString.constant('3GPP multimedia file')],
-    acronym: IntlString.constant('3GPP'),
-    expandedAcronym: IntlString.constant('3rd Generation Partnership Project'),
+    comments: ['3GPP multimedia file'],
+    acronym: '3GPP',
+    expandedAcronym: '3rd Generation Partnership Project',
     subclassOf: ['video/mp4'],
     alias: [
       'video/3gp',
@@ -350,11 +349,9 @@ final Map<String, RegistryEntry> mimeinfoDbVideo = {
   ),
   "video/3gpp2": const RegistryEntry(
     mediaType: 'video/3gpp2',
-    comments: [IntlString.constant('3GPP2 multimedia file')],
-    acronym: IntlString.constant('3GPP2'),
-    expandedAcronym: IntlString.constant(
-      '3rd Generation Partnership Project 2',
-    ),
+    comments: ['3GPP2 multimedia file'],
+    acronym: '3GPP2',
+    expandedAcronym: '3rd Generation Partnership Project 2',
     subclassOf: [],
     alias: ['audio/3gpp2'],
     globs: [
@@ -378,7 +375,7 @@ final Map<String, RegistryEntry> mimeinfoDbVideo = {
   ),
   "video/vnd.rn-realvideo": const RegistryEntry(
     mediaType: 'video/vnd.rn-realvideo',
-    comments: [IntlString.constant('RealVideo document')],
+    comments: ['RealVideo document'],
     subclassOf: [],
     alias: ['video/x-real-video'],
     globs: [
@@ -388,9 +385,9 @@ final Map<String, RegistryEntry> mimeinfoDbVideo = {
   ),
   "video/x-mjpeg": const RegistryEntry(
     mediaType: 'video/x-mjpeg',
-    comments: [IntlString.constant('MJPEG video stream')],
-    acronym: IntlString.constant('MJPEG'),
-    expandedAcronym: IntlString.constant('Motion JPEG'),
+    comments: ['MJPEG video stream'],
+    acronym: 'MJPEG',
+    expandedAcronym: 'Motion JPEG',
     subclassOf: ['image/jpeg'],
     alias: [],
     globs: [
@@ -400,9 +397,9 @@ final Map<String, RegistryEntry> mimeinfoDbVideo = {
   ),
   "video/mj2": const RegistryEntry(
     mediaType: 'video/mj2',
-    comments: [IntlString.constant('JPEG-2000 MJ2 video')],
-    acronym: IntlString.constant('MJ2'),
-    expandedAcronym: IntlString.constant('Motion JPEG-2000'),
+    comments: ['JPEG-2000 MJ2 video'],
+    acronym: 'MJ2',
+    expandedAcronym: 'Motion JPEG-2000',
     subclassOf: [],
     alias: [],
     globs: [
@@ -425,9 +422,9 @@ final Map<String, RegistryEntry> mimeinfoDbVideo = {
   ),
   "video/dv": const RegistryEntry(
     mediaType: 'video/dv',
-    comments: [IntlString.constant('DV video')],
-    acronym: IntlString.constant('DV'),
-    expandedAcronym: IntlString.constant('Digital Video'),
+    comments: ['DV video'],
+    acronym: 'DV',
+    expandedAcronym: 'Digital Video',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.dv', weight: 50, caseSensitive: false)],
@@ -447,17 +444,15 @@ final Map<String, RegistryEntry> mimeinfoDbVideo = {
   ),
   "video/isivideo": const RegistryEntry(
     mediaType: 'video/isivideo',
-    comments: [IntlString.constant('ISI video')],
+    comments: ['ISI video'],
     subclassOf: [],
     alias: [],
   ),
   "video/mp2t": const RegistryEntry(
     mediaType: 'video/mp2t',
-    comments: [IntlString.constant('MPEG-2 transport stream')],
-    acronym: IntlString.constant('MPEG-2 TS'),
-    expandedAcronym: IntlString.constant(
-      'Moving Picture Experts Group 2 Transport Stream',
-    ),
+    comments: ['MPEG-2 transport stream'],
+    acronym: 'MPEG-2 TS',
+    expandedAcronym: 'Moving Picture Experts Group 2 Transport Stream',
     subclassOf: [],
     alias: [],
     globs: [
@@ -558,9 +553,9 @@ final Map<String, RegistryEntry> mimeinfoDbVideo = {
   ),
   "video/mpeg": const RegistryEntry(
     mediaType: 'video/mpeg',
-    comments: [IntlString.constant('MPEG video')],
-    acronym: IntlString.constant('MPEG'),
-    expandedAcronym: IntlString.constant('Moving Picture Experts Group'),
+    comments: ['MPEG video'],
+    acronym: 'MPEG',
+    expandedAcronym: 'Moving Picture Experts Group',
     subclassOf: [],
     alias: [
       'video/x-mpeg',
@@ -604,7 +599,7 @@ final Map<String, RegistryEntry> mimeinfoDbVideo = {
   ),
   "video/vnd.mpegurl": const RegistryEntry(
     mediaType: 'video/vnd.mpegurl',
-    comments: [IntlString.constant('Video playlist')],
+    comments: ['Video playlist'],
     subclassOf: ['text/plain'],
     alias: ['video/x-mpegurl'],
     globs: [
@@ -628,7 +623,7 @@ final Map<String, RegistryEntry> mimeinfoDbVideo = {
   ),
   "video/quicktime": const RegistryEntry(
     mediaType: 'video/quicktime',
-    comments: [IntlString.constant('QuickTime video')],
+    comments: ['QuickTime video'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -661,7 +656,7 @@ final Map<String, RegistryEntry> mimeinfoDbVideo = {
   ),
   "video/vnd.vivo": const RegistryEntry(
     mediaType: 'video/vnd.vivo',
-    comments: [IntlString.constant('Vivo video')],
+    comments: ['Vivo video'],
     subclassOf: [],
     alias: ['video/vivo'],
     globs: [
@@ -671,20 +666,20 @@ final Map<String, RegistryEntry> mimeinfoDbVideo = {
   ),
   "video/wavelet": const RegistryEntry(
     mediaType: 'video/wavelet',
-    comments: [IntlString.constant('Wavelet video')],
+    comments: ['Wavelet video'],
     subclassOf: [],
     alias: [],
   ),
   "video/x-anim": const RegistryEntry(
     mediaType: 'video/x-anim',
-    comments: [IntlString.constant('ANIM animation')],
+    comments: ['ANIM animation'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.anim[1-9j]', weight: 50, caseSensitive: true)],
   ),
   "video/x-flic": const RegistryEntry(
     mediaType: 'video/x-flic',
-    comments: [IntlString.constant('FLIC animation')],
+    comments: ['FLIC animation'],
     subclassOf: [],
     alias: ['video/fli', 'video/x-fli'],
     globs: [
@@ -713,9 +708,9 @@ final Map<String, RegistryEntry> mimeinfoDbVideo = {
   ),
   "video/x-mng": const RegistryEntry(
     mediaType: 'video/x-mng',
-    comments: [IntlString.constant('MNG animation')],
-    acronym: IntlString.constant('MNG'),
-    expandedAcronym: IntlString.constant('Multiple-Image Network Graphics'),
+    comments: ['MNG animation'],
+    acronym: 'MNG',
+    expandedAcronym: 'Multiple-Image Network Graphics',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.mng', weight: 50, caseSensitive: false)],
@@ -735,16 +730,16 @@ final Map<String, RegistryEntry> mimeinfoDbVideo = {
   ),
   "video/x-ms-wmv": const RegistryEntry(
     mediaType: 'video/x-ms-wmv',
-    comments: [IntlString.constant('Windows Media video')],
+    comments: ['Windows Media video'],
     subclassOf: ['application/vnd.ms-asf'],
     alias: [],
     globs: [Glob(pattern: '*.wmv', weight: 50, caseSensitive: false)],
   ),
   "video/vnd.avi": const RegistryEntry(
     mediaType: 'video/vnd.avi',
-    comments: [IntlString.constant('AVI video')],
-    acronym: IntlString.constant('AVI'),
-    expandedAcronym: IntlString.constant('Audio Video Interleave'),
+    comments: ['AVI video'],
+    acronym: 'AVI',
+    expandedAcronym: 'Audio Video Interleave',
     subclassOf: [],
     alias: [
       'video/x-avi',
@@ -797,7 +792,7 @@ final Map<String, RegistryEntry> mimeinfoDbVideo = {
   ),
   "video/x-nsv": const RegistryEntry(
     mediaType: 'video/x-nsv',
-    comments: [IntlString.constant('NullSoft video')],
+    comments: ['NullSoft video'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.nsv', weight: 50, caseSensitive: false)],
@@ -812,7 +807,7 @@ final Map<String, RegistryEntry> mimeinfoDbVideo = {
   ),
   "video/x-sgi-movie": const RegistryEntry(
     mediaType: 'video/x-sgi-movie',
-    comments: [IntlString.constant('SGI video')],
+    comments: ['SGI video'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.movie', weight: 50, caseSensitive: false)],
@@ -827,7 +822,7 @@ final Map<String, RegistryEntry> mimeinfoDbVideo = {
   ),
   "video/vnd.radgamettools.bink": const RegistryEntry(
     mediaType: 'video/vnd.radgamettools.bink',
-    comments: [IntlString.constant('Bink Video')],
+    comments: ['Bink Video'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -938,7 +933,7 @@ final Map<String, RegistryEntry> mimeinfoDbVideo = {
   ),
   "video/vnd.radgamettools.smacker": const RegistryEntry(
     mediaType: 'video/vnd.radgamettools.smacker',
-    comments: [IntlString.constant('Smacker Video')],
+    comments: ['Smacker Video'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.smk', weight: 50, caseSensitive: false)],

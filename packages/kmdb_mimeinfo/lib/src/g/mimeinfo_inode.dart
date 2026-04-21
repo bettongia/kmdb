@@ -18,51 +18,50 @@ Copyright 2026 The KMDB Authors
 // ignore_for_file: non_constant_identifier_names
 
 import '../registry_base.dart';
-import 'package:kmdb_util/util.dart';
 import 'package:meta/meta.dart';
 
 @internal
 final Map<String, RegistryEntry> mimeinfoDbInode = {
   "inode/blockdevice": const RegistryEntry(
     mediaType: 'inode/blockdevice',
-    comments: [IntlString.constant('Block device')],
+    comments: ['Block device'],
     subclassOf: [],
     alias: [],
   ),
   "inode/chardevice": const RegistryEntry(
     mediaType: 'inode/chardevice',
-    comments: [IntlString.constant('Character device')],
+    comments: ['Character device'],
     subclassOf: [],
     alias: [],
   ),
   "inode/directory": const RegistryEntry(
     mediaType: 'inode/directory',
     genericIcon: GenericIcon.folder,
-    comments: [IntlString.constant('Folder')],
+    comments: ['Folder'],
     subclassOf: [],
     alias: ['x-directory/normal'],
   ),
   "inode/fifo": const RegistryEntry(
     mediaType: 'inode/fifo',
-    comments: [IntlString.constant('Pipe')],
+    comments: ['Pipe'],
     subclassOf: [],
     alias: [],
   ),
   "inode/mount-point": const RegistryEntry(
     mediaType: 'inode/mount-point',
-    comments: [IntlString.constant('Mount point')],
+    comments: ['Mount point'],
     subclassOf: ['inode/directory'],
     alias: [],
   ),
   "inode/socket": const RegistryEntry(
     mediaType: 'inode/socket',
-    comments: [IntlString.constant('Socket')],
+    comments: ['Socket'],
     subclassOf: [],
     alias: [],
   ),
   "inode/symlink": const RegistryEntry(
     mediaType: 'inode/symlink',
-    comments: [IntlString.constant('Symbolic link')],
+    comments: ['Symbolic link'],
     subclassOf: [],
     alias: [],
   ),

@@ -18,7 +18,6 @@ Copyright 2026 The KMDB Authors
 // ignore_for_file: non_constant_identifier_names
 
 import '../registry_base.dart';
-import 'package:kmdb_util/util.dart';
 import 'package:meta/meta.dart';
 
 @internal
@@ -26,9 +25,9 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   "text/vnd.familysearch.gedcom": const RegistryEntry(
     mediaType: 'text/vnd.familysearch.gedcom',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('GEDCOM family history')],
-    acronym: IntlString.constant('GEDCOM'),
-    expandedAcronym: IntlString.constant('GEnealogical Data COMmunication'),
+    comments: ['GEDCOM family history'],
+    acronym: 'GEDCOM',
+    expandedAcronym: 'GEnealogical Data COMmunication',
     subclassOf: ['text/plain'],
     alias: ['application/x-gedcom', 'text/gedcom'],
     globs: [
@@ -51,14 +50,14 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-kaitai-struct": const RegistryEntry(
     mediaType: 'text/x-kaitai-struct',
-    comments: [IntlString.constant('Kaitai Struct definition file')],
+    comments: ['Kaitai Struct definition file'],
     subclassOf: ['application/yaml'],
     alias: [],
     globs: [Glob(pattern: '*.ksy', weight: 50, caseSensitive: false)],
   ),
   "text/x-qml": const RegistryEntry(
     mediaType: 'text/x-qml',
-    comments: [IntlString.constant('Qt Markup Language file')],
+    comments: ['Qt Markup Language file'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -111,7 +110,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   "text/x-groovy": const RegistryEntry(
     mediaType: 'text/x-groovy',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('Groovy source code')],
+    comments: ['Groovy source code'],
     subclassOf: ['text/x-csrc'],
     alias: [],
     globs: [
@@ -123,7 +122,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-gradle": const RegistryEntry(
     mediaType: 'text/x-gradle',
-    comments: [IntlString.constant('Gradle script')],
+    comments: ['Gradle script'],
     subclassOf: ['text/x-groovy'],
     alias: [],
     globs: [Glob(pattern: '*.gradle', weight: 50, caseSensitive: false)],
@@ -131,7 +130,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   "text/javascript": const RegistryEntry(
     mediaType: 'text/javascript',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('JavaScript program')],
+    comments: ['JavaScript program'],
     subclassOf: ['application/x-executable', 'text/plain'],
     alias: [
       'application/x-javascript',
@@ -214,7 +213,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   "text/jscript.encode": const RegistryEntry(
     mediaType: 'text/jscript.encode',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('Encoded JScript program')],
+    comments: ['Encoded JScript program'],
     subclassOf: ['application/x-executable'],
     alias: [],
     globs: [Glob(pattern: '*.jse', weight: 50, caseSensitive: false)],
@@ -229,7 +228,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/vnd.trolltech.linguist": const RegistryEntry(
     mediaType: 'text/vnd.trolltech.linguist',
-    comments: [IntlString.constant('Message catalog')],
+    comments: ['Message catalog'],
     subclassOf: ['application/xml'],
     alias: ['application/x-linguist', 'text/vnd.qt.linguist'],
     globs: [Glob(pattern: '*.ts', weight: 50, caseSensitive: false)],
@@ -255,18 +254,18 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-ocl": const RegistryEntry(
     mediaType: 'text/x-ocl',
-    comments: [IntlString.constant('OCL file')],
-    acronym: IntlString.constant('OCL'),
-    expandedAcronym: IntlString.constant('Object Constraint Language'),
+    comments: ['OCL file'],
+    acronym: 'OCL',
+    expandedAcronym: 'Object Constraint Language',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.ocl', weight: 50, caseSensitive: false)],
   ),
   "text/x-cobol": const RegistryEntry(
     mediaType: 'text/x-cobol',
-    comments: [IntlString.constant('COBOL source code')],
-    acronym: IntlString.constant('COBOL'),
-    expandedAcronym: IntlString.constant('COmmon Business Oriented Language'),
+    comments: ['COBOL source code'],
+    acronym: 'COBOL',
+    expandedAcronym: 'COmmon Business Oriented Language',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -277,28 +276,28 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   "text/x-reject": const RegistryEntry(
     mediaType: 'text/x-reject',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('Rejected patch')],
+    comments: ['Rejected patch'],
     subclassOf: ['text/plain'],
     alias: ['application/x-reject'],
     globs: [Glob(pattern: '*.rej', weight: 50, caseSensitive: false)],
   ),
   "text/x-crystal": const RegistryEntry(
     mediaType: 'text/x-crystal',
-    comments: [IntlString.constant('Crystal source code')],
+    comments: ['Crystal source code'],
     subclassOf: ['text/plain'],
     alias: ['text/crystal'],
     globs: [Glob(pattern: '*.cr', weight: 50, caseSensitive: false)],
   ),
   "text/julia": const RegistryEntry(
     mediaType: 'text/julia',
-    comments: [IntlString.constant('Julia source code')],
+    comments: ['Julia source code'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.jl', weight: 50, caseSensitive: false)],
   ),
   "text/rust": const RegistryEntry(
     mediaType: 'text/rust',
-    comments: [IntlString.constant('Rust source code')],
+    comments: ['Rust source code'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.rs', weight: 50, caseSensitive: false)],
@@ -306,9 +305,9 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   "text/vtt": const RegistryEntry(
     mediaType: 'text/vtt',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('WebVTT subtitles')],
-    acronym: IntlString.constant('VTT'),
-    expandedAcronym: IntlString.constant('Video Text Tracks'),
+    comments: ['WebVTT subtitles'],
+    acronym: 'VTT',
+    expandedAcronym: 'Video Text Tracks',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.vtt', weight: 50, caseSensitive: false)],
@@ -328,7 +327,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-microdvd": const RegistryEntry(
     mediaType: 'text/x-microdvd',
-    comments: [IntlString.constant('MicroDVD subtitles')],
+    comments: ['MicroDVD subtitles'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.sub', weight: 50, caseSensitive: false)],
@@ -345,7 +344,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-mpl2": const RegistryEntry(
     mediaType: 'text/x-mpl2',
-    comments: [IntlString.constant('MPL2 subtitles')],
+    comments: ['MPL2 subtitles'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.mpl', weight: 50, caseSensitive: false)],
@@ -362,7 +361,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-mpsub": const RegistryEntry(
     mediaType: 'text/x-mpsub',
-    comments: [IntlString.constant('MPlayer subtitles')],
+    comments: ['MPlayer subtitles'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.sub', weight: 50, caseSensitive: false)],
@@ -382,9 +381,9 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-ssa": const RegistryEntry(
     mediaType: 'text/x-ssa',
-    comments: [IntlString.constant('SSA subtitles')],
-    acronym: IntlString.constant('SSA'),
-    expandedAcronym: IntlString.constant('SubStation Alpha'),
+    comments: ['SSA subtitles'],
+    acronym: 'SSA',
+    expandedAcronym: 'SubStation Alpha',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -413,7 +412,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-subviewer": const RegistryEntry(
     mediaType: 'text/x-subviewer',
-    comments: [IntlString.constant('SubViewer subtitles')],
+    comments: ['SubViewer subtitles'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.sub', weight: 50, caseSensitive: false)],
@@ -433,7 +432,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-iMelody": const RegistryEntry(
     mediaType: 'text/x-iMelody',
-    comments: [IntlString.constant('iMelody ringtone')],
+    comments: ['iMelody ringtone'],
     subclassOf: ['text/plain'],
     alias: ['audio/x-iMelody', 'audio/iMelody'],
     globs: [
@@ -456,11 +455,9 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-mrml": const RegistryEntry(
     mediaType: 'text/x-mrml',
-    comments: [IntlString.constant('MRML playlist')],
-    acronym: IntlString.constant('MRML'),
-    expandedAcronym: IntlString.constant(
-      'Multimedia Retrieval Markup Language',
-    ),
+    comments: ['MRML playlist'],
+    acronym: 'MRML',
+    expandedAcronym: 'Multimedia Retrieval Markup Language',
     subclassOf: ['application/xml'],
     alias: [],
     globs: [
@@ -483,7 +480,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/troff": const RegistryEntry(
     mediaType: 'text/troff',
-    comments: [IntlString.constant('Troff document')],
+    comments: ['Troff document'],
     subclassOf: ['text/plain'],
     alias: ['application/x-troff', 'text/x-troff'],
     globs: [
@@ -525,16 +522,16 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/vnd.rn-realtext": const RegistryEntry(
     mediaType: 'text/vnd.rn-realtext',
-    comments: [IntlString.constant('RealText document')],
+    comments: ['RealText document'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.rt', weight: 50, caseSensitive: false)],
   ),
   "text/calendar": const RegistryEntry(
     mediaType: 'text/calendar',
-    comments: [IntlString.constant('VCS/ICS calendar')],
-    acronym: IntlString.constant('VCS/ICS'),
-    expandedAcronym: IntlString.constant('vCalendar/iCalendar'),
+    comments: ['VCS/ICS calendar'],
+    acronym: 'VCS/ICS',
+    expandedAcronym: 'vCalendar/iCalendar',
     subclassOf: ['text/plain'],
     alias: ['text/x-vcalendar', 'application/ics'],
     globs: [
@@ -563,16 +560,16 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/css": const RegistryEntry(
     mediaType: 'text/css',
-    comments: [IntlString.constant('CSS stylesheet')],
-    acronym: IntlString.constant('CSS'),
-    expandedAcronym: IntlString.constant('Cascading Style Sheets'),
+    comments: ['CSS stylesheet'],
+    acronym: 'CSS',
+    expandedAcronym: 'Cascading Style Sheets',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.css', weight: 50, caseSensitive: false)],
   ),
   "text/vcard": const RegistryEntry(
     mediaType: 'text/vcard',
-    comments: [IntlString.constant('Electronic business card')],
+    comments: ['Electronic business card'],
     subclassOf: ['text/plain'],
     alias: ['text/directory', 'text/x-vcard'],
     globs: [
@@ -603,14 +600,14 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/turtle": const RegistryEntry(
     mediaType: 'text/turtle',
-    comments: [IntlString.constant('Turtle document')],
+    comments: ['Turtle document'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.ttl', weight: 50, caseSensitive: false)],
   ),
   "text/x-txt2tags": const RegistryEntry(
     mediaType: 'text/x-txt2tags',
-    comments: [IntlString.constant('txt2tags document')],
+    comments: ['txt2tags document'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.t2t', weight: 50, caseSensitive: false)],
@@ -636,32 +633,31 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-verilog": const RegistryEntry(
     mediaType: 'text/x-verilog',
-    comments: [IntlString.constant('Verilog source code')],
+    comments: ['Verilog source code'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.v', weight: 50, caseSensitive: false)],
   ),
   "text/x-svhdr": const RegistryEntry(
     mediaType: 'text/x-svhdr',
-    comments: [IntlString.constant('SystemVerilog header')],
+    comments: ['SystemVerilog header'],
     subclassOf: ['text/x-verilog'],
     alias: [],
     globs: [Glob(pattern: '*.svh', weight: 50, caseSensitive: false)],
   ),
   "text/x-svsrc": const RegistryEntry(
     mediaType: 'text/x-svsrc',
-    comments: [IntlString.constant('SystemVerilog source code')],
+    comments: ['SystemVerilog source code'],
     subclassOf: ['text/x-verilog'],
     alias: [],
     globs: [Glob(pattern: '*.sv', weight: 50, caseSensitive: false)],
   ),
   "text/x-vhdl": const RegistryEntry(
     mediaType: 'text/x-vhdl',
-    comments: [IntlString.constant('VHDL source code')],
-    acronym: IntlString.constant('VHDL'),
-    expandedAcronym: IntlString.constant(
-      'Very-High-Speed Integrated Circuit Hardware Description Language',
-    ),
+    comments: ['VHDL source code'],
+    acronym: 'VHDL',
+    expandedAcronym:
+        'Very-High-Speed Integrated Circuit Hardware Description Language',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -671,19 +667,19 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/enriched": const RegistryEntry(
     mediaType: 'text/enriched',
-    comments: [IntlString.constant('Enriched text document')],
+    comments: ['Enriched text document'],
     subclassOf: ['text/plain'],
     alias: [],
   ),
   "text/htmlh": const RegistryEntry(
     mediaType: 'text/htmlh',
-    comments: [IntlString.constant('Help page')],
+    comments: ['Help page'],
     subclassOf: ['text/plain'],
     alias: [],
   ),
   "text/plain": const RegistryEntry(
     mediaType: 'text/plain',
-    comments: [IntlString.constant('Plain text document')],
+    comments: ['Plain text document'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -713,20 +709,20 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-rst": const RegistryEntry(
     mediaType: 'text/x-rst',
-    comments: [IntlString.constant('ReStructuredText document')],
+    comments: ['ReStructuredText document'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.rst', weight: 50, caseSensitive: false)],
   ),
   "text/rfc822-headers": const RegistryEntry(
     mediaType: 'text/rfc822-headers',
-    comments: [IntlString.constant('Email headers')],
+    comments: ['Email headers'],
     subclassOf: ['text/plain'],
     alias: [],
   ),
   "text/richtext": const RegistryEntry(
     mediaType: 'text/richtext',
-    comments: [IntlString.constant('Rich text document')],
+    comments: ['Rich text document'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.rtx', weight: 50, caseSensitive: false)],
@@ -734,9 +730,9 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   "text/x-opml+xml": const RegistryEntry(
     mediaType: 'text/x-opml+xml',
     genericIcon: GenericIcon.textHtml,
-    comments: [IntlString.constant('OPML syndication feed')],
-    acronym: IntlString.constant('OPML'),
-    expandedAcronym: IntlString.constant('Outline Processor Markup Language'),
+    comments: ['OPML syndication feed'],
+    acronym: 'OPML',
+    expandedAcronym: 'Outline Processor Markup Language',
     subclassOf: ['application/xml'],
     alias: ['text/x-opml'],
     globs: [Glob(pattern: '*.opml', weight: 50, caseSensitive: false)],
@@ -756,11 +752,9 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/sgml": const RegistryEntry(
     mediaType: 'text/sgml',
-    comments: [IntlString.constant('SGML document')],
-    acronym: IntlString.constant('SGML'),
-    expandedAcronym: IntlString.constant(
-      'Standard Generalized Markup Language',
-    ),
+    comments: ['SGML document'],
+    acronym: 'SGML',
+    expandedAcronym: 'Standard Generalized Markup Language',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -770,7 +764,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/spreadsheet": const RegistryEntry(
     mediaType: 'text/spreadsheet',
-    comments: [IntlString.constant('Spreadsheet interchange document')],
+    comments: ['Spreadsheet interchange document'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -788,9 +782,9 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/tab-separated-values": const RegistryEntry(
     mediaType: 'text/tab-separated-values',
-    comments: [IntlString.constant('TSV document')],
-    acronym: IntlString.constant('TSV'),
-    expandedAcronym: IntlString.constant('Tab Separated Values'),
+    comments: ['TSV document'],
+    acronym: 'TSV',
+    expandedAcronym: 'Tab Separated Values',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.tsv', weight: 50, caseSensitive: false)],
@@ -798,7 +792,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   "text/vnd.graphviz": const RegistryEntry(
     mediaType: 'text/vnd.graphviz',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Graphviz DOT graph')],
+    comments: ['Graphviz DOT graph'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -839,9 +833,9 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/vnd.sun.j2me.app-descriptor": const RegistryEntry(
     mediaType: 'text/vnd.sun.j2me.app-descriptor',
-    comments: [IntlString.constant('JAD document')],
-    acronym: IntlString.constant('JAD'),
-    expandedAcronym: IntlString.constant('Java Application Descriptor'),
+    comments: ['JAD document'],
+    acronym: 'JAD',
+    expandedAcronym: 'Java Application Descriptor',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.jad', weight: 50, caseSensitive: false)],
@@ -861,30 +855,30 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/vnd.wap.wml": const RegistryEntry(
     mediaType: 'text/vnd.wap.wml',
-    comments: [IntlString.constant('WML document')],
-    acronym: IntlString.constant('WML'),
-    expandedAcronym: IntlString.constant('Wireless Markup Language'),
+    comments: ['WML document'],
+    acronym: 'WML',
+    expandedAcronym: 'Wireless Markup Language',
     subclassOf: ['application/xml'],
     alias: [],
     globs: [Glob(pattern: '*.wml', weight: 50, caseSensitive: false)],
   ),
   "text/vnd.wap.wmlscript": const RegistryEntry(
     mediaType: 'text/vnd.wap.wmlscript',
-    comments: [IntlString.constant('WMLScript program')],
+    comments: ['WMLScript program'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.wmls', weight: 50, caseSensitive: false)],
   ),
   "text/vnd.senx.warpscript": const RegistryEntry(
     mediaType: 'text/vnd.senx.warpscript',
-    comments: [IntlString.constant('WarpScript source code')],
+    comments: ['WarpScript source code'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.mc2', weight: 50, caseSensitive: false)],
   ),
   "text/x-adasrc": const RegistryEntry(
     mediaType: 'text/x-adasrc',
-    comments: [IntlString.constant('Ada source code')],
+    comments: ['Ada source code'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -894,14 +888,14 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-authors": const RegistryEntry(
     mediaType: 'text/x-authors',
-    comments: [IntlString.constant('Author list')],
+    comments: ['Author list'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: 'AUTHORS', weight: 50, caseSensitive: true)],
   ),
   "text/x-bibtex": const RegistryEntry(
     mediaType: 'text/x-bibtex',
-    comments: [IntlString.constant('BibTeX document')],
+    comments: ['BibTeX document'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.bib', weight: 50, caseSensitive: false)],
@@ -921,14 +915,14 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-blueprint": const RegistryEntry(
     mediaType: 'text/x-blueprint',
-    comments: [IntlString.constant('Blueprint source code')],
+    comments: ['Blueprint source code'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.blp', weight: 50, caseSensitive: false)],
   ),
   "text/x-c++hdr": const RegistryEntry(
     mediaType: 'text/x-c++hdr',
-    comments: [IntlString.constant('C++ header')],
+    comments: ['C++ header'],
     subclassOf: ['text/x-chdr'],
     alias: [],
     globs: [
@@ -941,7 +935,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-c++src": const RegistryEntry(
     mediaType: 'text/x-c++src',
-    comments: [IntlString.constant('C++ source code')],
+    comments: ['C++ source code'],
     subclassOf: ['text/x-csrc'],
     alias: [],
     globs: [
@@ -954,21 +948,21 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-changelog": const RegistryEntry(
     mediaType: 'text/x-changelog',
-    comments: [IntlString.constant('ChangeLog document')],
+    comments: ['ChangeLog document'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: 'ChangeLog', weight: 50, caseSensitive: true)],
   ),
   "text/x-chdr": const RegistryEntry(
     mediaType: 'text/x-chdr',
-    comments: [IntlString.constant('C header')],
+    comments: ['C header'],
     subclassOf: ['text/x-csrc'],
     alias: [],
     globs: [Glob(pattern: '*.h', weight: 50, caseSensitive: false)],
   ),
   "text/x-cmake": const RegistryEntry(
     mediaType: 'text/x-cmake',
-    comments: [IntlString.constant('CMake source code')],
+    comments: ['CMake source code'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -978,7 +972,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-common-lisp": const RegistryEntry(
     mediaType: 'text/x-common-lisp',
-    comments: [IntlString.constant('Common Lisp source code')],
+    comments: ['Common Lisp source code'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -990,39 +984,39 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/csv": const RegistryEntry(
     mediaType: 'text/csv',
-    comments: [IntlString.constant('CSV document')],
-    acronym: IntlString.constant('CSV'),
-    expandedAcronym: IntlString.constant('Comma Separated Values'),
+    comments: ['CSV document'],
+    acronym: 'CSV',
+    expandedAcronym: 'Comma Separated Values',
     subclassOf: ['text/plain'],
     alias: ['text/x-comma-separated-values', 'text/x-csv'],
     globs: [Glob(pattern: '*.csv', weight: 50, caseSensitive: false)],
   ),
   "text/csv-schema": const RegistryEntry(
     mediaType: 'text/csv-schema',
-    comments: [IntlString.constant('CSV Schema document')],
-    acronym: IntlString.constant('CSV'),
-    expandedAcronym: IntlString.constant('Comma Separated Values'),
+    comments: ['CSV Schema document'],
+    acronym: 'CSV',
+    expandedAcronym: 'Comma Separated Values',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.csvs', weight: 50, caseSensitive: false)],
   ),
   "text/x-copying": const RegistryEntry(
     mediaType: 'text/x-copying',
-    comments: [IntlString.constant('License terms')],
+    comments: ['License terms'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: 'COPYING', weight: 50, caseSensitive: true)],
   ),
   "text/x-credits": const RegistryEntry(
     mediaType: 'text/x-credits',
-    comments: [IntlString.constant('Author credits')],
+    comments: ['Author credits'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: 'CREDITS', weight: 50, caseSensitive: true)],
   ),
   "text/x-csrc": const RegistryEntry(
     mediaType: 'text/x-csrc',
-    comments: [IntlString.constant('C source code')],
+    comments: ['C source code'],
     subclassOf: ['text/plain'],
     alias: ['text/x-c'],
     globs: [Glob(pattern: '*.c', weight: 50, caseSensitive: true)],
@@ -1044,14 +1038,14 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-csharp": const RegistryEntry(
     mediaType: 'text/x-csharp',
-    comments: [IntlString.constant('C# source code')],
+    comments: ['C# source code'],
     subclassOf: ['text/x-csrc'],
     alias: [],
     globs: [Glob(pattern: '*.cs', weight: 50, caseSensitive: false)],
   ),
   "text/x-vala": const RegistryEntry(
     mediaType: 'text/x-vala',
-    comments: [IntlString.constant('Vala source code')],
+    comments: ['Vala source code'],
     subclassOf: ['text/x-csrc'],
     alias: [],
     globs: [
@@ -1061,36 +1055,34 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-ooc": const RegistryEntry(
     mediaType: 'text/x-ooc',
-    comments: [IntlString.constant('OOC source code')],
-    acronym: IntlString.constant('OOC'),
-    expandedAcronym: IntlString.constant('Out Of Class'),
+    comments: ['OOC source code'],
+    acronym: 'OOC',
+    expandedAcronym: 'Out Of Class',
     subclassOf: ['text/x-csrc'],
     alias: [],
     globs: [Glob(pattern: '*.ooc', weight: 50, caseSensitive: false)],
   ),
   "text/x-dcl": const RegistryEntry(
     mediaType: 'text/x-dcl',
-    comments: [IntlString.constant('DCL script')],
-    acronym: IntlString.constant('DCL'),
-    expandedAcronym: IntlString.constant('Data Conversion Laboratory'),
+    comments: ['DCL script'],
+    acronym: 'DCL',
+    expandedAcronym: 'Data Conversion Laboratory',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.dcl', weight: 50, caseSensitive: false)],
   ),
   "text/x-dsl": const RegistryEntry(
     mediaType: 'text/x-dsl',
-    comments: [IntlString.constant('DSSSL document')],
-    acronym: IntlString.constant('DSSSL'),
-    expandedAcronym: IntlString.constant(
-      'Document Style Semantics and Specification Language',
-    ),
+    comments: ['DSSSL document'],
+    acronym: 'DSSSL',
+    expandedAcronym: 'Document Style Semantics and Specification Language',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.dsl', weight: 50, caseSensitive: false)],
   ),
   "text/x-dsrc": const RegistryEntry(
     mediaType: 'text/x-dsrc',
-    comments: [IntlString.constant('D source code')],
+    comments: ['D source code'],
     subclassOf: ['text/x-csrc'],
     alias: [],
     globs: [
@@ -1100,7 +1092,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-eiffel": const RegistryEntry(
     mediaType: 'text/x-eiffel',
-    comments: [IntlString.constant('Eiffel source code')],
+    comments: ['Eiffel source code'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -1110,7 +1102,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-emacs-lisp": const RegistryEntry(
     mediaType: 'text/x-emacs-lisp',
-    comments: [IntlString.constant('Emacs Lisp source code')],
+    comments: ['Emacs Lisp source code'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.el', weight: 50, caseSensitive: false)],
@@ -1131,7 +1123,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-elixir": const RegistryEntry(
     mediaType: 'text/x-elixir',
-    comments: [IntlString.constant('Elixir source code')],
+    comments: ['Elixir source code'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -1141,14 +1133,14 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-erlang": const RegistryEntry(
     mediaType: 'text/x-erlang',
-    comments: [IntlString.constant('Erlang source code')],
+    comments: ['Erlang source code'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.erl', weight: 50, caseSensitive: false)],
   ),
   "text/x-fortran": const RegistryEntry(
     mediaType: 'text/x-fortran',
-    comments: [IntlString.constant('Fortran source code')],
+    comments: ['Fortran source code'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -1161,21 +1153,21 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   "text/x-genie": const RegistryEntry(
     mediaType: 'text/x-genie',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('Genie source code')],
+    comments: ['Genie source code'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.gs', weight: 50, caseSensitive: true)],
   ),
   "text/x-gettext-translation": const RegistryEntry(
     mediaType: 'text/x-gettext-translation',
-    comments: [IntlString.constant('Translation file')],
+    comments: ['Translation file'],
     subclassOf: ['text/plain'],
     alias: ['text/x-po', 'application/x-gettext'],
     globs: [Glob(pattern: '*.po', weight: 50, caseSensitive: false)],
   ),
   "text/x-gettext-translation-template": const RegistryEntry(
     mediaType: 'text/x-gettext-translation-template',
-    comments: [IntlString.constant('Translation template')],
+    comments: ['Translation template'],
     subclassOf: ['text/plain'],
     alias: ['text/x-pot'],
     globs: [Glob(pattern: '*.pot', weight: 50, caseSensitive: false)],
@@ -1196,16 +1188,16 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-gherkin": const RegistryEntry(
     mediaType: 'text/x-gherkin',
-    comments: [IntlString.constant('Gherkin document')],
+    comments: ['Gherkin document'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.feature', weight: 50, caseSensitive: false)],
   ),
   "text/html": const RegistryEntry(
     mediaType: 'text/html',
-    comments: [IntlString.constant('HTML document')],
-    acronym: IntlString.constant('HTML'),
-    expandedAcronym: IntlString.constant('HyperText Markup Language'),
+    comments: ['HTML document'],
+    acronym: 'HTML',
+    expandedAcronym: 'HyperText Markup Language',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -1315,9 +1307,9 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   "text/x-component": const RegistryEntry(
     mediaType: 'text/x-component',
     genericIcon: GenericIcon.textHtml,
-    comments: [IntlString.constant('HTML component')],
-    acronym: IntlString.constant('HTML'),
-    expandedAcronym: IntlString.constant('HyperText Markup Language'),
+    comments: ['HTML component'],
+    acronym: 'HTML',
+    expandedAcronym: 'HyperText Markup Language',
     subclassOf: ['application/xml'],
     alias: [],
     globs: [Glob(pattern: '*.htc', weight: 50, caseSensitive: false)],
@@ -1325,7 +1317,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/cache-manifest": const RegistryEntry(
     mediaType: 'text/cache-manifest',
-    comments: [IntlString.constant('Web application cache file')],
+    comments: ['Web application cache file'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.manifest', weight: 50, caseSensitive: false)],
@@ -1371,7 +1363,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-google-video-pointer": const RegistryEntry(
     mediaType: 'text/x-google-video-pointer',
-    comments: [IntlString.constant('Google Video Pointer shortcut')],
+    comments: ['Google Video Pointer shortcut'],
     subclassOf: ['text/plain'],
     alias: ['text/google-video-pointer'],
     globs: [Glob(pattern: '*.gvp', weight: 50, caseSensitive: false)],
@@ -1397,39 +1389,39 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-haskell": const RegistryEntry(
     mediaType: 'text/x-haskell',
-    comments: [IntlString.constant('Haskell source code')],
+    comments: ['Haskell source code'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.hs', weight: 50, caseSensitive: false)],
   ),
   "text/x-idl": const RegistryEntry(
     mediaType: 'text/x-idl',
-    comments: [IntlString.constant('IDL document')],
-    acronym: IntlString.constant('IDL'),
-    expandedAcronym: IntlString.constant('Interface Definition Language'),
+    comments: ['IDL document'],
+    acronym: 'IDL',
+    expandedAcronym: 'Interface Definition Language',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.idl', weight: 50, caseSensitive: false)],
   ),
   "text/x-install": const RegistryEntry(
     mediaType: 'text/x-install',
-    comments: [IntlString.constant('Installation instructions')],
+    comments: ['Installation instructions'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: 'INSTALL', weight: 50, caseSensitive: true)],
   ),
   "text/x-java": const RegistryEntry(
     mediaType: 'text/x-java',
-    comments: [IntlString.constant('Java source code')],
+    comments: ['Java source code'],
     subclassOf: ['text/x-csrc'],
     alias: [],
     globs: [Glob(pattern: '*.java', weight: 50, caseSensitive: false)],
   ),
   "text/x-ldif": const RegistryEntry(
     mediaType: 'text/x-ldif',
-    comments: [IntlString.constant('LDIF address book')],
-    acronym: IntlString.constant('LDIF'),
-    expandedAcronym: IntlString.constant('LDAP Data Interchange Format'),
+    comments: ['LDIF address book'],
+    acronym: 'LDIF',
+    expandedAcronym: 'LDAP Data Interchange Format',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.ldif', weight: 50, caseSensitive: false)],
@@ -1455,30 +1447,30 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-lilypond": const RegistryEntry(
     mediaType: 'text/x-lilypond',
-    comments: [IntlString.constant('Lilypond music sheet')],
+    comments: ['Lilypond music sheet'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.ly', weight: 50, caseSensitive: false)],
   ),
   "text/x-literate-haskell": const RegistryEntry(
     mediaType: 'text/x-literate-haskell',
-    comments: [IntlString.constant('LHS source code')],
-    acronym: IntlString.constant('LHS'),
-    expandedAcronym: IntlString.constant('Literate Haskell source code'),
+    comments: ['LHS source code'],
+    acronym: 'LHS',
+    expandedAcronym: 'Literate Haskell source code',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.lhs', weight: 50, caseSensitive: false)],
   ),
   "text/x-log": const RegistryEntry(
     mediaType: 'text/x-log',
-    comments: [IntlString.constant('Application log')],
+    comments: ['Application log'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.log', weight: 50, caseSensitive: false)],
   ),
   "text/x-makefile": const RegistryEntry(
     mediaType: 'text/x-makefile',
-    comments: [IntlString.constant('Makefile build file')],
+    comments: ['Makefile build file'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -1511,7 +1503,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   "text/markdown": const RegistryEntry(
     mediaType: 'text/markdown',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Markdown document')],
+    comments: ['Markdown document'],
     subclassOf: ['text/plain'],
     alias: ['text/x-markdown'],
     globs: [
@@ -1522,16 +1514,16 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-moc": const RegistryEntry(
     mediaType: 'text/x-moc',
-    comments: [IntlString.constant('Qt MOC file')],
-    acronym: IntlString.constant('Qt MOC'),
-    expandedAcronym: IntlString.constant('Qt Meta Object Compiler'),
+    comments: ['Qt MOC file'],
+    acronym: 'Qt MOC',
+    expandedAcronym: 'Qt Meta Object Compiler',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.moc', weight: 50, caseSensitive: false)],
   ),
   "text/x-ms-regedit": const RegistryEntry(
     mediaType: 'text/x-ms-regedit',
-    comments: [IntlString.constant('Windows Registry extract')],
+    comments: ['Windows Registry extract'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.reg', weight: 50, caseSensitive: false)],
@@ -1564,16 +1556,16 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-mof": const RegistryEntry(
     mediaType: 'text/x-mof',
-    comments: [IntlString.constant('MOF file')],
-    acronym: IntlString.constant('MOF'),
-    expandedAcronym: IntlString.constant('Windows Managed Object File'),
+    comments: ['MOF file'],
+    acronym: 'MOF',
+    expandedAcronym: 'Windows Managed Object File',
     subclassOf: ['text/x-csrc'],
     alias: [],
     globs: [Glob(pattern: '*.mof', weight: 50, caseSensitive: false)],
   ),
   "text/x-mup": const RegistryEntry(
     mediaType: 'text/x-mup',
-    comments: [IntlString.constant('Mup musical composition document')],
+    comments: ['Mup musical composition document'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -1596,7 +1588,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-objcsrc": const RegistryEntry(
     mediaType: 'text/x-objcsrc',
-    comments: [IntlString.constant('Objective-C source code')],
+    comments: ['Objective-C source code'],
     subclassOf: ['text/x-csrc'],
     alias: [],
     globs: [Glob(pattern: '*.m', weight: 50, caseSensitive: false)],
@@ -1616,14 +1608,14 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-objc++src": const RegistryEntry(
     mediaType: 'text/x-objc++src',
-    comments: [IntlString.constant('Objective-C++ source code')],
+    comments: ['Objective-C++ source code'],
     subclassOf: ['text/x-c++src', 'text/x-objcsrc'],
     alias: [],
     globs: [Glob(pattern: '*.mm', weight: 50, caseSensitive: false)],
   ),
   "text/x-ocaml": const RegistryEntry(
     mediaType: 'text/x-ocaml',
-    comments: [IntlString.constant('OCaml source code')],
+    comments: ['OCaml source code'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -1633,16 +1625,16 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-opencl-src": const RegistryEntry(
     mediaType: 'text/x-opencl-src',
-    comments: [IntlString.constant('OpenCL source code')],
-    acronym: IntlString.constant('OpenCL'),
-    expandedAcronym: IntlString.constant('Open Computing Language'),
+    comments: ['OpenCL source code'],
+    acronym: 'OpenCL',
+    expandedAcronym: 'Open Computing Language',
     subclassOf: ['text/x-csrc'],
     alias: [],
     globs: [Glob(pattern: '*.cl', weight: 50, caseSensitive: false)],
   ),
   "text/x-matlab": const RegistryEntry(
     mediaType: 'text/x-matlab',
-    comments: [IntlString.constant('MATLAB file')],
+    comments: ['MATLAB file'],
     subclassOf: ['text/plain'],
     alias: ['text/x-octave'],
     globs: [Glob(pattern: '*.m', weight: 50, caseSensitive: false)],
@@ -1668,7 +1660,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-meson": const RegistryEntry(
     mediaType: 'text/x-meson',
-    comments: [IntlString.constant('Meson source code')],
+    comments: ['Meson source code'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -1678,7 +1670,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-modelica": const RegistryEntry(
     mediaType: 'text/x-modelica',
-    comments: [IntlString.constant('Modelica model')],
+    comments: ['Modelica model'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.mo', weight: 50, caseSensitive: false)],
@@ -1737,7 +1729,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-pascal": const RegistryEntry(
     mediaType: 'text/x-pascal',
-    comments: [IntlString.constant('Pascal source code')],
+    comments: ['Pascal source code'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -1747,7 +1739,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-patch": const RegistryEntry(
     mediaType: 'text/x-patch',
-    comments: [IntlString.constant('Differences between files')],
+    comments: ['Differences between files'],
     subclassOf: ['text/plain'],
     alias: ['text/x-diff'],
     globs: [
@@ -1809,14 +1801,14 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-nim": const RegistryEntry(
     mediaType: 'text/x-nim',
-    comments: [IntlString.constant('Nim source code')],
+    comments: ['Nim source code'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.nim', weight: 50, caseSensitive: false)],
   ),
   "text/x-nimscript": const RegistryEntry(
     mediaType: 'text/x-nimscript',
-    comments: [IntlString.constant('Nimscript source code')],
+    comments: ['Nimscript source code'],
     subclassOf: ['text/x-nim'],
     alias: [],
     globs: [
@@ -1826,14 +1818,14 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-go": const RegistryEntry(
     mediaType: 'text/x-go',
-    comments: [IntlString.constant('Go source code')],
+    comments: ['Go source code'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.go', weight: 50, caseSensitive: false)],
   ),
   "text/x-scons": const RegistryEntry(
     mediaType: 'text/x-scons',
-    comments: [IntlString.constant('SCons configuration file')],
+    comments: ['SCons configuration file'],
     subclassOf: ['text/x-python'],
     alias: [],
     globs: [
@@ -1844,7 +1836,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-python3": const RegistryEntry(
     mediaType: 'text/x-python3',
-    comments: [IntlString.constant('Python 3 script')],
+    comments: ['Python 3 script'],
     subclassOf: ['text/x-python'],
     alias: [],
     globs: [
@@ -1923,7 +1915,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-python": const RegistryEntry(
     mediaType: 'text/x-python',
-    comments: [IntlString.constant('Python script')],
+    comments: ['Python script'],
     subclassOf: ['application/x-executable', 'text/plain'],
     alias: [],
     globs: [
@@ -2001,14 +1993,14 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-sagemath": const RegistryEntry(
     mediaType: 'text/x-sagemath',
-    comments: [IntlString.constant('SageMath script')],
+    comments: ['SageMath script'],
     subclassOf: ['text/x-python'],
     alias: [],
     globs: [Glob(pattern: '*.sage', weight: 60, caseSensitive: true)],
   ),
   "text/x-lua": const RegistryEntry(
     mediaType: 'text/x-lua',
-    comments: [IntlString.constant('Lua script')],
+    comments: ['Lua script'],
     subclassOf: ['application/x-executable', 'text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.lua', weight: 50, caseSensitive: false)],
@@ -2046,21 +2038,21 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-readme": const RegistryEntry(
     mediaType: 'text/x-readme',
-    comments: [IntlString.constant('README document')],
+    comments: ['README document'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: 'README*', weight: 10, caseSensitive: true)],
   ),
   "text/x-nfo": const RegistryEntry(
     mediaType: 'text/x-nfo',
-    comments: [IntlString.constant('NFO document')],
+    comments: ['NFO document'],
     subclassOf: ['text/x-readme'],
     alias: [],
     globs: [Glob(pattern: '*.nfo', weight: 50, caseSensitive: false)],
   ),
   "text/x-todo-txt": const RegistryEntry(
     mediaType: 'text/x-todo-txt',
-    comments: [IntlString.constant('Todo.txt file')],
+    comments: ['Todo.txt file'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: 'todo.txt', weight: 10, caseSensitive: true)],
@@ -2076,9 +2068,9 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-rpm-spec": const RegistryEntry(
     mediaType: 'text/x-rpm-spec',
-    comments: [IntlString.constant('RPM spec file')],
-    acronym: IntlString.constant('RPM'),
-    expandedAcronym: IntlString.constant('Red Hat Package Manager'),
+    comments: ['RPM spec file'],
+    acronym: 'RPM',
+    expandedAcronym: 'Red Hat Package Manager',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.spec', weight: 50, caseSensitive: false)],
@@ -2105,16 +2097,16 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   "text/x-sass": const RegistryEntry(
     mediaType: 'text/x-sass',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('Sass CSS pre-processor file')],
-    acronym: IntlString.constant('Sass'),
-    expandedAcronym: IntlString.constant('Syntactically Awesome Style Sheets'),
+    comments: ['Sass CSS pre-processor file'],
+    acronym: 'Sass',
+    expandedAcronym: 'Syntactically Awesome Style Sheets',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.sass', weight: 50, caseSensitive: false)],
   ),
   "text/x-scala": const RegistryEntry(
     mediaType: 'text/x-scala',
-    comments: [IntlString.constant('Scala source code')],
+    comments: ['Scala source code'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -2124,7 +2116,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-scheme": const RegistryEntry(
     mediaType: 'text/x-scheme',
-    comments: [IntlString.constant('Scheme source code')],
+    comments: ['Scheme source code'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -2135,23 +2127,23 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   "text/x-scss": const RegistryEntry(
     mediaType: 'text/x-scss',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('SCSS pre-processor file')],
-    acronym: IntlString.constant('SCSS'),
-    expandedAcronym: IntlString.constant('Sassy CSS'),
+    comments: ['SCSS pre-processor file'],
+    acronym: 'SCSS',
+    expandedAcronym: 'Sassy CSS',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.scss', weight: 50, caseSensitive: false)],
   ),
   "text/x-setext": const RegistryEntry(
     mediaType: 'text/x-setext',
-    comments: [IntlString.constant('Setext document')],
+    comments: ['Setext document'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.etx', weight: 50, caseSensitive: false)],
   ),
   "text/tcl": const RegistryEntry(
     mediaType: 'text/tcl',
-    comments: [IntlString.constant('Tcl script')],
+    comments: ['Tcl script'],
     subclassOf: ['text/plain'],
     alias: ['text/x-tcl'],
     globs: [
@@ -2161,7 +2153,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-tex": const RegistryEntry(
     mediaType: 'text/x-tex',
-    comments: [IntlString.constant('TeX document')],
+    comments: ['TeX document'],
     subclassOf: ['text/plain'],
     alias: ['application/x-tex'],
     globs: [
@@ -2195,7 +2187,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-texinfo": const RegistryEntry(
     mediaType: 'text/x-texinfo',
-    comments: [IntlString.constant('TeXInfo document')],
+    comments: ['TeXInfo document'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -2205,28 +2197,28 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-typst": const RegistryEntry(
     mediaType: 'text/x-typst',
-    comments: [IntlString.constant('Typst document')],
+    comments: ['Typst document'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.typ', weight: 50, caseSensitive: false)],
   ),
   "text/x-troff-me": const RegistryEntry(
     mediaType: 'text/x-troff-me',
-    comments: [IntlString.constant('Troff ME input document')],
+    comments: ['Troff ME input document'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.me', weight: 50, caseSensitive: false)],
   ),
   "text/x-troff-mm": const RegistryEntry(
     mediaType: 'text/x-troff-mm',
-    comments: [IntlString.constant('Troff MM input document')],
+    comments: ['Troff MM input document'],
     subclassOf: ['text/troff'],
     alias: [],
     globs: [Glob(pattern: '*.mm', weight: 50, caseSensitive: false)],
   ),
   "text/x-troff-ms": const RegistryEntry(
     mediaType: 'text/x-troff-ms',
-    comments: [IntlString.constant('Troff MS input document')],
+    comments: ['Troff MS input document'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.ms', weight: 50, caseSensitive: false)],
@@ -2234,27 +2226,27 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   "text/x-twig": const RegistryEntry(
     mediaType: 'text/x-twig',
     genericIcon: GenericIcon.textXGenericTemplate,
-    comments: [IntlString.constant('Twig template')],
+    comments: ['Twig template'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.twig', weight: 50, caseSensitive: false)],
   ),
   "text/x-uil": const RegistryEntry(
     mediaType: 'text/x-uil',
-    comments: [IntlString.constant('X-Motif UIL table')],
+    comments: ['X-Motif UIL table'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.uil', weight: 50, caseSensitive: false)],
   ),
   "text/x-uri": const RegistryEntry(
     mediaType: 'text/x-uri',
-    comments: [IntlString.constant('Resource location')],
+    comments: ['Resource location'],
     subclassOf: ['text/plain'],
     alias: [],
   ),
   "text/x-uuencode": const RegistryEntry(
     mediaType: 'text/x-uuencode',
-    comments: [IntlString.constant('uuencoded file')],
+    comments: ['uuencoded file'],
     subclassOf: ['text/plain'],
     alias: ['zz-application/zz-winassoc-uu'],
     globs: [Glob(pattern: '*.uue', weight: 50, caseSensitive: false)],
@@ -2275,14 +2267,14 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   "text/x-basic": const RegistryEntry(
     mediaType: 'text/x-basic',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('BASIC program')],
+    comments: ['BASIC program'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.bas', weight: 50, caseSensitive: false)],
   ),
   "text/x-vb": const RegistryEntry(
     mediaType: 'text/x-vb',
-    comments: [IntlString.constant('Visual Basic .NET source code')],
+    comments: ['Visual Basic .NET source code'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.vb', weight: 50, caseSensitive: false)],
@@ -2310,7 +2302,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   "text/vbscript": const RegistryEntry(
     mediaType: 'text/vbscript',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('VBScript program')],
+    comments: ['VBScript program'],
     subclassOf: ['text/plain'],
     alias: ['text/vbs'],
     globs: [Glob(pattern: '*.vbs', weight: 50, caseSensitive: false)],
@@ -2318,7 +2310,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   "text/vbscript.encode": const RegistryEntry(
     mediaType: 'text/vbscript.encode',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('Encoded VBScript program')],
+    comments: ['Encoded VBScript program'],
     subclassOf: ['application/x-executable', 'text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.vbe', weight: 50, caseSensitive: false)],
@@ -2333,9 +2325,9 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-xmi": const RegistryEntry(
     mediaType: 'text/x-xmi',
-    comments: [IntlString.constant('XMI file')],
-    acronym: IntlString.constant('XMI'),
-    expandedAcronym: IntlString.constant('XML Metadata Interchange'),
+    comments: ['XMI file'],
+    acronym: 'XMI',
+    expandedAcronym: 'XML Metadata Interchange',
     subclassOf: ['application/xml'],
     alias: [],
     globs: [Glob(pattern: '*.xmi', weight: 50, caseSensitive: false)],
@@ -2352,9 +2344,9 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-xslfo": const RegistryEntry(
     mediaType: 'text/x-xslfo',
-    comments: [IntlString.constant('XSL FO file')],
-    acronym: IntlString.constant('XSL FO'),
-    expandedAcronym: IntlString.constant('XSL Formatting Objects'),
+    comments: ['XSL FO file'],
+    acronym: 'XSL FO',
+    expandedAcronym: 'XSL Formatting Objects',
     subclassOf: ['application/xml'],
     alias: [],
     globs: [
@@ -2370,7 +2362,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-iptables": const RegistryEntry(
     mediaType: 'text/x-iptables',
-    comments: [IntlString.constant('iptables configuration file')],
+    comments: ['iptables configuration file'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.iptables', weight: 50, caseSensitive: false)],
@@ -2464,7 +2456,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-dbus-service": const RegistryEntry(
     mediaType: 'text/x-dbus-service',
-    comments: [IntlString.constant('D-Bus service file')],
+    comments: ['D-Bus service file'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.service', weight: 50, caseSensitive: false)],
@@ -2490,7 +2482,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-systemd-unit": const RegistryEntry(
     mediaType: 'text/x-systemd-unit',
-    comments: [IntlString.constant('Systemd unit file')],
+    comments: ['Systemd unit file'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -2649,7 +2641,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   "text/x-maven+xml": const RegistryEntry(
     mediaType: 'text/x-maven+xml',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('Maven description file')],
+    comments: ['Maven description file'],
     subclassOf: ['application/xml'],
     alias: [],
     globs: [
@@ -2659,7 +2651,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/xmcd": const RegistryEntry(
     mediaType: 'text/xmcd',
-    comments: [IntlString.constant('XMCD CD database')],
+    comments: ['XMCD CD database'],
     subclassOf: ['text/plain'],
     alias: [],
     magic: [
@@ -2679,14 +2671,14 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   "text/x.gcode": const RegistryEntry(
     mediaType: 'text/x.gcode',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('G-code file')],
+    comments: ['G-code file'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.gcode', weight: 50, caseSensitive: false)],
   ),
   "text/x-gcode-gx": const RegistryEntry(
     mediaType: 'text/x-gcode-gx',
-    comments: [IntlString.constant('G-code Extended file')],
+    comments: ['G-code Extended file'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.gx', weight: 50, caseSensitive: false)],
@@ -2706,16 +2698,16 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-kotlin": const RegistryEntry(
     mediaType: 'text/x-kotlin',
-    comments: [IntlString.constant('Kotlin source code')],
+    comments: ['Kotlin source code'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.kt', weight: 50, caseSensitive: false)],
   ),
   "text/x-devicetree-source": const RegistryEntry(
     mediaType: 'text/x-devicetree-source',
-    comments: [IntlString.constant('Devicetree source code')],
-    acronym: IntlString.constant('DTS'),
-    expandedAcronym: IntlString.constant('Device Tree Source'),
+    comments: ['Devicetree source code'],
+    acronym: 'DTS',
+    expandedAcronym: 'Device Tree Source',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -2779,9 +2771,9 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/x-devicetree-binary": const RegistryEntry(
     mediaType: 'text/x-devicetree-binary',
-    comments: [IntlString.constant('Flattened Devicetree')],
-    acronym: IntlString.constant('DTB'),
-    expandedAcronym: IntlString.constant('Device Tree Binary'),
+    comments: ['Flattened Devicetree'],
+    acronym: 'DTB',
+    expandedAcronym: 'Device Tree Binary',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.dtb', weight: 50, caseSensitive: false)],
@@ -2801,7 +2793,7 @@ final Map<String, RegistryEntry> mimeinfoDbText = {
   ),
   "text/org": const RegistryEntry(
     mediaType: 'text/org',
-    comments: [IntlString.constant('Org-mode file')],
+    comments: ['Org-mode file'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.org', weight: 50, caseSensitive: false)],

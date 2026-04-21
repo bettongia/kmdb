@@ -14,10 +14,11 @@
 
 import 'dart:collection';
 
-import 'package:kmdb_util/util.dart';
-
 import 'package:characters/characters.dart';
 import 'package:collection/collection.dart';
+
+import 'lists.dart';
+import 'range.dart';
 
 /// Validators are used to validate data against a schema
 ///
@@ -25,7 +26,7 @@ import 'package:collection/collection.dart';
 ///
 /// Validators are [call]able classes that usually have that single
 /// instance method.
-abstract interface class Validator<T> implements MappedObject {
+abstract interface class Validator<T> {
   String get name;
 
   bool call(T input);
@@ -56,7 +57,6 @@ class EnumValidator<T> implements Validator<T> {
   @override
   int get hashCode => Object.hashAllUnordered([name, ...values]);
 
-  @override
   Map<String, dynamic> toMap() => {
     'name': name,
     'value': values.map((e) => e.toString()).toList(),
@@ -87,7 +87,6 @@ class ConstValidator<T> implements Validator<T> {
   @override
   int get hashCode => Object.hash(name, value);
 
-  @override
   Map<String, dynamic> toMap() => {'name': name, 'value': value};
 }
 
@@ -121,7 +120,6 @@ class Maximum<T extends num> implements Validator<T> {
   @override
   int get hashCode => Object.hash(name, max);
 
-  @override
   Map<String, dynamic> toMap() => {'name': name, 'value': max};
 }
 
@@ -155,7 +153,6 @@ class ExclusiveMaximum<T extends num> implements Validator<T> {
   @override
   int get hashCode => Object.hash(name, max);
 
-  @override
   Map<String, dynamic> toMap() => {'name': name, 'value': max};
 }
 
@@ -187,7 +184,6 @@ class Minimum<T extends num> implements Validator<T> {
   @override
   int get hashCode => Object.hash(name, min);
 
-  @override
   Map<String, dynamic> toMap() => {'name': name, 'value': min};
 }
 
@@ -219,7 +215,6 @@ class ExclusiveMinimum<T extends num> implements Validator<T> {
   @override
   int get hashCode => Object.hash(name, min);
 
-  @override
   Map<String, dynamic> toMap() => {'name': name, 'value': min};
 }
 
@@ -253,7 +248,6 @@ class MultipleOf<T extends num> implements Validator<T> {
   @override
   int get hashCode => Object.hash(name, divisor);
 
-  @override
   Map<String, dynamic> toMap() => {'name': name, 'value': divisor};
 }
 
@@ -280,7 +274,6 @@ class InRange implements Validator<num> {
   @override
   int get hashCode => Object.hash(name, range);
 
-  @override
   Map<String, dynamic> toMap() => {'name': name, 'value': range.toMap()};
 }
 
@@ -311,7 +304,6 @@ class MaximumLength implements Validator<String> {
   @override
   int get hashCode => Object.hash(name, maximumLength);
 
-  @override
   Map<String, dynamic> toMap() => {'name': name, 'value': maximumLength};
 }
 
@@ -338,7 +330,6 @@ class ExactLength implements Validator<String> {
   @override
   int get hashCode => Object.hash(name, length);
 
-  @override
   Map<String, dynamic> toMap() => {'name': name, 'value': length};
 }
 
@@ -369,7 +360,6 @@ class MinimumLength implements Validator<String> {
   @override
   int get hashCode => Object.hash(name, minimumLength);
 
-  @override
   Map<String, dynamic> toMap() => {'name': name, 'value': minimumLength};
 }
 
@@ -395,7 +385,6 @@ class InRangeLength implements Validator<String> {
   @override
   int get hashCode => Object.hash(name, range);
 
-  @override
   Map<String, dynamic> toMap() => {'name': name, 'value': range.toMap()};
 }
 
@@ -428,7 +417,6 @@ class PatternValidator implements Validator<String> {
   @override
   int get hashCode => Object.hash(name, pattern);
 
-  @override
   Map<String, dynamic> toMap() => {
     'name': name,
     'value': pattern.pattern.toString(),
@@ -460,7 +448,6 @@ class MaxItems<T> implements Validator<Iterable<T>> {
   @override
   int get hashCode => Object.hash(name, max);
 
-  @override
   Map<String, dynamic> toMap() => {'name': name, 'value': max};
 }
 
@@ -489,7 +476,6 @@ class MinItems<T> implements Validator<Iterable<T>> {
   @override
   int get hashCode => Object.hash(name, min);
 
-  @override
   Map<String, dynamic> toMap() => {'name': name, 'value': min};
 }
 
@@ -518,7 +504,6 @@ class ItemCount<T> implements Validator<Iterable<T>> {
   @override
   int get hashCode => Object.hash(name, count);
 
-  @override
   Map<String, dynamic> toMap() => {'name': name, 'value': count};
 }
 
@@ -538,7 +523,6 @@ class UniqueItems<T> implements Validator<Iterable<T>> {
   @override
   int get hashCode => name.hashCode; // I'm not convinced
 
-  @override
   Map<String, dynamic> toMap() => {'name': name};
 }
 
@@ -565,7 +549,6 @@ class MinProperties implements Validator<Map> {
   @override
   int get hashCode => Object.hash(name, min);
 
-  @override
   Map<String, dynamic> toMap() => {'name': name, 'value': min};
 }
 
@@ -592,7 +575,6 @@ class MaxProperties implements Validator<Map> {
   @override
   int get hashCode => Object.hash(name, max);
 
-  @override
   Map<String, dynamic> toMap() => {'name': name, 'value': max};
 }
 
@@ -620,7 +602,6 @@ class Required implements Validator<Map> {
   @override
   int get hashCode => Object.hashAllUnordered([name, ...properties]);
 
-  @override
   Map<String, dynamic> toMap() => {'name': name, 'value': properties};
 }
 
@@ -692,6 +673,5 @@ class DependentRequired implements Validator<Map> {
     return Object.hashAllUnordered([name, ...pairs]);
   }
 
-  @override
   Map<String, dynamic> toMap() => {'name': name, 'value': properties};
 }

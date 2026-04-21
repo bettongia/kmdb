@@ -18,7 +18,6 @@ Copyright 2026 The KMDB Authors
 // ignore_for_file: non_constant_identifier_names
 
 import '../registry_base.dart';
-import 'package:kmdb_util/util.dart';
 import 'package:meta/meta.dart';
 
 @internal
@@ -26,9 +25,9 @@ final Map<String, RegistryEntry> mimeinfoDbX_epoc = {
   "x-epoc/x-sisx-app": const RegistryEntry(
     mediaType: 'x-epoc/x-sisx-app',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('SISX package')],
-    acronym: IntlString.constant('SIS'),
-    expandedAcronym: IntlString.constant('Symbian Installation File'),
+    comments: ['SISX package'],
+    acronym: 'SIS',
+    expandedAcronym: 'Symbian Installation File',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.sisx', weight: 50, caseSensitive: false)],

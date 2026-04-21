@@ -13,7 +13,8 @@
 // limitations under the License.
 
 import 'package:kmdb_schema/schema.dart';
-import 'package:kmdb_util/util.dart';
+import 'package:kmdb_schema/src/range.dart';
+
 import 'package:test/test.dart';
 
 void main() {

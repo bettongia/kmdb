@@ -18,7 +18,6 @@ Copyright 2026 The KMDB Authors
 // ignore_for_file: non_constant_identifier_names
 
 import '../registry_base.dart';
-import 'package:kmdb_util/util.dart';
 import 'package:meta/meta.dart';
 
 @internal
@@ -26,7 +25,7 @@ final Map<String, RegistryEntry> mimeinfoDbChemical = {
   "chemical/x-pdb": const RegistryEntry(
     mediaType: 'chemical/x-pdb',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('Protein Data Bank file')],
+    comments: ['Protein Data Bank file'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [

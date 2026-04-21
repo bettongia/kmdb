@@ -16,3 +16,4 @@
 library;
 
 export 'src/schema_base.dart';
+export 'src/formats_base.dart';

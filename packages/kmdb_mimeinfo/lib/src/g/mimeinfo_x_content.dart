@@ -18,122 +18,121 @@ Copyright 2026 The KMDB Authors
 // ignore_for_file: non_constant_identifier_names
 
 import '../registry_base.dart';
-import 'package:kmdb_util/util.dart';
 import 'package:meta/meta.dart';
 
 @internal
 final Map<String, RegistryEntry> mimeinfoDbX_content = {
   "x-content/image-dcf": const RegistryEntry(
     mediaType: 'x-content/image-dcf',
-    comments: [IntlString.constant('Digital photos')],
+    comments: ['Digital photos'],
     subclassOf: [],
     alias: [],
   ),
   "x-content/video-vcd": const RegistryEntry(
     mediaType: 'x-content/video-vcd',
-    comments: [IntlString.constant('Video CD')],
+    comments: ['Video CD'],
     subclassOf: [],
     alias: [],
   ),
   "x-content/video-svcd": const RegistryEntry(
     mediaType: 'x-content/video-svcd',
-    comments: [IntlString.constant('Super Video CD')],
+    comments: ['Super Video CD'],
     subclassOf: [],
     alias: [],
   ),
   "x-content/video-dvd": const RegistryEntry(
     mediaType: 'x-content/video-dvd',
-    comments: [IntlString.constant('Video DVD')],
+    comments: ['Video DVD'],
     subclassOf: [],
     alias: [],
   ),
   "x-content/audio-cdda": const RegistryEntry(
     mediaType: 'x-content/audio-cdda',
-    comments: [IntlString.constant('Audio CD')],
+    comments: ['Audio CD'],
     subclassOf: [],
     alias: [],
   ),
   "x-content/blank-cd": const RegistryEntry(
     mediaType: 'x-content/blank-cd',
-    comments: [IntlString.constant('Blank CD disc')],
+    comments: ['Blank CD disc'],
     subclassOf: [],
     alias: [],
   ),
   "x-content/blank-dvd": const RegistryEntry(
     mediaType: 'x-content/blank-dvd',
-    comments: [IntlString.constant('Blank DVD disc')],
+    comments: ['Blank DVD disc'],
     subclassOf: [],
     alias: [],
   ),
   "x-content/blank-bd": const RegistryEntry(
     mediaType: 'x-content/blank-bd',
-    comments: [IntlString.constant('Blank Blu-ray disc')],
+    comments: ['Blank Blu-ray disc'],
     subclassOf: [],
     alias: [],
   ),
   "x-content/blank-hddvd": const RegistryEntry(
     mediaType: 'x-content/blank-hddvd',
-    comments: [IntlString.constant('Blank HD DVD disc')],
+    comments: ['Blank HD DVD disc'],
     subclassOf: [],
     alias: [],
   ),
   "x-content/audio-dvd": const RegistryEntry(
     mediaType: 'x-content/audio-dvd',
-    comments: [IntlString.constant('Audio DVD')],
+    comments: ['Audio DVD'],
     subclassOf: [],
     alias: [],
   ),
   "x-content/video-bluray": const RegistryEntry(
     mediaType: 'x-content/video-bluray',
-    comments: [IntlString.constant('Blu-ray video disc')],
+    comments: ['Blu-ray video disc'],
     subclassOf: [],
     alias: [],
   ),
   "x-content/video-hddvd": const RegistryEntry(
     mediaType: 'x-content/video-hddvd',
-    comments: [IntlString.constant('HD DVD video disc')],
+    comments: ['HD DVD video disc'],
     subclassOf: [],
     alias: [],
   ),
   "x-content/ebook-reader": const RegistryEntry(
     mediaType: 'x-content/ebook-reader',
-    comments: [IntlString.constant('E-book reader')],
+    comments: ['E-book reader'],
     subclassOf: [],
     alias: [],
   ),
   "x-content/image-picturecd": const RegistryEntry(
     mediaType: 'x-content/image-picturecd',
-    comments: [IntlString.constant('Picture CD')],
+    comments: ['Picture CD'],
     subclassOf: [],
     alias: [],
   ),
   "x-content/audio-player": const RegistryEntry(
     mediaType: 'x-content/audio-player',
-    comments: [IntlString.constant('Portable audio player')],
+    comments: ['Portable audio player'],
     subclassOf: [],
     alias: [],
   ),
   "x-content/ostree-repository": const RegistryEntry(
     mediaType: 'x-content/ostree-repository',
-    comments: [IntlString.constant('OSTree software updates')],
+    comments: ['OSTree software updates'],
     subclassOf: [],
     alias: [],
   ),
   "x-content/software": const RegistryEntry(
     mediaType: 'x-content/software',
-    comments: [IntlString.constant('Software')],
+    comments: ['Software'],
     subclassOf: [],
     alias: [],
   ),
   "x-content/unix-software": const RegistryEntry(
     mediaType: 'x-content/unix-software',
-    comments: [IntlString.constant('UNIX software')],
+    comments: ['UNIX software'],
     subclassOf: ['x-content/software'],
     alias: [],
   ),
   "x-content/win32-software": const RegistryEntry(
     mediaType: 'x-content/win32-software',
-    comments: [IntlString.constant('Windows software')],
+    comments: ['Windows software'],
     subclassOf: ['x-content/software'],
     alias: [],
   ),

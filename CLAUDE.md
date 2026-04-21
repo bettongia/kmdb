@@ -47,6 +47,11 @@ packages/
   kmdb_ui/             — Flutter UI widgets
   kmdb_tokenizer_icu/  — ICU FFI word tokeniser for lexical search
   kmdb_inferencing/    — ONNX Runtime + BGE embedding model for semantic search
+  kmdb_lexical/        — lexical utilities (stemmer, stopwords) used by FTS
+  kmdb_mimeinfo/       — FreeDesktop shared-mime-info file-type identification
+  kmdb_schema/         — JSON schema validation
+  kmdb_tooling/        — dev_loader helpers (code-generation tooling)
+  kmdb_util/           — shared utility types (strings, lists, range, result, mapper)
 ```
 
 Run `dart pub get` once from the workspace root to resolve dependencies for all

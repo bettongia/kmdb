@@ -18,7 +18,6 @@ Copyright 2026 The KMDB Authors
 // ignore_for_file: non_constant_identifier_names
 
 import '../registry_base.dart';
-import 'package:kmdb_util/util.dart';
 import 'package:meta/meta.dart';
 
 @internal
@@ -26,28 +25,28 @@ final Map<String, RegistryEntry> mimeinfoDbMessage = {
   "message/delivery-status": const RegistryEntry(
     mediaType: 'message/delivery-status',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('Mail delivery report')],
+    comments: ['Mail delivery report'],
     subclassOf: ['text/plain'],
     alias: [],
   ),
   "message/disposition-notification": const RegistryEntry(
     mediaType: 'message/disposition-notification',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('Mail disposition report')],
+    comments: ['Mail disposition report'],
     subclassOf: ['text/plain'],
     alias: [],
   ),
   "message/external-body": const RegistryEntry(
     mediaType: 'message/external-body',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('Reference to remote file')],
+    comments: ['Reference to remote file'],
     subclassOf: [],
     alias: [],
   ),
   "message/news": const RegistryEntry(
     mediaType: 'message/news',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('Usenet news message')],
+    comments: ['Usenet news message'],
     subclassOf: ['text/plain'],
     alias: [],
     magic: [
@@ -79,14 +78,14 @@ final Map<String, RegistryEntry> mimeinfoDbMessage = {
   "message/partial": const RegistryEntry(
     mediaType: 'message/partial',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('Partial email message')],
+    comments: ['Partial email message'],
     subclassOf: ['text/plain'],
     alias: [],
   ),
   "message/rfc822": const RegistryEntry(
     mediaType: 'message/rfc822',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('Email message')],
+    comments: ['Email message'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.eml', weight: 50, caseSensitive: false)],
@@ -168,7 +167,7 @@ final Map<String, RegistryEntry> mimeinfoDbMessage = {
   "message/x-gnu-rmail": const RegistryEntry(
     mediaType: 'message/x-gnu-rmail',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('GNU mail message')],
+    comments: ['GNU mail message'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: 'RMAIL', weight: 50, caseSensitive: true)],

@@ -95,7 +95,6 @@ void buildMimeInfoRegistry(XmlDocument document, Directory outputDir) {
         ..directives.addAll([
           Directive.import('../registry_base.dart'),
 
-          Directive.import('package:kmdb_util/util.dart'),
           Directive.import('package:meta/meta.dart'),
         ])
         ..body.addAll([
@@ -285,21 +284,21 @@ String codeExpandedAcronym(String? expandedAcronym) {
   if (expandedAcronym == null || expandedAcronym.isEmpty) {
     return '';
   }
-  return 'expandedAcronym: IntlString.constant(${_quote(expandedAcronym)})';
+  return 'expandedAcronym: ${_quote(expandedAcronym)}';
 }
 
 String codeAcronym(String? acronym) {
   if (acronym == null || acronym.isEmpty) {
     return '';
   }
-  return 'acronym: IntlString.constant(${_quote(acronym)})';
+  return 'acronym: ${_quote(acronym)}';
 }
 
 String codeComment(String? comment) {
   if (comment == null || comment.isEmpty) {
     return '';
   }
-  return 'comments: [IntlString.constant(${_quote(comment)})]';
+  return 'comments: [${_quote(comment)}]';
 }
 
 String codeGenericIcon(String? name) {
@@ -317,7 +316,7 @@ String codeIcon(String? name) {
   if (name == null || name.isEmpty) {
     return '';
   }
-  return 'icon: IntlString.constant(${_quote(name)})';
+  return 'icon: ${_quote(name)}';
 }
 
 String codeMediaType(String type, {bool keyOnly = false}) {
