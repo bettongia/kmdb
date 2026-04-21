@@ -115,6 +115,12 @@ abstract final class IndexWriter {
   ///
   /// Fan-out paths return each element individually. Scalar paths return a
   /// single-element list.
+  ///
+  /// The fan-out guard checks `path.endsWith('[]')`. Because
+  /// [IndexDefinition] normalises the path at construction time — rewriting
+  /// `[*]` to `[]` — this guard always sees the canonical form regardless of
+  /// whether the user originally supplied `[*]` or `[]`. No change is needed
+  /// here when [FieldPath._normalise] is updated.
   static List<Object?> _resolveValues(
     String path,
     Map<String, dynamic> document,

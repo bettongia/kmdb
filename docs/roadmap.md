@@ -192,6 +192,39 @@ References:
 - [SQLite FTS5](https://www.sqlite.org/fts5.html)
 - [Postgres Full Text Search](https://www.postgresql.org/docs/current/textsearch.html)
 
+# JSONPath — Deferred Extensions (low priority)
+
+KMDB currently supports a subset of RFC 9535 (JSONPath) for field path
+selectors (see spec §13). The following extensions were explicitly deferred
+from the initial implementation:
+
+## Filter expressions
+
+`$.policies[?(@.expired == true)]` — in-path filter predicates that select
+array elements matching a condition. These overlap heavily with the existing
+Filter DSL and require a unified expression layer design to avoid duplicating
+logic and risking inconsistency. The right approach is to design a shared
+expression evaluator first, then surface it in both the path syntax and the
+Filter DSL.
+
+## Recursive descent
+
+`$..name` — matches `name` at any depth in the document tree. Useful for
+deeply nested or schema-less documents, but adds O(depth × fields) traversal
+cost with non-obvious semantics for index fan-out (how many entries per
+document? depth-bounded?). Deferred until there is a concrete use-case with
+known performance requirements.
+
+## Cross-collection / cross-document references
+
+A future "foreign key" or join mechanism (e.g.
+`orders[*].customerId -> customers`) would need path syntax to describe the
+join key on both sides. The path grammar defined in §13 is designed to be
+composable with such a feature: a reference expression could be expressed as
+two paths plus a join operator, with each individual path using the existing
+subset. No grammar changes are needed now, but this should be revisited when
+cross-collection query design is planned.
+
 ---
 
 <!-- prettier-ignore-start -->
