@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import '../exceptions.dart';
+import '../filter/field_path.dart';
 
 /// Declares a secondary index on a document field within a collection.
 ///
@@ -23,15 +24,28 @@ import '../exceptions.dart';
 ///
 /// ## Path syntax
 ///
-/// The [path] follows the dot-notation field path rules from spec §16:
+/// The [path] supports the same JSONPath subset as [FieldPath] (spec §13):
 ///
-/// | Syntax | Resolves to |
-/// | ------ | ----------- |
-/// | `"city"` | Top-level field |
-/// | `"address.city"` | Nested object field |
-/// | `"tags[0]"` | Specific array element |
-/// | `"tags[]"` | Array fan-out — one index entry per array element |
-/// | `"meta.stats.views"` | Deeply nested field |
+/// | Syntax              | Example               | Resolves to                  |
+/// | ------------------- | --------------------- | ---------------------------- |
+/// | Identifier          | `city`                | Top-level field              |
+/// | Dot child           | `address.city`        | Nested object field          |
+/// | Optional root sigil | `$.address.city`      | Same as `address.city`       |
+/// | Array wildcard      | `tags[*]` or `tags[]` | Fan-out — one entry per elem |
+/// | Positional index    | `tags[0]`             | Element at index 0           |
+/// | Negative index      | `tags[-1]`            | Last element                 |
+/// | Deep nested         | `meta.stats.views`    | Deeply nested field          |
+///
+/// ### Normalisation
+///
+/// The path is normalised at construction time: `$.address.city` is stored and
+/// used identically to `address.city`, and `[*]` is rewritten to `[]`.
+/// Normalisation is applied before the `indexNamespace` is computed, so the
+/// storage key is always derived from the canonical path.
+///
+/// Note: `$`-prefixed index paths were never previously documented or accepted
+/// as valid input, so no existing database can contain a `$`-prefixed index
+/// namespace. Normalisation is purely additive — there is no migration needed.
 ///
 /// ## Example
 ///
@@ -40,6 +54,7 @@ import '../exceptions.dart';
 ///   path: '/db',
 ///   indexes: [
 ///     IndexDefinition('contacts', 'address.city'),
+///     IndexDefinition('contacts', r'$.address.city'), // same index
 ///     IndexDefinition('contacts', 'tags[]'),
 ///   ],
 /// );
@@ -47,11 +62,30 @@ import '../exceptions.dart';
 final class IndexDefinition {
   /// Creates an [IndexDefinition] for [path] in [namespace].
   ///
-  /// Throws [ReservedIndexPathException] if [path] starts with `_`, because
-  /// `_`-prefixed fields are system-managed and not user-queryable.
-  IndexDefinition(this.namespace, this.path) {
-    if (path.startsWith('_')) {
-      throw ReservedIndexPathException(namespace, path);
+  /// The [path] is normalised: a leading `$.` prefix is stripped and `[*]` is
+  /// rewritten to `[]`, so `$.address.city` and `address.city` refer to the
+  /// same index.
+  ///
+  /// Throws [ArgumentError] if [path] is a bare `$` (no child path).
+  ///
+  /// Throws [ReservedIndexPathException] if [path] starts with `_` after
+  /// normalisation, because `_`-prefixed fields are system-managed and not
+  /// user-queryable.
+  IndexDefinition(this.namespace, String path)
+    : path = FieldPath.normalisePath(path) {
+    if (this.path.startsWith('_')) {
+      throw ReservedIndexPathException(namespace, this.path);
+    }
+    // Also reject a bare "$" path — normalisePath() already throws for this,
+    // but we guard here explicitly for clarity. The check above follows the
+    // same pattern used for "_"-prefixed paths.
+    if (this.path.startsWith(r'$')) {
+      throw ArgumentError.value(
+        path,
+        'path',
+        "Index path must not start with '\$' after normalisation. "
+            "Use a bare field path such as 'address.city'.",
+      );
     }
   }
 
@@ -60,12 +94,18 @@ final class IndexDefinition {
   /// [KmdbDatabase.collection] when the collection was created.
   final String namespace;
 
-  /// The dot-notation field path to index.
+  /// The normalised dot-notation field path to index.
+  ///
+  /// Leading `$.` prefixes and `[*]` wildcards are rewritten to their
+  /// canonical forms at construction time.
   final String path;
 
   /// The system namespace where index entries are stored.
   ///
-  /// Format: `$index:{namespace}:{path}`.
+  /// Format: `$index:{namespace}:{path}` where `{path}` is the normalised
+  /// path. Because normalisation runs at construction time, this namespace is
+  /// always derived from the canonical path — `$.address.city` and
+  /// `address.city` produce the same `indexNamespace`.
   String get indexNamespace =>
       r'$index:'
       '$namespace:$path';
