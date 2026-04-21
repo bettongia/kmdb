@@ -18,7 +18,6 @@ Copyright 2026 The KMDB Authors
 // ignore_for_file: non_constant_identifier_names
 
 import '../registry_base.dart';
-import 'package:kmdb_util/util.dart';
 import 'package:meta/meta.dart';
 
 @internal
@@ -26,11 +25,9 @@ final Map<String, RegistryEntry> mimeinfoDbModel = {
   "model/iges": const RegistryEntry(
     mediaType: 'model/iges',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('IGES document')],
-    acronym: IntlString.constant('IGES'),
-    expandedAcronym: IntlString.constant(
-      'Initial Graphics Exchange Specification',
-    ),
+    comments: ['IGES document'],
+    acronym: 'IGES',
+    expandedAcronym: 'Initial Graphics Exchange Specification',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -60,9 +57,9 @@ final Map<String, RegistryEntry> mimeinfoDbModel = {
   "model/gltf-binary": const RegistryEntry(
     mediaType: 'model/gltf-binary',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('glTF model')],
-    acronym: IntlString.constant('glTF'),
-    expandedAcronym: IntlString.constant('GL Transmission Format'),
+    comments: ['glTF model'],
+    acronym: 'glTF',
+    expandedAcronym: 'GL Transmission Format',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.glb', weight: 50, caseSensitive: false)],
@@ -78,9 +75,9 @@ final Map<String, RegistryEntry> mimeinfoDbModel = {
   "model/gltf+json": const RegistryEntry(
     mediaType: 'model/gltf+json',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('glTF model')],
-    acronym: IntlString.constant('glTF'),
-    expandedAcronym: IntlString.constant('GL Transmission Format'),
+    comments: ['glTF model'],
+    acronym: 'glTF',
+    expandedAcronym: 'GL Transmission Format',
     subclassOf: ['application/json'],
     alias: [],
     globs: [Glob(pattern: '*.gltf', weight: 50, caseSensitive: false)],
@@ -88,9 +85,9 @@ final Map<String, RegistryEntry> mimeinfoDbModel = {
   "model/vrml": const RegistryEntry(
     mediaType: 'model/vrml',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('VRML document')],
-    acronym: IntlString.constant('VRML'),
-    expandedAcronym: IntlString.constant('Virtual Reality Modeling Language'),
+    comments: ['VRML document'],
+    acronym: 'VRML',
+    expandedAcronym: 'Virtual Reality Modeling Language',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -115,7 +112,7 @@ final Map<String, RegistryEntry> mimeinfoDbModel = {
   "model/obj": const RegistryEntry(
     mediaType: 'model/obj',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('OBJ 3D model')],
+    comments: ['OBJ 3D model'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.obj', weight: 50, caseSensitive: false)],
@@ -142,7 +139,7 @@ final Map<String, RegistryEntry> mimeinfoDbModel = {
   "model/mtl": const RegistryEntry(
     mediaType: 'model/mtl',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('OBJ 3D model material library')],
+    comments: ['OBJ 3D model material library'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.mtl', weight: 50, caseSensitive: false)],
@@ -169,9 +166,9 @@ final Map<String, RegistryEntry> mimeinfoDbModel = {
   "model/3mf": const RegistryEntry(
     mediaType: 'model/3mf',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('3MF document')],
-    acronym: IntlString.constant('3MF'),
-    expandedAcronym: IntlString.constant('3D Manufacturing Format'),
+    comments: ['3MF document'],
+    acronym: '3MF',
+    expandedAcronym: '3D Manufacturing Format',
     subclassOf: ['application/zip'],
     alias: ['application/vnd.ms-3mfdocument'],
     globs: [Glob(pattern: '*.3mf', weight: 50, caseSensitive: false)],
@@ -179,9 +176,9 @@ final Map<String, RegistryEntry> mimeinfoDbModel = {
   "model/stl": const RegistryEntry(
     mediaType: 'model/stl',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('STL 3D model')],
-    acronym: IntlString.constant('STL'),
-    expandedAcronym: IntlString.constant('StereoLithography'),
+    comments: ['STL 3D model'],
+    acronym: 'STL',
+    expandedAcronym: 'StereoLithography',
     subclassOf: [],
     alias: ['model/x.stl-ascii', 'model/x.stl-binary'],
     globs: [Glob(pattern: '*.stl', weight: 50, caseSensitive: false)],

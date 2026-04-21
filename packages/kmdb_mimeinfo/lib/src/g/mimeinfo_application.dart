@@ -18,7 +18,6 @@ Copyright 2026 The KMDB Authors
 // ignore_for_file: non_constant_identifier_names
 
 import '../registry_base.dart';
-import 'package:kmdb_util/util.dart';
 import 'package:meta/meta.dart';
 
 @internal
@@ -26,7 +25,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-atari-2600-rom": const RegistryEntry(
     mediaType: 'application/x-atari-2600-rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Atari 2600 ROM')],
+    comments: ['Atari 2600 ROM'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.a26', weight: 50, caseSensitive: false)],
@@ -34,7 +33,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-atari-7800-rom": const RegistryEntry(
     mediaType: 'application/x-atari-7800-rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Atari 7800 ROM')],
+    comments: ['Atari 7800 ROM'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.a78', weight: 50, caseSensitive: false)],
@@ -55,7 +54,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-atari-lynx-rom": const RegistryEntry(
     mediaType: 'application/x-atari-lynx-rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Atari Lynx ROM')],
+    comments: ['Atari Lynx ROM'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.lnx', weight: 50, caseSensitive: false)],
@@ -71,9 +70,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/andrew-inset": const RegistryEntry(
     mediaType: 'application/andrew-inset',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('ATK inset')],
-    acronym: IntlString.constant('ATK'),
-    expandedAcronym: IntlString.constant('Andrew Toolkit'),
+    comments: ['ATK inset'],
+    acronym: 'ATK',
+    expandedAcronym: 'Andrew Toolkit',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.ez', weight: 50, caseSensitive: false)],
@@ -81,7 +80,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/epub+zip": const RegistryEntry(
     mediaType: 'application/epub+zip',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Electronic book document')],
+    comments: ['Electronic book document'],
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.epub', weight: 50, caseSensitive: false)],
@@ -123,7 +122,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/vnd.amazon.mobi8-ebook": const RegistryEntry(
     mediaType: 'application/vnd.amazon.mobi8-ebook',
-    comments: [IntlString.constant('Kindle book document')],
+    comments: ['Kindle book document'],
     subclassOf: ['application/x-mobipocket-ebook'],
     alias: ['application/x-mobi8-ebook'],
     globs: [
@@ -134,7 +133,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/illustrator": const RegistryEntry(
     mediaType: 'application/illustrator',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('Adobe Illustrator document')],
+    comments: ['Adobe Illustrator document'],
     subclassOf: [],
     alias: ['application/vnd.adobe.illustrator'],
     globs: [Glob(pattern: '*.ai', weight: 50, caseSensitive: false)],
@@ -142,7 +141,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/mac-binhex40": const RegistryEntry(
     mediaType: 'application/mac-binhex40',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Macintosh BinHex-encoded file')],
+    comments: ['Macintosh BinHex-encoded file'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.hqx', weight: 50, caseSensitive: false)],
@@ -169,7 +168,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/mathematica": const RegistryEntry(
     mediaType: 'application/mathematica',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Mathematica Notebook file')],
+    comments: ['Mathematica Notebook file'],
     subclassOf: ['text/plain'],
     alias: ['application/x-mathematica'],
     globs: [Glob(pattern: '*.nb', weight: 50, caseSensitive: false)],
@@ -203,9 +202,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/mathml+xml": const RegistryEntry(
     mediaType: 'application/mathml+xml',
-    comments: [IntlString.constant('MathML document')],
-    acronym: IntlString.constant('MathML'),
-    expandedAcronym: IntlString.constant('Mathematical Markup Language'),
+    comments: ['MathML document'],
+    acronym: 'MathML',
+    expandedAcronym: 'Mathematical Markup Language',
     subclassOf: ['application/xml'],
     alias: ['text/mathml'],
     globs: [Glob(pattern: '*.mml', weight: 50, caseSensitive: false)],
@@ -219,7 +218,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/mbox": const RegistryEntry(
     mediaType: 'application/mbox',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('Mailbox file')],
+    comments: ['Mailbox file'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.mbox', weight: 50, caseSensitive: false)],
@@ -239,7 +238,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/metalink+xml": const RegistryEntry(
     mediaType: 'application/metalink+xml',
-    comments: [IntlString.constant('Metalink file')],
+    comments: ['Metalink file'],
     subclassOf: ['application/xml'],
     alias: [],
     globs: [Glob(pattern: '*.metalink', weight: 50, caseSensitive: false)],
@@ -265,7 +264,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/metalink4+xml": const RegistryEntry(
     mediaType: 'application/metalink4+xml',
-    comments: [IntlString.constant('Metalink file')],
+    comments: ['Metalink file'],
     subclassOf: ['application/xml'],
     alias: [],
     globs: [Glob(pattern: '*.meta4', weight: 50, caseSensitive: false)],
@@ -291,14 +290,14 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/octet-stream": const RegistryEntry(
     mediaType: 'application/octet-stream',
-    comments: [IntlString.constant('Unknown')],
+    comments: ['Unknown'],
     subclassOf: [],
     alias: [],
   ),
   "application/x-partial-download": const RegistryEntry(
     mediaType: 'application/x-partial-download',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Partially downloaded file')],
+    comments: ['Partially downloaded file'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -310,9 +309,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/oda": const RegistryEntry(
     mediaType: 'application/oda',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('ODA document')],
-    acronym: IntlString.constant('ODA'),
-    expandedAcronym: IntlString.constant('Office Document Architecture'),
+    comments: ['ODA document'],
+    acronym: 'ODA',
+    expandedAcronym: 'Office Document Architecture',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.oda', weight: 50, caseSensitive: false)],
@@ -320,7 +319,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-wwf": const RegistryEntry(
     mediaType: 'application/x-wwf',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('WWF document')],
+    comments: ['WWF document'],
     subclassOf: ['application/pdf'],
     alias: ['application/wwf'],
     globs: [Glob(pattern: '*.wwf', weight: 50, caseSensitive: false)],
@@ -328,9 +327,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/pdf": const RegistryEntry(
     mediaType: 'application/pdf',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('PDF document')],
-    acronym: IntlString.constant('PDF'),
-    expandedAcronym: IntlString.constant('Portable Document Format'),
+    comments: ['PDF document'],
+    acronym: 'PDF',
+    expandedAcronym: 'Portable Document Format',
     subclassOf: [],
     alias: [
       'application/x-pdf',
@@ -356,9 +355,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/xspf+xml": const RegistryEntry(
     mediaType: 'application/xspf+xml',
     genericIcon: GenericIcon.audioXGeneric,
-    comments: [IntlString.constant('XSPF playlist')],
-    acronym: IntlString.constant('XSPF'),
-    expandedAcronym: IntlString.constant('XML Shareable Playlist Format'),
+    comments: ['XSPF playlist'],
+    acronym: 'XSPF',
+    expandedAcronym: 'XML Shareable Playlist Format',
     subclassOf: ['application/xml'],
     alias: ['application/x-xspf+xml'],
     globs: [Glob(pattern: '*.xspf', weight: 50, caseSensitive: false)],
@@ -388,14 +387,14 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-windows-themepack": const RegistryEntry(
     mediaType: 'application/x-windows-themepack',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Microsoft Windows theme pack')],
+    comments: ['Microsoft Windows theme pack'],
     subclassOf: ['application/vnd.ms-cab-compressed'],
     alias: [],
     globs: [Glob(pattern: '*.themepack', weight: 50, caseSensitive: false)],
   ),
   "application/pgp-encrypted": const RegistryEntry(
     mediaType: 'application/pgp-encrypted',
-    comments: [IntlString.constant('PGP/MIME-encrypted message header')],
+    comments: ['PGP/MIME-encrypted message header'],
     subclassOf: [],
     alias: ['application/pgp'],
     globs: [
@@ -419,9 +418,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/pgp-keys": const RegistryEntry(
     mediaType: 'application/pgp-keys',
-    comments: [IntlString.constant('PGP keys')],
-    acronym: IntlString.constant('PGP'),
-    expandedAcronym: IntlString.constant('Pretty Good Privacy'),
+    comments: ['PGP keys'],
+    acronym: 'PGP',
+    expandedAcronym: 'Pretty Good Privacy',
     subclassOf: [],
     alias: [],
     globs: [
@@ -478,7 +477,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/pgp-signature": const RegistryEntry(
     mediaType: 'application/pgp-signature',
-    comments: [IntlString.constant('Detached OpenPGP signature')],
+    comments: ['Detached OpenPGP signature'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -504,9 +503,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/pkcs7-mime": const RegistryEntry(
     mediaType: 'application/pkcs7-mime',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('PKCS#7 file')],
-    acronym: IntlString.constant('PKCS'),
-    expandedAcronym: IntlString.constant('Public-Key Cryptography Standards'),
+    comments: ['PKCS#7 file'],
+    acronym: 'PKCS',
+    expandedAcronym: 'Public-Key Cryptography Standards',
     subclassOf: [],
     alias: [],
     globs: [
@@ -517,29 +516,27 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/pkcs7-signature": const RegistryEntry(
     mediaType: 'application/pkcs7-signature',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('Detached S/MIME signature')],
-    acronym: IntlString.constant('S/MIME'),
-    expandedAcronym: IntlString.constant(
-      'Secure/Multipurpose Internet Mail Extensions',
-    ),
+    comments: ['Detached S/MIME signature'],
+    acronym: 'S/MIME',
+    expandedAcronym: 'Secure/Multipurpose Internet Mail Extensions',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.p7s', weight: 50, caseSensitive: false)],
   ),
   "application/pkcs8": const RegistryEntry(
     mediaType: 'application/pkcs8',
-    comments: [IntlString.constant('PKCS#8 private key')],
-    acronym: IntlString.constant('PKCS'),
-    expandedAcronym: IntlString.constant('Public-Key Cryptography Standards'),
+    comments: ['PKCS#8 private key'],
+    acronym: 'PKCS',
+    expandedAcronym: 'Public-Key Cryptography Standards',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.p8', weight: 50, caseSensitive: false)],
   ),
   "application/pkcs8-encrypted": const RegistryEntry(
     mediaType: 'application/pkcs8-encrypted',
-    comments: [IntlString.constant('PKCS#8 private key (encrypted)')],
-    acronym: IntlString.constant('PKCS'),
-    expandedAcronym: IntlString.constant('Public-Key Cryptography Standards'),
+    comments: ['PKCS#8 private key (encrypted)'],
+    acronym: 'PKCS',
+    expandedAcronym: 'Public-Key Cryptography Standards',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.p8e', weight: 50, caseSensitive: false)],
@@ -547,16 +544,16 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/pkcs10": const RegistryEntry(
     mediaType: 'application/pkcs10',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('PKCS#10 certification request')],
-    acronym: IntlString.constant('PKCS'),
-    expandedAcronym: IntlString.constant('Public-Key Cryptography Standards'),
+    comments: ['PKCS#10 certification request'],
+    acronym: 'PKCS',
+    expandedAcronym: 'Public-Key Cryptography Standards',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.p10', weight: 50, caseSensitive: false)],
   ),
   "application/pkix-cert": const RegistryEntry(
     mediaType: 'application/pkix-cert',
-    comments: [IntlString.constant('X.509 certificate')],
+    comments: ['X.509 certificate'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.cer', weight: 50, caseSensitive: false)],
@@ -582,7 +579,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/pkix-crl": const RegistryEntry(
     mediaType: 'application/pkix-crl',
-    comments: [IntlString.constant('Certificate revocation list')],
+    comments: ['Certificate revocation list'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.crl', weight: 50, caseSensitive: false)],
@@ -602,7 +599,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/pkix-pkipath": const RegistryEntry(
     mediaType: 'application/pkix-pkipath',
-    comments: [IntlString.constant('PkiPath certification path')],
+    comments: ['PkiPath certification path'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.pkipath', weight: 50, caseSensitive: false)],
@@ -610,7 +607,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/postscript": const RegistryEntry(
     mediaType: 'application/postscript',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('PostScript document')],
+    comments: ['PostScript document'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.ps', weight: 50, caseSensitive: false)],
@@ -632,7 +629,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/prs.plucker": const RegistryEntry(
     mediaType: 'application/prs.plucker',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Plucker document')],
+    comments: ['Plucker document'],
     subclassOf: [],
     alias: [],
     magic: [
@@ -651,9 +648,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/raml+yaml": const RegistryEntry(
     mediaType: 'application/raml+yaml',
-    comments: [IntlString.constant('RAML document')],
-    acronym: IntlString.constant('RAML'),
-    expandedAcronym: IntlString.constant('RESTful API Modeling Language'),
+    comments: ['RAML document'],
+    acronym: 'RAML',
+    expandedAcronym: 'RESTful API Modeling Language',
     subclassOf: ['application/yaml'],
     alias: [],
     globs: [Glob(pattern: '*.raml', weight: 50, caseSensitive: false)],
@@ -674,11 +671,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/relax-ng-compact-syntax": const RegistryEntry(
     mediaType: 'application/relax-ng-compact-syntax',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('RELAX NG XML schema')],
-    acronym: IntlString.constant('RELAX NG'),
-    expandedAcronym: IntlString.constant(
-      'REgular LAnguage for XML Next Generation',
-    ),
+    comments: ['RELAX NG XML schema'],
+    acronym: 'RELAX NG',
+    expandedAcronym: 'REgular LAnguage for XML Next Generation',
     subclassOf: ['text/plain'],
     alias: ['application/x-rnc'],
     globs: [Glob(pattern: '*.rnc', weight: 50, caseSensitive: false)],
@@ -686,9 +681,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/rtf": const RegistryEntry(
     mediaType: 'application/rtf',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('RTF document')],
-    acronym: IntlString.constant('RTF'),
-    expandedAcronym: IntlString.constant('Rich Text Format'),
+    comments: ['RTF document'],
+    acronym: 'RTF',
+    expandedAcronym: 'Rich Text Format',
     subclassOf: ['text/plain'],
     alias: ['text/rtf'],
     globs: [Glob(pattern: '*.rtf', weight: 50, caseSensitive: false)],
@@ -709,7 +704,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/sieve": const RegistryEntry(
     mediaType: 'application/sieve',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('Sieve mail filter script')],
+    comments: ['Sieve mail filter script'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -720,11 +715,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/smil+xml": const RegistryEntry(
     mediaType: 'application/smil+xml',
     genericIcon: GenericIcon.videoXGeneric,
-    comments: [IntlString.constant('SMIL document')],
-    acronym: IntlString.constant('SMIL'),
-    expandedAcronym: IntlString.constant(
-      'Synchronized Multimedia Integration Language',
-    ),
+    comments: ['SMIL document'],
+    acronym: 'SMIL',
+    expandedAcronym: 'Synchronized Multimedia Integration Language',
     subclassOf: ['application/xml'],
     alias: ['application/smil'],
     globs: [
@@ -761,9 +754,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.ms-wpl": const RegistryEntry(
     mediaType: 'application/vnd.ms-wpl',
     genericIcon: GenericIcon.videoXGeneric,
-    comments: [IntlString.constant('WPL playlist')],
-    acronym: IntlString.constant('WPL'),
-    expandedAcronym: IntlString.constant('Windows Media Player Playlist'),
+    comments: ['WPL playlist'],
+    acronym: 'WPL',
+    expandedAcronym: 'Windows Media Player Playlist',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.wpl', weight: 50, caseSensitive: false)],
@@ -783,7 +776,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-sqlite2": const RegistryEntry(
     mediaType: 'application/x-sqlite2',
-    comments: [IntlString.constant('SQLite2 database')],
+    comments: ['SQLite2 database'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.sqlite2', weight: 50, caseSensitive: false)],
@@ -803,7 +796,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/vnd.sqlite3": const RegistryEntry(
     mediaType: 'application/vnd.sqlite3',
-    comments: [IntlString.constant('SQLite3 database')],
+    comments: ['SQLite3 database'],
     subclassOf: [],
     alias: ['application/x-sqlite3'],
     globs: [Glob(pattern: '*.sqlite3', weight: 50, caseSensitive: false)],
@@ -823,7 +816,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-apple-systemprofiler+xml": const RegistryEntry(
     mediaType: 'application/x-apple-systemprofiler+xml',
-    comments: [IntlString.constant('Apple System Profiler')],
+    comments: ['Apple System Profiler'],
     subclassOf: ['application/xml'],
     alias: [],
     globs: [Glob(pattern: '*.spx', weight: 40, caseSensitive: false)],
@@ -858,9 +851,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-go-sgf": const RegistryEntry(
     mediaType: 'application/x-go-sgf',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('SGF record')],
-    acronym: IntlString.constant('SGF'),
-    expandedAcronym: IntlString.constant('Smart Game Format'),
+    comments: ['SGF record'],
+    acronym: 'SGF',
+    expandedAcronym: 'Smart Game Format',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.sgf', weight: 50, caseSensitive: false)],
@@ -886,14 +879,14 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-godot-project": const RegistryEntry(
     mediaType: 'application/x-godot-project',
-    comments: [IntlString.constant('Godot Engine project')],
+    comments: ['Godot Engine project'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: 'project.godot', weight: 50, caseSensitive: true)],
   ),
   "application/x-godot-resource": const RegistryEntry(
     mediaType: 'application/x-godot-resource',
-    comments: [IntlString.constant('Godot Engine resource')],
+    comments: ['Godot Engine resource'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -916,7 +909,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-godot-scene": const RegistryEntry(
     mediaType: 'application/x-godot-scene',
-    comments: [IntlString.constant('Godot Engine scene')],
+    comments: ['Godot Engine scene'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -940,14 +933,14 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-godot-shader": const RegistryEntry(
     mediaType: 'application/x-godot-shader',
-    comments: [IntlString.constant('Godot Engine shader')],
+    comments: ['Godot Engine shader'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.gdshader', weight: 50, caseSensitive: false)],
   ),
   "application/x-gdscript": const RegistryEntry(
     mediaType: 'application/x-gdscript',
-    comments: [IntlString.constant('GDScript script')],
+    comments: ['GDScript script'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.gd', weight: 50, caseSensitive: false)],
@@ -955,9 +948,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/its+xml": const RegistryEntry(
     mediaType: 'application/its+xml',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('ITS translation file')],
-    acronym: IntlString.constant('ITS'),
-    expandedAcronym: IntlString.constant('Internationalization Tag Set'),
+    comments: ['ITS translation file'],
+    acronym: 'ITS',
+    expandedAcronym: 'Internationalization Tag Set',
     subclassOf: ['application/xml'],
     alias: [],
     globs: [Glob(pattern: '*.its', weight: 50, caseSensitive: false)],
@@ -981,11 +974,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/xliff+xml": const RegistryEntry(
     mediaType: 'application/xliff+xml',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('XLIFF translation file')],
-    acronym: IntlString.constant('XLIFF'),
-    expandedAcronym: IntlString.constant(
-      'XML Localization Interchange File Format',
-    ),
+    comments: ['XLIFF translation file'],
+    acronym: 'XLIFF',
+    expandedAcronym: 'XML Localization Interchange File Format',
     subclassOf: ['application/xml'],
     alias: ['application/x-xliff'],
     globs: [
@@ -1015,9 +1006,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/toml": const RegistryEntry(
     mediaType: 'application/toml',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('TOML document')],
-    acronym: IntlString.constant('TOML'),
-    expandedAcronym: IntlString.constant('Tom\'s Obvious Minimal Language'),
+    comments: ['TOML document'],
+    acronym: 'TOML',
+    expandedAcronym: 'Tom\'s Obvious Minimal Language',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.toml', weight: 50, caseSensitive: false)],
@@ -1025,9 +1016,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/yaml": const RegistryEntry(
     mediaType: 'application/yaml',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('YAML document')],
-    acronym: IntlString.constant('YAML'),
-    expandedAcronym: IntlString.constant('YAML Ain\'t Markup Language'),
+    comments: ['YAML document'],
+    acronym: 'YAML',
+    expandedAcronym: 'YAML Ain\'t Markup Language',
     subclassOf: ['text/plain'],
     alias: ['application/x-yaml', 'text/yaml', 'text/x-yaml'],
     globs: [
@@ -1051,7 +1042,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.corel-draw": const RegistryEntry(
     mediaType: 'application/vnd.corel-draw',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('Corel Draw drawing')],
+    comments: ['Corel Draw drawing'],
     subclassOf: [],
     alias: [
       'application/cdr',
@@ -1080,9 +1071,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.hp-hpgl": const RegistryEntry(
     mediaType: 'application/vnd.hp-hpgl',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('HPGL file')],
-    acronym: IntlString.constant('HPGL'),
-    expandedAcronym: IntlString.constant('HP Graphics Language'),
+    comments: ['HPGL file'],
+    acronym: 'HPGL',
+    expandedAcronym: 'HP Graphics Language',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.hpgl', weight: 50, caseSensitive: false)],
@@ -1090,16 +1081,16 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.hp-pcl": const RegistryEntry(
     mediaType: 'application/vnd.hp-pcl',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('PCL file')],
-    acronym: IntlString.constant('PCL'),
-    expandedAcronym: IntlString.constant('HP Printer Control Language'),
+    comments: ['PCL file'],
+    acronym: 'PCL',
+    expandedAcronym: 'HP Printer Control Language',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.pcl', weight: 50, caseSensitive: false)],
   ),
   "application/vnd.cups-ppd": const RegistryEntry(
     mediaType: 'application/vnd.cups-ppd',
-    comments: [IntlString.constant('PostScript printer description')],
+    comments: ['PostScript printer description'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.ppd', weight: 50, caseSensitive: false)],
@@ -1120,7 +1111,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.lotus-1-2-3": const RegistryEntry(
     mediaType: 'application/vnd.lotus-1-2-3',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('Lotus 1-2-3 spreadsheet')],
+    comments: ['Lotus 1-2-3 spreadsheet'],
     subclassOf: [],
     alias: [
       'application/x-lotus123',
@@ -1153,7 +1144,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.lotus-wordpro": const RegistryEntry(
     mediaType: 'application/vnd.lotus-wordpro',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Lotus Word Pro document')],
+    comments: ['Lotus Word Pro document'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.lwp', weight: 50, caseSensitive: false)],
@@ -1174,9 +1165,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-lmdb": const RegistryEntry(
     mediaType: 'application/x-lmdb',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('LMDB database')],
-    acronym: IntlString.constant('LMDB'),
-    expandedAcronym: IntlString.constant('Lightning Memory-Mapped Database'),
+    comments: ['LMDB database'],
+    acronym: 'LMDB',
+    expandedAcronym: 'Lightning Memory-Mapped Database',
     subclassOf: [],
     alias: [],
     globs: [
@@ -1200,9 +1191,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.ms-access": const RegistryEntry(
     mediaType: 'application/vnd.ms-access',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('JET database')],
-    acronym: IntlString.constant('JET'),
-    expandedAcronym: IntlString.constant('Joint Engine Technology'),
+    comments: ['JET database'],
+    acronym: 'JET',
+    expandedAcronym: 'Joint Engine Technology',
     subclassOf: [],
     alias: [
       'application/msaccess',
@@ -1230,7 +1221,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.ms-cab-compressed": const RegistryEntry(
     mediaType: 'application/vnd.ms-cab-compressed',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Microsoft Cabinet archive')],
+    comments: ['Microsoft Cabinet archive'],
     subclassOf: [],
     alias: ['zz-application/zz-winassoc-cab'],
     globs: [Glob(pattern: '*.cab', weight: 50, caseSensitive: false)],
@@ -1251,7 +1242,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.ms-excel": const RegistryEntry(
     mediaType: 'application/vnd.ms-excel',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('Excel spreadsheet')],
+    comments: ['Excel spreadsheet'],
     subclassOf: ['application/x-ole-storage'],
     alias: [
       'application/msexcel',
@@ -1285,7 +1276,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.ms-excel.addin.macroEnabled.12": const RegistryEntry(
     mediaType: 'application/vnd.ms-excel.addin.macroEnabled.12',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('Excel add-in')],
+    comments: ['Excel add-in'],
     subclassOf: [
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     ],
@@ -1295,7 +1286,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.ms-excel.sheet.binary.macroEnabled.12": const RegistryEntry(
     mediaType: 'application/vnd.ms-excel.sheet.binary.macroEnabled.12',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('Excel 2007 binary spreadsheet')],
+    comments: ['Excel 2007 binary spreadsheet'],
     subclassOf: [
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     ],
@@ -1305,7 +1296,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.ms-excel.sheet.macroEnabled.12": const RegistryEntry(
     mediaType: 'application/vnd.ms-excel.sheet.macroEnabled.12',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('Excel spreadsheet')],
+    comments: ['Excel spreadsheet'],
     subclassOf: [
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     ],
@@ -1315,7 +1306,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.ms-excel.template.macroEnabled.12": const RegistryEntry(
     mediaType: 'application/vnd.ms-excel.template.macroEnabled.12',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('Excel spreadsheet template')],
+    comments: ['Excel spreadsheet template'],
     subclassOf: [
       'application/vnd.openxmlformats-officedocument.spreadsheetml.template',
     ],
@@ -1325,7 +1316,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.ms-powerpoint": const RegistryEntry(
     mediaType: 'application/vnd.ms-powerpoint',
     genericIcon: GenericIcon.xOfficePresentation,
-    comments: [IntlString.constant('PowerPoint presentation')],
+    comments: ['PowerPoint presentation'],
     subclassOf: ['application/x-ole-storage'],
     alias: [
       'application/powerpoint',
@@ -1342,7 +1333,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.ms-powerpoint.addin.macroEnabled.12": const RegistryEntry(
     mediaType: 'application/vnd.ms-powerpoint.addin.macroEnabled.12',
     genericIcon: GenericIcon.xOfficePresentation,
-    comments: [IntlString.constant('PowerPoint add-in')],
+    comments: ['PowerPoint add-in'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.ppam', weight: 50, caseSensitive: false)],
@@ -1350,7 +1341,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.ms-powerpoint.presentation.macroEnabled.12": const RegistryEntry(
     mediaType: 'application/vnd.ms-powerpoint.presentation.macroEnabled.12',
     genericIcon: GenericIcon.xOfficePresentation,
-    comments: [IntlString.constant('PowerPoint presentation')],
+    comments: ['PowerPoint presentation'],
     subclassOf: [
       'application/vnd.openxmlformats-officedocument.presentationml.presentation',
     ],
@@ -1360,7 +1351,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.ms-powerpoint.slide.macroEnabled.12": const RegistryEntry(
     mediaType: 'application/vnd.ms-powerpoint.slide.macroEnabled.12',
     genericIcon: GenericIcon.xOfficePresentation,
-    comments: [IntlString.constant('PowerPoint slide')],
+    comments: ['PowerPoint slide'],
     subclassOf: [
       'application/vnd.openxmlformats-officedocument.presentationml.slide',
     ],
@@ -1370,7 +1361,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.ms-powerpoint.slideshow.macroEnabled.12": const RegistryEntry(
     mediaType: 'application/vnd.ms-powerpoint.slideshow.macroEnabled.12',
     genericIcon: GenericIcon.xOfficePresentation,
-    comments: [IntlString.constant('PowerPoint presentation')],
+    comments: ['PowerPoint presentation'],
     subclassOf: [
       'application/vnd.openxmlformats-officedocument.presentationml.slideshow',
     ],
@@ -1380,7 +1371,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.ms-powerpoint.template.macroEnabled.12": const RegistryEntry(
     mediaType: 'application/vnd.ms-powerpoint.template.macroEnabled.12',
     genericIcon: GenericIcon.xOfficePresentation,
-    comments: [IntlString.constant('PowerPoint presentation template')],
+    comments: ['PowerPoint presentation template'],
     subclassOf: [
       'application/vnd.openxmlformats-officedocument.presentationml.template',
     ],
@@ -1390,7 +1381,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.ms-visio.drawing.main+xml": const RegistryEntry(
     mediaType: 'application/vnd.ms-visio.drawing.main+xml',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('Office Open XML Visio drawing')],
+    comments: ['Office Open XML Visio drawing'],
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.vsdx', weight: 50, caseSensitive: false)],
@@ -1398,7 +1389,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.ms-visio.template.main+xml": const RegistryEntry(
     mediaType: 'application/vnd.ms-visio.template.main+xml',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('Office Open XML Visio template')],
+    comments: ['Office Open XML Visio template'],
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.vstx', weight: 50, caseSensitive: false)],
@@ -1406,7 +1397,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.ms-visio.stencil.main+xml": const RegistryEntry(
     mediaType: 'application/vnd.ms-visio.stencil.main+xml',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('Office Open XML Visio stencil')],
+    comments: ['Office Open XML Visio stencil'],
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.vssx', weight: 50, caseSensitive: false)],
@@ -1414,7 +1405,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.ms-visio.drawing.macroEnabled.main+xml": const RegistryEntry(
     mediaType: 'application/vnd.ms-visio.drawing.macroEnabled.main+xml',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('Office Open XML Visio drawing')],
+    comments: ['Office Open XML Visio drawing'],
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.vsdm', weight: 50, caseSensitive: false)],
@@ -1423,7 +1414,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
       const RegistryEntry(
         mediaType: 'application/vnd.ms-visio.template.macroEnabled.main+xml',
         genericIcon: GenericIcon.imageXGeneric,
-        comments: [IntlString.constant('Office Open XML Visio template')],
+        comments: ['Office Open XML Visio template'],
         subclassOf: ['application/zip'],
         alias: [],
         globs: [Glob(pattern: '*.vstm', weight: 50, caseSensitive: false)],
@@ -1431,7 +1422,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.ms-visio.stencil.macroEnabled.main+xml": const RegistryEntry(
     mediaType: 'application/vnd.ms-visio.stencil.macroEnabled.main+xml',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('Office Open XML Visio stencil')],
+    comments: ['Office Open XML Visio stencil'],
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.vssm', weight: 50, caseSensitive: false)],
@@ -1439,7 +1430,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.ms-word.document.macroEnabled.12": const RegistryEntry(
     mediaType: 'application/vnd.ms-word.document.macroEnabled.12',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Word document')],
+    comments: ['Word document'],
     subclassOf: [
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     ],
@@ -1449,7 +1440,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.ms-word.template.macroEnabled.12": const RegistryEntry(
     mediaType: 'application/vnd.ms-word.template.macroEnabled.12',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Word document template')],
+    comments: ['Word document template'],
     subclassOf: [
       'application/vnd.openxmlformats-officedocument.wordprocessingml.template',
     ],
@@ -1459,9 +1450,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/oxps": const RegistryEntry(
     mediaType: 'application/oxps',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('OpenXPS document')],
-    acronym: IntlString.constant('OpenXPS'),
-    expandedAcronym: IntlString.constant('Open XML Paper Specification'),
+    comments: ['OpenXPS document'],
+    acronym: 'OpenXPS',
+    expandedAcronym: 'Open XML Paper Specification',
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.oxps', weight: 50, caseSensitive: false)],
@@ -1469,9 +1460,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.ms-xpsdocument": const RegistryEntry(
     mediaType: 'application/vnd.ms-xpsdocument',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('XPS document')],
-    acronym: IntlString.constant('XPS'),
-    expandedAcronym: IntlString.constant('XML Paper Specification'),
+    comments: ['XPS document'],
+    acronym: 'XPS',
+    expandedAcronym: 'XML Paper Specification',
     subclassOf: ['application/zip'],
     alias: ['application/xps'],
     globs: [Glob(pattern: '*.xps', weight: 50, caseSensitive: false)],
@@ -1479,7 +1470,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.ms-works": const RegistryEntry(
     mediaType: 'application/vnd.ms-works',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Microsoft Works document')],
+    comments: ['Microsoft Works document'],
     subclassOf: ['application/x-ole-storage'],
     alias: [],
     globs: [
@@ -1493,7 +1484,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.visio": const RegistryEntry(
     mediaType: 'application/vnd.visio',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Microsoft Visio document')],
+    comments: ['Microsoft Visio document'],
     subclassOf: ['application/x-ole-storage'],
     alias: [],
     globs: [
@@ -1506,7 +1497,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/msword": const RegistryEntry(
     mediaType: 'application/msword',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Word document')],
+    comments: ['Word document'],
     subclassOf: ['application/x-ole-storage'],
     alias: [
       'application/vnd.ms-word',
@@ -1579,16 +1570,16 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/msword-template": const RegistryEntry(
     mediaType: 'application/msword-template',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Word template')],
+    comments: ['Word template'],
     subclassOf: ['application/msword'],
     alias: [],
     globs: [Glob(pattern: '*.dot', weight: 50, caseSensitive: false)],
   ),
   "application/gml+xml": const RegistryEntry(
     mediaType: 'application/gml+xml',
-    comments: [IntlString.constant('GML document')],
-    acronym: IntlString.constant('GML'),
-    expandedAcronym: IntlString.constant('Geography Markup Language'),
+    comments: ['GML document'],
+    acronym: 'GML',
+    expandedAcronym: 'Geography Markup Language',
     subclassOf: ['application/xml'],
     alias: [],
     globs: [Glob(pattern: '*.gml', weight: 50, caseSensitive: false)],
@@ -1598,7 +1589,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/gnunet-directory": const RegistryEntry(
     mediaType: 'application/gnunet-directory',
-    comments: [IntlString.constant('GNUnet search file')],
+    comments: ['GNUnet search file'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.gnd', weight: 50, caseSensitive: false)],
@@ -1618,11 +1609,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/vnd.ms-tnef": const RegistryEntry(
     mediaType: 'application/vnd.ms-tnef',
-    comments: [IntlString.constant('TNEF message')],
-    acronym: IntlString.constant('TNEF'),
-    expandedAcronym: IntlString.constant(
-      'Transport Neutral Encapsulation Format',
-    ),
+    comments: ['TNEF message'],
+    acronym: 'TNEF',
+    expandedAcronym: 'Transport Neutral Encapsulation Format',
     subclassOf: [],
     alias: ['application/ms-tnef'],
     globs: [
@@ -1647,7 +1636,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.stardivision.calc": const RegistryEntry(
     mediaType: 'application/vnd.stardivision.calc',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('StarCalc spreadsheet')],
+    comments: ['StarCalc spreadsheet'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.sdc', weight: 50, caseSensitive: false)],
@@ -1655,7 +1644,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.stardivision.chart": const RegistryEntry(
     mediaType: 'application/vnd.stardivision.chart',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('StarChart chart')],
+    comments: ['StarChart chart'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.sds', weight: 50, caseSensitive: false)],
@@ -1663,7 +1652,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.stardivision.draw": const RegistryEntry(
     mediaType: 'application/vnd.stardivision.draw',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('StarDraw drawing')],
+    comments: ['StarDraw drawing'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.sda', weight: 50, caseSensitive: false)],
@@ -1671,7 +1660,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.stardivision.impress": const RegistryEntry(
     mediaType: 'application/vnd.stardivision.impress',
     genericIcon: GenericIcon.xOfficePresentation,
-    comments: [IntlString.constant('StarImpress presentation')],
+    comments: ['StarImpress presentation'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -1681,7 +1670,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/vnd.stardivision.mail": const RegistryEntry(
     mediaType: 'application/vnd.stardivision.mail',
-    comments: [IntlString.constant('StarMail email')],
+    comments: ['StarMail email'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.smd', weight: 50, caseSensitive: false)],
@@ -1689,7 +1678,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.stardivision.math": const RegistryEntry(
     mediaType: 'application/vnd.stardivision.math',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('StarMath formula')],
+    comments: ['StarMath formula'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.smf', weight: 50, caseSensitive: false)],
@@ -1697,7 +1686,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.stardivision.writer": const RegistryEntry(
     mediaType: 'application/vnd.stardivision.writer',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('StarWriter document')],
+    comments: ['StarWriter document'],
     subclassOf: [],
     alias: ['application/vnd.stardivision.writer-global'],
     globs: [
@@ -1722,7 +1711,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.sun.xml.calc": const RegistryEntry(
     mediaType: 'application/vnd.sun.xml.calc',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('LibreOffice Calc spreadsheet')],
+    comments: ['LibreOffice Calc spreadsheet'],
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.sxc', weight: 50, caseSensitive: false)],
@@ -1759,7 +1748,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.sun.xml.calc.template": const RegistryEntry(
     mediaType: 'application/vnd.sun.xml.calc.template',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('LibreOffice Calc template')],
+    comments: ['LibreOffice Calc template'],
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.stc', weight: 50, caseSensitive: false)],
@@ -1796,7 +1785,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.sun.xml.draw": const RegistryEntry(
     mediaType: 'application/vnd.sun.xml.draw',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('LibreOffice Draw drawing')],
+    comments: ['LibreOffice Draw drawing'],
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.sxd', weight: 50, caseSensitive: false)],
@@ -1833,7 +1822,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.sun.xml.draw.template": const RegistryEntry(
     mediaType: 'application/vnd.sun.xml.draw.template',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('LibreOffice Draw template')],
+    comments: ['LibreOffice Draw template'],
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.std', weight: 50, caseSensitive: false)],
@@ -1870,7 +1859,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.sun.xml.impress": const RegistryEntry(
     mediaType: 'application/vnd.sun.xml.impress',
     genericIcon: GenericIcon.xOfficePresentation,
-    comments: [IntlString.constant('LibreOffice Impress presentation')],
+    comments: ['LibreOffice Impress presentation'],
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.sxi', weight: 50, caseSensitive: false)],
@@ -1907,7 +1896,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.sun.xml.impress.template": const RegistryEntry(
     mediaType: 'application/vnd.sun.xml.impress.template',
     genericIcon: GenericIcon.xOfficePresentation,
-    comments: [IntlString.constant('LibreOffice Impress template')],
+    comments: ['LibreOffice Impress template'],
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.sti', weight: 50, caseSensitive: false)],
@@ -1944,7 +1933,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.sun.xml.math": const RegistryEntry(
     mediaType: 'application/vnd.sun.xml.math',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('LibreOffice Math formula')],
+    comments: ['LibreOffice Math formula'],
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.sxm', weight: 50, caseSensitive: false)],
@@ -1981,7 +1970,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.sun.xml.writer": const RegistryEntry(
     mediaType: 'application/vnd.sun.xml.writer',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('LibreOffice Writer document')],
+    comments: ['LibreOffice Writer document'],
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.sxw', weight: 50, caseSensitive: false)],
@@ -2018,7 +2007,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.sun.xml.writer.global": const RegistryEntry(
     mediaType: 'application/vnd.sun.xml.writer.global',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('LibreOffice Writer global document')],
+    comments: ['LibreOffice Writer global document'],
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.sxg', weight: 50, caseSensitive: false)],
@@ -2055,7 +2044,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.sun.xml.writer.template": const RegistryEntry(
     mediaType: 'application/vnd.sun.xml.writer.template',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('LibreOffice Writer template')],
+    comments: ['LibreOffice Writer template'],
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.stw', weight: 50, caseSensitive: false)],
@@ -2092,9 +2081,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.oasis.opendocument.text": const RegistryEntry(
     mediaType: 'application/vnd.oasis.opendocument.text',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('ODT document')],
-    acronym: IntlString.constant('ODT'),
-    expandedAcronym: IntlString.constant('OpenDocument Text'),
+    comments: ['ODT document'],
+    acronym: 'ODT',
+    expandedAcronym: 'OpenDocument Text',
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.odt', weight: 50, caseSensitive: false)],
@@ -2131,9 +2120,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.oasis.opendocument.text-flat-xml": const RegistryEntry(
     mediaType: 'application/vnd.oasis.opendocument.text-flat-xml',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('ODT document (Flat XML)')],
-    acronym: IntlString.constant('FODT'),
-    expandedAcronym: IntlString.constant('OpenDocument Text (Flat XML)'),
+    comments: ['ODT document (Flat XML)'],
+    acronym: 'FODT',
+    expandedAcronym: 'OpenDocument Text (Flat XML)',
     subclassOf: ['application/xml'],
     alias: [],
     globs: [Glob(pattern: '*.fodt', weight: 50, caseSensitive: false)],
@@ -2141,9 +2130,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.oasis.opendocument.text-template": const RegistryEntry(
     mediaType: 'application/vnd.oasis.opendocument.text-template',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('ODT template')],
-    acronym: IntlString.constant('ODT'),
-    expandedAcronym: IntlString.constant('OpenDocument Text'),
+    comments: ['ODT template'],
+    acronym: 'ODT',
+    expandedAcronym: 'OpenDocument Text',
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.ott', weight: 50, caseSensitive: false)],
@@ -2180,9 +2169,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.oasis.opendocument.text-web": const RegistryEntry(
     mediaType: 'application/vnd.oasis.opendocument.text-web',
     genericIcon: GenericIcon.textHtml,
-    comments: [IntlString.constant('OTH template')],
-    acronym: IntlString.constant('OTH'),
-    expandedAcronym: IntlString.constant('OpenDocument HTML'),
+    comments: ['OTH template'],
+    acronym: 'OTH',
+    expandedAcronym: 'OpenDocument HTML',
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.oth', weight: 50, caseSensitive: false)],
@@ -2219,9 +2208,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.oasis.opendocument.text-master": const RegistryEntry(
     mediaType: 'application/vnd.oasis.opendocument.text-master',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('ODM document')],
-    acronym: IntlString.constant('ODM'),
-    expandedAcronym: IntlString.constant('OpenDocument Master'),
+    comments: ['ODM document'],
+    acronym: 'ODM',
+    expandedAcronym: 'OpenDocument Master',
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.odm', weight: 50, caseSensitive: false)],
@@ -2258,9 +2247,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.oasis.opendocument.graphics": const RegistryEntry(
     mediaType: 'application/vnd.oasis.opendocument.graphics',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('ODG drawing')],
-    acronym: IntlString.constant('ODG'),
-    expandedAcronym: IntlString.constant('OpenDocument Drawing'),
+    comments: ['ODG drawing'],
+    acronym: 'ODG',
+    expandedAcronym: 'OpenDocument Drawing',
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.odg', weight: 50, caseSensitive: false)],
@@ -2297,9 +2286,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.oasis.opendocument.graphics-flat-xml": const RegistryEntry(
     mediaType: 'application/vnd.oasis.opendocument.graphics-flat-xml',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('ODG drawing (Flat XML)')],
-    acronym: IntlString.constant('FODG'),
-    expandedAcronym: IntlString.constant('OpenDocument Drawing (Flat XML)'),
+    comments: ['ODG drawing (Flat XML)'],
+    acronym: 'FODG',
+    expandedAcronym: 'OpenDocument Drawing (Flat XML)',
     subclassOf: ['application/xml'],
     alias: [],
     globs: [Glob(pattern: '*.fodg', weight: 50, caseSensitive: false)],
@@ -2307,9 +2296,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.oasis.opendocument.graphics-template": const RegistryEntry(
     mediaType: 'application/vnd.oasis.opendocument.graphics-template',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('ODG template')],
-    acronym: IntlString.constant('ODG'),
-    expandedAcronym: IntlString.constant('OpenDocument Drawing'),
+    comments: ['ODG template'],
+    acronym: 'ODG',
+    expandedAcronym: 'OpenDocument Drawing',
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.otg', weight: 50, caseSensitive: false)],
@@ -2347,9 +2336,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.oasis.opendocument.presentation": const RegistryEntry(
     mediaType: 'application/vnd.oasis.opendocument.presentation',
     genericIcon: GenericIcon.xOfficePresentation,
-    comments: [IntlString.constant('ODP presentation')],
-    acronym: IntlString.constant('ODP'),
-    expandedAcronym: IntlString.constant('OpenDocument Presentation'),
+    comments: ['ODP presentation'],
+    acronym: 'ODP',
+    expandedAcronym: 'OpenDocument Presentation',
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.odp', weight: 50, caseSensitive: false)],
@@ -2387,11 +2376,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
       const RegistryEntry(
         mediaType: 'application/vnd.oasis.opendocument.presentation-flat-xml',
         genericIcon: GenericIcon.xOfficePresentation,
-        comments: [IntlString.constant('ODP presentation (Flat XML)')],
-        acronym: IntlString.constant('FODP'),
-        expandedAcronym: IntlString.constant(
-          'OpenDocument Presentation (Flat XML)',
-        ),
+        comments: ['ODP presentation (Flat XML)'],
+        acronym: 'FODP',
+        expandedAcronym: 'OpenDocument Presentation (Flat XML)',
         subclassOf: ['application/xml'],
         alias: [],
         globs: [Glob(pattern: '*.fodp', weight: 50, caseSensitive: false)],
@@ -2399,9 +2386,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.oasis.opendocument.presentation-template": const RegistryEntry(
     mediaType: 'application/vnd.oasis.opendocument.presentation-template',
     genericIcon: GenericIcon.xOfficePresentation,
-    comments: [IntlString.constant('ODP template')],
-    acronym: IntlString.constant('ODP'),
-    expandedAcronym: IntlString.constant('OpenDocument Presentation'),
+    comments: ['ODP template'],
+    acronym: 'ODP',
+    expandedAcronym: 'OpenDocument Presentation',
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.otp', weight: 50, caseSensitive: false)],
@@ -2439,9 +2426,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.oasis.opendocument.spreadsheet": const RegistryEntry(
     mediaType: 'application/vnd.oasis.opendocument.spreadsheet',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('ODS spreadsheet')],
-    acronym: IntlString.constant('ODS'),
-    expandedAcronym: IntlString.constant('OpenDocument Spreadsheet'),
+    comments: ['ODS spreadsheet'],
+    acronym: 'ODS',
+    expandedAcronym: 'OpenDocument Spreadsheet',
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.ods', weight: 50, caseSensitive: false)],
@@ -2479,11 +2466,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
       const RegistryEntry(
         mediaType: 'application/vnd.oasis.opendocument.spreadsheet-flat-xml',
         genericIcon: GenericIcon.xOfficeSpreadsheet,
-        comments: [IntlString.constant('ODS spreadsheet (Flat XML)')],
-        acronym: IntlString.constant('FODS'),
-        expandedAcronym: IntlString.constant(
-          'OpenDocument Spreadsheet (Flat XML)',
-        ),
+        comments: ['ODS spreadsheet (Flat XML)'],
+        acronym: 'FODS',
+        expandedAcronym: 'OpenDocument Spreadsheet (Flat XML)',
         subclassOf: ['application/xml'],
         alias: [],
         globs: [Glob(pattern: '*.fods', weight: 50, caseSensitive: false)],
@@ -2491,9 +2476,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.oasis.opendocument.spreadsheet-template": const RegistryEntry(
     mediaType: 'application/vnd.oasis.opendocument.spreadsheet-template',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('ODS template')],
-    acronym: IntlString.constant('ODS'),
-    expandedAcronym: IntlString.constant('OpenDocument Spreadsheet'),
+    comments: ['ODS template'],
+    acronym: 'ODS',
+    expandedAcronym: 'OpenDocument Spreadsheet',
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.ots', weight: 50, caseSensitive: false)],
@@ -2531,9 +2516,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.oasis.opendocument.chart": const RegistryEntry(
     mediaType: 'application/vnd.oasis.opendocument.chart',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('ODC chart')],
-    acronym: IntlString.constant('ODC'),
-    expandedAcronym: IntlString.constant('OpenDocument Chart'),
+    comments: ['ODC chart'],
+    acronym: 'ODC',
+    expandedAcronym: 'OpenDocument Chart',
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.odc', weight: 50, caseSensitive: false)],
@@ -2570,9 +2555,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.oasis.opendocument.chart-template": const RegistryEntry(
     mediaType: 'application/vnd.oasis.opendocument.chart-template',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('ODC template')],
-    acronym: IntlString.constant('ODC'),
-    expandedAcronym: IntlString.constant('OpenDocument Chart'),
+    comments: ['ODC template'],
+    acronym: 'ODC',
+    expandedAcronym: 'OpenDocument Chart',
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.otc', weight: 50, caseSensitive: false)],
@@ -2609,9 +2594,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.oasis.opendocument.formula": const RegistryEntry(
     mediaType: 'application/vnd.oasis.opendocument.formula',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('ODF formula')],
-    acronym: IntlString.constant('ODF'),
-    expandedAcronym: IntlString.constant('OpenDocument Formula'),
+    comments: ['ODF formula'],
+    acronym: 'ODF',
+    expandedAcronym: 'OpenDocument Formula',
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.odf', weight: 50, caseSensitive: false)],
@@ -2648,9 +2633,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.oasis.opendocument.formula-template": const RegistryEntry(
     mediaType: 'application/vnd.oasis.opendocument.formula-template',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('ODF template')],
-    acronym: IntlString.constant('ODF'),
-    expandedAcronym: IntlString.constant('OpenDocument Formula'),
+    comments: ['ODF template'],
+    acronym: 'ODF',
+    expandedAcronym: 'OpenDocument Formula',
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.otf', weight: 50, caseSensitive: false)],
@@ -2688,9 +2673,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.oasis.opendocument.database": const RegistryEntry(
     mediaType: 'application/vnd.oasis.opendocument.database',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('ODB database')],
-    acronym: IntlString.constant('ODB'),
-    expandedAcronym: IntlString.constant('OpenDocument Database'),
+    comments: ['ODB database'],
+    acronym: 'ODB',
+    expandedAcronym: 'OpenDocument Database',
     subclassOf: ['application/zip'],
     alias: ['application/vnd.sun.xml.base'],
     globs: [Glob(pattern: '*.odb', weight: 50, caseSensitive: false)],
@@ -2727,9 +2712,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.oasis.opendocument.image": const RegistryEntry(
     mediaType: 'application/vnd.oasis.opendocument.image',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('ODI image')],
-    acronym: IntlString.constant('ODI'),
-    expandedAcronym: IntlString.constant('OpenDocument Image'),
+    comments: ['ODI image'],
+    acronym: 'ODI',
+    expandedAcronym: 'OpenDocument Image',
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.odi', weight: 50, caseSensitive: false)],
@@ -2766,14 +2751,14 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.openofficeorg.extension": const RegistryEntry(
     mediaType: 'application/vnd.openofficeorg.extension',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('OpenOffice.org extension')],
+    comments: ['OpenOffice.org extension'],
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.oxt', weight: 50, caseSensitive: false)],
   ),
   "application/vnd.android.package-archive": const RegistryEntry(
     mediaType: 'application/vnd.android.package-archive',
-    comments: [IntlString.constant('Android package')],
+    comments: ['Android package'],
     subclassOf: ['application/java-archive'],
     alias: [],
     globs: [Glob(pattern: '*.apk', weight: 50, caseSensitive: false)],
@@ -2781,9 +2766,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.symbian.install": const RegistryEntry(
     mediaType: 'application/vnd.symbian.install',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('SIS package')],
-    acronym: IntlString.constant('SIS'),
-    expandedAcronym: IntlString.constant('Symbian Installation File'),
+    comments: ['SIS package'],
+    acronym: 'SIS',
+    expandedAcronym: 'Symbian Installation File',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.sis', weight: 50, caseSensitive: false)],
@@ -2803,7 +2788,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/vnd.tcpdump.pcap": const RegistryEntry(
     mediaType: 'application/vnd.tcpdump.pcap',
-    comments: [IntlString.constant('Network packet capture')],
+    comments: ['Network packet capture'],
     subclassOf: [],
     alias: ['application/x-pcap', 'application/pcap'],
     globs: [
@@ -2834,7 +2819,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.wordperfect": const RegistryEntry(
     mediaType: 'application/vnd.wordperfect',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('WordPerfect document')],
+    comments: ['WordPerfect document'],
     subclassOf: [],
     alias: ['application/x-wordperfect', 'application/wordperfect'],
     globs: [
@@ -2856,11 +2841,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-spss-por": const RegistryEntry(
     mediaType: 'application/x-spss-por',
-    comments: [IntlString.constant('SPSS portable data file')],
-    acronym: IntlString.constant('SPSS'),
-    expandedAcronym: IntlString.constant(
-      'Statistical Package for the Social Sciences',
-    ),
+    comments: ['SPSS portable data file'],
+    acronym: 'SPSS',
+    expandedAcronym: 'Statistical Package for the Social Sciences',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.por', weight: 50, caseSensitive: false)],
@@ -2880,11 +2863,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-spss-sav": const RegistryEntry(
     mediaType: 'application/x-spss-sav',
-    comments: [IntlString.constant('SPSS data file')],
-    acronym: IntlString.constant('SPSS'),
-    expandedAcronym: IntlString.constant(
-      'Statistical Package for the Social Sciences',
-    ),
+    comments: ['SPSS data file'],
+    acronym: 'SPSS',
+    expandedAcronym: 'Statistical Package for the Social Sciences',
     subclassOf: [],
     alias: ['application/x-spss-savefile'],
     globs: [
@@ -2914,9 +2895,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-xbel": const RegistryEntry(
     mediaType: 'application/x-xbel',
     genericIcon: GenericIcon.textHtml,
-    comments: [IntlString.constant('XBEL bookmarks')],
-    acronym: IntlString.constant('XBEL'),
-    expandedAcronym: IntlString.constant('XML Bookmark Exchange Language'),
+    comments: ['XBEL bookmarks'],
+    acronym: 'XBEL',
+    expandedAcronym: 'XML Bookmark Exchange Language',
     subclassOf: ['application/xml'],
     alias: [],
     globs: [Glob(pattern: '*.xbel', weight: 50, caseSensitive: false)],
@@ -2937,7 +2918,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-7z-compressed": const RegistryEntry(
     mediaType: 'application/x-7z-compressed',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('7-zip archive')],
+    comments: ['7-zip archive'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -2961,7 +2942,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-abiword": const RegistryEntry(
     mediaType: 'application/x-abiword',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('AbiWord document')],
+    comments: ['AbiWord document'],
     subclassOf: ['application/xml'],
     alias: [],
     globs: [
@@ -2999,7 +2980,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-cue": const RegistryEntry(
     mediaType: 'application/x-cue',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('CD image cuesheet')],
+    comments: ['CD image cuesheet'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.cue', weight: 50, caseSensitive: false)],
@@ -3007,7 +2988,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-amipro": const RegistryEntry(
     mediaType: 'application/x-amipro',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Lotus AmiPro document')],
+    comments: ['Lotus AmiPro document'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.sam', weight: 50, caseSensitive: false)],
@@ -3015,7 +2996,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-aportisdoc": const RegistryEntry(
     mediaType: 'application/x-aportisdoc',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('AportisDoc document')],
+    comments: ['AportisDoc document'],
     subclassOf: ['application/vnd.palm'],
     alias: [],
     globs: [
@@ -3045,7 +3026,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-applix-spreadsheet": const RegistryEntry(
     mediaType: 'application/x-applix-spreadsheet',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('Applix Spreadsheets spreadsheet')],
+    comments: ['Applix Spreadsheets spreadsheet'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.as', weight: 50, caseSensitive: false)],
@@ -3080,7 +3061,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-applix-word": const RegistryEntry(
     mediaType: 'application/x-applix-word',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Applix Words document')],
+    comments: ['Applix Words document'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.aw', weight: 50, caseSensitive: false)],
@@ -3109,7 +3090,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-arc": const RegistryEntry(
     mediaType: 'application/x-arc',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('ARC archive')],
+    comments: ['ARC archive'],
     subclassOf: [],
     alias: [],
     magic: [
@@ -3159,7 +3140,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-archive": const RegistryEntry(
     mediaType: 'application/x-archive',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('AR archive')],
+    comments: ['AR archive'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -3184,9 +3165,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-arj": const RegistryEntry(
     mediaType: 'application/x-arj',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('ARJ archive')],
-    acronym: IntlString.constant('ARJ'),
-    expandedAcronym: IntlString.constant('Archived by Robert Jung'),
+    comments: ['ARJ archive'],
+    acronym: 'ARJ',
+    expandedAcronym: 'Archived by Robert Jung',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.arj', weight: 50, caseSensitive: false)],
@@ -3206,9 +3187,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-asar": const RegistryEntry(
     mediaType: 'application/x-asar',
-    comments: [IntlString.constant('Electron Archive (ASAR)')],
-    acronym: IntlString.constant('ASAR'),
-    expandedAcronym: IntlString.constant('Atom Shell Archive Format'),
+    comments: ['Electron Archive (ASAR)'],
+    acronym: 'ASAR',
+    expandedAcronym: 'Atom Shell Archive Format',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.asar', weight: 50, caseSensitive: false)],
@@ -3237,9 +3218,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-asp": const RegistryEntry(
     mediaType: 'application/x-asp',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('ASP page')],
-    acronym: IntlString.constant('ASP'),
-    expandedAcronym: IntlString.constant('Active Server Page'),
+    comments: ['ASP page'],
+    acronym: 'ASP',
+    expandedAcronym: 'Active Server Page',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.asp', weight: 50, caseSensitive: false)],
@@ -3247,7 +3228,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-awk": const RegistryEntry(
     mediaType: 'application/x-awk',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('AWK script')],
+    comments: ['AWK script'],
     subclassOf: ['application/x-executable', 'text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.awk', weight: 50, caseSensitive: false)],
@@ -3322,16 +3303,16 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-bcpio": const RegistryEntry(
     mediaType: 'application/x-bcpio',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('BCPIO archive')],
-    acronym: IntlString.constant('BCPIO'),
-    expandedAcronym: IntlString.constant('Binary CPIO'),
+    comments: ['BCPIO archive'],
+    acronym: 'BCPIO',
+    expandedAcronym: 'Binary CPIO',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.bcpio', weight: 50, caseSensitive: false)],
   ),
   "application/x-bittorrent": const RegistryEntry(
     mediaType: 'application/x-bittorrent',
-    comments: [IntlString.constant('BitTorrent seed file')],
+    comments: ['BitTorrent seed file'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.torrent', weight: 50, caseSensitive: false)],
@@ -3352,7 +3333,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-blender": const RegistryEntry(
     mediaType: 'application/x-blender',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('Blender scene')],
+    comments: ['Blender scene'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -3377,7 +3358,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-bzdvi": const RegistryEntry(
     mediaType: 'application/x-bzdvi',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('TeX DVI document (bzip2-compressed)')],
+    comments: ['TeX DVI document (bzip2-compressed)'],
     subclassOf: ['application/x-bzip2'],
     alias: [],
     globs: [Glob(pattern: '*.dvi.bz2', weight: 50, caseSensitive: false)],
@@ -3385,7 +3366,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-bzip1": const RegistryEntry(
     mediaType: 'application/x-bzip1',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Bzip1 archive')],
+    comments: ['Bzip1 archive'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.bz', weight: 50, caseSensitive: false)],
@@ -3401,7 +3382,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-bzip1-compressed-tar": const RegistryEntry(
     mediaType: 'application/x-bzip1-compressed-tar',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Tar archive (bzip1-compressed)')],
+    comments: ['Tar archive (bzip1-compressed)'],
     subclassOf: ['application/x-bzip1'],
     alias: [],
     globs: [
@@ -3412,7 +3393,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-bzip2": const RegistryEntry(
     mediaType: 'application/x-bzip2',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Bzip2 archive')],
+    comments: ['Bzip2 archive'],
     subclassOf: [],
     alias: ['application/bzip2', 'application/x-bzip'],
     globs: [Glob(pattern: '*.bz2', weight: 50, caseSensitive: false)],
@@ -3428,7 +3409,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-bzip2-compressed-tar": const RegistryEntry(
     mediaType: 'application/x-bzip2-compressed-tar',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Tar archive (bzip2-compressed)')],
+    comments: ['Tar archive (bzip2-compressed)'],
     subclassOf: ['application/x-bzip2'],
     alias: ['application/x-bzip-compressed-tar'],
     globs: [
@@ -3440,7 +3421,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-bzip3": const RegistryEntry(
     mediaType: 'application/x-bzip3',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Bzip3 archive')],
+    comments: ['Bzip3 archive'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.bz3', weight: 50, caseSensitive: false)],
@@ -3461,7 +3442,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-bzip3-compressed-tar": const RegistryEntry(
     mediaType: 'application/x-bzip3-compressed-tar',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Tar archive (bzip3-compressed)')],
+    comments: ['Tar archive (bzip3-compressed)'],
     subclassOf: ['application/x-bzip3'],
     alias: [],
     globs: [
@@ -3472,7 +3453,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-bzpdf": const RegistryEntry(
     mediaType: 'application/x-bzpdf',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('PDF document (bzip2-compressed)')],
+    comments: ['PDF document (bzip2-compressed)'],
     subclassOf: ['application/x-bzip2'],
     alias: [],
     globs: [Glob(pattern: '*.pdf.bz2', weight: 50, caseSensitive: false)],
@@ -3480,7 +3461,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-bzpostscript": const RegistryEntry(
     mediaType: 'application/x-bzpostscript',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('PostScript document (bzip2-compressed)')],
+    comments: ['PostScript document (bzip2-compressed)'],
     subclassOf: ['application/x-bzip2'],
     alias: [],
     globs: [Glob(pattern: '*.ps.bz2', weight: 50, caseSensitive: false)],
@@ -3488,7 +3469,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.comicbook-rar": const RegistryEntry(
     mediaType: 'application/vnd.comicbook-rar',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Comic book archive (rar container)')],
+    comments: ['Comic book archive (rar container)'],
     subclassOf: ['application/vnd.rar'],
     alias: ['application/x-cbr'],
     globs: [Glob(pattern: '*.cbr', weight: 50, caseSensitive: false)],
@@ -3496,7 +3477,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-cb7": const RegistryEntry(
     mediaType: 'application/x-cb7',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Comic book archive (7z container)')],
+    comments: ['Comic book archive (7z container)'],
     subclassOf: ['application/x-7z-compressed'],
     alias: [],
     globs: [Glob(pattern: '*.cb7', weight: 50, caseSensitive: false)],
@@ -3504,7 +3485,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-cbt": const RegistryEntry(
     mediaType: 'application/x-cbt',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Comic book archive (tar container)')],
+    comments: ['Comic book archive (tar container)'],
     subclassOf: ['application/x-tar'],
     alias: [],
     globs: [Glob(pattern: '*.cbt', weight: 50, caseSensitive: false)],
@@ -3512,7 +3493,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.comicbook+zip": const RegistryEntry(
     mediaType: 'application/vnd.comicbook+zip',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Comic book archive (zip container)')],
+    comments: ['Comic book archive (zip container)'],
     subclassOf: ['application/zip'],
     alias: ['application/x-cbz'],
     globs: [Glob(pattern: '*.cbz', weight: 50, caseSensitive: false)],
@@ -3520,9 +3501,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-lrzip": const RegistryEntry(
     mediaType: 'application/x-lrzip',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Lrzip archive')],
-    acronym: IntlString.constant('Lrzip'),
-    expandedAcronym: IntlString.constant('Long Range Zip'),
+    comments: ['Lrzip archive'],
+    acronym: 'Lrzip',
+    expandedAcronym: 'Long Range Zip',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.lrz', weight: 50, caseSensitive: false)],
@@ -3538,7 +3519,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-lrzip-compressed-tar": const RegistryEntry(
     mediaType: 'application/x-lrzip-compressed-tar',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Tar archive (lrzip-compressed)')],
+    comments: ['Tar archive (lrzip-compressed)'],
     subclassOf: ['application/x-lrzip'],
     alias: [],
     globs: [
@@ -3548,14 +3529,14 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-apple-diskimage": const RegistryEntry(
     mediaType: 'application/x-apple-diskimage',
-    comments: [IntlString.constant('Apple disk image')],
+    comments: ['Apple disk image'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.dmg', weight: 50, caseSensitive: false)],
   ),
   "application/vnd.efi.img": const RegistryEntry(
     mediaType: 'application/vnd.efi.img',
-    comments: [IntlString.constant('Raw disk image')],
+    comments: ['Raw disk image'],
     subclassOf: [],
     alias: ['application/x-raw-disk-image'],
     globs: [
@@ -3566,7 +3547,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-raw-floppy-disk-image": const RegistryEntry(
     mediaType: 'application/x-raw-floppy-disk-image',
     genericIcon: GenericIcon.mediaFloppy,
-    comments: [IntlString.constant('Floppy disk image')],
+    comments: ['Floppy disk image'],
     subclassOf: ['application/vnd.efi.img'],
     alias: ['application/x-fd-file'],
     globs: [
@@ -3576,7 +3557,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-raw-disk-image-xz-compressed": const RegistryEntry(
     mediaType: 'application/x-raw-disk-image-xz-compressed',
-    comments: [IntlString.constant('Raw disk image (XZ-compressed)')],
+    comments: ['Raw disk image (XZ-compressed)'],
     subclassOf: ['application/x-xz'],
     alias: [],
     globs: [
@@ -3587,7 +3568,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.efi.iso": const RegistryEntry(
     mediaType: 'application/vnd.efi.iso',
     genericIcon: GenericIcon.mediaOptical,
-    comments: [IntlString.constant('Raw CD image')],
+    comments: ['Raw CD image'],
     subclassOf: ['application/vnd.efi.img'],
     alias: ['application/x-cd-image', 'application/x-iso9660-image'],
     globs: [
@@ -3598,7 +3579,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-compressed-iso": const RegistryEntry(
     mediaType: 'application/x-compressed-iso',
     genericIcon: GenericIcon.mediaOptical,
-    comments: [IntlString.constant('Compressed CD image')],
+    comments: ['Compressed CD image'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.cso', weight: 50, caseSensitive: false)],
@@ -3614,7 +3595,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-iso9660-appimage": const RegistryEntry(
     mediaType: 'application/x-iso9660-appimage',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('AppImage application bundle')],
+    comments: ['AppImage application bundle'],
     subclassOf: ['application/x-executable', 'application/vnd.efi.iso'],
     alias: [],
     globs: [Glob(pattern: '*.appimage', weight: 50, caseSensitive: false)],
@@ -3659,7 +3640,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-cdrdao-toc": const RegistryEntry(
     mediaType: 'application/x-cdrdao-toc',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('CD Table Of Contents')],
+    comments: ['CD Table Of Contents'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.toc', weight: 50, caseSensitive: false)],
@@ -3712,7 +3693,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-gd-rom-cue": const RegistryEntry(
     mediaType: 'application/x-gd-rom-cue',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('GD-ROM image cuesheet')],
+    comments: ['GD-ROM image cuesheet'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.gdi', weight: 50, caseSensitive: false)],
@@ -3720,7 +3701,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-discjuggler-cd-image": const RegistryEntry(
     mediaType: 'application/x-discjuggler-cd-image',
     genericIcon: GenericIcon.mediaOptical,
-    comments: [IntlString.constant('Padus DiscJuggler CD image')],
+    comments: ['Padus DiscJuggler CD image'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.cdi', weight: 50, caseSensitive: false)],
@@ -3728,9 +3709,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.chess-pgn": const RegistryEntry(
     mediaType: 'application/vnd.chess-pgn',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('PGN chess game notation')],
-    acronym: IntlString.constant('PGN'),
-    expandedAcronym: IntlString.constant('Portable Game Notation'),
+    comments: ['PGN chess game notation'],
+    acronym: 'PGN',
+    expandedAcronym: 'Portable Game Notation',
     subclassOf: ['text/plain'],
     alias: ['application/x-chess-pgn'],
     globs: [Glob(pattern: '*.pgn', weight: 50, caseSensitive: false)],
@@ -3751,23 +3732,23 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.ms-htmlhelp": const RegistryEntry(
     mediaType: 'application/vnd.ms-htmlhelp',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('CHM document')],
-    acronym: IntlString.constant('CHM'),
-    expandedAcronym: IntlString.constant('Compiled Help Modules'),
+    comments: ['CHM document'],
+    acronym: 'CHM',
+    expandedAcronym: 'Compiled Help Modules',
     subclassOf: [],
     alias: ['application/x-chm'],
     globs: [Glob(pattern: '*.chm', weight: 50, caseSensitive: false)],
   ),
   "application/x-class-file": const RegistryEntry(
     mediaType: 'application/x-class-file',
-    comments: [IntlString.constant('Java byte code')],
+    comments: ['Java byte code'],
     subclassOf: [],
     alias: [],
   ),
   "application/x-compress": const RegistryEntry(
     mediaType: 'application/x-compress',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('UNIX-compressed file')],
+    comments: ['UNIX-compressed file'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.Z', weight: 50, caseSensitive: false)],
@@ -3788,7 +3769,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-compressed-tar": const RegistryEntry(
     mediaType: 'application/x-compressed-tar',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Tar archive (gzip-compressed)')],
+    comments: ['Tar archive (gzip-compressed)'],
     subclassOf: ['application/gzip'],
     alias: [],
     globs: [
@@ -3798,7 +3779,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-core": const RegistryEntry(
     mediaType: 'application/x-core',
-    comments: [IntlString.constant('Program crash data')],
+    comments: ['Program crash data'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: 'core', weight: 50, caseSensitive: true)],
@@ -3875,7 +3856,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-cpio": const RegistryEntry(
     mediaType: 'application/x-cpio',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('CPIO archive')],
+    comments: ['CPIO archive'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.cpio', weight: 50, caseSensitive: false)],
@@ -3914,14 +3895,14 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-cpio-compressed": const RegistryEntry(
     mediaType: 'application/x-cpio-compressed',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('CPIO archive (gzip-compressed)')],
+    comments: ['CPIO archive (gzip-compressed)'],
     subclassOf: ['application/gzip'],
     alias: [],
     globs: [Glob(pattern: '*.cpio.gz', weight: 50, caseSensitive: false)],
   ),
   "application/x-perf-data": const RegistryEntry(
     mediaType: 'application/x-perf-data',
-    comments: [IntlString.constant('Perf data')],
+    comments: ['Perf data'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: 'perf.data', weight: 50, caseSensitive: true)],
@@ -3942,7 +3923,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-csh": const RegistryEntry(
     mediaType: 'application/x-csh',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('C shell script')],
+    comments: ['C shell script'],
     subclassOf: ['application/x-shellscript', 'text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.csh', weight: 50, caseSensitive: false)],
@@ -3981,7 +3962,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.dbf": const RegistryEntry(
     mediaType: 'application/vnd.dbf',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Xbase document')],
+    comments: ['Xbase document'],
     subclassOf: [],
     alias: [
       'application/dbase',
@@ -3994,7 +3975,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/ecmascript": const RegistryEntry(
     mediaType: 'application/ecmascript',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('ECMAScript program')],
+    comments: ['ECMAScript program'],
     subclassOf: ['text/javascript'],
     alias: ['text/ecmascript'],
     globs: [Glob(pattern: '*.es', weight: 50, caseSensitive: false)],
@@ -4002,7 +3983,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-mame-chd": const RegistryEntry(
     mediaType: 'application/x-mame-chd',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('MAME compressed hard disk image')],
+    comments: ['MAME compressed hard disk image'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.chd', weight: 50, caseSensitive: false)],
@@ -4023,7 +4004,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-sega-cd-rom": const RegistryEntry(
     mediaType: 'application/x-sega-cd-rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Sega CD disc image')],
+    comments: ['Sega CD disc image'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.iso', weight: 50, caseSensitive: false)],
@@ -4066,7 +4047,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-sega-pico-rom": const RegistryEntry(
     mediaType: 'application/x-sega-pico-rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Sega Pico ROM')],
+    comments: ['Sega Pico ROM'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.iso', weight: 50, caseSensitive: false)],
@@ -4087,7 +4068,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-saturn-rom": const RegistryEntry(
     mediaType: 'application/x-saturn-rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Sega Saturn disc image')],
+    comments: ['Sega Saturn disc image'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.iso', weight: 50, caseSensitive: false)],
@@ -4114,7 +4095,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-dreamcast-rom": const RegistryEntry(
     mediaType: 'application/x-dreamcast-rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Dreamcast disc image')],
+    comments: ['Dreamcast disc image'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.iso', weight: 50, caseSensitive: false)],
@@ -4135,7 +4116,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-nintendo-ds-rom": const RegistryEntry(
     mediaType: 'application/x-nintendo-ds-rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Nintendo DS ROM')],
+    comments: ['Nintendo DS ROM'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.nds', weight: 50, caseSensitive: false)],
@@ -4143,7 +4124,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-nintendo-3ds-rom": const RegistryEntry(
     mediaType: 'application/x-nintendo-3ds-rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Nintendo 3DS ROM')],
+    comments: ['Nintendo 3DS ROM'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -4167,7 +4148,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-nintendo-3ds-executable": const RegistryEntry(
     mediaType: 'application/x-nintendo-3ds-executable',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Nintendo 3DS Executable')],
+    comments: ['Nintendo 3DS Executable'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.3dsx', weight: 50, caseSensitive: false)],
@@ -4183,7 +4164,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-pc-engine-rom": const RegistryEntry(
     mediaType: 'application/x-pc-engine-rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('PC Engine ROM')],
+    comments: ['PC Engine ROM'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.pce', weight: 50, caseSensitive: false)],
@@ -4191,7 +4172,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-wii-rom": const RegistryEntry(
     mediaType: 'application/x-wii-rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Wii disc image')],
+    comments: ['Wii disc image'],
     subclassOf: [],
     alias: [
       'application/x-wii-iso-image',
@@ -4223,7 +4204,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-wii-wad": const RegistryEntry(
     mediaType: 'application/x-wii-wad',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('WiiWare bundle')],
+    comments: ['WiiWare bundle'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.wad', weight: 50, caseSensitive: false)],
@@ -4256,7 +4237,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-gamecube-rom": const RegistryEntry(
     mediaType: 'application/x-gamecube-rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('GameCube disc image')],
+    comments: ['GameCube disc image'],
     subclassOf: [],
     alias: ['application/x-gamecube-iso-image'],
     globs: [Glob(pattern: '*.iso', weight: 50, caseSensitive: false)],
@@ -4277,7 +4258,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-thomson-cartridge-memo7": const RegistryEntry(
     mediaType: 'application/x-thomson-cartridge-memo7',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Thomson M\xe9mo7 cartridge')],
+    comments: ['Thomson M\xe9mo7 cartridge'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.m7', weight: 50, caseSensitive: false)],
@@ -4285,7 +4266,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-thomson-cassette": const RegistryEntry(
     mediaType: 'application/x-thomson-cassette',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Thomson cassette')],
+    comments: ['Thomson cassette'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.k7', weight: 50, caseSensitive: false)],
@@ -4293,9 +4274,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-hfe-floppy-image": const RegistryEntry(
     mediaType: 'application/x-hfe-floppy-image',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('HFE floppy disk image')],
-    acronym: IntlString.constant('HFE'),
-    expandedAcronym: IntlString.constant('HxC Floppy Emulator'),
+    comments: ['HFE floppy disk image'],
+    acronym: 'HFE',
+    expandedAcronym: 'HxC Floppy Emulator',
     subclassOf: [],
     alias: ['application/x-hfe-file'],
     globs: [Glob(pattern: '*.hfe', weight: 50, caseSensitive: false)],
@@ -4316,9 +4297,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-thomson-sap-image": const RegistryEntry(
     mediaType: 'application/x-thomson-sap-image',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('SAP Thomson floppy disk image')],
-    acronym: IntlString.constant('SAP'),
-    expandedAcronym: IntlString.constant('Syst\xe8me d\'Archivage Pukall'),
+    comments: ['SAP Thomson floppy disk image'],
+    acronym: 'SAP',
+    expandedAcronym: 'Syst\xe8me d\'Archivage Pukall',
     subclassOf: [],
     alias: ['application/x-sap-file'],
     globs: [Glob(pattern: '*.sap', weight: 50, caseSensitive: false)],
@@ -4340,7 +4321,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.debian.binary-package": const RegistryEntry(
     mediaType: 'application/vnd.debian.binary-package',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Debian package')],
+    comments: ['Debian package'],
     subclassOf: [],
     alias: ['application/x-deb', 'application/x-debian-package'],
     globs: [
@@ -4372,7 +4353,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-designer": const RegistryEntry(
     mediaType: 'application/x-designer',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Qt Designer interface document')],
+    comments: ['Qt Designer interface document'],
     subclassOf: ['application/xml'],
     alias: [],
     globs: [Glob(pattern: '*.ui', weight: 50, caseSensitive: false)],
@@ -4399,7 +4380,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-desktop": const RegistryEntry(
     mediaType: 'application/x-desktop',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('Desktop entry')],
+    comments: ['Desktop entry'],
     subclassOf: ['text/plain'],
     alias: ['application/x-gnome-app-info'],
     globs: [
@@ -4446,7 +4427,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-fictionbook+xml": const RegistryEntry(
     mediaType: 'application/x-fictionbook+xml',
-    comments: [IntlString.constant('FictionBook document')],
+    comments: ['FictionBook document'],
     subclassOf: ['application/xml'],
     alias: ['application/x-fictionbook'],
     globs: [Glob(pattern: '*.fb2', weight: 50, caseSensitive: false)],
@@ -4472,7 +4453,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-zip-compressed-fb2": const RegistryEntry(
     mediaType: 'application/x-zip-compressed-fb2',
-    comments: [IntlString.constant('Compressed FictionBook document')],
+    comments: ['Compressed FictionBook document'],
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.fb2.zip', weight: 50, caseSensitive: false)],
@@ -4501,7 +4482,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-dia-diagram": const RegistryEntry(
     mediaType: 'application/x-dia-diagram',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('Dia diagram')],
+    comments: ['Dia diagram'],
     subclassOf: ['application/xml'],
     alias: [],
     globs: [Glob(pattern: '*.dia', weight: 50, caseSensitive: false)],
@@ -4528,7 +4509,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-dia-shape": const RegistryEntry(
     mediaType: 'application/x-dia-shape',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('Dia shape')],
+    comments: ['Dia shape'],
     subclassOf: ['application/xml'],
     alias: [],
     globs: [Glob(pattern: '*.shape', weight: 50, caseSensitive: false)],
@@ -4555,9 +4536,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-dvi": const RegistryEntry(
     mediaType: 'application/x-dvi',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('TeX DVI document')],
-    acronym: IntlString.constant('DVI'),
-    expandedAcronym: IntlString.constant('Device independent file format'),
+    comments: ['TeX DVI document'],
+    acronym: 'DVI',
+    expandedAcronym: 'Device independent file format',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.dvi', weight: 50, caseSensitive: false)],
@@ -4577,7 +4558,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-e-theme": const RegistryEntry(
     mediaType: 'application/x-e-theme',
-    comments: [IntlString.constant('Enlightenment theme')],
+    comments: ['Enlightenment theme'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.etheme', weight: 50, caseSensitive: false)],
@@ -4585,7 +4566,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-egon": const RegistryEntry(
     mediaType: 'application/x-egon',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('Egon Animator animation')],
+    comments: ['Egon Animator animation'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.egon', weight: 50, caseSensitive: false)],
@@ -4593,7 +4574,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-executable": const RegistryEntry(
     mediaType: 'application/x-executable',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Executable')],
+    comments: ['Executable'],
     subclassOf: [],
     alias: [],
     magic: [
@@ -4640,9 +4621,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-fluid": const RegistryEntry(
     mediaType: 'application/x-fluid',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('FLTK Fluid file')],
-    acronym: IntlString.constant('FLTK'),
-    expandedAcronym: IntlString.constant('Fast Light Toolkit'),
+    comments: ['FLTK Fluid file'],
+    acronym: 'FLTK',
+    expandedAcronym: 'Fast Light Toolkit',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.fl', weight: 50, caseSensitive: false)],
@@ -4663,7 +4644,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-font-type1": const RegistryEntry(
     mediaType: 'application/x-font-type1',
     genericIcon: GenericIcon.fontXGeneric,
-    comments: [IntlString.constant('PostScript type-1 font')],
+    comments: ['PostScript type-1 font'],
     subclassOf: ['application/postscript'],
     alias: [],
     globs: [
@@ -4713,7 +4694,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-font-afm": const RegistryEntry(
     mediaType: 'application/x-font-afm',
     genericIcon: GenericIcon.fontXGeneric,
-    comments: [IntlString.constant('Adobe font metrics')],
+    comments: ['Adobe font metrics'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.afm', weight: 50, caseSensitive: false)],
@@ -4721,7 +4702,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-font-bdf": const RegistryEntry(
     mediaType: 'application/x-font-bdf',
     genericIcon: GenericIcon.fontXGeneric,
-    comments: [IntlString.constant('BDF font')],
+    comments: ['BDF font'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.bdf', weight: 50, caseSensitive: false)],
@@ -4742,7 +4723,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-font-dos": const RegistryEntry(
     mediaType: 'application/x-font-dos',
     genericIcon: GenericIcon.fontXGeneric,
-    comments: [IntlString.constant('DOS font')],
+    comments: ['DOS font'],
     subclassOf: [],
     alias: [],
     magic: [
@@ -4774,7 +4755,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-font-framemaker": const RegistryEntry(
     mediaType: 'application/x-font-framemaker',
     genericIcon: GenericIcon.fontXGeneric,
-    comments: [IntlString.constant('Adobe FrameMaker font')],
+    comments: ['Adobe FrameMaker font'],
     subclassOf: [],
     alias: [],
     magic: [
@@ -4794,7 +4775,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-font-libgrx": const RegistryEntry(
     mediaType: 'application/x-font-libgrx',
     genericIcon: GenericIcon.fontXGeneric,
-    comments: [IntlString.constant('LIBGRX font')],
+    comments: ['LIBGRX font'],
     subclassOf: [],
     alias: [],
     magic: [
@@ -4814,9 +4795,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-font-linux-psf": const RegistryEntry(
     mediaType: 'application/x-font-linux-psf',
     genericIcon: GenericIcon.fontXGeneric,
-    comments: [IntlString.constant('Linux PSF console font')],
-    acronym: IntlString.constant('PSF'),
-    expandedAcronym: IntlString.constant('PC Screen Font'),
+    comments: ['Linux PSF console font'],
+    acronym: 'PSF',
+    expandedAcronym: 'PC Screen Font',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.psf', weight: 50, caseSensitive: false)],
@@ -4837,9 +4818,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-gz-font-linux-psf": const RegistryEntry(
     mediaType: 'application/x-gz-font-linux-psf',
     genericIcon: GenericIcon.fontXGeneric,
-    comments: [IntlString.constant('Linux PSF console font (gzip-compressed)')],
-    acronym: IntlString.constant('PSF'),
-    expandedAcronym: IntlString.constant('PC Screen Font'),
+    comments: ['Linux PSF console font (gzip-compressed)'],
+    acronym: 'PSF',
+    expandedAcronym: 'PC Screen Font',
     subclassOf: ['application/gzip'],
     alias: [],
     globs: [Glob(pattern: '*.psf.gz', weight: 50, caseSensitive: false)],
@@ -4847,9 +4828,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-font-pcf": const RegistryEntry(
     mediaType: 'application/x-font-pcf',
     genericIcon: GenericIcon.fontXGeneric,
-    comments: [IntlString.constant('PCF font')],
-    acronym: IntlString.constant('PCF'),
-    expandedAcronym: IntlString.constant('Portable Compiled Format'),
+    comments: ['PCF font'],
+    acronym: 'PCF',
+    expandedAcronym: 'Portable Compiled Format',
     subclassOf: [],
     alias: [],
     globs: [
@@ -4874,7 +4855,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-font-speedo": const RegistryEntry(
     mediaType: 'application/x-font-speedo',
     genericIcon: GenericIcon.fontXGeneric,
-    comments: [IntlString.constant('Speedo font')],
+    comments: ['Speedo font'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.spd', weight: 50, caseSensitive: false)],
@@ -4895,7 +4876,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-font-sunos-news": const RegistryEntry(
     mediaType: 'application/x-font-sunos-news',
     genericIcon: GenericIcon.fontXGeneric,
-    comments: [IntlString.constant('SunOS News font')],
+    comments: ['SunOS News font'],
     subclassOf: [],
     alias: [],
     magic: [
@@ -4927,9 +4908,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/font-tdpfr": const RegistryEntry(
     mediaType: 'application/font-tdpfr',
     genericIcon: GenericIcon.fontXGeneric,
-    comments: [IntlString.constant('TDPFR font')],
-    acronym: IntlString.constant('TDPFR'),
-    expandedAcronym: IntlString.constant('TrueDoc Portable Font Resource'),
+    comments: ['TDPFR font'],
+    acronym: 'TDPFR',
+    expandedAcronym: 'TrueDoc Portable Font Resource',
     subclassOf: [],
     alias: ['application/vnd.truedoc'],
     globs: [Glob(pattern: '*.pfr', weight: 50, caseSensitive: false)],
@@ -4956,7 +4937,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-font-tex": const RegistryEntry(
     mediaType: 'application/x-font-tex',
     genericIcon: GenericIcon.fontXGeneric,
-    comments: [IntlString.constant('TeX font')],
+    comments: ['TeX font'],
     subclassOf: [],
     alias: [],
     magic: [
@@ -4988,7 +4969,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-font-tex-tfm": const RegistryEntry(
     mediaType: 'application/x-font-tex-tfm',
     genericIcon: GenericIcon.fontXGeneric,
-    comments: [IntlString.constant('TeX font metrics')],
+    comments: ['TeX font metrics'],
     subclassOf: [],
     alias: [],
     magic: [
@@ -5014,7 +4995,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-font-ttx": const RegistryEntry(
     mediaType: 'application/x-font-ttx',
     genericIcon: GenericIcon.fontXGeneric,
-    comments: [IntlString.constant('TrueType XML font')],
+    comments: ['TrueType XML font'],
     subclassOf: ['application/xml'],
     alias: [],
     globs: [Glob(pattern: '*.ttx', weight: 50, caseSensitive: false)],
@@ -5035,7 +5016,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-font-vfont": const RegistryEntry(
     mediaType: 'application/x-font-vfont',
     genericIcon: GenericIcon.fontXGeneric,
-    comments: [IntlString.constant('V font')],
+    comments: ['V font'],
     subclassOf: [],
     alias: [],
     magic: [
@@ -5050,7 +5031,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.framemaker": const RegistryEntry(
     mediaType: 'application/vnd.framemaker',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Adobe FrameMaker document')],
+    comments: ['Adobe FrameMaker document'],
     subclassOf: [],
     alias: ['application/x-frame'],
     globs: [Glob(pattern: '*.fm', weight: 50, caseSensitive: false)],
@@ -5102,7 +5083,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-gameboy-rom": const RegistryEntry(
     mediaType: 'application/x-gameboy-rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Game Boy ROM')],
+    comments: ['Game Boy ROM'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -5135,7 +5116,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-gameboy-color-rom": const RegistryEntry(
     mediaType: 'application/x-gameboy-color-rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Game Boy Color ROM')],
+    comments: ['Game Boy Color ROM'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -5167,7 +5148,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-gba-rom": const RegistryEntry(
     mediaType: 'application/x-gba-rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Game Boy Advance ROM')],
+    comments: ['Game Boy Advance ROM'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -5178,16 +5159,16 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-virtual-boy-rom": const RegistryEntry(
     mediaType: 'application/x-virtual-boy-rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Virtual Boy ROM')],
+    comments: ['Virtual Boy ROM'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.vb', weight: 50, caseSensitive: false)],
   ),
   "application/x-gdbm": const RegistryEntry(
     mediaType: 'application/x-gdbm',
-    comments: [IntlString.constant('GDBM database')],
-    acronym: IntlString.constant('GDBM'),
-    expandedAcronym: IntlString.constant('GNU Database Manager'),
+    comments: ['GDBM database'],
+    acronym: 'GDBM',
+    expandedAcronym: 'GNU Database Manager',
     subclassOf: [],
     alias: [],
     magic: [
@@ -5214,7 +5195,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-genesis-rom": const RegistryEntry(
     mediaType: 'application/x-genesis-rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Genesis ROM')],
+    comments: ['Genesis ROM'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -5263,7 +5244,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-genesis-32x-rom": const RegistryEntry(
     mediaType: 'application/x-genesis-32x-rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Genesis 32X ROM')],
+    comments: ['Genesis 32X ROM'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -5286,7 +5267,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-gettext-translation": const RegistryEntry(
     mediaType: 'application/x-gettext-translation',
-    comments: [IntlString.constant('Translated messages (machine-readable)')],
+    comments: ['Translated messages (machine-readable)'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -5316,7 +5297,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-gtk-builder": const RegistryEntry(
     mediaType: 'application/x-gtk-builder',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('GTK+ Builder interface document')],
+    comments: ['GTK+ Builder interface document'],
     subclassOf: ['application/xml'],
     alias: [],
     globs: [Glob(pattern: '*.ui', weight: 50, caseSensitive: false)],
@@ -5337,7 +5318,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-glade": const RegistryEntry(
     mediaType: 'application/x-glade',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Glade project')],
+    comments: ['Glade project'],
     subclassOf: ['application/xml'],
     alias: [],
     globs: [Glob(pattern: '*.glade', weight: 50, caseSensitive: false)],
@@ -5358,7 +5339,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-gnucash": const RegistryEntry(
     mediaType: 'application/x-gnucash',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('GnuCash financial data')],
+    comments: ['GnuCash financial data'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -5370,7 +5351,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-gnumeric": const RegistryEntry(
     mediaType: 'application/x-gnumeric',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('Gnumeric spreadsheet')],
+    comments: ['Gnumeric spreadsheet'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.gnumeric', weight: 50, caseSensitive: false)],
@@ -5397,7 +5378,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-gnuplot": const RegistryEntry(
     mediaType: 'application/x-gnuplot',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Gnuplot document')],
+    comments: ['Gnuplot document'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -5409,7 +5390,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-graphite": const RegistryEntry(
     mediaType: 'application/x-graphite',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Graphite scientific graph')],
+    comments: ['Graphite scientific graph'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.gra', weight: 50, caseSensitive: false)],
@@ -5417,7 +5398,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-gtktalog": const RegistryEntry(
     mediaType: 'application/x-gtktalog',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('GTKtalog catalog')],
+    comments: ['GTKtalog catalog'],
     subclassOf: [],
     alias: [],
     magic: [
@@ -5437,7 +5418,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-gzdvi": const RegistryEntry(
     mediaType: 'application/x-gzdvi',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('TeX DVI document (gzip-compressed)')],
+    comments: ['TeX DVI document (gzip-compressed)'],
     subclassOf: ['application/gzip'],
     alias: [],
     globs: [Glob(pattern: '*.dvi.gz', weight: 50, caseSensitive: false)],
@@ -5445,7 +5426,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/gzip": const RegistryEntry(
     mediaType: 'application/gzip',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Gzip archive')],
+    comments: ['Gzip archive'],
     subclassOf: [],
     alias: ['application/x-gzip'],
     globs: [Glob(pattern: '*.gz', weight: 50, caseSensitive: false)],
@@ -5466,7 +5447,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-gzpdf": const RegistryEntry(
     mediaType: 'application/x-gzpdf',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('PDF document (gzip-compressed)')],
+    comments: ['PDF document (gzip-compressed)'],
     subclassOf: ['application/gzip'],
     alias: [],
     globs: [Glob(pattern: '*.pdf.gz', weight: 50, caseSensitive: false)],
@@ -5474,7 +5455,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-gzpostscript": const RegistryEntry(
     mediaType: 'application/x-gzpostscript',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('PostScript document (gzip-compressed)')],
+    comments: ['PostScript document (gzip-compressed)'],
     subclassOf: ['application/gzip'],
     alias: [],
     globs: [Glob(pattern: '*.ps.gz', weight: 50, caseSensitive: false)],
@@ -5482,9 +5463,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-hdf": const RegistryEntry(
     mediaType: 'application/x-hdf',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('HDF document')],
-    acronym: IntlString.constant('HDF'),
-    expandedAcronym: IntlString.constant('Hierarchical Data Format'),
+    comments: ['HDF document'],
+    acronym: 'HDF',
+    expandedAcronym: 'Hierarchical Data Format',
     subclassOf: [],
     alias: [],
     globs: [
@@ -5516,9 +5497,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-iff": const RegistryEntry(
     mediaType: 'application/x-iff',
-    comments: [IntlString.constant('IFF file')],
-    acronym: IntlString.constant('IFF'),
-    expandedAcronym: IntlString.constant('Interchange File Format'),
+    comments: ['IFF file'],
+    acronym: 'IFF',
+    expandedAcronym: 'Interchange File Format',
     subclassOf: [],
     alias: [],
     magic: [
@@ -5532,7 +5513,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-ipod-firmware": const RegistryEntry(
     mediaType: 'application/x-ipod-firmware',
-    comments: [IntlString.constant('iPod firmware')],
+    comments: ['iPod firmware'],
     subclassOf: [],
     alias: [],
     magic: [
@@ -5552,14 +5533,14 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/java-archive": const RegistryEntry(
     mediaType: 'application/java-archive',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Java archive')],
+    comments: ['Java archive'],
     subclassOf: ['application/zip'],
     alias: ['application/x-jar', 'application/x-java-archive'],
     globs: [Glob(pattern: '*.jar', weight: 50, caseSensitive: false)],
   ),
   "application/x-java": const RegistryEntry(
     mediaType: 'application/x-java',
-    comments: [IntlString.constant('Java class')],
+    comments: ['Java class'],
     subclassOf: [],
     alias: [
       'application/java',
@@ -5586,9 +5567,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-java-jnlp-file": const RegistryEntry(
     mediaType: 'application/x-java-jnlp-file',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('JNLP file')],
-    acronym: IntlString.constant('JNLP'),
-    expandedAcronym: IntlString.constant('Java Network Launching Protocol'),
+    comments: ['JNLP file'],
+    acronym: 'JNLP',
+    expandedAcronym: 'Java Network Launching Protocol',
     subclassOf: ['application/xml'],
     alias: [],
     globs: [Glob(pattern: '*.jnlp', weight: 50, caseSensitive: false)],
@@ -5608,7 +5589,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-java-keystore": const RegistryEntry(
     mediaType: 'application/x-java-keystore',
-    comments: [IntlString.constant('Java keystore')],
+    comments: ['Java keystore'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -5632,9 +5613,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-java-jce-keystore": const RegistryEntry(
     mediaType: 'application/x-java-jce-keystore',
-    comments: [IntlString.constant('Java JCE keystore')],
-    acronym: IntlString.constant('JCE'),
-    expandedAcronym: IntlString.constant('Java Cryptography Extension'),
+    comments: ['Java JCE keystore'],
+    acronym: 'JCE',
+    expandedAcronym: 'Java Cryptography Extension',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.jceks', weight: 50, caseSensitive: false)],
@@ -5655,7 +5636,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-java-pack200": const RegistryEntry(
     mediaType: 'application/x-java-pack200',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Pack200 Java archive')],
+    comments: ['Pack200 Java archive'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.pack', weight: 50, caseSensitive: false)],
@@ -5676,9 +5657,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/json": const RegistryEntry(
     mediaType: 'application/json',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('JSON document')],
-    acronym: IntlString.constant('JSON'),
-    expandedAcronym: IntlString.constant('JavaScript Object Notation'),
+    comments: ['JSON document'],
+    acronym: 'JSON',
+    expandedAcronym: 'JavaScript Object Notation',
     subclassOf: ['application/json5'],
     alias: [],
     globs: [Glob(pattern: '*.json', weight: 50, caseSensitive: false)],
@@ -5686,9 +5667,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/json5": const RegistryEntry(
     mediaType: 'application/json5',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('JSON5 document')],
-    acronym: IntlString.constant('JSON5'),
-    expandedAcronym: IntlString.constant('JavaScript Object Notation 5'),
+    comments: ['JSON5 document'],
+    acronym: 'JSON5',
+    expandedAcronym: 'JavaScript Object Notation 5',
     subclassOf: ['text/javascript'],
     alias: [],
     globs: [Glob(pattern: '*.json5', weight: 50, caseSensitive: false)],
@@ -5696,9 +5677,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/jrd+json": const RegistryEntry(
     mediaType: 'application/jrd+json',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('JRD document')],
-    acronym: IntlString.constant('JRD'),
-    expandedAcronym: IntlString.constant('JSON Resource Descriptor'),
+    comments: ['JRD document'],
+    acronym: 'JRD',
+    expandedAcronym: 'JSON Resource Descriptor',
     subclassOf: ['application/json'],
     alias: [],
     globs: [Glob(pattern: '*.jrd', weight: 50, caseSensitive: false)],
@@ -5706,9 +5687,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/json-patch+json": const RegistryEntry(
     mediaType: 'application/json-patch+json',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('JSON patch')],
-    acronym: IntlString.constant('JSON'),
-    expandedAcronym: IntlString.constant('JavaScript Object Notation'),
+    comments: ['JSON patch'],
+    acronym: 'JSON',
+    expandedAcronym: 'JavaScript Object Notation',
     subclassOf: ['application/json'],
     alias: [],
     globs: [Glob(pattern: '*.json-patch', weight: 50, caseSensitive: false)],
@@ -5716,11 +5697,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/ld+json": const RegistryEntry(
     mediaType: 'application/ld+json',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('JSON-LD document')],
-    acronym: IntlString.constant('JSON-LD'),
-    expandedAcronym: IntlString.constant(
-      'JavaScript Object Notation for Linked Data',
-    ),
+    comments: ['JSON-LD document'],
+    acronym: 'JSON-LD',
+    expandedAcronym: 'JavaScript Object Notation for Linked Data',
     subclassOf: ['application/json'],
     alias: [],
     globs: [Glob(pattern: '*.jsonld', weight: 50, caseSensitive: false)],
@@ -5728,7 +5707,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/schema+json": const RegistryEntry(
     mediaType: 'application/schema+json',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('JSON schema')],
+    comments: ['JSON schema'],
     subclassOf: ['application/json'],
     alias: [],
     globs: [Glob(pattern: '*.json', weight: 50, caseSensitive: false)],
@@ -5757,7 +5736,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-ipynb+json": const RegistryEntry(
     mediaType: 'application/x-ipynb+json',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Jupyter notebook document')],
+    comments: ['Jupyter notebook document'],
     subclassOf: ['application/json'],
     alias: [],
     globs: [Glob(pattern: '*.ipynb', weight: 50, caseSensitive: false)],
@@ -5786,7 +5765,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.coffeescript": const RegistryEntry(
     mediaType: 'application/vnd.coffeescript',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('CoffeeScript document')],
+    comments: ['CoffeeScript document'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.coffee', weight: 50, caseSensitive: false)],
@@ -5794,7 +5773,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-jbuilder-project": const RegistryEntry(
     mediaType: 'application/x-jbuilder-project',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('JBuilder project')],
+    comments: ['JBuilder project'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -5805,7 +5784,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-karbon": const RegistryEntry(
     mediaType: 'application/x-karbon',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('Karbon14 drawing')],
+    comments: ['Karbon14 drawing'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.karbon', weight: 50, caseSensitive: false)],
@@ -5864,7 +5843,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-kchart": const RegistryEntry(
     mediaType: 'application/x-kchart',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('KChart chart')],
+    comments: ['KChart chart'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.chrt', weight: 50, caseSensitive: false)],
@@ -5922,28 +5901,28 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-kexi-connectiondata": const RegistryEntry(
     mediaType: 'application/x-kexi-connectiondata',
-    comments: [IntlString.constant('Kexi settings')],
+    comments: ['Kexi settings'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.kexic', weight: 50, caseSensitive: false)],
   ),
   "application/x-kexiproject-shortcut": const RegistryEntry(
     mediaType: 'application/x-kexiproject-shortcut',
-    comments: [IntlString.constant('Kexi shortcut')],
+    comments: ['Kexi shortcut'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.kexis', weight: 50, caseSensitive: false)],
   ),
   "application/x-kexiproject-sqlite2": const RegistryEntry(
     mediaType: 'application/x-kexiproject-sqlite2',
-    comments: [IntlString.constant('Kexi database file')],
+    comments: ['Kexi database file'],
     subclassOf: ['application/x-sqlite2'],
     alias: [],
     globs: [Glob(pattern: '*.kexi', weight: 50, caseSensitive: false)],
   ),
   "application/x-kexiproject-sqlite3": const RegistryEntry(
     mediaType: 'application/x-kexiproject-sqlite3',
-    comments: [IntlString.constant('Kexi database file')],
+    comments: ['Kexi database file'],
     subclassOf: ['application/vnd.sqlite3'],
     alias: ['application/x-vnd.kde.kexi', 'application/x-kexiproject-sqlite'],
     globs: [Glob(pattern: '*.kexi', weight: 50, caseSensitive: false)],
@@ -5951,7 +5930,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-kformula": const RegistryEntry(
     mediaType: 'application/x-kformula',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('KFormula formula')],
+    comments: ['KFormula formula'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.kfo', weight: 50, caseSensitive: false)],
@@ -6010,7 +5989,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-killustrator": const RegistryEntry(
     mediaType: 'application/x-killustrator',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('KIllustrator drawing')],
+    comments: ['KIllustrator drawing'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.kil', weight: 50, caseSensitive: false)],
@@ -6047,7 +6026,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-kivio": const RegistryEntry(
     mediaType: 'application/x-kivio',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Kivio flowchart')],
+    comments: ['Kivio flowchart'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.flw', weight: 50, caseSensitive: false)],
@@ -6106,7 +6085,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-kontour": const RegistryEntry(
     mediaType: 'application/x-kontour',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('Kontour drawing')],
+    comments: ['Kontour drawing'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.kon', weight: 50, caseSensitive: false)],
@@ -6165,7 +6144,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-kpovmodeler": const RegistryEntry(
     mediaType: 'application/x-kpovmodeler',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('KPovModeler scene')],
+    comments: ['KPovModeler scene'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.kpm', weight: 50, caseSensitive: false)],
@@ -6173,7 +6152,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-kpresenter": const RegistryEntry(
     mediaType: 'application/x-kpresenter',
     genericIcon: GenericIcon.xOfficePresentation,
-    comments: [IntlString.constant('KPresenter presentation')],
+    comments: ['KPresenter presentation'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -6235,7 +6214,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-krita": const RegistryEntry(
     mediaType: 'application/x-krita',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Krita document')],
+    comments: ['Krita document'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -6309,7 +6288,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-kspread": const RegistryEntry(
     mediaType: 'application/x-kspread',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('KSpread spreadsheet')],
+    comments: ['KSpread spreadsheet'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.ksp', weight: 50, caseSensitive: false)],
@@ -6368,7 +6347,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-kspread-crypt": const RegistryEntry(
     mediaType: 'application/x-kspread-crypt',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('KSpread spreadsheet (encrypted)')],
+    comments: ['KSpread spreadsheet (encrypted)'],
     subclassOf: [],
     alias: [],
     magic: [
@@ -6388,7 +6367,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-ksysv-package": const RegistryEntry(
     mediaType: 'application/x-ksysv-package',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('KSysV init package')],
+    comments: ['KSysV init package'],
     subclassOf: [],
     alias: [],
     magic: [
@@ -6411,7 +6390,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-kugar": const RegistryEntry(
     mediaType: 'application/x-kugar',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Kugar document')],
+    comments: ['Kugar document'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.kud', weight: 50, caseSensitive: false)],
@@ -6419,7 +6398,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-kword": const RegistryEntry(
     mediaType: 'application/x-kword',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('KWord document')],
+    comments: ['KWord document'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -6481,7 +6460,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-kword-crypt": const RegistryEntry(
     mediaType: 'application/x-kword-crypt',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('KWord document (encrypted)')],
+    comments: ['KWord document (encrypted)'],
     subclassOf: [],
     alias: [],
     magic: [
@@ -6501,7 +6480,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-lha": const RegistryEntry(
     mediaType: 'application/x-lha',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('LHA archive')],
+    comments: ['LHA archive'],
     subclassOf: [],
     alias: ['application/x-lzh-compressed'],
     globs: [
@@ -6591,7 +6570,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-lhz": const RegistryEntry(
     mediaType: 'application/x-lhz',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('LHZ archive')],
+    comments: ['LHZ archive'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.lhz', weight: 50, caseSensitive: false)],
@@ -6599,7 +6578,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-lyx": const RegistryEntry(
     mediaType: 'application/x-lyx',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('LyX document')],
+    comments: ['LyX document'],
     subclassOf: ['text/plain'],
     alias: ['text/x-lyx'],
     globs: [Glob(pattern: '*.lyx', weight: 50, caseSensitive: false)],
@@ -6615,7 +6594,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-lz4": const RegistryEntry(
     mediaType: 'application/x-lz4',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('LZ4 archive')],
+    comments: ['LZ4 archive'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.lz4', weight: 50, caseSensitive: false)],
@@ -6642,7 +6621,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-lz4-compressed-tar": const RegistryEntry(
     mediaType: 'application/x-lz4-compressed-tar',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Tar archive (LZ4-compressed)')],
+    comments: ['Tar archive (LZ4-compressed)'],
     subclassOf: ['application/x-lz4'],
     alias: [],
     globs: [Glob(pattern: '*.tar.lz4', weight: 50, caseSensitive: false)],
@@ -6650,7 +6629,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-lzip": const RegistryEntry(
     mediaType: 'application/x-lzip',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Lzip archive')],
+    comments: ['Lzip archive'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.lz', weight: 50, caseSensitive: false)],
@@ -6666,7 +6645,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-lzip-compressed-tar": const RegistryEntry(
     mediaType: 'application/x-lzip-compressed-tar',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Tar archive (lzip-compressed)')],
+    comments: ['Tar archive (lzip-compressed)'],
     subclassOf: ['application/x-lzip'],
     alias: [],
     globs: [Glob(pattern: '*.tar.lz', weight: 50, caseSensitive: false)],
@@ -6674,7 +6653,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-lzpdf": const RegistryEntry(
     mediaType: 'application/x-lzpdf',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('PDF document (lzip-compressed)')],
+    comments: ['PDF document (lzip-compressed)'],
     subclassOf: ['application/x-lzip'],
     alias: [],
     globs: [Glob(pattern: '*.pdf.lz', weight: 50, caseSensitive: false)],
@@ -6682,9 +6661,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-lzma": const RegistryEntry(
     mediaType: 'application/x-lzma',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('LZMA archive')],
-    acronym: IntlString.constant('LZMA'),
-    expandedAcronym: IntlString.constant('Lempel-Ziv-Markov chain-Algorithm'),
+    comments: ['LZMA archive'],
+    acronym: 'LZMA',
+    expandedAcronym: 'Lempel-Ziv-Markov chain-Algorithm',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.lzma', weight: 50, caseSensitive: false)],
@@ -6692,7 +6671,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-lzma-compressed-tar": const RegistryEntry(
     mediaType: 'application/x-lzma-compressed-tar',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Tar archive (LZMA-compressed)')],
+    comments: ['Tar archive (LZMA-compressed)'],
     subclassOf: ['application/x-lzma'],
     alias: [],
     globs: [
@@ -6703,9 +6682,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-lzop": const RegistryEntry(
     mediaType: 'application/x-lzop',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('LZO archive')],
-    acronym: IntlString.constant('LZO'),
-    expandedAcronym: IntlString.constant('Lempel-Ziv-Oberhumer'),
+    comments: ['LZO archive'],
+    acronym: 'LZO',
+    expandedAcronym: 'Lempel-Ziv-Oberhumer',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.lzo', weight: 50, caseSensitive: false)],
@@ -6726,7 +6705,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-qpress": const RegistryEntry(
     mediaType: 'application/x-qpress',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Qpress archive')],
+    comments: ['Qpress archive'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.qp', weight: 50, caseSensitive: false)],
@@ -6747,9 +6726,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-xar": const RegistryEntry(
     mediaType: 'application/x-xar',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('XAR archive')],
-    acronym: IntlString.constant('XAR'),
-    expandedAcronym: IntlString.constant('eXtensible ARchive'),
+    comments: ['XAR archive'],
+    acronym: 'XAR',
+    expandedAcronym: 'eXtensible ARchive',
     subclassOf: [],
     alias: [],
     globs: [
@@ -6773,7 +6752,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/zlib": const RegistryEntry(
     mediaType: 'application/zlib',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Zlib archive')],
+    comments: ['Zlib archive'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.zz', weight: 50, caseSensitive: false)],
@@ -6781,7 +6760,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-magicpoint": const RegistryEntry(
     mediaType: 'application/x-magicpoint',
     genericIcon: GenericIcon.xOfficePresentation,
-    comments: [IntlString.constant('MagicPoint presentation')],
+    comments: ['MagicPoint presentation'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.mgp', weight: 50, caseSensitive: false)],
@@ -6789,7 +6768,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-macbinary": const RegistryEntry(
     mediaType: 'application/x-macbinary',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Macintosh MacBinary file')],
+    comments: ['Macintosh MacBinary file'],
     subclassOf: [],
     alias: [],
     magic: [
@@ -6809,7 +6788,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-matroska": const RegistryEntry(
     mediaType: 'application/x-matroska',
     genericIcon: GenericIcon.videoXGeneric,
-    comments: [IntlString.constant('Matroska stream')],
+    comments: ['Matroska stream'],
     subclassOf: [],
     alias: [],
     magic: [
@@ -6844,9 +6823,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-mimearchive": const RegistryEntry(
     mediaType: 'application/x-mimearchive',
-    comments: [IntlString.constant('MHTML web archive')],
-    acronym: IntlString.constant('MHTML'),
-    expandedAcronym: IntlString.constant('MIME HTML'),
+    comments: ['MHTML web archive'],
+    acronym: 'MHTML',
+    expandedAcronym: 'MIME HTML',
     subclassOf: ['multipart/related'],
     alias: [],
     globs: [
@@ -6857,9 +6836,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/mxf": const RegistryEntry(
     mediaType: 'application/mxf',
     genericIcon: GenericIcon.videoXGeneric,
-    comments: [IntlString.constant('MXF video')],
-    acronym: IntlString.constant('MXF'),
-    expandedAcronym: IntlString.constant('Material Exchange Format'),
+    comments: ['MXF video'],
+    acronym: 'MXF',
+    expandedAcronym: 'Material Exchange Format',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.mxf', weight: 50, caseSensitive: false)],
@@ -6880,7 +6859,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-mobipocket-ebook": const RegistryEntry(
     mediaType: 'application/x-mobipocket-ebook',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Mobipocket e-book')],
+    comments: ['Mobipocket e-book'],
     subclassOf: ['application/vnd.palm'],
     alias: [],
     globs: [
@@ -6914,7 +6893,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-mif": const RegistryEntry(
     mediaType: 'application/x-mif',
-    comments: [IntlString.constant('Adobe FrameMaker MIF document')],
+    comments: ['Adobe FrameMaker MIF document'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.mif', weight: 50, caseSensitive: false)],
@@ -6922,7 +6901,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-mozilla-bookmarks": const RegistryEntry(
     mediaType: 'application/x-mozilla-bookmarks',
     genericIcon: GenericIcon.textHtml,
-    comments: [IntlString.constant('Mozilla bookmarks')],
+    comments: ['Mozilla bookmarks'],
     subclassOf: ['text/html'],
     alias: ['application/x-netscape-bookmarks'],
     magic: [
@@ -6942,9 +6921,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-msdownload": const RegistryEntry(
     mediaType: 'application/x-msdownload',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Windows or DOS program')],
-    acronym: IntlString.constant('DOS'),
-    expandedAcronym: IntlString.constant('Disk Operating System'),
+    comments: ['Windows or DOS program'],
+    acronym: 'DOS',
+    expandedAcronym: 'Disk Operating System',
     subclassOf: ['application/x-executable'],
     alias: ['application/x-ms-dos-executable'],
     globs: [
@@ -6966,9 +6945,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-dosexec": const RegistryEntry(
     mediaType: 'application/x-dosexec',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('DOS executable')],
-    acronym: IntlString.constant('DOS'),
-    expandedAcronym: IntlString.constant('Disk Operating System'),
+    comments: ['DOS executable'],
+    acronym: 'DOS',
+    expandedAcronym: 'Disk Operating System',
     subclassOf: ['application/x-msdownload'],
     alias: [],
     globs: [Glob(pattern: '*.exe', weight: 30, caseSensitive: false)],
@@ -6997,7 +6976,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-ms-ne-executable": const RegistryEntry(
     mediaType: 'application/x-ms-ne-executable',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('16-bit Windows program')],
+    comments: ['16-bit Windows program'],
     subclassOf: ['application/x-msdownload'],
     alias: [],
     globs: [
@@ -7032,9 +7011,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.microsoft.portable-executable": const RegistryEntry(
     mediaType: 'application/vnd.microsoft.portable-executable',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Windows or EFI program')],
-    acronym: IntlString.constant('EFI'),
-    expandedAcronym: IntlString.constant('Extensible Firmware Interface'),
+    comments: ['Windows or EFI program'],
+    acronym: 'EFI',
+    expandedAcronym: 'Extensible Firmware Interface',
     subclassOf: ['application/x-msdownload'],
     alias: [],
     globs: [
@@ -7072,7 +7051,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-ms-pdb": const RegistryEntry(
     mediaType: 'application/x-ms-pdb',
-    comments: [IntlString.constant('Windows program database')],
+    comments: ['Windows program database'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.pdb', weight: 50, caseSensitive: false)],
@@ -7099,7 +7078,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-bat": const RegistryEntry(
     mediaType: 'application/x-bat',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('DOS/Windows batch file')],
+    comments: ['DOS/Windows batch file'],
     subclassOf: ['text/plain'],
     alias: ['application/bat'],
     globs: [Glob(pattern: '*.bat', weight: 50, caseSensitive: false)],
@@ -7107,7 +7086,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-powershell": const RegistryEntry(
     mediaType: 'application/x-powershell',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('PowerShell script')],
+    comments: ['PowerShell script'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.ps1', weight: 50, caseSensitive: false)],
@@ -7134,7 +7113,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-ms-shortcut": const RegistryEntry(
     mediaType: 'application/x-ms-shortcut',
     genericIcon: GenericIcon.emblemSymbolicLink,
-    comments: [IntlString.constant('Windows shortcut')],
+    comments: ['Windows shortcut'],
     subclassOf: [],
     alias: ['application/x-win-lnk'],
     globs: [Glob(pattern: '*.lnk', weight: 50, caseSensitive: false)],
@@ -7156,7 +7135,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-mswinurl": const RegistryEntry(
     mediaType: 'application/x-mswinurl',
     genericIcon: GenericIcon.emblemSymbolicLink,
-    comments: [IntlString.constant('Internet shortcut')],
+    comments: ['Internet shortcut'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.url', weight: 50, caseSensitive: false)],
@@ -7191,7 +7170,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-mswrite": const RegistryEntry(
     mediaType: 'application/x-mswrite',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('WRI document')],
+    comments: ['WRI document'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.wri', weight: 50, caseSensitive: false)],
@@ -7199,7 +7178,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-msx-rom": const RegistryEntry(
     mediaType: 'application/x-msx-rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('MSX ROM')],
+    comments: ['MSX ROM'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.msx', weight: 50, caseSensitive: false)],
@@ -7207,7 +7186,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-m4": const RegistryEntry(
     mediaType: 'application/x-m4',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('M4 macro')],
+    comments: ['M4 macro'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.m4', weight: 50, caseSensitive: false)],
@@ -7215,7 +7194,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-n64-rom": const RegistryEntry(
     mediaType: 'application/x-n64-rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Nintendo64 ROM')],
+    comments: ['Nintendo64 ROM'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -7252,7 +7231,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-nautilus-link": const RegistryEntry(
     mediaType: 'application/x-nautilus-link',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('Nautilus link')],
+    comments: ['Nautilus link'],
     subclassOf: ['text/plain'],
     alias: [],
     magic: [
@@ -7272,7 +7251,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-neo-geo-pocket-rom": const RegistryEntry(
     mediaType: 'application/x-neo-geo-pocket-rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Neo-Geo Pocket ROM')],
+    comments: ['Neo-Geo Pocket ROM'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.ngp', weight: 50, caseSensitive: false)],
@@ -7307,7 +7286,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-neo-geo-pocket-color-rom": const RegistryEntry(
     mediaType: 'application/x-neo-geo-pocket-color-rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Neo-Geo Pocket Color ROM')],
+    comments: ['Neo-Geo Pocket Color ROM'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.ngc', weight: 50, caseSensitive: false)],
@@ -7342,7 +7321,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-nes-rom": const RegistryEntry(
     mediaType: 'application/x-nes-rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('NES ROM')],
+    comments: ['NES ROM'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -7355,9 +7334,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-netcdf": const RegistryEntry(
     mediaType: 'application/x-netcdf',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Unidata NetCDF document')],
-    acronym: IntlString.constant('NetCDF'),
-    expandedAcronym: IntlString.constant('Network Common Data Form'),
+    comments: ['Unidata NetCDF document'],
+    acronym: 'NetCDF',
+    expandedAcronym: 'Network Common Data Form',
     subclassOf: [],
     alias: [],
     globs: [
@@ -7367,7 +7346,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-nzb": const RegistryEntry(
     mediaType: 'application/x-nzb',
-    comments: [IntlString.constant('NewzBin usenet index')],
+    comments: ['NewzBin usenet index'],
     subclassOf: ['application/xml'],
     alias: [],
     globs: [Glob(pattern: '*.nzb', weight: 50, caseSensitive: false)],
@@ -7388,7 +7367,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-object": const RegistryEntry(
     mediaType: 'application/x-object',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Object code')],
+    comments: ['Object code'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -7450,7 +7429,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/annodex": const RegistryEntry(
     mediaType: 'application/annodex',
     genericIcon: GenericIcon.videoXGeneric,
-    comments: [IntlString.constant('Annodex exchange format')],
+    comments: ['Annodex exchange format'],
     subclassOf: [],
     alias: ['application/x-annodex'],
     globs: [Glob(pattern: '*.anx', weight: 50, caseSensitive: false)],
@@ -7487,7 +7466,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/ogg": const RegistryEntry(
     mediaType: 'application/ogg',
     genericIcon: GenericIcon.videoXGeneric,
-    comments: [IntlString.constant('Ogg multimedia file')],
+    comments: ['Ogg multimedia file'],
     subclassOf: [],
     alias: ['application/x-ogg'],
     globs: [Glob(pattern: '*.ogx', weight: 50, caseSensitive: false)],
@@ -7503,7 +7482,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-ole-storage": const RegistryEntry(
     mediaType: 'application/x-ole-storage',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('OLE2 compound document storage')],
+    comments: ['OLE2 compound document storage'],
     subclassOf: [],
     alias: [],
     magic: [
@@ -7529,7 +7508,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.microsoft.windows.thumbnail-cache": const RegistryEntry(
     mediaType: 'application/vnd.microsoft.windows.thumbnail-cache',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('Microsoft Windows Thumbnail Cache')],
+    comments: ['Microsoft Windows Thumbnail Cache'],
     subclassOf: ['application/x-ole-storage'],
     alias: [],
     globs: [
@@ -7544,7 +7523,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/vnd.ms-publisher": const RegistryEntry(
     mediaType: 'application/vnd.ms-publisher',
-    comments: [IntlString.constant('Microsoft Publisher document')],
+    comments: ['Microsoft Publisher document'],
     subclassOf: ['application/x-ole-storage'],
     alias: [],
     globs: [Glob(pattern: '*.pub', weight: 50, caseSensitive: false)],
@@ -7552,7 +7531,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-msi": const RegistryEntry(
     mediaType: 'application/x-msi',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Windows Installer package')],
+    comments: ['Windows Installer package'],
     subclassOf: ['application/x-ole-storage'],
     alias: [],
     globs: [Glob(pattern: '*.msi', weight: 50, caseSensitive: false)],
@@ -7560,7 +7539,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/appx": const RegistryEntry(
     mediaType: 'application/appx',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Windows app store package')],
+    comments: ['Windows app store package'],
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.appx', weight: 50, caseSensitive: false)],
@@ -7568,7 +7547,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/msix": const RegistryEntry(
     mediaType: 'application/msix',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Windows app store package')],
+    comments: ['Windows app store package'],
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.msix', weight: 50, caseSensitive: false)],
@@ -7576,7 +7555,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/appxbundle": const RegistryEntry(
     mediaType: 'application/appxbundle',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Windows app store bundle')],
+    comments: ['Windows app store bundle'],
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.appxbundle', weight: 50, caseSensitive: false)],
@@ -7584,7 +7563,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/msixbundle": const RegistryEntry(
     mediaType: 'application/msixbundle',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Windows app store bundle')],
+    comments: ['Windows app store bundle'],
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.msixbundle', weight: 50, caseSensitive: false)],
@@ -7592,7 +7571,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/appinstaller": const RegistryEntry(
     mediaType: 'application/appinstaller',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Windows app store installer')],
+    comments: ['Windows app store installer'],
     subclassOf: ['application/xml'],
     alias: [],
     globs: [Glob(pattern: '*.appinstaller', weight: 50, caseSensitive: false)],
@@ -7613,7 +7592,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-oleo": const RegistryEntry(
     mediaType: 'application/x-oleo',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('GNU Oleo spreadsheet')],
+    comments: ['GNU Oleo spreadsheet'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.oleo', weight: 50, caseSensitive: false)],
@@ -7634,14 +7613,14 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-pak": const RegistryEntry(
     mediaType: 'application/x-pak',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('PAK archive')],
+    comments: ['PAK archive'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.pak', weight: 50, caseSensitive: false)],
   ),
   "application/vnd.palm": const RegistryEntry(
     mediaType: 'application/vnd.palm',
-    comments: [IntlString.constant('Palm OS database')],
+    comments: ['Palm OS database'],
     subclassOf: [],
     alias: ['application/x-palm-database'],
     globs: [
@@ -7654,9 +7633,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-par2": const RegistryEntry(
     mediaType: 'application/x-par2',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Parchive archive')],
-    acronym: IntlString.constant('Parchive'),
-    expandedAcronym: IntlString.constant('Parity Volume Set Archive'),
+    comments: ['Parchive archive'],
+    acronym: 'Parchive',
+    expandedAcronym: 'Parity Volume Set Archive',
     subclassOf: [],
     alias: [],
     globs: [
@@ -7675,9 +7654,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-pef-executable": const RegistryEntry(
     mediaType: 'application/x-pef-executable',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('PEF executable')],
-    acronym: IntlString.constant('PEF'),
-    expandedAcronym: IntlString.constant('Preferred Executable Format'),
+    comments: ['PEF executable'],
+    acronym: 'PEF',
+    expandedAcronym: 'Preferred Executable Format',
     subclassOf: [],
     alias: [],
     magic: [
@@ -7692,7 +7671,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-perl": const RegistryEntry(
     mediaType: 'application/x-perl',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('Perl script')],
+    comments: ['Perl script'],
     subclassOf: ['application/x-executable', 'text/plain'],
     alias: ['text/x-perl'],
     globs: [
@@ -7786,7 +7765,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-php": const RegistryEntry(
     mediaType: 'application/x-php',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('PHP script')],
+    comments: ['PHP script'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -7812,9 +7791,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-pkcs7-certificates": const RegistryEntry(
     mediaType: 'application/x-pkcs7-certificates',
-    comments: [IntlString.constant('PKCS#7 certificate bundle')],
-    acronym: IntlString.constant('PKCS'),
-    expandedAcronym: IntlString.constant('Public-Key Cryptography Standards'),
+    comments: ['PKCS#7 certificate bundle'],
+    acronym: 'PKCS',
+    expandedAcronym: 'Public-Key Cryptography Standards',
     subclassOf: [],
     alias: [],
     globs: [
@@ -7824,9 +7803,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/pkcs12": const RegistryEntry(
     mediaType: 'application/pkcs12',
-    comments: [IntlString.constant('PKCS#12 certificate bundle')],
-    acronym: IntlString.constant('PKCS'),
-    expandedAcronym: IntlString.constant('Public-Key Cryptography Standards'),
+    comments: ['PKCS#12 certificate bundle'],
+    acronym: 'PKCS',
+    expandedAcronym: 'Public-Key Cryptography Standards',
     subclassOf: [],
     alias: ['application/x-pkcs12'],
     globs: [
@@ -7837,7 +7816,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-planperfect": const RegistryEntry(
     mediaType: 'application/x-planperfect',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('PlanPerfect spreadsheet')],
+    comments: ['PlanPerfect spreadsheet'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.pln', weight: 50, caseSensitive: false)],
@@ -7845,7 +7824,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-pocket-word": const RegistryEntry(
     mediaType: 'application/x-pocket-word',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Pocket Word document')],
+    comments: ['Pocket Word document'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.psw', weight: 50, caseSensitive: false)],
@@ -7866,7 +7845,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-profile": const RegistryEntry(
     mediaType: 'application/x-profile',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('Profiler results')],
+    comments: ['Profiler results'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: 'gmon.out', weight: 50, caseSensitive: true)],
@@ -7874,14 +7853,14 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-pw": const RegistryEntry(
     mediaType: 'application/x-pw',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Pathetic Writer document')],
+    comments: ['Pathetic Writer document'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.pw', weight: 50, caseSensitive: false)],
   ),
   "application/x-python-bytecode": const RegistryEntry(
     mediaType: 'application/x-python-bytecode',
-    comments: [IntlString.constant('Python bytecode')],
+    comments: ['Python bytecode'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -7905,7 +7884,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-qtiplot": const RegistryEntry(
     mediaType: 'application/x-qtiplot',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('QtiPlot document')],
+    comments: ['QtiPlot document'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -7929,7 +7908,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-quattropro": const RegistryEntry(
     mediaType: 'application/x-quattropro',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('Quattro Pro spreadsheet')],
+    comments: ['Quattro Pro spreadsheet'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -7941,7 +7920,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-quicktime-media-link": const RegistryEntry(
     mediaType: 'application/x-quicktime-media-link',
     genericIcon: GenericIcon.videoXGeneric,
-    comments: [IntlString.constant('QuickTime playlist')],
+    comments: ['QuickTime playlist'],
     subclassOf: ['video/quicktime'],
     alias: ['application/x-quicktimeplayer'],
     globs: [Glob(pattern: '*.qtl', weight: 50, caseSensitive: false)],
@@ -7988,7 +7967,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-qw": const RegistryEntry(
     mediaType: 'application/x-qw',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('Quicken document')],
+    comments: ['Quicken document'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.qif', weight: 50, caseSensitive: false)],
@@ -7996,9 +7975,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.rar": const RegistryEntry(
     mediaType: 'application/vnd.rar',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('RAR archive')],
-    acronym: IntlString.constant('RAR'),
-    expandedAcronym: IntlString.constant('Roshal ARchive'),
+    comments: ['RAR archive'],
+    acronym: 'RAR',
+    expandedAcronym: 'Roshal ARchive',
     subclassOf: [],
     alias: ['application/x-rar', 'application/x-rar-compressed'],
     globs: [Glob(pattern: '*.rar', weight: 50, caseSensitive: false)],
@@ -8014,9 +7993,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-dar": const RegistryEntry(
     mediaType: 'application/x-dar',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('DAR archive')],
-    acronym: IntlString.constant('DAR'),
-    expandedAcronym: IntlString.constant('Disk ARchive'),
+    comments: ['DAR archive'],
+    acronym: 'DAR',
+    expandedAcronym: 'Disk ARchive',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.dar', weight: 50, caseSensitive: false)],
@@ -8032,7 +8011,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-alz": const RegistryEntry(
     mediaType: 'application/x-alz',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Alzip archive')],
+    comments: ['Alzip archive'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.alz', weight: 50, caseSensitive: false)],
@@ -8048,7 +8027,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-rpm": const RegistryEntry(
     mediaType: 'application/x-rpm',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('RPM package')],
+    comments: ['RPM package'],
     subclassOf: [],
     alias: ['application/x-redhat-package-manager'],
     globs: [Glob(pattern: '*.rpm', weight: 50, caseSensitive: false)],
@@ -8069,7 +8048,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-source-rpm": const RegistryEntry(
     mediaType: 'application/x-source-rpm',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Source RPM package')],
+    comments: ['Source RPM package'],
     subclassOf: ['application/x-rpm'],
     alias: [],
     globs: [
@@ -8080,7 +8059,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-ruby": const RegistryEntry(
     mediaType: 'application/x-ruby',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('Ruby script')],
+    comments: ['Ruby script'],
     subclassOf: ['application/x-executable', 'text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.rb', weight: 50, caseSensitive: false)],
@@ -8107,7 +8086,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-markaby": const RegistryEntry(
     mediaType: 'application/x-markaby',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('Markaby script')],
+    comments: ['Markaby script'],
     subclassOf: ['application/x-ruby'],
     alias: [],
     globs: [Glob(pattern: '*.mab', weight: 50, caseSensitive: false)],
@@ -8115,7 +8094,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-sc": const RegistryEntry(
     mediaType: 'application/x-sc',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('SC/Xspread spreadsheet')],
+    comments: ['SC/Xspread spreadsheet'],
     subclassOf: [],
     alias: [],
     magic: [
@@ -8135,7 +8114,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-shar": const RegistryEntry(
     mediaType: 'application/x-shar',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Shell archive')],
+    comments: ['Shell archive'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.shar', weight: 50, caseSensitive: false)],
@@ -8143,14 +8122,14 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-shared-library-la": const RegistryEntry(
     mediaType: 'application/x-shared-library-la',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('Libtool shared library')],
+    comments: ['Libtool shared library'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.la', weight: 50, caseSensitive: false)],
   ),
   "application/x-sharedlib": const RegistryEntry(
     mediaType: 'application/x-sharedlib',
-    comments: [IntlString.constant('Shared library')],
+    comments: ['Shared library'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -8182,7 +8161,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-shellscript": const RegistryEntry(
     mediaType: 'application/x-shellscript',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('Shell script')],
+    comments: ['Shell script'],
     subclassOf: ['application/x-executable', 'text/plain'],
     alias: ['text/x-sh'],
     globs: [Glob(pattern: '*.sh', weight: 50, caseSensitive: false)],
@@ -8263,7 +8242,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-fishscript": const RegistryEntry(
     mediaType: 'application/x-fishscript',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('Fish shell script')],
+    comments: ['Fish shell script'],
     subclassOf: ['application/x-executable', 'text/plain'],
     alias: ['text/x-fish'],
     globs: [Glob(pattern: '*.fish', weight: 50, caseSensitive: false)],
@@ -8284,7 +8263,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-nuscript": const RegistryEntry(
     mediaType: 'application/x-nuscript',
     genericIcon: GenericIcon.textXScript,
-    comments: [IntlString.constant('Nu shell script')],
+    comments: ['Nu shell script'],
     subclassOf: ['application/x-executable', 'text/plain'],
     alias: ['text/x-nu'],
     globs: [Glob(pattern: '*.nu', weight: 50, caseSensitive: false)],
@@ -8305,7 +8284,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.adobe.flash.movie": const RegistryEntry(
     mediaType: 'application/vnd.adobe.flash.movie',
     genericIcon: GenericIcon.videoXGeneric,
-    comments: [IntlString.constant('Shockwave Flash file')],
+    comments: ['Shockwave Flash file'],
     subclassOf: [],
     alias: ['application/x-shockwave-flash', 'application/futuresplash'],
     globs: [
@@ -8325,7 +8304,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-shorten": const RegistryEntry(
     mediaType: 'application/x-shorten',
     genericIcon: GenericIcon.audioXGeneric,
-    comments: [IntlString.constant('Shorten audio')],
+    comments: ['Shorten audio'],
     subclassOf: [],
     alias: ['audio/x-shorten'],
     globs: [Glob(pattern: '*.shn', weight: 50, caseSensitive: false)],
@@ -8341,7 +8320,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-siag": const RegistryEntry(
     mediaType: 'application/x-siag',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('Siag spreadsheet')],
+    comments: ['Siag spreadsheet'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.siag', weight: 50, caseSensitive: false)],
@@ -8349,14 +8328,14 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-slp": const RegistryEntry(
     mediaType: 'application/x-slp',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Stampede package')],
+    comments: ['Stampede package'],
     subclassOf: [],
     alias: [],
   ),
   "application/x-sg1000-rom": const RegistryEntry(
     mediaType: 'application/x-sg1000-rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('SG-1000 ROM')],
+    comments: ['SG-1000 ROM'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.sg', weight: 50, caseSensitive: false)],
@@ -8364,7 +8343,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-sms-rom": const RegistryEntry(
     mediaType: 'application/x-sms-rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Master System ROM')],
+    comments: ['Master System ROM'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.sms', weight: 50, caseSensitive: false)],
@@ -8372,7 +8351,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-gamegear-rom": const RegistryEntry(
     mediaType: 'application/x-gamegear-rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Game Gear ROM')],
+    comments: ['Game Gear ROM'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.gg', weight: 50, caseSensitive: false)],
@@ -8380,7 +8359,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.nintendo.snes.rom": const RegistryEntry(
     mediaType: 'application/vnd.nintendo.snes.rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Super NES ROM')],
+    comments: ['Super NES ROM'],
     subclassOf: [],
     alias: ['application/x-snes-rom'],
     globs: [
@@ -8391,7 +8370,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-stuffit": const RegistryEntry(
     mediaType: 'application/x-stuffit',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('StuffIt archive')],
+    comments: ['StuffIt archive'],
     subclassOf: [],
     alias: ['application/stuffit', 'application/x-sit'],
     globs: [Glob(pattern: '*.sit', weight: 50, caseSensitive: false)],
@@ -8413,7 +8392,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-stuffitx": const RegistryEntry(
     mediaType: 'application/x-stuffitx',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('StuffIt X archive')],
+    comments: ['StuffIt X archive'],
     subclassOf: [],
     alias: ['application/x-sitx'],
     globs: [Glob(pattern: '*.sitx', weight: 50, caseSensitive: false)],
@@ -8434,7 +8413,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-subrip": const RegistryEntry(
     mediaType: 'application/x-subrip',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('SubRip subtitles')],
+    comments: ['SubRip subtitles'],
     subclassOf: ['text/plain'],
     alias: ['application/x-srt'],
     globs: [Glob(pattern: '*.srt', weight: 50, caseSensitive: false)],
@@ -8463,11 +8442,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-sami": const RegistryEntry(
     mediaType: 'application/x-sami',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('SAMI subtitles')],
-    acronym: IntlString.constant('SAMI'),
-    expandedAcronym: IntlString.constant(
-      'Synchronized Accessible Media Interchange',
-    ),
+    comments: ['SAMI subtitles'],
+    acronym: 'SAMI',
+    expandedAcronym: 'Synchronized Accessible Media Interchange',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -8491,11 +8468,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.smaf": const RegistryEntry(
     mediaType: 'application/vnd.smaf',
     genericIcon: GenericIcon.audioXGeneric,
-    comments: [IntlString.constant('SMAF audio')],
-    acronym: IntlString.constant('SMAF'),
-    expandedAcronym: IntlString.constant(
-      'Synthetic music Mobile Application Format',
-    ),
+    comments: ['SMAF audio'],
+    acronym: 'SMAF',
+    expandedAcronym: 'Synthetic music Mobile Application Format',
     subclassOf: [],
     alias: ['application/x-smaf'],
     globs: [
@@ -8514,7 +8489,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-sv4cpio": const RegistryEntry(
     mediaType: 'application/x-sv4cpio',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('SV4 CPIO archive')],
+    comments: ['SV4 CPIO archive'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.sv4cpio', weight: 50, caseSensitive: false)],
@@ -8522,7 +8497,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-sv4crc": const RegistryEntry(
     mediaType: 'application/x-sv4crc',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('SV4 CPIO archive (with CRC)')],
+    comments: ['SV4 CPIO archive (with CRC)'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.sv4crc', weight: 50, caseSensitive: false)],
@@ -8530,7 +8505,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-tar": const RegistryEntry(
     mediaType: 'application/x-tar',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Tar archive')],
+    comments: ['Tar archive'],
     subclassOf: [],
     alias: ['application/x-gtar'],
     globs: [
@@ -8561,7 +8536,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-tarz": const RegistryEntry(
     mediaType: 'application/x-tarz',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Tar archive (compressed)')],
+    comments: ['Tar archive (compressed)'],
     subclassOf: ['application/x-compress'],
     alias: [],
     globs: [
@@ -8572,7 +8547,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-tex-gf": const RegistryEntry(
     mediaType: 'application/x-tex-gf',
     genericIcon: GenericIcon.fontXGeneric,
-    comments: [IntlString.constant('Generic font file')],
+    comments: ['Generic font file'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.gf', weight: 50, caseSensitive: false)],
@@ -8580,7 +8555,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-tex-pk": const RegistryEntry(
     mediaType: 'application/x-tex-pk',
     genericIcon: GenericIcon.fontXGeneric,
-    comments: [IntlString.constant('Packed font file')],
+    comments: ['Packed font file'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.pk', weight: 50, caseSensitive: false)],
@@ -8588,7 +8563,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-tgif": const RegistryEntry(
     mediaType: 'application/x-tgif',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('TGIF document')],
+    comments: ['TGIF document'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.obj', weight: 50, caseSensitive: false)],
@@ -8609,7 +8584,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-theme": const RegistryEntry(
     mediaType: 'application/x-theme',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Theme')],
+    comments: ['Theme'],
     subclassOf: ['application/x-desktop'],
     alias: [],
     globs: [Glob(pattern: '*.theme', weight: 50, caseSensitive: false)],
@@ -8617,13 +8592,13 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-toutdoux": const RegistryEntry(
     mediaType: 'application/x-toutdoux',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('ToutDoux document')],
+    comments: ['ToutDoux document'],
     subclassOf: [],
     alias: [],
   ),
   "application/x-trash": const RegistryEntry(
     mediaType: 'application/x-trash',
-    comments: [IntlString.constant('Backup file')],
+    comments: ['Backup file'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -8637,7 +8612,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-troff-man": const RegistryEntry(
     mediaType: 'application/x-troff-man',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('Manual page')],
+    comments: ['Manual page'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -8648,14 +8623,14 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-troff-man-compressed": const RegistryEntry(
     mediaType: 'application/x-troff-man-compressed',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('Manual page (compressed)')],
+    comments: ['Manual page (compressed)'],
     subclassOf: [],
     alias: [],
   ),
   "application/x-tzo": const RegistryEntry(
     mediaType: 'application/x-tzo',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Tar archive (LZO-compressed)')],
+    comments: ['Tar archive (LZO-compressed)'],
     subclassOf: ['application/x-lzop'],
     alias: [],
     globs: [
@@ -8666,7 +8641,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-xz": const RegistryEntry(
     mediaType: 'application/x-xz',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('XZ archive')],
+    comments: ['XZ archive'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.xz', weight: 50, caseSensitive: false)],
@@ -8687,7 +8662,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-xz-compressed-tar": const RegistryEntry(
     mediaType: 'application/x-xz-compressed-tar',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Tar archive (XZ-compressed)')],
+    comments: ['Tar archive (XZ-compressed)'],
     subclassOf: ['application/x-xz'],
     alias: [],
     globs: [
@@ -8698,7 +8673,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-zpaq": const RegistryEntry(
     mediaType: 'application/x-zpaq',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Zpaq Archive')],
+    comments: ['Zpaq Archive'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.zpaq', weight: 50, caseSensitive: false)],
@@ -8714,7 +8689,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/zstd": const RegistryEntry(
     mediaType: 'application/zstd',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Zstandard archive')],
+    comments: ['Zstandard archive'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.zst', weight: 50, caseSensitive: false)],
@@ -8735,7 +8710,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-zstd-compressed-tar": const RegistryEntry(
     mediaType: 'application/x-zstd-compressed-tar',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Tar archive (Zstandard-compressed)')],
+    comments: ['Tar archive (Zstandard-compressed)'],
     subclassOf: ['application/zstd'],
     alias: [],
     globs: [
@@ -8746,7 +8721,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-xzpdf": const RegistryEntry(
     mediaType: 'application/x-xzpdf',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('PDF document (XZ-compressed)')],
+    comments: ['PDF document (XZ-compressed)'],
     subclassOf: ['application/x-xz'],
     alias: [],
     globs: [Glob(pattern: '*.pdf.xz', weight: 50, caseSensitive: false)],
@@ -8754,7 +8729,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-ustar": const RegistryEntry(
     mediaType: 'application/x-ustar',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Ustar archive')],
+    comments: ['Ustar archive'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.ustar', weight: 50, caseSensitive: false)],
@@ -8762,7 +8737,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-wais-source": const RegistryEntry(
     mediaType: 'application/x-wais-source',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('WAIS source code')],
+    comments: ['WAIS source code'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.src', weight: 50, caseSensitive: false)],
@@ -8770,7 +8745,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-wpg": const RegistryEntry(
     mediaType: 'application/x-wpg',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('WordPerfect/Drawperfect image')],
+    comments: ['WordPerfect/Drawperfect image'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.wpg', weight: 50, caseSensitive: false)],
@@ -8778,7 +8753,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-wonderswan-rom": const RegistryEntry(
     mediaType: 'application/x-wonderswan-rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Bandai WonderSwan ROM')],
+    comments: ['Bandai WonderSwan ROM'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.ws', weight: 50, caseSensitive: false)],
@@ -8786,7 +8761,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-wonderswan-color-rom": const RegistryEntry(
     mediaType: 'application/x-wonderswan-color-rom',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('Bandai WonderSwan Color ROM')],
+    comments: ['Bandai WonderSwan Color ROM'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.wsc', weight: 50, caseSensitive: false)],
@@ -8794,9 +8769,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-x509-ca-cert": const RegistryEntry(
     mediaType: 'application/x-x509-ca-cert',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [
-      IntlString.constant('DER/PEM/Netscape-encoded X.509 certificate'),
-    ],
+    comments: ['DER/PEM/Netscape-encoded X.509 certificate'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -8827,14 +8800,14 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-zerosize": const RegistryEntry(
     mediaType: 'application/x-zerosize',
-    comments: [IntlString.constant('Empty document')],
+    comments: ['Empty document'],
     subclassOf: [],
     alias: [],
   ),
   "application/x-zoo": const RegistryEntry(
     mediaType: 'application/x-zoo',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Zoo archive')],
+    comments: ['Zoo archive'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.zoo', weight: 50, caseSensitive: false)],
@@ -8855,11 +8828,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/xhtml+xml": const RegistryEntry(
     mediaType: 'application/xhtml+xml',
     genericIcon: GenericIcon.textHtml,
-    comments: [IntlString.constant('XHTML page')],
-    acronym: IntlString.constant('XHTML'),
-    expandedAcronym: IntlString.constant(
-      'Extensible HyperText Markup Language',
-    ),
+    comments: ['XHTML page'],
+    acronym: 'XHTML',
+    expandedAcronym: 'Extensible HyperText Markup Language',
     subclassOf: ['application/xml'],
     alias: [],
     globs: [
@@ -8906,7 +8877,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/zip": const RegistryEntry(
     mediaType: 'application/zip',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Zip archive')],
+    comments: ['Zip archive'],
     subclassOf: [],
     alias: ['application/x-zip-compressed', 'application/x-zip'],
     globs: [
@@ -8929,9 +8900,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-ms-wim": const RegistryEntry(
     mediaType: 'application/x-ms-wim',
-    comments: [IntlString.constant('WIM disk image')],
-    acronym: IntlString.constant('WIM'),
-    expandedAcronym: IntlString.constant('Windows Imaging Format'),
+    comments: ['WIM disk image'],
+    acronym: 'WIM',
+    expandedAcronym: 'Windows Imaging Format',
     subclassOf: [],
     alias: [],
     globs: [
@@ -8954,7 +8925,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/vnd.apple.mpegurl": const RegistryEntry(
     mediaType: 'application/vnd.apple.mpegurl',
-    comments: [IntlString.constant('Media playlist')],
+    comments: ['Media playlist'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -8991,7 +8962,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/ram": const RegistryEntry(
     mediaType: 'application/ram',
-    comments: [IntlString.constant('RealMedia playlist')],
+    comments: ['RealMedia playlist'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.ram', weight: 50, caseSensitive: false)],
@@ -8999,7 +8970,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.rn-realmedia": const RegistryEntry(
     mediaType: 'application/vnd.rn-realmedia',
     genericIcon: GenericIcon.videoXGeneric,
-    comments: [IntlString.constant('RealMedia document')],
+    comments: ['RealMedia document'],
     subclassOf: [],
     alias: ['application/vnd.rn-realmedia-vbr'],
     globs: [
@@ -9021,7 +8992,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-riff": const RegistryEntry(
     mediaType: 'application/x-riff',
-    comments: [IntlString.constant('RIFF container')],
+    comments: ['RIFF container'],
     subclassOf: [],
     alias: [],
     magic: [
@@ -9036,9 +9007,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-ufraw": const RegistryEntry(
     mediaType: 'application/x-ufraw',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('UFRaw ID image')],
-    acronym: IntlString.constant('UFRaw'),
-    expandedAcronym: IntlString.constant('Unidentified Flying Raw'),
+    comments: ['UFRaw ID image'],
+    acronym: 'UFRaw',
+    expandedAcronym: 'Unidentified Flying Raw',
     subclassOf: ['application/xml'],
     alias: [],
     globs: [Glob(pattern: '*.ufraw', weight: 50, caseSensitive: false)],
@@ -9046,11 +9017,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/dicom": const RegistryEntry(
     mediaType: 'application/dicom',
     genericIcon: GenericIcon.imageXGeneric,
-    comments: [IntlString.constant('DICOM image')],
-    acronym: IntlString.constant('DICOM'),
-    expandedAcronym: IntlString.constant(
-      'Digital Imaging and Communications in Medicine',
-    ),
+    comments: ['DICOM image'],
+    acronym: 'DICOM',
+    expandedAcronym: 'Digital Imaging and Communications in Medicine',
     subclassOf: [],
     alias: [],
     globs: [
@@ -9074,7 +9043,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-docbook+xml": const RegistryEntry(
     mediaType: 'application/x-docbook+xml',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('DocBook document')],
+    comments: ['DocBook document'],
     subclassOf: ['application/xml'],
     alias: ['application/docbook+xml', 'application/vnd.oasis.docbook+xml'],
     globs: [
@@ -9111,9 +9080,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/fits": const RegistryEntry(
     mediaType: 'application/fits',
-    comments: [IntlString.constant('FITS document')],
-    acronym: IntlString.constant('FITS'),
-    expandedAcronym: IntlString.constant('Flexible Image Transport System'),
+    comments: ['FITS document'],
+    acronym: 'FITS',
+    expandedAcronym: 'Flexible Image Transport System',
     subclassOf: [],
     alias: ['image/x-fits', 'image/fits'],
     globs: [
@@ -9137,7 +9106,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-navi-animation": const RegistryEntry(
     mediaType: 'application/x-navi-animation',
-    comments: [IntlString.constant('Windows animated cursor')],
+    comments: ['Windows animated cursor'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.ani', weight: 50, caseSensitive: false)],
@@ -9165,9 +9134,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/rdf+xml": const RegistryEntry(
     mediaType: 'application/rdf+xml',
-    comments: [IntlString.constant('RDF file')],
-    acronym: IntlString.constant('RDF'),
-    expandedAcronym: IntlString.constant('Resource Description Framework'),
+    comments: ['RDF file'],
+    acronym: 'RDF',
+    expandedAcronym: 'Resource Description Framework',
     subclassOf: ['application/xml'],
     alias: ['text/rdf'],
     globs: [
@@ -9184,9 +9153,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/owl+xml": const RegistryEntry(
     mediaType: 'application/owl+xml',
-    comments: [IntlString.constant('OWL XML file')],
-    acronym: IntlString.constant('OWL'),
-    expandedAcronym: IntlString.constant('Web Ontology Language'),
+    comments: ['OWL XML file'],
+    acronym: 'OWL',
+    expandedAcronym: 'Web Ontology Language',
     subclassOf: ['application/xml'],
     alias: [],
     globs: [Glob(pattern: '*.owx', weight: 50, caseSensitive: false)],
@@ -9213,9 +9182,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/rss+xml": const RegistryEntry(
     mediaType: 'application/rss+xml',
     genericIcon: GenericIcon.textHtml,
-    comments: [IntlString.constant('RSS summary')],
-    acronym: IntlString.constant('RSS'),
-    expandedAcronym: IntlString.constant('RDF Site Summary'),
+    comments: ['RSS summary'],
+    acronym: 'RSS',
+    expandedAcronym: 'RDF Site Summary',
     subclassOf: ['application/xml'],
     alias: ['text/rss'],
     globs: [Glob(pattern: '*.rss', weight: 50, caseSensitive: false)],
@@ -9242,7 +9211,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/atom+xml": const RegistryEntry(
     mediaType: 'application/atom+xml',
     genericIcon: GenericIcon.textHtml,
-    comments: [IntlString.constant('Atom syndication feed')],
+    comments: ['Atom syndication feed'],
     subclassOf: ['application/xml'],
     alias: [],
     globs: [Glob(pattern: '*.atom', weight: 50, caseSensitive: false)],
@@ -9266,7 +9235,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-ace": const RegistryEntry(
     mediaType: 'application/x-ace',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('ACE archive')],
+    comments: ['ACE archive'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.ace', weight: 50, caseSensitive: false)],
@@ -9287,23 +9256,23 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/xml-dtd": const RegistryEntry(
     mediaType: 'application/xml-dtd',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('DTD file')],
-    acronym: IntlString.constant('DTD'),
-    expandedAcronym: IntlString.constant('Document Type Definition'),
+    comments: ['DTD file'],
+    acronym: 'DTD',
+    expandedAcronym: 'Document Type Definition',
     subclassOf: ['text/plain'],
     alias: ['text/x-dtd'],
     globs: [Glob(pattern: '*.dtd', weight: 50, caseSensitive: false)],
   ),
   "application/vnd.dart": const RegistryEntry(
     mediaType: 'application/vnd.dart',
-    comments: [IntlString.constant('Dart source code')],
+    comments: ['Dart source code'],
     subclassOf: ['text/plain'],
     alias: ['text/x-dart'],
     globs: [Glob(pattern: '*.dart', weight: 50, caseSensitive: false)],
   ),
   "application/sql": const RegistryEntry(
     mediaType: 'application/sql',
-    comments: [IntlString.constant('SQL code')],
+    comments: ['SQL code'],
     subclassOf: ['text/plain'],
     alias: ['text/x-sql'],
     globs: [Glob(pattern: '*.sql', weight: 50, caseSensitive: false)],
@@ -9311,11 +9280,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/xslt+xml": const RegistryEntry(
     mediaType: 'application/xslt+xml',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('XSLT stylesheet')],
-    acronym: IntlString.constant('XSLT'),
-    expandedAcronym: IntlString.constant(
-      'eXtensible Stylesheet Language Transformation',
-    ),
+    comments: ['XSLT stylesheet'],
+    acronym: 'XSLT',
+    expandedAcronym: 'eXtensible Stylesheet Language Transformation',
     subclassOf: ['application/xml'],
     alias: [],
     globs: [
@@ -9345,9 +9312,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/xml": const RegistryEntry(
     mediaType: 'application/xml',
     genericIcon: GenericIcon.textHtml,
-    comments: [IntlString.constant('XML document')],
-    acronym: IntlString.constant('XML'),
-    expandedAcronym: IntlString.constant('eXtensible Markup Language'),
+    comments: ['XML document'],
+    acronym: 'XML',
+    expandedAcronym: 'eXtensible Markup Language',
     subclassOf: ['text/plain'],
     alias: ['text/xml'],
     globs: [
@@ -9373,9 +9340,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/xml-external-parsed-entity": const RegistryEntry(
     mediaType: 'application/xml-external-parsed-entity',
     genericIcon: GenericIcon.textHtml,
-    comments: [IntlString.constant('XML entities document')],
-    acronym: IntlString.constant('XML'),
-    expandedAcronym: IntlString.constant('eXtensible Markup Language'),
+    comments: ['XML entities document'],
+    acronym: 'XML',
+    expandedAcronym: 'eXtensible Markup Language',
     subclassOf: ['application/xml'],
     alias: ['text/xml-external-parsed-entity'],
     globs: [Glob(pattern: '*.ent', weight: 50, caseSensitive: false)],
@@ -9383,7 +9350,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-hwp": const RegistryEntry(
     mediaType: 'application/x-hwp',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Haansoft Hangul document')],
+    comments: ['Haansoft Hangul document'],
     subclassOf: [],
     alias: ['application/vnd.haansoft-hwp'],
     globs: [Glob(pattern: '*.hwp', weight: 50, caseSensitive: false)],
@@ -9404,16 +9371,16 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-hwt": const RegistryEntry(
     mediaType: 'application/x-hwt',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Haansoft Hangul document template')],
+    comments: ['Haansoft Hangul document template'],
     subclassOf: [],
     alias: ['application/vnd.haansoft-hwt'],
     globs: [Glob(pattern: '*.hwt', weight: 50, caseSensitive: false)],
   ),
   "application/vnd.ms-asf": const RegistryEntry(
     mediaType: 'application/vnd.ms-asf',
-    comments: [IntlString.constant('ASF video')],
-    acronym: IntlString.constant('ASF'),
-    expandedAcronym: IntlString.constant('Advanced Streaming Format'),
+    comments: ['ASF video'],
+    acronym: 'ASF',
+    expandedAcronym: 'Advanced Streaming Format',
     subclassOf: [],
     alias: ['video/x-ms-wm', 'video/x-ms-asf', 'video/x-ms-asf-plugin'],
     globs: [Glob(pattern: '*.asf', weight: 50, caseSensitive: false)],
@@ -9440,7 +9407,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-netshow-channel": const RegistryEntry(
     mediaType: 'application/x-netshow-channel',
     genericIcon: GenericIcon.videoXGeneric,
-    comments: [IntlString.constant('Windows Media Station file')],
+    comments: ['Windows Media Station file'],
     subclassOf: ['application/vnd.ms-asf'],
     alias: [],
     globs: [Glob(pattern: '*.nsc', weight: 50, caseSensitive: false)],
@@ -9461,9 +9428,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/sdp": const RegistryEntry(
     mediaType: 'application/sdp',
     genericIcon: GenericIcon.videoXGeneric,
-    comments: [IntlString.constant('SDP multicast stream file')],
-    acronym: IntlString.constant('SDP'),
-    expandedAcronym: IntlString.constant('Session Description Protocol'),
+    comments: ['SDP multicast stream file'],
+    acronym: 'SDP',
+    expandedAcronym: 'Session Description Protocol',
     subclassOf: ['text/plain'],
     alias: ['application/x-sdp', 'application/vnd.sdp'],
     globs: [Glob(pattern: '*.sdp', weight: 50, caseSensitive: false)],
@@ -9492,7 +9459,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.emusic-emusic_package": const RegistryEntry(
     mediaType: 'application/vnd.emusic-emusic_package',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('eMusic download package')],
+    comments: ['eMusic download package'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.emp', weight: 50, caseSensitive: false)],
@@ -9512,9 +9479,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/vnd.google-earth.kml+xml": const RegistryEntry(
     mediaType: 'application/vnd.google-earth.kml+xml',
-    comments: [IntlString.constant('KML geographic data')],
-    acronym: IntlString.constant('KML'),
-    expandedAcronym: IntlString.constant('Keyhole Markup Language'),
+    comments: ['KML geographic data'],
+    acronym: 'KML',
+    expandedAcronym: 'Keyhole Markup Language',
     subclassOf: ['application/xml'],
     alias: [],
     globs: [Glob(pattern: '*.kml', weight: 50, caseSensitive: false)],
@@ -9524,16 +9491,16 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/vnd.google-earth.kmz": const RegistryEntry(
     mediaType: 'application/vnd.google-earth.kmz',
-    comments: [IntlString.constant('KML geographic compressed data')],
-    acronym: IntlString.constant('KML'),
-    expandedAcronym: IntlString.constant('Keyhole Markup Language'),
+    comments: ['KML geographic compressed data'],
+    acronym: 'KML',
+    expandedAcronym: 'Keyhole Markup Language',
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.kmz', weight: 50, caseSensitive: false)],
   ),
   "application/geo+json": const RegistryEntry(
     mediaType: 'application/geo+json',
-    comments: [IntlString.constant('GeoJSON geospatial data')],
+    comments: ['GeoJSON geospatial data'],
     subclassOf: ['application/json'],
     alias: ['application/vnd.geo+json'],
     globs: [
@@ -9543,9 +9510,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/gpx+xml": const RegistryEntry(
     mediaType: 'application/gpx+xml',
-    comments: [IntlString.constant('GPX geographic data')],
-    acronym: IntlString.constant('GPX'),
-    expandedAcronym: IntlString.constant('GPS Exchange Format'),
+    comments: ['GPX geographic data'],
+    acronym: 'GPX',
+    expandedAcronym: 'GPS Exchange Format',
     subclassOf: ['application/xml'],
     alias: ['application/gpx', 'application/x-gpx+xml', 'application/x-gpx'],
     globs: [Glob(pattern: '*.gpx', weight: 50, caseSensitive: false)],
@@ -9563,9 +9530,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-ica": const RegistryEntry(
     mediaType: 'application/x-ica',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('Citrix ICA settings file')],
-    acronym: IntlString.constant('ICA'),
-    expandedAcronym: IntlString.constant('Independent Computing Architecture'),
+    comments: ['Citrix ICA settings file'],
+    acronym: 'ICA',
+    expandedAcronym: 'Independent Computing Architecture',
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.ica', weight: 50, caseSensitive: false)],
@@ -9573,9 +9540,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.mozilla.xul+xml": const RegistryEntry(
     mediaType: 'application/vnd.mozilla.xul+xml',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('XUL interface document')],
-    acronym: IntlString.constant('XUL'),
-    expandedAcronym: IntlString.constant('XML User interface markup Language'),
+    comments: ['XUL interface document'],
+    acronym: 'XUL',
+    expandedAcronym: 'XML User interface markup Language',
     subclassOf: ['application/xml'],
     alias: [],
     globs: [Glob(pattern: '*.xul', weight: 50, caseSensitive: false)],
@@ -9589,7 +9556,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-xpinstall": const RegistryEntry(
     mediaType: 'application/x-xpinstall',
-    comments: [IntlString.constant('XPInstall installer module')],
+    comments: ['XPInstall installer module'],
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.xpi', weight: 50, caseSensitive: false)],
@@ -9599,7 +9566,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
         mediaType:
             'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         genericIcon: GenericIcon.xOfficeDocument,
-        comments: [IntlString.constant('Word 2007 document')],
+        comments: ['Word 2007 document'],
         subclassOf: ['application/zip'],
         alias: [],
         globs: [Glob(pattern: '*.docx', weight: 50, caseSensitive: false)],
@@ -9609,7 +9576,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
         mediaType:
             'application/vnd.openxmlformats-officedocument.wordprocessingml.template',
         genericIcon: GenericIcon.xOfficeDocument,
-        comments: [IntlString.constant('Word 2007 document template')],
+        comments: ['Word 2007 document template'],
         subclassOf: ['application/zip'],
         alias: [],
         globs: [Glob(pattern: '*.dotx', weight: 50, caseSensitive: false)],
@@ -9619,7 +9586,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
         mediaType:
             'application/vnd.openxmlformats-officedocument.presentationml.presentation',
         genericIcon: GenericIcon.xOfficePresentation,
-        comments: [IntlString.constant('PowerPoint 2007 presentation')],
+        comments: ['PowerPoint 2007 presentation'],
         subclassOf: ['application/zip'],
         alias: [],
         globs: [Glob(pattern: '*.pptx', weight: 50, caseSensitive: false)],
@@ -9629,7 +9596,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
         mediaType:
             'application/vnd.openxmlformats-officedocument.presentationml.slide',
         genericIcon: GenericIcon.xOfficePresentation,
-        comments: [IntlString.constant('PowerPoint 2007 slide')],
+        comments: ['PowerPoint 2007 slide'],
         subclassOf: ['application/zip'],
         alias: [],
         globs: [Glob(pattern: '*.sldx', weight: 50, caseSensitive: false)],
@@ -9639,7 +9606,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
         mediaType:
             'application/vnd.openxmlformats-officedocument.presentationml.slideshow',
         genericIcon: GenericIcon.xOfficePresentation,
-        comments: [IntlString.constant('PowerPoint 2007 show')],
+        comments: ['PowerPoint 2007 show'],
         subclassOf: ['application/zip'],
         alias: [],
         globs: [Glob(pattern: '*.ppsx', weight: 50, caseSensitive: false)],
@@ -9649,9 +9616,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
         mediaType:
             'application/vnd.openxmlformats-officedocument.presentationml.template',
         genericIcon: GenericIcon.xOfficePresentation,
-        comments: [
-          IntlString.constant('PowerPoint 2007 presentation template'),
-        ],
+        comments: ['PowerPoint 2007 presentation template'],
         subclassOf: ['application/zip'],
         alias: [],
         globs: [Glob(pattern: '*.potx', weight: 50, caseSensitive: false)],
@@ -9661,7 +9626,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
         mediaType:
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         genericIcon: GenericIcon.xOfficeSpreadsheet,
-        comments: [IntlString.constant('Excel 2007 spreadsheet')],
+        comments: ['Excel 2007 spreadsheet'],
         subclassOf: ['application/zip'],
         alias: [],
         globs: [Glob(pattern: '*.xlsx', weight: 50, caseSensitive: false)],
@@ -9671,7 +9636,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
         mediaType:
             'application/vnd.openxmlformats-officedocument.spreadsheetml.template',
         genericIcon: GenericIcon.xOfficeSpreadsheet,
-        comments: [IntlString.constant('Excel 2007 spreadsheet template')],
+        comments: ['Excel 2007 spreadsheet template'],
         subclassOf: ['application/zip'],
         alias: [],
         globs: [Glob(pattern: '*.xltx', weight: 50, caseSensitive: false)],
@@ -9679,7 +9644,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.ms-officetheme": const RegistryEntry(
     mediaType: 'application/vnd.ms-officetheme',
     genericIcon: GenericIcon.textXGenericTemplate,
-    comments: [IntlString.constant('Microsoft Office 2007 theme')],
+    comments: ['Microsoft Office 2007 theme'],
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.thmx', weight: 50, caseSensitive: false)],
@@ -9687,7 +9652,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-t602": const RegistryEntry(
     mediaType: 'application/x-t602',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('T602 document')],
+    comments: ['T602 document'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.602', weight: 50, caseSensitive: false)],
@@ -9720,7 +9685,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-cisco-vpn-settings": const RegistryEntry(
     mediaType: 'application/x-cisco-vpn-settings',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('Cisco VPN settings')],
+    comments: ['Cisco VPN settings'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.pcf', weight: 50, caseSensitive: false)],
@@ -9748,9 +9713,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/vnd.iccprofile": const RegistryEntry(
     mediaType: 'application/vnd.iccprofile',
-    comments: [IntlString.constant('ICC profile')],
-    acronym: IntlString.constant('ICC'),
-    expandedAcronym: IntlString.constant('International Color Consortium'),
+    comments: ['ICC profile'],
+    acronym: 'ICC',
+    expandedAcronym: 'International Color Consortium',
     subclassOf: [],
     alias: [],
     globs: [
@@ -9774,7 +9739,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-it87": const RegistryEntry(
     mediaType: 'application/x-it87',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('IT 8.7 color calibration file')],
+    comments: ['IT 8.7 color calibration file'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.it87', weight: 50, caseSensitive: false)],
@@ -9795,7 +9760,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-ccmx": const RegistryEntry(
     mediaType: 'application/x-ccmx',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('CCMX color correction file')],
+    comments: ['CCMX color correction file'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.ccmx', weight: 50, caseSensitive: false)],
@@ -9810,7 +9775,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/winhlp": const RegistryEntry(
     mediaType: 'application/winhlp',
-    comments: [IntlString.constant('WinHelp help file')],
+    comments: ['WinHelp help file'],
     subclassOf: [],
     alias: ['zz-application/zz-winassoc-hlp'],
     globs: [Glob(pattern: '*.hlp', weight: 50, caseSensitive: false)],
@@ -9830,7 +9795,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-bsdiff": const RegistryEntry(
     mediaType: 'application/x-bsdiff',
-    comments: [IntlString.constant('Binary differences between files')],
+    comments: ['Binary differences between files'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.bsdiff', weight: 50, caseSensitive: false)],
@@ -9856,9 +9821,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/trig": const RegistryEntry(
     mediaType: 'application/trig',
-    comments: [IntlString.constant('TriG RDF document')],
-    acronym: IntlString.constant('TriG'),
-    expandedAcronym: IntlString.constant('TriG RDF Graph Triple Language'),
+    comments: ['TriG RDF document'],
+    acronym: 'TriG',
+    expandedAcronym: 'TriG RDF Graph Triple Language',
     subclassOf: ['text/plain'],
     alias: ['application/x-trig'],
     globs: [Glob(pattern: '*.trig', weight: 50, caseSensitive: false)],
@@ -9866,7 +9831,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.apple.keynote": const RegistryEntry(
     mediaType: 'application/vnd.apple.keynote',
     genericIcon: GenericIcon.xOfficePresentation,
-    comments: [IntlString.constant('Apple Keynote 5 presentation')],
+    comments: ['Apple Keynote 5 presentation'],
     subclassOf: ['application/zip'],
     alias: ['application/x-iwork-keynote-sffkey'],
     globs: [Glob(pattern: '*.key', weight: 80, caseSensitive: true)],
@@ -9895,7 +9860,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.apple.numbers": const RegistryEntry(
     mediaType: 'application/vnd.apple.numbers',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('Apple Numbers spreadsheet')],
+    comments: ['Apple Numbers spreadsheet'],
     subclassOf: ['application/zip'],
     alias: ['application/x-iwork-numbers-sffnumbers'],
     globs: [Glob(pattern: '*.numbers', weight: 50, caseSensitive: false)],
@@ -9930,7 +9895,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.apple.pages": const RegistryEntry(
     mediaType: 'application/vnd.apple.pages',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Apple Pages document')],
+    comments: ['Apple Pages document'],
     subclassOf: ['application/zip'],
     alias: ['application/x-iwork-pages-sffpages'],
     globs: [Glob(pattern: '*.pages', weight: 50, caseSensitive: false)],
@@ -9964,7 +9929,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/vnd.apple.pkpass": const RegistryEntry(
     mediaType: 'application/vnd.apple.pkpass',
-    comments: [IntlString.constant('Apple Wallet pass')],
+    comments: ['Apple Wallet pass'],
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.pkpass', weight: 50, caseSensitive: false)],
@@ -9993,7 +9958,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-pagemaker": const RegistryEntry(
     mediaType: 'application/x-pagemaker',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('Adobe PageMaker document')],
+    comments: ['Adobe PageMaker document'],
     subclassOf: ['application/x-ole-storage'],
     alias: [],
     globs: [
@@ -10006,9 +9971,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-doom-wad": const RegistryEntry(
     mediaType: 'application/x-doom-wad',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Doom WAD file')],
-    acronym: IntlString.constant('WAD'),
-    expandedAcronym: IntlString.constant('Where\'s All the Data'),
+    comments: ['Doom WAD file'],
+    acronym: 'WAD',
+    expandedAcronym: 'Where\'s All the Data',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.wad', weight: 80, caseSensitive: true)],
@@ -10024,7 +9989,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-amiga-disk-format": const RegistryEntry(
     mediaType: 'application/x-amiga-disk-format',
-    comments: [IntlString.constant('Amiga disk image')],
+    comments: ['Amiga disk image'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.adf', weight: 50, caseSensitive: false)],
@@ -10045,7 +10010,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.flatpak": const RegistryEntry(
     mediaType: 'application/vnd.flatpak',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Flatpak application bundle')],
+    comments: ['Flatpak application bundle'],
     subclassOf: [],
     alias: ['application/vnd.xdgapp'],
     globs: [
@@ -10075,7 +10040,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.flatpak.repo": const RegistryEntry(
     mediaType: 'application/vnd.flatpak.repo',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Flatpak repository description')],
+    comments: ['Flatpak repository description'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.flatpakrepo', weight: 50, caseSensitive: false)],
@@ -10096,7 +10061,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.flatpak.ref": const RegistryEntry(
     mediaType: 'application/vnd.flatpak.ref',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Flatpak repository reference')],
+    comments: ['Flatpak repository reference'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.flatpakref', weight: 50, caseSensitive: false)],
@@ -10116,7 +10081,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/vnd.squashfs": const RegistryEntry(
     mediaType: 'application/vnd.squashfs',
-    comments: [IntlString.constant('Squashfs filesystem image')],
+    comments: ['Squashfs filesystem image'],
     subclassOf: ['application/vnd.efi.img'],
     alias: [],
     globs: [Glob(pattern: '*.sqsh', weight: 50, caseSensitive: false)],
@@ -10133,7 +10098,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.appimage": const RegistryEntry(
     mediaType: 'application/vnd.appimage',
     genericIcon: GenericIcon.applicationXExecutable,
-    comments: [IntlString.constant('AppImage application bundle')],
+    comments: ['AppImage application bundle'],
     subclassOf: ['application/x-executable', 'application/vnd.squashfs'],
     alias: [],
     globs: [Glob(pattern: '*.appimage', weight: 60, caseSensitive: true)],
@@ -10177,16 +10142,16 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/vnd.snap": const RegistryEntry(
     mediaType: 'application/vnd.snap',
-    comments: [IntlString.constant('Snap package')],
+    comments: ['Snap package'],
     subclassOf: ['application/vnd.squashfs'],
     alias: [],
     globs: [Glob(pattern: '*.snap', weight: 50, caseSensitive: false)],
   ),
   "application/x-fds-disk": const RegistryEntry(
     mediaType: 'application/x-fds-disk',
-    comments: [IntlString.constant('Nintendo FDS disk image')],
-    acronym: IntlString.constant('FDS'),
-    expandedAcronym: IntlString.constant('Famicom Disk System'),
+    comments: ['Nintendo FDS disk image'],
+    acronym: 'FDS',
+    expandedAcronym: 'Famicom Disk System',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.fds', weight: 50, caseSensitive: false)],
@@ -10206,9 +10171,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/ovf": const RegistryEntry(
     mediaType: 'application/ovf',
-    comments: [IntlString.constant('OVF disk image')],
-    acronym: IntlString.constant('OVF'),
-    expandedAcronym: IntlString.constant('Open Virtualization Format'),
+    comments: ['OVF disk image'],
+    acronym: 'OVF',
+    expandedAcronym: 'Open Virtualization Format',
     subclassOf: ['application/x-tar'],
     alias: ['application/x-virtualbox-ova'],
     globs: [Glob(pattern: '*.ova', weight: 50, caseSensitive: false)],
@@ -10242,9 +10207,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-qed-disk": const RegistryEntry(
     mediaType: 'application/x-qed-disk',
-    comments: [IntlString.constant('QEMU QED disk image')],
-    acronym: IntlString.constant('QED'),
-    expandedAcronym: IntlString.constant('QEMU Enhanced Disk'),
+    comments: ['QEMU QED disk image'],
+    acronym: 'QED',
+    expandedAcronym: 'QEMU Enhanced Disk',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.qed', weight: 50, caseSensitive: false)],
@@ -10264,9 +10229,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-qemu-disk": const RegistryEntry(
     mediaType: 'application/x-qemu-disk',
-    comments: [IntlString.constant('QEMU QCOW disk image')],
-    acronym: IntlString.constant('QCOW'),
-    expandedAcronym: IntlString.constant('QEMU Copy On Write'),
+    comments: ['QEMU QCOW disk image'],
+    acronym: 'QCOW',
+    expandedAcronym: 'QEMU Copy On Write',
     subclassOf: [],
     alias: [],
     globs: [
@@ -10297,9 +10262,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-vhd-disk": const RegistryEntry(
     mediaType: 'application/x-vhd-disk',
-    comments: [IntlString.constant('VHD disk image')],
-    acronym: IntlString.constant('VHD'),
-    expandedAcronym: IntlString.constant('Virtual Hard Disk'),
+    comments: ['VHD disk image'],
+    acronym: 'VHD',
+    expandedAcronym: 'Virtual Hard Disk',
     subclassOf: [],
     alias: ['application/x-virtualbox-vhd'],
     globs: [
@@ -10322,9 +10287,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-vhdx-disk": const RegistryEntry(
     mediaType: 'application/x-vhdx-disk',
-    comments: [IntlString.constant('VHDX disk image')],
-    acronym: IntlString.constant('VHDX'),
-    expandedAcronym: IntlString.constant('Virtual Hard Disk v2'),
+    comments: ['VHDX disk image'],
+    acronym: 'VHDX',
+    expandedAcronym: 'Virtual Hard Disk v2',
     subclassOf: [],
     alias: ['application/x-virtualbox-vhdx'],
     globs: [Glob(pattern: '*.vhdx', weight: 50, caseSensitive: false)],
@@ -10344,9 +10309,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-vmdk-disk": const RegistryEntry(
     mediaType: 'application/x-vmdk-disk',
-    comments: [IntlString.constant('VMDK disk image')],
-    acronym: IntlString.constant('VMDK'),
-    expandedAcronym: IntlString.constant('Virtual Machine Disk'),
+    comments: ['VMDK disk image'],
+    acronym: 'VMDK',
+    expandedAcronym: 'Virtual Machine Disk',
     subclassOf: [],
     alias: ['application/x-virtualbox-vmdk'],
     globs: [Glob(pattern: '*.vmdk', weight: 50, caseSensitive: false)],
@@ -10372,9 +10337,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-vdi-disk": const RegistryEntry(
     mediaType: 'application/x-vdi-disk',
-    comments: [IntlString.constant('VDI disk image')],
-    acronym: IntlString.constant('VDI'),
-    expandedAcronym: IntlString.constant('Virtual Disk Image'),
+    comments: ['VDI disk image'],
+    acronym: 'VDI',
+    expandedAcronym: 'Virtual Disk Image',
     subclassOf: [],
     alias: ['application/x-virtualbox-vdi'],
     globs: [Glob(pattern: '*.vdi', weight: 50, caseSensitive: false)],
@@ -10425,16 +10390,16 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-appleworks-document": const RegistryEntry(
     mediaType: 'application/x-appleworks-document',
     genericIcon: GenericIcon.xOfficeDocument,
-    comments: [IntlString.constant('AppleWorks document')],
+    comments: ['AppleWorks document'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.cwk', weight: 50, caseSensitive: false)],
   ),
   "application/x-bps-patch": const RegistryEntry(
     mediaType: 'application/x-bps-patch',
-    comments: [IntlString.constant('BPS patch')],
-    acronym: IntlString.constant('BPS'),
-    expandedAcronym: IntlString.constant('Binary Patching System'),
+    comments: ['BPS patch'],
+    acronym: 'BPS',
+    expandedAcronym: 'Binary Patching System',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.bps', weight: 50, caseSensitive: false)],
@@ -10449,9 +10414,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-ips-patch": const RegistryEntry(
     mediaType: 'application/x-ips-patch',
-    comments: [IntlString.constant('IPS patch')],
-    acronym: IntlString.constant('IPS'),
-    expandedAcronym: IntlString.constant('International Patching System'),
+    comments: ['IPS patch'],
+    acronym: 'IPS',
+    expandedAcronym: 'International Patching System',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.ips', weight: 50, caseSensitive: false)],
@@ -10472,7 +10437,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-pyspread-spreadsheet": const RegistryEntry(
     mediaType: 'application/x-pyspread-spreadsheet',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('Pyspread spreadsheet')],
+    comments: ['Pyspread spreadsheet'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.pysu', weight: 50, caseSensitive: false)],
@@ -10493,16 +10458,16 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-pyspread-bz-spreadsheet": const RegistryEntry(
     mediaType: 'application/x-pyspread-bz-spreadsheet',
     genericIcon: GenericIcon.xOfficeSpreadsheet,
-    comments: [IntlString.constant('Pyspread spreadsheet (bzip2-compressed)')],
+    comments: ['Pyspread spreadsheet (bzip2-compressed)'],
     subclassOf: ['application/x-bzip2'],
     alias: [],
     globs: [Glob(pattern: '*.pys', weight: 50, caseSensitive: false)],
   ),
   "application/x-openzim": const RegistryEntry(
     mediaType: 'application/x-openzim',
-    comments: [IntlString.constant('OpenZIM file')],
-    acronym: IntlString.constant('ZIM'),
-    expandedAcronym: IntlString.constant('Zeno IMproved'),
+    comments: ['OpenZIM file'],
+    acronym: 'ZIM',
+    expandedAcronym: 'Zeno IMproved',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.zim', weight: 50, caseSensitive: false)],
@@ -10522,11 +10487,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/sparql-query": const RegistryEntry(
     mediaType: 'application/sparql-query',
-    comments: [IntlString.constant('SPARQL query')],
-    acronym: IntlString.constant('SPARQL'),
-    expandedAcronym: IntlString.constant(
-      'SPARQL Protocol and RDF Query Language',
-    ),
+    comments: ['SPARQL query'],
+    acronym: 'SPARQL',
+    expandedAcronym: 'SPARQL Protocol and RDF Query Language',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.qs', weight: 50, caseSensitive: false)],
@@ -10546,11 +10509,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/sparql-results+xml": const RegistryEntry(
     mediaType: 'application/sparql-results+xml',
-    comments: [IntlString.constant('SPARQL query results')],
-    acronym: IntlString.constant('SPARQL'),
-    expandedAcronym: IntlString.constant(
-      'SPARQL Protocol and RDF Query Language',
-    ),
+    comments: ['SPARQL query results'],
+    acronym: 'SPARQL',
+    expandedAcronym: 'SPARQL Protocol and RDF Query Language',
     subclassOf: ['application/xml'],
     alias: [],
     globs: [Glob(pattern: '*.srx', weight: 50, caseSensitive: false)],
@@ -10563,9 +10524,9 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/wasm": const RegistryEntry(
     mediaType: 'application/wasm',
-    comments: [IntlString.constant('WASM binary module')],
-    acronym: IntlString.constant('WASM'),
-    expandedAcronym: IntlString.constant('Web Assembly'),
+    comments: ['WASM binary module'],
+    acronym: 'WASM',
+    expandedAcronym: 'Web Assembly',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.wasm', weight: 50, caseSensitive: false)],
@@ -10586,7 +10547,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-openvpn-profile": const RegistryEntry(
     mediaType: 'application/x-openvpn-profile',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('OpenVPN profile')],
+    comments: ['OpenVPN profile'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [
@@ -10597,29 +10558,25 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-modrinth-modpack+zip": const RegistryEntry(
     mediaType: 'application/x-modrinth-modpack+zip',
     genericIcon: GenericIcon.packageXGeneric,
-    comments: [IntlString.constant('Modrinth Modpack')],
+    comments: ['Modrinth Modpack'],
     subclassOf: ['application/zip'],
     alias: [],
     globs: [Glob(pattern: '*.mrpack', weight: 50, caseSensitive: false)],
   ),
   "application/cbor": const RegistryEntry(
     mediaType: 'application/cbor',
-    comments: [IntlString.constant('CBOR Data')],
-    acronym: IntlString.constant('CBOR'),
-    expandedAcronym: IntlString.constant(
-      'Concise Binary Object Representation',
-    ),
+    comments: ['CBOR Data'],
+    acronym: 'CBOR',
+    expandedAcronym: 'Concise Binary Object Representation',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.cbor', weight: 50, caseSensitive: false)],
   ),
   "application/x-eris-link+cbor": const RegistryEntry(
     mediaType: 'application/x-eris-link+cbor',
-    comments: [IntlString.constant('ERIS Link')],
-    acronym: IntlString.constant('ERIS'),
-    expandedAcronym: IntlString.constant(
-      'Encoding for Robust Immutable Storage',
-    ),
+    comments: ['ERIS Link'],
+    acronym: 'ERIS',
+    expandedAcronym: 'Encoding for Robust Immutable Storage',
     subclassOf: ['application/cbor'],
     alias: [],
     globs: [Glob(pattern: '*.eris', weight: 50, caseSensitive: false)],
@@ -10640,7 +10597,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/vnd.gerber": const RegistryEntry(
     mediaType: 'application/vnd.gerber',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('Gerber file')],
+    comments: ['Gerber file'],
     subclassOf: ['text/plain'],
     alias: ['application/x-gerber'],
     globs: [Glob(pattern: '*.gbr', weight: 50, caseSensitive: false)],
@@ -10665,7 +10622,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-gerber-job": const RegistryEntry(
     mediaType: 'application/x-gerber-job',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('Gerber job file')],
+    comments: ['Gerber job file'],
     subclassOf: ['application/json'],
     alias: [],
     globs: [Glob(pattern: '*.gbrjob', weight: 50, caseSensitive: false)],
@@ -10673,7 +10630,7 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   "application/x-excellon": const RegistryEntry(
     mediaType: 'application/x-excellon',
     genericIcon: GenericIcon.textXGeneric,
-    comments: [IntlString.constant('Excellon drill file')],
+    comments: ['Excellon drill file'],
     subclassOf: ['text/plain'],
     alias: [],
     globs: [Glob(pattern: '*.drl', weight: 50, caseSensitive: false)],
@@ -10693,14 +10650,14 @@ final Map<String, RegistryEntry> mimeinfoDbApplication = {
   ),
   "application/x-tiled-tmx": const RegistryEntry(
     mediaType: 'application/x-tiled-tmx',
-    comments: [IntlString.constant('Tiled map files')],
+    comments: ['Tiled map files'],
     subclassOf: ['application/xml'],
     alias: [],
     globs: [Glob(pattern: '*.tmx', weight: 50, caseSensitive: false)],
   ),
   "application/x-tiled-tsx": const RegistryEntry(
     mediaType: 'application/x-tiled-tsx',
-    comments: [IntlString.constant('Tiled tileset files')],
+    comments: ['Tiled tileset files'],
     subclassOf: ['application/xml'],
     alias: [],
     globs: [Glob(pattern: '*.tsx', weight: 50, caseSensitive: false)],

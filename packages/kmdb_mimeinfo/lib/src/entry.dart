@@ -14,7 +14,6 @@
 
 import 'dart:convert';
 
-import 'package:kmdb_util/util.dart';
 import 'package:collection/collection.dart';
 
 import 'glob.dart';
@@ -26,10 +25,10 @@ import 'xml.dart';
 /// A single entry in the MIME database, detailing rules and metadata for a specific media type.
 class RegistryEntry {
   final String mediaType;
-  final List<IntlString> _comments;
-  final IntlString? acronym;
-  final IntlString? expandedAcronym;
-  final IntlString? icon;
+  final List<String> _comments;
+  final String? acronym;
+  final String? expandedAcronym;
+  final String? icon;
   final GenericIcon? genericIcon;
 
   final List<String> _alias;
@@ -45,7 +44,7 @@ class RegistryEntry {
     this.expandedAcronym,
     this.icon,
     this.genericIcon,
-    List<IntlString> comments = const [],
+    List<String> comments = const [],
     List<String> alias = const [],
     List<String> subclassOf = const [],
     List<Glob> globs = const [],
@@ -58,7 +57,7 @@ class RegistryEntry {
        _magic = magic,
        _rootXML = rootXML;
 
-  List<IntlString> get comments => UnmodifiableListView(_comments);
+  List<String> get comments => UnmodifiableListView(_comments);
   List<String> get alias => UnmodifiableListView(_alias);
   List<String> get subclassOf => UnmodifiableListView(_subclassOf);
   List<Glob> get globs => UnmodifiableListView(_globs);
@@ -126,10 +125,10 @@ class RegistryEntry {
   Map<String, dynamic> toMap() {
     return {
       'mediaType': mediaType,
-      'comments': _comments.map((e) => e.toMap()).toList(),
-      if (acronym != null) 'acronym': acronym!.toMap(),
-      if (expandedAcronym != null) 'expandedAcronym': expandedAcronym!.toMap(),
-      if (icon != null) 'icon': icon!.toMap(),
+      'comments': _comments,
+      if (acronym != null) 'acronym': acronym,
+      if (expandedAcronym != null) 'expandedAcronym': expandedAcronym,
+      if (icon != null) 'icon': icon,
       if (genericIcon != null) 'genericIcon': genericIcon!.value,
       if (_alias.isNotEmpty) 'alias': _alias,
       if (_subclassOf.isNotEmpty) 'subclassOf': _subclassOf,

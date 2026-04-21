@@ -194,35 +194,91 @@ other devices are applied directly to the LSM without re-validation.
 Applications must not treat schema conformance as a database-wide invariant; it
 is defence-in-depth on local writes only.
 
+### Existing `kmdb_schema` package
+
+[packages/kmdb_schema/](../packages/kmdb_schema/) already provides primitive
+validators that map directly to JSON Schema keywords. These are **already
+implemented and tested**:
+
+| Validator | JSON Schema keyword |
+|---|---|
+| `EnumValidator<T>` | `enum` |
+| `ConstValidator<T>` | `const` |
+| `Minimum<T>` / `Maximum<T>` | `minimum` / `maximum` |
+| `ExclusiveMinimum<T>` / `ExclusiveMaximum<T>` | `exclusiveMinimum` / `exclusiveMaximum` |
+| `MultipleOf<T>` | `multipleOf` |
+| `MinimumLength` / `MaximumLength` | `minLength` / `maxLength` |
+| `PatternValidator` | `pattern` |
+| `MinItems<T>` / `MaxItems<T>` | `minItems` / `maxItems` |
+| `UniqueItems<T>` | `uniqueItems` |
+| `Required` | `required` |
+| `MinProperties` / `MaxProperties` | `minProperties` / `maxProperties` |
+| `DependentRequired` | `dependentRequired` |
+
+**Bug to fix:** `MinimumLength` uses `input.runes.length` while all other string
+validators use `input.characters.length` — make consistent.
+
+**Still to add to `kmdb_schema`** (generic, no KMDB dependency):
+
+- `TypeValidator` — maps JSON Schema `type` strings to Dart runtime type checks
+- `FormatValidator` — surface regex checks for `email`, `uri`, `date`,
+  `date-time`, `uuid`
+- `PropertiesValidator` — applies per-field child validators to a Map
+- `AdditionalPropertiesValidator` — rejects keys not declared in a properties set
+- `ItemsValidator` — applies a child validator to every element of a List
+
+The sealed `SchemaRule` hierarchy and `SchemaParser` also live in `kmdb_schema`
+(generic; no KMDB storage concepts). `SchemaManager` (persistence, MetaStore
+integration, version checking) lives in `kmdb`.
+
 ### New spec document
 
-`docs/spec/24_collection_schemas.md` — covers schema registration, JSON Schema
+`docs/spec/25_collection_schemas.md` — covers schema registration, JSON Schema
 subset, `schemaModelVersion` versioning, sync behaviour, and the
 `onSchemaVersionMismatch` callback.
 
 ## Implementation plan
 
-### Phase 1 — Core types and validator
+### Phase 1 — Complete `kmdb_schema` primitives
+
+- [ ] Fix `MinimumLength` — change `input.runes.length` to
+      `input.characters.length`
+- [ ] Add `TypeValidator` to `validation.dart`
+- [ ] Add `FormatValidator` to `validation.dart` (email, uri, date, date-time,
+      uuid)
+- [ ] Add `PropertiesValidator` to `validation.dart`
+- [ ] Add `AdditionalPropertiesValidator` to `validation.dart`
+- [ ] Add `ItemsValidator` to `validation.dart`
+- [ ] Update `validation_test.dart` with tests for all new validators
+- [ ] Export new validators from `schema.dart`
+
+### Phase 2 — `SchemaRule` tree and parser in `kmdb_schema`
+
+- [ ] Add sealed `SchemaRule` hierarchy to
+      `packages/kmdb_schema/lib/src/schema_rule.dart`
+- [ ] Implement `SchemaParser` —
+      `SchemaRule parse(Map<String, dynamic> jsonSchema)` using Phase 1
+      validators
+- [ ] Add `SchemaViolation` type (path + message) to `kmdb_schema`
+- [ ] Unit-test `SchemaParser` for every supported keyword including nested
+      `properties`
+
+### Phase 3 — KMDB integration types
 
 - [ ] Add `CollectionSchema` to `packages/kmdb/lib/src/query/`
-- [ ] Add sealed `SchemaRule` hierarchy to `packages/kmdb/lib/src/query/schema/`
-- [ ] Add `SchemaViolation` and `SchemaValidationException` to
+- [ ] Add `SchemaValidationException` to
       `packages/kmdb/lib/src/query/exceptions.dart`
-- [ ] Implement `SchemaValidator` — pure function
-      `List<SchemaViolation> validate(SchemaRule, Map)`
-- [ ] Implement `SchemaParser` —
-      `SchemaRule parse(Map<String, dynamic> jsonSchema)`
-- [ ] Unit-test every keyword in the JSON Schema subset (see §Coverage below)
+- [ ] Implement `SchemaManager` in `packages/kmdb/lib/src/query/schema/`:
+  - `static const int kSchemaModelVersion = 1`
+  - `Future<void> load(MetaStore meta)` — reads `schema:*` keys at open time
+  - `Future<void> register(CollectionSchema, MetaStore)` — parses, persists,
+    caches
+  - `void validate(String collection, Map<String, dynamic> doc)` — throws on
+    violation
+- [ ] Unit-test `SchemaManager`: persistence round-trip, version mismatch
+      callback, no-op when collection has no schema
 
-### Phase 2 — SchemaManager and persistence
-
-- [ ] Implement `SchemaManager` with `kSchemaModelVersion = 1`
-- [ ] `register()` — parse, persist to `$meta` under `schema:{collection}`
-- [ ] `load()` — read all `schema:*` keys from `$meta` at open time, handle
-      version mismatch
-- [ ] Unit-test persistence round-trip and version mismatch path
-
-### Phase 3 — Integration with KmdbDatabase and KmdbCollection
+### Phase 4 — Wire into `KmdbDatabase` and `KmdbCollection`
 
 - [ ] Add `schemas` and `onSchemaVersionMismatch` parameters to
       `KmdbDatabase.open()`
@@ -234,7 +290,7 @@ subset, `schemaModelVersion` versioning, sync behaviour, and the
 - [ ] Integration tests: schema enforced on insert/put/replace/update; not on
       delete; not on synced data arriving via `writeBatchInternal` directly
 
-### Phase 4 — Spec and docs
+### Phase 5 — Spec and docs
 
 - [ ] Write `docs/spec/25_collection_schemas.md`
 - [ ] Update `docs/spec/13_query_api.md` — note schema parameter on `open()`

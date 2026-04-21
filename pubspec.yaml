@@ -15,7 +15,6 @@ workspace:
   - packages/kmdb_schema
   - packages/kmdb_tooling
   - packages/kmdb_mimeinfo
-  - packages/kmdb_util
 
 dev_dependencies:
   lints: ^6.0.0

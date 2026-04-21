@@ -18,7 +18,6 @@ Copyright 2026 The KMDB Authors
 // ignore_for_file: non_constant_identifier_names
 
 import '../registry_base.dart';
-import 'package:kmdb_util/util.dart';
 import 'package:meta/meta.dart';
 
 @internal
@@ -26,9 +25,9 @@ final Map<String, RegistryEntry> mimeinfoDbFont = {
   "font/woff": const RegistryEntry(
     mediaType: 'font/woff',
     genericIcon: GenericIcon.fontXGeneric,
-    comments: [IntlString.constant('WOFF font')],
-    acronym: IntlString.constant('WOFF'),
-    expandedAcronym: IntlString.constant('Web Open Font Format'),
+    comments: ['WOFF font'],
+    acronym: 'WOFF',
+    expandedAcronym: 'Web Open Font Format',
     subclassOf: [],
     alias: ['application/font-woff'],
     globs: [Glob(pattern: '*.woff', weight: 50, caseSensitive: false)],
@@ -49,9 +48,9 @@ final Map<String, RegistryEntry> mimeinfoDbFont = {
   "font/woff2": const RegistryEntry(
     mediaType: 'font/woff2',
     genericIcon: GenericIcon.fontXGeneric,
-    comments: [IntlString.constant('WOFF2 font')],
-    acronym: IntlString.constant('WOFF2'),
-    expandedAcronym: IntlString.constant('Web Open Font Format 2.0'),
+    comments: ['WOFF2 font'],
+    acronym: 'WOFF2',
+    expandedAcronym: 'Web Open Font Format 2.0',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.woff2', weight: 50, caseSensitive: false)],
@@ -72,7 +71,7 @@ final Map<String, RegistryEntry> mimeinfoDbFont = {
   "font/otf": const RegistryEntry(
     mediaType: 'font/otf',
     genericIcon: GenericIcon.fontXGeneric,
-    comments: [IntlString.constant('OpenType font')],
+    comments: ['OpenType font'],
     subclassOf: ['font/ttf'],
     alias: ['application/x-font-otf'],
     globs: [Glob(pattern: '*.otf', weight: 50, caseSensitive: false)],
@@ -88,7 +87,7 @@ final Map<String, RegistryEntry> mimeinfoDbFont = {
   "font/ttf": const RegistryEntry(
     mediaType: 'font/ttf',
     genericIcon: GenericIcon.fontXGeneric,
-    comments: [IntlString.constant('TrueType font')],
+    comments: ['TrueType font'],
     subclassOf: [],
     alias: ['application/x-font-ttf'],
     globs: [Glob(pattern: '*.ttf', weight: 50, caseSensitive: false)],
@@ -116,7 +115,7 @@ final Map<String, RegistryEntry> mimeinfoDbFont = {
   "font/collection": const RegistryEntry(
     mediaType: 'font/collection',
     genericIcon: GenericIcon.fontXGeneric,
-    comments: [IntlString.constant('Font collection')],
+    comments: ['Font collection'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.ttc', weight: 50, caseSensitive: false)],

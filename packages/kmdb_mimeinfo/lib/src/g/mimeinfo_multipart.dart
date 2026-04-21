@@ -18,62 +18,61 @@ Copyright 2026 The KMDB Authors
 // ignore_for_file: non_constant_identifier_names
 
 import '../registry_base.dart';
-import 'package:kmdb_util/util.dart';
 import 'package:meta/meta.dart';
 
 @internal
 final Map<String, RegistryEntry> mimeinfoDbMultipart = {
   "multipart/alternative": const RegistryEntry(
     mediaType: 'multipart/alternative',
-    comments: [IntlString.constant('Message in several formats')],
+    comments: ['Message in several formats'],
     subclassOf: [],
     alias: [],
   ),
   "multipart/appledouble": const RegistryEntry(
     mediaType: 'multipart/appledouble',
-    comments: [IntlString.constant('Macintosh AppleDouble-encoded file')],
+    comments: ['Macintosh AppleDouble-encoded file'],
     subclassOf: [],
     alias: [],
   ),
   "multipart/digest": const RegistryEntry(
     mediaType: 'multipart/digest',
-    comments: [IntlString.constant('Message digest')],
+    comments: ['Message digest'],
     subclassOf: [],
     alias: [],
   ),
   "multipart/encrypted": const RegistryEntry(
     mediaType: 'multipart/encrypted',
-    comments: [IntlString.constant('Encrypted message')],
+    comments: ['Encrypted message'],
     subclassOf: [],
     alias: [],
   ),
   "multipart/mixed": const RegistryEntry(
     mediaType: 'multipart/mixed',
-    comments: [IntlString.constant('Compound documents')],
+    comments: ['Compound documents'],
     subclassOf: [],
     alias: [],
   ),
   "multipart/related": const RegistryEntry(
     mediaType: 'multipart/related',
-    comments: [IntlString.constant('Compound document')],
+    comments: ['Compound document'],
     subclassOf: [],
     alias: [],
   ),
   "multipart/report": const RegistryEntry(
     mediaType: 'multipart/report',
-    comments: [IntlString.constant('Mail system report')],
+    comments: ['Mail system report'],
     subclassOf: [],
     alias: [],
   ),
   "multipart/signed": const RegistryEntry(
     mediaType: 'multipart/signed',
-    comments: [IntlString.constant('Signed message')],
+    comments: ['Signed message'],
     subclassOf: [],
     alias: [],
   ),
   "multipart/x-mixed-replace": const RegistryEntry(
     mediaType: 'multipart/x-mixed-replace',
-    comments: [IntlString.constant('Stream of data (server push)')],
+    comments: ['Stream of data (server push)'],
     subclassOf: [],
     alias: [],
   ),

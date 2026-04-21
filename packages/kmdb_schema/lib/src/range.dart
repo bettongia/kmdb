@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'mapper.dart';
-
 /// Handy function for grabbing a [Range] and iterating over it.
 ///
 /// ```dart
@@ -58,7 +56,7 @@ Iterable<num> range({
 ///
 /// Consider using the [range()] function if you just want to use a one-off
 /// range in a loop.
-class Range implements MappedObject {
+class Range {
   /// The starting value of the range (inclusive), defaults to 0
   final num start;
 
@@ -195,7 +193,6 @@ class Range implements MappedObject {
   @override
   int get hashCode => Object.hash(start, stop, step, stopExclusive);
 
-  @override
   Map<String, dynamic> toMap() => {
     'start': start,
     'stop': stop,

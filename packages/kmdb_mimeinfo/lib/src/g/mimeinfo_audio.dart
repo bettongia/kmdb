@@ -18,32 +18,29 @@ Copyright 2026 The KMDB Authors
 // ignore_for_file: non_constant_identifier_names
 
 import '../registry_base.dart';
-import 'package:kmdb_util/util.dart';
 import 'package:meta/meta.dart';
 
 @internal
 final Map<String, RegistryEntry> mimeinfoDbAudio = {
   "audio/x-amzxml": const RegistryEntry(
     mediaType: 'audio/x-amzxml',
-    comments: [IntlString.constant('AmazonMP3 download file')],
+    comments: ['AmazonMP3 download file'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.amz', weight: 50, caseSensitive: false)],
   ),
   "audio/x-gsm": const RegistryEntry(
     mediaType: 'audio/x-gsm',
-    comments: [IntlString.constant('GSM 06.10 audio')],
-    acronym: IntlString.constant('GSM'),
-    expandedAcronym: IntlString.constant(
-      'Global System for Mobile communications',
-    ),
+    comments: ['GSM 06.10 audio'],
+    acronym: 'GSM',
+    expandedAcronym: 'Global System for Mobile communications',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.gsm', weight: 50, caseSensitive: false)],
   ),
   "audio/x-iriver-pla": const RegistryEntry(
     mediaType: 'audio/x-iriver-pla',
-    comments: [IntlString.constant('iRiver playlist')],
+    comments: ['iRiver playlist'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.pla', weight: 50, caseSensitive: false)],
@@ -63,20 +60,20 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-matroska": const RegistryEntry(
     mediaType: 'audio/x-matroska',
-    comments: [IntlString.constant('Matroska audio')],
+    comments: ['Matroska audio'],
     subclassOf: ['application/x-matroska'],
     alias: [],
     globs: [Glob(pattern: '*.mka', weight: 50, caseSensitive: false)],
   ),
   "audio/webm": const RegistryEntry(
     mediaType: 'audio/webm',
-    comments: [IntlString.constant('WebM audio')],
+    comments: ['WebM audio'],
     subclassOf: ['video/webm'],
     alias: [],
   ),
   "audio/annodex": const RegistryEntry(
     mediaType: 'audio/annodex',
-    comments: [IntlString.constant('Annodex audio')],
+    comments: ['Annodex audio'],
     subclassOf: ['application/annodex'],
     alias: ['audio/x-annodex'],
     globs: [Glob(pattern: '*.axa', weight: 50, caseSensitive: false)],
@@ -112,7 +109,7 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/ogg": const RegistryEntry(
     mediaType: 'audio/ogg',
-    comments: [IntlString.constant('Ogg audio')],
+    comments: ['Ogg audio'],
     subclassOf: ['application/ogg'],
     alias: ['audio/x-ogg'],
     globs: [
@@ -131,7 +128,7 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-vorbis+ogg": const RegistryEntry(
     mediaType: 'audio/x-vorbis+ogg',
-    comments: [IntlString.constant('Ogg Vorbis audio')],
+    comments: ['Ogg Vorbis audio'],
     subclassOf: ['audio/ogg'],
     alias: ['audio/vorbis', 'audio/x-vorbis'],
     globs: [
@@ -162,7 +159,7 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-flac+ogg": const RegistryEntry(
     mediaType: 'audio/x-flac+ogg',
-    comments: [IntlString.constant('Ogg FLAC audio')],
+    comments: ['Ogg FLAC audio'],
     subclassOf: ['audio/ogg'],
     alias: ['audio/x-oggflac'],
     globs: [
@@ -207,7 +204,7 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-opus+ogg": const RegistryEntry(
     mediaType: 'audio/x-opus+ogg',
-    comments: [IntlString.constant('Opus audio')],
+    comments: ['Opus audio'],
     subclassOf: ['audio/ogg'],
     alias: [],
     globs: [Glob(pattern: '*.opus', weight: 50, caseSensitive: false)],
@@ -235,7 +232,7 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-speex+ogg": const RegistryEntry(
     mediaType: 'audio/x-speex+ogg',
-    comments: [IntlString.constant('Ogg Speex audio')],
+    comments: ['Ogg Speex audio'],
     subclassOf: ['audio/ogg'],
     alias: [],
     globs: [
@@ -267,7 +264,7 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-speex": const RegistryEntry(
     mediaType: 'audio/x-speex',
-    comments: [IntlString.constant('Speex audio')],
+    comments: ['Speex audio'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.spx', weight: 50, caseSensitive: false)],
@@ -287,9 +284,9 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-xmf": const RegistryEntry(
     mediaType: 'audio/x-xmf',
-    comments: [IntlString.constant('XMF audio')],
-    acronym: IntlString.constant('XMF'),
-    expandedAcronym: IntlString.constant('eXtensible Music Format'),
+    comments: ['XMF audio'],
+    acronym: 'XMF',
+    expandedAcronym: 'eXtensible Music Format',
     subclassOf: [],
     alias: ['audio/xmf'],
     globs: [Glob(pattern: '*.xmf', weight: 50, caseSensitive: false)],
@@ -304,9 +301,9 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/mobile-xmf": const RegistryEntry(
     mediaType: 'audio/mobile-xmf',
-    comments: [IntlString.constant('Mobile XMF audio')],
-    acronym: IntlString.constant('XMF'),
-    expandedAcronym: IntlString.constant('eXtensible Music Format'),
+    comments: ['Mobile XMF audio'],
+    acronym: 'XMF',
+    expandedAcronym: 'eXtensible Music Format',
     subclassOf: [],
     alias: ['audio/vnd.nokia.mobile-xmf'],
     globs: [Glob(pattern: '*.mxmf', weight: 50, caseSensitive: false)],
@@ -326,7 +323,7 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/ac3": const RegistryEntry(
     mediaType: 'audio/ac3',
-    comments: [IntlString.constant('Dolby Digital audio')],
+    comments: ['Dolby Digital audio'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.ac3', weight: 50, caseSensitive: false)],
@@ -346,9 +343,9 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/vnd.dts": const RegistryEntry(
     mediaType: 'audio/vnd.dts',
-    comments: [IntlString.constant('DTS audio')],
-    acronym: IntlString.constant('DTS'),
-    expandedAcronym: IntlString.constant('Digital Theater Systems'),
+    comments: ['DTS audio'],
+    acronym: 'DTS',
+    expandedAcronym: 'Digital Theater Systems',
     subclassOf: [],
     alias: ['audio/x-dts'],
     globs: [Glob(pattern: '*.dts', weight: 50, caseSensitive: false)],
@@ -386,11 +383,9 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/vnd.dts.hd": const RegistryEntry(
     mediaType: 'audio/vnd.dts.hd',
-    comments: [IntlString.constant('DTS-HD audio')],
-    acronym: IntlString.constant('DTS-HD'),
-    expandedAcronym: IntlString.constant(
-      'Digital Theater Systems High Definition',
-    ),
+    comments: ['DTS-HD audio'],
+    acronym: 'DTS-HD',
+    expandedAcronym: 'Digital Theater Systems High Definition',
     subclassOf: ['audio/vnd.dts'],
     alias: ['audio/x-dtshd'],
     globs: [Glob(pattern: '*.dtshd', weight: 50, caseSensitive: false)],
@@ -418,9 +413,9 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/AMR": const RegistryEntry(
     mediaType: 'audio/AMR',
-    comments: [IntlString.constant('AMR audio')],
-    acronym: IntlString.constant('AMR'),
-    expandedAcronym: IntlString.constant('Adaptive Multi-Rate'),
+    comments: ['AMR audio'],
+    acronym: 'AMR',
+    expandedAcronym: 'Adaptive Multi-Rate',
     subclassOf: [],
     alias: ['audio/amr-encrypted'],
     globs: [Glob(pattern: '*.amr', weight: 50, caseSensitive: false)],
@@ -446,9 +441,9 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/AMR-WB": const RegistryEntry(
     mediaType: 'audio/AMR-WB',
-    comments: [IntlString.constant('AMR-WB audio')],
-    acronym: IntlString.constant('AMR-WB'),
-    expandedAcronym: IntlString.constant('Adaptive Multi-Rate Wideband'),
+    comments: ['AMR-WB audio'],
+    acronym: 'AMR-WB',
+    expandedAcronym: 'Adaptive Multi-Rate Wideband',
     subclassOf: [],
     alias: ['audio/amr-wb-encrypted'],
     globs: [Glob(pattern: '*.awb', weight: 50, caseSensitive: false)],
@@ -474,7 +469,7 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/basic": const RegistryEntry(
     mediaType: 'audio/basic',
-    comments: [IntlString.constant('ULAW (Sun) audio')],
+    comments: ['ULAW (Sun) audio'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -492,7 +487,7 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/prs.sid": const RegistryEntry(
     mediaType: 'audio/prs.sid',
-    comments: [IntlString.constant('Commodore 64 audio')],
+    comments: ['Commodore 64 audio'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -510,9 +505,9 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-adpcm": const RegistryEntry(
     mediaType: 'audio/x-adpcm',
-    comments: [IntlString.constant('PCM audio')],
-    acronym: IntlString.constant('PCM'),
-    expandedAcronym: IntlString.constant('Pulse-code Modulation'),
+    comments: ['PCM audio'],
+    acronym: 'PCM',
+    expandedAcronym: 'Pulse-code Modulation',
     subclassOf: [],
     alias: [],
     magic: [
@@ -595,11 +590,9 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-aifc": const RegistryEntry(
     mediaType: 'audio/x-aifc',
-    comments: [IntlString.constant('AIFC audio')],
-    acronym: IntlString.constant('AIFC'),
-    expandedAcronym: IntlString.constant(
-      'Audio Interchange File format Compressed',
-    ),
+    comments: ['AIFC audio'],
+    acronym: 'AIFC',
+    expandedAcronym: 'Audio Interchange File format Compressed',
     subclassOf: ['application/x-iff'],
     alias: ['audio/x-aiffc'],
     globs: [
@@ -617,9 +610,9 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-aiff": const RegistryEntry(
     mediaType: 'audio/x-aiff',
-    comments: [IntlString.constant('AIFF/Amiga/Mac audio')],
-    acronym: IntlString.constant('AIFF'),
-    expandedAcronym: IntlString.constant('Audio Interchange File Format'),
+    comments: ['AIFF/Amiga/Mac audio'],
+    acronym: 'AIFF',
+    expandedAcronym: 'Audio Interchange File Format',
     subclassOf: ['application/x-iff'],
     alias: [],
     globs: [
@@ -638,7 +631,7 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-ape": const RegistryEntry(
     mediaType: 'audio/x-ape',
-    comments: [IntlString.constant('Monkey\'s audio')],
+    comments: ['Monkey\'s audio'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.ape', weight: 50, caseSensitive: false)],
@@ -653,7 +646,7 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-pn-audibleaudio": const RegistryEntry(
     mediaType: 'audio/x-pn-audibleaudio',
-    comments: [IntlString.constant('Audible.Com audio')],
+    comments: ['Audible.Com audio'],
     subclassOf: [],
     alias: ['audio/vnd.audible'],
     globs: [Glob(pattern: '*.aa', weight: 50, caseSensitive: false)],
@@ -673,7 +666,7 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/vnd.audible.aax": const RegistryEntry(
     mediaType: 'audio/vnd.audible.aax',
-    comments: [IntlString.constant('Audible Enhanced audio')],
+    comments: ['Audible Enhanced audio'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.aax', weight: 50, caseSensitive: false)],
@@ -693,7 +686,7 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/vnd.audible.aaxc": const RegistryEntry(
     mediaType: 'audio/vnd.audible.aaxc',
-    comments: [IntlString.constant('Audible Enhanced audio')],
+    comments: ['Audible Enhanced audio'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.aaxc', weight: 50, caseSensitive: false)],
@@ -713,11 +706,9 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-dff": const RegistryEntry(
     mediaType: 'audio/x-dff',
-    comments: [IntlString.constant('DSDIFF audio')],
-    acronym: IntlString.constant('DSDIFF'),
-    expandedAcronym: IntlString.constant(
-      'Direct Stream Digital Interchange File Format',
-    ),
+    comments: ['DSDIFF audio'],
+    acronym: 'DSDIFF',
+    expandedAcronym: 'Direct Stream Digital Interchange File Format',
     subclassOf: [],
     alias: ['audio/dff'],
     globs: [Glob(pattern: '*.dff', weight: 50, caseSensitive: false)],
@@ -745,9 +736,9 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-dsf": const RegistryEntry(
     mediaType: 'audio/x-dsf',
-    comments: [IntlString.constant('DSF audio')],
-    acronym: IntlString.constant('DSF'),
-    expandedAcronym: IntlString.constant('Direct stream digital Stream File'),
+    comments: ['DSF audio'],
+    acronym: 'DSF',
+    expandedAcronym: 'Direct stream digital Stream File',
     subclassOf: [],
     alias: ['audio/dsf', 'audio/x-dsd', 'audio/dsd'],
     globs: [Glob(pattern: '*.dsf', weight: 50, caseSensitive: false)],
@@ -783,7 +774,7 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-it": const RegistryEntry(
     mediaType: 'audio/x-it',
-    comments: [IntlString.constant('Impulse Tracker audio')],
+    comments: ['Impulse Tracker audio'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.it', weight: 50, caseSensitive: false)],
@@ -798,9 +789,9 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/flac": const RegistryEntry(
     mediaType: 'audio/flac',
-    comments: [IntlString.constant('FLAC audio')],
-    acronym: IntlString.constant('FLAC'),
-    expandedAcronym: IntlString.constant('Free Lossless Audio Codec'),
+    comments: ['FLAC audio'],
+    acronym: 'FLAC',
+    expandedAcronym: 'Free Lossless Audio Codec',
     subclassOf: [],
     alias: ['audio/x-flac'],
     globs: [Glob(pattern: '*.flac', weight: 50, caseSensitive: false)],
@@ -815,9 +806,9 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-tak": const RegistryEntry(
     mediaType: 'audio/x-tak',
-    comments: [IntlString.constant('TAK audio')],
-    acronym: IntlString.constant('TAK'),
-    expandedAcronym: IntlString.constant('Tom\'s lossless Audio Kompressor'),
+    comments: ['TAK audio'],
+    acronym: 'TAK',
+    expandedAcronym: 'Tom\'s lossless Audio Kompressor',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.tak', weight: 50, caseSensitive: false)],
@@ -832,7 +823,7 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-wavpack": const RegistryEntry(
     mediaType: 'audio/x-wavpack',
-    comments: [IntlString.constant('WavPack audio')],
+    comments: ['WavPack audio'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -850,7 +841,7 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-wavpack-correction": const RegistryEntry(
     mediaType: 'audio/x-wavpack-correction',
-    comments: [IntlString.constant('WavPack audio correction file')],
+    comments: ['WavPack audio correction file'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.wvc', weight: 50, caseSensitive: false)],
@@ -865,11 +856,9 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/midi": const RegistryEntry(
     mediaType: 'audio/midi',
-    comments: [IntlString.constant('MIDI audio')],
-    acronym: IntlString.constant('MIDI'),
-    expandedAcronym: IntlString.constant(
-      'Musical Instrument Digital Interface',
-    ),
+    comments: ['MIDI audio'],
+    acronym: 'MIDI',
+    expandedAcronym: 'Musical Instrument Digital Interface',
     subclassOf: [],
     alias: ['audio/x-midi'],
     globs: [
@@ -888,7 +877,7 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-mo3": const RegistryEntry(
     mediaType: 'audio/x-mo3',
-    comments: [IntlString.constant('Compressed Tracker audio')],
+    comments: ['Compressed Tracker audio'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.mo3', weight: 50, caseSensitive: false)],
@@ -903,9 +892,9 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/aac": const RegistryEntry(
     mediaType: 'audio/aac',
-    comments: [IntlString.constant('AAC audio')],
-    acronym: IntlString.constant('AAC'),
-    expandedAcronym: IntlString.constant('Advanced Audio Coding'),
+    comments: ['AAC audio'],
+    acronym: 'AAC',
+    expandedAcronym: 'Advanced Audio Coding',
     subclassOf: [],
     alias: ['audio/x-aac'],
     globs: [
@@ -930,9 +919,9 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/usac": const RegistryEntry(
     mediaType: 'audio/usac',
-    comments: [IntlString.constant('USAC audio')],
-    acronym: IntlString.constant('USAC'),
-    expandedAcronym: IntlString.constant('Unified Speech and Audio Coding'),
+    comments: ['USAC audio'],
+    acronym: 'USAC',
+    expandedAcronym: 'Unified Speech and Audio Coding',
     subclassOf: [],
     alias: [],
     globs: [
@@ -942,7 +931,7 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/mp4": const RegistryEntry(
     mediaType: 'audio/mp4',
-    comments: [IntlString.constant('MPEG-4 audio')],
+    comments: ['MPEG-4 audio'],
     subclassOf: [],
     alias: ['audio/x-m4a', 'audio/m4a'],
     globs: [
@@ -965,14 +954,14 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-m4r": const RegistryEntry(
     mediaType: 'audio/x-m4r',
-    comments: [IntlString.constant('MPEG-4 ringtone')],
+    comments: ['MPEG-4 ringtone'],
     subclassOf: ['video/mp4'],
     alias: [],
     globs: [Glob(pattern: '*.m4r', weight: 50, caseSensitive: false)],
   ),
   "audio/x-m4b": const RegistryEntry(
     mediaType: 'audio/x-m4b',
-    comments: [IntlString.constant('MPEG-4 audio book')],
+    comments: ['MPEG-4 audio book'],
     subclassOf: ['audio/mp4'],
     alias: [],
     globs: [
@@ -995,7 +984,7 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-mod": const RegistryEntry(
     mediaType: 'audio/x-mod',
-    comments: [IntlString.constant('Amiga SoundTracker audio')],
+    comments: ['Amiga SoundTracker audio'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -1214,14 +1203,14 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/mp2": const RegistryEntry(
     mediaType: 'audio/mp2',
-    comments: [IntlString.constant('MP2 audio')],
+    comments: ['MP2 audio'],
     subclassOf: [],
     alias: ['audio/x-mp2'],
     globs: [Glob(pattern: '*.mp2', weight: 50, caseSensitive: false)],
   ),
   "audio/mpeg": const RegistryEntry(
     mediaType: 'audio/mpeg',
-    comments: [IntlString.constant('MP3 audio')],
+    comments: ['MP3 audio'],
     subclassOf: [],
     alias: ['audio/x-mp3', 'audio/x-mpg', 'audio/x-mpeg', 'audio/mp3'],
     globs: [
@@ -1275,7 +1264,7 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-mpegurl": const RegistryEntry(
     mediaType: 'audio/x-mpegurl',
-    comments: [IntlString.constant('Media playlist')],
+    comments: ['Media playlist'],
     subclassOf: ['text/plain'],
     alias: [
       'audio/mpegurl',
@@ -1305,7 +1294,7 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-ms-asx": const RegistryEntry(
     mediaType: 'audio/x-ms-asx',
-    comments: [IntlString.constant('Microsoft ASX playlist')],
+    comments: ['Microsoft ASX playlist'],
     subclassOf: [],
     alias: [
       'video/x-ms-wvx',
@@ -1348,9 +1337,9 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-psf": const RegistryEntry(
     mediaType: 'audio/x-psf',
-    comments: [IntlString.constant('PSF audio')],
-    acronym: IntlString.constant('PSF'),
-    expandedAcronym: IntlString.constant('Portable Sound Format'),
+    comments: ['PSF audio'],
+    acronym: 'PSF',
+    expandedAcronym: 'Portable Sound Format',
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.psf', weight: 50, caseSensitive: false)],
@@ -1365,32 +1354,32 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-minipsf": const RegistryEntry(
     mediaType: 'audio/x-minipsf',
-    comments: [IntlString.constant('MiniPSF audio')],
-    acronym: IntlString.constant('MiniPSF'),
-    expandedAcronym: IntlString.constant('Miniature Portable Sound Format'),
+    comments: ['MiniPSF audio'],
+    acronym: 'MiniPSF',
+    expandedAcronym: 'Miniature Portable Sound Format',
     subclassOf: ['audio/x-psf'],
     alias: [],
     globs: [Glob(pattern: '*.minipsf', weight: 50, caseSensitive: false)],
   ),
   "audio/x-psflib": const RegistryEntry(
     mediaType: 'audio/x-psflib',
-    comments: [IntlString.constant('PSFlib audio library')],
-    acronym: IntlString.constant('PSFlib'),
-    expandedAcronym: IntlString.constant('Portable Sound Format Library'),
+    comments: ['PSFlib audio library'],
+    acronym: 'PSFlib',
+    expandedAcronym: 'Portable Sound Format Library',
     subclassOf: ['audio/x-psf'],
     alias: [],
     globs: [Glob(pattern: '*.psflib', weight: 50, caseSensitive: false)],
   ),
   "audio/x-ms-wma": const RegistryEntry(
     mediaType: 'audio/x-ms-wma',
-    comments: [IntlString.constant('Windows Media audio')],
+    comments: ['Windows Media audio'],
     subclassOf: ['application/vnd.ms-asf'],
     alias: ['audio/wma'],
     globs: [Glob(pattern: '*.wma', weight: 50, caseSensitive: false)],
   ),
   "audio/x-musepack": const RegistryEntry(
     mediaType: 'audio/x-musepack',
-    comments: [IntlString.constant('Musepack audio')],
+    comments: ['Musepack audio'],
     subclassOf: [],
     alias: [],
     globs: [
@@ -1410,7 +1399,7 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/vnd.rn-realaudio": const RegistryEntry(
     mediaType: 'audio/vnd.rn-realaudio',
-    comments: [IntlString.constant('RealAudio document')],
+    comments: ['RealAudio document'],
     subclassOf: [],
     alias: ['audio/x-pn-realaudio', 'audio/vnd.m-realaudio'],
     globs: [
@@ -1420,13 +1409,13 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-riff": const RegistryEntry(
     mediaType: 'audio/x-riff',
-    comments: [IntlString.constant('RIFF audio')],
+    comments: ['RIFF audio'],
     subclassOf: [],
     alias: [],
   ),
   "audio/x-s3m": const RegistryEntry(
     mediaType: 'audio/x-s3m',
-    comments: [IntlString.constant('Scream Tracker 3 audio')],
+    comments: ['Scream Tracker 3 audio'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.s3m', weight: 50, caseSensitive: false)],
@@ -1446,7 +1435,7 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-scpls": const RegistryEntry(
     mediaType: 'audio/x-scpls',
-    comments: [IntlString.constant('MP3 ShoutCast playlist')],
+    comments: ['MP3 ShoutCast playlist'],
     subclassOf: [],
     alias: ['application/pls', 'audio/scpls'],
     globs: [Glob(pattern: '*.pls', weight: 50, caseSensitive: false)],
@@ -1478,7 +1467,7 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-stm": const RegistryEntry(
     mediaType: 'audio/x-stm',
-    comments: [IntlString.constant('Scream Tracker audio')],
+    comments: ['Scream Tracker audio'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.stm', weight: 50, caseSensitive: false)],
@@ -1510,14 +1499,14 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-voc": const RegistryEntry(
     mediaType: 'audio/x-voc',
-    comments: [IntlString.constant('VOC audio')],
+    comments: ['VOC audio'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.voc', weight: 50, caseSensitive: false)],
   ),
   "audio/vnd.wave": const RegistryEntry(
     mediaType: 'audio/vnd.wave',
-    comments: [IntlString.constant('WAV audio')],
+    comments: ['WAV audio'],
     subclassOf: ['application/x-riff'],
     alias: ['audio/wav', 'audio/x-wav'],
     globs: [Glob(pattern: '*.wav', weight: 50, caseSensitive: false)],
@@ -1533,7 +1522,7 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-xi": const RegistryEntry(
     mediaType: 'audio/x-xi',
-    comments: [IntlString.constant('FastTracker II instrument')],
+    comments: ['FastTracker II instrument'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.xi', weight: 50, caseSensitive: false)],
@@ -1553,7 +1542,7 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-xm": const RegistryEntry(
     mediaType: 'audio/x-xm',
-    comments: [IntlString.constant('FastTracker II audio')],
+    comments: ['FastTracker II audio'],
     subclassOf: [],
     alias: [],
     globs: [Glob(pattern: '*.xm', weight: 50, caseSensitive: false)],
@@ -1573,7 +1562,7 @@ final Map<String, RegistryEntry> mimeinfoDbAudio = {
   ),
   "audio/x-tta": const RegistryEntry(
     mediaType: 'audio/x-tta',
-    comments: [IntlString.constant('TrueAudio audio')],
+    comments: ['TrueAudio audio'],
     subclassOf: [],
     alias: ['audio/tta'],
     globs: [Glob(pattern: '*.tta', weight: 50, caseSensitive: false)],
