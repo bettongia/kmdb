@@ -28,7 +28,7 @@ import 'command.dart';
 ///   `false` if an existing database was reopened.
 ///
 /// Usage: `kmdb <db> init`
-final class InitCommand implements CliCommand {
+final class InitCommand extends CliCommand {
   const InitCommand();
 
   @override

@@ -24,7 +24,7 @@ import 'vault_get_command.dart';
 /// the database was opened without a vault store.
 ///
 /// Usage: `kmdb <db> vault <sub-command> [args...]`
-final class VaultCommand implements CliCommand {
+final class VaultCommand extends CliCommand {
   const VaultCommand();
 
   static const _subCommands = <String, CliCommand>{'get': VaultGetCommand()};

@@ -17,7 +17,7 @@ import 'command.dart';
 /// Displays identifying information about the database instance.
 ///
 /// Usage: `kmdb <db> info`
-final class InfoCommand implements CliCommand {
+final class InfoCommand extends CliCommand {
   const InfoCommand();
 
   @override

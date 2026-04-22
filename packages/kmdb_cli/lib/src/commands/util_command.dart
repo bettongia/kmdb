@@ -41,7 +41,7 @@ import 'command.dart';
 /// ```
 ///
 /// All subcommands are **read-only** — no writes are performed.
-final class UtilCommand implements CliCommand {
+final class UtilCommand extends CliCommand {
   /// Creates a [UtilCommand].
   const UtilCommand();
 
@@ -53,8 +53,14 @@ final class UtilCommand implements CliCommand {
       'Inspect raw SSTable, WAL, and Manifest files for debugging.';
 
   @override
-  String get usage =>
-      'util <sstable|wal|manifest> [filename] [--full] [--data]';
+  String get usage => 'util <sstable|wal|manifest> [filename]';
+
+  @override
+  void configureArgParser(ArgParser parser) {
+    parser
+      ..addFlag('full', negatable: false, help: 'Show detailed per-entry output')
+      ..addFlag('data', negatable: false, help: 'Include decoded value payloads (implies --full)');
+  }
 
   @override
   Future<bool> execute(

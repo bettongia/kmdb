@@ -54,7 +54,7 @@ import 'vault/vault_import_helper.dart';
 /// ```
 ///
 /// Reports `{"updated": N}` on success.
-final class UpdateCommand implements CliCommand {
+final class UpdateCommand extends CliCommand {
   const UpdateCommand();
 
   @override
@@ -68,9 +68,17 @@ final class UpdateCommand implements CliCommand {
       'Always requires --set <json>.';
 
   @override
-  String get usage =>
-      'update <collection> [<id> | --id <id>... | --filter <json> | --all] '
-      '--set <json> | --import <package.kvlt>';
+  String get usage => 'update <collection> [<id>]';
+
+  @override
+  void configureArgParser(ArgParser parser) {
+    parser
+      ..addOption('id', valueHelp: 'id,...', help: 'Document ID(s) to update (comma-separated, repeatable)')
+      ..addOption('filter', valueHelp: 'json', help: 'JSON filter to select documents to update')
+      ..addFlag('all', negatable: false, help: 'Update all documents in the collection')
+      ..addOption('set', valueHelp: 'json', help: 'JSON fields to shallow-merge into matching documents')
+      ..addOption('import', valueHelp: 'package.kvlt', help: 'Merge fields from a vault KVLT package');
+  }
 
   @override
   Future<bool> execute(

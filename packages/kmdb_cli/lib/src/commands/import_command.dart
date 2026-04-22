@@ -28,7 +28,7 @@ import 'command.dart';
 /// kmdb <db> import <collection> [--input <file>]
 ///                                [--on-conflict ignore|replace|error]
 /// ```
-final class ImportCommand implements CliCommand {
+final class ImportCommand extends CliCommand {
   const ImportCommand();
 
   @override
@@ -38,8 +38,19 @@ final class ImportCommand implements CliCommand {
   String get description => 'Import NDJSON documents into a collection.';
 
   @override
-  String get usage =>
-      'import <collection> [--input <file>] [--on-conflict ignore|replace|error]';
+  String get usage => 'import <collection>';
+
+  @override
+  void configureArgParser(ArgParser parser) {
+    parser
+      ..addOption('input', valueHelp: 'file', help: 'NDJSON file to import (default: stdin)')
+      ..addOption(
+        'on-conflict',
+        valueHelp: 'ignore|replace|error',
+        help: 'Conflict resolution when a document key already exists (default: replace)',
+        allowed: ['ignore', 'replace', 'error'],
+      );
+  }
 
   @override
   Future<bool> execute(

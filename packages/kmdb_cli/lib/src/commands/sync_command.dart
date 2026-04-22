@@ -32,7 +32,7 @@ import 'sync_helpers.dart';
 /// kmdb <db> sync --sync-dir <path>   # one-off; bypasses config
 /// kmdb <db> sync [<remote>] [--collection <coll>]...
 /// ```
-final class SyncCommand implements CliCommand {
+final class SyncCommand extends CliCommand {
   /// Creates a [SyncCommand].
   const SyncCommand();
 
@@ -44,8 +44,14 @@ final class SyncCommand implements CliCommand {
       'Push local SSTables to a sync folder then pull peer SSTables.';
 
   @override
-  String get usage =>
-      'sync [<remote>] [--sync-dir <path>] [--collection <coll>]...';
+  String get usage => 'sync [<remote>]';
+
+  @override
+  void configureArgParser(ArgParser parser) {
+    parser
+      ..addOption('sync-dir', valueHelp: 'path', help: 'One-off sync directory path (bypasses saved remotes)')
+      ..addOption('collection', valueHelp: 'coll,...', help: 'Restrict sync to these collections (comma-separated)');
+  }
 
   @override
   Future<bool> execute(

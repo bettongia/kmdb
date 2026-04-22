@@ -149,8 +149,10 @@ void main() {
       expect(err.toString(), contains('--rrf-k must be >= 1'));
     });
 
-    test('--rrf-k is mentioned in usage text', () {
-      expect(SearchCommand().usage, contains('--rrf-k'));
+    test('--rrf-k is registered in the arg parser', () {
+      final parser = ArgParser();
+      SearchCommand().configureArgParser(parser);
+      expect(parser.usage, contains('--rrf-k'));
     });
   });
 

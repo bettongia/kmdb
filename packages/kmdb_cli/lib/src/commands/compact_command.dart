@@ -17,7 +17,7 @@ import 'command.dart';
 /// Runs full compaction until all levels are stable.
 ///
 /// Usage: `kmdb <db> compact`
-final class CompactCommand implements CliCommand {
+final class CompactCommand extends CliCommand {
   const CompactCommand();
 
   @override

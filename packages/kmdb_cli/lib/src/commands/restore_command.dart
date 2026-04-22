@@ -22,7 +22,7 @@ import 'command.dart';
 /// Restores a database from a dump file produced by [DumpCommand].
 ///
 /// Usage: `kmdb <db> restore [--input <file>]`
-final class RestoreCommand implements CliCommand {
+final class RestoreCommand extends CliCommand {
   const RestoreCommand();
 
   @override
@@ -32,7 +32,12 @@ final class RestoreCommand implements CliCommand {
   String get description => 'Restore all collections from a NDJSON dump.';
 
   @override
-  String get usage => 'restore [--input <file>]';
+  String get usage => 'restore';
+
+  @override
+  void configureArgParser(ArgParser parser) {
+    parser.addOption('input', valueHelp: 'file', help: 'NDJSON dump file to restore from (default: stdin)');
+  }
 
   @override
   Future<bool> execute(

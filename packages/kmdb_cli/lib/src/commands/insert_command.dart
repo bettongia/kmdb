@@ -50,7 +50,7 @@ import 'vault/vault_import_helper.dart';
 /// kmdb <db> insert <collection> [--file <path>]
 /// kmdb <db> insert <collection> [--import <package.kvlt>]
 /// ```
-final class InsertCommand implements CliCommand {
+final class InsertCommand extends CliCommand {
   const InsertCommand();
 
   @override
@@ -62,9 +62,15 @@ final class InsertCommand implements CliCommand {
       'from --value, --file, or stdin.';
 
   @override
-  String get usage =>
-      'insert <collection> [--value <json>] [--file <path>] '
-      '[--import <package.kvlt>]';
+  String get usage => 'insert <collection>';
+
+  @override
+  void configureArgParser(ArgParser parser) {
+    parser
+      ..addOption('value', valueHelp: 'json', help: 'Inline JSON document(s) to insert')
+      ..addOption('file', valueHelp: 'path', help: 'Read document(s) from a JSON/NDJSON file')
+      ..addOption('import', valueHelp: 'package.kvlt', help: 'Import from a vault KVLT package');
+  }
 
   @override
   Future<bool> execute(

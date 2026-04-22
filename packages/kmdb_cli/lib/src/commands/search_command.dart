@@ -49,7 +49,7 @@ import 'command.dart';
 /// - `--limit <n>` — maximum hits to return (default 10).
 /// - `--offset <n>` — number of top results to skip (default 0).
 /// - `--output table|json|ids` — output format (default `table`).
-final class SearchCommand implements CliCommand {
+final class SearchCommand extends CliCommand {
   /// Creates a [SearchCommand].
   const SearchCommand();
 
@@ -62,11 +62,33 @@ final class SearchCommand implements CliCommand {
 
   @override
   String get usage =>
-      'search <collection> <query> [--fields f1,f2] [--mode auto|lexical|semantic] '
-      '[--candidates n] [--rrf-k n] [--limit n] [--offset n] [--output table|json|ids] [--explain]\n'
+      'search <collection> <query>\n'
       '       search list <collection>\n'
-      '       search create <collection> <field> [--stopwords] [--k1 n] [--b n]\n'
+      '       search create <collection> <field>\n'
       '       search delete <collection> <field>';
+
+  @override
+  void configureArgParser(ArgParser parser) {
+    parser
+      ..addOption('fields', valueHelp: 'f1,f2,...', help: 'Comma-separated field names to search (default: all indexed)')
+      ..addOption(
+        'mode',
+        valueHelp: 'auto|lexical|semantic',
+        help: 'Search mode (default: auto)',
+        allowed: ['auto', 'lexical', 'semantic'],
+      )
+      ..addOption('candidates', valueHelp: 'n', help: 'Maximum candidate documents for semantic/hybrid search (default: 100)')
+      ..addOption('rrf-k', valueHelp: 'n', help: 'Reciprocal Rank Fusion smoothing constant (default: 60)')
+      ..addOption('limit', valueHelp: 'n', help: 'Maximum results to return (default: 10)')
+      ..addOption('offset', valueHelp: 'n', help: 'Number of results to skip (default: 0)')
+      ..addOption(
+        'output',
+        valueHelp: 'table|json|ids',
+        help: 'Output format for search results (default: table)',
+        allowed: ['table', 'json', 'ids'],
+      )
+      ..addFlag('explain', negatable: false, help: 'Show search execution plan');
+  }
 
   // Keywords that are always subcommands, never collection names.
   static const _subcommands = {'list', 'create', 'delete'};

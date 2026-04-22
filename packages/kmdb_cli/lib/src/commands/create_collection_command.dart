@@ -26,7 +26,7 @@ import 'command.dart';
 ///               already existed.
 ///
 /// Usage: `kmdb <db> create-collection <name>`
-final class CreateCollectionCommand implements CliCommand {
+final class CreateCollectionCommand extends CliCommand {
   const CreateCollectionCommand();
 
   @override
