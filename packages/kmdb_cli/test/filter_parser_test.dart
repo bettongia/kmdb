@@ -135,6 +135,57 @@ void main() {
       expect(f.evaluate(doc), isTrue);
     });
 
+    // ── Case-insensitive string ops ────────────────────────────────────────
+
+    test('eq with insensitive:true matches different case', () {
+      final f = FilterParser.parse(
+        '{"field":"city","op":"eq","value":"london","insensitive":true}',
+      );
+      expect(f.evaluate(doc), isTrue);
+    });
+
+    test('eq with insensitive:true does not match wrong value', () {
+      final f = FilterParser.parse(
+        '{"field":"city","op":"eq","value":"paris","insensitive":true}',
+      );
+      expect(f.evaluate(doc), isFalse);
+    });
+
+    test('eq without insensitive flag is case-sensitive', () {
+      final f = FilterParser.parse(
+        '{"field":"city","op":"eq","value":"london"}',
+      );
+      expect(f.evaluate(doc), isFalse);
+    });
+
+    test('startsWith with insensitive:true matches different case', () {
+      final f = FilterParser.parse(
+        '{"field":"city","op":"startsWith","value":"LON","insensitive":true}',
+      );
+      expect(f.evaluate(doc), isTrue);
+    });
+
+    test('endsWith with insensitive:true matches different case', () {
+      final f = FilterParser.parse(
+        '{"field":"city","op":"endsWith","value":"DON","insensitive":true}',
+      );
+      expect(f.evaluate(doc), isTrue);
+    });
+
+    test('contains with insensitive:true matches different case', () {
+      final f = FilterParser.parse(
+        '{"field":"city","op":"contains","value":"OND","insensitive":true}',
+      );
+      expect(f.evaluate(doc), isTrue);
+    });
+
+    test('insensitive:false is the same as omitting the key', () {
+      final f = FilterParser.parse(
+        '{"field":"city","op":"startsWith","value":"LON","insensitive":false}',
+      );
+      expect(f.evaluate(doc), isFalse);
+    });
+
     test('endsWith matches suffix', () {
       final f = FilterParser.parse(
         '{"field":"city","op":"endsWith","value":"don"}',
