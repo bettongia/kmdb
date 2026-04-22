@@ -4,6 +4,11 @@
 
 **PR link**: —
 
+**Prerequisite**: `plan_write_pipeline_and_cli_migration.md` must be complete
+before this plan is implemented. Once the CLI routes writes through
+`KmdbCollection`, schema enforcement on `insert`, `put`, and `update` is
+automatic — no manual wiring in write commands is needed here.
+
 ## Problem statement
 
 Users have no way to define, inspect, or remove collection schemas via the CLI.
@@ -22,9 +27,13 @@ string without understanding the internal `SchemaRule` hierarchy.
 - [x] Storage location: `$meta` only — schemas sync automatically, consistent
       with the library. Not mirrored in `local/config.json`.
 - [x] Update semantics: validate the merged document (existing + patch), not
-      just the patch — mirrors `KmdbCollection.update()` behaviour.
+      just the patch — this is now handled automatically because `update` routes
+      through `KmdbCollection.update()` after the prerequisite migration.
 - [x] `MetaStore.deleteRawByName` exists — `SchemaManager.deregister` is
       implementable without engine changes.
+- [x] `CommandContext` / `DatabaseOpener` wiring: handled by the prerequisite
+      plan. `ctx.db.schemaManager` and `ctx.db.store.meta` are available after
+      the migration; no further wiring needed here.
 
 ## Investigation
 
@@ -52,44 +61,6 @@ Implementation: remove the key `schema:{collection}` via
 `schema:__registry__` list without the collection name, and evict the in-memory
 cache entry. Deregistering an unknown collection is a no-op.
 
-### `CommandContext` and `DatabaseOpener`
-
-`CommandContext` currently carries `store`, `config`, `indexManager`, and
-`vaultStore`. A `SchemaManager` field is added as a required named parameter
-with a default of `SchemaManager()` (empty, no schemas — keeps tests
-construction-compatible).
-
-`DatabaseOpener.open()` does not need changes. Schema loading happens in
-`cli_runner.dart` after the store is opened:
-
-```dart
-final schemaManager = SchemaManager();
-await schemaManager.load(store.meta);
-```
-
-### Write commands requiring enforcement
-
-The CLI has three mutation commands that write document content:
-
-| Command | Write path | Validation input |
-| :------ | :--------- | :--------------- |
-| `insert` | single doc or batch | the incoming doc |
-| `put` | single doc | the incoming doc |
-| `update` | shallow merge of `--set` into existing doc | **merged result** (existing + patch) |
-
-`update` is the subtle case. `_updateOne()` currently does:
-```
-read existing → _merge(existing, setFields) → store.put()
-```
-Validation must run on the merged map, between `_merge` and `store.put`. The
-same applies to the filter-based and `--all` paths that inline the same
-read-merge-write loop.
-
-The `--import` path in `update` (vault package replace) follows the same
-principle: validate the replacement doc before the `WriteBatch` is written.
-
-`delete` is never validated — consistent with the library.
-
 ### `schema set` input
 
 Two input modes, mirroring `insert --value` / `insert --file`:
@@ -102,22 +73,33 @@ The file or string contains only the JSON Schema (e.g.
 
 ### Error format for schema violations
 
+The `schema validate` subcommand (dry-run validation against a registered
+schema) formats violations as:
+
 ```
 Error: schema validation failed for 'contacts':
   name: required field is missing
   email: must be a valid email
 ```
 
-One violation per line, indented two spaces, `path: message`.
-When `path` is empty (root violation), the message is printed without a prefix.
+One violation per line, indented two spaces, `path: message`. When `path` is
+empty (root violation), the message is printed without a prefix.
+
+For enforcement errors arising from `insert`, `put`, and `update` after the
+prerequisite migration, these commands receive a `SchemaValidationException` from
+`KmdbCollection` and should format it using the same layout.
 
 ### `schema:__registry__` key
 
 `SchemaManager` writes and reads this key directly via `putRawByName` /
-`getRawByName`. The CLI `schema list` subcommand reads the registry key directly
-from `store.meta` (same as `SchemaManager.load()` does internally) rather than
-adding a public accessor, unless that proves cumbersome — in which case a
+`getRawByName`. The CLI `schema list` subcommand reads the registry key from
+`ctx.db.store.meta`. If accessing the raw bytes proves cumbersome, a
 `registeredCollections` getter on `SchemaManager` is the right fix.
+
+> **Review note:** Add `registeredCollections` unconditionally in Phase 2 — it
+> is always cleaner than having the CLI decode raw registry bytes directly, and
+> the implementation is a one-liner (`_rules.keys.toList()`). Do not leave this
+> as a fallback.
 
 ## Implementation plan
 
@@ -154,19 +136,7 @@ adding a public accessor, unless that proves cumbersome — in which case a
   - Registry updated correctly after deregister (persists across `load()`)
   - Other registered collections unaffected by deregister
 
-### Phase 3 — Wire `SchemaManager` into `CommandContext`
-
-- [ ] Add `SchemaManager schemaManager` to `CommandContext` constructor
-      (required named param, defaulting to `SchemaManager()` for test
-      construction without a live store)
-- [ ] Load schemas in `cli_runner.dart` after `DatabaseOpener.open()`:
-  ```dart
-  final schemaManager = SchemaManager();
-  await schemaManager.load(store.meta);
-  ```
-- [ ] Pass `schemaManager` to `CommandContext(...)` in the runner
-
-### Phase 4 — CLI `schema` command
+### Phase 3 — CLI `schema` command
 
 New file:
 `packages/kmdb_cli/lib/src/commands/schema_command.dart`
@@ -185,54 +155,34 @@ kmdb <db> schema validate <collection> (--doc <json> | --file <path>)
   - Accept `--file <path>` (reads file, `jsonDecode`) or `--schema <json>`
     (inline); exactly one required
   - Validate the decoded value is a `Map<String, dynamic>`
-  - Call `ctx.schemaManager.register(CollectionSchema(collection: collection,
-    jsonSchema: decoded), ctx.store.meta)`
+  - Call `ctx.db.schemaManager.register(CollectionSchema(collection: collection,
+    jsonSchema: decoded), ctx.db.store.meta)`
   - Print confirmation: `Schema registered for '<collection>'.`
 - [ ] `schema show <collection>`:
-  - Read raw bytes from `ctx.store.meta.getRawByName('schema:$collection')`
+  - Read raw bytes from `ctx.db.store.meta.getRawByName('schema:$collection')`
   - If absent, error: `No schema registered for '<collection>'.`
   - Decode JSON, extract the `schema` field, pretty-print it
 - [ ] `schema list`:
-  - Read `ctx.store.meta.getRawByName('schema:__registry__')`
+  - Read `ctx.db.store.meta.getRawByName('schema:__registry__')`
   - If absent or empty, print: `No schemas registered.`
   - Print one collection name per line
 - [ ] `schema remove <collection>`:
-  - Call `ctx.schemaManager.deregister(collection, ctx.store.meta)`
+  - Call `ctx.db.schemaManager.deregister(collection, ctx.db.store.meta)`
   - Print: `Schema removed for '<collection>'.`
 - [ ] `schema validate <collection> (--doc <json> | --file <path>)`:
   - Read doc JSON from `--doc` inline string or `--file` path
-  - Call `ctx.schemaManager.validate(collection, doc)` — catch
+  - Call `ctx.db.schemaManager.validate(collection, doc)` — catch
     `SchemaValidationException` and print violations in the standard error
     format; print `{"valid": true}` when validation passes
   - If no schema is registered for the collection, print
     `No schema registered for '<collection>'. Document not validated.` and
     return `true`
+- [ ] Add `SchemaValidationException` formatting helper (shared between
+      `schema validate` output and the violation errors surfaced by migrated
+      write commands)
 - [ ] Register `SchemaCommand` in `cli_runner.dart`
 - [ ] Tests for all subcommands covering success, missing arg, missing
       collection, and no-schema cases
-
-### Phase 5 — Enforcement in write commands
-
-- [ ] `insert_command.dart`:
-  - After decoding each incoming doc, call
-    `ctx.schemaManager.validate(collection, doc)` before `store.put`
-  - On `SchemaValidationException`, write formatted violations to `ctx.err` and
-    return `false` (abort the entire batch — do not partially insert)
-- [ ] `put_command.dart`:
-  - Same pattern: validate before `store.put`
-- [ ] `update_command.dart`:
-  - In `_updateOne()`: validate `merged` (result of `_merge`) before `store.put`
-  - In the filter-based loop: validate each `merged` doc before `store.put`;
-    abort on first violation (report key in error message)
-  - In the `--all` loop: same
-  - In `_executeImport`: validate the replacement `doc` before writing the
-    `WriteBatch`
-- [ ] Tests for enforcement in each write command:
-  - Valid doc accepted; invalid doc rejected with correct error message
-  - `update` with `--set` that produces an invalid merged doc is rejected
-  - `update --all` aborts on the first violation and reports the document key
-  - Collections without a schema are unaffected
-  - `delete` is never blocked regardless of schema
 
 ## Coverage targets
 
@@ -245,9 +195,6 @@ kmdb <db> schema validate <collection> (--doc <json> | --file <path>)
 | `schema list` | none, one, multiple collections |
 | `schema remove` | removes enforcement, unknown collection no-op |
 | `schema validate` | violations reported, valid doc passes, no-schema no-op |
-| `insert` enforcement | valid accepted, invalid rejected |
-| `put` enforcement | valid accepted, invalid rejected |
-| `update` enforcement | merged valid, merged invalid, filter-based abort on violation, `--all` abort on violation, `--import` replacement validated |
 | Cross-collection isolation | schema only enforced for its named collection |
 
 All tests must pass with ≥ 90% coverage.
