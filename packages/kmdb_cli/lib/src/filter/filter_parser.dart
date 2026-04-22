@@ -40,6 +40,10 @@ import 'package:kmdb/kmdb.dart';
 /// `isNull`, `isNotNull`, `isTrue`, `isFalse`,
 /// `startsWith`, `endsWith`, `contains`,
 /// `containsAll`, `containsAny`.
+///
+/// The optional `"insensitive": true` key enables case-insensitive matching
+/// for string ops (`eq`, `startsWith`, `endsWith`, `contains`).
+/// It has no effect on non-string values or other operators.
 abstract final class FilterParser {
   FilterParser._();
 
@@ -83,16 +87,22 @@ abstract final class FilterParser {
     final field = fieldRaw as String;
     final op = opRaw as String;
     final value = node['value'];
+    final caseSensitive = !((node['insensitive'] as bool?) ?? false);
 
-    return _buildFieldFilter(field, op, value);
+    return _buildFieldFilter(field, op, value, caseSensitive: caseSensitive);
   }
 
   // ignore: long-method
-  static Filter _buildFieldFilter(String field, String op, dynamic value) {
+  static Filter _buildFieldFilter(
+    String field,
+    String op,
+    dynamic value, {
+    bool caseSensitive = true,
+  }) {
     final f = Field(field);
     switch (op) {
       case 'eq':
-        return f.equals(value);
+        return f.equals(value, caseSensitive: caseSensitive);
       case 'ne':
         return f.notEquals(value);
       case 'lt':
@@ -119,11 +129,11 @@ abstract final class FilterParser {
       case 'isFalse':
         return f.isFalse();
       case 'startsWith':
-        return f.startsWith(value as String);
+        return f.startsWith(value as String, caseSensitive: caseSensitive);
       case 'endsWith':
-        return f.endsWith(value as String);
+        return f.endsWith(value as String, caseSensitive: caseSensitive);
       case 'contains':
-        return f.contains(value as Object);
+        return f.contains(value as Object, caseSensitive: caseSensitive);
       case 'containsAll':
         return f.containsAll(
           _requireList(value, 'containsAll').cast<Object?>(),

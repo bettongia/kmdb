@@ -44,7 +44,11 @@ final class Field {
   // ── Equality & comparison ──────────────────────────────────────────────────
 
   /// Matches documents where the field equals [value].
-  Filter equals(Object? value) => _FieldFilter(path, _Op.eq, value);
+  ///
+  /// Set [caseSensitive] to `false` for a case-insensitive string match.
+  /// Has no effect when [value] is not a [String].
+  Filter equals(Object? value, {bool caseSensitive = true}) =>
+      _FieldFilter(path, _Op.eq, value, caseSensitive: caseSensitive);
 
   /// Matches documents where the field does not equal [value].
   Filter notEquals(Object? value) => _FieldFilter(path, _Op.neq, value);
@@ -96,18 +100,26 @@ final class Field {
   // ── String ────────────────────────────────────────────────────────────────
 
   /// Matches documents where the (String) field starts with [prefix].
-  Filter startsWith(String prefix) =>
-      _FieldFilter(path, _Op.startsWith, prefix);
+  ///
+  /// Set [caseSensitive] to `false` for a case-insensitive match.
+  Filter startsWith(String prefix, {bool caseSensitive = true}) =>
+      _FieldFilter(path, _Op.startsWith, prefix, caseSensitive: caseSensitive);
 
   /// Matches documents where the (String) field ends with [suffix].
-  Filter endsWith(String suffix) => _FieldFilter(path, _Op.endsWith, suffix);
+  ///
+  /// Set [caseSensitive] to `false` for a case-insensitive match.
+  Filter endsWith(String suffix, {bool caseSensitive = true}) =>
+      _FieldFilter(path, _Op.endsWith, suffix, caseSensitive: caseSensitive);
 
   /// Matches documents where the (String) field contains the given substring, OR
   /// where the array field contains the given element.
   ///
   /// - If the resolved value is a `String`, performs a substring match.
+  ///   Set [caseSensitive] to `false` for a case-insensitive substring match.
   /// - If the resolved value is a `List`, checks for element membership.
-  Filter contains(Object value) => _FieldFilter(path, _Op.contains, value);
+  ///   [caseSensitive] has no effect for list membership checks.
+  Filter contains(Object value, {bool caseSensitive = true}) =>
+      _FieldFilter(path, _Op.contains, value, caseSensitive: caseSensitive);
 
   // ── Array ─────────────────────────────────────────────────────────────────
 
@@ -147,11 +159,17 @@ enum _Op {
 // ── FieldFilter implementation ─────────────────────────────────────────────────
 
 final class _FieldFilter extends Filter {
-  const _FieldFilter(this._path, this._op, this._operand);
+  const _FieldFilter(
+    this._path,
+    this._op,
+    this._operand, {
+    this.caseSensitive = true,
+  });
 
   final String _path;
   final _Op _op;
   final Object? _operand;
+  final bool caseSensitive;
 
   @override
   (String, Object?)? get equalityPredicate =>
@@ -177,6 +195,9 @@ final class _FieldFilter extends Filter {
 
       case _Op.eq:
         if (value == missing) return false;
+        if (!caseSensitive && value is String && _operand is String) {
+          return value.toLowerCase() == _operand.toLowerCase();
+        }
         return _coercedEquals(value, _operand);
 
       case _Op.neq:
@@ -217,14 +238,25 @@ final class _FieldFilter extends Filter {
 
       case _Op.startsWith:
         if (value is! String) return false;
-        return value.startsWith(_operand as String);
+        final swPrefix = _operand as String;
+        return caseSensitive
+            ? value.startsWith(swPrefix)
+            : value.toLowerCase().startsWith(swPrefix.toLowerCase());
 
       case _Op.endsWith:
         if (value is! String) return false;
-        return value.endsWith(_operand as String);
+        final ewSuffix = _operand as String;
+        return caseSensitive
+            ? value.endsWith(ewSuffix)
+            : value.toLowerCase().endsWith(ewSuffix.toLowerCase());
 
       case _Op.contains:
-        if (value is String) return value.contains(_operand as String);
+        if (value is String) {
+          final cSubstr = _operand as String;
+          return caseSensitive
+              ? value.contains(cSubstr)
+              : value.toLowerCase().contains(cSubstr.toLowerCase());
+        }
         if (value is List) return value.any((e) => _coercedEquals(e, _operand));
         return false;
 

@@ -165,6 +165,91 @@ void main() {
     });
   });
 
+  group('Case-insensitive string filters', () {
+    final doc = {'name': 'Hello World'};
+
+    test('eq case-insensitive matches different case', () {
+      expect(
+        Field('name').equals('hello world', caseSensitive: false).evaluate(doc),
+        isTrue,
+      );
+      expect(
+        Field('name').equals('HELLO WORLD', caseSensitive: false).evaluate(doc),
+        isTrue,
+      );
+    });
+    test('eq case-insensitive does not match different value', () {
+      expect(
+        Field('name').equals('goodbye', caseSensitive: false).evaluate(doc),
+        isFalse,
+      );
+    });
+    test('eq case-sensitive (default) still rejects wrong case', () {
+      expect(Field('name').equals('hello world').evaluate(doc), isFalse);
+    });
+    test('eq case-insensitive has no effect on non-string fields', () {
+      expect(
+        Field('x').equals(42, caseSensitive: false).evaluate({'x': 42}),
+        isTrue,
+      );
+      expect(
+        Field('x').equals(99, caseSensitive: false).evaluate({'x': 42}),
+        isFalse,
+      );
+    });
+    test('startsWith case-insensitive matches', () {
+      expect(
+        Field('name')
+            .startsWith('hello', caseSensitive: false)
+            .evaluate(doc),
+        isTrue,
+      );
+      expect(
+        Field('name')
+            .startsWith('HELLO', caseSensitive: false)
+            .evaluate(doc),
+        isTrue,
+      );
+    });
+    test('startsWith case-sensitive (default) rejects wrong case', () {
+      expect(Field('name').startsWith('hello').evaluate(doc), isFalse);
+    });
+    test('endsWith case-insensitive matches', () {
+      expect(
+        Field('name').endsWith('WORLD', caseSensitive: false).evaluate(doc),
+        isTrue,
+      );
+    });
+    test('endsWith case-sensitive (default) rejects wrong case', () {
+      expect(Field('name').endsWith('WORLD').evaluate(doc), isFalse);
+    });
+    test('contains case-insensitive matches substring', () {
+      expect(
+        Field('name').contains('ello', caseSensitive: false).evaluate(doc),
+        isTrue,
+      );
+      expect(
+        Field('name').contains('ELLO', caseSensitive: false).evaluate(doc),
+        isTrue,
+      );
+    });
+    test('contains case-insensitive does not match absent substring', () {
+      expect(
+        Field('name').contains('xyz', caseSensitive: false).evaluate(doc),
+        isFalse,
+      );
+    });
+    test('contains case-insensitive has no effect on list fields', () {
+      final listDoc = {
+        'tags': ['Dart', 'Flutter'],
+      };
+      expect(
+        Field('tags').contains('Dart', caseSensitive: false).evaluate(listDoc),
+        isTrue,
+      );
+    });
+  });
+
   // ── Array operations ──────────────────────────────────────────────────────────
 
   group('Array filters', () {
