@@ -12,6 +12,49 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'package:kmdb_schema/schema.dart' show SchemaViolation;
+
+export 'package:kmdb_schema/schema.dart' show SchemaViolation;
+
+/// Thrown by [KmdbCollection] write methods when a document fails validation
+/// against the collection's registered [CollectionSchema].
+///
+/// All violations found in a single write attempt are reported together in
+/// [violations] so UI forms can surface every error at once rather than
+/// one at a time.
+///
+/// [SchemaValidationException] is thrown synchronously before the
+/// [WriteBatch] is committed, so no partial write occurs.
+///
+/// Example:
+/// ```dart
+/// try {
+///   await contacts.insert(contact);
+/// } on SchemaValidationException catch (e) {
+///   for (final v in e.violations) {
+///     print('${v.path}: ${v.message}');
+///   }
+/// }
+/// ```
+final class SchemaValidationException implements Exception {
+  /// Creates a [SchemaValidationException] for [collection] with [violations].
+  const SchemaValidationException({
+    required this.collection,
+    required this.violations,
+  });
+
+  /// The collection namespace whose schema was violated.
+  final String collection;
+
+  /// Every violation found during validation of the rejected document.
+  final List<SchemaViolation> violations;
+
+  @override
+  String toString() =>
+      'SchemaValidationException in "$collection": '
+      '${violations.map((v) => v.toString()).join('; ')}';
+}
+
 /// Thrown by [KmdbCollection.insert] when a document with the same key already
 /// exists in the collection.
 final class DocumentAlreadyExistsException implements Exception {

@@ -783,4 +783,164 @@ void main() {
       });
     });
   });
+
+  group('typeValidator', () {
+    test('name', () => expect(TypeValidator('string').name, 'type'));
+
+    test('string', () {
+      expect(TypeValidator('string')('hello'), isTrue);
+      expect(TypeValidator('string')(42), isFalse);
+      expect(TypeValidator('string')(null), isFalse);
+    });
+
+    test('number', () {
+      expect(TypeValidator('number')(3.14), isTrue);
+      expect(TypeValidator('number')(42), isTrue);
+      expect(TypeValidator('number')('42'), isFalse);
+    });
+
+    test('integer', () {
+      expect(TypeValidator('integer')(42), isTrue);
+      expect(TypeValidator('integer')(3.14), isFalse);
+      expect(TypeValidator('integer')('42'), isFalse);
+    });
+
+    test('boolean', () {
+      expect(TypeValidator('boolean')(true), isTrue);
+      expect(TypeValidator('boolean')(false), isTrue);
+      expect(TypeValidator('boolean')(1), isFalse);
+    });
+
+    test('array', () {
+      expect(TypeValidator('array')([1, 2]), isTrue);
+      expect(TypeValidator('array')({}), isFalse);
+    });
+
+    test('object', () {
+      expect(TypeValidator('object')({'a': 1}), isTrue);
+      expect(TypeValidator('object')([]), isFalse);
+    });
+
+    test('null', () {
+      expect(TypeValidator('null')(null), isTrue);
+      expect(TypeValidator('null')(0), isFalse);
+      expect(TypeValidator('null')(''), isFalse);
+    });
+
+    test('unknown type returns false', () {
+      expect(TypeValidator('unknown')(42), isFalse);
+    });
+
+    test('equal', () {
+      final v = TypeValidator('string');
+      expect(v, equals(TypeValidator('string')));
+      expect(v, isNot(TypeValidator('number')));
+      expect(v.hashCode, equals(TypeValidator('string').hashCode));
+    });
+
+    test('toMap', () {
+      expect(TypeValidator('string').toMap(), {
+        'name': 'type',
+        'value': 'string',
+      });
+    });
+  });
+
+  group('propertiesValidator', () {
+    test('name', () => expect(PropertiesValidator({}).name, 'properties'));
+
+    test('valid — matching fields pass', () {
+      final v = PropertiesValidator({'age': TypeValidator('integer')});
+      expect(v({'age': 30, 'name': 'Alice'}), isTrue);
+    });
+
+    test('valid — absent field is skipped', () {
+      final v = PropertiesValidator({'age': TypeValidator('integer')});
+      expect(v({'name': 'Alice'}), isTrue);
+    });
+
+    test('not valid — wrong type for present field', () {
+      final v = PropertiesValidator({'age': TypeValidator('integer')});
+      expect(v({'age': 'thirty'}), isFalse);
+    });
+
+    test('equal', () {
+      final v1 = PropertiesValidator({'a': TypeValidator('string')});
+      final v2 = PropertiesValidator({'a': TypeValidator('string')});
+      final v3 = PropertiesValidator({'a': TypeValidator('number')});
+      expect(v1, equals(v2));
+      expect(v1, isNot(v3));
+      expect(v1.hashCode, equals(v2.hashCode));
+    });
+
+    test('toMap contains name', () {
+      final v = PropertiesValidator({'x': TypeValidator('string')});
+      expect((v.toMap()['name']), 'properties');
+    });
+  });
+
+  group('additionalPropertiesValidator', () {
+    test('name', () {
+      expect(AdditionalPropertiesValidator(['a']).name, 'additionalProperties');
+    });
+
+    test('valid — only allowed keys', () {
+      final v = AdditionalPropertiesValidator(['name', 'age']);
+      expect(v({'name': 'Alice', 'age': 30}), isTrue);
+      expect(v({'name': 'Alice'}), isTrue);
+      expect(v({}), isTrue);
+    });
+
+    test('not valid — extra key present', () {
+      final v = AdditionalPropertiesValidator(['name', 'age']);
+      expect(v({'name': 'Alice', 'age': 30, 'extra': true}), isFalse);
+    });
+
+    test('equal', () {
+      final v1 = AdditionalPropertiesValidator(['a', 'b']);
+      final v2 = AdditionalPropertiesValidator(['b', 'a']);
+      final v3 = AdditionalPropertiesValidator(['a', 'c']);
+      expect(v1, equals(v2));
+      expect(v1, isNot(v3));
+      expect(v1.hashCode, equals(v2.hashCode));
+    });
+
+    test('toMap', () {
+      final v = AdditionalPropertiesValidator(['b', 'a']);
+      final map = v.toMap();
+      expect(map['name'], 'additionalProperties');
+      expect(map['value'], ['a', 'b']); // sorted
+    });
+  });
+
+  group('itemsValidator', () {
+    test('name', () {
+      expect(ItemsValidator(TypeValidator('string')).name, 'items');
+    });
+
+    test('valid — all elements match', () {
+      final v = ItemsValidator(TypeValidator('string'));
+      expect(v(['a', 'b', 'c']), isTrue);
+      expect(v([]), isTrue);
+    });
+
+    test('not valid — element type mismatch', () {
+      final v = ItemsValidator(TypeValidator('string'));
+      expect(v(['a', 42, 'c']), isFalse);
+    });
+
+    test('equal', () {
+      final v1 = ItemsValidator(TypeValidator('string'));
+      final v2 = ItemsValidator(TypeValidator('string'));
+      final v3 = ItemsValidator(TypeValidator('number'));
+      expect(v1, equals(v2));
+      expect(v1, isNot(v3));
+      expect(v1.hashCode, equals(v2.hashCode));
+    });
+
+    test('toMap', () {
+      final v = ItemsValidator(TypeValidator('integer'));
+      expect(v.toMap(), {'name': 'items', 'value': 'type'});
+    });
+  });
 }

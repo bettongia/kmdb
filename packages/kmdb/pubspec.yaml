@@ -12,6 +12,7 @@ resolution: workspace
 
 dependencies:
   cbor: ^6.5.1
+  kmdb_schema:
   kmdb_zstd:
   meta: any
   kmdb_lexical:

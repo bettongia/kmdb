@@ -37,6 +37,22 @@ final db = await KmdbDatabase.open(
   },
   // ── Vault (§24) ──────────────────────────────────────────────────────────
   vaultStore: vaultStore,       // null → vault features disabled
+  // ── Collection schemas (§25) ─────────────────────────────────────────────
+  schemas: [
+    CollectionSchema(
+      collection: 'contacts',
+      jsonSchema: {
+        'required': ['name', 'email'],
+        'properties': {
+          'name': {'type': 'string', 'minLength': 1},
+          'email': {'type': 'string', 'format': 'email'},
+        },
+      },
+    ),
+  ],
+  onSchemaVersionMismatch: (collection, storedVersion, supportedVersion) {
+    // Schema authored by a newer KMDB build — enforcement disabled.
+  },
 );
 ```
 
@@ -190,6 +206,14 @@ Future<Map<String, T?>>  getMany(Iterable<String> keys);
 Future<bool>             exists(String key);
 Stream<T?>               watchKey(String key);  // re-emits on put or delete
 ```
+
+### Schema Validation
+
+When a `CollectionSchema` is registered for a collection (see §25), every write
+method — `put`, `insert`, `replace`, `update` — validates the encoded document
+against the schema before committing. Violations throw
+`SchemaValidationException` with a list of all `SchemaViolation` objects found.
+`delete` is never blocked. Sync ingest bypasses validation (see §25).
 
 ### Write Methods
 

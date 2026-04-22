@@ -79,7 +79,7 @@ class StringFormatValidator implements StringValidatorService {
       'time',
       'A string instance is valid against this attribute if it is a valid '
           'representation according to the "time" ABNF rule in RFC3339',
-      (value) => DateFormat('HH:mm:ss.mmm').tryParseStrict(value) != null,
+      (value) => DateFormat('HH:mm:ss.SSS').tryParseStrict(value) != null,
     ),
     'uuid': StringValidator(
       'uuid',
@@ -131,12 +131,16 @@ bool isValidRegex(String value) {
 }
 
 bool isValidDate(String value) {
+  // Reject anything that isn't strictly YYYY-MM-DD.
+  if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value)) return false;
   final d = DateTime.tryParse(value);
-  if (d == null) {
-    return false;
-  }
-
-  return DateTime(d.year, d.month, d.day) == d;
+  if (d == null) return false;
+  // Reject overflow dates (e.g. month 13) by re-formatting and comparing.
+  final reformatted =
+      '${d.year.toString().padLeft(4, '0')}-'
+      '${d.month.toString().padLeft(2, '0')}-'
+      '${d.day.toString().padLeft(2, '0')}';
+  return reformatted == value;
 }
 
 /// A string that only contains decimal (0-9)digits.

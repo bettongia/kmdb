@@ -25,11 +25,13 @@ import '../vault/vault_gc.dart';
 import '../vault/vault_recovery.dart';
 import '../vault/vault_ref_interceptor.dart';
 import '../vault/vault_store.dart';
+import 'collection_schema.dart';
 import 'exceptions.dart';
 import 'index/index_definition.dart';
 import 'index/index_manager.dart';
 import 'kmdb_codec.dart';
 import 'kmdb_collection.dart';
+import 'schema/schema_manager.dart';
 
 /// The top-level KMDB database handle.
 ///
@@ -75,6 +77,35 @@ import 'kmdb_collection.dart';
 /// final task = await tasks.get(key);
 /// ```
 ///
+/// ## Collection Schemas
+///
+/// Schemas are optional. When supplied, every document write to that collection
+/// is validated before the [WriteBatch] is committed. Writes that violate the
+/// schema throw [SchemaValidationException]. Schemas are persisted in `$meta`
+/// and synced to other devices (spec §25).
+///
+/// ```dart
+/// final db = await KmdbDatabase.open(
+///   path: '/path/to/database',
+///   adapter: adapter,
+///   schemas: [
+///     CollectionSchema(
+///       collection: 'contacts',
+///       jsonSchema: {
+///         'required': ['name', 'email'],
+///         'properties': {
+///           'name': {'type': 'string', 'minLength': 1},
+///           'email': {'type': 'string', 'format': 'email'},
+///         },
+///       },
+///     ),
+///   ],
+///   onSchemaVersionMismatch: (collection, stored, supported) {
+///     // Schema from a newer KMDB build — enforcement disabled for safety.
+///   },
+/// );
+/// ```
+///
 /// ## Lifecycle
 ///
 /// Call [onResume] when the app returns to the foreground (mobile/web).
@@ -84,6 +115,7 @@ final class KmdbDatabase {
     required CacheLayer cache,
     required KvStoreImpl store,
     required IndexManager indexManager,
+    required SchemaManager schemaManager,
     required FtsManager? ftsManager,
     required VecManager? vecManager,
     required List<FtsIndexDefinition> ftsIndexes,
@@ -94,6 +126,7 @@ final class KmdbDatabase {
   }) : _cache = cache,
        _store = store,
        _indexManager = indexManager,
+       _schemaManager = schemaManager,
        _ftsManager = ftsManager,
        _vecManager = vecManager,
        _ftsIndexes = ftsIndexes,
@@ -109,6 +142,7 @@ final class KmdbDatabase {
   final CacheLayer _cache;
   final KvStoreImpl _store;
   final IndexManager _indexManager;
+  final SchemaManager _schemaManager;
   final FtsManager? _ftsManager;
   final VecManager? _vecManager;
   final List<FtsIndexDefinition> _ftsIndexes;
@@ -173,6 +207,9 @@ final class KmdbDatabase {
     EmbeddingModel? embeddingModel,
     void Function()? onSearchIndexReady,
     VaultStore? vaultStore,
+    List<CollectionSchema> schemas = const [],
+    void Function(String collection, int storedVersion, int supportedVersion)?
+    onSchemaVersionMismatch,
   }) async {
     // Validate that an embedding model is provided when vector indexes are
     // requested. We check this before any I/O so the error is immediate.
@@ -235,10 +272,22 @@ final class KmdbDatabase {
       vaultGc = VaultGc(store: vaultStore, kvStore: store);
     }
 
+    // Initialise SchemaManager: register caller-supplied schemas (persisting
+    // them via LWW), then load any schemas synced from other devices.
+    final schemaManager = SchemaManager(
+      onSchemaVersionMismatch: onSchemaVersionMismatch,
+    );
+    final metaStore = store.meta;
+    for (final schema in schemas) {
+      await schemaManager.register(schema, metaStore);
+    }
+    await schemaManager.load(metaStore);
+
     return KmdbDatabase._(
       cache: cache,
       store: store,
       indexManager: indexManager,
+      schemaManager: schemaManager,
       ftsManager: ftsManager,
       vecManager: vecManager,
       ftsIndexes: ftsIndexes,
@@ -314,6 +363,9 @@ final class KmdbDatabase {
 
   /// The index manager for write interception and lazy build.
   IndexManager get indexManager => _indexManager;
+
+  /// The schema manager for admission-gate validation on collection writes.
+  SchemaManager get schemaManager => _schemaManager;
 
   /// The FTS index definitions configured at open time.
   List<FtsIndexDefinition> get ftsIndexes => _ftsIndexes;
