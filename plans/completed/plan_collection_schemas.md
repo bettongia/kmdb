@@ -1,8 +1,8 @@
 # Collection Schemas
 
-**Status**: Investigated
+**Status**: Complete
 
-**PR link**: _pending_
+**Committed**: main branch, 2026-04-22
 
 ## Problem statement
 
@@ -251,62 +251,62 @@ Format validators (`email`, `uri`, `date`, `date-time`, `uuid`, plus 8 more) are
 already implemented in `StringFormatValidator` (accessed via
 `StringFormatValidator().getValidator(name)`). The following still need adding:
 
-- [ ] Fix `MinimumLength` — change `input.runes.length` to
+- [x] Fix `MinimumLength` — change `input.runes.length` to
       `input.characters.length`
-- [ ] Add `TypeValidator` to `schema_base.dart`
-- [ ] Add `PropertiesValidator` to `schema_base.dart`
-- [ ] Add `AdditionalPropertiesValidator` to `schema_base.dart`
-- [ ] Add `ItemsValidator` to `schema_base.dart`
-- [ ] Add tests for `date`, `date-time`, and `time` format validators (no test
+- [x] Add `TypeValidator` to `schema_base.dart`
+- [x] Add `PropertiesValidator` to `schema_base.dart`
+- [x] Add `AdditionalPropertiesValidator` to `schema_base.dart`
+- [x] Add `ItemsValidator` to `schema_base.dart`
+- [x] Add tests for `date`, `date-time`, and `time` format validators (no test
       file exists for these yet)
-- [ ] Update `validation_test.dart` with tests for all new validators
-- [ ] Export new validators from `schema.dart`
+- [x] Update `validation_test.dart` with tests for all new validators
+- [x] Export new validators from `schema.dart`
 
 ### Phase 2 — `SchemaRule` tree and parser in `kmdb_schema`
 
-- [ ] Add sealed `SchemaRule` hierarchy to
+- [x] Add sealed `SchemaRule` hierarchy to
       `packages/kmdb_schema/lib/src/schema_rule.dart`
-- [ ] Implement `SchemaParser` —
+- [x] Implement `SchemaParser` —
       `SchemaRule parse(Map<String, dynamic> jsonSchema)` using Phase 1
       validators
-- [ ] Add `SchemaViolation` type (path + message) to `kmdb_schema`
-- [ ] Unit-test `SchemaParser` for every supported keyword including nested
+- [x] Add `SchemaViolation` type (path + message) to `kmdb_schema`
+- [x] Unit-test `SchemaParser` for every supported keyword including nested
       `properties`
 
 ### Phase 3 — KMDB integration types
 
-- [ ] Add `CollectionSchema` to `packages/kmdb/lib/src/query/`
-- [ ] Add `SchemaValidationException` to
+- [x] Add `CollectionSchema` to `packages/kmdb/lib/src/query/`
+- [x] Add `SchemaValidationException` to
       `packages/kmdb/lib/src/query/exceptions.dart`
-- [ ] Implement `SchemaManager` in `packages/kmdb/lib/src/query/schema/`:
+- [x] Implement `SchemaManager` in `packages/kmdb/lib/src/query/schema/`:
   - `static const int kSchemaModelVersion = 1`
   - `Future<void> load(MetaStore meta)` — reads `schema:*` keys at open time
   - `Future<void> register(CollectionSchema, MetaStore)` — parses, persists,
     caches
   - `void validate(String collection, Map<String, dynamic> doc)` — throws on
     violation
-- [ ] Unit-test `SchemaManager`: persistence round-trip, version mismatch
+- [x] Unit-test `SchemaManager`: persistence round-trip, version mismatch
       callback, no-op when collection has no schema
 
 ### Phase 4 — Wire into `KmdbDatabase` and `KmdbCollection`
 
-- [ ] Add `schemas` and `onSchemaVersionMismatch` parameters to
+- [x] Add `schemas` and `onSchemaVersionMismatch` parameters to
       `KmdbDatabase.open()`
-- [ ] Instantiate and wire `SchemaManager` in `open()`
-- [ ] Insert `schemaManager.validate(namespace, mergedDoc)` into
+- [x] Instantiate and wire `SchemaManager` in `open()`
+- [x] Insert `schemaManager.validate(namespace, mergedDoc)` into
       `_writeDocument()` after `_validateNoReservedKeys()` and before encoding
-- [ ] Ensure `update()` passes the merged document (old + patch) to the
+- [x] Ensure `update()` passes the merged document (old + patch) to the
       validator
-- [ ] Integration tests: schema enforced on insert/put/replace/update; not on
+- [x] Integration tests: schema enforced on insert/put/replace/update; not on
       delete; not on synced data arriving via `writeBatchInternal` directly
 
 ### Phase 5 — Spec and docs
 
-- [ ] Write `docs/spec/25_collection_schemas.md`
-- [ ] Update `docs/spec/13_query_api.md` — note schema parameter on `open()`
-- [ ] Update `packages/kmdb/lib/src/query/kmdb_database.dart` doc comment with
+- [x] Write `docs/spec/25_collection_schemas.md`
+- [x] Update `docs/spec/13_query_api.md` — note schema parameter on `open()`
+- [x] Update `packages/kmdb/lib/src/query/kmdb_database.dart` doc comment with
       schema example
-- [ ] Update `packages/kmdb/lib/src/query/kmdb_collection.dart` doc comment
+- [x] Update `packages/kmdb/lib/src/query/kmdb_collection.dart` doc comment
       noting `SchemaValidationException`
 
 ### Coverage targets
@@ -331,4 +331,10 @@ All tests must pass with ≥ 90% coverage.
 
 ## Summary
 
-_To be completed on implementation._
+Implemented in full across 5 phases. Key outcomes:
+
+- `kmdb_schema` package extended with `SchemaViolation`, a sealed `SchemaRule` hierarchy, and `SchemaParser`. Fixed two datetime format validator bugs (`time` format used wrong millisecond pattern; `date` validator silently accepted overflow months like `2026-13-01`).
+- `kmdb` package gains `CollectionSchema`, `SchemaValidationException`, and `SchemaManager` (parse, persist, validate). Schemas are stored as UTF-8 JSON in `$meta` under `schema:{collection}`, with a `schema:__registry__` index key so synced schemas are loaded on the next open.
+- `KmdbDatabase.open()` accepts `schemas` and `onSchemaVersionMismatch` parameters. `KmdbCollection._writeDocument()` calls `schemaManager.validate()` before encoding, so violations throw before any I/O and leave no partial state.
+- 31 `SchemaManager` unit tests and full integration tests covering all write paths, persistence across open, `additionalProperties` defaulting, no enforcement on delete, and `onSchemaVersionMismatch` wiring.
+- All 1105 kmdb tests pass. Spec §25 written; §13 updated.
