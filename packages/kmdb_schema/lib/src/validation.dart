@@ -346,7 +346,7 @@ class MinimumLength implements Validator<String> {
   bool call(String input) => minLength(input, minimumLength);
 
   bool minLength(String input, int minimumLength) {
-    return input.runes.length >= minimumLength;
+    return input.characters.length >= minimumLength;
   }
 
   @override
@@ -603,6 +603,153 @@ class Required implements Validator<Map> {
   int get hashCode => Object.hashAllUnordered([name, ...properties]);
 
   Map<String, dynamic> toMap() => {'name': name, 'value': properties};
+}
+
+/// Validates that a value matches one of the JSON Schema [type] strings.
+///
+/// Supported types: `string`, `number`, `integer`, `boolean`, `array`,
+/// `object`, `null`.
+class TypeValidator implements Validator<dynamic> {
+  /// The expected JSON Schema type string.
+  final String type;
+
+  @override
+  final String name = 'type';
+
+  TypeValidator(this.type);
+
+  @override
+  bool call(dynamic input) {
+    return switch (type) {
+      'string' => input is String,
+      'number' => input is num,
+      'integer' => input is int,
+      'boolean' => input is bool,
+      'array' => input is List,
+      'object' => input is Map,
+      'null' => input == null,
+      _ => false,
+    };
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is TypeValidator && other.type == type;
+
+  @override
+  int get hashCode => Object.hash(name, type);
+
+  Map<String, dynamic> toMap() => {'name': name, 'value': type};
+}
+
+/// Validates each entry in a map against a per-key [Validator].
+///
+/// Only validates keys that are present in the map — absent keys are ignored
+/// (use [Required] to enforce presence). Any key in [properties] not present
+/// in the input map is silently skipped.
+class PropertiesValidator implements Validator<Map> {
+  /// Per-field validators keyed by field name.
+  final Map<String, Validator<dynamic>> properties;
+
+  @override
+  final String name = 'properties';
+
+  PropertiesValidator(Map<String, Validator<dynamic>> properties)
+    : properties = Map.unmodifiable(properties);
+
+  @override
+  bool call(Map input) {
+    for (final MapEntry(:key, value: validator) in properties.entries) {
+      if (!input.containsKey(key)) continue;
+      if (!validator(input[key])) return false;
+    }
+    return true;
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (other is! PropertiesValidator) return false;
+    if (other.properties.length != properties.length) return false;
+    for (final entry in properties.entries) {
+      if (other.properties[entry.key] != entry.value) return false;
+    }
+    return true;
+  }
+
+  @override
+  int get hashCode => Object.hashAllUnordered([
+    name,
+    ...properties.entries.map((e) => Object.hash(e.key, e.value)),
+  ]);
+
+  Map<String, dynamic> toMap() => {
+    'name': name,
+    'value': {for (final e in properties.entries) e.key: e.value.toString()},
+  };
+}
+
+/// Validates that a map contains no keys outside [allowedProperties].
+///
+/// Corresponds to `additionalProperties: false` in JSON Schema. Keys not
+/// listed in [allowedProperties] cause validation to fail.
+class AdditionalPropertiesValidator implements Validator<Map> {
+  /// The complete set of permitted property names.
+  final Set<String> allowedProperties;
+
+  @override
+  final String name = 'additionalProperties';
+
+  AdditionalPropertiesValidator(Iterable<String> allowed)
+    : allowedProperties = Set.unmodifiable(Set<String>.from(allowed));
+
+  @override
+  bool call(Map input) {
+    for (final key in input.keys) {
+      if (!allowedProperties.contains(key)) return false;
+    }
+    return true;
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (other is! AdditionalPropertiesValidator) return false;
+    if (other.allowedProperties.length != allowedProperties.length)
+      return false;
+    return other.allowedProperties.containsAll(allowedProperties);
+  }
+
+  @override
+  int get hashCode => Object.hashAllUnordered([name, ...allowedProperties]);
+
+  Map<String, dynamic> toMap() => {
+    'name': name,
+    'value': allowedProperties.toList()..sort(),
+  };
+}
+
+/// Validates that every element in an iterable satisfies [itemValidator].
+///
+/// Corresponds to `items` in JSON Schema. An empty iterable always passes.
+class ItemsValidator<T> implements Validator<Iterable<T>> {
+  /// The validator applied to each element.
+  final Validator<T> itemValidator;
+
+  @override
+  final String name = 'items';
+
+  ItemsValidator(this.itemValidator);
+
+  @override
+  bool call(Iterable<T> input) => input.every(itemValidator.call);
+
+  @override
+  bool operator ==(Object other) =>
+      other is ItemsValidator && other.itemValidator == itemValidator;
+
+  @override
+  int get hashCode => Object.hash(name, itemValidator);
+
+  Map<String, dynamic> toMap() => {'name': name, 'value': itemValidator.name};
 }
 
 /// Validates that, if a map has a specified key then it also has

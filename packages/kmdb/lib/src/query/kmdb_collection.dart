@@ -166,6 +166,8 @@ final class KmdbCollection<T> {
   ///
   /// Throws [DocumentAlreadyExistsException] if a document with the same key
   /// already exists (rare for UUIDv7).
+  /// Throws [SchemaValidationException] if a [CollectionSchema] is registered
+  /// for this collection and the document violates it.
   Future<T> insert(T value) async {
     final key = keyGenerator.next();
     final existing = await _db.cache.get(namespace, key);
@@ -185,6 +187,8 @@ final class KmdbCollection<T> {
   ///
   /// The key returned by [KmdbCodec.keyOf] must be a valid UUIDv7 hex string.
   /// Throws [DocumentNotFoundException] if no document with that key exists.
+  /// Throws [SchemaValidationException] if a [CollectionSchema] is registered
+  /// for this collection and the replacement document violates it.
   Future<void> replace(T value) async {
     final key = codec.keyOf(value);
     final existingBytes = await _db.cache.get(namespace, key);
@@ -198,6 +202,8 @@ final class KmdbCollection<T> {
   /// Upserts [value] — inserts if absent, replaces if present.
   ///
   /// The key returned by [KmdbCodec.keyOf] must be a valid UUIDv7 hex string.
+  /// Throws [SchemaValidationException] if a [CollectionSchema] is registered
+  /// for this collection and the document violates it.
   Future<void> put(T value) async {
     final key = codec.keyOf(value);
     final existingBytes = await _db.cache.get(namespace, key);
@@ -236,6 +242,8 @@ final class KmdbCollection<T> {
   /// Safe on a single device (the synchronous single-isolate model prevents
   /// interleaving). Subject to LWW conflict resolution during sync — see
   /// the **Conflict Semantics** section above.
+  /// Throws [SchemaValidationException] if a [CollectionSchema] is registered
+  /// for this collection and the result of [updater] violates it.
   Future<T?> update(String key, T Function(T current) updater) async {
     final current = await get(key);
     if (current == null) return null;
@@ -602,6 +610,9 @@ final class KmdbCollection<T> {
     // Validate before any I/O — throw immediately if the codec emitted
     // reserved fields. This prevents partial writes on error.
     _validateNoReservedKeys(newDoc);
+    // Schema validation runs after reserved-key check and before encoding so
+    // that a violation aborts the write without touching the store.
+    _db.schemaManager.validate(namespace, newDoc);
     final encodedValue = ValueCodec.encode(newDoc);
     final batch = WriteBatch()..put(namespace, key, encodedValue);
 

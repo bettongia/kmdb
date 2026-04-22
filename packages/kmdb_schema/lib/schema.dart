@@ -17,3 +17,6 @@ library;
 
 export 'src/schema_base.dart';
 export 'src/formats_base.dart';
+export 'src/schema_violation.dart';
+export 'src/schema_rule.dart';
+export 'src/schema_parser.dart';
