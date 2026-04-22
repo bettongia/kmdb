@@ -317,6 +317,25 @@ full merged document — correct behaviour, consistent with the library.
 
 All tests must pass with ≥ 90% coverage.
 
+## Review notes
+
+- **Verify `_validateNoReservedKeys` exists.** The investigation confirmed
+  `_db.schemaManager.validate()` at line 615 of `kmdb_collection.dart` but did
+  not surface a separate `_validateNoReservedKeys` call. Grep for it before
+  starting Phase 1 — if it is absent the `ReservedKeyValidator` step is a no-op
+  and can be dropped.
+
+- **Augmentor signature unification confirmed necessary.** `IndexManager` uses
+  `docKey`; `FtsManager` and `VecManager` use `docId`; `VaultRefInterceptor` has
+  neither parameter. The proposed unified `docKey` name is correct — all four
+  implementations will need updating, including `VaultRefInterceptor` which will
+  receive but ignore `namespace` and `docKey`.
+
+- **CLI schema plan dependency on `CommandContext.db`.** Phase 3 of
+  `plan_cli_schemas.md` calls `ctx.db.schemaManager` and `ctx.db.store.meta`.
+  These are only available after this plan's Phase 3 completes. The CLI schema
+  plan must not start its Phase 3 until `CommandContext` holds `KmdbDatabase`.
+
 ## Summary
 
 —
