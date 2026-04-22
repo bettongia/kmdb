@@ -15,6 +15,8 @@
 import 'dart:convert';
 import 'dart:io' as io;
 
+import 'package:args/args.dart';
+export 'package:args/args.dart' show ArgParser;
 import 'package:kmdb/kmdb.dart';
 
 import '../config/kmdb_config.dart';
@@ -103,15 +105,28 @@ final class CommandContext {
 }
 
 /// Base interface for all CLI commands.
-abstract interface class CliCommand {
+abstract class CliCommand {
+  const CliCommand();
+
   /// The primary name of this command (e.g. `'get'`).
   String get name;
 
   /// Short description shown in `--help` listings.
   String get description;
 
-  /// Usage string shown under the command name in help.
+  /// Positional-argument synopsis shown as the command invocation in help.
+  ///
+  /// Include only the positional arguments (e.g. `'scan <collection>'`).
+  /// Option flags are registered via [configureArgParser] and appear in the
+  /// generated options table below the invocation line.
   String get usage;
+
+  /// Registers this command's flags and options on [parser].
+  ///
+  /// Called by the help-text builder so that `kmdb help <command>` shows a
+  /// structured options table rather than a hand-written synopsis string.
+  /// The default implementation is a no-op for commands with no flags.
+  void configureArgParser(ArgParser parser) {}
 
   /// Executes the command with the given positional [args] and [flags].
   ///

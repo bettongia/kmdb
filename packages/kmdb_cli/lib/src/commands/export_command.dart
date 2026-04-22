@@ -39,7 +39,7 @@ import 'command.dart';
 /// kmdb <db> export <collection>
 /// kmdb <db> export <collection> --vault [--output <dir>]
 /// ```
-final class ExportCommand implements CliCommand {
+final class ExportCommand extends CliCommand {
   const ExportCommand();
 
   @override
@@ -51,7 +51,14 @@ final class ExportCommand implements CliCommand {
       'With --vault, exports vault attachments as KVLT packages.';
 
   @override
-  String get usage => 'export <collection> [--vault] [--output <dir>]';
+  String get usage => 'export <collection>';
+
+  @override
+  void configureArgParser(ArgParser parser) {
+    parser
+      ..addFlag('vault', negatable: false, help: 'Export vault attachments as KVLT packages alongside NDJSON')
+      ..addOption('output', valueHelp: 'dir', help: 'Output directory for vault packages (default: <collection>_vault_export)');
+  }
 
   @override
   Future<bool> execute(

@@ -23,7 +23,7 @@ import 'command.dart';
 /// value is reported as an error.
 ///
 /// Usage: `kmdb <db> verify`
-final class VerifyCommand implements CliCommand {
+final class VerifyCommand extends CliCommand {
   const VerifyCommand();
 
   @override

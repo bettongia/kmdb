@@ -28,7 +28,7 @@ import 'command.dart';
 /// kmdb <db> index info <collection> <path>
 /// kmdb <db> index delete <collection> <path>
 /// ```
-final class IndexCommand implements CliCommand {
+final class IndexCommand extends CliCommand {
   /// Creates an [IndexCommand].
   const IndexCommand();
 

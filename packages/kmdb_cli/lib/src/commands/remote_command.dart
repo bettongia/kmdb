@@ -31,7 +31,7 @@ import 'command.dart';
 ///
 /// The first positional argument is the subcommand. For `add` and `remove`,
 /// the second positional argument is the remote name.
-final class RemoteCommand implements CliCommand {
+final class RemoteCommand extends CliCommand {
   /// Creates a [RemoteCommand].
   const RemoteCommand();
 

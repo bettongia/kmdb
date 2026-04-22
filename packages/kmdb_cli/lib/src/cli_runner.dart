@@ -623,7 +623,9 @@ Examples:
 ///
 /// [run] is a no-op because commands are never dispatched through this runner.
 final class _UsageCommand extends Command<void> {
-  _UsageCommand(this._cmd);
+  _UsageCommand(this._cmd) {
+    _cmd.configureArgParser(argParser);
+  }
 
   final CliCommand _cmd;
 

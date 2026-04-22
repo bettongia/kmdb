@@ -20,7 +20,7 @@ import 'command.dart';
 /// Counts documents in a collection, optionally filtered.
 ///
 /// Usage: `kmdb <db> count <collection> [--filter <json>]`
-final class CountCommand implements CliCommand {
+final class CountCommand extends CliCommand {
   const CountCommand();
 
   @override
@@ -30,7 +30,12 @@ final class CountCommand implements CliCommand {
   String get description => 'Count documents in a collection.';
 
   @override
-  String get usage => 'count <collection> [--filter <json>]';
+  String get usage => 'count <collection>';
+
+  @override
+  void configureArgParser(ArgParser parser) {
+    parser.addOption('filter', valueHelp: 'json', help: 'JSON filter expression');
+  }
 
   @override
   Future<bool> execute(

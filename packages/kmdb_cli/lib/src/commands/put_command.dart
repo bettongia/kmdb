@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+
 import 'command.dart';
 import 'insert_command.dart';
 
@@ -25,7 +26,7 @@ import 'insert_command.dart';
 /// [InsertCommand]. Update any scripts to use `insert` instead.
 ///
 /// Usage: `kmdb <db> put <collection> [--value <json>] [--file <path>]`
-final class PutCommand implements CliCommand {
+final class PutCommand extends CliCommand {
   const PutCommand();
 
   @override
@@ -37,7 +38,14 @@ final class PutCommand implements CliCommand {
       'Insert one or more documents.';
 
   @override
-  String get usage => 'put <collection> [--value <json>] [--file <path>]';
+  String get usage => 'put <collection>';
+
+  @override
+  void configureArgParser(ArgParser parser) {
+    parser
+      ..addOption('value', valueHelp: 'json', help: 'Inline JSON document(s) to insert')
+      ..addOption('file', valueHelp: 'path', help: 'Read document(s) from a JSON/NDJSON file');
+  }
 
   @override
   Future<bool> execute(

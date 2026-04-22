@@ -31,7 +31,7 @@ import '../command.dart';
 /// kmdb <db> vault get <uri>
 /// kmdb <db> vault get <uri> --output photo.jpg
 /// ```
-final class VaultGetCommand implements CliCommand {
+final class VaultGetCommand extends CliCommand {
   const VaultGetCommand();
 
   @override
@@ -43,7 +43,12 @@ final class VaultGetCommand implements CliCommand {
       'Writes raw bytes to stdout or --output <file>.';
 
   @override
-  String get usage => 'vault get <uri> [--output <file>]';
+  String get usage => 'vault get <uri>';
+
+  @override
+  void configureArgParser(ArgParser parser) {
+    parser.addOption('output', valueHelp: 'file', help: 'Write blob bytes to file instead of stdout');
+  }
 
   @override
   Future<bool> execute(

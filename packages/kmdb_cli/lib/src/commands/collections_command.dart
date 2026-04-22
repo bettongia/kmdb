@@ -42,7 +42,7 @@ import 'command.dart';
 /// the current device. Note that other devices that have synced this
 /// collection will still show it until they sync and detect that all documents
 /// have been tombstoned (or the CLI applies its own post-sync cleanup).
-final class CollectionsCommand implements CliCommand {
+final class CollectionsCommand extends CliCommand {
   /// Creates a [CollectionsCommand].
   const CollectionsCommand();
 

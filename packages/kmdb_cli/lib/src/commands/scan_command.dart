@@ -16,7 +16,9 @@ import 'dart:convert';
 
 import 'package:kmdb/kmdb.dart';
 
+
 import '../filter/filter_parser.dart';
+import '../output/output_mode.dart';
 import 'command.dart';
 
 /// Scans a collection with optional filtering, ordering, and pagination.
@@ -45,7 +47,7 @@ import 'command.dart';
 ///
 /// Paths that do not resolve in a document are omitted from the output (no key
 /// is emitted for that document).
-final class ScanCommand implements CliCommand {
+final class ScanCommand extends CliCommand {
   const ScanCommand();
 
   @override
@@ -55,10 +57,30 @@ final class ScanCommand implements CliCommand {
   String get description => 'Scan documents in a collection.';
 
   @override
-  String get usage =>
-      'scan <collection> [--filter <json>] [--order-by <field>] [--desc] '
-      '[--limit <n>] [--offset <n>] [--key-prefix <str>] '
-      '[--select <path1,path2,...>] [--explain]';
+  String get usage => 'scan <collection>';
+
+  @override
+  void configureArgParser(ArgParser parser) {
+    parser
+      ..addOption('filter', valueHelp: 'json', help: 'JSON filter expression')
+      ..addOption('order-by', valueHelp: 'field', help: 'Sort by field name')
+      ..addFlag('desc', negatable: false, help: 'Sort descending')
+      ..addOption('limit', valueHelp: 'n', help: 'Maximum documents to return')
+      ..addOption('offset', valueHelp: 'n', help: 'Number of documents to skip')
+      ..addOption(
+        'key-prefix',
+        valueHelp: 'str',
+        help: 'Filter documents whose key starts with this prefix',
+      )
+      ..addOption(
+        'select',
+        valueHelp: 'path1,path2,...',
+        help:
+            'Comma-separated field paths to project '
+            '(e.g. name, address.city, tags[0])',
+      )
+      ..addFlag('explain', negatable: false, help: 'Show query execution plan');
+  }
 
   @override
   Future<bool> execute(
@@ -211,9 +233,20 @@ final class ScanCommand implements CliCommand {
     final documentsMatched = candidates.length;
 
     // ── Project fields ─────────────────────────────────────────────────────────
+    // Use flat keys for table/csv/line so dot-path selections appear as column
+    // headers (e.g. "name.en") with the resolved scalar value rather than a
+    // re-nested object under the parent key.
+    final flatProjection = ctx.mode == OutputMode.table ||
+        ctx.mode == OutputMode.csv ||
+        ctx.mode == OutputMode.line;
     final projected = selectFields == null
         ? candidates
-        : candidates.map((doc) => projectDocument(doc, selectFields)).toList();
+        : candidates
+            .map(
+              (doc) =>
+                  projectDocument(doc, selectFields, flat: flatProjection),
+            )
+            .toList();
 
     // ── Sort ───────────────────────────────────────────────────────────────────
     final sorted = orderBy != null;
@@ -360,8 +393,9 @@ final class ScanCommand implements CliCommand {
 /// This function is shared by [ScanCommand] and [GetCommand].
 Map<String, dynamic> projectDocument(
   Map<String, dynamic> doc,
-  List<String> fields,
-) {
+  List<String> fields, {
+  bool flat = false,
+}) {
   final result = <String, dynamic>{};
   for (final field in fields) {
     final value = FieldPath.resolve(field, doc);
@@ -373,10 +407,11 @@ Map<String, dynamic> projectDocument(
     // again so the output key structure matches the resolved path.
     final normField = FieldPath.normalisePath(field);
 
-    // Determine whether this path contains a bracket expression anywhere.
-    // If it does, use the normalised field token as a flat key to avoid
-    // ambiguity about reconstructing array structure from a scalar value.
-    if (normField.contains('[')) {
+    // Bracket expressions always use flat keys to avoid ambiguity about
+    // reconstructing array structure from a scalar value.  Dot-paths use flat
+    // keys too when [flat] is true (table/csv/line modes), so that the path
+    // itself appears as the column header rather than the parent key.
+    if (normField.contains('[') || flat) {
       result[normField] = value;
     } else {
       // Dot-child path: re-nest the resolved value back into the output map.

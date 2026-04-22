@@ -17,7 +17,7 @@ import 'command.dart';
 /// Displays engine-level statistics.
 ///
 /// Usage: `kmdb <db> stats`
-final class StatsCommand implements CliCommand {
+final class StatsCommand extends CliCommand {
   const StatsCommand();
 
   @override

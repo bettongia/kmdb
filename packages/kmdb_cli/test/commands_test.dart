@@ -918,6 +918,56 @@ void main() {
         expect(docs.every((d) => !(d as Map).containsKey('address')), isTrue);
       },
     );
+
+    test(
+      '--select dot-path uses flat key and scalar value in table mode',
+      () async {
+        final id = _key('flatTbl');
+        await _putDoc(store, 'flat_items', {
+          '_id': id,
+          'name': {'en': 'Mawson', 'fr': 'Mawson'},
+          'score': 42,
+        });
+
+        final ctx = _ctx(store, out: out, err: err, mode: OutputMode.table);
+        final ok = await ScanCommand().execute(
+          ctx,
+          ['flat_items'],
+          {'select': 'name.en,score'},
+        );
+        expect(ok, isTrue);
+        final output = out.toString();
+        // Column header must be the dot-path, not the parent key.
+        expect(output, contains('name.en'));
+        // The scalar value must appear, not the JSON-encoded object.
+        expect(output, contains('Mawson'));
+        expect(output, isNot(contains('"en"')));
+      },
+    );
+
+    test(
+      '--select dot-path uses flat key and scalar value in csv mode',
+      () async {
+        final id = _key('flatCsv');
+        await _putDoc(store, 'csv_items', {
+          '_id': id,
+          'location': {'latitude': -67.6, 'longitude': 62.9},
+        });
+
+        final ctx = _ctx(store, out: out, err: err, mode: OutputMode.csv);
+        final ok = await ScanCommand().execute(
+          ctx,
+          ['csv_items'],
+          {'select': 'location.latitude,location.longitude'},
+        );
+        expect(ok, isTrue);
+        final lines = out.toString().trim().split('\n');
+        // Header row: dot-path column names.
+        expect(lines[0], equals('location.latitude,location.longitude'));
+        // Data row: scalar values, not JSON objects.
+        expect(lines[1], equals('-67.6,62.9'));
+      },
+    );
   });
 
   // ── CountCommand ────────────────────────────────────────────────────────────

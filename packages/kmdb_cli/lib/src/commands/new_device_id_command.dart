@@ -44,7 +44,7 @@ import 'command.dart';
 /// ```bash
 /// kmdb <db> new-device-id
 /// ```
-final class NewDeviceIdCommand implements CliCommand {
+final class NewDeviceIdCommand extends CliCommand {
   /// Creates a [NewDeviceIdCommand].
   const NewDeviceIdCommand();
 

@@ -38,7 +38,7 @@ import 'command.dart';
 /// Stub vault objects (no local blob) are silently skipped.
 ///
 /// Usage: `kmdb <db> dump [--vault] [--vault-dir <dir>]`
-final class DumpCommand implements CliCommand {
+final class DumpCommand extends CliCommand {
   const DumpCommand();
 
   @override
@@ -50,7 +50,14 @@ final class DumpCommand implements CliCommand {
       'With --vault, exports vault attachments as KVLT packages.';
 
   @override
-  String get usage => 'dump [--vault] [--vault-dir <dir>]';
+  String get usage => 'dump';
+
+  @override
+  void configureArgParser(ArgParser parser) {
+    parser
+      ..addFlag('vault', negatable: false, help: 'Export vault attachments as KVLT packages')
+      ..addOption('vault-dir', valueHelp: 'dir', help: 'Output directory for vault packages (default: vault_dump)');
+  }
 
   @override
   Future<bool> execute(

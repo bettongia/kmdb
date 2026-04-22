@@ -17,7 +17,7 @@ import 'command.dart';
 /// Deletes a document by key.
 ///
 /// Usage: `kmdb <db> delete <collection> <key>`
-final class DeleteCommand implements CliCommand {
+final class DeleteCommand extends CliCommand {
   const DeleteCommand();
 
   @override

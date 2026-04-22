@@ -17,7 +17,7 @@ import 'command.dart';
 /// Forces the active memtable to flush to an SSTable.
 ///
 /// Usage: `kmdb <db> flush`
-final class FlushCommand implements CliCommand {
+final class FlushCommand extends CliCommand {
   const FlushCommand();
 
   @override

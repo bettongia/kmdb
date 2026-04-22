@@ -14,6 +14,7 @@
 
 import 'package:kmdb/kmdb.dart';
 
+import '../output/output_mode.dart';
 import 'command.dart';
 import 'scan_command.dart';
 
@@ -25,10 +26,11 @@ import 'scan_command.dart';
 /// using the full JSONPath subset supported by KMDB. See [ScanCommand] for the
 /// complete path syntax documentation.
 ///
-/// Dot-child paths are re-nested in the output (e.g. `address.city` →
-/// `{"address": {"city": "London"}}`). Bracket selections use the raw path
-/// token as a flat key.
-final class GetCommand implements CliCommand {
+/// For JSON/YAML output, dot-child paths are re-nested (e.g. `address.city` →
+/// `{"address": {"city": "London"}}`). For table/csv/line output, dot-paths
+/// are kept as flat keys so the path itself appears as the column header.
+/// Bracket selections always use the raw path token as a flat key.
+final class GetCommand extends CliCommand {
   const GetCommand();
 
   @override
@@ -38,9 +40,18 @@ final class GetCommand implements CliCommand {
   String get description => 'Retrieve a document by key.';
 
   @override
-  String get usage =>
-      'get <coll> <key> [--select <path1,path2,...>]  '
-      r'Paths: "name", "address.city", "$.name", "tags[0]", "tags[-1]", "tags[]"';
+  String get usage => 'get <collection> <key>';
+
+  @override
+  void configureArgParser(ArgParser parser) {
+    parser.addOption(
+      'select',
+      valueHelp: 'path1,path2,...',
+      help:
+          'Comma-separated field paths to project '
+          '(e.g. name, address.city, tags[0])',
+    );
+  }
 
   @override
   Future<bool> execute(
@@ -70,7 +81,10 @@ final class GetCommand implements CliCommand {
           .where((s) => s.isNotEmpty)
           .toList();
       if (fields.isNotEmpty) {
-        ctx.writeDocuments([projectDocument(doc, fields)]);
+        final flat = ctx.mode == OutputMode.table ||
+            ctx.mode == OutputMode.csv ||
+            ctx.mode == OutputMode.line;
+        ctx.writeDocuments([projectDocument(doc, fields, flat: flat)]);
         return true;
       }
     }
