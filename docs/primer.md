@@ -312,6 +312,47 @@ This is what application code interacts with. The query layer adds:
 - **Secondary indexes** for fast filtered scans
 - **Reactive queries** via `watch()`
 
+## Write Pipeline
+
+Every document write routes through three explicit layers before the `WriteBatch`
+is committed:
+
+```
+insert / put / update / delete
+    ↓
+Layer 1 — Validators     WriteValidator list; any validator may throw to abort
+    ↓
+Layer 2 — Augmentors     WriteAugmentor list; each adds side-effect entries to the batch
+    ↓
+Layer 3 — Atomic commit  WriteBatch committed; KvStore.writeEvents fires
+```
+
+**Layer 1 validators** run before any I/O. A validator throws to abort the write
+entirely — no partial state is ever written. Built-in validators:
+`ReservedKeyValidator` (blocks writes to `_id` and other engine-reserved fields)
+and `SchemaManager` (enforces any registered JSON Schema, if one is active for
+the collection). Application code can register additional validators at
+`KmdbDatabase.open()`.
+
+**Layer 2 augmentors** add side-effect entries to the `WriteBatch`. All four
+built-in augmentors run: `IndexManager` (secondary index entries), `FtsManager`
+(BM25 inverted index), `VecManager` (vector embeddings), and
+`VaultRefInterceptor` (blob reference counts). Because augmentors write into the
+same `WriteBatch` as the document, all side-effects are atomic — a secondary
+index entry is never out of sync with its document.
+
+**Layer 3 is implicit.** Once `WriteBatch` is committed, `KvStore.writeEvents`
+fires. The cache layer and reactive queries both subscribe to this stream for
+invalidation and re-execution.
+
+**Deletes skip Layer 1.** Validation gates write content; a delete is never
+blocked by a validator.
+
+**Sync ingestion bypasses all three layers.** Incoming SSTables from other
+devices are applied directly to the LSM and are never re-validated. The
+admission gate is a per-device, per-write guarantee, not a database-wide
+invariant (see _Multi-Device Sync_ below).
+
 ## Collections and Codecs
 
 Each collection is bound to a namespace and a `KmdbCodec<T>`:
@@ -621,9 +662,10 @@ path.
 ## Reference-Counted GC
 
 The `$vault:{sha256}` key in KvStore tracks the reference count for each vault
-URI. The Query Layer intercepts every document write via `VaultRefInterceptor`,
-diffs the vault URIs in the old and new document, and adjusts counters in the
-same `WriteBatch` — the ref-count and the document are always consistent.
+URI. `VaultRefInterceptor` implements `WriteAugmentor` and runs as part of the
+Query Layer write pipeline. It diffs the vault URIs in the old and new document
+and adjusts counters in the same `WriteBatch` — the ref-count and the document
+are always consistent.
 
 When the count reaches zero, `VaultGc.onZeroRefs()` writes `tombstone.json`.
 The GC sweep (`VaultGc.sweep()`) deletes the hash directory after re-validating
@@ -655,6 +697,7 @@ If you want to trace a specific path, start at these files:
 | Goal                            | Start here                                                                       |
 | :------------------------------ | :------------------------------------------------------------------------------- |
 | Understand a write end-to-end   | [lsm_engine.dart](lib/src/engine/kvstore/lsm_engine.dart)                        |
+| Understand the Query Layer write pipeline | [kmdb_collection.dart](lib/src/query/kmdb_collection.dart)             |
 | Understand crash recovery       | [crash_recovery.dart](lib/src/engine/kvstore/crash_recovery.dart)                |
 | Understand a query end-to-end   | [kmdb_query.dart](lib/src/query/kmdb_query.dart)                                 |
 | Understand how indexes work     | [index_manager.dart](lib/src/query/index/index_manager.dart)                     |
@@ -689,6 +732,8 @@ semantics.
 | **Compaction**         | Merging multiple SSTables to remove duplicates, tombstones, and level overlap         |
 | **LWW**                | Last-Write-Wins — conflict resolution strategy; higher HLC value wins                 |
 | **Generation counter** | Monotonic integer per namespace; incremented on write; drives cache invalidation      |
+| **WriteValidator**     | Layer 1 interface; throws to abort a write before any I/O occurs                     |
+| **WriteAugmentor**     | Layer 2 interface; adds side-effect entries (indexes, FTS, vectors, vault ref-counts) to the WriteBatch |
 | **BM25**               | Best Match 25 — probabilistic term-frequency ranking function used by lexical search  |
 | **Inverted index**     | Data structure mapping terms → documents; basis of lexical search (`$fts:` namespaces)|
 | **Embedding**          | Dense vector representing text meaning; produced by BGE model for semantic search     |
