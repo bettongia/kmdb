@@ -40,6 +40,13 @@ untyped `rawCollection` entry point so the CLI can route writes through
 - [x] Post-write notification: `KvStore.writeEvents` stream already serves as
       Layer 3. `CacheLayer` and `watch()` already subscribe to it. No new code
       needed for this layer in this plan; it is documented in the spec.
+- [x] Schema validation on sync ingestion: incoming SSTables from other devices
+      are applied directly to the LSM and are **never** re-validated against the
+      local schema (see roadmap §0.01 — Sync behaviour). `WriteValidator` runs
+      only in `_writeDocument()`, which is called for local writes only. This is
+      intentional: the admission gate cannot be applied retroactively to data
+      written on another device before the schema was activated or under a looser
+      schema version.
 
 ## Investigation
 
