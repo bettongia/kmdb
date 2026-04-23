@@ -713,8 +713,9 @@ class AdditionalPropertiesValidator implements Validator<Map> {
   @override
   bool operator ==(Object other) {
     if (other is! AdditionalPropertiesValidator) return false;
-    if (other.allowedProperties.length != allowedProperties.length)
+    if (other.allowedProperties.length != allowedProperties.length) {
       return false;
+    }
     return other.allowedProperties.containsAll(allowedProperties);
   }
 

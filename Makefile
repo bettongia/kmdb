@@ -114,8 +114,8 @@ site/spec.html:  docs/spec/*.md docs/spec/.pandoc docs/template/header.html | si
 site/index.html:  docs/index.md docs/.pandoc docs/template/header.html | site/
 	pandoc --defaults="docs/.pandoc" docs/index.md -o "site/index.html";
 
-site/roadmap.html: docs/roadmap.md docs/.pandoc docs/template/header.html | site/
-	pandoc --defaults="docs/.pandoc" docs/roadmap.md -o "site/roadmap.html";
+site/roadmap.html: docs/roadmap/*.md docs/.pandoc docs/template/header.html | site/
+	pandoc --defaults="docs/.pandoc" docs/roadmap/*.md -o "site/roadmap.html";
 
 site/primer.html: docs/primer.md docs/.pandoc docs/template/header.html | site/
 	pandoc --defaults="docs/.pandoc" docs/primer.md -o "site/primer.html";
