@@ -377,18 +377,18 @@ handy parameters to help us explore the data:
 `--select` accepts a comma-separated list of field paths. These paths support a
 JSONPath subset syntax:
 
-| Path form          | Example           | Output key in result           |
-| ------------------ | ----------------- | ------------------------------ |
-| Top-level field    | `name`            | `name`                         |
-| Dot-child path     | `address.city`    | `address` → `city` (re-nested) |
-| Optional root `$.` | `$.name`          | Same as `name`                 |
-| Array wildcard     | `tags[]` or `tags[*]` | `tags[]` (flat key)        |
-| Positional index   | `tags[0]`         | `tags[0]` (flat key)           |
-| Negative index     | `tags[-1]`        | `tags[-1]` (last element)      |
+| Path form          | Example               | Output key in result           |
+| ------------------ | --------------------- | ------------------------------ |
+| Top-level field    | `name`                | `name`                         |
+| Dot-child path     | `address.city`        | `address` → `city` (re-nested) |
+| Optional root `$.` | `$.name`              | Same as `name`                 |
+| Array wildcard     | `tags[]` or `tags[*]` | `tags[]` (flat key)            |
+| Positional index   | `tags[0]`             | `tags[0]` (flat key)           |
+| Negative index     | `tags[-1]`            | `tags[-1]` (last element)      |
 
-Dot-child paths are re-nested in the output so `--select="address.city"` produces
-`{"address": {"city": "..."}}`. Array bracket selections use the raw path token
-as a flat key.
+Dot-child paths are re-nested in the output so `--select="address.city"`
+produces `{"address": {"city": "..."}}`. Array bracket selections use the raw
+path token as a flat key.
 
 We can get a more human-friendly output from `scan` using the following example:
 
@@ -432,42 +432,128 @@ kmdb also supports loading from an NDJSON file - let's add in some country
 codes:
 
 ```sh
-kmdb demodb put country_codes --file iso_3166_1.ndjson
+kmdb demodb insert country_codes --file data/iso_3166/iso_3166_1.ndjson
+```
 
+You should now have 249 country codes:
+
+```sh
 kmdb demodb count country_codes
 ```
 
-We can also load via stdin:
+We can also load data via stdin:
 
 ```sh
-cat elements.ndjson| kmdb demodb put elements
+cat data/elements/elements.ndjson| kmdb demodb insert elements
 kmdb demodb count elements
 ```
 
 # Query
 
-```sh
-kmdb demodb scan weather_stations --filter '{"field":"Station Name","op":"eq","value":"MAWSON"}'
-```
+Now we have some data (collection/documents), let's start querying.
 
 ```sh
-kmdb demodb scan weather_stations --filter '{"field":"Station Name","op":"eq","value":"MAWSON"}' --format table
-
-kmdb demodb scan weather_stations --filter '{"field":"Station Name","op":"eq","value":"MAWSON"}' --format csv
+kmdb demodb scan weather_stations --filter '{"field":"name.en","op":"eq","value":"Mawson"}'
 ```
 
-You can use `jq` to manipulate the default JSON-based output:
+To recap from earlier we can use different output formats:
 
 ```sh
-kmdb demodb scan weather_stations --filter '{"field":"Station Name","op":"eq","value":"MAWSON"}' | jq '.[] | {"Country or Territory", "WMO Station Number", "Period"}'
+# A (nicer) UX for humans is a table:
+kmdb demodb scan weather_stations --format table \
+  --filter '{"field":"name.en","op":"eq","value":"Mawson"}' \
+  --select="name.en,location"
 ```
 
-But using `--select` and the table mode will give you some nicely formatted
-output:
+Output:
+
+```
+name.en  location
+───────────────────────────────────────────────────────────
+Mawson   {"latitude":-67.6,"longitude":62.9,"elevation":10}
+```
+
+We can also get a CSV version:
 
 ```sh
-kmdb demodb scan elements --filter '{"field":"Name","op":"startsWith","value":"H"}' --select Name,Symbol,Atomic_Number --format table
+kmdb demodb scan weather_stations --format csv \
+  --filter '{"field":"name.en","op":"eq","value":"Mawson"}' \
+  --select="name.en,location.latitude,location.longitude,location.elevation"
 ```
+
+Output:
+
+```
+name.en,location.latitude,location.longitude,location.elevation
+Mawson,-67.6,62.9,10
+```
+
+You can also use `jq` to manipulate the default JSON-based output:
+
+```sh
+kmdb demodb scan weather_stations \
+  --filter '{"field":"name.en","op":"eq","value":"Mawson"}' | \
+  jq 'map({name:.name.en,lat:.location.latitude,long:.location.longitude,elevation:.location.elevation})'
+```
+
+Using `--select` and the table mode will give you some nicely formatted output
+for the table of elements:
+
+```sh
+kmdb demodb scan elements --format table \
+  --filter '{"field":"Name","op":"startsWith","value":"H"}' \
+  --select Name,Symbol,Atomic_Number
+```
+
+Perhaps we want to order by name:
+
+```sh
+kmdb demodb scan elements --format table \
+  --filter '{"field":"Name","op":"startsWith","value":"H"}' \
+  --select Name,Symbol,Atomic_Number --order-by Name
+```
+
+To flip the result around, use `--desc` for descending:
+
+```sh
+kmdb demodb scan elements --format table \
+  --filter '{"field":"Name","op":"startsWith","value":"H"}' \
+  --select Name,Symbol,Atomic_Number --order-by Name --desc
+```
+
+# Filtering
+
+Filtering supports a range of operators:
+
+| Operator      | Description                                    |
+| ------------- | ---------------------------------------------- |
+| `eq`          | Equal to value                                 |
+| `ne`          | Not equal to value                             |
+| `lt`          | Less than value                                |
+| `lte`         | Less than or equal to value                    |
+| `gt`          | Greater than value                             |
+| `gte`         | Greater than or equal to value                 |
+| `between`     | Inclusive range — value must be `[min, max]`   |
+| `in`          | Field value is one of the listed values        |
+| `notIn`       | Field value is not in the listed values        |
+| `isNull`      | Field is absent or null                        |
+| `isNotNull`   | Field is present and non-null                  |
+| `isTrue`      | Field is boolean `true`                        |
+| `isFalse`     | Field is boolean `false`                       |
+| `startsWith`  | String field starts with value                 |
+| `endsWith`    | String field ends with value                   |
+| `contains`    | String field contains value as a substring     |
+| `containsAll` | Array field contains all listed values         |
+| `containsAny` | Array field contains at least one listed value |
+
+TODO: Case insensitive added to the DSL
+
+```sh
+kmdb demodb scan elements --filter '{"field":"Name","op":"startsWith","value":"He","insensitive":true}'
+kmdb demodb scan elements --filter '{"field":"Name","op":"eq","value":"hello world","insensitive":true}'
+```
+
+# Indexes
 
 ## Query execution plans
 
@@ -534,7 +620,7 @@ kmdb demodb scan weather_stations \
 }
 ```
 
-## Export/Import
+# Export/Import
 
 Export lets you export a collection to NDJSON format:
 
@@ -542,7 +628,7 @@ Export lets you export a collection to NDJSON format:
 kmdb demodb export elements --output elements.export
 ```
 
-## Backups
+# Backups
 
 Let's create a backup:
 
@@ -557,7 +643,7 @@ kmdb demodb_2 restore --input demodb.dump
 kmdb demodb_2 collections
 ```
 
-## Synchronising
+# Synchronising
 
 ```sh
 mkdir -p remote_mount/demodb_sync
@@ -769,7 +855,7 @@ kmdb copydb_copy sync
 kmdb copydb_copy scan notes
 ```
 
-## Management
+# Management
 
 Some handy database management utilities:
 
@@ -781,7 +867,7 @@ kmdb demodb flush
 kmdb demodb compact
 ```
 
-## Deleting the database
+# Deleting the database
 
 To delete the database, just run:
 
@@ -791,9 +877,3 @@ rm -rf syncdb*
 rm -rf copydb*
 rm -rf remote_mount
 ```
-
-## Sources
-
-- [Weather stations](https://data.un.org/Data.aspx?d=CLINO&f=ElementCode%3A15)
--
--
