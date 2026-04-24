@@ -30,7 +30,6 @@ import 'commands/flush_command.dart';
 import 'commands/get_command.dart';
 import 'commands/import_command.dart';
 import 'commands/insert_command.dart';
-import 'commands/put_command.dart';
 import 'commands/update_command.dart';
 import 'commands/info_command.dart';
 import 'commands/init_command.dart';
@@ -63,7 +62,6 @@ final _commands = <String, CliCommand>{
     const InitCommand(),
     const GetCommand(),
     const InsertCommand(),
-    const PutCommand(),
     const UpdateCommand(),
     const DeleteCommand(),
     const ScanCommand(),

@@ -135,7 +135,7 @@ void main() {
       // Put document (assigned a random UUIDv7 ID)
       final putResult = await run([
         dbPath,
-        'put',
+        'insert',
         'tasks',
         '--value',
         '{"title":"Buy bread"}',
@@ -169,7 +169,7 @@ void main() {
       // Put
       final putResult = await run([
         dbPath,
-        'put',
+        'insert',
         'tasks',
         '--value',
         '{"title":"x"}',
@@ -190,8 +190,8 @@ void main() {
     test('scan documents', () async {
       final dbPath = tmp.file('db');
 
-      await run([dbPath, 'put', 'tasks', '--value', '{"title":"A"}']);
-      await run([dbPath, 'put', 'tasks', '--value', '{"title":"B"}']);
+      await run([dbPath, 'insert', 'tasks', '--value', '{"title":"A"}']);
+      await run([dbPath, 'insert', 'tasks', '--value', '{"title":"B"}']);
 
       final scanResult = await run([dbPath, 'scan', 'tasks']);
       expect(scanResult.exitCode, equals(0), reason: scanResult.stderr);
@@ -204,8 +204,8 @@ void main() {
       final exportPath = tmp.file('export.ndjson');
 
       // 1. Create some data
-      final p1 = await run([dbPath, 'put', 'tasks', '--value', '{"v":1}']);
-      final p2 = await run([dbPath, 'put', 'tasks', '--value', '{"v":2}']);
+      final p1 = await run([dbPath, 'insert', 'tasks', '--value', '{"v":1}']);
+      final p2 = await run([dbPath, 'insert', 'tasks', '--value', '{"v":2}']);
       expect(p1.exitCode, 0);
       expect(p2.exitCode, 0);
 
@@ -283,9 +283,9 @@ void main() {
 
     test('scan accepts --limit=<n> (equals form)', () async {
       final dbPath = tmp.file('db');
-      await run([dbPath, 'put', 'notes', '--value', '{"v":1}']);
-      await run([dbPath, 'put', 'notes', '--value', '{"v":2}']);
-      await run([dbPath, 'put', 'notes', '--value', '{"v":3}']);
+      await run([dbPath, 'insert', 'notes', '--value', '{"v":1}']);
+      await run([dbPath, 'insert', 'notes', '--value', '{"v":2}']);
+      await run([dbPath, 'insert', 'notes', '--value', '{"v":3}']);
       final result = await run([dbPath, 'scan', 'notes', '--limit=2']);
       expect(result.exitCode, equals(0), reason: result.stderr);
       final docs = json.decode(result.stdout) as List;
@@ -297,11 +297,11 @@ void main() {
     test('persists WAL and skips SST creation with --no-flush', () async {
       final dbPath = tmp.file('db');
 
-      // Run put with --no-flush.
+      // Run insert with --no-flush.
       final putResult = await run([
         dbPath,
         '--no-flush',
-        'put',
+        'insert',
         'notes',
         '--value',
         '{"title":"WAL test"}',
@@ -347,10 +347,10 @@ void main() {
     test('flushes by default without --no-flush', () async {
       final dbPath = tmp.file('db');
 
-      // Run put without flags (defaulting to --flush).
+      // Run insert without flags (defaulting to --flush).
       final putResult = await run([
         dbPath,
-        'put',
+        'insert',
         'notes',
         '--value',
         '{"title":"Direct flush"}',
