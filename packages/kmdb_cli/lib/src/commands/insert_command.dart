@@ -25,9 +25,9 @@ import 'vault/vault_import_helper.dart';
 /// Each document receives a system-generated UUIDv7 identifier in its `_id`
 /// field. Any `_id` supplied by the caller is replaced.
 ///
-/// Note: this command operates at the KvStore layer and does not update any
-/// secondary indexes defined via `KmdbDatabase.collection`. Secondary indexes
-/// will be stale until the next Query Layer write or index rebuild.
+/// Writes route through the full Query Layer write pipeline: schema validation,
+/// secondary index maintenance, FTS updates, and vault ref-count adjustments
+/// all run automatically and atomically with each document write.
 ///
 /// **Input formats accepted:**
 /// - A single JSON object: `{"name":"Alice"}`
@@ -67,9 +67,21 @@ final class InsertCommand extends CliCommand {
   @override
   void configureArgParser(ArgParser parser) {
     parser
-      ..addOption('value', valueHelp: 'json', help: 'Inline JSON document(s) to insert')
-      ..addOption('file', valueHelp: 'path', help: 'Read document(s) from a JSON/NDJSON file')
-      ..addOption('import', valueHelp: 'package.kvlt', help: 'Import from a vault KVLT package');
+      ..addOption(
+        'value',
+        valueHelp: 'json',
+        help: 'Inline JSON document(s) to insert',
+      )
+      ..addOption(
+        'file',
+        valueHelp: 'path',
+        help: 'Read document(s) from a JSON/NDJSON file',
+      )
+      ..addOption(
+        'import',
+        valueHelp: 'package.kvlt',
+        help: 'Import from a vault KVLT package',
+      );
   }
 
   @override
@@ -99,9 +111,13 @@ final class InsertCommand extends CliCommand {
     final docs = await _readDocuments(ctx, flags);
     if (docs == null) return false;
 
-    // Validate all documents before any I/O to prevent partial writes.
-    // _id is silently replaced by the system-generated key (documented);
-    // all other _-prefixed keys are rejected as reserved.
+    // Pre-validate all documents before any I/O to prevent partial writes in
+    // batch mode. The '_id' field is silently stripped (the collection assigns
+    // a new system-generated key); all other '_'-prefixed keys are reserved.
+    // Note: the write pipeline runs ReservedKeyValidator again inside col.insert
+    // but the codec.encode() call there strips '_id' first, so only genuinely
+    // reserved keys (other than '_id') reach the validator. This pre-check
+    // uses the same logic so users see a consistent error before any I/O.
     for (var i = 0; i < docs.length; i++) {
       final offending = docs[i].keys
           .where((k) => k.startsWith('_') && k != '_id')
@@ -117,13 +133,17 @@ final class InsertCommand extends CliCommand {
       }
     }
 
+    // Route writes through the Query Layer write pipeline (schema validation,
+    // secondary index maintenance, FTS, vault ref counts).
+    final col = ctx.rawCollection(collection);
     final inserted = <Map<String, dynamic>>[];
     for (final doc in docs) {
-      final key = const UuidV7KeyGenerator().next();
-      doc['_id'] = key;
-      final encoded = ValueCodec.encode(doc);
-      await ctx.store.put(collection, key, encoded);
-      inserted.add(doc);
+      // col.insert() assigns a new UUIDv7 key and calls _writeDocument(),
+      // which runs all validators and augmentors before committing.
+      // The '_id' in the user's doc is stripped by RawDocumentCodec.encode()
+      // and the assigned key is re-injected via RawDocumentCodec.withKey().
+      final result = await col.insert(doc);
+      inserted.add(result);
     }
 
     ctx.writeDocuments(inserted);

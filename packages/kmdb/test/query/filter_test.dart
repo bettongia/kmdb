@@ -199,15 +199,11 @@ void main() {
     });
     test('startsWith case-insensitive matches', () {
       expect(
-        Field('name')
-            .startsWith('hello', caseSensitive: false)
-            .evaluate(doc),
+        Field('name').startsWith('hello', caseSensitive: false).evaluate(doc),
         isTrue,
       );
       expect(
-        Field('name')
-            .startsWith('HELLO', caseSensitive: false)
-            .evaluate(doc),
+        Field('name').startsWith('HELLO', caseSensitive: false).evaluate(doc),
         isTrue,
       );
     });

@@ -22,26 +22,29 @@ import 'package:test/test.dart';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-Future<KvStoreImpl> _openStore() async {
-  final (store, _) = await KvStoreImpl.open(
-    '/testdb',
-    MemoryStorageAdapter(),
+/// Each call gets a unique in-memory path so tests cannot accidentally share
+/// a lock even when run concurrently.
+var _dbCounter = 0;
+
+Future<KmdbDatabase> _openStore({
+  List<IndexDefinition> indexes = const [],
+}) async {
+  return KmdbDatabase.open(
+    path: '/testdb_${_dbCounter++}',
+    adapter: MemoryStorageAdapter(),
     config: KvStoreConfig.forTesting(),
+    indexes: indexes,
   );
-  return store;
 }
 
 CommandContext _ctx(
-  KvStoreImpl store, {
+  KmdbDatabase db, {
   OutputMode mode = OutputMode.json,
-  IndexManager? indexManager,
   StringBuffer? out,
   StringBuffer? err,
 }) => CommandContext(
-  store: store,
+  db: db,
   mode: mode,
-  indexManager:
-      indexManager ?? IndexManager(store: store, definitions: const []),
   out: out ?? StringBuffer(),
   err: err ?? StringBuffer(),
 );
@@ -59,12 +62,12 @@ String _key(String seed) {
 }
 
 Future<void> _putDoc(
-  KvStoreImpl store,
+  KmdbDatabase db,
   String coll,
   Map<String, dynamic> doc,
 ) async {
   final id = doc['_id'] as String? ?? _key(doc.toString());
-  await store.put(coll, id, ValueCodec.encode({...doc}..remove('_id')));
+  await db.store.put(coll, id, ValueCodec.encode({...doc}..remove('_id')));
 }
 
 /// Waits until [manager] reports [IndexStatus.current] for [namespace]/[path],
@@ -87,21 +90,21 @@ void main() {
   tearDown(MemoryStorageAdapter.releaseAllLocks);
 
   group('scan --explain', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
     late StringBuffer err;
 
     setUp(() async {
-      store = await _openStore();
+      db = await _openStore();
       out = StringBuffer();
       err = StringBuffer();
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('no indexes — reports full scan in table format', () async {
-      await _putDoc(store, 'people', {'name': 'Alice', 'age': 30});
+      await _putDoc(db, 'people', {'name': 'Alice', 'age': 30});
 
-      final ctx = _ctx(store, mode: OutputMode.table, out: out, err: err);
+      final ctx = _ctx(db, mode: OutputMode.table, out: out, err: err);
       final ok = await ScanCommand().execute(
         ctx,
         ['people'],
@@ -123,9 +126,9 @@ void main() {
     test(
       'no indexes — filter shows indexStatus: none in JSON explain',
       () async {
-        await _putDoc(store, 'people', {'name': 'Alice', 'age': 30});
+        await _putDoc(db, 'people', {'name': 'Alice', 'age': 30});
 
-        final ctx = _ctx(store, mode: OutputMode.json, out: out, err: err);
+        final ctx = _ctx(db, mode: OutputMode.json, out: out, err: err);
         await ScanCommand().execute(
           ctx,
           ['people'],
@@ -164,9 +167,9 @@ void main() {
     );
 
     test('--explain with no filter — empty filter list, full scan', () async {
-      await _putDoc(store, 'people', {'name': 'Alice', 'age': 30});
+      await _putDoc(db, 'people', {'name': 'Alice', 'age': 30});
 
-      final ctx = _ctx(store, mode: OutputMode.table, out: out, err: err);
+      final ctx = _ctx(db, mode: OutputMode.table, out: out, err: err);
       final ok = await ScanCommand().execute(
         ctx,
         ['people'],
@@ -182,22 +185,19 @@ void main() {
     });
 
     test('current index — reports index scan in table format', () async {
-      final nameIndex = IndexDefinition('people', 'name');
-      final indexManager = IndexManager(store: store, definitions: [nameIndex]);
+      // Open a new database with the name index defined at open time.
+      final dbIdx = await _openStore(
+        indexes: [IndexDefinition('people', 'name')],
+      );
+      addTearDown(() => dbIdx.close());
 
-      await _putDoc(store, 'people', {'name': 'Alice', 'age': 30});
-      await _putDoc(store, 'people', {'name': 'Bob', 'age': 25});
+      await _putDoc(dbIdx, 'people', {'name': 'Alice', 'age': 30});
+      await _putDoc(dbIdx, 'people', {'name': 'Bob', 'age': 25});
 
       // Trigger build and wait for the index to become current.
-      await _waitForCurrent(indexManager, 'people', 'name');
+      await _waitForCurrent(dbIdx.indexManager, 'people', 'name');
 
-      final ctx = _ctx(
-        store,
-        mode: OutputMode.table,
-        indexManager: indexManager,
-        out: out,
-        err: err,
-      );
+      final ctx = _ctx(dbIdx, mode: OutputMode.table, out: out, err: err);
       final ok = await ScanCommand().execute(
         ctx,
         ['people'],
@@ -215,19 +215,16 @@ void main() {
     });
 
     test('current index — JSON format includes _explain key', () async {
-      final nameIndex = IndexDefinition('people', 'name');
-      final indexManager = IndexManager(store: store, definitions: [nameIndex]);
-
-      await _putDoc(store, 'people', {'name': 'Alice', 'age': 30});
-      await _waitForCurrent(indexManager, 'people', 'name');
-
-      final ctx = _ctx(
-        store,
-        mode: OutputMode.json,
-        indexManager: indexManager,
-        out: out,
-        err: err,
+      // Open a new database with the name index defined at open time.
+      final dbIdx = await _openStore(
+        indexes: [IndexDefinition('people', 'name')],
       );
+      addTearDown(() => dbIdx.close());
+
+      await _putDoc(dbIdx, 'people', {'name': 'Alice', 'age': 30});
+      await _waitForCurrent(dbIdx.indexManager, 'people', 'name');
+
+      final ctx = _ctx(dbIdx, mode: OutputMode.json, out: out, err: err);
       await ScanCommand().execute(
         ctx,
         ['people'],
@@ -269,9 +266,9 @@ void main() {
     });
 
     test('without --explain flag — no plan output', () async {
-      await _putDoc(store, 'people', {'name': 'Alice', 'age': 30});
+      await _putDoc(db, 'people', {'name': 'Alice', 'age': 30});
 
-      final ctx = _ctx(store, mode: OutputMode.table, out: out, err: err);
+      final ctx = _ctx(db, mode: OutputMode.table, out: out, err: err);
       await ScanCommand().execute(ctx, ['people'], {});
 
       expect(out.toString(), isNot(contains('Query plan')));

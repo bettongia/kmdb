@@ -56,8 +56,17 @@ final class ExportCommand extends CliCommand {
   @override
   void configureArgParser(ArgParser parser) {
     parser
-      ..addFlag('vault', negatable: false, help: 'Export vault attachments as KVLT packages alongside NDJSON')
-      ..addOption('output', valueHelp: 'dir', help: 'Output directory for vault packages (default: <collection>_vault_export)');
+      ..addFlag(
+        'vault',
+        negatable: false,
+        help: 'Export vault attachments as KVLT packages alongside NDJSON',
+      )
+      ..addOption(
+        'output',
+        valueHelp: 'dir',
+        help:
+            'Output directory for vault packages (default: <collection>_vault_export)',
+      );
   }
 
   @override
@@ -79,7 +88,11 @@ final class ExportCommand extends CliCommand {
 
     const enc = JsonEncoder();
     await for (final entry in ctx.store.scan(collection)) {
-      final doc = ValueCodec.decode(entry.value);
+      // Inject _id from the entry key — documents are stored without _id in
+      // the value bytes (the key is the canonical identity). The exported NDJSON
+      // must include _id so that import can restore documents to their original
+      // keys rather than generating new ones.
+      final doc = ValueCodec.decode(entry.value)..['_id'] = entry.key;
       ctx.out.writeln(enc.convert(doc));
     }
     return true;
@@ -124,8 +137,10 @@ final class ExportCommand extends CliCommand {
     const enc = JsonEncoder();
 
     await for (final entry in ctx.store.scan(collection)) {
-      final doc = ValueCodec.decode(entry.value);
-      final docId = doc['_id'] as String? ?? entry.key;
+      // Inject _id from the entry key — documents are stored without _id in
+      // the value bytes (the key is the canonical identity).
+      final doc = ValueCodec.decode(entry.value)..['_id'] = entry.key;
+      final docId = entry.key;
 
       // Find vault URIs in this document.
       final vaultUris = _scanForVaultUris(doc);

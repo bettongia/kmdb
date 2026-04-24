@@ -38,24 +38,20 @@ io.Directory _mkTempDir() {
   return d;
 }
 
-/// Opens a real on-disk [KvStoreImpl] in [dir].
-Future<KvStoreImpl> _openStore(io.Directory dir) async {
+/// Opens a real on-disk [KmdbDatabase] in [dir].
+Future<KmdbDatabase> _openStore(io.Directory dir) async {
   final adapter = StorageAdapterNative();
-  final (store, _) = await KvStoreImpl.open(dir.path, adapter);
-  return store;
+  return KmdbDatabase.open(path: dir.path, adapter: adapter);
 }
 
 /// Creates a [CommandContext] backed by string buffers for testing.
-CommandContext _ctx(
-  KvStoreImpl store, {
-  StringBuffer? out,
-  StringBuffer? err,
-}) => CommandContext(
-  store: store,
-  mode: OutputMode.json,
-  out: out ?? StringBuffer(),
-  err: err ?? StringBuffer(),
-);
+CommandContext _ctx(KmdbDatabase db, {StringBuffer? out, StringBuffer? err}) =>
+    CommandContext(
+      db: db,
+      mode: OutputMode.json,
+      out: out ?? StringBuffer(),
+      err: err ?? StringBuffer(),
+    );
 
 /// Writes a corrupt WAL file in [dir] named [filename].
 ///
@@ -108,17 +104,17 @@ void main() {
 
   group('UtilCommand routing', () {
     late io.Directory tmpDir;
-    late KvStoreImpl store;
+    late KmdbDatabase db;
 
     setUp(() async {
       tmpDir = _mkTempDir();
-      store = await _openStore(tmpDir);
+      db = await _openStore(tmpDir);
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('no subcommand returns false and writes error', () async {
       final err = StringBuffer();
-      final ctx = _ctx(store, err: err);
+      final ctx = _ctx(db, err: err);
       final ok = await const UtilCommand().execute(ctx, [], {});
       expect(ok, isFalse);
       expect(err.toString(), contains('util requires a subcommand'));
@@ -126,7 +122,7 @@ void main() {
 
     test('unknown subcommand returns false and writes error', () async {
       final err = StringBuffer();
-      final ctx = _ctx(store, err: err);
+      final ctx = _ctx(db, err: err);
       final ok = await const UtilCommand().execute(ctx, ['badcmd'], {});
       expect(ok, isFalse);
       expect(err.toString(), contains("Unknown util subcommand 'badcmd'"));
@@ -135,7 +131,7 @@ void main() {
     test('every subcommand path sets suppressFlush on the context', () async {
       // suppressFlush must be set regardless of whether the subcommand
       // succeeds, so that the CLI runner never flushes after a util call.
-      final ctx = _ctx(store);
+      final ctx = _ctx(db);
       expect(ctx.suppressFlush, isFalse);
       await const UtilCommand().execute(ctx, ['manifest'], {});
       expect(ctx.suppressFlush, isTrue);
@@ -146,23 +142,23 @@ void main() {
 
   group('util sstable', () {
     late io.Directory tmpDir;
-    late KvStoreImpl store;
+    late KmdbDatabase db;
 
     setUp(() async {
       tmpDir = _mkTempDir();
-      store = await _openStore(tmpDir);
+      db = await _openStore(tmpDir);
       // Write data and flush to generate a real SSTable file.
       final k1 = _keygen.next();
       final k2 = _keygen.next();
-      await store.put('ns', k1, ValueCodec.encode({'id': 'a', 'x': 1}));
-      await store.put('ns', k2, ValueCodec.encode({'id': 'b', 'x': 2}));
-      await store.flush();
+      await db.store.put('ns', k1, ValueCodec.encode({'id': 'a', 'x': 1}));
+      await db.store.put('ns', k2, ValueCodec.encode({'id': 'b', 'x': 2}));
+      await db.store.flush();
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('no filename argument returns false and writes error', () async {
       final err = StringBuffer();
-      final ctx = _ctx(store, err: err);
+      final ctx = _ctx(db, err: err);
       final ok = await const UtilCommand().execute(ctx, ['sstable'], {});
       expect(ok, isFalse);
       expect(err.toString(), contains('util sstable requires a filename'));
@@ -170,7 +166,7 @@ void main() {
 
     test('file not found emits error field and returns false', () async {
       final out = StringBuffer();
-      final ctx = _ctx(store, out: out);
+      final ctx = _ctx(db, out: out);
       final ok = await const UtilCommand().execute(ctx, [
         'sstable',
         'nonexistent.sst',
@@ -188,7 +184,7 @@ void main() {
       await io.File(badPath).writeAsBytes(List<int>.filled(100, 0xFF));
 
       final out = StringBuffer();
-      final ctx = _ctx(store, out: out);
+      final ctx = _ctx(db, out: out);
       final ok = await const UtilCommand().execute(ctx, [
         'sstable',
         'bad.sst',
@@ -208,7 +204,7 @@ void main() {
         final filename = files.first.path.split('/').last;
 
         final out = StringBuffer();
-        final ctx = _ctx(store, out: out);
+        final ctx = _ctx(db, out: out);
         final ok = await const UtilCommand().execute(ctx, [
           'sstable',
           filename,
@@ -239,7 +235,7 @@ void main() {
       final filename = files.first.path.split('/').last;
 
       final out = StringBuffer();
-      final ctx = _ctx(store, out: out);
+      final ctx = _ctx(db, out: out);
       final ok = await const UtilCommand().execute(
         ctx,
         ['sstable', filename],
@@ -259,7 +255,7 @@ void main() {
       final filename = files.first.path.split('/').last;
 
       final out = StringBuffer();
-      final ctx = _ctx(store, out: out);
+      final ctx = _ctx(db, out: out);
       final ok = await const UtilCommand().execute(
         ctx,
         ['sstable', filename],
@@ -301,7 +297,7 @@ void main() {
       final filename = files.first.path.split('/').last;
 
       final out = StringBuffer();
-      final ctx = _ctx(store, out: out);
+      final ctx = _ctx(db, out: out);
       final ok = await const UtilCommand().execute(
         ctx,
         ['sstable', filename],
@@ -373,20 +369,20 @@ void main() {
 
   group('util wal', () {
     late io.Directory tmpDir;
-    late KvStoreImpl store;
+    late KmdbDatabase db;
 
     setUp(() async {
       tmpDir = _mkTempDir();
-      store = await _openStore(tmpDir);
+      db = await _openStore(tmpDir);
       // Write data to generate WAL records.
-      await store.put('ns', _keygen.next(), ValueCodec.encode({'id': 'a'}));
-      await store.put('ns', _keygen.next(), ValueCodec.encode({'id': 'b'}));
+      await db.store.put('ns', _keygen.next(), ValueCodec.encode({'id': 'a'}));
+      await db.store.put('ns', _keygen.next(), ValueCodec.encode({'id': 'b'}));
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('no filename argument returns false and writes error', () async {
       final err = StringBuffer();
-      final ctx = _ctx(store, err: err);
+      final ctx = _ctx(db, err: err);
       final ok = await const UtilCommand().execute(ctx, ['wal'], {});
       expect(ok, isFalse);
       expect(err.toString(), contains('util wal requires a filename'));
@@ -394,7 +390,7 @@ void main() {
 
     test('file not found emits error field and returns false', () async {
       final out = StringBuffer();
-      final ctx = _ctx(store, out: out);
+      final ctx = _ctx(db, out: out);
       final ok = await const UtilCommand().execute(ctx, [
         'wal',
         'wal-99999.log',
@@ -417,7 +413,7 @@ void main() {
         final filename = walFiles.first.path.split('/').last;
 
         final out = StringBuffer();
-        final ctx = _ctx(store, out: out);
+        final ctx = _ctx(db, out: out);
         final ok = await const UtilCommand().execute(ctx, [
           'wal',
           filename,
@@ -452,7 +448,7 @@ void main() {
       final filename = walFiles.first.path.split('/').last;
 
       final out = StringBuffer();
-      final ctx = _ctx(store, out: out);
+      final ctx = _ctx(db, out: out);
       final ok = await const UtilCommand().execute(
         ctx,
         ['wal', filename],
@@ -499,7 +495,7 @@ void main() {
       final filename = walFiles.first.path.split('/').last;
 
       final out = StringBuffer();
-      final ctx = _ctx(store, out: out);
+      final ctx = _ctx(db, out: out);
       final ok = await const UtilCommand().execute(
         ctx,
         ['wal', filename],
@@ -521,7 +517,7 @@ void main() {
       final filename = walFiles.first.path.split('/').last;
 
       final out = StringBuffer();
-      final ctx = _ctx(store, out: out);
+      final ctx = _ctx(db, out: out);
       final ok = await const UtilCommand().execute(
         ctx,
         ['wal', filename],
@@ -583,7 +579,7 @@ void main() {
         final filename = await _writeCorruptWal(tmpDir, 'wal-corrupt.log');
 
         final out = StringBuffer();
-        final ctx = _ctx(store, out: out);
+        final ctx = _ctx(db, out: out);
         final ok = await const UtilCommand().execute(
           ctx,
           ['wal', filename],
@@ -615,7 +611,7 @@ void main() {
         );
 
         final out = StringBuffer();
-        final ctx = _ctx(store, out: out);
+        final ctx = _ctx(db, out: out);
         final ok = await const UtilCommand().execute(ctx, [
           'wal',
           filename,
@@ -637,7 +633,7 @@ void main() {
       await io.File(flushMarkerPath).writeAsBytes(record.encode());
 
       final out = StringBuffer();
-      final ctx = _ctx(store, out: out);
+      final ctx = _ctx(db, out: out);
       final ok = await const UtilCommand().execute(ctx, ['wal-flush.log'], {});
       // subcommand not provided so this routes to unknown subcommand error
       expect(ok, isFalse);
@@ -653,7 +649,7 @@ void main() {
       await io.File(flushMarkerPath).writeAsBytes(record.encode());
 
       final out = StringBuffer();
-      final ctx = _ctx(store, out: out);
+      final ctx = _ctx(db, out: out);
       final ok = await const UtilCommand().execute(ctx, [
         'wal',
         'wal-flush2.log',
@@ -669,18 +665,18 @@ void main() {
 
   group('util manifest', () {
     late io.Directory tmpDir;
-    late KvStoreImpl store;
+    late KmdbDatabase db;
 
     setUp(() async {
       tmpDir = _mkTempDir();
-      store = await _openStore(tmpDir);
+      db = await _openStore(tmpDir);
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('summary on empty database has empty levels', () async {
       // A freshly opened store has a CURRENT file but no SSTable edits yet.
       final out = StringBuffer();
-      final ctx = _ctx(store, out: out);
+      final ctx = _ctx(db, out: out);
       final ok = await const UtilCommand().execute(ctx, ['manifest'], {});
       expect(ok, isTrue);
       final result = json.decode(out.toString()) as Map<String, dynamic>;
@@ -696,7 +692,7 @@ void main() {
         // device ID setup). The key invariant is that the list is present and
         // each edit has the required fields.
         final out = StringBuffer();
-        final ctx = _ctx(store, out: out);
+        final ctx = _ctx(db, out: out);
         final ok = await const UtilCommand().execute(
           ctx,
           ['manifest'],
@@ -719,11 +715,11 @@ void main() {
     );
 
     test('after flush summary lists SSTable filenames in levels', () async {
-      await store.put('ns', _keygen.next(), ValueCodec.encode({'id': 'a'}));
-      await store.flush();
+      await db.store.put('ns', _keygen.next(), ValueCodec.encode({'id': 'a'}));
+      await db.store.flush();
 
       final out = StringBuffer();
-      final ctx = _ctx(store, out: out);
+      final ctx = _ctx(db, out: out);
       final ok = await const UtilCommand().execute(ctx, ['manifest'], {});
       expect(ok, isTrue);
       final result = json.decode(out.toString()) as Map<String, dynamic>;
@@ -741,11 +737,15 @@ void main() {
     test(
       'after flush --full lists VersionEdits with expected fields',
       () async {
-        await store.put('ns', _keygen.next(), ValueCodec.encode({'id': 'a'}));
-        await store.flush();
+        await db.store.put(
+          'ns',
+          _keygen.next(),
+          ValueCodec.encode({'id': 'a'}),
+        );
+        await db.store.flush();
 
         final out = StringBuffer();
-        final ctx = _ctx(store, out: out);
+        final ctx = _ctx(db, out: out);
         final ok = await const UtilCommand().execute(
           ctx,
           ['manifest'],
@@ -777,24 +777,20 @@ void main() {
       // Create a new database directory, open and close it, then delete CURRENT
       // to simulate an incomplete database state (e.g. partially initialised).
       final blankDir = _mkTempDir();
-      final blankAdapter = StorageAdapterNative();
-      final (blankStore, _) = await KvStoreImpl.open(
-        blankDir.path,
-        blankAdapter,
-      );
-      await blankStore.close();
+      final blankDb = await _openStore(blankDir);
+      await blankDb.close();
       io.File('${blankDir.path}/CURRENT').deleteSync();
 
       // Re-open to get a context that has the blankDir as its dbDir, but
       // the CURRENT file should be gone.
       // We delete CURRENT after the second open.
-      final blankStore2 = await _openStore(blankDir);
+      final blankDb2 = await _openStore(blankDir);
       io.File('${blankDir.path}/CURRENT').deleteSync();
 
       final out = StringBuffer();
-      final ctx = _ctx(blankStore2, out: out);
+      final ctx = _ctx(blankDb2, out: out);
       final ok = await const UtilCommand().execute(ctx, ['manifest'], {});
-      await blankStore2.close();
+      await blankDb2.close();
 
       expect(ok, isTrue);
       final result = json.decode(out.toString()) as Map<String, dynamic>;

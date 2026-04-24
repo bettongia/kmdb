@@ -583,136 +583,63 @@ final class KmdbCollection<T> {
     }
   }
 
-  /// Validates that [doc] contains no top-level keys starting with `_`.
-  ///
-  /// The `_` prefix is reserved for KMDB system-managed fields (e.g. `_id`).
-  /// Throws [ReservedFieldException] listing every offending key if any are
-  /// found. Validation runs before any I/O, so no partial writes occur.
-  static void _validateNoReservedKeys(Map<String, dynamic> doc) {
-    final offending = doc.keys
-        .where((k) => k.startsWith('_'))
-        .toList(growable: false);
-    if (offending.isNotEmpty) {
-      throw ReservedFieldException(offending);
-    }
-  }
-
   /// Encodes and writes [newDoc], updating index entries for [oldDoc].
   ///
-  /// Validates that [newDoc] contains no `_`-prefixed top-level keys before
-  /// any I/O is performed. Both secondary index and FTS index writes are
-  /// included in the same [WriteBatch] as the document write (atomicity).
+  /// Runs all registered [WriteValidator]s (Layer 1) before any I/O so that
+  /// a violation aborts the write cleanly. Then runs all [WriteAugmentor]s
+  /// (Layer 2) to add side-effect entries to the [WriteBatch] before it is
+  /// atomically committed (Layer 3 — `writeEvents` fires automatically).
   Future<void> _writeDocument({
     required String key,
     required Map<String, dynamic> newDoc,
     required Map<String, dynamic>? oldDoc,
   }) async {
-    // Validate before any I/O — throw immediately if the codec emitted
-    // reserved fields. This prevents partial writes on error.
-    _validateNoReservedKeys(newDoc);
-    // Schema validation runs after reserved-key check and before encoding so
-    // that a violation aborts the write without touching the store.
-    _db.schemaManager.validate(namespace, newDoc);
+    // Layer 1: run validators before any I/O. Any validator may throw to
+    // abort the write; no partial I/O occurs if one does.
+    for (final validator in _db.validators) {
+      validator.validate(namespace, newDoc);
+    }
+
     final encodedValue = ValueCodec.encode(newDoc);
     final batch = WriteBatch()..put(namespace, key, encodedValue);
 
-    // Secondary index interception.
-    await _db.indexManager.interceptWrite(
-      batch: batch,
-      namespace: namespace,
-      docKey: key,
-      oldDoc: oldDoc,
-      newDoc: newDoc,
-    );
-
-    // FTS index interception (no-op when no FTS indexes are configured).
-    final fts = _db.ftsManager;
-    if (fts != null && fts.hasAnyIndex(namespace)) {
-      await fts.interceptWrite(
+    // Layer 2: run augmentors to add side-effect entries to the batch.
+    // All augmentor writes share the same atomic WriteBatch as the document
+    // write, ensuring consistency between document and index state.
+    for (final augmentor in _db.augmentors) {
+      await augmentor.interceptWrite(
+        batch: batch,
         namespace: namespace,
-        docId: key,
+        docKey: key,
         newDoc: newDoc,
         oldDoc: oldDoc,
-        batch: batch,
       );
     }
 
-    // Vector index interception. Inference runs synchronously before the
-    // WriteBatch is committed; a StateError from inference aborts the write.
-    final vec = _db.vecManager;
-    if (vec != null && vec.hasAnyIndex(namespace)) {
-      await vec.interceptWrite(
-        namespace: namespace,
-        docId: key,
-        newDoc: newDoc,
-        oldDoc: oldDoc,
-        batch: batch,
-      );
-    }
-
-    // Vault reference-count interception (no-op when no VaultStore is
-    // configured). Diffs old vs new vault URIs and adjusts `$vault` counters
-    // in the same WriteBatch, preserving atomicity with the document write.
-    final vaultInterceptor = _db.vaultRefInterceptor;
-    if (vaultInterceptor != null) {
-      await vaultInterceptor.interceptWrite(
-        batch: batch,
-        oldDoc: oldDoc,
-        newDoc: newDoc,
-      );
-    }
-
+    // Layer 3: commit the batch — writeEvents fires automatically and the
+    // CacheLayer / watch() subscribers are notified via the stream.
     await _db.store.writeBatchInternal(batch);
   }
 
   /// Removes a document and its index entries (secondary, FTS, and vector).
+  ///
+  /// Runs all registered [WriteAugmentor]s (Layer 2) with `newDoc: null` to
+  /// clean up side-effect entries. Validators are not run — deletes are never
+  /// blocked by admission-gate checks.
   Future<void> _deleteDocument({
     required String key,
     required Map<String, dynamic> oldDoc,
   }) async {
     final batch = WriteBatch()..delete(namespace, key);
 
-    // Secondary index interception.
-    await _db.indexManager.interceptWrite(
-      batch: batch,
-      namespace: namespace,
-      docKey: key,
-      oldDoc: oldDoc,
-      newDoc: null,
-    );
-
-    // FTS index interception.
-    final fts = _db.ftsManager;
-    if (fts != null && fts.hasAnyIndex(namespace)) {
-      await fts.interceptWrite(
+    // Layer 2: augmentors receive newDoc: null to signal deletion.
+    for (final augmentor in _db.augmentors) {
+      await augmentor.interceptWrite(
+        batch: batch,
         namespace: namespace,
-        docId: key,
+        docKey: key,
         newDoc: null,
         oldDoc: oldDoc,
-        batch: batch,
-      );
-    }
-
-    // Vector index interception.
-    final vec = _db.vecManager;
-    if (vec != null && vec.hasAnyIndex(namespace)) {
-      await vec.interceptWrite(
-        namespace: namespace,
-        docId: key,
-        newDoc: null,
-        oldDoc: oldDoc,
-        batch: batch,
-      );
-    }
-
-    // Vault reference-count interception. A delete is a full removal of the
-    // old document, so newDoc is null — all vault URIs are decremented.
-    final vaultInterceptor = _db.vaultRefInterceptor;
-    if (vaultInterceptor != null) {
-      await vaultInterceptor.interceptWrite(
-        batch: batch,
-        oldDoc: oldDoc,
-        newDoc: null,
       );
     }
 

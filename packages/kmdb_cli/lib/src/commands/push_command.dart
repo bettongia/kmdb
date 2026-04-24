@@ -54,8 +54,16 @@ final class PushCommand extends CliCommand {
   @override
   void configureArgParser(ArgParser parser) {
     parser
-      ..addOption('sync-dir', valueHelp: 'path', help: 'One-off sync directory path (bypasses saved remotes)')
-      ..addOption('collection', valueHelp: 'coll,...', help: 'Restrict sync to these collections (comma-separated)');
+      ..addOption(
+        'sync-dir',
+        valueHelp: 'path',
+        help: 'One-off sync directory path (bypasses saved remotes)',
+      )
+      ..addOption(
+        'collection',
+        valueHelp: 'coll,...',
+        help: 'Restrict sync to these collections (comma-separated)',
+      );
   }
 
   @override

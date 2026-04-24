@@ -43,11 +43,16 @@ final class ImportCommand extends CliCommand {
   @override
   void configureArgParser(ArgParser parser) {
     parser
-      ..addOption('input', valueHelp: 'file', help: 'NDJSON file to import (default: stdin)')
+      ..addOption(
+        'input',
+        valueHelp: 'file',
+        help: 'NDJSON file to import (default: stdin)',
+      )
       ..addOption(
         'on-conflict',
         valueHelp: 'ignore|replace|error',
-        help: 'Conflict resolution when a document key already exists (default: replace)',
+        help:
+            'Conflict resolution when a document key already exists (default: replace)',
         allowed: ['ignore', 'replace', 'error'],
       );
   }
