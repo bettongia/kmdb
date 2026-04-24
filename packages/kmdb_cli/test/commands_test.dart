@@ -31,7 +31,6 @@ import 'package:kmdb_cli/src/commands/import_command.dart';
 import 'package:kmdb_cli/src/commands/info_command.dart';
 import 'package:kmdb_cli/src/commands/init_command.dart';
 import 'package:kmdb_cli/src/commands/insert_command.dart';
-import 'package:kmdb_cli/src/commands/put_command.dart';
 import 'package:kmdb_cli/src/commands/scan_command.dart';
 import 'package:kmdb_cli/src/commands/update_command.dart';
 import 'package:kmdb_cli/src/commands/stats_command.dart';
@@ -333,254 +332,6 @@ void main() {
       // 'name' is present; 'address.city' is absent and must be omitted.
       expect(result[0]['name'], equals('Bob'));
       expect(result[0].containsKey('address'), isFalse);
-    });
-  });
-
-  // ── PutCommand ──────────────────────────────────────────────────────────────
-
-  group('PutCommand', () {
-    late KmdbDatabase db;
-    late StringBuffer out;
-    late StringBuffer err;
-
-    setUp(() async {
-      db = await _openStore();
-      out = StringBuffer();
-      err = StringBuffer();
-    });
-    tearDown(() => db.close());
-
-    test('inserts document with generated ID and echoes it back', () async {
-      final ctx = _ctx(db, out: out, err: err);
-      const doc = '{"name":"Alice"}';
-      final ok = await PutCommand().execute(ctx, ['notes'], {'value': doc});
-      expect(ok, isTrue);
-
-      final decoded = json.decode(out.toString()) as List;
-      final generatedId = decoded[0]['_id'] as String;
-      expect(generatedId, hasLength(32));
-      expect(generatedId[12], equals('7')); // version
-
-      final result = await db.store.get('notes', generatedId);
-      expect(result, isNotNull);
-      expect(ValueCodec.decode(result!)['name'], equals('Alice'));
-    });
-
-    test('returns false for invalid JSON', () async {
-      final ctx = _ctx(db, out: out, err: err);
-      final ok = await PutCommand().execute(ctx, ['notes'], {'value': '{bad}'});
-      expect(ok, isFalse);
-      expect(err.toString(), contains('Invalid JSON'));
-    });
-
-    test('returns false when document is not a JSON object', () async {
-      final ctx = _ctx(db, out: out, err: err);
-      final ok = await PutCommand().execute(ctx, ['notes'], {'value': '[1,2]'});
-      expect(ok, isFalse);
-      expect(err.toString(), contains('JSON object'));
-    });
-
-    test('ignores user-provided id and generates a new one', () async {
-      final ctx = _ctx(db, out: out, err: err);
-      final userId = _key('user');
-      final doc = '{"_id":"$userId","name":"Alice"}';
-      final ok = await PutCommand().execute(ctx, ['notes'], {'value': doc});
-      expect(ok, isTrue);
-
-      final decoded = json.decode(out.toString()) as List;
-      // The echoed document uses '_id' as the system key field.
-      final assignedId = decoded[0]['_id'] as String;
-      expect(assignedId, isNot(equals(userId)));
-      expect(assignedId, hasLength(32));
-
-      // The user-provided ID should NOT have been written.
-      expect(await db.store.get('notes', userId), isNull);
-
-      // The assigned ID should have been written.
-      expect(await db.store.get('notes', assignedId), isNotNull);
-    });
-
-    test('returns false when namespace arg missing', () async {
-      final ctx = _ctx(db, out: out, err: err);
-      final ok = await PutCommand().execute(ctx, [], {
-        'value': '{"name":"Alice"}',
-      });
-      expect(ok, isFalse);
-    });
-
-    test('inserts multiple documents from a JSON array via --value', () async {
-      final ctx = _ctx(db, out: out, err: err);
-      const arrayJson = '[{"name":"Alice"},{"name":"Bob"}]';
-      final ok = await PutCommand().execute(
-        ctx,
-        ['notes'],
-        {'value': arrayJson},
-      );
-      expect(ok, isTrue);
-
-      final decoded = json.decode(out.toString()) as List;
-      expect(decoded, hasLength(2));
-      final id0 = decoded[0]['_id'] as String;
-      final id1 = decoded[1]['_id'] as String;
-      expect(id0, hasLength(32));
-      expect(id1, hasLength(32));
-      expect(id0, isNot(equals(id1)));
-
-      expect(
-        ValueCodec.decode((await db.store.get('notes', id0))!)['name'],
-        equals('Alice'),
-      );
-      expect(
-        ValueCodec.decode((await db.store.get('notes', id1))!)['name'],
-        equals('Bob'),
-      );
-    });
-
-    test('inserts document from a JSON file via --file', () async {
-      final tmp = _TmpFile();
-      tmp.write('{"name":"Carol"}');
-      addTearDown(tmp.delete);
-
-      final ctx = _ctx(db, out: out, err: err);
-      final ok = await PutCommand().execute(ctx, ['notes'], {'file': tmp.path});
-      expect(ok, isTrue);
-
-      final decoded = json.decode(out.toString()) as List;
-      expect(decoded, hasLength(1));
-      final id = decoded[0]['_id'] as String;
-      expect(
-        ValueCodec.decode((await db.store.get('notes', id))!)['name'],
-        equals('Carol'),
-      );
-    });
-
-    test(
-      'inserts multiple documents from a JSON array file via --file',
-      () async {
-        final tmp = _TmpFile();
-        tmp.write('[{"name":"Dave"},{"name":"Eve"}]');
-        addTearDown(tmp.delete);
-
-        final ctx = _ctx(db, out: out, err: err);
-        final ok = await PutCommand().execute(
-          ctx,
-          ['notes'],
-          {'file': tmp.path},
-        );
-        expect(ok, isTrue);
-
-        final decoded = json.decode(out.toString()) as List;
-        expect(decoded, hasLength(2));
-        expect(decoded.map((d) => d['name']), containsAll(['Dave', 'Eve']));
-      },
-    );
-
-    test('inserts multiple documents from an NDJSON file via --file', () async {
-      final tmp = _TmpFile(ext: 'ndjson');
-      tmp.write('{"name":"Frank"}\n{"name":"Grace"}\n\n');
-      addTearDown(tmp.delete);
-
-      final ctx = _ctx(db, out: out, err: err);
-      final ok = await PutCommand().execute(ctx, ['notes'], {'file': tmp.path});
-      expect(ok, isTrue);
-
-      final decoded = json.decode(out.toString()) as List;
-      expect(decoded, hasLength(2));
-      expect(decoded.map((d) => d['name']), containsAll(['Frank', 'Grace']));
-    });
-
-    test('inserts multiple documents from a JSONL file via --file', () async {
-      final tmp = _TmpFile(ext: 'jsonl');
-      tmp.write('{"name":"Heidi"}\n{"name":"Ivan"}\n');
-      addTearDown(tmp.delete);
-
-      final ctx = _ctx(db, out: out, err: err);
-      final ok = await PutCommand().execute(ctx, ['notes'], {'file': tmp.path});
-      expect(ok, isTrue);
-
-      final decoded = json.decode(out.toString()) as List;
-      expect(decoded, hasLength(2));
-      expect(decoded.map((d) => d['name']), containsAll(['Heidi', 'Ivan']));
-    });
-
-    test('returns false when --file path does not exist', () async {
-      final ctx = _ctx(db, out: out, err: err);
-      final ok = await PutCommand().execute(
-        ctx,
-        ['notes'],
-        {'file': '/nonexistent/path/file.json'},
-      );
-      expect(ok, isFalse);
-      expect(err.toString(), contains('Cannot read file'));
-    });
-
-    test('returns false for non-object items in JSON array', () async {
-      final ctx = _ctx(db, out: out, err: err);
-      final ok = await PutCommand().execute(
-        ctx,
-        ['notes'],
-        {'value': '[{"name":"Alice"}, 42]'},
-      );
-      expect(ok, isFalse);
-      expect(err.toString(), contains('JSON object'));
-    });
-
-    test('returns false for invalid JSON line in NDJSON file', () async {
-      final tmp = _TmpFile(ext: 'ndjson');
-      tmp.write('{"name":"Alice"}\n{bad json}\n');
-      addTearDown(tmp.delete);
-
-      final ctx = _ctx(db, out: out, err: err);
-      final ok = await PutCommand().execute(ctx, ['notes'], {'file': tmp.path});
-      expect(ok, isFalse);
-      expect(err.toString(), contains('invalid JSON'));
-    });
-
-    test('inserts zero documents from an empty JSON array', () async {
-      final ctx = _ctx(db, out: out, err: err);
-      final ok = await PutCommand().execute(ctx, ['notes'], {'value': '[]'});
-      expect(ok, isTrue);
-      final decoded = json.decode(out.toString()) as List;
-      expect(decoded, isEmpty);
-    });
-
-    test('rejects document with reserved "_"-prefixed field', () async {
-      final ctx = _ctx(db, out: out, err: err);
-      final ok = await InsertCommand().execute(
-        ctx,
-        ['notes'],
-        {'value': '{"_title": "hack"}'},
-      );
-      expect(ok, isFalse);
-      expect(err.toString(), contains('"_title"'));
-      expect(err.toString(), contains('reserved'));
-    });
-
-    test('rejects batch when any document has a reserved field', () async {
-      final ctx = _ctx(db, out: out, err: err);
-      final ok = await InsertCommand().execute(
-        ctx,
-        ['notes'],
-        {'value': '[{"name":"ok"},{"_title":"hack","name":"bad"}]'},
-      );
-      expect(ok, isFalse);
-      expect(err.toString(), contains('"_title"'));
-      // No documents should have been written (pre-validated before any I/O).
-      final keys = await db.store.scan('notes').toList();
-      expect(keys, isEmpty);
-    });
-
-    test('allows document with no reserved fields', () async {
-      final ctx = _ctx(db, out: out, err: err);
-      final ok = await InsertCommand().execute(
-        ctx,
-        ['notes'],
-        {'value': '{"title": "no underscore prefix"}'},
-      );
-      expect(ok, isTrue);
-      final decoded = json.decode(out.toString()) as List;
-      expect(decoded, hasLength(1));
-      expect((decoded.first as Map)['title'], equals('no underscore prefix'));
     });
   });
 
@@ -1790,53 +1541,44 @@ void main() {
       expect(ok, isFalse);
       expect(err.toString(), contains('Cannot read file'));
     });
-  });
 
-  // ── PutCommand (deprecated wrapper) ────────────────────────────────────────
-
-  group('PutCommand (deprecated)', () {
-    late KmdbDatabase db;
-    late StringBuffer out;
-    late StringBuffer err;
-
-    setUp(() async {
-      db = await _openStore();
-      out = StringBuffer();
-      err = StringBuffer();
-    });
-    tearDown(() => db.close());
-
-    test('still inserts document and emits a deprecation warning', () async {
+    test('rejects document with reserved "_"-prefixed field', () async {
       final ctx = _ctx(db, out: out, err: err);
-      final ok = await PutCommand().execute(
+      final ok = await InsertCommand().execute(
         ctx,
         ['notes'],
-        {'value': '{"x":1}'},
-      );
-      expect(ok, isTrue);
-
-      // Document should be stored.
-      final decoded = json.decode(out.toString()) as List;
-      expect(decoded, hasLength(1));
-      expect(decoded[0]['_id'], isNotNull);
-
-      // Deprecation warning must appear on stderr.
-      expect(err.toString(), contains('deprecated'));
-      expect(err.toString(), contains('insert'));
-    });
-
-    test('deprecation warning appears even when insert fails', () async {
-      // Pass invalid JSON so InsertCommand returns false.
-      final ctx = _ctx(db, out: out, err: err);
-      final ok = await PutCommand().execute(
-        ctx,
-        ['notes'],
-        {'value': '{bad json}'},
+        {'value': '{"_title": "hack"}'},
       );
       expect(ok, isFalse);
+      expect(err.toString(), contains('"_title"'));
+      expect(err.toString(), contains('reserved'));
+    });
 
-      // Warning still emitted before delegate runs.
-      expect(err.toString(), contains('deprecated'));
+    test('rejects batch when any document has a reserved field', () async {
+      final ctx = _ctx(db, out: out, err: err);
+      final ok = await InsertCommand().execute(
+        ctx,
+        ['notes'],
+        {'value': '[{"name":"ok"},{"_title":"hack","name":"bad"}]'},
+      );
+      expect(ok, isFalse);
+      expect(err.toString(), contains('"_title"'));
+      // No documents should have been written (pre-validated before any I/O).
+      final keys = await db.store.scan('notes').toList();
+      expect(keys, isEmpty);
+    });
+
+    test('allows document with no reserved fields', () async {
+      final ctx = _ctx(db, out: out, err: err);
+      final ok = await InsertCommand().execute(
+        ctx,
+        ['notes'],
+        {'value': '{"title": "no underscore prefix"}'},
+      );
+      expect(ok, isTrue);
+      final decoded = json.decode(out.toString()) as List;
+      expect(decoded, hasLength(1));
+      expect((decoded.first as Map)['title'], equals('no underscore prefix'));
     });
   });
 
