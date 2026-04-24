@@ -86,7 +86,38 @@ final class SchemaManager implements WriteValidator {
   // collection → parsed rule tree
   final Map<String, SchemaRule> _rules = {};
 
+  // collection → raw JSON Schema map (retained for getSchema())
+  final Map<String, Map<String, dynamic>> _rawSchemas = {};
+
   // ── Public API ──────────────────────────────────────────────────────────────
+
+  /// The names of all collections that currently have a registered schema.
+  ///
+  /// The list is derived from the in-memory cache; call [load] first to ensure
+  /// schemas persisted from other devices are included.
+  ///
+  /// Example:
+  /// ```dart
+  /// final collections = schemaManager.registeredCollections;
+  /// // → ['contacts', 'tasks']
+  /// ```
+  List<String> get registeredCollections => _rules.keys.toList();
+
+  /// Returns the raw JSON Schema map for [collection], or `null` if no schema
+  /// is registered.
+  ///
+  /// The returned map is the original map that was passed to [CollectionSchema]
+  /// (or loaded from `$meta`). It is suitable for display or re-serialisation
+  /// without coupling the caller to the internal [SchemaRule] representation.
+  ///
+  /// Example:
+  /// ```dart
+  /// final schema = schemaManager.getSchema('contacts');
+  /// if (schema != null) {
+  ///   print(jsonEncode(schema));
+  /// }
+  /// ```
+  Map<String, dynamic>? getSchema(String collection) => _rawSchemas[collection];
 
   /// Loads persisted schemas from [meta] for collections not already registered.
   ///
@@ -112,6 +143,7 @@ final class SchemaManager implements WriteValidator {
   Future<void> register(CollectionSchema schema, MetaStore meta) async {
     final rule = SchemaParser().parse(schema.jsonSchema);
     _rules[schema.collection] = rule;
+    _rawSchemas[schema.collection] = schema.jsonSchema;
 
     final payload = jsonEncode({
       'schemaModelVersion': kSchemaModelVersion,
@@ -143,6 +175,43 @@ final class SchemaManager implements WriteValidator {
     }
   }
 
+  /// Removes the schema for [collection] from both storage and the in-memory
+  /// cache.
+  ///
+  /// After a successful call, writes to [collection] are no longer validated
+  /// against any schema. Deregistering an unknown collection (one that was
+  /// never registered) is a no-op — this method does not throw.
+  ///
+  /// Implementation steps:
+  ///
+  /// 1. Delete the `schema:{collection}` key from [meta].
+  /// 2. Read the registry, remove [collection], and rewrite it.
+  /// 3. Evict [collection] from the in-memory caches.
+  ///
+  /// Example:
+  /// ```dart
+  /// await schemaManager.deregister('contacts', meta);
+  /// // Future writes to 'contacts' are no longer validated.
+  /// ```
+  Future<void> deregister(String collection, MetaStore meta) async {
+    // Step 1: delete the per-collection schema key from storage.
+    await meta.deleteRawByName('schema:$collection');
+
+    // Step 2: rebuild the registry without the removed collection.
+    final current = await _loadRegistry(meta);
+    if (current.contains(collection)) {
+      final updated = current.where((c) => c != collection).toList()..sort();
+      await meta.putRawByName(
+        _kRegistryName,
+        Uint8List.fromList(utf8.encode(jsonEncode(updated))),
+      );
+    }
+
+    // Step 3: evict from in-memory caches.
+    _rules.remove(collection);
+    _rawSchemas.remove(collection);
+  }
+
   // ── Internal ────────────────────────────────────────────────────────────────
 
   void _loadFromBytes(String collection, Uint8List bytes) {
@@ -155,6 +224,7 @@ final class SchemaManager implements WriteValidator {
       }
       final schemaMap = payload['schema'] as Map<String, dynamic>;
       _rules[collection] = SchemaParser().parse(schemaMap);
+      _rawSchemas[collection] = schemaMap;
     } catch (_) {
       // Corrupt or unreadable schema payload — skip silently.
     }

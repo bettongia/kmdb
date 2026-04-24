@@ -328,4 +328,222 @@ void main() {
       );
     });
   });
+
+  // ── registeredCollections ────────────────────────────────────────────────────
+
+  group('registeredCollections', () {
+    test('empty when no schemas registered', () {
+      final manager = SchemaManager();
+      expect(manager.registeredCollections, isEmpty);
+    });
+
+    test('returns collection name after register', () async {
+      final store = await _openStore();
+      final manager = SchemaManager();
+      await manager.register(_contactSchema, store.meta);
+      expect(manager.registeredCollections, contains('contacts'));
+    });
+
+    test('returns correct list after registering multiple schemas', () async {
+      final store = await _openStore();
+      final manager = SchemaManager();
+      await manager.register(_contactSchema, store.meta);
+      await manager.register(
+        const CollectionSchema(
+          collection: 'tasks',
+          jsonSchema: {
+            'required': ['title'],
+          },
+        ),
+        store.meta,
+      );
+      expect(manager.registeredCollections, containsAll(['contacts', 'tasks']));
+      expect(manager.registeredCollections.length, 2);
+    });
+
+    test('collection removed from list after deregister', () async {
+      final store = await _openStore();
+      final manager = SchemaManager();
+      await manager.register(_contactSchema, store.meta);
+      await manager.deregister('contacts', store.meta);
+      expect(manager.registeredCollections, isNot(contains('contacts')));
+    });
+
+    test('other collections unaffected by deregister', () async {
+      final store = await _openStore();
+      final manager = SchemaManager();
+      await manager.register(_contactSchema, store.meta);
+      await manager.register(
+        const CollectionSchema(
+          collection: 'tasks',
+          jsonSchema: {
+            'required': ['title'],
+          },
+        ),
+        store.meta,
+      );
+      await manager.deregister('contacts', store.meta);
+      expect(manager.registeredCollections, contains('tasks'));
+      expect(manager.registeredCollections, isNot(contains('contacts')));
+    });
+  });
+
+  // ── getSchema ────────────────────────────────────────────────────────────────
+
+  group('getSchema', () {
+    test('returns null for unknown collection', () {
+      final manager = SchemaManager();
+      expect(manager.getSchema('unknown'), isNull);
+    });
+
+    test('returns schema map for registered collection', () async {
+      final store = await _openStore();
+      final manager = SchemaManager();
+      await manager.register(_contactSchema, store.meta);
+      final schema = manager.getSchema('contacts');
+      expect(schema, isNotNull);
+      expect(schema!['required'], containsAll(['name', 'email']));
+    });
+
+    test('returns raw map that round-trips to the original schema', () async {
+      final store = await _openStore();
+      final manager = SchemaManager();
+      final jsonSchema = <String, dynamic>{
+        'required': ['name'],
+        'properties': {
+          'name': {'type': 'string', 'minLength': 1},
+        },
+      };
+      await manager.register(
+        CollectionSchema(collection: 'items', jsonSchema: jsonSchema),
+        store.meta,
+      );
+      final returned = manager.getSchema('items');
+      expect(returned, equals(jsonSchema));
+    });
+
+    test('returns null after deregister', () async {
+      final store = await _openStore();
+      final manager = SchemaManager();
+      await manager.register(_contactSchema, store.meta);
+      await manager.deregister('contacts', store.meta);
+      expect(manager.getSchema('contacts'), isNull);
+    });
+
+    test('schema returned after load() matches original', () async {
+      final store = await _openStore();
+      final manager1 = SchemaManager();
+      await manager1.register(_contactSchema, store.meta);
+
+      // A fresh manager must return the same schema after loading from meta.
+      final manager2 = SchemaManager();
+      await manager2.load(store.meta);
+      final schema = manager2.getSchema('contacts');
+      expect(schema, isNotNull);
+      expect(schema!['required'], containsAll(['name', 'email']));
+    });
+  });
+
+  // ── deregister ───────────────────────────────────────────────────────────────
+
+  group('deregister', () {
+    test('stops enforcement for that collection', () async {
+      final store = await _openStore();
+      final manager = SchemaManager();
+      await manager.register(_contactSchema, store.meta);
+
+      // Confirm schema is enforced before deregister.
+      expect(
+        () => manager.validate('contacts', <String, dynamic>{}),
+        throwsA(isA<SchemaValidationException>()),
+      );
+
+      await manager.deregister('contacts', store.meta);
+
+      // After deregister, writes must pass without validation.
+      expect(
+        () => manager.validate('contacts', <String, dynamic>{}),
+        returnsNormally,
+      );
+    });
+
+    test('deregister of unknown collection is a no-op', () async {
+      final store = await _openStore();
+      final manager = SchemaManager();
+      // Must not throw.
+      expect(
+        () => manager.deregister('never_registered', store.meta),
+        returnsNormally,
+      );
+    });
+
+    test('registry updated correctly — does not appear after load()', () async {
+      final store = await _openStore();
+      final manager = SchemaManager();
+      await manager.register(_contactSchema, store.meta);
+      await manager.deregister('contacts', store.meta);
+
+      // A fresh manager loading from the same store must not enforce the schema.
+      final fresh = SchemaManager();
+      await fresh.load(store.meta);
+      expect(
+        () => fresh.validate('contacts', <String, dynamic>{}),
+        returnsNormally,
+      );
+      expect(fresh.registeredCollections, isNot(contains('contacts')));
+    });
+
+    test('other registered collections unaffected by deregister', () async {
+      final store = await _openStore();
+      final manager = SchemaManager();
+      await manager.register(_contactSchema, store.meta);
+      await manager.register(
+        const CollectionSchema(
+          collection: 'tasks',
+          jsonSchema: {
+            'required': ['title'],
+          },
+        ),
+        store.meta,
+      );
+
+      await manager.deregister('contacts', store.meta);
+
+      // 'tasks' schema must still be enforced.
+      expect(
+        () => manager.validate('tasks', <String, dynamic>{}),
+        throwsA(isA<SchemaValidationException>()),
+      );
+
+      // 'tasks' must survive a fresh load as well.
+      final fresh = SchemaManager();
+      await fresh.load(store.meta);
+      expect(
+        () => fresh.validate('tasks', <String, dynamic>{}),
+        throwsA(isA<SchemaValidationException>()),
+      );
+    });
+
+    test('deregister after load() removes enforcement', () async {
+      final store = await _openStore();
+
+      // Persist the schema via one manager.
+      final writer = SchemaManager();
+      await writer.register(_contactSchema, store.meta);
+
+      // Load in a fresh manager and then deregister.
+      final manager = SchemaManager();
+      await manager.load(store.meta);
+      expect(
+        () => manager.validate('contacts', <String, dynamic>{}),
+        throwsA(isA<SchemaValidationException>()),
+      );
+
+      await manager.deregister('contacts', store.meta);
+      expect(
+        () => manager.validate('contacts', <String, dynamic>{}),
+        returnsNormally,
+      );
+    });
+  });
 }

@@ -1,6 +1,6 @@
 # CLI Schema Management
 
-**Status**: Investigated
+**Status**: Implementing
 
 **PR link**: —
 

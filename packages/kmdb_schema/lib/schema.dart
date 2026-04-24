@@ -20,3 +20,4 @@ export 'src/formats_base.dart';
 export 'src/schema_violation.dart';
 export 'src/schema_rule.dart';
 export 'src/schema_parser.dart';
+export 'src/json_schema_validator.dart';
