@@ -272,10 +272,22 @@ abstract final class KmdbCli {
       }
     }
 
-    final KvStoreImpl store;
+    // Load the per-database CLI config before opening the database so that
+    // index definitions can be passed to KmdbDatabase.open(). Failures here
+    // are non-fatal — we log a warning and use an empty config so the user
+    // can still run non-index commands.
+    KmdbConfig config;
+    try {
+      config = await KmdbConfig.load(dbPath);
+    } on FormatException catch (e) {
+      io.stderr.writeln('Warning: could not load config: ${e.message}');
+      config = KmdbConfig.empty();
+    }
+
+    final KmdbDatabase db;
     final bool dbCreated;
     try {
-      (store, dbCreated) = await DatabaseOpener.open(dbPath);
+      (db, dbCreated) = await DatabaseOpener.open(dbPath, config);
     } on LockException catch (e) {
       io.stderr.writeln('Error: $e');
       return 1;
@@ -284,41 +296,9 @@ abstract final class KmdbCli {
       return 1;
     }
 
-    // Load the per-database CLI config so index definitions are available to
-    // every command. Failures here are non-fatal — we log a warning and use an
-    // empty config so the user can still run non-index commands.
-    final dbDir = (await store.storeInfo()).dbDir;
-    KmdbConfig config;
-    try {
-      config = await KmdbConfig.load(dbDir);
-    } on FormatException catch (e) {
-      io.stderr.writeln('Warning: could not load config: ${e.message}');
-      config = KmdbConfig.empty();
-    }
-
-    // Construct IndexManager from the configured index definitions, mapping the
-    // user-facing "collection" name to the library-internal "namespace".
-    final indexDefinitions = config.indexes
-        .map((r) => IndexDefinition(r.collection, r.path))
-        .toList();
-    final indexManager = IndexManager(
-      store: store,
-      definitions: indexDefinitions,
-    );
-
-    // Open a VaultStore for the database path. The vault is always available
-    // on native platforms — it is initialised lazily on first use and is
-    // always a no-op when vault features are not needed.
-    final vaultStore = VaultStore(
-      dbDir: dbPath,
-      adapter: StorageAdapterNative(),
-    );
-
     final ctx = CommandContext(
-      store: store,
+      db: db,
       config: config,
-      indexManager: indexManager,
-      vaultStore: vaultStore,
       mode: mode,
       out: outSink,
       dbCreated: dbCreated,
@@ -340,7 +320,7 @@ abstract final class KmdbCli {
       commandLines = await _readLines(readPath, io.stderr);
       if (commandLines.isEmpty && !io.File(readPath).existsSync()) {
         io.stderr.writeln('Error: file not found: $readPath');
-        await store.close();
+        await db.close();
         return 1;
       }
     } else if (!io.stdin.hasTerminal) {
@@ -352,7 +332,7 @@ abstract final class KmdbCli {
     } else {
       io.stderr.writeln('Error: no command provided.');
       _printUsage();
-      await store.close();
+      await db.close();
       return 1;
     }
 
@@ -376,7 +356,7 @@ abstract final class KmdbCli {
         }
       }
     } finally {
-      await store.close(flush: flushOnExit && !ctx.suppressFlush);
+      await db.close(flush: flushOnExit && !ctx.suppressFlush);
       if (fileSink != null) {
         await fileSink.flush();
         await fileSink.close();

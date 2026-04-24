@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 import 'command.dart';
 import 'insert_command.dart';
 
@@ -43,8 +42,16 @@ final class PutCommand extends CliCommand {
   @override
   void configureArgParser(ArgParser parser) {
     parser
-      ..addOption('value', valueHelp: 'json', help: 'Inline JSON document(s) to insert')
-      ..addOption('file', valueHelp: 'path', help: 'Read document(s) from a JSON/NDJSON file');
+      ..addOption(
+        'value',
+        valueHelp: 'json',
+        help: 'Inline JSON document(s) to insert',
+      )
+      ..addOption(
+        'file',
+        valueHelp: 'path',
+        help: 'Read document(s) from a JSON/NDJSON file',
+      );
   }
 
   @override

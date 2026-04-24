@@ -19,6 +19,7 @@ import 'package:cbor/cbor.dart';
 import '../../engine/kvstore/kv_store.dart';
 import '../../engine/kvstore/kv_store_impl.dart';
 import '../../encoding/value_codec.dart';
+import '../write_augmentor.dart';
 import 'index_definition.dart';
 import 'index_reader.dart';
 import 'index_writer.dart';
@@ -100,7 +101,9 @@ final class IndexState {
 ///   // fall back to full scan
 /// }
 /// ```
-final class IndexManager {
+/// Implements [WriteAugmentor] so it integrates cleanly with the formal write
+/// pipeline in [KmdbCollection] without requiring special-casing.
+final class IndexManager implements WriteAugmentor {
   IndexManager({
     required KvStoreImpl store,
     required List<IndexDefinition> definitions,
@@ -231,12 +234,13 @@ final class IndexManager {
   /// write to the namespace so that [requireFreshIndex] queries issued shortly
   /// after can find the index current without waiting for the first explicit
   /// query to activate it.
+  @override
   Future<void> interceptWrite({
     required WriteBatch batch,
     required String namespace,
     required String docKey,
-    required Map<String, dynamic>? oldDoc,
     required Map<String, dynamic>? newDoc,
+    required Map<String, dynamic>? oldDoc,
   }) async {
     final active = await activeDefinitionsFor(namespace);
     for (final def in active) {

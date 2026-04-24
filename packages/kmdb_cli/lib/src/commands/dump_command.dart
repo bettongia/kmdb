@@ -55,8 +55,16 @@ final class DumpCommand extends CliCommand {
   @override
   void configureArgParser(ArgParser parser) {
     parser
-      ..addFlag('vault', negatable: false, help: 'Export vault attachments as KVLT packages')
-      ..addOption('vault-dir', valueHelp: 'dir', help: 'Output directory for vault packages (default: vault_dump)');
+      ..addFlag(
+        'vault',
+        negatable: false,
+        help: 'Export vault attachments as KVLT packages',
+      )
+      ..addOption(
+        'vault-dir',
+        valueHelp: 'dir',
+        help: 'Output directory for vault packages (default: vault_dump)',
+      );
   }
 
   @override
@@ -77,7 +85,9 @@ final class DumpCommand extends CliCommand {
     for (final coll in collections) {
       ctx.out.writeln('# collection: $coll');
       await for (final entry in ctx.store.scan(coll)) {
-        final doc = ValueCodec.decode(entry.value);
+        // Inject _id from the entry key — documents are stored without _id in
+        // the value bytes; the key is the canonical identity.
+        final doc = ValueCodec.decode(entry.value)..['_id'] = entry.key;
         ctx.out.writeln(enc.convert(doc));
       }
     }
@@ -122,8 +132,8 @@ final class DumpCommand extends CliCommand {
       final collDir = io.Directory('$vaultDirPath/$coll');
 
       await for (final entry in ctx.store.scan(coll)) {
-        final doc = ValueCodec.decode(entry.value);
-        final docId = doc['_id'] as String? ?? entry.key;
+        final doc = ValueCodec.decode(entry.value)..['_id'] = entry.key;
+        final docId = entry.key;
 
         ctx.out.writeln(enc.convert(doc));
 

@@ -47,7 +47,11 @@ final class VaultGetCommand extends CliCommand {
 
   @override
   void configureArgParser(ArgParser parser) {
-    parser.addOption('output', valueHelp: 'file', help: 'Write blob bytes to file instead of stdout');
+    parser.addOption(
+      'output',
+      valueHelp: 'file',
+      help: 'Write blob bytes to file instead of stdout',
+    );
   }
 
   @override

@@ -28,14 +28,14 @@ String _key() => const UuidV7KeyGenerator().next();
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Opens a store via [DatabaseOpener] so the engine device ID is correct.
-Future<KvStoreImpl> _openStore(String dir) async =>
-    (await DatabaseOpener.open(dir)).$1;
+/// Opens a database via [DatabaseOpener] so the engine device ID is correct.
+Future<KmdbDatabase> _openStore(String dir) async =>
+    (await DatabaseOpener.open(dir, KmdbConfig.empty())).$1;
 
-/// Opens a store with a specific [deviceId] (bypasses meta for the engine ID).
-///
-/// Used for "peer" stores in tests to ensure distinct device identities
-/// regardless of how quickly the test opens two databases.
+/// Opens a raw store with a specific [deviceId] (bypasses meta for the engine
+/// ID). Used for "peer" stores in sync tests to ensure distinct device
+/// identities regardless of how quickly the test opens two databases. Peer
+/// stores are used with [SyncEngine] directly and do not need [KmdbDatabase].
 Future<KvStoreImpl> _openStoreWithId(String dir, String deviceId) async {
   final adapter = StorageAdapterNative();
   await adapter.createDirectory(dir);
@@ -43,15 +43,12 @@ Future<KvStoreImpl> _openStoreWithId(String dir, String deviceId) async {
   return store;
 }
 
-CommandContext _ctx(
-  KvStoreImpl store, {
-  StringBuffer? out,
-  StringBuffer? err,
-}) => CommandContext(
-  store: store,
-  out: out ?? StringBuffer(),
-  err: err ?? StringBuffer(),
-);
+CommandContext _ctx(KmdbDatabase db, {StringBuffer? out, StringBuffer? err}) =>
+    CommandContext(
+      db: db,
+      out: out ?? StringBuffer(),
+      err: err ?? StringBuffer(),
+    );
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -59,7 +56,7 @@ void main() {
   late io.Directory tmpDir;
   late io.Directory dbDir;
   late io.Directory syncDir;
-  late KvStoreImpl store;
+  late KmdbDatabase db;
   late StringBuffer out;
   late StringBuffer err;
 
@@ -67,13 +64,13 @@ void main() {
     tmpDir = io.Directory.systemTemp.createTempSync('pull_cmd_test_');
     dbDir = io.Directory('${tmpDir.path}/db')..createSync();
     syncDir = io.Directory('${tmpDir.path}/sync')..createSync();
-    store = await _openStore(dbDir.path);
+    db = await _openStore(dbDir.path);
     out = StringBuffer();
     err = StringBuffer();
   });
 
   tearDown(() async {
-    await store.close(flush: false);
+    await db.close(flush: false);
     if (tmpDir.existsSync()) tmpDir.deleteSync(recursive: true);
   });
 
@@ -88,14 +85,14 @@ void main() {
   // ── Error: no remote ──────────────────────────────────────────────────────
 
   test('returns false when no remote and no origin is configured', () async {
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await pullCmd.execute(ctx, [], {});
     expect(ok, isFalse);
     expect(err.toString(), contains("no 'origin' remote is configured"));
   });
 
   test('returns false when named remote does not exist', () async {
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await pullCmd.execute(ctx, ['nosuch'], {});
     expect(ok, isFalse);
     expect(err.toString(), contains("remote 'nosuch' not found"));
@@ -106,7 +103,7 @@ void main() {
   test(
     'returns false when both remote name and --sync-dir are given',
     () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await pullCmd.execute(
         ctx,
         ['origin'],
@@ -121,10 +118,10 @@ void main() {
 
   test('pull with no peer SSTables is a no-op', () async {
     // Empty database, empty sync dir.
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
 
     // Need a namespace to pull: add a doc first so pull doesn't exit early.
-    await store.put('notes', _key(), ValueCodec.encode({'x': 1}));
+    await db.store.put('notes', _key(), ValueCodec.encode({'x': 1}));
 
     final ok = await pullCmd.execute(ctx, [], {'sync-dir': syncDir.path});
     expect(ok, isTrue);
@@ -136,7 +133,7 @@ void main() {
   test('pull on empty local store succeeds and reports complete', () async {
     // Fresh store with no local collections — pull should still run so that
     // a device with no data can receive peer SSTables on its first sync.
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await pullCmd.execute(ctx, [], {'sync-dir': syncDir.path});
     expect(ok, isTrue);
     expect(out.toString(), contains('pull: complete'));
@@ -177,16 +174,16 @@ void main() {
     await peerStore.close(flush: false);
 
     // Add a namespace on our store so we have something to pull into.
-    await store.put('notes', _key(), ValueCodec.encode({'local': true}));
+    await db.store.put('notes', _key(), ValueCodec.encode({'local': true}));
 
     // Now pull from the sync folder.
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await pullCmd.execute(ctx, [], {'sync-dir': syncDir.path});
     expect(ok, isTrue);
     expect(out.toString(), contains('pull: complete'));
 
     // The peer's document should now be in our local store.
-    final raw = await store.get('notes', peerKey);
+    final raw = await db.store.get('notes', peerKey);
     expect(raw, isNotNull);
     final doc = ValueCodec.decode(raw!);
     expect(doc['msg'], 'from peer');
@@ -196,7 +193,7 @@ void main() {
 
   test('pull via named remote', () async {
     // Register the remote.
-    final ctxRemote = _ctx(store, out: out, err: err);
+    final ctxRemote = _ctx(db, out: out, err: err);
     await remoteCmd.execute(
       ctxRemote,
       ['add', 'origin'],
@@ -204,9 +201,9 @@ void main() {
     );
 
     // Add a namespace so pull doesn't exit early.
-    await store.put('notes', _key(), ValueCodec.encode({'y': 2}));
+    await db.store.put('notes', _key(), ValueCodec.encode({'y': 2}));
 
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await pullCmd.execute(ctx, [], {});
     expect(ok, isTrue);
     expect(out.toString(), contains('pull: complete'));
@@ -215,7 +212,7 @@ void main() {
   // ── Namespace filtering ───────────────────────────────────────────────────
 
   test('system collection cannot be synced via --namespace', () async {
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await pullCmd.execute(ctx, [], {
       'sync-dir': syncDir.path,
       'collection': r'$meta',
@@ -227,23 +224,18 @@ void main() {
   // ── purgeOrphanedIndexes ──────────────────────────────────────────────────
 
   group('purgeOrphanedIndexes', () {
-    /// Creates a [CommandContext] backed by [store] with the given [config].
-    CommandContext makeCtx(KvStoreImpl s, KmdbConfig config) => CommandContext(
-      store: s,
-      config: config,
-      indexManager: IndexManager(store: s, definitions: const []),
-      out: out,
-      err: err,
-    );
+    /// Creates a [CommandContext] backed by [db] with the given [config].
+    CommandContext makeCtx(KmdbDatabase d, KmdbConfig config) =>
+        CommandContext(db: d, config: config, out: out, err: err);
 
     test('no-op when no index definitions are configured', () async {
       // A collection with documents but no index config — nothing should happen.
-      await store.put('notes', _key(), ValueCodec.encode({'x': 1}));
+      await db.store.put('notes', _key(), ValueCodec.encode({'x': 1}));
       final config = KmdbConfig.empty();
-      final ctx = makeCtx(store, config);
+      final ctx = makeCtx(db, config);
       await SyncHelpers.purgeOrphanedIndexes(ctx, dbDir.path);
       // Collection should still be registered.
-      final namespaces = await store.listNamespaces();
+      final namespaces = await db.store.listNamespaces();
       expect(namespaces, contains('notes'));
     });
 
@@ -251,19 +243,19 @@ void main() {
       'collection with live docs is unaffected even when indexes configured',
       () async {
         // Register a collection with a live document and configure an index.
-        await store.put(
+        await db.store.put(
           'contacts',
           _key(),
           ValueCodec.encode({'city': 'Sydney'}),
         );
         final config = KmdbConfig.empty();
         config.addIndex('contacts', 'city');
-        final ctx = makeCtx(store, config);
+        final ctx = makeCtx(db, config);
 
         await SyncHelpers.purgeOrphanedIndexes(ctx, dbDir.path);
 
         // Collection must still be registered and index config untouched.
-        final namespaces = await store.listNamespaces();
+        final namespaces = await db.store.listNamespaces();
         expect(namespaces, contains('contacts'));
         expect(config.indexesForCollection('contacts'), hasLength(1));
       },
@@ -275,18 +267,18 @@ void main() {
         // Simulate a collection that has been entirely deleted (all tombstones).
         // We can achieve this by registering the namespace without inserting any
         // documents — createNamespace registers it but leaves it empty.
-        await store.createNamespace('contacts');
+        await db.store.createNamespace('contacts');
         final config = KmdbConfig.empty();
         config.addIndex('contacts', 'city');
         expect(config.indexesForCollection('contacts'), hasLength(1));
 
-        final ctx = makeCtx(store, config);
+        final ctx = makeCtx(db, config);
         await SyncHelpers.purgeOrphanedIndexes(ctx, dbDir.path);
 
         // Index config should be cleared.
         expect(config.indexesForCollection('contacts'), isEmpty);
         // Namespace should be unregistered.
-        final namespaces = await store.listNamespaces();
+        final namespaces = await db.store.listNamespaces();
         expect(namespaces, isNot(contains('contacts')));
       },
     );
@@ -295,20 +287,20 @@ void main() {
       'cleanup runs for multiple orphaned collections in one pass',
       () async {
         // Two collections: both empty after "full tombstone" scenario.
-        await store.createNamespace('collA');
-        await store.createNamespace('collB');
+        await db.store.createNamespace('collA');
+        await db.store.createNamespace('collB');
         final config = KmdbConfig.empty();
         config.addIndex('collA', 'field1');
         config.addIndex('collB', 'field2');
 
-        final ctx = makeCtx(store, config);
+        final ctx = makeCtx(db, config);
         await SyncHelpers.purgeOrphanedIndexes(ctx, dbDir.path);
 
         // Both index definitions should be removed.
         expect(config.indexesForCollection('collA'), isEmpty);
         expect(config.indexesForCollection('collB'), isEmpty);
         // Both namespaces should be unregistered.
-        final namespaces = await store.listNamespaces();
+        final namespaces = await db.store.listNamespaces();
         expect(namespaces, isNot(contains('collA')));
         expect(namespaces, isNot(contains('collB')));
       },
@@ -321,7 +313,7 @@ void main() {
       // no-op and not throw.
       final config = KmdbConfig.empty();
       config.addIndex('ghost', 'field');
-      final ctx = makeCtx(store, config);
+      final ctx = makeCtx(db, config);
 
       // Should not throw.
       await expectLater(

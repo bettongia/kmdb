@@ -36,7 +36,11 @@ final class RestoreCommand extends CliCommand {
 
   @override
   void configureArgParser(ArgParser parser) {
-    parser.addOption('input', valueHelp: 'file', help: 'NDJSON dump file to restore from (default: stdin)');
+    parser.addOption(
+      'input',
+      valueHelp: 'file',
+      help: 'NDJSON dump file to restore from (default: stdin)',
+    );
   }
 
   @override

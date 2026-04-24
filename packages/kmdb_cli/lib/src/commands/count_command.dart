@@ -20,6 +20,9 @@ import 'command.dart';
 /// Counts documents in a collection, optionally filtered.
 ///
 /// Usage: `kmdb <db> count <collection> [--filter <json>]`
+///
+/// Counts route through the Query Layer so secondary-index acceleration (when
+/// available) and the Cache Layer are used automatically.
 final class CountCommand extends CliCommand {
   const CountCommand();
 
@@ -34,7 +37,11 @@ final class CountCommand extends CliCommand {
 
   @override
   void configureArgParser(ArgParser parser) {
-    parser.addOption('filter', valueHelp: 'json', help: 'JSON filter expression');
+    parser.addOption(
+      'filter',
+      valueHelp: 'json',
+      help: 'JSON filter expression',
+    );
   }
 
   @override
@@ -63,14 +70,13 @@ final class CountCommand extends CliCommand {
       }
     }
 
-    var count = 0;
-    await for (final entry in ctx.store.scan(collection)) {
-      if (filter != null) {
-        final doc = ValueCodec.decode(entry.value);
-        if (!filter.evaluate(doc)) continue;
-      }
-      count++;
-    }
+    // Route through the Query Layer. When a filter is present, use
+    // col.where(filter).count() which can leverage secondary indexes.
+    // When no filter is present, count all documents via col.all().count().
+    final col = ctx.rawCollection(collection);
+    final count = filter != null
+        ? await col.where(filter).count()
+        : await col.all().count();
 
     ctx.writeValue({'count': count});
     return true;

@@ -16,44 +16,49 @@ import 'dart:io' as io;
 
 import 'package:kmdb/kmdb.dart';
 
-/// Opens a [KvStoreImpl] from a filesystem path.
+import 'config/kmdb_config.dart';
+
+/// Opens a [KmdbDatabase] from a filesystem path.
 ///
-/// The CLI opens the raw [KvStoreImpl] rather than [KmdbDatabase] because it
-/// operates without a user-supplied typed codec: all documents are read as
-/// plain [Map<String, dynamic>] via the engine's [ValueCodec].
+/// [DatabaseOpener] is the CLI's entry point for database access. It performs
+/// the two-phase device-ID initialisation and then opens a full [KmdbDatabase]
+/// so that all write pipeline validation and augmentation (schema enforcement,
+/// secondary index maintenance, FTS updates, vault ref counts) run for every
+/// CLI write.
 ///
-/// The device ID is loaded from (or generated into) `$meta` so CLI writes are
-/// attributed to the same device across sessions. Crucially, the engine is
-/// opened with the stored device ID so that SSTable filenames are consistent
-/// with the device identity used by [SyncEngine].
+/// ## Two-phase open
+///
+/// The device ID must be established before the full open so that SSTable
+/// names use the correct stable identity:
+///
+/// 1. Open a minimal [KvStoreImpl] with the default device ID.
+/// 2. Load (or generate) the stable device ID from `$meta`.
+/// 3. If the device ID differs from the default, close the store without
+///    flushing. The WAL will replay any writes from this phase on reopen.
+/// 4. Open [KmdbDatabase] with the stable device ID and the index definitions
+///    loaded from `local/config.json`.
 abstract final class DatabaseOpener {
   DatabaseOpener._();
 
-  /// Opens the database at [dbPath] and returns the store and a creation flag.
+  /// Opens the database at [dbPath] and returns the database and a creation
+  /// flag.
   ///
-  /// The returned record is `(store, created)` where [created] is `true` when
+  /// The returned record is `(db, created)` where [created] is `true` when
   /// the database did not previously exist (i.e. no `CURRENT` file was present
   /// before this call) and `false` when an existing database was reopened.
   ///
+  /// [config] supplies the index and FTS index definitions to register with
+  /// [KmdbDatabase.open]. Pass [KmdbConfig.empty] when the config file is
+  /// absent or cannot be parsed.
+  ///
   /// Creates the directory if it does not exist.
-  ///
-  /// The first open of a fresh database generates a new device ID and stores it
-  /// in `$meta`. On every subsequent open, the stored device ID is loaded and
-  /// used to name SSTables, ensuring consistent device identity across CLI
-  /// sessions and compatibility with [SyncEngine].
-  ///
-  /// ## Two-phase open
-  ///
-  /// To correctly initialise the engine device ID:
-  ///
-  /// 1. Open with the default device ID (`'00000000'`).
-  /// 2. Load (or generate) the stable device ID from `$meta`.
-  /// 3. If the device ID differs from the default, reopen with the correct ID
-  ///    so all subsequent SSTable writes use the stable identity.
   ///
   /// Throws [LockException] if another process has the database open.
   /// Throws [ArgumentError] if [dbPath] is empty.
-  static Future<(KvStoreImpl, bool created)> open(String dbPath) async {
+  static Future<(KmdbDatabase, bool created)> open(
+    String dbPath,
+    KmdbConfig config,
+  ) async {
     if (dbPath.isEmpty) {
       throw ArgumentError.value(
         dbPath,
@@ -70,32 +75,47 @@ abstract final class DatabaseOpener {
     final adapter = StorageAdapterNative();
     await adapter.createDirectory(dbPath);
 
-    // Phase 1: open with the default device ID.
+    // ── Phase 1: establish stable device ID ───────────────────────────────────
+    // Open with the default device ID first so we can read or generate the
+    // persisted stable identity. The WAL records any writes from this phase
+    // (e.g. the ensureDeviceId write) so they are replayed correctly on the
+    // full KmdbDatabase open below.
     var (store, _) = await KvStoreImpl.open(dbPath, adapter);
 
-    // Load (or generate) the stable device ID.  On first open this generates
+    // Load (or generate) the stable device ID. On first open this generates
     // and persists a new 8-character hex ID; on subsequent opens it returns
     // the previously stored value.
     final deviceId = await store.ensureDeviceId();
 
-    // Phase 2: if the stored device ID differs from the default, close and
-    // reopen so the LSM engine uses the correct ID for all future SSTable
-    // names.  This ensures SyncEngine.push() can match local SSTables against
-    // the device identity exposed by storeInfo().
+    // If the stable device ID differs from the default, close the store
+    // without flushing. The WAL will replay the ensureDeviceId write on the
+    // KmdbDatabase open below, which uses the correct device ID.
     const defaultDeviceId = '00000000';
     if (deviceId != defaultDeviceId) {
-      // Close without flushing — the WAL records the writes from phase 1
-      // (i.e. the ensureDeviceId write) and will be replayed on reopen.
       await store.close(flush: false);
-
-      final result = await KvStoreImpl.open(
-        dbPath,
-        adapter,
-        deviceId: deviceId,
-      );
-      store = result.$1;
     }
 
-    return (store, created);
+    // ── Phase 2: open KmdbDatabase with config-derived index definitions ──────
+    // Build index definitions from the persisted CLI config so that secondary
+    // index maintenance and FTS updates run automatically for every CLI write.
+    final indexDefinitions = config.indexes
+        .map((r) => IndexDefinition(r.collection, r.path))
+        .toList();
+    final ftsDefinitions = config.ftsIndexes
+        .map(
+          (r) => FtsIndexDefinition(collection: r.collection, field: r.field),
+        )
+        .toList();
+
+    final db = await KmdbDatabase.open(
+      path: dbPath,
+      adapter: adapter,
+      deviceId: deviceId,
+      indexes: indexDefinitions,
+      ftsIndexes: ftsDefinitions,
+      // Schemas are loaded automatically from $meta — no caller parameter needed.
+    );
+
+    return (db, created);
   }
 }

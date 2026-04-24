@@ -173,6 +173,8 @@ void main() {
         final batch = WriteBatch();
         await interceptor.interceptWrite(
           batch: batch,
+          namespace: "test",
+          docKey: "testkey",
           oldDoc: null,
           newDoc: {'file': ref.uri},
         );
@@ -188,6 +190,8 @@ void main() {
         final batch = WriteBatch();
         await interceptor.interceptWrite(
           batch: batch,
+          namespace: "test",
+          docKey: "testkey",
           oldDoc: null,
           newDoc: {'file': ref.uri},
         );
@@ -204,6 +208,8 @@ void main() {
         final batch = WriteBatch();
         await interceptor.interceptWrite(
           batch: batch,
+          namespace: "test",
+          docKey: "testkey",
           oldDoc: null,
           newDoc: {
             'meta': {'attachment': ref.uri},
@@ -221,6 +227,8 @@ void main() {
         final batch = WriteBatch();
         await interceptor.interceptWrite(
           batch: batch,
+          namespace: "test",
+          docKey: "testkey",
           oldDoc: null,
           newDoc: {
             'attachments': [ref.uri],
@@ -242,6 +250,8 @@ void main() {
         final batch = WriteBatch();
         await interceptor.interceptWrite(
           batch: batch,
+          namespace: "test",
+          docKey: "testkey",
           oldDoc: null,
           newDoc: {'a': ref1.uri, 'b': ref2.uri},
         );
@@ -261,6 +271,8 @@ void main() {
         final initBatch = WriteBatch();
         await interceptor.interceptWrite(
           batch: initBatch,
+          namespace: "test",
+          docKey: "testkey",
           oldDoc: null,
           newDoc: {'file': ref.uri},
         );
@@ -271,6 +283,8 @@ void main() {
         final updateBatch = WriteBatch();
         await interceptor.interceptWrite(
           batch: updateBatch,
+          namespace: "test",
+          docKey: "testkey",
           oldDoc: {'file': ref.uri},
           newDoc: {'file': ref.uri, 'extra': 'value'},
         );
@@ -291,6 +305,8 @@ void main() {
         final batch1 = WriteBatch();
         await interceptor.interceptWrite(
           batch: batch1,
+          namespace: 'test',
+          docKey: 'testkey',
           oldDoc: null,
           newDoc: {'file': ref1.uri},
         );
@@ -300,6 +316,8 @@ void main() {
         final batch2 = WriteBatch();
         await interceptor.interceptWrite(
           batch: batch2,
+          namespace: 'test',
+          docKey: 'testkey',
           oldDoc: {'file': ref1.uri},
           newDoc: {'file': ref2.uri},
         );
@@ -325,6 +343,8 @@ void main() {
         final batch1 = WriteBatch();
         await interceptor.interceptWrite(
           batch: batch1,
+          namespace: 'test',
+          docKey: 'testkey',
           oldDoc: null,
           newDoc: {'a': ref1.uri},
         );
@@ -334,6 +354,8 @@ void main() {
         final batch2 = WriteBatch();
         await interceptor.interceptWrite(
           batch: batch2,
+          namespace: 'test',
+          docKey: 'testkey',
           oldDoc: {'a': ref1.uri},
           newDoc: {'a': ref1.uri, 'b': ref2.uri},
         );
@@ -354,6 +376,8 @@ void main() {
         final batch1 = WriteBatch();
         await interceptor.interceptWrite(
           batch: batch1,
+          namespace: 'test',
+          docKey: 'testkey',
           oldDoc: null,
           newDoc: {'file': ref.uri},
         );
@@ -363,6 +387,8 @@ void main() {
         final batch2 = WriteBatch();
         await interceptor.interceptWrite(
           batch: batch2,
+          namespace: 'test',
+          docKey: 'testkey',
           oldDoc: {'file': ref.uri},
           newDoc: null,
         );
@@ -382,6 +408,8 @@ void main() {
           final batch1 = WriteBatch();
           await interceptor.interceptWrite(
             batch: batch1,
+            namespace: 'test',
+            docKey: 'testkey',
             oldDoc: null,
             newDoc: {'file': ref.uri},
           );
@@ -389,6 +417,8 @@ void main() {
           final batch2 = WriteBatch();
           await interceptor.interceptWrite(
             batch: batch2,
+            namespace: 'test',
+            docKey: 'testkey',
             oldDoc: {'file': ref.uri},
             newDoc: null,
           );
@@ -406,6 +436,8 @@ void main() {
         final batch = WriteBatch();
         await interceptor.interceptWrite(
           batch: batch,
+          namespace: "test",
+          docKey: "testkey",
           oldDoc: {'name': 'Alice', 'age': 30},
           newDoc: {'name': 'Bob', 'age': 31},
         );
@@ -425,6 +457,8 @@ void main() {
         final b1 = WriteBatch();
         await interceptor.interceptWrite(
           batch: b1,
+          namespace: "test",
+          docKey: "testkey",
           oldDoc: null,
           newDoc: {'f': ref.uri},
         );
@@ -432,6 +466,8 @@ void main() {
         final b2 = WriteBatch();
         await interceptor.interceptWrite(
           batch: b2,
+          namespace: "test",
+          docKey: "testkey",
           oldDoc: {'f': ref.uri},
           newDoc: null,
         );
@@ -442,6 +478,8 @@ void main() {
         final b3 = WriteBatch();
         await interceptor.interceptWrite(
           batch: b3,
+          namespace: "test",
+          docKey: "testkey",
           oldDoc: null,
           newDoc: {'f': ref.uri},
         );

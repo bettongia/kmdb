@@ -106,7 +106,13 @@ Future<void> applyVaultRefCounts({
 }) async {
   final gc = VaultGc(store: vaultStore, kvStore: store);
   final interceptor = VaultRefInterceptor(kvStore: store, gc: gc);
-  await interceptor.interceptWrite(batch: batch, oldDoc: oldDoc, newDoc: doc);
+  await interceptor.interceptWrite(
+    batch: batch,
+    namespace: '',
+    docKey: '',
+    oldDoc: oldDoc,
+    newDoc: doc,
+  );
 }
 
 /// Reads all vault URI strings from [doc] by recursively scanning all values.

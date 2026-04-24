@@ -14,6 +14,7 @@
 
 import '../encoding/value_codec.dart';
 import '../engine/kvstore/kv_store.dart';
+import '../query/write_augmentor.dart';
 import 'vault_gc.dart';
 import 'vault_recovery.dart' show kVaultNamespace;
 import 'vault_ref.dart';
@@ -35,7 +36,12 @@ import 'vault_ref.dart';
 /// Each entry is keyed by the SHA-256 hex string and encoded as a
 /// [ValueCodec]-encoded map: `{"refCount": N}`. The miniature CBOR decoder
 /// in [VaultGc] and [VaultRecovery] reads this format.
-final class VaultRefInterceptor {
+///
+/// Implements [WriteAugmentor] so it integrates with the formal write pipeline
+/// without requiring special-casing in [KmdbCollection]. The [namespace] and
+/// [docKey] parameters are accepted but unused — vault URI diffing is
+/// purely document-content-based.
+final class VaultRefInterceptor implements WriteAugmentor {
   /// Creates a [VaultRefInterceptor].
   const VaultRefInterceptor({required this.kvStore, required this.gc});
 
@@ -59,12 +65,16 @@ final class VaultRefInterceptor {
   /// [VaultGc.onRefRestored] is called (removes `tombstone.json`).
   ///
   /// [oldDoc] may be `null` for new inserts. [newDoc] may be `null` for
-  /// deletes (call [interceptDelete] instead for clarity, though this method
-  /// handles `null` correctly).
+  /// deletes. The [namespace] and [docKey] parameters are accepted to satisfy
+  /// the [WriteAugmentor] interface but are not used — vault URI diffing is
+  /// purely document-content-based.
+  @override
   Future<void> interceptWrite({
     required WriteBatch batch,
-    required Map<String, dynamic>? oldDoc,
+    required String namespace,
+    required String docKey,
     required Map<String, dynamic>? newDoc,
+    required Map<String, dynamic>? oldDoc,
   }) async {
     final oldUris = _extractVaultUris(oldDoc);
     final newUris = _extractVaultUris(newDoc);

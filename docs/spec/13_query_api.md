@@ -178,6 +178,94 @@ class TaskCodec implements KmdbCodec<Task> {
 }
 ```
 
+## Write Pipeline
+
+Every document write — whether typed (`collection()`) or untyped (`rawCollection()`)
+— passes through a three-layer write pipeline before the `WriteBatch` is committed.
+
+### Layer 1 — Validators (`WriteValidator`)
+
+Validators are called sequentially before any I/O. If any validator throws, the
+write is aborted and no partial I/O has occurred. Built-in validators:
+
+| Validator | What it checks |
+| --------- | -------------- |
+| `ReservedKeyValidator` | Rejects any document whose `encode()` output contains a top-level key beginning with `_`. Always runs first. |
+| `SchemaManager` | Validates the encoded document against the collection's registered JSON Schema, if one is defined (§25). |
+
+Application code can supply additional validators via the `WriteValidator`
+interface:
+
+```dart
+abstract interface class WriteValidator {
+  /// Validates [document] before it is written to [collection].
+  ///
+  /// Throws to abort the write. Called before any I/O — no partial write
+  /// can occur if a validator throws.
+  void validate(String collection, Map<String, dynamic> document);
+}
+```
+
+### Layer 2 — Augmentors (`WriteAugmentor`)
+
+Augmentors run after all validators pass. Each augmentor adds entries to the
+same `WriteBatch` as the document write so that all writes — document and
+side-effects — are committed atomically. Built-in augmentors:
+
+| Augmentor | What it adds to the batch |
+| --------- | ------------------------- |
+| `IndexManager` | Secondary index entries (`$index:{ns}:{path}:…` namespaces) |
+| `FtsManager` | BM25 posting lists (`$fts:…` namespaces) |
+| `VecManager` | SQ8 vector entries (`$vec:…` namespaces) |
+| `VaultRefInterceptor` | Vault blob reference counts (`$vault` namespace) |
+
+Application code can supply additional augmentors via the `WriteAugmentor`
+interface:
+
+```dart
+abstract interface class WriteAugmentor {
+  /// Adds entries to [batch] for this augmentor's concern.
+  ///
+  /// [newDoc] is `null` for deletes; [oldDoc] is `null` for new inserts.
+  Future<void> interceptWrite({
+    required WriteBatch batch,
+    required String namespace,
+    required String docKey,
+    required Map<String, dynamic>? newDoc,
+    required Map<String, dynamic>? oldDoc,
+  });
+}
+```
+
+### Layer 3 — Post-write notifications
+
+`KvStore.writeEvents` fires automatically after `WriteBatch` is committed.
+`CacheLayer` subscribes to evict stale cache entries; `watch()` subscribers
+re-execute their queries. No additional application code is required.
+
+### Delete path
+
+`delete()` skips Layer 1 (validators) — deletes are never blocked by
+admission-gate checks. Layer 2 augmentors still run, receiving `newDoc: null`
+to clean up side-effect entries (index postings, vector embeddings, ref counts).
+
+### `rawCollection` — untyped access
+
+`KmdbDatabase.rawCollection(String name)` returns a
+`KmdbCollection<Map<String, dynamic>>` backed by the built-in
+`RawDocumentCodec`. All write pipeline layers run identically to a typed
+collection:
+
+```dart
+final col = db.rawCollection('contacts');
+await col.insert({'name': 'Alice', 'email': 'alice@example.com'});
+final doc = await col.get(key); // Map<String, dynamic> with '_id' set
+```
+
+This is the recommended entry point for code that works with plain
+`Map<String, dynamic>` documents, such as CLI tools, without requiring a typed
+model class.
+
 ## `KmdbCollection<T>`
 
 Obtained via `db.collection(name: '...', codec: ...)`.

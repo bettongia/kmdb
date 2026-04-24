@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'package:kmdb/kmdb.dart';
-
 import '../output/output_mode.dart';
 import 'command.dart';
 import 'scan_command.dart';
@@ -30,6 +28,9 @@ import 'scan_command.dart';
 /// `{"address": {"city": "London"}}`). For table/csv/line output, dot-paths
 /// are kept as flat keys so the path itself appears as the column header.
 /// Bracket selections always use the raw path token as a flat key.
+///
+/// Reads pass through the Cache Layer, so recently-written documents are served
+/// from the session cache without a store scan.
 final class GetCommand extends CliCommand {
   const GetCommand();
 
@@ -66,13 +67,15 @@ final class GetCommand extends CliCommand {
     final collection = args[0];
     final key = args[1];
 
-    final bytes = await ctx.store.get(collection, key);
-    if (bytes == null) {
+    // Route through the Query Layer so the Cache Layer is consulted before
+    // going to the LSM engine.
+    final col = ctx.rawCollection(collection);
+    final doc = await col.get(key);
+    if (doc == null) {
       ctx.writeError('Document not found: $collection/$key');
       return false;
     }
 
-    final doc = ValueCodec.decode(bytes);
     final selectValue = flags['select'];
     if (selectValue != null) {
       final fields = '$selectValue'
@@ -81,7 +84,8 @@ final class GetCommand extends CliCommand {
           .where((s) => s.isNotEmpty)
           .toList();
       if (fields.isNotEmpty) {
-        final flat = ctx.mode == OutputMode.table ||
+        final flat =
+            ctx.mode == OutputMode.table ||
             ctx.mode == OutputMode.csv ||
             ctx.mode == OutputMode.line;
         ctx.writeDocuments([projectDocument(doc, fields, flat: flat)]);

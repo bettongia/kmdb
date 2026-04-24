@@ -23,11 +23,15 @@ import 'package:test/test.dart';
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
+/// Counter to generate unique in-memory database paths per test, preventing
+/// LockException when multiple [KmdbDatabase] instances are opened concurrently.
+var _dbCounter = 0;
+
 /// A [VaultStore] backed by [MemoryStorageAdapter] for CLI tests.
 class _TestVaultStore extends VaultStore {
-  _TestVaultStore(MemoryStorageAdapter adapter)
+  _TestVaultStore(MemoryStorageAdapter adapter, String dbPath)
     : _mem = adapter,
-      super(adapter: adapter, dbDir: '/testdb');
+      super(adapter: adapter, dbDir: dbPath);
 
   final MemoryStorageAdapter _mem;
 
@@ -41,28 +45,27 @@ class _TestVaultStore extends VaultStore {
   }
 }
 
-/// Opens an in-memory [KvStoreImpl] for tests.
-Future<KvStoreImpl> _openStore() async {
-  final (store, _) = await KvStoreImpl.open(
-    '/testdb',
-    MemoryStorageAdapter(),
+/// Opens an in-memory [KmdbDatabase] for tests, optionally wired with [vault].
+///
+/// Each call uses a unique path to prevent [LockException] when tests open
+/// multiple databases concurrently (e.g. a vault-wired db and a no-vault db).
+Future<KmdbDatabase> _openStore({String? path, _TestVaultStore? vault}) async {
+  final dbPath = path ?? '/testdb_backup_vault_${_dbCounter++}';
+  return KmdbDatabase.open(
+    path: dbPath,
+    adapter: MemoryStorageAdapter(),
     config: KvStoreConfig.forTesting(),
+    vaultStore: vault,
   );
-  return store;
 }
 
-/// Builds a [CommandContext] with an optional [VaultStore].
-CommandContext _ctx(
-  KvStoreImpl store, {
-  required _TestVaultStore? vault,
-  StringBuffer? out,
-  StringBuffer? err,
-}) => CommandContext(
-  store: store,
-  vaultStore: vault,
-  out: out ?? StringBuffer(),
-  err: err ?? StringBuffer(),
-);
+/// Builds a [CommandContext] backed by [db].
+CommandContext _ctx(KmdbDatabase db, {StringBuffer? out, StringBuffer? err}) =>
+    CommandContext(
+      db: db,
+      out: out ?? StringBuffer(),
+      err: err ?? StringBuffer(),
+    );
 
 /// Ingests [bytes] into [vault] and returns the `kmdb-vault://` URI string.
 Future<String> _ingest(
@@ -82,8 +85,10 @@ Future<String> _ingest(
 final _kFileBytes = Uint8List.fromList(utf8.encode('dump-vault-test'));
 
 void main() {
+  tearDown(MemoryStorageAdapter.releaseAllLocks);
+
   group('DumpCommand --vault', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late MemoryStorageAdapter memAdapter;
     late _TestVaultStore vault;
     late StringBuffer out;
@@ -91,15 +96,16 @@ void main() {
     late io.Directory tmpDir;
 
     setUp(() async {
-      store = await _openStore();
+      final dbPath = '/testdb_backup_vault_${_dbCounter++}';
       memAdapter = MemoryStorageAdapter();
-      vault = _TestVaultStore(memAdapter);
+      vault = _TestVaultStore(memAdapter, dbPath);
+      db = await _openStore(path: dbPath, vault: vault);
       out = StringBuffer();
       err = StringBuffer();
       tmpDir = io.Directory.systemTemp.createTempSync('kmdb_dump_vault_test_');
     });
     tearDown(() async {
-      await store.close();
+      await db.close();
       try {
         tmpDir.deleteSync(recursive: true);
       } catch (_) {}
@@ -112,9 +118,9 @@ void main() {
       () async {
         // Insert a small document using the raw KV store.
         const id = '01900000000070809000000000000010';
-        await store.put('notes', id, ValueCodec.encode({'i': id}));
+        await db.store.put('notes', id, ValueCodec.encode({'i': id}));
 
-        final ctx = _ctx(store, vault: vault, out: out, err: err);
+        final ctx = _ctx(db, out: out, err: err);
         final ok = await DumpCommand().execute(ctx, [], {});
 
         expect(ok, isTrue);
@@ -126,7 +132,10 @@ void main() {
     // ── Vault not configured ──────────────────────────────────────────────
 
     test('--vault returns false when vault store is null', () async {
-      final ctx = _ctx(store, vault: null, out: out, err: err);
+      // Open a second database without vault to test the "no vault" error path.
+      final dbNoVault = await _openStore();
+      addTearDown(() => dbNoVault.close());
+      final ctx = _ctx(dbNoVault, out: out, err: err);
       final ok = await DumpCommand().execute(ctx, [], {
         'vault': true,
         'vault-dir': tmpDir.path,
@@ -138,7 +147,7 @@ void main() {
     // ── Vault dir creation failure ────────────────────────────────────────
 
     test('--vault returns false when vault-dir cannot be created', () async {
-      final ctx = _ctx(store, vault: vault, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       // Provide a path that is impossible to create (inside a regular file).
       final badDir = '${tmpDir.path}/notadir/nested';
       // First create a file with that name to block directory creation.
@@ -157,7 +166,7 @@ void main() {
     test(
       '--vault on empty database produces empty NDJSON and summary',
       () async {
-        final ctx = _ctx(store, vault: vault, out: out, err: err);
+        final ctx = _ctx(db, out: out, err: err);
         final ok = await DumpCommand().execute(ctx, [], {
           'vault': true,
           'vault-dir': '${tmpDir.path}/output',
@@ -176,10 +185,10 @@ void main() {
 
     test('--vault skips documents without vault URIs', () async {
       const id = '01900000000070809000000000000011';
-      await store.put('docs', id, ValueCodec.encode({'i': id}));
+      await db.store.put('docs', id, ValueCodec.encode({'i': id}));
 
       final vaultDirPath = '${tmpDir.path}/output2';
-      final ctx = _ctx(store, vault: vault, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await DumpCommand().execute(ctx, [], {
         'vault': true,
         'vault-dir': vaultDirPath,

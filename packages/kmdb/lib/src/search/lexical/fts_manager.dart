@@ -24,6 +24,7 @@ import 'package:meta/meta.dart' show visibleForTesting;
 import '../../encoding/value_codec.dart';
 import '../../engine/kvstore/kv_store.dart';
 import '../../engine/kvstore/kv_store_impl.dart';
+import '../../query/write_augmentor.dart';
 import '../fts_index_definition.dart';
 import '../search_result.dart';
 import '../sync_delta.dart';
@@ -86,7 +87,9 @@ final defaultStopwords = getStopWords(Locale.fromSubtags(languageCode: 'en'));
 /// );
 /// await store.writeBatchInternal(batch);
 /// ```
-final class FtsManager {
+/// Implements [WriteAugmentor] so it integrates with the formal write pipeline
+/// without requiring special-casing in [KmdbCollection].
+final class FtsManager implements WriteAugmentor {
   /// Creates an [FtsManager].
   ///
   /// [store] is the underlying [KvStoreImpl] used for all index reads and
@@ -166,12 +169,13 @@ final class FtsManager {
   /// - Update (`oldDoc != null`, `newDoc != null`) — writes overlay entry
   ///   (or promotes to insert if field was not previously indexed).
   /// - Delete (`newDoc == null`) — writes TOMBSTONE overlay, decrements stats.
+  @override
   Future<void> interceptWrite({
+    required WriteBatch batch,
     required String namespace,
-    required String docId,
+    required String docKey,
     required Map<String, dynamic>? newDoc,
     required Map<String, dynamic>? oldDoc,
-    required WriteBatch batch,
   }) async {
     final matching = _defsFor(namespace);
     if (matching.isEmpty) return;
@@ -189,11 +193,11 @@ final class FtsManager {
         continue;
       }
       if (newDoc == null) {
-        await _interceptDelete(def, namespace, docId, batch);
+        await _interceptDelete(def, namespace, docKey, batch);
       } else if (oldDoc == null) {
-        await _interceptInsert(def, namespace, docId, newDoc, batch);
+        await _interceptInsert(def, namespace, docKey, newDoc, batch);
       } else {
-        await _interceptUpdate(def, namespace, docId, newDoc, batch);
+        await _interceptUpdate(def, namespace, docKey, newDoc, batch);
       }
     }
   }

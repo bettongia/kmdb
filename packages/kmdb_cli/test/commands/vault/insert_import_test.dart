@@ -23,11 +23,15 @@ import 'package:test/test.dart';
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
+/// Counter to generate unique in-memory database paths per test, preventing
+/// LockException when multiple [KmdbDatabase] instances are opened concurrently.
+var _dbCounter = 0;
+
 /// A [VaultStore] that works with the flat [MemoryStorageAdapter] key store.
 class _TestVaultStore extends VaultStore {
-  _TestVaultStore(MemoryStorageAdapter adapter)
+  _TestVaultStore(MemoryStorageAdapter adapter, String dbPath)
     : _mem = adapter,
-      super(adapter: adapter, dbDir: '/testdb');
+      super(adapter: adapter, dbDir: dbPath);
 
   final MemoryStorageAdapter _mem;
 
@@ -41,50 +45,52 @@ class _TestVaultStore extends VaultStore {
   }
 }
 
-/// Opens an in-memory [KvStoreImpl] for tests.
-Future<KvStoreImpl> _openStore() async {
-  final (store, _) = await KvStoreImpl.open(
-    '/testdb',
-    MemoryStorageAdapter(),
+/// Opens an in-memory [KmdbDatabase] for tests, optionally wired with [vault].
+///
+/// Each call uses a unique path to prevent [LockException] when tests open
+/// multiple databases concurrently (e.g. a vault-wired db and a no-vault db).
+Future<KmdbDatabase> _openStore({String? path, _TestVaultStore? vault}) async {
+  final dbPath = path ?? '/testdb_insert_import_${_dbCounter++}';
+  return KmdbDatabase.open(
+    path: dbPath,
+    adapter: MemoryStorageAdapter(),
     config: KvStoreConfig.forTesting(),
+    vaultStore: vault,
   );
-  return store;
 }
 
-/// Builds a [CommandContext] for tests.
-CommandContext _ctx(
-  KvStoreImpl store, {
-  required _TestVaultStore? vault,
-  StringBuffer? out,
-  StringBuffer? err,
-}) => CommandContext(
-  store: store,
-  vaultStore: vault,
-  out: out ?? StringBuffer(),
-  err: err ?? StringBuffer(),
-);
+/// Builds a [CommandContext] backed by [db].
+CommandContext _ctx(KmdbDatabase db, {StringBuffer? out, StringBuffer? err}) =>
+    CommandContext(
+      db: db,
+      out: out ?? StringBuffer(),
+      err: err ?? StringBuffer(),
+    );
 
 void main() {
+  tearDown(MemoryStorageAdapter.releaseAllLocks);
+
   group('InsertCommand --import', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late MemoryStorageAdapter memAdapter;
     late _TestVaultStore vault;
     late StringBuffer out;
     late StringBuffer err;
 
     setUp(() async {
-      store = await _openStore();
+      final dbPath = '/testdb_insert_import_${_dbCounter++}';
       memAdapter = MemoryStorageAdapter();
-      vault = _TestVaultStore(memAdapter);
+      vault = _TestVaultStore(memAdapter, dbPath);
+      db = await _openStore(path: dbPath, vault: vault);
       out = StringBuffer();
       err = StringBuffer();
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     // ── Mutual exclusion ──────────────────────────────────────────────────
 
     test('--import is mutually exclusive with --value', () async {
-      final ctx = _ctx(store, vault: vault, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await InsertCommand().execute(
         ctx,
         ['col'],
@@ -95,7 +101,7 @@ void main() {
     });
 
     test('--import is mutually exclusive with --file', () async {
-      final ctx = _ctx(store, vault: vault, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await InsertCommand().execute(
         ctx,
         ['col'],
@@ -108,7 +114,9 @@ void main() {
     // ── Vault not configured ──────────────────────────────────────────────
 
     test('--import returns false when vault store is null', () async {
-      final ctx = _ctx(store, vault: null, out: out, err: err);
+      final dbNoVault = await _openStore();
+      addTearDown(() => dbNoVault.close());
+      final ctx = _ctx(dbNoVault, out: out, err: err);
       final ok = await InsertCommand().execute(
         ctx,
         ['col'],
@@ -121,7 +129,7 @@ void main() {
     // ── Missing collection ─────────────────────────────────────────────────
 
     test('returns false when collection arg is missing', () async {
-      final ctx = _ctx(store, vault: vault, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await InsertCommand().execute(ctx, [], {'import': '/p.kvlt'});
       expect(ok, isFalse);
       expect(err.toString(), isNotEmpty);
@@ -130,7 +138,7 @@ void main() {
     // ── Non-existent package file ──────────────────────────────────────────
 
     test('returns false when package file does not exist', () async {
-      final ctx = _ctx(store, vault: vault, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await InsertCommand().execute(
         ctx,
         ['col'],
@@ -152,7 +160,7 @@ void main() {
         } catch (_) {}
       });
 
-      final ctx = _ctx(store, vault: vault, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await InsertCommand().execute(
         ctx,
         ['col'],
@@ -185,7 +193,7 @@ void main() {
           } catch (_) {}
         });
 
-        final ctx = _ctx(store, vault: vault, out: out, err: err);
+        final ctx = _ctx(db, out: out, err: err);
         final ok = await InsertCommand().execute(
           ctx,
           ['col'],
@@ -225,7 +233,7 @@ void main() {
           } catch (_) {}
         });
 
-        final ctx = _ctx(store, vault: vault, out: out, err: err);
+        final ctx = _ctx(db, out: out, err: err);
         final ok = await InsertCommand().execute(
           ctx,
           ['col'],
@@ -258,7 +266,7 @@ void main() {
         } catch (_) {}
       });
 
-      final ctx = _ctx(store, vault: vault, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await InsertCommand().execute(
         ctx,
         ['col'],
@@ -270,7 +278,7 @@ void main() {
       // the error paths above still provide meaningful coverage.
       if (ok) {
         // On success, a document should have been inserted.
-        final docs = await store.scan('col').toList();
+        final docs = await db.store.scan('col').toList();
         expect(docs.length, equals(1));
       }
       // If not ok, it might be a Zstd error in the native test environment.

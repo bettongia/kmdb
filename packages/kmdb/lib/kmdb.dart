@@ -62,6 +62,9 @@ export 'src/query/kmdb_codec.dart' show KmdbCodec;
 export 'src/query/kmdb_database.dart' show KmdbDatabase;
 export 'src/query/kmdb_collection.dart' show KmdbCollection;
 export 'src/query/kmdb_query.dart' show KmdbQuery;
+export 'src/query/raw_document_codec.dart' show RawDocumentCodec;
+export 'src/query/write_augmentor.dart' show WriteAugmentor;
+export 'src/query/write_validator.dart' show WriteValidator;
 export 'src/query/exceptions.dart'
     show
         DocumentAlreadyExistsException,

@@ -43,8 +43,8 @@ final class _MapCodec implements KmdbCodec<Map<String, dynamic>> {
   };
 }
 
-/// Seeds a [KmdbDatabase] with FTS index and returns the underlying [KvStore].
-Future<KvStoreImpl> _seedDb({
+/// Seeds a [KmdbDatabase] with FTS index and returns the database.
+Future<KmdbDatabase> _seedDb({
   String collection = 'docs',
   String field = 'body',
   required List<String> bodies,
@@ -60,16 +60,16 @@ Future<KvStoreImpl> _seedDb({
     await col.insert({field: body});
   }
 
-  return db.store;
+  return db;
 }
 
 CommandContext _ctx(
-  KvStoreImpl store, {
+  KmdbDatabase db, {
   KmdbConfig? config,
   StringBuffer? out,
   StringBuffer? err,
 }) => CommandContext(
-  store: store,
+  db: db,
   config: config ?? KmdbConfig.empty(),
   out: out ?? StringBuffer(),
   err: err ?? StringBuffer(),
@@ -82,23 +82,23 @@ void main() {
 
   // ── --rrf-k flag validation ──────────────────────────────────────────────────
   group('--rrf-k flag', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
     late StringBuffer err;
 
     setUp(() async {
-      store = await _seedDb(bodies: ['database storage engine']);
+      db = await _seedDb(bodies: ['database storage engine']);
       out = StringBuffer();
       err = StringBuffer();
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('--rrf-k 1 runs without error', () async {
       final config = KmdbConfig.empty();
       config.addFtsIndex('docs', 'body');
 
       final ok = await SearchCommand().execute(
-        _ctx(store, config: config, out: out, err: err),
+        _ctx(db, config: config, out: out, err: err),
         ['docs', 'database'],
         {'rrf-k': '1'},
       );
@@ -112,7 +112,7 @@ void main() {
       config.addFtsIndex('docs', 'body');
 
       final ok = await SearchCommand().execute(
-        _ctx(store, config: config, out: out, err: err),
+        _ctx(db, config: config, out: out, err: err),
         ['docs', 'database'],
         {'rrf-k': '60'},
       );
@@ -126,7 +126,7 @@ void main() {
       config.addFtsIndex('docs', 'body');
 
       final ok = await SearchCommand().execute(
-        _ctx(store, config: config, out: out, err: err),
+        _ctx(db, config: config, out: out, err: err),
         ['docs', 'database'],
         {'rrf-k': '0'},
       );
@@ -140,7 +140,7 @@ void main() {
       config.addFtsIndex('docs', 'body');
 
       final ok = await SearchCommand().execute(
-        _ctx(store, config: config, out: out, err: err),
+        _ctx(db, config: config, out: out, err: err),
         ['docs', 'database'],
         {'rrf-k': '-5'},
       );
@@ -158,16 +158,16 @@ void main() {
 
   // ── (hybrid) label in table output ──────────────────────────────────────────
   group('hybrid label in table output', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
     late StringBuffer err;
 
     setUp(() async {
-      store = await _seedDb(bodies: ['database storage engine']);
+      db = await _seedDb(bodies: ['database storage engine']);
       out = StringBuffer();
       err = StringBuffer();
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test(
       '--mode auto with embeddingModel configured shows (hybrid) in output',
@@ -179,7 +179,7 @@ void main() {
         config.embeddingModel = (type: 'onnx', modelPath: '/fake/model.onnx');
 
         final ok = await SearchCommand().execute(
-          _ctx(store, config: config, out: out, err: err),
+          _ctx(db, config: config, out: out, err: err),
           ['docs', 'database'],
           {'mode': 'auto'},
         );
@@ -197,7 +197,7 @@ void main() {
         // No embeddingModel → single-index lexical path.
 
         final ok = await SearchCommand().execute(
-          _ctx(store, config: config, out: out, err: err),
+          _ctx(db, config: config, out: out, err: err),
           ['docs', 'database'],
           {'mode': 'auto'},
         );
@@ -215,7 +215,7 @@ void main() {
         config.embeddingModel = (type: 'onnx', modelPath: '/fake/model.onnx');
 
         final ok = await SearchCommand().execute(
-          _ctx(store, config: config, out: out, err: err),
+          _ctx(db, config: config, out: out, err: err),
           ['docs', 'database'],
           {'mode': 'lexical'},
         );
@@ -228,23 +228,23 @@ void main() {
 
   // ── --candidates flag ────────────────────────────────────────────────────────
   group('--candidates flag', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
 
     setUp(() async {
-      store = await _seedDb(
+      db = await _seedDb(
         bodies: List.generate(10, (i) => 'database article $i'),
       );
       out = StringBuffer();
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('--candidates 20 is accepted without error', () async {
       final config = KmdbConfig.empty();
       config.addFtsIndex('docs', 'body');
 
       final ok = await SearchCommand().execute(
-        _ctx(store, config: config, out: out),
+        _ctx(db, config: config, out: out),
         ['docs', 'database'],
         {'candidates': '20'},
       );
@@ -258,7 +258,7 @@ void main() {
       config.embeddingModel = (type: 'onnx', modelPath: '/fake/model.onnx');
 
       final ok = await SearchCommand().execute(
-        _ctx(store, config: config, out: out),
+        _ctx(db, config: config, out: out),
         ['docs', 'database'],
         {'candidates': '5'},
       );
@@ -270,20 +270,20 @@ void main() {
 
   // ── mode label in table output ────────────────────────────────────────────────
   group('mode label', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
 
     setUp(() async {
-      store = await _seedDb(bodies: ['database storage engine']);
+      db = await _seedDb(bodies: ['database storage engine']);
       out = StringBuffer();
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('table output includes mode: label', () async {
       final config = KmdbConfig.empty();
       config.addFtsIndex('docs', 'body');
 
-      await SearchCommand().execute(_ctx(store, config: config, out: out), [
+      await SearchCommand().execute(_ctx(db, config: config, out: out), [
         'docs',
         'database',
       ], {});
@@ -296,7 +296,7 @@ void main() {
       config.addFtsIndex('docs', 'body');
 
       await SearchCommand().execute(
-        _ctx(store, config: config, out: out),
+        _ctx(db, config: config, out: out),
         ['docs', 'database'],
         {'output': 'json'},
       );
@@ -311,7 +311,7 @@ void main() {
       config.embeddingModel = (type: 'onnx', modelPath: '/fake/model.onnx');
 
       await SearchCommand().execute(
-        _ctx(store, config: config, out: out),
+        _ctx(db, config: config, out: out),
         ['docs', 'database'],
         {'output': 'json', 'rrf-k': '42'},
       );

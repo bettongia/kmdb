@@ -16,7 +16,6 @@ import 'dart:convert';
 
 import 'package:kmdb/kmdb.dart';
 
-
 import '../filter/filter_parser.dart';
 import '../output/output_mode.dart';
 import 'command.dart';
@@ -140,12 +139,12 @@ final class ScanCommand extends CliCommand {
             } catch (_) {
               keys = const [];
             }
-            // Fetch and filter the narrowed candidate set.
+            // Fetch and filter the narrowed candidate set via the Query Layer.
+            final col = ctx.rawCollection(collection);
             final fetched = <Map<String, dynamic>>[];
             for (final key in keys) {
-              final bytes = await ctx.store.get(collection, key);
-              if (bytes == null) continue;
-              final doc = ValueCodec.decode(bytes)..['_id'] = key;
+              final doc = await col.get(key);
+              if (doc == null) continue;
               if (!filter.evaluate(doc)) continue;
               fetched.add(doc);
             }
@@ -236,17 +235,18 @@ final class ScanCommand extends CliCommand {
     // Use flat keys for table/csv/line so dot-path selections appear as column
     // headers (e.g. "name.en") with the resolved scalar value rather than a
     // re-nested object under the parent key.
-    final flatProjection = ctx.mode == OutputMode.table ||
+    final flatProjection =
+        ctx.mode == OutputMode.table ||
         ctx.mode == OutputMode.csv ||
         ctx.mode == OutputMode.line;
     final projected = selectFields == null
         ? candidates
         : candidates
-            .map(
-              (doc) =>
-                  projectDocument(doc, selectFields, flat: flatProjection),
-            )
-            .toList();
+              .map(
+                (doc) =>
+                    projectDocument(doc, selectFields, flat: flatProjection),
+              )
+              .toList();
 
     // ── Sort ───────────────────────────────────────────────────────────────────
     final sorted = orderBy != null;
@@ -283,23 +283,46 @@ final class ScanCommand extends CliCommand {
     return true;
   }
 
-  /// Performs a full scan of [collection] filtered by [filter], returning
-  /// the matching documents and the total document count examined.
+  /// Fetches documents from [collection], filtered by [filter] and/or
+  /// [keyPrefix], returning matching documents and the total examined count.
+  ///
+  /// When [keyPrefix] is set, the scan operates at the store level (key-prefix
+  /// scanning has no [Filter] DSL equivalent). Without a prefix, the scan
+  /// routes through the Query Layer so the Cache Layer and secondary indexes
+  /// can be consulted.
   static Future<(List<Map<String, dynamic>>, int)> _fullScan(
     CommandContext ctx,
     String collection,
     Filter? filter,
     String? keyPrefix,
   ) async {
-    final docs = <Map<String, dynamic>>[];
-    var count = 0;
-    await for (final entry in ctx.store.scan(collection, startKey: keyPrefix)) {
-      count++;
-      final doc = ValueCodec.decode(entry.value)..['_id'] = entry.key;
-      if (filter != null && !filter.evaluate(doc)) continue;
-      docs.add(doc);
+    // Key-prefix scanning must remain at the store layer: it is a storage-level
+    // operation with no Query Layer equivalent.
+    if (keyPrefix != null) {
+      final docs = <Map<String, dynamic>>[];
+      var count = 0;
+      await for (final entry in ctx.store.scan(
+        collection,
+        startKey: keyPrefix,
+      )) {
+        count++;
+        final doc = ValueCodec.decode(entry.value)..['_id'] = entry.key;
+        if (filter != null && !filter.evaluate(doc)) continue;
+        docs.add(doc);
+      }
+      return (docs, count);
     }
-    return (docs, count);
+
+    // No key prefix: route through the Query Layer. This allows secondary
+    // indexes to be consulted and the Cache Layer to be used.
+    final col = ctx.rawCollection(collection);
+    final docs = filter != null
+        ? await col.where(filter).get()
+        : await col.all().get();
+    // documentsScanned equals the total collection size for a full scan.
+    // When a filter is given, we report the matched count as the scanned count
+    // because the Query Layer may have used an index to narrow the set.
+    return (docs, docs.length);
   }
 
   /// Writes the query plan block to [ctx.out] in the appropriate format.

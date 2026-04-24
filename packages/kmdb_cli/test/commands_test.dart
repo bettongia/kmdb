@@ -40,25 +40,24 @@ import 'package:test/test.dart';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Opens a fresh memory-backed store for testing.
-Future<KvStoreImpl> _openStore() async {
-  final (store, _) = await KvStoreImpl.open(
-    '/testdb',
-    MemoryStorageAdapter(),
+/// Opens a fresh memory-backed database for testing.
+Future<KmdbDatabase> _openStore() async {
+  return KmdbDatabase.open(
+    path: '/testdb',
+    adapter: MemoryStorageAdapter(),
     config: KvStoreConfig.forTesting(),
   );
-  return store;
 }
 
 /// Creates a [CommandContext] for testing.
 CommandContext _ctx(
-  KvStoreImpl store, {
+  KmdbDatabase db, {
   OutputMode mode = OutputMode.json,
   bool dbCreated = false,
   StringBuffer? out,
   StringBuffer? err,
 }) => CommandContext(
-  store: store,
+  db: db,
   mode: mode,
   dbCreated: dbCreated,
   out: out ?? StringBuffer(),
@@ -84,12 +83,12 @@ String _key(String seed) {
 /// The document map must contain a `'_id'` key whose value is the UUIDv7
 /// hex string to use as the storage key.
 Future<void> _putDoc(
-  KvStoreImpl store,
+  KmdbDatabase db,
   String coll,
   Map<String, dynamic> doc,
 ) async {
   final id = doc['_id'] as String;
-  await store.put(coll, id, ValueCodec.encode(doc));
+  await db.store.put(coll, id, ValueCodec.encode(doc));
 }
 
 /// Simple temporary file wrapper.
@@ -110,21 +109,21 @@ void main() {
   // ── InitCommand ─────────────────────────────────────────────────────────────
 
   group('InitCommand', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
     late StringBuffer err;
 
     setUp(() async {
-      store = await _openStore();
+      db = await _openStore();
       out = StringBuffer();
       err = StringBuffer();
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test(
       'reports path, deviceId, and created=true for a fresh database',
       () async {
-        final ctx = _ctx(store, out: out, err: err, dbCreated: true);
+        final ctx = _ctx(db, out: out, err: err, dbCreated: true);
         final ok = await InitCommand().execute(ctx, [], {});
         expect(ok, isTrue);
 
@@ -136,7 +135,7 @@ void main() {
     );
 
     test('reports created=false when reopening an existing database', () async {
-      final ctx = _ctx(store, out: out, err: err, dbCreated: false);
+      final ctx = _ctx(db, out: out, err: err, dbCreated: false);
       final ok = await InitCommand().execute(ctx, [], {});
       expect(ok, isTrue);
 
@@ -145,11 +144,11 @@ void main() {
     });
 
     test('is idempotent — running init twice on same store succeeds', () async {
-      final ctx1 = _ctx(store, out: out, err: err, dbCreated: true);
+      final ctx1 = _ctx(db, out: out, err: err, dbCreated: true);
       expect(await InitCommand().execute(ctx1, [], {}), isTrue);
 
       final out2 = StringBuffer();
-      final ctx2 = _ctx(store, out: out2, err: err, dbCreated: false);
+      final ctx2 = _ctx(db, out: out2, err: err, dbCreated: false);
       expect(await InitCommand().execute(ctx2, [], {}), isTrue);
 
       final result = json.decode(out2.toString()) as Map<String, dynamic>;
@@ -160,22 +159,22 @@ void main() {
   // ── GetCommand ──────────────────────────────────────────────────────────────
 
   group('GetCommand', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
     late StringBuffer err;
 
     setUp(() async {
-      store = await _openStore();
+      db = await _openStore();
       out = StringBuffer();
       err = StringBuffer();
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('fetches existing document and echoes it back', () async {
       final id = _key('xone');
-      await _putDoc(store, 'notes', {'_id': id, 'text': 'hello'});
+      await _putDoc(db, 'notes', {'_id': id, 'text': 'hello'});
 
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await GetCommand().execute(ctx, ['notes', id], {});
       expect(ok, isTrue);
       final result = json.decode(out.toString()) as List;
@@ -183,23 +182,23 @@ void main() {
     });
 
     test('returns false when key is missing', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await GetCommand().execute(ctx, ['notes', _key('miss')], {});
       expect(ok, isFalse);
       expect(err.toString(), contains('not found'));
     });
 
     test('returns false when all args are missing', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await GetCommand().execute(ctx, [], {});
       expect(ok, isFalse);
     });
 
     test('--select returns only requested fields', () async {
       final id = _key('xsel');
-      await _putDoc(store, 'notes', {'_id': id, 'text': 'hi', 'score': 5});
+      await _putDoc(db, 'notes', {'_id': id, 'text': 'hi', 'score': 5});
 
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await GetCommand().execute(
         ctx,
         ['notes', id],
@@ -213,9 +212,9 @@ void main() {
 
     test('--select with unknown field returns empty document', () async {
       final id = _key('xselunk');
-      await _putDoc(store, 'notes', {'_id': id, 'text': 'hi'});
+      await _putDoc(db, 'notes', {'_id': id, 'text': 'hi'});
 
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await GetCommand().execute(
         ctx,
         ['notes', id],
@@ -228,12 +227,12 @@ void main() {
 
     test('--select with dot-path re-nests the value', () async {
       final id = _key('xnest');
-      await _putDoc(store, 'notes', {
+      await _putDoc(db, 'notes', {
         '_id': id,
         'address': {'city': 'Paris', 'zip': '75001'},
       });
 
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await GetCommand().execute(
         ctx,
         ['notes', id],
@@ -250,9 +249,9 @@ void main() {
 
     test(r'--select with $.name works identically to name', () async {
       final id = _key('xsigil');
-      await _putDoc(store, 'notes', {'_id': id, 'name': 'Alice', 'score': 10});
+      await _putDoc(db, 'notes', {'_id': id, 'name': 'Alice', 'score': 10});
 
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await GetCommand().execute(
         ctx,
         ['notes', id],
@@ -266,12 +265,12 @@ void main() {
 
     test('--select with array index returns flat key', () async {
       final id = _key('xarr');
-      await _putDoc(store, 'notes', {
+      await _putDoc(db, 'notes', {
         '_id': id,
         'tags': ['dart', 'flutter', 'kmdb'],
       });
 
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await GetCommand().execute(
         ctx,
         ['notes', id],
@@ -285,12 +284,12 @@ void main() {
 
     test('--select with negative array index returns flat key', () async {
       final id = _key('xarrn');
-      await _putDoc(store, 'notes', {
+      await _putDoc(db, 'notes', {
         '_id': id,
         'tags': ['dart', 'flutter', 'kmdb'],
       });
 
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await GetCommand().execute(
         ctx,
         ['notes', id],
@@ -303,12 +302,12 @@ void main() {
 
     test('--select with array wildcard returns flat key', () async {
       final id = _key('xarrw');
-      await _putDoc(store, 'notes', {
+      await _putDoc(db, 'notes', {
         '_id': id,
         'tags': ['dart', 'flutter'],
       });
 
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await GetCommand().execute(
         ctx,
         ['notes', id],
@@ -321,9 +320,9 @@ void main() {
 
     test('--select with absent path omits the key gracefully', () async {
       final id = _key('xabsent');
-      await _putDoc(store, 'notes', {'_id': id, 'name': 'Bob'});
+      await _putDoc(db, 'notes', {'_id': id, 'name': 'Bob'});
 
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await GetCommand().execute(
         ctx,
         ['notes', id],
@@ -340,19 +339,19 @@ void main() {
   // ── PutCommand ──────────────────────────────────────────────────────────────
 
   group('PutCommand', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
     late StringBuffer err;
 
     setUp(() async {
-      store = await _openStore();
+      db = await _openStore();
       out = StringBuffer();
       err = StringBuffer();
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('inserts document with generated ID and echoes it back', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       const doc = '{"name":"Alice"}';
       final ok = await PutCommand().execute(ctx, ['notes'], {'value': doc});
       expect(ok, isTrue);
@@ -362,27 +361,27 @@ void main() {
       expect(generatedId, hasLength(32));
       expect(generatedId[12], equals('7')); // version
 
-      final result = await store.get('notes', generatedId);
+      final result = await db.store.get('notes', generatedId);
       expect(result, isNotNull);
       expect(ValueCodec.decode(result!)['name'], equals('Alice'));
     });
 
     test('returns false for invalid JSON', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await PutCommand().execute(ctx, ['notes'], {'value': '{bad}'});
       expect(ok, isFalse);
       expect(err.toString(), contains('Invalid JSON'));
     });
 
     test('returns false when document is not a JSON object', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await PutCommand().execute(ctx, ['notes'], {'value': '[1,2]'});
       expect(ok, isFalse);
       expect(err.toString(), contains('JSON object'));
     });
 
     test('ignores user-provided id and generates a new one', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final userId = _key('user');
       final doc = '{"_id":"$userId","name":"Alice"}';
       final ok = await PutCommand().execute(ctx, ['notes'], {'value': doc});
@@ -395,14 +394,14 @@ void main() {
       expect(assignedId, hasLength(32));
 
       // The user-provided ID should NOT have been written.
-      expect(await store.get('notes', userId), isNull);
+      expect(await db.store.get('notes', userId), isNull);
 
       // The assigned ID should have been written.
-      expect(await store.get('notes', assignedId), isNotNull);
+      expect(await db.store.get('notes', assignedId), isNotNull);
     });
 
     test('returns false when namespace arg missing', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await PutCommand().execute(ctx, [], {
         'value': '{"name":"Alice"}',
       });
@@ -410,7 +409,7 @@ void main() {
     });
 
     test('inserts multiple documents from a JSON array via --value', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       const arrayJson = '[{"name":"Alice"},{"name":"Bob"}]';
       final ok = await PutCommand().execute(
         ctx,
@@ -428,11 +427,11 @@ void main() {
       expect(id0, isNot(equals(id1)));
 
       expect(
-        ValueCodec.decode((await store.get('notes', id0))!)['name'],
+        ValueCodec.decode((await db.store.get('notes', id0))!)['name'],
         equals('Alice'),
       );
       expect(
-        ValueCodec.decode((await store.get('notes', id1))!)['name'],
+        ValueCodec.decode((await db.store.get('notes', id1))!)['name'],
         equals('Bob'),
       );
     });
@@ -442,7 +441,7 @@ void main() {
       tmp.write('{"name":"Carol"}');
       addTearDown(tmp.delete);
 
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await PutCommand().execute(ctx, ['notes'], {'file': tmp.path});
       expect(ok, isTrue);
 
@@ -450,7 +449,7 @@ void main() {
       expect(decoded, hasLength(1));
       final id = decoded[0]['_id'] as String;
       expect(
-        ValueCodec.decode((await store.get('notes', id))!)['name'],
+        ValueCodec.decode((await db.store.get('notes', id))!)['name'],
         equals('Carol'),
       );
     });
@@ -462,7 +461,7 @@ void main() {
         tmp.write('[{"name":"Dave"},{"name":"Eve"}]');
         addTearDown(tmp.delete);
 
-        final ctx = _ctx(store, out: out, err: err);
+        final ctx = _ctx(db, out: out, err: err);
         final ok = await PutCommand().execute(
           ctx,
           ['notes'],
@@ -481,7 +480,7 @@ void main() {
       tmp.write('{"name":"Frank"}\n{"name":"Grace"}\n\n');
       addTearDown(tmp.delete);
 
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await PutCommand().execute(ctx, ['notes'], {'file': tmp.path});
       expect(ok, isTrue);
 
@@ -495,7 +494,7 @@ void main() {
       tmp.write('{"name":"Heidi"}\n{"name":"Ivan"}\n');
       addTearDown(tmp.delete);
 
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await PutCommand().execute(ctx, ['notes'], {'file': tmp.path});
       expect(ok, isTrue);
 
@@ -505,7 +504,7 @@ void main() {
     });
 
     test('returns false when --file path does not exist', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await PutCommand().execute(
         ctx,
         ['notes'],
@@ -516,7 +515,7 @@ void main() {
     });
 
     test('returns false for non-object items in JSON array', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await PutCommand().execute(
         ctx,
         ['notes'],
@@ -531,14 +530,14 @@ void main() {
       tmp.write('{"name":"Alice"}\n{bad json}\n');
       addTearDown(tmp.delete);
 
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await PutCommand().execute(ctx, ['notes'], {'file': tmp.path});
       expect(ok, isFalse);
       expect(err.toString(), contains('invalid JSON'));
     });
 
     test('inserts zero documents from an empty JSON array', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await PutCommand().execute(ctx, ['notes'], {'value': '[]'});
       expect(ok, isTrue);
       final decoded = json.decode(out.toString()) as List;
@@ -546,7 +545,7 @@ void main() {
     });
 
     test('rejects document with reserved "_"-prefixed field', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await InsertCommand().execute(
         ctx,
         ['notes'],
@@ -558,7 +557,7 @@ void main() {
     });
 
     test('rejects batch when any document has a reserved field', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await InsertCommand().execute(
         ctx,
         ['notes'],
@@ -567,12 +566,12 @@ void main() {
       expect(ok, isFalse);
       expect(err.toString(), contains('"_title"'));
       // No documents should have been written (pre-validated before any I/O).
-      final keys = await store.scan('notes').toList();
+      final keys = await db.store.scan('notes').toList();
       expect(keys, isEmpty);
     });
 
     test('allows document with no reserved fields', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await InsertCommand().execute(
         ctx,
         ['notes'],
@@ -588,31 +587,31 @@ void main() {
   // ── DeleteCommand ───────────────────────────────────────────────────────────
 
   group('DeleteCommand', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
     late StringBuffer err;
 
     setUp(() async {
-      store = await _openStore();
+      db = await _openStore();
       out = StringBuffer();
       err = StringBuffer();
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('deletes existing document', () async {
       final id = _key('del1');
-      await _putDoc(store, 'tasks', {'_id': id, 'x': 1});
-      final ctx = _ctx(store, out: out, err: err);
+      await _putDoc(db, 'tasks', {'_id': id, 'x': 1});
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await DeleteCommand().execute(ctx, ['tasks', id], {});
       expect(ok, isTrue);
-      expect(await store.get('tasks', id), isNull);
+      expect(await db.store.get('tasks', id), isNull);
       final result = json.decode(out.toString()) as Map;
       expect(result['deleted'], equals(id));
     });
 
     test('succeeds (no-op) when key does not exist', () async {
       // Delete is idempotent at the store level.
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await DeleteCommand().execute(ctx, [
         'tasks',
         _key('gost'),
@@ -621,7 +620,7 @@ void main() {
     });
 
     test('returns false when args are missing', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await DeleteCommand().execute(ctx, ['tasks'], {});
       expect(ok, isFalse);
       expect(err.toString(), contains('requires'));
@@ -631,7 +630,7 @@ void main() {
   // ── ScanCommand ─────────────────────────────────────────────────────────────
 
   group('ScanCommand', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
     late StringBuffer err;
     late String idA;
@@ -639,20 +638,20 @@ void main() {
     late String idC;
 
     setUp(() async {
-      store = await _openStore();
+      db = await _openStore();
       out = StringBuffer();
       err = StringBuffer();
       idA = _key('scanA');
       idB = _key('scanB');
       idC = _key('scanC');
-      await _putDoc(store, 'items', {'_id': idA, 'score': 10, 'tag': 'x'});
-      await _putDoc(store, 'items', {'_id': idB, 'score': 30, 'tag': 'y'});
-      await _putDoc(store, 'items', {'_id': idC, 'score': 20, 'tag': 'x'});
+      await _putDoc(db, 'items', {'_id': idA, 'score': 10, 'tag': 'x'});
+      await _putDoc(db, 'items', {'_id': idB, 'score': 30, 'tag': 'y'});
+      await _putDoc(db, 'items', {'_id': idC, 'score': 20, 'tag': 'x'});
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('scans all documents in namespace', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await ScanCommand().execute(ctx, ['items'], {});
       expect(ok, isTrue);
       final docs = json.decode(out.toString()) as List;
@@ -660,7 +659,7 @@ void main() {
     });
 
     test('applies filter', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final filter = '{"field":"tag","op":"eq","value":"x"}';
       final ok = await ScanCommand().execute(
         ctx,
@@ -674,7 +673,7 @@ void main() {
     });
 
     test('applies order-by ascending', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await ScanCommand().execute(
         ctx,
         ['items'],
@@ -687,7 +686,7 @@ void main() {
     });
 
     test('applies order-by descending', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await ScanCommand().execute(
         ctx,
         ['items'],
@@ -699,7 +698,7 @@ void main() {
     });
 
     test('applies limit and offset', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await ScanCommand().execute(
         ctx,
         ['items'],
@@ -712,7 +711,7 @@ void main() {
     });
 
     test('returns false for invalid filter JSON', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await ScanCommand().execute(
         ctx,
         ['items'],
@@ -723,7 +722,7 @@ void main() {
     });
 
     test('returns false for unknown filter operator', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final filter = '{"field":"x","op":"regex","value":".*"}';
       final ok = await ScanCommand().execute(
         ctx,
@@ -734,13 +733,13 @@ void main() {
     });
 
     test('returns false when namespace arg missing', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await ScanCommand().execute(ctx, [], {});
       expect(ok, isFalse);
     });
 
     test('returns empty list for unknown namespace', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await ScanCommand().execute(ctx, ['empty'], {});
       expect(ok, isTrue);
       final docs = json.decode(out.toString()) as List;
@@ -748,7 +747,7 @@ void main() {
     });
 
     test('--select projects to requested fields only', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await ScanCommand().execute(
         ctx,
         ['items'],
@@ -764,7 +763,7 @@ void main() {
     });
 
     test('--select with single field', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await ScanCommand().execute(
         ctx,
         ['items'],
@@ -777,7 +776,7 @@ void main() {
     });
 
     test('--select interacts correctly with --filter', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final filter = '{"field":"tag","op":"eq","value":"x"}';
       final ok = await ScanCommand().execute(
         ctx,
@@ -794,7 +793,7 @@ void main() {
     });
 
     test('--select preserves field order from parameter', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await ScanCommand().execute(
         ctx,
         ['items'],
@@ -810,7 +809,7 @@ void main() {
     });
 
     test('--select with unknown field produces empty documents', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await ScanCommand().execute(
         ctx,
         ['items'],
@@ -825,13 +824,13 @@ void main() {
     test('--select dot-path re-nests value on scan', () async {
       // Insert a document with a nested address field into a new collection.
       final id = _key('nestA');
-      await _putDoc(store, 'nested_items', {
+      await _putDoc(db, 'nested_items', {
         '_id': id,
         'address': {'city': 'London', 'zip': 'EC1'},
         'name': 'Alice',
       });
 
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await ScanCommand().execute(
         ctx,
         ['nested_items'],
@@ -850,7 +849,7 @@ void main() {
     });
 
     test(r'--select $.name works identically to name on scan', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       // The items collection has 'tag' fields; use the root sigil form.
       final ok = await ScanCommand().execute(
         ctx,
@@ -866,12 +865,12 @@ void main() {
 
     test('--select with array index returns flat key on scan', () async {
       final id = _key('scanArr');
-      await _putDoc(store, 'arr_items', {
+      await _putDoc(db, 'arr_items', {
         '_id': id,
         'tags': ['dart', 'flutter', 'kmdb'],
       });
 
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await ScanCommand().execute(
         ctx,
         ['arr_items'],
@@ -884,12 +883,12 @@ void main() {
 
     test('--select with array wildcard returns flat key on scan', () async {
       final id = _key('scanWild');
-      await _putDoc(store, 'wild_items', {
+      await _putDoc(db, 'wild_items', {
         '_id': id,
         'tags': ['a', 'b', 'c'],
       });
 
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await ScanCommand().execute(
         ctx,
         ['wild_items'],
@@ -903,7 +902,7 @@ void main() {
     test(
       '--select with absent nested path omits key gracefully on scan',
       () async {
-        final ctx = _ctx(store, out: out, err: err);
+        final ctx = _ctx(db, out: out, err: err);
         // items has 'score' and 'tag' but no 'address.city'.
         final ok = await ScanCommand().execute(
           ctx,
@@ -923,13 +922,13 @@ void main() {
       '--select dot-path uses flat key and scalar value in table mode',
       () async {
         final id = _key('flatTbl');
-        await _putDoc(store, 'flat_items', {
+        await _putDoc(db, 'flat_items', {
           '_id': id,
           'name': {'en': 'Mawson', 'fr': 'Mawson'},
           'score': 42,
         });
 
-        final ctx = _ctx(store, out: out, err: err, mode: OutputMode.table);
+        final ctx = _ctx(db, out: out, err: err, mode: OutputMode.table);
         final ok = await ScanCommand().execute(
           ctx,
           ['flat_items'],
@@ -949,12 +948,12 @@ void main() {
       '--select dot-path uses flat key and scalar value in csv mode',
       () async {
         final id = _key('flatCsv');
-        await _putDoc(store, 'csv_items', {
+        await _putDoc(db, 'csv_items', {
           '_id': id,
           'location': {'latitude': -67.6, 'longitude': 62.9},
         });
 
-        final ctx = _ctx(store, out: out, err: err, mode: OutputMode.csv);
+        final ctx = _ctx(db, out: out, err: err, mode: OutputMode.csv);
         final ok = await ScanCommand().execute(
           ctx,
           ['csv_items'],
@@ -973,22 +972,22 @@ void main() {
   // ── CountCommand ────────────────────────────────────────────────────────────
 
   group('CountCommand', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
     late StringBuffer err;
 
     setUp(() async {
-      store = await _openStore();
+      db = await _openStore();
       out = StringBuffer();
       err = StringBuffer();
-      await _putDoc(store, 'ns', {'_id': _key('cnt1'), 'active': true});
-      await _putDoc(store, 'ns', {'_id': _key('cnt2'), 'active': false});
-      await _putDoc(store, 'ns', {'_id': _key('cnt3'), 'active': true});
+      await _putDoc(db, 'ns', {'_id': _key('cnt1'), 'active': true});
+      await _putDoc(db, 'ns', {'_id': _key('cnt2'), 'active': false});
+      await _putDoc(db, 'ns', {'_id': _key('cnt3'), 'active': true});
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('counts all documents', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await CountCommand().execute(ctx, ['ns'], {});
       expect(ok, isTrue);
       final result = json.decode(out.toString()) as Map;
@@ -996,7 +995,7 @@ void main() {
     });
 
     test('counts filtered documents', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final filter = '{"field":"active","op":"isTrue"}';
       final ok = await CountCommand().execute(ctx, ['ns'], {'filter': filter});
       expect(ok, isTrue);
@@ -1005,7 +1004,7 @@ void main() {
     });
 
     test('returns 0 for empty namespace', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await CountCommand().execute(ctx, ['empty'], {});
       expect(ok, isTrue);
       final result = json.decode(out.toString()) as Map;
@@ -1013,13 +1012,13 @@ void main() {
     });
 
     test('returns false when namespace arg missing', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await CountCommand().execute(ctx, [], {});
       expect(ok, isFalse);
     });
 
     test('returns false for invalid filter', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await CountCommand().execute(ctx, ['ns'], {'filter': '{bad}'});
       expect(ok, isFalse);
     });
@@ -1028,26 +1027,26 @@ void main() {
   // ── CollectionsCommand ──────────────────────────────────────────────────────
 
   group('CollectionsCommand', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
     late StringBuffer err;
 
     setUp(() async {
-      store = await _openStore();
+      db = await _openStore();
       out = StringBuffer();
       err = StringBuffer();
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('requires a subcommand', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await CollectionsCommand().execute(ctx, [], {});
       expect(ok, isFalse);
       expect(err.toString(), contains('subcommand required'));
     });
 
     test('unknown subcommand returns error', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await CollectionsCommand().execute(ctx, ['bogus'], {});
       expect(ok, isFalse);
       expect(err.toString(), contains("unknown subcommand 'bogus'"));
@@ -1057,16 +1056,16 @@ void main() {
 
     group('list', () {
       test('returns a list when no user namespaces exist', () async {
-        final ctx = _ctx(store, out: out, err: err);
+        final ctx = _ctx(db, out: out, err: err);
         final ok = await CollectionsCommand().execute(ctx, ['list'], {});
         expect(ok, isTrue);
         expect(json.decode(out.toString()), isA<List>());
       });
 
       test('lists namespaces written to', () async {
-        await _putDoc(store, 'tasks', {'_id': _key('task'), 'v': 1});
-        await _putDoc(store, 'notes', {'_id': _key('note'), 'v': 2});
-        final ctx = _ctx(store, out: out, err: err);
+        await _putDoc(db, 'tasks', {'_id': _key('task'), 'v': 1});
+        await _putDoc(db, 'notes', {'_id': _key('note'), 'v': 2});
+        final ctx = _ctx(db, out: out, err: err);
         final ok = await CollectionsCommand().execute(ctx, ['list'], {});
         expect(ok, isTrue);
         final result = (json.decode(out.toString()) as List).cast<String>();
@@ -1074,8 +1073,8 @@ void main() {
       });
 
       test('does not include system namespaces', () async {
-        await _putDoc(store, 'tasks', {'_id': _key('sys'), 'v': 1});
-        final ctx = _ctx(store, out: out, err: err);
+        await _putDoc(db, 'tasks', {'_id': _key('sys'), 'v': 1});
+        final ctx = _ctx(db, out: out, err: err);
         await CollectionsCommand().execute(ctx, ['list'], {});
         final result = (json.decode(out.toString()) as List).cast<String>();
         expect(result.any((ns) => ns.startsWith(r'$')), isFalse);
@@ -1086,7 +1085,7 @@ void main() {
 
     group('create', () {
       test('creates a namespace and returns success message', () async {
-        final ctx = _ctx(store, out: out, err: err);
+        final ctx = _ctx(db, out: out, err: err);
         final ok = await CollectionsCommand().execute(ctx, [
           'create',
           'widgets',
@@ -1102,12 +1101,12 @@ void main() {
         'is idempotent — second create returns already-exists message',
         () async {
           await CollectionsCommand().execute(
-            _ctx(store, out: StringBuffer(), err: StringBuffer()),
+            _ctx(db, out: StringBuffer(), err: StringBuffer()),
             ['create', 'widgets'],
             {},
           );
           out.clear();
-          final ctx = _ctx(store, out: out, err: err);
+          final ctx = _ctx(db, out: out, err: err);
           final ok = await CollectionsCommand().execute(ctx, [
             'create',
             'widgets',
@@ -1119,7 +1118,7 @@ void main() {
       );
 
       test('requires a collection name', () async {
-        final ctx = _ctx(store, out: out, err: err);
+        final ctx = _ctx(db, out: out, err: err);
         final ok = await CollectionsCommand().execute(ctx, ['create'], {});
         expect(ok, isFalse);
         expect(err.toString(), contains('collection name required'));
@@ -1130,28 +1129,28 @@ void main() {
 
     group('delete', () {
       test('removes all documents from the collection', () async {
-        await _putDoc(store, 'tasks', {'_id': _key('t1'), 'v': 1});
-        await _putDoc(store, 'tasks', {'_id': _key('t2'), 'v': 2});
-        expect(await store.scan('tasks').toList(), hasLength(2));
+        await _putDoc(db, 'tasks', {'_id': _key('t1'), 'v': 1});
+        await _putDoc(db, 'tasks', {'_id': _key('t2'), 'v': 2});
+        expect(await db.store.scan('tasks').toList(), hasLength(2));
 
-        final ctx = _ctx(store, out: out, err: err);
+        final ctx = _ctx(db, out: out, err: err);
         final ok = await CollectionsCommand().execute(ctx, [
           'delete',
           'tasks',
         ], {});
         expect(ok, isTrue);
-        expect(await store.scan('tasks').toList(), isEmpty);
+        expect(await db.store.scan('tasks').toList(), isEmpty);
       });
 
       test('unregisters the collection from the namespace registry', () async {
-        await _putDoc(store, 'tasks', {'_id': _key('t1'), 'v': 1});
-        final ctx = _ctx(store, out: out, err: err);
+        await _putDoc(db, 'tasks', {'_id': _key('t1'), 'v': 1});
+        final ctx = _ctx(db, out: out, err: err);
         await CollectionsCommand().execute(ctx, ['delete', 'tasks'], {});
-        expect(await store.listNamespaces(), isNot(contains('tasks')));
+        expect(await db.store.listNamespaces(), isNot(contains('tasks')));
       });
 
       test('returns error for unknown collection name', () async {
-        final ctx = _ctx(store, out: out, err: err);
+        final ctx = _ctx(db, out: out, err: err);
         final ok = await CollectionsCommand().execute(ctx, [
           'delete',
           'nonexistent',
@@ -1161,22 +1160,22 @@ void main() {
       });
 
       test('requires a collection name', () async {
-        final ctx = _ctx(store, out: out, err: err);
+        final ctx = _ctx(db, out: out, err: err);
         final ok = await CollectionsCommand().execute(ctx, ['delete'], {});
         expect(ok, isFalse);
         expect(err.toString(), contains('collection name required'));
       });
 
       test('other collections are unaffected', () async {
-        await _putDoc(store, 'tasks', {'_id': _key('t1'), 'v': 1});
-        await _putDoc(store, 'notes', {'_id': _key('n1'), 'v': 1});
+        await _putDoc(db, 'tasks', {'_id': _key('t1'), 'v': 1});
+        await _putDoc(db, 'notes', {'_id': _key('n1'), 'v': 1});
 
-        final ctx = _ctx(store, out: out, err: err);
+        final ctx = _ctx(db, out: out, err: err);
         await CollectionsCommand().execute(ctx, ['delete', 'tasks'], {});
 
         // notes should still be there.
-        expect(await store.scan('notes').toList(), isNotEmpty);
-        expect(await store.listNamespaces(), contains('notes'));
+        expect(await db.store.scan('notes').toList(), isNotEmpty);
+        expect(await db.store.listNamespaces(), contains('notes'));
       });
     });
   });
@@ -1184,25 +1183,25 @@ void main() {
   // ── CreateCollectionCommand ────────────────────────────────────────────────
 
   group('CreateCollectionCommand', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
     late StringBuffer err;
 
     setUp(() async {
-      store = await _openStore();
+      db = await _openStore();
       out = StringBuffer();
       err = StringBuffer();
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('prints deprecation warning to stderr', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       await CreateCollectionCommand().execute(ctx, ['widgets'], {});
       expect(err.toString(), contains('deprecated'));
     });
 
     test('creates a new collection and returns created: true', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await CreateCollectionCommand().execute(ctx, ['widgets'], {});
       expect(ok, isTrue);
       final result = json.decode(out.toString()) as Map<String, dynamic>;
@@ -1211,9 +1210,9 @@ void main() {
     });
 
     test('collection appears in listNamespaces after creation', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       await CreateCollectionCommand().execute(ctx, ['widgets'], {});
-      final namespaces = await store.listNamespaces();
+      final namespaces = await db.store.listNamespaces();
       expect(namespaces, contains('widgets'));
     });
 
@@ -1221,12 +1220,12 @@ void main() {
       'is a no-op when collection already exists, returns created: false',
       () async {
         await CreateCollectionCommand().execute(
-          _ctx(store, out: StringBuffer(), err: StringBuffer()),
+          _ctx(db, out: StringBuffer(), err: StringBuffer()),
           ['widgets'],
           {},
         );
         out.clear();
-        final ctx = _ctx(store, out: out, err: err);
+        final ctx = _ctx(db, out: out, err: err);
         final ok = await CreateCollectionCommand().execute(ctx, [
           'widgets',
         ], {});
@@ -1240,8 +1239,8 @@ void main() {
     test(
       'is a no-op when collection was populated via a document write',
       () async {
-        await _putDoc(store, 'notes', {'_id': _key('note'), 'v': 1});
-        final ctx = _ctx(store, out: out, err: err);
+        await _putDoc(db, 'notes', {'_id': _key('note'), 'v': 1});
+        final ctx = _ctx(db, out: out, err: err);
         final ok = await CreateCollectionCommand().execute(ctx, ['notes'], {});
         expect(ok, isTrue);
         final result = json.decode(out.toString()) as Map<String, dynamic>;
@@ -1250,14 +1249,14 @@ void main() {
     );
 
     test('returns error when no name argument is provided', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await CreateCollectionCommand().execute(ctx, [], {});
       expect(ok, isFalse);
       expect(err.toString(), contains('Error'));
     });
 
     test('rejects system namespace names', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       expect(
         () => CreateCollectionCommand().execute(ctx, [r'$meta'], {}),
         throwsArgumentError,
@@ -1268,19 +1267,19 @@ void main() {
   // ── StatsCommand ────────────────────────────────────────────────────────────
 
   group('StatsCommand', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
     late StringBuffer err;
 
     setUp(() async {
-      store = await _openStore();
+      db = await _openStore();
       out = StringBuffer();
       err = StringBuffer();
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('returns stats object with expected shape', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await StatsCommand().execute(ctx, [], {});
       expect(ok, isTrue);
       final result = json.decode(out.toString()) as Map<String, dynamic>;
@@ -1291,7 +1290,7 @@ void main() {
     });
 
     test('sstables.total equals l0 + l1 + l2', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       await StatsCommand().execute(ctx, [], {});
       final result = json.decode(out.toString()) as Map<String, dynamic>;
       final s = result['sstables'] as Map<String, dynamic>;
@@ -1303,19 +1302,19 @@ void main() {
   // ── InfoCommand ─────────────────────────────────────────────────────────────
 
   group('InfoCommand', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
     late StringBuffer err;
 
     setUp(() async {
-      store = await _openStore();
+      db = await _openStore();
       out = StringBuffer();
       err = StringBuffer();
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('returns info with deviceId and hlc fields', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await InfoCommand().execute(ctx, [], {});
       expect(ok, isTrue);
       final result = json.decode(out.toString()) as Map<String, dynamic>;
@@ -1330,20 +1329,20 @@ void main() {
   // ── FlushCommand ────────────────────────────────────────────────────────────
 
   group('FlushCommand', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
     late StringBuffer err;
 
     setUp(() async {
-      store = await _openStore();
+      db = await _openStore();
       out = StringBuffer();
       err = StringBuffer();
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('flushes and returns {flushed: true}', () async {
-      await _putDoc(store, 'ns', {'_id': _key('flsh'), 'v': 1});
-      final ctx = _ctx(store, out: out, err: err);
+      await _putDoc(db, 'ns', {'_id': _key('flsh'), 'v': 1});
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await FlushCommand().execute(ctx, [], {});
       expect(ok, isTrue);
       final result = json.decode(out.toString()) as Map;
@@ -1354,19 +1353,19 @@ void main() {
   // ── CompactCommand ──────────────────────────────────────────────────────────
 
   group('CompactCommand', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
     late StringBuffer err;
 
     setUp(() async {
-      store = await _openStore();
+      db = await _openStore();
       out = StringBuffer();
       err = StringBuffer();
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('compacts and returns {compacted: true}', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await CompactCommand().execute(ctx, [], {});
       expect(ok, isTrue);
       final result = json.decode(out.toString()) as Map;
@@ -1377,26 +1376,26 @@ void main() {
   // ── ImportCommand — argument validation ─────────────────────────────────────
 
   group('ImportCommand — argument validation', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
     late StringBuffer err;
 
     setUp(() async {
-      store = await _openStore();
+      db = await _openStore();
       out = StringBuffer();
       err = StringBuffer();
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('returns false when namespace arg missing', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await ImportCommand().execute(ctx, [], {});
       expect(ok, isFalse);
       expect(err.toString(), contains('requires'));
     });
 
     test('returns false for unknown --on-conflict value', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await ImportCommand().execute(
         ctx,
         ['ns'],
@@ -1410,16 +1409,16 @@ void main() {
   // ── ImportCommand — file round-trip ─────────────────────────────────────────
 
   group('ImportCommand — file round-trip', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
     late StringBuffer err;
 
     setUp(() async {
-      store = await _openStore();
+      db = await _openStore();
       out = StringBuffer();
       err = StringBuffer();
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('imports NDJSON from a file', () async {
       final p1 = _key('imp1');
@@ -1427,7 +1426,7 @@ void main() {
       final tmp = _TmpFile();
       tmp.write('{"_id":"$p1","name":"Alice"}\n{"_id":"$p2","name":"Bob"}\n');
 
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await ImportCommand().execute(
         ctx,
         ['people'],
@@ -1439,11 +1438,11 @@ void main() {
       expect(result['skipped'], equals(0));
 
       expect(
-        ValueCodec.decode((await store.get('people', p1))!)['name'],
+        ValueCodec.decode((await db.store.get('people', p1))!)['name'],
         equals('Alice'),
       );
       expect(
-        ValueCodec.decode((await store.get('people', p2))!)['name'],
+        ValueCodec.decode((await db.store.get('people', p2))!)['name'],
         equals('Bob'),
       );
 
@@ -1452,12 +1451,12 @@ void main() {
 
     test('ignore conflict skips existing documents', () async {
       final p1 = _key('ign1');
-      await _putDoc(store, 'people', {'_id': p1, 'name': 'OldAlice'});
+      await _putDoc(db, 'people', {'_id': p1, 'name': 'OldAlice'});
 
       final tmp = _TmpFile();
       tmp.write('{"_id":"$p1","name":"NewAlice"}\n');
 
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await ImportCommand().execute(
         ctx,
         ['people'],
@@ -1468,7 +1467,7 @@ void main() {
       expect(result['skipped'], equals(1));
       // Original value must be unchanged.
       expect(
-        ValueCodec.decode((await store.get('people', p1))!)['name'],
+        ValueCodec.decode((await db.store.get('people', p1))!)['name'],
         equals('OldAlice'),
       );
 
@@ -1477,12 +1476,12 @@ void main() {
 
     test('error conflict returns false on duplicate', () async {
       final p1 = _key('err1');
-      await _putDoc(store, 'people', {'_id': p1, 'name': 'Alice'});
+      await _putDoc(db, 'people', {'_id': p1, 'name': 'Alice'});
 
       final tmp = _TmpFile();
       tmp.write('{"_id":"$p1","name":"NewAlice"}\n');
 
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await ImportCommand().execute(
         ctx,
         ['people'],
@@ -1499,7 +1498,7 @@ void main() {
       final tmp = _TmpFile();
       tmp.write('{"_id":"$id"}\n{bad json}\n');
 
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await ImportCommand().execute(
         ctx,
         ['ns'],
@@ -1515,7 +1514,7 @@ void main() {
       final tmp = _TmpFile();
       tmp.write('{"name":"no-id"}\n');
 
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await ImportCommand().execute(
         ctx,
         ['ns'],
@@ -1533,7 +1532,7 @@ void main() {
       final tmp = _TmpFile();
       tmp.write('{"_id":"$x1","v":1}\n\n{"_id":"$x2","v":2}\n');
 
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await ImportCommand().execute(
         ctx,
         ['ns'],
@@ -1550,14 +1549,14 @@ void main() {
   // ── Export → Import roundtrip ───────────────────────────────────────────────
 
   group('Export → Import roundtrip', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer err;
 
     setUp(() async {
-      store = await _openStore();
+      db = await _openStore();
       err = StringBuffer();
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('export then import restores identical documents', () async {
       // Seed three documents.
@@ -1568,12 +1567,12 @@ void main() {
         {'_id': ids[2], 'name': 'Carol', 'score': 30},
       ];
       for (final doc in origDocs) {
-        await _putDoc(store, 'people', doc);
+        await _putDoc(db, 'people', doc);
       }
 
       // Export via ctx.out (mirrors how --output redirects ctx.out in prod).
       final exportOut = StringBuffer();
-      final exportCtx = _ctx(store, out: exportOut, err: err);
+      final exportCtx = _ctx(db, out: exportOut, err: err);
       final exportOk = await ExportCommand().execute(exportCtx, ['people'], {});
       expect(exportOk, isTrue);
 
@@ -1584,16 +1583,16 @@ void main() {
 
       // Delete all documents from the namespace.
       for (final id in ids) {
-        await store.delete('people', id);
+        await db.store.delete('people', id);
       }
       // Verify namespace is empty.
       final countOut = StringBuffer();
-      await CountCommand().execute(_ctx(store, out: countOut), ['people'], {});
+      await CountCommand().execute(_ctx(db, out: countOut), ['people'], {});
       expect((json.decode(countOut.toString()) as Map)['count'], equals(0));
 
       // Re-import from the exported file.
       final importOut = StringBuffer();
-      final importCtx = _ctx(store, out: importOut, err: err);
+      final importCtx = _ctx(db, out: importOut, err: err);
       final importOk = await ImportCommand().execute(
         importCtx,
         ['people'],
@@ -1605,7 +1604,7 @@ void main() {
 
       // Verify each document was restored correctly.
       for (final orig in origDocs) {
-        final bytes = await store.get('people', orig['_id'] as String);
+        final bytes = await db.store.get('people', orig['_id'] as String);
         expect(
           bytes,
           isNotNull,
@@ -1620,11 +1619,11 @@ void main() {
     test('export writes one line per document in NDJSON format', () async {
       final id1 = _key('exp1');
       final id2 = _key('exp2');
-      await _putDoc(store, 'items', {'_id': id1, 'v': 1});
-      await _putDoc(store, 'items', {'_id': id2, 'v': 2});
+      await _putDoc(db, 'items', {'_id': id1, 'v': 1});
+      await _putDoc(db, 'items', {'_id': id2, 'v': 2});
 
       final exportOut = StringBuffer();
-      final ctx = _ctx(store, out: exportOut, err: err);
+      final ctx = _ctx(db, out: exportOut, err: err);
       final ok = await ExportCommand().execute(ctx, ['items'], {});
       expect(ok, isTrue);
 
@@ -1644,19 +1643,19 @@ void main() {
   // ── InsertCommand ───────────────────────────────────────────────────────────
 
   group('InsertCommand', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
     late StringBuffer err;
 
     setUp(() async {
-      store = await _openStore();
+      db = await _openStore();
       out = StringBuffer();
       err = StringBuffer();
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('inserts document with generated ID and echoes it back', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       const doc = '{"name":"Alice"}';
       final ok = await InsertCommand().execute(ctx, ['notes'], {'value': doc});
       expect(ok, isTrue);
@@ -1666,13 +1665,13 @@ void main() {
       expect(generatedId, hasLength(32));
       expect(generatedId[12], equals('7')); // UUIDv7 version nibble
 
-      final stored = await store.get('notes', generatedId);
+      final stored = await db.store.get('notes', generatedId);
       expect(stored, isNotNull);
       expect(ValueCodec.decode(stored!)['name'], equals('Alice'));
     });
 
     test('ignores user-provided _id and generates a new one', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final userId = _key('user');
       final doc = '{"_id":"$userId","name":"Alice"}';
       final ok = await InsertCommand().execute(ctx, ['notes'], {'value': doc});
@@ -1683,13 +1682,13 @@ void main() {
       expect(assignedId, isNot(equals(userId)));
 
       // User-supplied ID must NOT have been stored.
-      expect(await store.get('notes', userId), isNull);
+      expect(await db.store.get('notes', userId), isNull);
       // The generated ID must exist.
-      expect(await store.get('notes', assignedId), isNotNull);
+      expect(await db.store.get('notes', assignedId), isNotNull);
     });
 
     test('returns false for invalid JSON via --value', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await InsertCommand().execute(
         ctx,
         ['notes'],
@@ -1700,7 +1699,7 @@ void main() {
     });
 
     test('returns false when document is not a JSON object', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await InsertCommand().execute(
         ctx,
         ['notes'],
@@ -1711,7 +1710,7 @@ void main() {
     });
 
     test('inserts multiple documents from a JSON array via --value', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       const arrayJson = '[{"name":"Alice"},{"name":"Bob"}]';
       final ok = await InsertCommand().execute(
         ctx,
@@ -1732,7 +1731,7 @@ void main() {
       tmp.write('{"name":"Carol"}');
       addTearDown(tmp.delete);
 
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await InsertCommand().execute(
         ctx,
         ['notes'],
@@ -1744,7 +1743,7 @@ void main() {
       expect(decoded, hasLength(1));
       final id = decoded[0]['_id'] as String;
       expect(
-        ValueCodec.decode((await store.get('notes', id))!)['name'],
+        ValueCodec.decode((await db.store.get('notes', id))!)['name'],
         equals('Carol'),
       );
     });
@@ -1754,7 +1753,7 @@ void main() {
       tmp.write('{"name":"Frank"}\n{"name":"Grace"}\n\n');
       addTearDown(tmp.delete);
 
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await InsertCommand().execute(
         ctx,
         ['notes'],
@@ -1768,7 +1767,7 @@ void main() {
     });
 
     test('inserts zero documents from an empty JSON array', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await InsertCommand().execute(ctx, ['notes'], {'value': '[]'});
       expect(ok, isTrue);
       final decoded = json.decode(out.toString()) as List;
@@ -1776,13 +1775,13 @@ void main() {
     });
 
     test('returns false when collection arg is missing', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await InsertCommand().execute(ctx, [], {'value': '{"x":1}'});
       expect(ok, isFalse);
     });
 
     test('returns false when --file path does not exist', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await InsertCommand().execute(
         ctx,
         ['notes'],
@@ -1796,19 +1795,19 @@ void main() {
   // ── PutCommand (deprecated wrapper) ────────────────────────────────────────
 
   group('PutCommand (deprecated)', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
     late StringBuffer err;
 
     setUp(() async {
-      store = await _openStore();
+      db = await _openStore();
       out = StringBuffer();
       err = StringBuffer();
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('still inserts document and emits a deprecation warning', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await PutCommand().execute(
         ctx,
         ['notes'],
@@ -1828,7 +1827,7 @@ void main() {
 
     test('deprecation warning appears even when insert fails', () async {
       // Pass invalid JSON so InsertCommand returns false.
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await PutCommand().execute(
         ctx,
         ['notes'],
@@ -1844,7 +1843,7 @@ void main() {
   // ── UpdateCommand ───────────────────────────────────────────────────────────
 
   group('UpdateCommand', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
     late StringBuffer err;
     late String idA;
@@ -1852,34 +1851,30 @@ void main() {
     late String idC;
 
     setUp(() async {
-      store = await _openStore();
+      db = await _openStore();
       out = StringBuffer();
       err = StringBuffer();
       idA = _key('updA');
       idB = _key('updB');
       idC = _key('updC');
-      await _putDoc(store, 'col', {
+      await _putDoc(db, 'col', {
         '_id': idA,
         'name': 'Alice',
         'status': 'active',
       });
-      await _putDoc(store, 'col', {
-        '_id': idB,
-        'name': 'Bob',
-        'status': 'active',
-      });
-      await _putDoc(store, 'col', {
+      await _putDoc(db, 'col', {'_id': idB, 'name': 'Bob', 'status': 'active'});
+      await _putDoc(db, 'col', {
         '_id': idC,
         'name': 'Carol',
         'status': 'inactive',
       });
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     // ── Single-id mode (positional) ──────────────────────────────────────────
 
     test('single-id: updates one field and preserves others', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await UpdateCommand().execute(
         ctx,
         ['col', idA],
@@ -1887,14 +1882,17 @@ void main() {
       );
       expect(ok, isTrue);
 
-      final doc = ValueCodec.decode((await store.get('col', idA))!);
-      expect(doc['status'], equals('done'));
+      // Read back via the Query Layer so _id is injected from the storage key.
+      // After migration, _id is stored as the key, not in value bytes.
+      final doc = await db.rawCollection('col').get(idA);
+      expect(doc, isNotNull);
+      expect(doc!['status'], equals('done'));
       expect(doc['name'], equals('Alice')); // untouched
       expect(doc['_id'], equals(idA)); // _id preserved
     });
 
     test('single-id: adds a new field that did not exist', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await UpdateCommand().execute(
         ctx,
         ['col', idA],
@@ -1902,7 +1900,7 @@ void main() {
       );
       expect(ok, isTrue);
 
-      final doc = ValueCodec.decode((await store.get('col', idA))!);
+      final doc = ValueCodec.decode((await db.store.get('col', idA))!);
       expect(doc['score'], equals(99));
       expect(doc['name'], equals('Alice')); // still present
     });
@@ -1910,7 +1908,7 @@ void main() {
     test(
       'single-id: does not overwrite _id even when --set contains _id',
       () async {
-        final ctx = _ctx(store, out: out, err: err);
+        final ctx = _ctx(db, out: out, err: err);
         final ok = await UpdateCommand().execute(
           ctx,
           ['col', idA],
@@ -1918,13 +1916,16 @@ void main() {
         );
         expect(ok, isTrue);
 
-        final doc = ValueCodec.decode((await store.get('col', idA))!);
-        expect(doc['_id'], equals(idA)); // original _id preserved
+        // Read back via the Query Layer so _id is injected from the storage key.
+        // After migration, _id is stored as the key, not in value bytes.
+        final doc = await db.rawCollection('col').get(idA);
+        expect(doc, isNotNull);
+        expect(doc!['_id'], equals(idA)); // original _id preserved
       },
     );
 
     test('single-id: returns false when document does not exist', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await UpdateCommand().execute(
         ctx,
         ['col', _key('ghost')],
@@ -1935,7 +1936,7 @@ void main() {
     });
 
     test('single-id: reports {"updated": 1}', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       await UpdateCommand().execute(
         ctx,
         ['col', idA],
@@ -1948,7 +1949,7 @@ void main() {
     // ── Multi-id mode (--id) ─────────────────────────────────────────────────
 
     test('multi-id: updates all listed documents', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await UpdateCommand().execute(
         ctx,
         ['col'],
@@ -1956,14 +1957,14 @@ void main() {
       );
       expect(ok, isTrue);
 
-      final docA = ValueCodec.decode((await store.get('col', idA))!);
-      final docB = ValueCodec.decode((await store.get('col', idB))!);
+      final docA = ValueCodec.decode((await db.store.get('col', idA))!);
+      final docB = ValueCodec.decode((await db.store.get('col', idB))!);
       expect(docA['status'], equals('reviewed'));
       expect(docB['status'], equals('reviewed'));
     });
 
     test('multi-id: reports count of updated documents', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       await UpdateCommand().execute(
         ctx,
         ['col'],
@@ -1976,7 +1977,7 @@ void main() {
     test(
       'multi-id: returns false and reports error when one id is missing',
       () async {
-        final ctx = _ctx(store, out: out, err: err);
+        final ctx = _ctx(db, out: out, err: err);
         final ok = await UpdateCommand().execute(
           ctx,
           ['col'],
@@ -1988,7 +1989,7 @@ void main() {
     );
 
     test('multi-id: single id in --id flag works', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await UpdateCommand().execute(
         ctx,
         ['col'],
@@ -1997,14 +1998,14 @@ void main() {
       expect(ok, isTrue);
       final result = json.decode(out.toString()) as Map;
       expect(result['updated'], equals(1));
-      final doc = ValueCodec.decode((await store.get('col', idA))!);
+      final doc = ValueCodec.decode((await db.store.get('col', idA))!);
       expect(doc['status'], equals('solo'));
     });
 
     // ── Filter mode ──────────────────────────────────────────────────────────
 
     test('filter: updates only matching documents', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final filter = '{"field":"status","op":"eq","value":"active"}';
       final ok = await UpdateCommand().execute(
         ctx,
@@ -2013,16 +2014,16 @@ void main() {
       );
       expect(ok, isTrue);
 
-      final docA = ValueCodec.decode((await store.get('col', idA))!);
-      final docB = ValueCodec.decode((await store.get('col', idB))!);
-      final docC = ValueCodec.decode((await store.get('col', idC))!);
+      final docA = ValueCodec.decode((await db.store.get('col', idA))!);
+      final docB = ValueCodec.decode((await db.store.get('col', idB))!);
+      final docC = ValueCodec.decode((await db.store.get('col', idC))!);
       expect(docA['flagged'], isTrue); // active -> updated
       expect(docB['flagged'], isTrue); // active -> updated
       expect(docC['flagged'], isNull); // inactive -> not touched
     });
 
     test('filter: returns {"updated": 0} when nothing matches', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final filter = '{"field":"status","op":"eq","value":"archived"}';
       final ok = await UpdateCommand().execute(
         ctx,
@@ -2035,7 +2036,7 @@ void main() {
     });
 
     test('filter: returns false for invalid filter JSON', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await UpdateCommand().execute(
         ctx,
         ['col'],
@@ -2046,7 +2047,7 @@ void main() {
     });
 
     test('filter: returns false for unknown filter operator', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await UpdateCommand().execute(
         ctx,
         ['col'],
@@ -2058,7 +2059,7 @@ void main() {
     // ── All-docs mode ─────────────────────────────────────────────────────────
 
     test('all: updates every document in the collection', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await UpdateCommand().execute(
         ctx,
         ['col'],
@@ -2067,7 +2068,7 @@ void main() {
       expect(ok, isTrue);
 
       for (final id in [idA, idB, idC]) {
-        final doc = ValueCodec.decode((await store.get('col', id))!);
+        final doc = ValueCodec.decode((await db.store.get('col', id))!);
         expect(doc['archived'], isTrue);
       }
 
@@ -2076,7 +2077,7 @@ void main() {
     });
 
     test('all: returns {"updated": 0} for an empty collection', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await UpdateCommand().execute(
         ctx,
         ['empty'],
@@ -2090,7 +2091,7 @@ void main() {
     // ── Mutual exclusion ─────────────────────────────────────────────────────
 
     test('returns false when positional id and --all are both given', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await UpdateCommand().execute(
         ctx,
         ['col', idA],
@@ -2101,7 +2102,7 @@ void main() {
     });
 
     test('returns false when --id and --filter are both given', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await UpdateCommand().execute(
         ctx,
         ['col'],
@@ -2116,7 +2117,7 @@ void main() {
     });
 
     test('returns false when --filter and --all are both given', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await UpdateCommand().execute(
         ctx,
         ['col'],
@@ -2131,7 +2132,7 @@ void main() {
     });
 
     test('returns false when no targeting mode is given', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await UpdateCommand().execute(
         ctx,
         ['col'],
@@ -2144,14 +2145,14 @@ void main() {
     // ── --set validation ─────────────────────────────────────────────────────
 
     test('returns false when --set is missing', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await UpdateCommand().execute(ctx, ['col', idA], {});
       expect(ok, isFalse);
       expect(err.toString(), contains('--set'));
     });
 
     test('returns false when --set is invalid JSON', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await UpdateCommand().execute(
         ctx,
         ['col', idA],
@@ -2162,7 +2163,7 @@ void main() {
     });
 
     test('returns false when --set is a JSON array', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await UpdateCommand().execute(
         ctx,
         ['col', idA],
@@ -2173,7 +2174,7 @@ void main() {
     });
 
     test('returns false when --set is a JSON scalar', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await UpdateCommand().execute(
         ctx,
         ['col', idA],
@@ -2190,13 +2191,13 @@ void main() {
       () async {
         // Set up document with a nested object.
         final id = _key('nested');
-        await _putDoc(store, 'col', {
+        await _putDoc(db, 'col', {
           '_id': id,
           'profile': {'city': 'Sydney', 'country': 'AU'},
           'name': 'Dana',
         });
 
-        final ctx = _ctx(store, out: out, err: err);
+        final ctx = _ctx(db, out: out, err: err);
         final ok = await UpdateCommand().execute(
           ctx,
           ['col', id],
@@ -2204,7 +2205,7 @@ void main() {
         );
         expect(ok, isTrue);
 
-        final doc = ValueCodec.decode((await store.get('col', id))!);
+        final doc = ValueCodec.decode((await db.store.get('col', id))!);
         // Shallow merge: entire profile replaced.
         expect(doc['profile'], equals({'city': 'Melbourne'}));
         expect(doc['name'], equals('Dana')); // sibling field unchanged
@@ -2214,7 +2215,7 @@ void main() {
     // ── Error: missing collection ─────────────────────────────────────────────
 
     test('returns false when collection arg is missing', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await UpdateCommand().execute(ctx, [], {'set': '{"x":1}'});
       expect(ok, isFalse);
       expect(err.toString(), contains('update requires'));
@@ -2223,7 +2224,7 @@ void main() {
     // ── Filter mode: empty collection ─────────────────────────────────────────
 
     test('filter: returns {"updated":0} on empty collection', () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final filter = '{"field":"status","op":"eq","value":"active"}';
       final ok = await UpdateCommand().execute(
         ctx,
@@ -2239,12 +2240,12 @@ void main() {
   // ── IndexCommand ─────────────────────────────────────────────────────────────
 
   group('IndexCommand', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
     late StringBuffer err;
 
     setUp(() async {
-      store = await _openStore();
+      db = await _openStore();
       out = StringBuffer();
       err = StringBuffer();
     });
@@ -2252,18 +2253,11 @@ void main() {
       MemoryStorageAdapter.releaseAllLocks();
     });
 
-    /// Creates a [CommandContext] with an empty [KmdbConfig] and empty
-    /// [IndexManager] suitable for most index tests.
+    /// Creates a [CommandContext] with an empty [KmdbConfig] suitable for most
+    /// index tests.
     CommandContext makeCtx({KmdbConfig? config}) {
       final cfg = config ?? KmdbConfig.empty();
-      final mgr = IndexManager(store: store, definitions: const []);
-      return CommandContext(
-        store: store,
-        config: cfg,
-        indexManager: mgr,
-        out: out,
-        err: err,
-      );
+      return CommandContext(db: db, config: cfg, out: out, err: err);
     }
 
     test('requires a subcommand', () async {
@@ -2339,13 +2333,7 @@ void main() {
       test('rejects paths starting with _', () async {
         final config = KmdbConfig.empty();
         final ok = await IndexCommand().execute(
-          CommandContext(
-            store: store,
-            config: config,
-            indexManager: IndexManager(store: store, definitions: const []),
-            out: out,
-            err: err,
-          ),
+          CommandContext(db: db, config: config, out: out, err: err),
           ['create', 'contacts', '_reserved'],
           {},
         );
@@ -2357,13 +2345,7 @@ void main() {
         final config = KmdbConfig.empty();
         config.addIndex('contacts', 'city');
         final ok = await IndexCommand().execute(
-          CommandContext(
-            store: store,
-            config: config,
-            indexManager: IndexManager(store: store, definitions: const []),
-            out: out,
-            err: err,
-          ),
+          CommandContext(db: db, config: config, out: out, err: err),
           ['create', 'contacts', 'city'],
           {},
         );
@@ -2430,9 +2412,9 @@ void main() {
           'kmdb_idx_del_test_',
         );
         try {
-          final (tmpStore, _) = await KvStoreImpl.open(
-            tmpDir.path,
-            StorageAdapterNative(),
+          final tmpDb = await KmdbDatabase.open(
+            path: tmpDir.path,
+            adapter: StorageAdapterNative(),
             config: KvStoreConfig.forTesting(),
           );
           try {
@@ -2441,16 +2423,7 @@ void main() {
             expect(config.indexesForCollection('contacts'), hasLength(1));
 
             final ok = await IndexCommand().execute(
-              CommandContext(
-                store: tmpStore,
-                config: config,
-                indexManager: IndexManager(
-                  store: tmpStore,
-                  definitions: const [],
-                ),
-                out: out,
-                err: err,
-              ),
+              CommandContext(db: tmpDb, config: config, out: out, err: err),
               ['delete', 'contacts', 'city'],
               {},
             );
@@ -2459,7 +2432,7 @@ void main() {
             expect(config.indexesForCollection('contacts'), isEmpty);
             expect(out.toString(), contains('deleted'));
           } finally {
-            await tmpStore.close();
+            await tmpDb.close();
           }
         } finally {
           tmpDir.deleteSync(recursive: true);
@@ -2471,14 +2444,14 @@ void main() {
   // ── CommandContext helpers ──────────────────────────────────────────────────
 
   group('CommandContext', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
 
-    setUp(() async => store = await _openStore());
-    tearDown(() => store.close());
+    setUp(() async => db = await _openStore());
+    tearDown(() => db.close());
 
     test('writeValue emits indented JSON', () async {
       final out = StringBuffer();
-      final ctx = _ctx(store, out: out);
+      final ctx = _ctx(db, out: out);
       ctx.writeValue({'ok': true});
       final decoded = json.decode(out.toString()) as Map;
       expect(decoded['ok'], isTrue);
@@ -2486,7 +2459,7 @@ void main() {
 
     test('writeError prefixes with "Error:"', () async {
       final err = StringBuffer();
-      final ctx = _ctx(store, err: err);
+      final ctx = _ctx(db, err: err);
       ctx.writeError('something went wrong');
       expect(err.toString(), startsWith('Error:'));
       expect(err.toString(), contains('something went wrong'));
@@ -2494,7 +2467,7 @@ void main() {
 
     test('writeDocuments uses active OutputMode', () async {
       final out = StringBuffer();
-      final ctx = _ctx(store, mode: OutputMode.ndjson, out: out);
+      final ctx = _ctx(db, mode: OutputMode.ndjson, out: out);
       ctx.writeDocuments([
         {'id': '1', 'v': 'a'},
         {'id': '2', 'v': 'b'},

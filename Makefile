@@ -130,7 +130,7 @@ site/spec.epub: docs/spec/*.md | site/
 coverage: coverage.log
 .PHONY: coverage
 
-coverage.log: packages/** | site/
+coverage.log: packages/*/** | site/
 	melos coverage | tee coverage.log
 
 site/spec.pdf: docs/spec/*.md | site/

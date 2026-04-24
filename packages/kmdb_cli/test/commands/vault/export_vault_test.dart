@@ -23,11 +23,15 @@ import 'package:test/test.dart';
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
+/// Counter to generate unique in-memory database paths per test, preventing
+/// LockException when multiple [KmdbDatabase] instances are opened concurrently.
+var _dbCounter = 0;
+
 /// A [VaultStore] backed by [MemoryStorageAdapter] for CLI tests.
 class _TestVaultStore extends VaultStore {
-  _TestVaultStore(MemoryStorageAdapter adapter)
+  _TestVaultStore(MemoryStorageAdapter adapter, String dbPath)
     : _mem = adapter,
-      super(adapter: adapter, dbDir: '/testdb');
+      super(adapter: adapter, dbDir: dbPath);
 
   final MemoryStorageAdapter _mem;
 
@@ -41,28 +45,27 @@ class _TestVaultStore extends VaultStore {
   }
 }
 
-/// Opens an in-memory [KvStoreImpl] for tests.
-Future<KvStoreImpl> _openStore() async {
-  final (store, _) = await KvStoreImpl.open(
-    '/testdb',
-    MemoryStorageAdapter(),
+/// Opens an in-memory [KmdbDatabase] for tests, optionally wired with [vault].
+///
+/// Each call uses a unique path to prevent [LockException] when tests open
+/// multiple databases concurrently (e.g. a vault-wired db and a no-vault db).
+Future<KmdbDatabase> _openStore({String? path, _TestVaultStore? vault}) async {
+  final dbPath = path ?? '/testdb_export_vault_${_dbCounter++}';
+  return KmdbDatabase.open(
+    path: dbPath,
+    adapter: MemoryStorageAdapter(),
     config: KvStoreConfig.forTesting(),
+    vaultStore: vault,
   );
-  return store;
 }
 
-/// Builds a [CommandContext] with an optional [VaultStore].
-CommandContext _ctx(
-  KvStoreImpl store, {
-  required _TestVaultStore? vault,
-  StringBuffer? out,
-  StringBuffer? err,
-}) => CommandContext(
-  store: store,
-  vaultStore: vault,
-  out: out ?? StringBuffer(),
-  err: err ?? StringBuffer(),
-);
+/// Builds a [CommandContext] backed by [db].
+CommandContext _ctx(KmdbDatabase db, {StringBuffer? out, StringBuffer? err}) =>
+    CommandContext(
+      db: db,
+      out: out ?? StringBuffer(),
+      err: err ?? StringBuffer(),
+    );
 
 /// Ingests [bytes] into [vault] and returns the `kmdb-vault://` URI string.
 Future<String> _ingest(
@@ -82,8 +85,10 @@ Future<String> _ingest(
 final _kFileBytes = Uint8List.fromList(utf8.encode('export-vault-test'));
 
 void main() {
+  tearDown(MemoryStorageAdapter.releaseAllLocks);
+
   group('ExportCommand --vault', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late MemoryStorageAdapter memAdapter;
     late _TestVaultStore vault;
     late StringBuffer out;
@@ -91,9 +96,10 @@ void main() {
     late io.Directory tmpDir;
 
     setUp(() async {
-      store = await _openStore();
+      final dbPath = '/testdb_export_vault_${_dbCounter++}';
       memAdapter = MemoryStorageAdapter();
-      vault = _TestVaultStore(memAdapter);
+      vault = _TestVaultStore(memAdapter, dbPath);
+      db = await _openStore(path: dbPath, vault: vault);
       out = StringBuffer();
       err = StringBuffer();
       tmpDir = io.Directory.systemTemp.createTempSync(
@@ -101,7 +107,7 @@ void main() {
       );
     });
     tearDown(() async {
-      await store.close();
+      await db.close();
       try {
         tmpDir.deleteSync(recursive: true);
       } catch (_) {}
@@ -110,7 +116,7 @@ void main() {
     // ── Missing collection argument ───────────────────────────────────────
 
     test('returns false when collection arg is missing', () async {
-      final ctx = _ctx(store, vault: vault, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await ExportCommand().execute(ctx, [], {});
       expect(ok, isFalse);
       expect(err.toString(), contains('requires <collection>'));
@@ -119,7 +125,10 @@ void main() {
     // ── Vault not configured ──────────────────────────────────────────────
 
     test('--vault returns false when vault store is null', () async {
-      final ctx = _ctx(store, vault: null, out: out, err: err);
+      // Open a second database without vault to test the "no vault" error path.
+      final dbNoVault = await _openStore();
+      addTearDown(() => dbNoVault.close());
+      final ctx = _ctx(dbNoVault, out: out, err: err);
       final ok = await ExportCommand().execute(
         ctx,
         ['notes'],
@@ -132,7 +141,7 @@ void main() {
     // ── Output dir creation failure ───────────────────────────────────────
 
     test('--vault returns false when output dir cannot be created', () async {
-      final ctx = _ctx(store, vault: vault, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       // Use a path blocked by an existing regular file.
       final blocked = '${tmpDir.path}/blocked';
       io.File(blocked).createSync();
@@ -151,9 +160,9 @@ void main() {
 
     test('standard export (no --vault) writes NDJSON to out sink', () async {
       const id = '01900000000070809000000000000020';
-      await store.put('docs', id, ValueCodec.encode({'i': id}));
+      await db.store.put('docs', id, ValueCodec.encode({'i': id}));
 
-      final ctx = _ctx(store, vault: vault, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await ExportCommand().execute(ctx, ['docs'], {});
 
       expect(ok, isTrue);
@@ -165,7 +174,7 @@ void main() {
     test(
       '--vault on empty collection writes summary with zero counts',
       () async {
-        final ctx = _ctx(store, vault: vault, out: out, err: err);
+        final ctx = _ctx(db, out: out, err: err);
         final ok = await ExportCommand().execute(
           ctx,
           ['empty'],
@@ -183,10 +192,10 @@ void main() {
       '--vault exports plain documents to NDJSON (no package files)',
       () async {
         const id = '01900000000070809000000000000021';
-        await store.put('docs', id, ValueCodec.encode({'i': id}));
+        await db.store.put('docs', id, ValueCodec.encode({'i': id}));
 
         final outputDir = '${tmpDir.path}/plain_export';
-        final ctx = _ctx(store, vault: vault, out: out, err: err);
+        final ctx = _ctx(db, out: out, err: err);
         final ok = await ExportCommand().execute(
           ctx,
           ['docs'],
@@ -259,7 +268,7 @@ void main() {
       // Export with --vault but no explicit --output.
       // The command will attempt to create '<collection>_vault_export'.
       // We just verify the command runs without crash and reports in out.
-      final ctx = _ctx(store, vault: vault, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await ExportCommand().execute(ctx, ['docs'], {'vault': true});
       // May succeed or fail depending on cwd write permissions.
       // Key assertion: the command doesn't crash unexpectedly.

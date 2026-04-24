@@ -23,45 +23,40 @@ import 'package:test/test.dart';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Opens a native-backed store in [dir].
-Future<KvStoreImpl> _openStore(String dir) async {
+/// Opens a native-backed database in [dir].
+Future<KmdbDatabase> _openStore(String dir) async {
   final adapter = StorageAdapterNative();
   await adapter.createDirectory(dir);
-  final (store, _) = await KvStoreImpl.open(dir, adapter);
-  await store.ensureDeviceId();
-  return store;
+  return KmdbDatabase.open(path: dir, adapter: adapter);
 }
 
-/// Creates a [CommandContext] backed by [store] with captured output buffers.
-CommandContext _ctx(
-  KvStoreImpl store, {
-  StringBuffer? out,
-  StringBuffer? err,
-}) => CommandContext(
-  store: store,
-  out: out ?? StringBuffer(),
-  err: err ?? StringBuffer(),
-);
+/// Creates a [CommandContext] backed by [db] with captured output buffers.
+CommandContext _ctx(KmdbDatabase db, {StringBuffer? out, StringBuffer? err}) =>
+    CommandContext(
+      db: db,
+      out: out ?? StringBuffer(),
+      err: err ?? StringBuffer(),
+    );
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 void main() {
   late io.Directory tmpDir;
   late io.Directory dbDir;
-  late KvStoreImpl store;
+  late KmdbDatabase db;
   late StringBuffer out;
   late StringBuffer err;
 
   setUp(() async {
     tmpDir = io.Directory.systemTemp.createTempSync('remote_cmd_test_');
     dbDir = io.Directory('${tmpDir.path}/db')..createSync();
-    store = await _openStore(dbDir.path);
+    db = await _openStore(dbDir.path);
     out = StringBuffer();
     err = StringBuffer();
   });
 
   tearDown(() async {
-    await store.close(flush: false);
+    await db.close(flush: false);
     if (tmpDir.existsSync()) tmpDir.deleteSync(recursive: true);
   });
 
@@ -77,14 +72,14 @@ void main() {
   // ── Error: missing subcommand ────────────────────────────────────────────────
 
   test('returns false when no subcommand is given', () async {
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await cmd.execute(ctx, [], {});
     expect(ok, isFalse);
     expect(err.toString(), contains('subcommand required'));
   });
 
   test('returns false for unknown subcommand', () async {
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await cmd.execute(ctx, ['oops'], {});
     expect(ok, isFalse);
     expect(err.toString(), contains("unknown subcommand 'oops'"));
@@ -93,21 +88,21 @@ void main() {
   // ── add ─────────────────────────────────────────────────────────────────────
 
   test('add: returns false when name is missing', () async {
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await cmd.execute(ctx, ['add'], {});
     expect(ok, isFalse);
     expect(err.toString(), contains('remote name required'));
   });
 
   test('add: returns false when --path is missing for local type', () async {
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await cmd.execute(ctx, ['add', 'origin'], {});
     expect(ok, isFalse);
     expect(err.toString(), contains('--path is required'));
   });
 
   test('add: returns false for unknown type', () async {
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await cmd.execute(
       ctx,
       ['add', 'origin'],
@@ -118,7 +113,7 @@ void main() {
   });
 
   test('add: successfully adds a local remote', () async {
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await cmd.execute(ctx, ['add', 'origin'], {'path': '/tmp/sync'});
     expect(ok, isTrue);
     expect(out.toString(), contains("Remote 'origin' added"));
@@ -130,7 +125,7 @@ void main() {
   });
 
   test('add: explicit --type local works', () async {
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await cmd.execute(
       ctx,
       ['add', 'nas'],
@@ -140,20 +135,20 @@ void main() {
   });
 
   test('add: fails on duplicate without --force', () async {
-    final ctx1 = _ctx(store, out: out, err: err);
+    final ctx1 = _ctx(db, out: out, err: err);
     await cmd.execute(ctx1, ['add', 'origin'], {'path': '/path/a'});
 
-    final ctx2 = _ctx(store, out: out, err: err);
+    final ctx2 = _ctx(db, out: out, err: err);
     final ok = await cmd.execute(ctx2, ['add', 'origin'], {'path': '/path/b'});
     expect(ok, isFalse);
     expect(err.toString(), contains("already exists"));
   });
 
   test('add: overwrites with --force', () async {
-    final ctx1 = _ctx(store, out: out, err: err);
+    final ctx1 = _ctx(db, out: out, err: err);
     await cmd.execute(ctx1, ['add', 'origin'], {'path': '/path/a'});
 
-    final ctx2 = _ctx(store, out: out, err: err);
+    final ctx2 = _ctx(db, out: out, err: err);
     final ok = await cmd.execute(
       ctx2,
       ['add', 'origin'],
@@ -168,14 +163,14 @@ void main() {
   // ── remove ───────────────────────────────────────────────────────────────────
 
   test('remove: returns false when name is missing', () async {
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await cmd.execute(ctx, ['remove'], {});
     expect(ok, isFalse);
     expect(err.toString(), contains('remote name required'));
   });
 
   test('remove: returns false when remote does not exist', () async {
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await cmd.execute(ctx, ['remove', 'nosuchremote'], {});
     expect(ok, isFalse);
     expect(err.toString(), contains("No remote named 'nosuchremote' found"));
@@ -183,11 +178,11 @@ void main() {
 
   test('remove: successfully removes a remote', () async {
     // First add.
-    final ctx1 = _ctx(store, out: out, err: err);
+    final ctx1 = _ctx(db, out: out, err: err);
     await cmd.execute(ctx1, ['add', 'origin'], {'path': '/tmp/sync'});
 
     // Then remove.
-    final ctx2 = _ctx(store, out: out, err: err);
+    final ctx2 = _ctx(db, out: out, err: err);
     final ok = await cmd.execute(ctx2, ['remove', 'origin'], {});
     expect(ok, isTrue);
     expect(out.toString(), contains("Remote 'origin' removed"));
@@ -199,18 +194,18 @@ void main() {
   // ── list ─────────────────────────────────────────────────────────────────────
 
   test('list: shows "No remotes" when empty', () async {
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await cmd.execute(ctx, ['list'], {});
     expect(ok, isTrue);
     expect(out.toString(), contains('No remotes configured'));
   });
 
   test('list: shows all remotes after add', () async {
-    final ctx1 = _ctx(store, out: out, err: err);
+    final ctx1 = _ctx(db, out: out, err: err);
     await cmd.execute(ctx1, ['add', 'origin'], {'path': '/tmp/sync'});
     await cmd.execute(ctx1, ['add', 'dropbox'], {'path': '/Dropbox/sync'});
 
-    final ctx2 = _ctx(store, out: out, err: err);
+    final ctx2 = _ctx(db, out: out, err: err);
     final ok = await cmd.execute(ctx2, ['list'], {});
     expect(ok, isTrue);
     final output = out.toString();
@@ -224,7 +219,7 @@ void main() {
   // ── Round-trip: add → list → remove → list ───────────────────────────────────
 
   test('full round-trip: add, list, remove, list', () async {
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
 
     // Add.
     expect(

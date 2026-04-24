@@ -31,7 +31,11 @@ import 'index/index_definition.dart';
 import 'index/index_manager.dart';
 import 'kmdb_codec.dart';
 import 'kmdb_collection.dart';
+import 'raw_document_codec.dart';
+import 'reserved_key_validator.dart';
 import 'schema/schema_manager.dart';
+import 'write_augmentor.dart';
+import 'write_validator.dart';
 
 /// The top-level KMDB database handle.
 ///
@@ -137,7 +141,32 @@ final class KmdbDatabase {
        // present; if either is absent, vault reference counting is disabled.
        _vaultRefInterceptor = (vaultStore != null && vaultGc != null)
            ? VaultRefInterceptor(kvStore: store, gc: vaultGc)
-           : null;
+           : null {
+    // ── Layer 1: validators (run before any I/O) ─────────────────────────────
+    // Always register the reserved-key validator first so that user fields
+    // starting with '_' are rejected before schema validation runs.
+    _validators
+      ..add(const ReservedKeyValidator())
+      ..add(_schemaManager);
+
+    // ── Layer 2: augmentors (add entries to WriteBatch after validators) ──────
+    // IndexManager is always present.
+    _augmentors.add(_indexManager);
+
+    // FtsManager augmentor — null when no FTS indexes are configured.
+    // The local `fts` variable captures the non-null value after the null
+    // check so that Dart's flow analysis can prove non-nullability.
+    final fts = _ftsManager;
+    if (fts != null) _augmentors.add(fts);
+
+    // VecManager augmentor — null when no vector indexes are configured.
+    final vec = _vecManager;
+    if (vec != null) _augmentors.add(vec);
+
+    // VaultRefInterceptor augmentor — null when vault is disabled.
+    final vri = _vaultRefInterceptor;
+    if (vri != null) _augmentors.add(vri);
+  }
 
   final CacheLayer _cache;
   final KvStoreImpl _store;
@@ -150,6 +179,14 @@ final class KmdbDatabase {
   final EmbeddingModel? _embeddingModel;
   final VaultStore? _vaultStore;
   final VaultRefInterceptor? _vaultRefInterceptor;
+
+  /// Layer 1 validators. Iterated in registration order; first failure aborts
+  /// the write before any I/O is performed.
+  final List<WriteValidator> _validators = [];
+
+  /// Layer 2 augmentors. Iterated in registration order; each adds entries to
+  /// the [WriteBatch] that is atomically committed with the document write.
+  final List<WriteAugmentor> _augmentors = [];
 
   // ── Factory ─────────────────────────────────────────────────────────────────
 
@@ -310,6 +347,26 @@ final class KmdbDatabase {
     required KmdbCodec<T> codec,
   }) => KmdbCollection<T>(namespace: name, codec: codec, database: this);
 
+  /// Returns an untyped collection for [name] using the built-in
+  /// [RawDocumentCodec].
+  ///
+  /// This is the entry point for code that works with plain
+  /// `Map<String, dynamic>` documents — such as the CLI — and does not have a
+  /// typed model. All write pipeline validation and augmentation (schema
+  /// enforcement, secondary index maintenance, FTS updates, vault ref counts)
+  /// still runs, so writes through [rawCollection] are fully equivalent to
+  /// typed writes through [collection].
+  ///
+  /// ## Example
+  ///
+  /// ```dart
+  /// final col = db.rawCollection('contacts');
+  /// await col.insert({'name': 'Alice', 'email': 'alice@example.com'});
+  /// final doc = await col.get(key);
+  /// ```
+  KmdbCollection<Map<String, dynamic>> rawCollection(String name) =>
+      collection(name: name, codec: const RawDocumentCodec());
+
   /// Checks all tracked namespaces for stale cache entries.
   ///
   /// Call this when the app returns to the foreground (mobile/web) to evict
@@ -354,6 +411,20 @@ final class KmdbDatabase {
   VecManager? get vecManager => _vecManager;
 
   // ── Internal (used by KmdbCollection) ─────────────────────────────────────
+
+  /// The ordered list of write validators (Layer 1 of the write pipeline).
+  ///
+  /// [KmdbCollection._writeDocument] iterates this list before any I/O. If any
+  /// validator throws, the write is aborted with no partial side effects.
+  List<WriteValidator> get validators => _validators;
+
+  /// The ordered list of write augmentors (Layer 2 of the write pipeline).
+  ///
+  /// [KmdbCollection._writeDocument] and [KmdbCollection._deleteDocument]
+  /// iterate this list to add extra entries to the [WriteBatch] before it is
+  /// committed. All augmentor writes land in the same atomic batch as the
+  /// document write.
+  List<WriteAugmentor> get augmentors => _augmentors;
 
   /// The cache-aware read path.
   CacheLayer get cache => _cache;
