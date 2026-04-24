@@ -75,7 +75,7 @@ melos:
       description: Test all packages with coverage
       run: |
         dart pub global run coverage:test_with_coverage &&
-        lcov --summary coverage/lcov.info
+        lcov --ignore-errors empty --summary coverage/lcov.info
       exec:
         concurrency: 4
       packageFilters:

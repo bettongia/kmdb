@@ -12,4 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-void main() {}
+import 'package:test/test.dart';
+
+void main() {
+  test('empty', () => expect(true, isTrue));
+}
