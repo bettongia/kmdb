@@ -348,4 +348,32 @@ All tests must pass with ≥ 90% coverage.
 
 ## Summary
 
-—
+All four phases delivered and merged via PR #18.
+
+**Phase 1** formalised the write pipeline: `WriteValidator` and `WriteAugmentor`
+interfaces were added under `packages/kmdb/lib/src/query/`, exported from
+`kmdb.dart`, and both documented in spec §13. `ReservedKeyValidator` replaced
+the static `_validateNoReservedKeys()`. `SchemaManager` gained
+`implements WriteValidator`. All four augmentors (`IndexManager`, `FtsManager`,
+`VecManager`, `VaultRefInterceptor`) gained `implements WriteAugmentor` and were
+unified to the common `interceptWrite({batch, namespace, docKey, newDoc, oldDoc})`
+signature. `KmdbDatabase` now holds `List<WriteValidator> _validators` and
+`List<WriteAugmentor> _augmentors` built at `open()`; `_writeDocument()` iterates
+both lists and `_deleteDocument()` iterates augmentors only.
+
+**Phase 2** added `RawDocumentCodec` and `KmdbDatabase.rawCollection()`, giving
+the CLI (and any other untyped caller) a pass-through entry point that routes
+writes through the full pipeline. Round-trip, schema enforcement, and index tests
+were added.
+
+**Phase 3** migrated the CLI: `DatabaseOpener.open()` now returns
+`(KmdbDatabase, bool created)`; `CommandContext` was restructured around
+`KmdbDatabase` with `store`, `indexManager`, and `vaultStore` as convenience
+getters. All mutation and read commands (`insert`, `put`, `update`, `get`,
+`scan`, `count`, `delete`) were migrated to `rawCollection`; `scan --prefix` and
+all engine-level commands remain at the store layer. Stale doc-comment warnings
+were removed; all CLI tests updated to `CommandContext(db: ...)`.
+
+**Phase 4** updated `plans/plan_cli_schemas.md` to add this plan as a
+prerequisite and removed the now-redundant phases that wired schema enforcement
+into the CLI manually.
