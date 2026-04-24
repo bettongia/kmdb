@@ -1,9 +1,6 @@
 {
   "permissions": {
-    "allow": [
-      "Read(//Users/gonk/development/kmesh/packages/registry_freedesktop_mimeinfo/**)",
-      "Read(//Users/gonk/development/kmesh/**)"
-    ]
+    "allow": []
   },
   "hooks": {
     "PreToolUse": [
@@ -21,17 +18,9 @@
   "sandbox": {
     "enabled": true,
     "filesystem": {
-      "allowWrite": [
-        "./"
-      ],
-      "denyRead": [
-        "~/"
-      ],
-      "allowRead": [
-        "./",
-        "~/.pub-cache",
-        "~/.gitconfig"
-      ]
+      "allowWrite": ["./"],
+      "denyRead": ["~/"],
+      "allowRead": []
     }
   }
 }
