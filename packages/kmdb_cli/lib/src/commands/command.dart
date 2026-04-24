@@ -25,34 +25,44 @@ import '../output/output_mode.dart';
 
 /// Execution context passed to every CLI command.
 ///
-/// Carries the open store, the CLI config, the index manager, the optional
-/// vault store, the chosen output mode, and output sinks so commands can be
-/// tested without real disk I/O or stdout.
+/// Carries the open [KmdbDatabase], the CLI config, the chosen output mode,
+/// and output sinks so commands can be tested without real disk I/O or stdout.
+///
+/// ## Query Layer access
+///
+/// Commands that read or write documents should use [rawCollection] to obtain
+/// an untyped [KmdbCollection] for the target collection. Writes through
+/// [rawCollection] pass through the full write pipeline (schema validation,
+/// secondary index maintenance, FTS updates, vault ref counts).
+///
+/// ## Engine-level access
+///
+/// Commands that operate on engine internals (dump, restore, sync, compact,
+/// flush, vault, etc.) may use [store] directly. Writes at the store level
+/// bypass the write pipeline — this is intentional for such commands (the same
+/// reason database restores bypass constraints in any database system).
 final class CommandContext {
+  /// Creates a [CommandContext] backed by [db].
+  ///
+  /// [config] defaults to [KmdbConfig.empty] when omitted. [mode] defaults to
+  /// [OutputMode.json]. [out] and [err] default to stdout and stderr.
   CommandContext({
-    required this.store,
+    required this.db,
     KmdbConfig? config,
-    IndexManager? indexManager,
-    this.vaultStore,
     this.mode = OutputMode.json,
     this.dbCreated = false,
     StringSink? out,
     StringSink? err,
   }) : config = config ?? KmdbConfig.empty(),
-       indexManager =
-           indexManager ?? IndexManager(store: store, definitions: const []),
        out = out ?? _StdoutSink(),
        err = err ?? _StderrSink();
 
-  /// The open key-value store.
-  final KvStoreImpl store;
-
-  /// The open vault store, or `null` when vault is not configured.
+  /// The open database.
   ///
-  /// Set by the CLI runner when the database directory contains a vault
-  /// subdirectory. Vault commands that require this field should check for
-  /// `null` and report an error to the user rather than crashing.
-  final VaultStore? vaultStore;
+  /// The primary field. Commands that read or write documents should use
+  /// [rawCollection] rather than accessing [db] directly. Commands that need
+  /// engine-level access use [store].
+  final KmdbDatabase db;
 
   /// The per-database CLI configuration loaded from `local/config.json`.
   ///
@@ -60,11 +70,6 @@ final class CommandContext {
   /// across CLI sessions. Commands that mutate this config must call
   /// [KmdbConfig.save] to persist the changes.
   final KmdbConfig config;
-
-  /// The [IndexManager] constructed from the configured index definitions.
-  ///
-  /// Commands that read or modify index state use this manager directly.
-  final IndexManager indexManager;
 
   /// The active output format.
   final OutputMode mode;
@@ -87,6 +92,38 @@ final class CommandContext {
   /// Set by read-only diagnostic commands (e.g. [UtilCommand]) that must never
   /// cause side-effects on the database they are inspecting.
   bool suppressFlush = false;
+
+  // ── Convenience accessors ──────────────────────────────────────────────────
+
+  /// The underlying key-value store.
+  ///
+  /// Use this only for engine-level operations (dump, restore, sync, compact,
+  /// flush, vault, etc.) that legitimately bypass the write pipeline.
+  /// For document reads and writes, prefer [rawCollection].
+  KvStoreImpl get store => db.store;
+
+  /// The index manager for write interception and lazy build.
+  ///
+  /// Use this for commands that inspect or manage index state (e.g. the
+  /// `index` command and `scan --explain`).
+  IndexManager get indexManager => db.indexManager;
+
+  /// The vault store, or `null` when vault is not configured.
+  ///
+  /// Vault commands that require this field should check for `null` and report
+  /// an error rather than crashing.
+  VaultStore? get vaultStore => db.vaultStore;
+
+  /// Returns an untyped [KmdbCollection] for [collectionName].
+  ///
+  /// The returned collection routes writes through the full write pipeline:
+  /// schema validation, secondary index maintenance, FTS updates, and vault
+  /// ref-count adjustments all run automatically. This is the recommended way
+  /// for CLI commands to read and write documents.
+  KmdbCollection<Map<String, dynamic>> rawCollection(String collectionName) =>
+      db.rawCollection(collectionName);
+
+  // ── Output helpers ─────────────────────────────────────────────────────────
 
   /// Writes [docs] to [out] using the active [mode].
   void writeDocuments(List<Map<String, dynamic>> docs) {

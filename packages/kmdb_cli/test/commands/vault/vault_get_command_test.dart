@@ -23,12 +23,16 @@ import 'package:test/test.dart';
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
+/// Counter to generate unique in-memory database paths per test, preventing
+/// LockException when multiple [KmdbDatabase] instances are opened concurrently.
+var _dbCounter = 0;
+
 /// A [VaultStore] subclass that overrides [listFilesRecursive] so it works
 /// with the flat [MemoryStorageAdapter] key store used in tests.
 class _TestVaultStore extends VaultStore {
-  _TestVaultStore(MemoryStorageAdapter memAdapter)
+  _TestVaultStore(MemoryStorageAdapter memAdapter, String dbPath)
     : _mem = memAdapter,
-      super(adapter: memAdapter, dbDir: '/testdb');
+      super(adapter: memAdapter, dbDir: dbPath);
 
   final MemoryStorageAdapter _mem;
 
@@ -42,28 +46,27 @@ class _TestVaultStore extends VaultStore {
   }
 }
 
-/// Opens an in-memory [KvStoreImpl] for tests.
-Future<KvStoreImpl> _openStore() async {
-  final (store, _) = await KvStoreImpl.open(
-    '/testdb',
-    MemoryStorageAdapter(),
+/// Opens an in-memory [KmdbDatabase] for tests, optionally wired with [vault].
+///
+/// Each call uses a unique path to prevent [LockException] when tests open
+/// multiple databases concurrently (e.g. a vault-wired db and a no-vault db).
+Future<KmdbDatabase> _openStore({String? path, _TestVaultStore? vault}) async {
+  final dbPath = path ?? '/testdb_vault_get_${_dbCounter++}';
+  return KmdbDatabase.open(
+    path: dbPath,
+    adapter: MemoryStorageAdapter(),
     config: KvStoreConfig.forTesting(),
+    vaultStore: vault,
   );
-  return store;
 }
 
-/// Builds a [CommandContext] for tests.
-CommandContext _ctx(
-  KvStoreImpl store, {
-  required _TestVaultStore? vault,
-  StringBuffer? out,
-  StringBuffer? err,
-}) => CommandContext(
-  store: store,
-  vaultStore: vault,
-  out: out ?? StringBuffer(),
-  err: err ?? StringBuffer(),
-);
+/// Builds a [CommandContext] backed by [db].
+CommandContext _ctx(KmdbDatabase db, {StringBuffer? out, StringBuffer? err}) =>
+    CommandContext(
+      db: db,
+      out: out ?? StringBuffer(),
+      err: err ?? StringBuffer(),
+    );
 
 /// Content bytes short enough that VaultStore never invokes Zstd compression.
 final _kBytes = Uint8List.fromList(utf8.encode('vault-get-test'));
@@ -85,26 +88,31 @@ Future<String> _ingest(
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 void main() {
+  tearDown(MemoryStorageAdapter.releaseAllLocks);
+
   group('VaultGetCommand', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late MemoryStorageAdapter memAdapter;
     late _TestVaultStore vault;
     late StringBuffer out;
     late StringBuffer err;
 
     setUp(() async {
-      store = await _openStore();
+      final dbPath = '/testdb_vault_get_${_dbCounter++}';
       memAdapter = MemoryStorageAdapter();
-      vault = _TestVaultStore(memAdapter);
+      vault = _TestVaultStore(memAdapter, dbPath);
+      db = await _openStore(path: dbPath, vault: vault);
       out = StringBuffer();
       err = StringBuffer();
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     // ── Vault store not configured ────────────────────────────────────────
 
     test('returns false when vault store is null', () async {
-      final ctx = _ctx(store, vault: null, out: out, err: err);
+      final dbNoVault = await _openStore();
+      addTearDown(() => dbNoVault.close());
+      final ctx = _ctx(dbNoVault, out: out, err: err);
       final ok = await VaultGetCommand().execute(ctx, [
         'kmdb-vault://sha256/${'a' * 64}',
       ], {});
@@ -115,14 +123,14 @@ void main() {
     // ── URI argument validation ────────────────────────────────────────────
 
     test('returns false when no URI argument is given', () async {
-      final ctx = _ctx(store, vault: vault, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await VaultGetCommand().execute(ctx, [], {});
       expect(ok, isFalse);
       expect(err.toString(), contains('requires a URI argument'));
     });
 
     test('returns false for a non-vault URI scheme', () async {
-      final ctx = _ctx(store, vault: vault, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await VaultGetCommand().execute(ctx, [
         'https://example.com/file',
       ], {});
@@ -133,7 +141,7 @@ void main() {
     test(
       'returns false for a malformed vault URI (too short sha256)',
       () async {
-        final ctx = _ctx(store, vault: vault, out: out, err: err);
+        final ctx = _ctx(db, out: out, err: err);
         final ok = await VaultGetCommand().execute(ctx, [
           'kmdb-vault://sha256/short',
         ], {});
@@ -145,7 +153,7 @@ void main() {
     // ── Object not found ──────────────────────────────────────────────────
 
     test('returns false when the vault object does not exist', () async {
-      final ctx = _ctx(store, vault: vault, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       // A valid-format SHA-256 that has not been ingested.
       final ok = await VaultGetCommand().execute(ctx, [
         'kmdb-vault://sha256/${'b' * 64}',
@@ -174,7 +182,7 @@ void main() {
       );
       // Blob is deliberately absent to simulate a stub.
 
-      final ctx = _ctx(store, vault: vault, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await VaultGetCommand().execute(ctx, [
         'kmdb-vault://sha256/$sha256',
       ], {});
@@ -196,7 +204,7 @@ void main() {
         } catch (_) {}
       });
 
-      final ctx = _ctx(store, vault: vault, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await VaultGetCommand().execute(
         ctx,
         [uri],
@@ -220,7 +228,7 @@ void main() {
       // Use a path in a non-existent directory to force an I/O failure.
       const badPath = '/nonexistent/dir/file.bin';
 
-      final ctx = _ctx(store, vault: vault, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await VaultGetCommand().execute(
         ctx,
         [uri],

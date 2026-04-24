@@ -1,6 +1,6 @@
 # Write Pipeline Formalisation and CLI Query Layer Migration
 
-**Status**: Investigated
+**Status**: Implementing
 
 **PR link**: —
 
@@ -233,66 +233,66 @@ full merged document — correct behaviour, consistent with the library.
 
 ### Phase 1 — Formalise the write pipeline
 
-- [ ] Add `WriteValidator` interface to
+- [x] Add `WriteValidator` interface to
       `packages/kmdb/lib/src/query/write_validator.dart`
-- [ ] Add `WriteAugmentor` interface to
+- [x] Add `WriteAugmentor` interface to
       `packages/kmdb/lib/src/query/write_augmentor.dart`
-- [ ] Add `ReservedKeyValidator implements WriteValidator` (replaces
+- [x] Add `ReservedKeyValidator implements WriteValidator` (replaces
       `_validateNoReservedKeys` static method)
-- [ ] Add `implements WriteValidator` to `SchemaManager` (method signature
+- [x] Add `implements WriteValidator` to `SchemaManager` (method signature
       already matches)
-- [ ] Add `implements WriteAugmentor` to `IndexManager`, `FtsManager`,
+- [x] Add `implements WriteAugmentor` to `IndexManager`, `FtsManager`,
       `VecManager`, `VaultRefInterceptor` — unify to the common named-parameter
       signature
-- [ ] Refactor `KmdbDatabase` to build `List<WriteValidator> _validators` and
+- [x] Refactor `KmdbDatabase` to build `List<WriteValidator> _validators` and
       `List<WriteAugmentor> _augmentors` during `open()`
-- [ ] Refactor `_writeDocument()` to iterate `_validators` then `_augmentors`
-- [ ] Refactor `_deleteDocument()` to iterate `_augmentors` only (no validators
+- [x] Refactor `_writeDocument()` to iterate `_validators` then `_augmentors`
+- [x] Refactor `_deleteDocument()` to iterate `_augmentors` only (no validators
       — delete is never blocked)
-- [ ] Export `WriteValidator` and `WriteAugmentor` from `kmdb.dart`
-- [ ] Update spec §13 with the 3-layer model; note Layer 3 (`writeEvents`) is
+- [x] Export `WriteValidator` and `WriteAugmentor` from `kmdb.dart`
+- [x] Update spec §13 with the 3-layer model; note Layer 3 (`writeEvents`) is
       the existing notification mechanism
-- [ ] All existing tests must still pass — this is a refactor, not a behaviour
+- [x] All existing tests must still pass — this is a refactor, not a behaviour
       change
 
 ### Phase 2 — `rawCollection`
 
-- [ ] Add `RawDocumentCodec` to
+- [x] Add `RawDocumentCodec` to
       `packages/kmdb/lib/src/query/raw_document_codec.dart`
-- [ ] Add `KmdbDatabase.rawCollection(String name)` — returns
+- [x] Add `KmdbDatabase.rawCollection(String name)` — returns
       `collection(name: name, codec: const RawDocumentCodec())`
-- [ ] Export `RawDocumentCodec` from `kmdb.dart`
-- [ ] Unit tests: insert/put/get/update/delete via `rawCollection` round-trip;
+- [x] Export `RawDocumentCodec` from `kmdb.dart`
+- [x] Unit tests: insert/put/get/update/delete via `rawCollection` round-trip;
       schema enforcement and index writes fire correctly via `rawCollection`
 
 ### Phase 3 — CLI migration
 
-- [ ] Refactor `DatabaseOpener.open()` to return `(KmdbDatabase, bool created)`:
+- [x] Refactor `DatabaseOpener.open()` to return `(KmdbDatabase, bool created)`:
   - Keep two-phase device-ID open using `db.store.ensureDeviceId()`
   - Pass config-derived `indexes` and `ftsIndexes` on the second open
   - Schemas loaded automatically from `$meta` (no change to `open()` signature
     needed)
-- [ ] Restructure `CommandContext`:
+- [x] Restructure `CommandContext`:
   - Replace `KvStoreImpl store` field with `KmdbDatabase db`
   - Add `KvStoreImpl get store => db.store` convenience getter for commands that
     still need engine access
   - Remove explicit `IndexManager indexManager` field — expose via `db.indexManager`
   - Remove explicit `VaultStore? vaultStore` field — expose via `db.vaultStore`
-- [ ] Migrate write commands: `insert`, `put`, `update` (all targeting modes
+- [x] Migrate write commands: `insert`, `put`, `update` (all targeting modes
       including `--import`)
-- [ ] Migrate read commands: `get`, `scan` (field-filter and no-filter paths),
+- [x] Migrate read commands: `get`, `scan` (field-filter and no-filter paths),
       `count`, `delete`
-- [ ] Keep `scan --prefix` using `db.store.scan()` directly
-- [ ] Update `cli_runner.dart` to open `KmdbDatabase` and construct the updated
+- [x] Keep `scan --prefix` using `db.store.scan()` directly
+- [x] Update `cli_runner.dart` to open `KmdbDatabase` and construct the updated
       `CommandContext`
-- [ ] Remove the doc-comment warnings about stale secondary indexes from
+- [x] Remove the doc-comment warnings about stale secondary indexes from
       `InsertCommand` and `UpdateCommand`
-- [ ] Update all CLI tests: replace `CommandContext(store: ...)` construction
+- [x] Update all CLI tests: replace `CommandContext(store: ...)` construction
       with `CommandContext(db: ...)`
 
 ### Phase 4 — Update dependent plan
 
-- [ ] Update `plans/plan_cli_schemas.md`:
+- [x] Update `plans/plan_cli_schemas.md`:
   - Add this plan as a prerequisite
   - Remove Phase 3 (enforcement in write commands) — enforcement is now free
     via the Query Layer migration

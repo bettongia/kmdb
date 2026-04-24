@@ -20,6 +20,7 @@ import 'package:cbor/cbor.dart';
 import '../../encoding/value_codec.dart';
 import '../../engine/kvstore/kv_store.dart';
 import '../../engine/kvstore/kv_store_impl.dart';
+import '../../query/write_augmentor.dart';
 import '../embedding_model.dart';
 import '../search_result.dart';
 import '../sync_delta.dart';
@@ -81,7 +82,9 @@ import 'vec_index_state.dart';
 /// );
 /// await store.writeBatchInternal(batch);
 /// ```
-final class VecManager {
+/// Implements [WriteAugmentor] so it integrates with the formal write pipeline
+/// without requiring special-casing in [KmdbCollection].
+final class VecManager implements WriteAugmentor {
   /// Creates a [VecManager].
   ///
   /// [store] is the underlying [KvStoreImpl] used for all index reads and
@@ -161,12 +164,13 @@ final class VecManager {
   /// - Update (`oldDoc != null`, `newDoc != null`) — overwrites vector; adjusts
   ///   truncation marker. Corpus `n` is unchanged.
   /// - Delete (`newDoc == null`) — removes vector and truncation marker; decrements `n`.
+  @override
   Future<void> interceptWrite({
+    required WriteBatch batch,
     required String namespace,
-    required String docId,
+    required String docKey,
     required Map<String, dynamic>? newDoc,
     required Map<String, dynamic>? oldDoc,
-    required WriteBatch batch,
   }) async {
     final matching = _defsFor(namespace);
     if (matching.isEmpty) return;
@@ -185,11 +189,11 @@ final class VecManager {
       }
 
       if (newDoc == null) {
-        await _interceptDelete(def, namespace, docId, batch);
+        await _interceptDelete(def, namespace, docKey, batch);
       } else if (oldDoc == null) {
-        await _interceptInsert(def, namespace, docId, newDoc, batch);
+        await _interceptInsert(def, namespace, docKey, newDoc, batch);
       } else {
-        await _interceptUpdate(def, namespace, docId, newDoc, batch);
+        await _interceptUpdate(def, namespace, docKey, newDoc, batch);
       }
     }
   }

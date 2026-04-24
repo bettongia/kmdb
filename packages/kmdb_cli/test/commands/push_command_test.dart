@@ -18,6 +18,7 @@ import 'package:kmdb/kmdb.dart';
 import 'package:kmdb_cli/src/commands/command.dart';
 import 'package:kmdb_cli/src/commands/push_command.dart';
 import 'package:kmdb_cli/src/commands/remote_command.dart';
+import 'package:kmdb_cli/src/config/kmdb_config.dart';
 import 'package:kmdb_cli/src/database_opener.dart';
 import 'package:test/test.dart';
 
@@ -26,20 +27,17 @@ String _key() => const UuidV7KeyGenerator().next();
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Opens a store via the production [DatabaseOpener] so the engine device ID
+/// Opens a database via the production [DatabaseOpener] so the engine device ID
 /// matches the meta-stored device ID, as required for sync.
-Future<KvStoreImpl> _openStore(String dir) async =>
-    (await DatabaseOpener.open(dir)).$1;
+Future<KmdbDatabase> _openStore(String dir) async =>
+    (await DatabaseOpener.open(dir, KmdbConfig.empty())).$1;
 
-CommandContext _ctx(
-  KvStoreImpl store, {
-  StringBuffer? out,
-  StringBuffer? err,
-}) => CommandContext(
-  store: store,
-  out: out ?? StringBuffer(),
-  err: err ?? StringBuffer(),
-);
+CommandContext _ctx(KmdbDatabase db, {StringBuffer? out, StringBuffer? err}) =>
+    CommandContext(
+      db: db,
+      out: out ?? StringBuffer(),
+      err: err ?? StringBuffer(),
+    );
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -47,7 +45,7 @@ void main() {
   late io.Directory tmpDir;
   late io.Directory dbDir;
   late io.Directory syncDir;
-  late KvStoreImpl store;
+  late KmdbDatabase db;
   late StringBuffer out;
   late StringBuffer err;
 
@@ -55,13 +53,13 @@ void main() {
     tmpDir = io.Directory.systemTemp.createTempSync('push_cmd_test_');
     dbDir = io.Directory('${tmpDir.path}/db')..createSync();
     syncDir = io.Directory('${tmpDir.path}/sync')..createSync();
-    store = await _openStore(dbDir.path);
+    db = await _openStore(dbDir.path);
     out = StringBuffer();
     err = StringBuffer();
   });
 
   tearDown(() async {
-    await store.close(flush: false);
+    await db.close(flush: false);
     if (tmpDir.existsSync()) tmpDir.deleteSync(recursive: true);
   });
 
@@ -76,7 +74,7 @@ void main() {
   // ── Error: no remote specified and no origin ──────────────────────────────
 
   test('returns false when no remote and no origin is configured', () async {
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await pushCmd.execute(ctx, [], {});
     expect(ok, isFalse);
     expect(err.toString(), contains("no 'origin' remote is configured"));
@@ -85,7 +83,7 @@ void main() {
   // ── Error: unknown remote name ────────────────────────────────────────────
 
   test('returns false when named remote does not exist', () async {
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await pushCmd.execute(ctx, ['nosuchremote'], {});
     expect(ok, isFalse);
     expect(err.toString(), contains("remote 'nosuchremote' not found"));
@@ -96,7 +94,7 @@ void main() {
   test(
     'returns false when both remote name and --sync-dir are given',
     () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await pushCmd.execute(
         ctx,
         ['origin'],
@@ -112,7 +110,7 @@ void main() {
   test('push via --sync-dir succeeds with no user namespaces', () async {
     // A freshly opened store has no user namespaces; push should succeed
     // with a "nothing to push" message.
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await pushCmd.execute(ctx, [], {'sync-dir': syncDir.path});
     expect(ok, isTrue);
     expect(out.toString(), contains('nothing to push'));
@@ -120,9 +118,9 @@ void main() {
 
   test('push via --sync-dir uploads SSTables when data exists', () async {
     // Write a document so there is something to push.
-    await store.put('notes', _key(), ValueCodec.encode({'title': 'Hello'}));
+    await db.store.put('notes', _key(), ValueCodec.encode({'title': 'Hello'}));
 
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await pushCmd.execute(ctx, [], {'sync-dir': syncDir.path});
     expect(ok, isTrue);
     expect(out.toString(), contains('push: complete'));
@@ -140,7 +138,7 @@ void main() {
 
   test('push via named remote uses origin by default', () async {
     // Register origin.
-    final ctxRemote = _ctx(store, out: out, err: err);
+    final ctxRemote = _ctx(db, out: out, err: err);
     await remoteCmd.execute(
       ctxRemote,
       ['add', 'origin'],
@@ -148,9 +146,9 @@ void main() {
     );
 
     // Write a document.
-    await store.put('notes', _key(), ValueCodec.encode({'title': 'World'}));
+    await db.store.put('notes', _key(), ValueCodec.encode({'title': 'World'}));
 
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await pushCmd.execute(ctx, [], {});
     expect(ok, isTrue);
     expect(out.toString(), contains('push: complete'));
@@ -158,16 +156,16 @@ void main() {
 
   test('push via explicit remote name', () async {
     // Register dropbox remote.
-    final ctxRemote = _ctx(store, out: out, err: err);
+    final ctxRemote = _ctx(db, out: out, err: err);
     await remoteCmd.execute(
       ctxRemote,
       ['add', 'dropbox'],
       {'path': syncDir.path},
     );
 
-    await store.put('notes', _key(), ValueCodec.encode({'body': 'test'}));
+    await db.store.put('notes', _key(), ValueCodec.encode({'body': 'test'}));
 
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await pushCmd.execute(ctx, ['dropbox'], {});
     expect(ok, isTrue);
     expect(out.toString(), contains('push: complete'));
@@ -176,10 +174,10 @@ void main() {
   // ── Namespace filtering ───────────────────────────────────────────────────
 
   test('--namespace restricts sync to named namespace', () async {
-    await store.put('notes', _key(), ValueCodec.encode({'n': 1}));
-    await store.put('tasks', _key(), ValueCodec.encode({'t': 1}));
+    await db.store.put('notes', _key(), ValueCodec.encode({'n': 1}));
+    await db.store.put('tasks', _key(), ValueCodec.encode({'t': 1}));
 
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await pushCmd.execute(ctx, [], {
       'sync-dir': syncDir.path,
       'collection': 'notes',
@@ -188,7 +186,7 @@ void main() {
   });
 
   test('system collections cannot be synced via --namespace', () async {
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await pushCmd.execute(ctx, [], {
       'sync-dir': syncDir.path,
       'collection': r'$meta',

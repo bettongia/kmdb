@@ -27,9 +27,9 @@ import 'vault/vault_import_helper.dart';
 /// wholesale, not recursively merged. The `_id` field is always preserved from
 /// the existing document — any `_id` in `--set` is silently ignored.
 ///
-/// Note: this command operates at the KvStore layer and does not update any
-/// secondary indexes defined via `KmdbDatabase.collection`. Secondary indexes
-/// will be stale until the next Query Layer write or index rebuild.
+/// Writes route through the full Query Layer write pipeline: schema validation,
+/// secondary index maintenance, FTS updates, and vault ref-count adjustments
+/// all run automatically and atomically with each document write.
 ///
 /// Each document write is independent — there is no atomicity guarantee across
 /// multiple documents.
@@ -73,11 +73,31 @@ final class UpdateCommand extends CliCommand {
   @override
   void configureArgParser(ArgParser parser) {
     parser
-      ..addOption('id', valueHelp: 'id,...', help: 'Document ID(s) to update (comma-separated, repeatable)')
-      ..addOption('filter', valueHelp: 'json', help: 'JSON filter to select documents to update')
-      ..addFlag('all', negatable: false, help: 'Update all documents in the collection')
-      ..addOption('set', valueHelp: 'json', help: 'JSON fields to shallow-merge into matching documents')
-      ..addOption('import', valueHelp: 'package.kvlt', help: 'Merge fields from a vault KVLT package');
+      ..addOption(
+        'id',
+        valueHelp: 'id,...',
+        help: 'Document ID(s) to update (comma-separated, repeatable)',
+      )
+      ..addOption(
+        'filter',
+        valueHelp: 'json',
+        help: 'JSON filter to select documents to update',
+      )
+      ..addFlag(
+        'all',
+        negatable: false,
+        help: 'Update all documents in the collection',
+      )
+      ..addOption(
+        'set',
+        valueHelp: 'json',
+        help: 'JSON fields to shallow-merge into matching documents',
+      )
+      ..addOption(
+        'import',
+        valueHelp: 'package.kvlt',
+        help: 'Merge fields from a vault KVLT package',
+      );
   }
 
   @override
@@ -192,7 +212,8 @@ final class UpdateCommand extends CliCommand {
         updated++;
       }
     } else if (filterFlag != null) {
-      // Filter-based: scan and update matching documents.
+      // Filter-based: query matching documents via the Query Layer, then update
+      // each one through the write pipeline so augmentors run.
       final Filter filter;
       try {
         filter = FilterParser.parse(filterFlag);
@@ -204,19 +225,23 @@ final class UpdateCommand extends CliCommand {
         return false;
       }
 
-      await for (final entry in ctx.store.scan(collection)) {
-        final doc = ValueCodec.decode(entry.value);
-        if (!filter.evaluate(doc)) continue;
+      final col = ctx.rawCollection(collection);
+      // Collect all matching documents first to avoid iterating while writing.
+      final matches = await col.where(filter).get();
+      for (final doc in matches) {
         final merged = _merge(doc, setFields);
-        await ctx.store.put(collection, entry.key, ValueCodec.encode(merged));
+        // col.put() runs the full write pipeline (validators + augmentors).
+        await col.put(merged);
         updated++;
       }
     } else {
-      // All-docs mode: update every document in the collection.
-      await for (final entry in ctx.store.scan(collection)) {
-        final doc = ValueCodec.decode(entry.value);
+      // All-docs mode: update every document via the write pipeline.
+      final col = ctx.rawCollection(collection);
+      // Collect all documents first to avoid iterating while writing.
+      final all = await col.all().get();
+      for (final doc in all) {
         final merged = _merge(doc, setFields);
-        await ctx.store.put(collection, entry.key, ValueCodec.encode(merged));
+        await col.put(merged);
         updated++;
       }
     }
@@ -302,13 +327,13 @@ final class UpdateCommand extends CliCommand {
       return false;
     }
 
-    // Check target document exists.
-    final rawOld = await ctx.store.get(collection, targetId);
-    if (rawOld == null) {
+    // Check target document exists via the Query Layer (Cache Layer consulted).
+    final col = ctx.rawCollection(collection);
+    final oldDoc = await col.get(targetId);
+    if (oldDoc == null) {
       ctx.writeError('Document not found: $targetId');
       return false;
     }
-    final oldDoc = ValueCodec.decode(rawOld);
 
     // Ingest all vault blobs from the package.
     final info = await ctx.store.storeInfo();
@@ -342,6 +367,9 @@ final class UpdateCommand extends CliCommand {
 
   /// Reads, merges, and writes back a single document identified by [key].
   ///
+  /// Routes through the Query Layer write pipeline so schema validation,
+  /// secondary index maintenance, FTS, and vault ref counts run automatically.
+  ///
   /// Returns `false` and writes an error to [ctx] when the document is not
   /// found. Returns `true` on success.
   Future<bool> _updateOne(
@@ -350,14 +378,16 @@ final class UpdateCommand extends CliCommand {
     String key,
     Map<String, dynamic> setFields,
   ) async {
-    final raw = await ctx.store.get(collection, key);
-    if (raw == null) {
+    final col = ctx.rawCollection(collection);
+    final doc = await col.get(key);
+    if (doc == null) {
       ctx.writeError('Document not found: $key');
       return false;
     }
-    final doc = ValueCodec.decode(raw);
     final merged = _merge(doc, setFields);
-    await ctx.store.put(collection, key, ValueCodec.encode(merged));
+    // col.put() is an upsert; since the document already exists, it runs the
+    // write pipeline with the old document for augmentors that need oldDoc.
+    await col.put(merged);
     return true;
   }
 

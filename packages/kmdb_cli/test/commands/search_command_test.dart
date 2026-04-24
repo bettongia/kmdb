@@ -22,24 +22,23 @@ import 'package:test/test.dart';
 
 // ── Test helpers ───────────────────────────────────────────────────────────────
 
-Future<KvStoreImpl> _openStore() async {
-  final (store, _) = await KvStoreImpl.open(
-    '/search_test_${Object().hashCode}',
-    MemoryStorageAdapter(),
+Future<KmdbDatabase> _openStore() async {
+  return KmdbDatabase.open(
+    path: '/search_test_${Object().hashCode}',
+    adapter: MemoryStorageAdapter(),
     config: KvStoreConfig.forTesting(),
   );
-  return store;
 }
 
 /// Creates a [CommandContext] wired with a [KmdbConfig] that has [ftsIndexes].
 CommandContext _ctx(
-  KvStoreImpl store, {
+  KmdbDatabase db, {
   KmdbConfig? config,
   StringBuffer? out,
   StringBuffer? err,
 }) {
   return CommandContext(
-    store: store,
+    db: db,
     config: config ?? KmdbConfig.empty(),
     out: out ?? StringBuffer(),
     err: err ?? StringBuffer(),
@@ -70,7 +69,7 @@ final class _MapCodec implements KmdbCodec<Map<String, dynamic>> {
 /// Builds a fresh [KmdbDatabase] with an FTS index on [collection].[field] and
 /// inserts the provided [docs] through the collection API so the FTS index is
 /// populated atomically.
-Future<({KvStoreImpl store, List<String> ids})> _seedDb({
+Future<({KmdbDatabase db, List<String> ids})> _seedDb({
   String collection = 'docs',
   String field = 'body',
   bool stopWords = false,
@@ -96,7 +95,7 @@ Future<({KvStoreImpl store, List<String> ids})> _seedDb({
     ids.add(doc['_id'] as String);
   }
 
-  return (store: db.store, ids: ids);
+  return (db: db, ids: ids);
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
@@ -105,20 +104,20 @@ void main() {
   tearDown(MemoryStorageAdapter.releaseAllLocks);
 
   group('SearchCommand — argument validation', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
     late StringBuffer err;
 
     setUp(() async {
-      store = await _openStore();
+      db = await _openStore();
       out = StringBuffer();
       err = StringBuffer();
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('no args prints error and returns false', () async {
       final ok = await SearchCommand().execute(
-        _ctx(store, out: out, err: err),
+        _ctx(db, out: out, err: err),
         [],
         {},
       );
@@ -129,11 +128,9 @@ void main() {
     test(
       'single arg (collection only) prints error and returns false',
       () async {
-        final ok = await SearchCommand().execute(
-          _ctx(store, out: out, err: err),
-          ['docs'],
-          {},
-        );
+        final ok = await SearchCommand().execute(_ctx(db, out: out, err: err), [
+          'docs',
+        ], {});
         expect(ok, isFalse);
         expect(err.toString(), contains('collection and query required'));
       },
@@ -143,7 +140,7 @@ void main() {
       final config = KmdbConfig.empty();
       config.addFtsIndex('docs', 'body');
       final ok = await SearchCommand().execute(
-        _ctx(store, config: config, out: out, err: err),
+        _ctx(db, config: config, out: out, err: err),
         ['docs', 'hello'],
         {'output': 'csv'},
       );
@@ -152,11 +149,10 @@ void main() {
     });
 
     test('collection with no FTS index configured prints error', () async {
-      final ok = await SearchCommand().execute(
-        _ctx(store, out: out, err: err),
-        ['docs', 'hello'],
-        {},
-      );
+      final ok = await SearchCommand().execute(_ctx(db, out: out, err: err), [
+        'docs',
+        'hello',
+      ], {});
       expect(ok, isFalse);
       expect(err.toString(), contains('no FTS indexes configured'));
     });
@@ -166,11 +162,10 @@ void main() {
       () async {
         // 'bogus query' — 'bogus' is not a reserved subcommand, so args[0] is
         // the collection name.  No FTS index → error about missing indexes.
-        final ok = await SearchCommand().execute(
-          _ctx(store, out: out, err: err),
-          ['bogus', 'query'],
-          {},
-        );
+        final ok = await SearchCommand().execute(_ctx(db, out: out, err: err), [
+          'bogus',
+          'query',
+        ], {});
         expect(ok, isFalse);
         expect(err.toString(), contains('no FTS indexes configured'));
       },
@@ -180,7 +175,7 @@ void main() {
       final config = KmdbConfig.empty();
       config.addFtsIndex('docs', 'body');
       final ok = await SearchCommand().execute(
-        _ctx(store, config: config, out: out, err: err),
+        _ctx(db, config: config, out: out, err: err),
         ['docs', 'hello'],
         {'mode': 'semantic'},
       );
@@ -198,7 +193,7 @@ void main() {
       final config = KmdbConfig.empty();
       config.addFtsIndex('docs', 'body');
       final ok = await SearchCommand().execute(
-        _ctx(store, config: config, out: out, err: err),
+        _ctx(db, config: config, out: out, err: err),
         ['docs', 'hello'],
         {'candidates': '200'},
       );
@@ -210,7 +205,7 @@ void main() {
   // ── search — main query path ──────────────────────────────────────────────────
 
   group('SearchCommand — table output', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late List<String> ids;
     late StringBuffer out;
     late StringBuffer err;
@@ -220,18 +215,18 @@ void main() {
       final seeded = await _seedDb(
         bodies: ['the quick brown fox', 'database search engine'],
       );
-      store = seeded.store;
+      db = seeded.db;
       ids = seeded.ids;
       out = StringBuffer();
       err = StringBuffer();
       config = KmdbConfig.empty();
       config.addFtsIndex('docs', 'body');
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('returns true and writes table headers', () async {
       final ok = await SearchCommand().execute(
-        _ctx(store, config: config, out: out, err: err),
+        _ctx(db, config: config, out: out, err: err),
         ['docs', 'quick'],
         {'output': 'table'},
       );
@@ -246,7 +241,7 @@ void main() {
 
     test('hit contains document id from the store', () async {
       final ok = await SearchCommand().execute(
-        _ctx(store, config: config, out: out, err: err),
+        _ctx(db, config: config, out: out, err: err),
         ['docs', 'quick'],
         {},
       );
@@ -258,7 +253,7 @@ void main() {
 
     test('no results prints informative message', () async {
       final ok = await SearchCommand().execute(
-        _ctx(store, config: config, out: out, err: err),
+        _ctx(db, config: config, out: out, err: err),
         ['docs', 'zzznomatch'],
         {},
       );
@@ -274,7 +269,7 @@ void main() {
       cfg2.addFtsIndex('docs', 'body');
       final out2 = StringBuffer();
       final ok = await SearchCommand().execute(
-        _ctx(seeded.store, config: cfg2, out: out2),
+        _ctx(seeded.db, config: cfg2, out: out2),
         ['docs', 'alpha'],
         {'limit': '1'},
       );
@@ -295,31 +290,31 @@ void main() {
           )
           .toList();
       expect(hitLines, hasLength(1));
-      await seeded.store.close();
+      await seeded.db.close();
     });
   });
 
   // ── --output json ─────────────────────────────────────────────────────────────
 
   group('SearchCommand — json output', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
     late StringBuffer err;
     late KmdbConfig config;
 
     setUp(() async {
       final seeded = await _seedDb(bodies: ['full text search is powerful']);
-      store = seeded.store;
+      db = seeded.db;
       out = StringBuffer();
       err = StringBuffer();
       config = KmdbConfig.empty();
       config.addFtsIndex('docs', 'body');
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('produces valid JSON with expected structure', () async {
       final ok = await SearchCommand().execute(
-        _ctx(store, config: config, out: out, err: err),
+        _ctx(db, config: config, out: out, err: err),
         ['docs', 'text'],
         {'output': 'json'},
       );
@@ -343,7 +338,7 @@ void main() {
 
     test('JSON empty query returns empty hits array', () async {
       final ok = await SearchCommand().execute(
-        _ctx(store, config: config, out: out, err: err),
+        _ctx(db, config: config, out: out, err: err),
         ['docs', 'zzznomatch'],
         {'output': 'json'},
       );
@@ -356,7 +351,7 @@ void main() {
   // ── --output ids ──────────────────────────────────────────────────────────────
 
   group('SearchCommand — ids output', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late List<String> ids;
     late StringBuffer out;
     late StringBuffer err;
@@ -364,18 +359,18 @@ void main() {
 
     setUp(() async {
       final seeded = await _seedDb(bodies: ['search engine technology']);
-      store = seeded.store;
+      db = seeded.db;
       ids = seeded.ids;
       out = StringBuffer();
       err = StringBuffer();
       config = KmdbConfig.empty();
       config.addFtsIndex('docs', 'body');
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('writes one id per line', () async {
       final ok = await SearchCommand().execute(
-        _ctx(store, config: config, out: out, err: err),
+        _ctx(db, config: config, out: out, err: err),
         ['docs', 'search'],
         {'output': 'ids'},
       );
@@ -388,7 +383,7 @@ void main() {
 
     test('ids output for no results is empty', () async {
       final ok = await SearchCommand().execute(
-        _ctx(store, config: config, out: out, err: err),
+        _ctx(db, config: config, out: out, err: err),
         ['docs', 'zzznomatch'],
         {'output': 'ids'},
       );
@@ -400,25 +395,25 @@ void main() {
   // ── --fields defaults ─────────────────────────────────────────────────────────
 
   group('SearchCommand — --fields flag', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
     late StringBuffer err;
     late KmdbConfig config;
 
     setUp(() async {
       final seeded = await _seedDb(bodies: ['test document content']);
-      store = seeded.store;
+      db = seeded.db;
       out = StringBuffer();
       err = StringBuffer();
       config = KmdbConfig.empty();
       config.addFtsIndex('docs', 'body');
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('missing --fields defaults to all configured FTS fields', () async {
       // No --fields flag: must search all configured fields (just 'body').
       final ok = await SearchCommand().execute(
-        _ctx(store, config: config, out: out, err: err),
+        _ctx(db, config: config, out: out, err: err),
         ['docs', 'content'],
         {},
       );
@@ -429,7 +424,7 @@ void main() {
 
     test('explicit --fields overrides defaults', () async {
       final ok = await SearchCommand().execute(
-        _ctx(store, config: config, out: out, err: err),
+        _ctx(db, config: config, out: out, err: err),
         ['docs', 'content'],
         {'fields': 'body'},
       );
@@ -441,33 +436,30 @@ void main() {
   // ── search list ───────────────────────────────────────────────────────────────
 
   group('SearchCommand — search list', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
     late StringBuffer err;
 
     setUp(() async {
-      store = await _openStore();
+      db = await _openStore();
       out = StringBuffer();
       err = StringBuffer();
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('requires collection name', () async {
-      final ok = await SearchCommand().execute(
-        _ctx(store, out: out, err: err),
-        ['list'],
-        {},
-      );
+      final ok = await SearchCommand().execute(_ctx(db, out: out, err: err), [
+        'list',
+      ], {});
       expect(ok, isFalse);
       expect(err.toString(), contains('collection name required'));
     });
 
     test('empty config prints no-indexes message', () async {
-      final ok = await SearchCommand().execute(
-        _ctx(store, out: out, err: err),
-        ['list', 'docs'],
-        {},
-      );
+      final ok = await SearchCommand().execute(_ctx(db, out: out, err: err), [
+        'list',
+        'docs',
+      ], {});
       expect(ok, isTrue);
       expect(out.toString(), contains('No FTS indexes'));
     });
@@ -476,7 +468,7 @@ void main() {
       final config = KmdbConfig.empty();
       config.addFtsIndex('docs', 'body', stopWords: true, k1: 1.5, b: 0.6);
       final ok = await SearchCommand().execute(
-        _ctx(store, config: config, out: out, err: err),
+        _ctx(db, config: config, out: out, err: err),
         ['list', 'docs'],
         {},
       );
@@ -492,33 +484,30 @@ void main() {
   // ── search create ─────────────────────────────────────────────────────────────
 
   group('SearchCommand — search create', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
     late StringBuffer err;
 
     setUp(() async {
-      store = await _openStore();
+      db = await _openStore();
       out = StringBuffer();
       err = StringBuffer();
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('requires collection and field', () async {
-      final ok = await SearchCommand().execute(
-        _ctx(store, out: out, err: err),
-        ['create'],
-        {},
-      );
+      final ok = await SearchCommand().execute(_ctx(db, out: out, err: err), [
+        'create',
+      ], {});
       expect(ok, isFalse);
       expect(err.toString(), contains('collection name and field required'));
     });
 
     test('requires field arg when only collection given', () async {
-      final ok = await SearchCommand().execute(
-        _ctx(store, out: out, err: err),
-        ['create', 'docs'],
-        {},
-      );
+      final ok = await SearchCommand().execute(_ctx(db, out: out, err: err), [
+        'create',
+        'docs',
+      ], {});
       expect(ok, isFalse);
       expect(err.toString(), contains('collection name and field required'));
     });
@@ -528,7 +517,7 @@ void main() {
       () async {
         // We test the config mutation, not the disk save (memory store).
         final config = KmdbConfig.empty();
-        final ctx = _ctx(store, config: config, out: out, err: err);
+        final ctx = _ctx(db, config: config, out: out, err: err);
 
         // Directly call addFtsIndex to verify the config mutation path.
         config.addFtsIndex('docs', 'body');
@@ -560,7 +549,7 @@ void main() {
     test('invalid --b value returns error', () async {
       final config = KmdbConfig.empty();
       final ok = await SearchCommand().execute(
-        _ctx(store, config: config, out: out, err: err),
+        _ctx(db, config: config, out: out, err: err),
         ['create', 'docs', 'body'],
         {'b': '2.0'}, // out of range
       );
@@ -571,7 +560,7 @@ void main() {
     test('invalid --k1 value returns error', () async {
       final config = KmdbConfig.empty();
       final ok = await SearchCommand().execute(
-        _ctx(store, config: config, out: out, err: err),
+        _ctx(db, config: config, out: out, err: err),
         ['create', 'docs', 'body'],
         {'k1': '-1'},
       );
@@ -583,33 +572,31 @@ void main() {
   // ── search delete ─────────────────────────────────────────────────────────────
 
   group('SearchCommand — search delete', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late StringBuffer out;
     late StringBuffer err;
 
     setUp(() async {
-      store = await _openStore();
+      db = await _openStore();
       out = StringBuffer();
       err = StringBuffer();
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     test('requires collection and field', () async {
-      final ok = await SearchCommand().execute(
-        _ctx(store, out: out, err: err),
-        ['delete'],
-        {},
-      );
+      final ok = await SearchCommand().execute(_ctx(db, out: out, err: err), [
+        'delete',
+      ], {});
       expect(ok, isFalse);
       expect(err.toString(), contains('collection name and field required'));
     });
 
     test('returns error when index not configured', () async {
-      final ok = await SearchCommand().execute(
-        _ctx(store, out: out, err: err),
-        ['delete', 'docs', 'body'],
-        {},
-      );
+      final ok = await SearchCommand().execute(_ctx(db, out: out, err: err), [
+        'delete',
+        'docs',
+        'body',
+      ], {});
       expect(ok, isFalse);
       expect(
         err.toString(),

@@ -18,6 +18,7 @@ import 'package:kmdb/kmdb.dart';
 import 'package:kmdb_cli/src/commands/command.dart';
 import 'package:kmdb_cli/src/commands/remote_command.dart';
 import 'package:kmdb_cli/src/commands/sync_command.dart';
+import 'package:kmdb_cli/src/config/kmdb_config.dart';
 import 'package:kmdb_cli/src/database_opener.dart';
 import 'package:test/test.dart';
 
@@ -26,12 +27,12 @@ String _key() => const UuidV7KeyGenerator().next();
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Opens a store via [DatabaseOpener] so the engine device ID is correct.
-Future<KvStoreImpl> _openStore(String dir) async =>
-    (await DatabaseOpener.open(dir)).$1;
+/// Opens a database via [DatabaseOpener] so the engine device ID is correct.
+Future<KmdbDatabase> _openStore(String dir) async =>
+    (await DatabaseOpener.open(dir, KmdbConfig.empty())).$1;
 
-/// Opens a store with an explicit [deviceId] for tests requiring distinct
-/// device identities.
+/// Opens a raw store with an explicit [deviceId] for sync tests requiring
+/// distinct device identities. Peer stores are used with [SyncEngine] directly.
 Future<KvStoreImpl> _openStoreWithId(String dir, String deviceId) async {
   final adapter = StorageAdapterNative();
   await adapter.createDirectory(dir);
@@ -39,15 +40,12 @@ Future<KvStoreImpl> _openStoreWithId(String dir, String deviceId) async {
   return store;
 }
 
-CommandContext _ctx(
-  KvStoreImpl store, {
-  StringBuffer? out,
-  StringBuffer? err,
-}) => CommandContext(
-  store: store,
-  out: out ?? StringBuffer(),
-  err: err ?? StringBuffer(),
-);
+CommandContext _ctx(KmdbDatabase db, {StringBuffer? out, StringBuffer? err}) =>
+    CommandContext(
+      db: db,
+      out: out ?? StringBuffer(),
+      err: err ?? StringBuffer(),
+    );
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -55,7 +53,7 @@ void main() {
   late io.Directory tmpDir;
   late io.Directory dbDir;
   late io.Directory syncDir;
-  late KvStoreImpl store;
+  late KmdbDatabase db;
   late StringBuffer out;
   late StringBuffer err;
 
@@ -63,13 +61,13 @@ void main() {
     tmpDir = io.Directory.systemTemp.createTempSync('sync_cmd_test_');
     dbDir = io.Directory('${tmpDir.path}/db')..createSync();
     syncDir = io.Directory('${tmpDir.path}/sync')..createSync();
-    store = await _openStore(dbDir.path);
+    db = await _openStore(dbDir.path);
     out = StringBuffer();
     err = StringBuffer();
   });
 
   tearDown(() async {
-    await store.close(flush: false);
+    await db.close(flush: false);
     if (tmpDir.existsSync()) tmpDir.deleteSync(recursive: true);
   });
 
@@ -84,14 +82,14 @@ void main() {
   // ── Error: no remote ──────────────────────────────────────────────────────
 
   test('returns false when no remote and no origin is configured', () async {
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await syncCmd.execute(ctx, [], {});
     expect(ok, isFalse);
     expect(err.toString(), contains("no 'origin' remote is configured"));
   });
 
   test('returns false when named remote does not exist', () async {
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await syncCmd.execute(ctx, ['nosuchremote'], {});
     expect(ok, isFalse);
     expect(err.toString(), contains("remote 'nosuchremote' not found"));
@@ -102,7 +100,7 @@ void main() {
   test(
     'returns false when both remote name and --sync-dir are given',
     () async {
-      final ctx = _ctx(store, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await syncCmd.execute(
         ctx,
         ['origin'],
@@ -118,7 +116,7 @@ void main() {
   test('sync on empty local store skips push but still pulls', () async {
     // An empty local store has nothing to push, but pull must still run so a
     // device with no local data can receive peer SSTables on its first sync.
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await syncCmd.execute(ctx, [], {'sync-dir': syncDir.path});
     expect(ok, isTrue);
     expect(out.toString(), contains('sync: complete'));
@@ -155,14 +153,14 @@ void main() {
     await peerStore.close(flush: false);
 
     // Local store is completely empty — no user collections.
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await syncCmd.execute(ctx, [], {'sync-dir': syncDir.path});
     expect(ok, isTrue);
     expect(out.toString(), contains('sync: complete'));
 
     // The peer's document must be present despite the local store being empty
     // when sync started.
-    final raw = await store.get('notes', peerKey);
+    final raw = await db.store.get('notes', peerKey);
     expect(raw, isNotNull);
     expect(ValueCodec.decode(raw!)['msg'], equals('hello from peer'));
   });
@@ -170,9 +168,9 @@ void main() {
   // ── Sync via --sync-dir ───────────────────────────────────────────────────
 
   test('sync via --sync-dir pushes local data', () async {
-    await store.put('notes', _key(), ValueCodec.encode({'t': 'sync test'}));
+    await db.store.put('notes', _key(), ValueCodec.encode({'t': 'sync test'}));
 
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await syncCmd.execute(ctx, [], {'sync-dir': syncDir.path});
     expect(ok, isTrue);
     expect(out.toString(), contains('sync: complete'));
@@ -189,16 +187,16 @@ void main() {
   // ── Sync via named remote ─────────────────────────────────────────────────
 
   test('sync uses origin remote by default', () async {
-    final ctxRemote = _ctx(store, out: out, err: err);
+    final ctxRemote = _ctx(db, out: out, err: err);
     await remoteCmd.execute(
       ctxRemote,
       ['add', 'origin'],
       {'path': syncDir.path},
     );
 
-    await store.put('tasks', _key(), ValueCodec.encode({'task': 'test'}));
+    await db.store.put('tasks', _key(), ValueCodec.encode({'task': 'test'}));
 
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await syncCmd.execute(ctx, [], {});
     expect(ok, isTrue);
     expect(out.toString(), contains('sync: complete'));
@@ -228,14 +226,14 @@ void main() {
     await peerStore.close(flush: false);
 
     // Our device writes data, then syncs.
-    await store.put('notes', _key(), ValueCodec.encode({'local': true}));
-    final ctx = _ctx(store, out: out, err: err);
+    await db.store.put('notes', _key(), ValueCodec.encode({'local': true}));
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await syncCmd.execute(ctx, [], {'sync-dir': syncDir.path});
     expect(ok, isTrue);
     expect(out.toString(), contains('sync: complete'));
 
     // After sync, the peer's document should be in our local store.
-    final raw = await store.get('notes', peerKey);
+    final raw = await db.store.get('notes', peerKey);
     expect(raw, isNotNull);
     final doc = ValueCodec.decode(raw!);
     expect(doc['from'], 'peer');
@@ -244,7 +242,7 @@ void main() {
   // ── Namespace filtering ───────────────────────────────────────────────────
 
   test('system collection cannot be synced via --namespace', () async {
-    final ctx = _ctx(store, out: out, err: err);
+    final ctx = _ctx(db, out: out, err: err);
     final ok = await syncCmd.execute(ctx, [], {
       'sync-dir': syncDir.path,
       'collection': r'$meta',

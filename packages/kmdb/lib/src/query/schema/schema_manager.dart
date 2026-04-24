@@ -20,6 +20,7 @@ import 'package:kmdb_schema/schema.dart';
 import '../../engine/kvstore/meta_store.dart';
 import '../collection_schema.dart';
 import '../exceptions.dart';
+import '../write_validator.dart';
 
 /// Manages collection schema registration, persistence, and validation.
 ///
@@ -51,7 +52,10 @@ import '../exceptions.dart';
 /// Schemas are stored as UTF-8 JSON under the symbolic name
 /// `schema:{collection}` in `$meta`. The registry of known collection names is
 /// stored under `schema:__registry__`.
-final class SchemaManager {
+///
+/// Implements [WriteValidator] so it can be added to the formal write pipeline
+/// and called uniformly by [KmdbCollection] without special-casing.
+final class SchemaManager implements WriteValidator {
   /// Creates a [SchemaManager].
   ///
   /// [onSchemaVersionMismatch] is called when a persisted schema has a
@@ -126,6 +130,7 @@ final class SchemaManager {
   /// No-op if no schema is registered for [collection]. Throws
   /// [SchemaValidationException] listing every violation found if the document
   /// does not conform.
+  @override
   void validate(String collection, Map<String, dynamic> doc) {
     final rule = _rules[collection];
     if (rule == null) return;

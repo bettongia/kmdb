@@ -23,11 +23,15 @@ import 'package:test/test.dart';
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
+/// Counter to generate unique in-memory database paths per test, preventing
+/// LockException when multiple [KmdbDatabase] instances are opened concurrently.
+var _dbCounter = 0;
+
 /// A [VaultStore] that works with the flat [MemoryStorageAdapter] key store.
 class _TestVaultStore extends VaultStore {
-  _TestVaultStore(MemoryStorageAdapter adapter)
+  _TestVaultStore(MemoryStorageAdapter adapter, String dbPath)
     : _mem = adapter,
-      super(adapter: adapter, dbDir: '/testdb');
+      super(adapter: adapter, dbDir: dbPath);
 
   final MemoryStorageAdapter _mem;
 
@@ -41,65 +45,63 @@ class _TestVaultStore extends VaultStore {
   }
 }
 
-/// Opens an in-memory [KvStoreImpl] for tests.
-Future<KvStoreImpl> _openStore() async {
-  final (store, _) = await KvStoreImpl.open(
-    '/testdb',
-    MemoryStorageAdapter(),
+/// Opens an in-memory [KmdbDatabase] for tests, optionally wired with [vault].
+///
+/// Each call uses a unique path to prevent [LockException] when tests open
+/// multiple databases concurrently (e.g. a vault-wired db and a no-vault db).
+Future<KmdbDatabase> _openStore({String? path, _TestVaultStore? vault}) async {
+  final dbPath = path ?? '/testdb_update_import_${_dbCounter++}';
+  return KmdbDatabase.open(
+    path: dbPath,
+    adapter: MemoryStorageAdapter(),
     config: KvStoreConfig.forTesting(),
+    vaultStore: vault,
   );
-  return store;
 }
 
-/// Builds a [CommandContext] for tests.
-CommandContext _ctx(
-  KvStoreImpl store, {
-  required _TestVaultStore? vault,
-  StringBuffer? out,
-  StringBuffer? err,
-}) => CommandContext(
-  store: store,
-  vaultStore: vault,
-  out: out ?? StringBuffer(),
-  err: err ?? StringBuffer(),
-);
+/// Builds a [CommandContext] backed by [db].
+CommandContext _ctx(KmdbDatabase db, {StringBuffer? out, StringBuffer? err}) =>
+    CommandContext(
+      db: db,
+      out: out ?? StringBuffer(),
+      err: err ?? StringBuffer(),
+    );
 
-/// Writes a small document into [store] directly using CBOR + 0x00 flag prefix.
+/// Writes a small document into [db] directly using the raw KV store.
 ///
 /// The document must be small enough to stay below the Zstd compression
 /// threshold (64 raw CBOR bytes). Uses raw ValueCodec encoding. If the doc
 /// exceeds the threshold, the Zstd library is required.
-Future<void> _putSmallDoc(
-  KvStoreImpl store,
-  String collection,
-  String id,
-) async {
-  // {'_id': id} where id is short → stays under 64 bytes in CBOR
+Future<void> _putSmallDoc(KmdbDatabase db, String collection, String id) async {
+  // {'i': id} where id is short → stays under 64 bytes in CBOR
   final doc = {'i': id}; // use short key to stay under threshold
-  await store.put(collection, id, ValueCodec.encode(doc));
+  await db.store.put(collection, id, ValueCodec.encode(doc));
 }
 
 void main() {
+  tearDown(MemoryStorageAdapter.releaseAllLocks);
+
   group('UpdateCommand --import', () {
-    late KvStoreImpl store;
+    late KmdbDatabase db;
     late MemoryStorageAdapter memAdapter;
     late _TestVaultStore vault;
     late StringBuffer out;
     late StringBuffer err;
 
     setUp(() async {
-      store = await _openStore();
+      final dbPath = '/testdb_update_import_${_dbCounter++}';
       memAdapter = MemoryStorageAdapter();
-      vault = _TestVaultStore(memAdapter);
+      vault = _TestVaultStore(memAdapter, dbPath);
+      db = await _openStore(path: dbPath, vault: vault);
       out = StringBuffer();
       err = StringBuffer();
     });
-    tearDown(() => store.close());
+    tearDown(() => db.close());
 
     // ── Mutual exclusion ──────────────────────────────────────────────────
 
     test('--import is mutually exclusive with --set', () async {
-      final ctx = _ctx(store, vault: vault, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await UpdateCommand().execute(
         ctx,
         ['col', 'someid'],
@@ -112,7 +114,9 @@ void main() {
     // ── Vault not configured ──────────────────────────────────────────────
 
     test('--import returns false when vault store is null', () async {
-      final ctx = _ctx(store, vault: null, out: out, err: err);
+      final dbNoVault = await _openStore();
+      addTearDown(() => dbNoVault.close());
+      final ctx = _ctx(dbNoVault, out: out, err: err);
       final ok = await UpdateCommand().execute(
         ctx,
         ['col'],
@@ -137,7 +141,7 @@ void main() {
         } catch (_) {}
       });
 
-      final ctx = _ctx(store, vault: vault, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       // No positional id, no --id flag — only collection name.
       final ok = await UpdateCommand().execute(
         ctx,
@@ -162,7 +166,7 @@ void main() {
         } catch (_) {}
       });
 
-      final ctx = _ctx(store, vault: vault, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       // Both positional id (args[1]) and --id flag provided.
       final ok = await UpdateCommand().execute(
         ctx,
@@ -176,7 +180,7 @@ void main() {
     // ── Non-existent package file ──────────────────────────────────────────
 
     test('returns false when package file does not exist', () async {
-      final ctx = _ctx(store, vault: vault, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await UpdateCommand().execute(
         ctx,
         ['col', 'some-id'],
@@ -198,7 +202,7 @@ void main() {
         } catch (_) {}
       });
 
-      final ctx = _ctx(store, vault: vault, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await UpdateCommand().execute(
         ctx,
         ['col', 'some-id'],
@@ -226,7 +230,7 @@ void main() {
       // Valid UUIDv7-format key that has not been inserted.
       const absentId = '01900000000070809000000000000001';
 
-      final ctx = _ctx(store, vault: vault, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await UpdateCommand().execute(
         ctx,
         ['col', absentId],
@@ -258,9 +262,9 @@ void main() {
       // Seed a small target document that stays under the Zstd threshold.
       // Must be a valid UUIDv7 hex string (version nibble = 7, variant = 8-b).
       const targetId = '01900000000070809000000000000002';
-      await _putSmallDoc(store, 'col', targetId);
+      await _putSmallDoc(db, 'col', targetId);
 
-      final ctx = _ctx(store, vault: vault, out: out, err: err);
+      final ctx = _ctx(db, out: out, err: err);
       final ok = await UpdateCommand().execute(
         ctx,
         ['col', targetId],

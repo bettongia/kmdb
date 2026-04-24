@@ -17,6 +17,9 @@ import 'command.dart';
 /// Deletes a document by key.
 ///
 /// Usage: `kmdb <db> delete <collection> <key>`
+///
+/// The delete is routed through the Query Layer so that secondary indexes, FTS
+/// indexes, and vault ref counts are updated atomically with the deletion.
 final class DeleteCommand extends CliCommand {
   const DeleteCommand();
 
@@ -42,7 +45,10 @@ final class DeleteCommand extends CliCommand {
     final collection = args[0];
     final key = args[1];
 
-    await ctx.store.delete(collection, key);
+    // Route through the Query Layer so all augmentors (index maintenance,
+    // FTS, vault ref counts) run atomically with the delete.
+    final col = ctx.rawCollection(collection);
+    await col.delete(key);
     ctx.writeValue({'deleted': key});
     return true;
   }

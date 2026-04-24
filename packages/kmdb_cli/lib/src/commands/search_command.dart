@@ -70,24 +70,49 @@ final class SearchCommand extends CliCommand {
   @override
   void configureArgParser(ArgParser parser) {
     parser
-      ..addOption('fields', valueHelp: 'f1,f2,...', help: 'Comma-separated field names to search (default: all indexed)')
+      ..addOption(
+        'fields',
+        valueHelp: 'f1,f2,...',
+        help: 'Comma-separated field names to search (default: all indexed)',
+      )
       ..addOption(
         'mode',
         valueHelp: 'auto|lexical|semantic',
         help: 'Search mode (default: auto)',
         allowed: ['auto', 'lexical', 'semantic'],
       )
-      ..addOption('candidates', valueHelp: 'n', help: 'Maximum candidate documents for semantic/hybrid search (default: 100)')
-      ..addOption('rrf-k', valueHelp: 'n', help: 'Reciprocal Rank Fusion smoothing constant (default: 60)')
-      ..addOption('limit', valueHelp: 'n', help: 'Maximum results to return (default: 10)')
-      ..addOption('offset', valueHelp: 'n', help: 'Number of results to skip (default: 0)')
+      ..addOption(
+        'candidates',
+        valueHelp: 'n',
+        help:
+            'Maximum candidate documents for semantic/hybrid search (default: 100)',
+      )
+      ..addOption(
+        'rrf-k',
+        valueHelp: 'n',
+        help: 'Reciprocal Rank Fusion smoothing constant (default: 60)',
+      )
+      ..addOption(
+        'limit',
+        valueHelp: 'n',
+        help: 'Maximum results to return (default: 10)',
+      )
+      ..addOption(
+        'offset',
+        valueHelp: 'n',
+        help: 'Number of results to skip (default: 0)',
+      )
       ..addOption(
         'output',
         valueHelp: 'table|json|ids',
         help: 'Output format for search results (default: table)',
         allowed: ['table', 'json', 'ids'],
       )
-      ..addFlag('explain', negatable: false, help: 'Show search execution plan');
+      ..addFlag(
+        'explain',
+        negatable: false,
+        help: 'Show search execution plan',
+      );
   }
 
   // Keywords that are always subcommands, never collection names.
@@ -240,7 +265,9 @@ final class SearchCommand extends CliCommand {
     Future<Map<String, dynamic>?> fetchDoc(String docId) async {
       final bytes = await ctx.store.get(collection, docId);
       if (bytes == null) return null;
-      return ValueCodec.decode(bytes);
+      // Inject _id from the docId — documents are stored without _id in
+      // the value bytes; the key is the canonical identity.
+      return ValueCodec.decode(bytes)..['_id'] = docId;
     }
 
     // Determine whether hybrid mode would be active for this collection.

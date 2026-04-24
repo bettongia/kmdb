@@ -24,27 +24,23 @@ import 'package:test/test.dart';
 
 int _dbCounter = 0;
 
-/// Opens a fresh in-memory store for testing with the given [deviceId].
-Future<KvStoreImpl> _openStore({String deviceId = 'aaaaaaaa'}) async {
-  final (store, _) = await KvStoreImpl.open(
-    '/testdb${_dbCounter++}',
-    MemoryStorageAdapter(),
+/// Opens a fresh in-memory database for testing with the given [deviceId].
+Future<KmdbDatabase> _openStore({String deviceId = 'aaaaaaaa'}) async {
+  return KmdbDatabase.open(
+    path: '/testdb${_dbCounter++}',
+    adapter: MemoryStorageAdapter(),
     config: KvStoreConfig.forTesting(),
     deviceId: deviceId,
   );
-  return store;
 }
 
 /// Creates a [CommandContext] for testing.
-CommandContext _ctx(
-  KvStoreImpl store, {
-  StringBuffer? out,
-  StringBuffer? err,
-}) => CommandContext(
-  store: store,
-  out: out ?? StringBuffer(),
-  err: err ?? StringBuffer(),
-);
+CommandContext _ctx(KmdbDatabase db, {StringBuffer? out, StringBuffer? err}) =>
+    CommandContext(
+      db: db,
+      out: out ?? StringBuffer(),
+      err: err ?? StringBuffer(),
+    );
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -57,13 +53,13 @@ void main() {
     test(
       'returns true and outputs valid JSON with old and new device IDs',
       () async {
-        final store = await _openStore(deviceId: 'aaaaaaaa');
+        final db = await _openStore(deviceId: 'aaaaaaaa');
         final out = StringBuffer();
         final err = StringBuffer();
-        addTearDown(() => store.close());
+        addTearDown(() => db.close());
 
         final ok = await NewDeviceIdCommand().execute(
-          _ctx(store, out: out, err: err),
+          _ctx(db, out: out, err: err),
           [],
           {},
         );
@@ -84,21 +80,17 @@ void main() {
     );
 
     test('store reflects new device ID after command executes', () async {
-      final store = await _openStore(deviceId: 'aaaaaaaa');
+      final db = await _openStore(deviceId: 'aaaaaaaa');
       final out = StringBuffer();
-      addTearDown(() => store.close());
+      addTearDown(() => db.close());
 
-      final ok = await NewDeviceIdCommand().execute(
-        _ctx(store, out: out),
-        [],
-        {},
-      );
+      final ok = await NewDeviceIdCommand().execute(_ctx(db, out: out), [], {});
       expect(ok, isTrue);
 
       final result = json.decode(out.toString()) as Map<String, dynamic>;
       final newId = result['newDeviceId'] as String;
 
-      final info = await store.storeInfo();
+      final info = await db.store.storeInfo();
       expect(info.deviceId, newId);
     });
 
@@ -107,12 +99,12 @@ void main() {
       () async {
         // Use a non-default device ID so we can verify the command reads the
         // actual current ID rather than assuming a default.
-        final store = await _openStore(deviceId: 'deadbeef');
+        final db = await _openStore(deviceId: 'deadbeef');
         final out = StringBuffer();
-        addTearDown(() => store.close());
+        addTearDown(() => db.close());
 
         final ok = await NewDeviceIdCommand().execute(
-          _ctx(store, out: out),
+          _ctx(db, out: out),
           [],
           {},
         );
@@ -126,11 +118,11 @@ void main() {
     // ── Remote warning ──────────────────────────────────────────────────────
 
     test('emits no warning when no remotes are configured', () async {
-      final store = await _openStore();
+      final db = await _openStore();
       final err = StringBuffer();
-      addTearDown(() => store.close());
+      addTearDown(() => db.close());
 
-      await NewDeviceIdCommand().execute(_ctx(store, err: err), [], {});
+      await NewDeviceIdCommand().execute(_ctx(db, err: err), [], {});
 
       expect(err.toString(), isEmpty);
     });
@@ -153,21 +145,20 @@ void main() {
         }),
       );
 
-      // Open the store at the temp directory using the native adapter so the
+      // Open the database at the temp directory using the native adapter so the
       // CLI command can read the config.json file.
-      final adapter = StorageAdapterNative();
-      final (store, _) = await KvStoreImpl.open(
-        tmpDir.path,
-        adapter,
+      final db = await KmdbDatabase.open(
+        path: tmpDir.path,
+        adapter: StorageAdapterNative(),
         config: KvStoreConfig.forTesting(),
         deviceId: 'aaaaaaaa',
       );
-      addTearDown(() => store.close());
+      addTearDown(() => db.close());
 
       final out = StringBuffer();
       final err = StringBuffer();
       final ok = await NewDeviceIdCommand().execute(
-        _ctx(store, out: out, err: err),
+        _ctx(db, out: out, err: err),
         [],
         {},
       );

@@ -58,8 +58,16 @@ final class UtilCommand extends CliCommand {
   @override
   void configureArgParser(ArgParser parser) {
     parser
-      ..addFlag('full', negatable: false, help: 'Show detailed per-entry output')
-      ..addFlag('data', negatable: false, help: 'Include decoded value payloads (implies --full)');
+      ..addFlag(
+        'full',
+        negatable: false,
+        help: 'Show detailed per-entry output',
+      )
+      ..addFlag(
+        'data',
+        negatable: false,
+        help: 'Include decoded value payloads (implies --full)',
+      );
   }
 
   @override
