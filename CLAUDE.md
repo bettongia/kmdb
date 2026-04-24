@@ -78,6 +78,9 @@ dart format packages/
 
 # Build docs site (requires pandoc)
 make docs
+
+# Run performance benchmarks (§18 P99 targets)
+dart run packages/kmdb/benchmark/main.dart
 ```
 
 ## Implementation Status
