@@ -11,8 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+import 'dart:collection' show UnmodifiableMapView;
+
 import 'package:characters/characters.dart' show StringCharacters;
-import 'package:collection/wrappers.dart';
+
 import 'package:intl/intl.dart';
 import 'formats/duration.dart' show isValidDuration;
 
