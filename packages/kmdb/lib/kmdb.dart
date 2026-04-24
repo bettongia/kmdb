@@ -76,6 +76,7 @@ export 'src/query/exceptions.dart'
         SchemaViolation,
         StaleIndexException;
 export 'src/query/collection_schema.dart' show CollectionSchema;
+export 'src/query/schema/schema_manager.dart' show SchemaManager;
 export 'src/query/filter/filter.dart' show Filter;
 export 'src/query/filter/field_filter.dart' show Field;
 export 'src/query/filter/field_path.dart' show FieldPath, missing;

@@ -438,6 +438,43 @@ final class KmdbDatabase {
   /// The schema manager for admission-gate validation on collection writes.
   SchemaManager get schemaManager => _schemaManager;
 
+  /// Registers [schema] for [collection] and persists it to `$meta`.
+  ///
+  /// This is a convenience wrapper around [SchemaManager.register] that
+  /// supplies the internal [MetaStore] automatically. After a successful call,
+  /// every subsequent write to [collection] is validated against [schema].
+  ///
+  /// Use this method from outside the `kmdb` package (e.g. CLI commands) to
+  /// avoid direct access to the package-private [MetaStore].
+  ///
+  /// Example:
+  /// ```dart
+  /// await db.registerSchema(CollectionSchema(
+  ///   collection: 'contacts',
+  ///   jsonSchema: {'required': ['name']},
+  /// ));
+  /// ```
+  Future<void> registerSchema(CollectionSchema schema) =>
+      _schemaManager.register(schema, _store.meta);
+
+  /// Removes the schema for [collection] from both `$meta` and the in-memory
+  /// cache.
+  ///
+  /// This is a convenience wrapper around [SchemaManager.deregister] that
+  /// supplies the internal [MetaStore] automatically. After a successful call,
+  /// writes to [collection] are no longer validated. Deregistering an unknown
+  /// collection is a no-op.
+  ///
+  /// Use this method from outside the `kmdb` package (e.g. CLI commands) to
+  /// avoid direct access to the package-private [MetaStore].
+  ///
+  /// Example:
+  /// ```dart
+  /// await db.deregisterSchema('contacts');
+  /// ```
+  Future<void> deregisterSchema(String collection) =>
+      _schemaManager.deregister(collection, _store.meta);
+
   /// The FTS index definitions configured at open time.
   List<FtsIndexDefinition> get ftsIndexes => _ftsIndexes;
 
