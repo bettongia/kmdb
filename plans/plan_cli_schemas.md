@@ -96,10 +96,6 @@ prerequisite migration, these commands receive a `SchemaValidationException` fro
 `ctx.db.store.meta`. If accessing the raw bytes proves cumbersome, a
 `registeredCollections` getter on `SchemaManager` is the right fix.
 
-> **Review note:** Add `registeredCollections` unconditionally in Phase 2 — it
-> is always cleaner than having the CLI decode raw registry bytes directly, and
-> the implementation is a one-liner (`_rules.keys.toList()`). Do not leave this
-> as a fallback.
 
 ## Implementation plan
 
@@ -121,9 +117,20 @@ prerequisite migration, these commands receive a `SchemaValidationException` fro
   - `fromJson` — non-object root (array) throws `FormatException`
   - `validate` returns all violations in one pass
 
-### Phase 2 — `SchemaManager.deregister()` in `kmdb`
+### Phase 2 — `SchemaManager` additions in `kmdb`
 
-- [ ] Add to `SchemaManager`:
+- [ ] Add `registeredCollections` getter to `SchemaManager`:
+  ```dart
+  List<String> get registeredCollections => _rules.keys.toList();
+  ```
+- [ ] Add `getSchema(String collection)` getter to `SchemaManager`:
+  ```dart
+  Map<String, dynamic>? getSchema(String collection)
+  ```
+  Returns the raw JSON Schema map for `collection`, or `null` if no schema is
+  registered. Used by `schema show` to display the schema without coupling the
+  CLI to internal storage format.
+- [ ] Add `deregister` to `SchemaManager`:
   ```dart
   Future<void> deregister(String collection, MetaStore meta)
   ```
@@ -131,6 +138,8 @@ prerequisite migration, these commands receive a `SchemaValidationException` fro
   - Read, filter, and rewrite the `schema:__registry__` list
   - Remove the in-memory cache entry; no-op if collection was never registered
 - [ ] Unit tests in `packages/kmdb/test/query/schema_manager_test.dart`:
+  - `registeredCollections` returns correct list after register/deregister
+  - `getSchema` returns the schema map for a registered collection; `null` for unknown
   - Deregister stops enforcement for that collection
   - Deregister of unknown collection is a no-op (does not throw)
   - Registry updated correctly after deregister (persists across `load()`)
@@ -159,12 +168,12 @@ kmdb <db> schema validate <collection> (--doc <json> | --file <path>)
     jsonSchema: decoded), ctx.db.store.meta)`
   - Print confirmation: `Schema registered for '<collection>'.`
 - [ ] `schema show <collection>`:
-  - Read raw bytes from `ctx.db.store.meta.getRawByName('schema:$collection')`
-  - If absent, error: `No schema registered for '<collection>'.`
-  - Decode JSON, extract the `schema` field, pretty-print it
+  - Call `ctx.db.schemaManager.getSchema(collection)`
+  - If `null`, error: `No schema registered for '<collection>'.`
+  - Pretty-print the returned JSON Schema map
 - [ ] `schema list`:
-  - Read `ctx.db.store.meta.getRawByName('schema:__registry__')`
-  - If absent or empty, print: `No schemas registered.`
+  - Call `ctx.db.schemaManager.registeredCollections`
+  - If empty, print: `No schemas registered.`
   - Print one collection name per line
 - [ ] `schema remove <collection>`:
   - Call `ctx.db.schemaManager.deregister(collection, ctx.db.store.meta)`
