@@ -1,8 +1,8 @@
 # CLI Schema Management
 
-**Status**: Implementing
+**Status**: Complete
 
-**PR link**: —
+**PR link**: https://github.com/aurochs-kmesh/kmdb/commit/77b6dd0
 
 **Prerequisite**: `plan_write_pipeline_and_cli_migration.md` must be complete
 before this plan is implemented. Once the CLI routes writes through
@@ -101,7 +101,7 @@ prerequisite migration, these commands receive a `SchemaValidationException` fro
 
 ### Phase 1 — `kmdb_schema`: `JsonSchemaValidator`
 
-- [ ] Add `JsonSchemaValidator` to
+- [x] Add `JsonSchemaValidator` to
       `packages/kmdb_schema/lib/src/json_schema_validator.dart`:
   - `JsonSchemaValidator.fromMap(Map<String, dynamic> schema)` — compiles via
     `SchemaParser().parse(schema)`
@@ -109,8 +109,8 @@ prerequisite migration, these commands receive a `SchemaValidationException` fro
     `fromMap`; throws `FormatException` on malformed JSON or non-object root
   - `List<SchemaViolation> validate(Map<String, dynamic> document)` — runs the
     compiled rule tree against `document` at root path `''`
-- [ ] Export `JsonSchemaValidator` from `packages/kmdb_schema/lib/schema.dart`
-- [ ] Unit tests in `packages/kmdb_schema/test/`:
+- [x] Export `JsonSchemaValidator` from `packages/kmdb_schema/lib/schema.dart`
+- [x] Unit tests in `packages/kmdb_schema/test/`:
   - `fromMap` — valid doc passes, missing required field fails
   - `fromJson` — valid JSON schema string compiles and validates
   - `fromJson` — malformed JSON throws `FormatException`
@@ -119,25 +119,14 @@ prerequisite migration, these commands receive a `SchemaValidationException` fro
 
 ### Phase 2 — `SchemaManager` additions in `kmdb`
 
-- [ ] Add `registeredCollections` getter to `SchemaManager`:
-  ```dart
-  List<String> get registeredCollections => _rules.keys.toList();
-  ```
-- [ ] Add `getSchema(String collection)` getter to `SchemaManager`:
-  ```dart
-  Map<String, dynamic>? getSchema(String collection)
-  ```
-  Returns the raw JSON Schema map for `collection`, or `null` if no schema is
-  registered. Used by `schema show` to display the schema without coupling the
-  CLI to internal storage format.
-- [ ] Add `deregister` to `SchemaManager`:
-  ```dart
-  Future<void> deregister(String collection, MetaStore meta)
-  ```
-  - Delete `schema:{collection}` via `meta.deleteRawByName`
-  - Read, filter, and rewrite the `schema:__registry__` list
-  - Remove the in-memory cache entry; no-op if collection was never registered
-- [ ] Unit tests in `packages/kmdb/test/query/schema_manager_test.dart`:
+- [x] Add `registeredCollections` getter to `SchemaManager`
+- [x] Add `getSchema(String collection)` getter to `SchemaManager` — stores raw
+      schema map alongside compiled rule tree so it survives round-trips
+- [x] Add `deregister` to `SchemaManager`
+- [x] Add `registerSchema()` / `deregisterSchema()` convenience wrappers on
+      `KmdbDatabase` to avoid exposing `@internal MetaStore` outside the package
+- [x] Export `SchemaManager` from `kmdb.dart`
+- [x] Unit tests in `packages/kmdb/test/query/schema_manager_test.dart`:
   - `registeredCollections` returns correct list after register/deregister
   - `getSchema` returns the schema map for a registered collection; `null` for unknown
   - Deregister stops enforcement for that collection
@@ -160,37 +149,14 @@ kmdb <db> schema remove <collection>
 kmdb <db> schema validate <collection> (--doc <json> | --file <path>)
 ```
 
-- [ ] `schema set <collection>`:
-  - Accept `--file <path>` (reads file, `jsonDecode`) or `--schema <json>`
-    (inline); exactly one required
-  - Validate the decoded value is a `Map<String, dynamic>`
-  - Call `ctx.db.schemaManager.register(CollectionSchema(collection: collection,
-    jsonSchema: decoded), ctx.db.store.meta)`
-  - Print confirmation: `Schema registered for '<collection>'.`
-- [ ] `schema show <collection>`:
-  - Call `ctx.db.schemaManager.getSchema(collection)`
-  - If `null`, error: `No schema registered for '<collection>'.`
-  - Pretty-print the returned JSON Schema map
-- [ ] `schema list`:
-  - Call `ctx.db.schemaManager.registeredCollections`
-  - If empty, print: `No schemas registered.`
-  - Print one collection name per line
-- [ ] `schema remove <collection>`:
-  - Call `ctx.db.schemaManager.deregister(collection, ctx.db.store.meta)`
-  - Print: `Schema removed for '<collection>'.`
-- [ ] `schema validate <collection> (--doc <json> | --file <path>)`:
-  - Read doc JSON from `--doc` inline string or `--file` path
-  - Call `ctx.db.schemaManager.validate(collection, doc)` — catch
-    `SchemaValidationException` and print violations in the standard error
-    format; print `{"valid": true}` when validation passes
-  - If no schema is registered for the collection, print
-    `No schema registered for '<collection>'. Document not validated.` and
-    return `true`
-- [ ] Add `SchemaValidationException` formatting helper (shared between
-      `schema validate` output and the violation errors surfaced by migrated
-      write commands)
-- [ ] Register `SchemaCommand` in `cli_runner.dart`
-- [ ] Tests for all subcommands covering success, missing arg, missing
+- [x] `schema set <collection>`
+- [x] `schema show <collection>`
+- [x] `schema list`
+- [x] `schema remove <collection>`
+- [x] `schema validate <collection> (--doc <json> | --file <path>)`
+- [x] `SchemaValidationException` formatting helper (`formatViolations`)
+- [x] Register `SchemaCommand` in `cli_runner.dart`
+- [x] Tests for all subcommands covering success, missing arg, missing
       collection, and no-schema cases
 
 ## Coverage targets
@@ -210,4 +176,23 @@ All tests must pass with ≥ 90% coverage.
 
 ## Summary
 
-—
+- Added `JsonSchemaValidator` to `kmdb_schema` — a standalone convenience type
+  with `fromMap`, `fromJson`, and `validate` that wraps `SchemaParser` for
+  non-KMDB consumers who want JSON Schema validation without the internal rule
+  hierarchy. 19 new tests.
+
+- Extended `SchemaManager` in `kmdb` with `registeredCollections`, `getSchema`,
+  and `deregister`. The raw JSON Schema map is now stored alongside the compiled
+  rule tree so `getSchema` can return the original map after a round-trip through
+  `$meta`. Added `registerSchema`/`deregisterSchema` convenience wrappers on
+  `KmdbDatabase` to provide a public API that doesn't require callers outside
+  the `kmdb` package to touch the `@internal MetaStore`. Exported `SchemaManager`
+  from `kmdb.dart`. 15 new tests.
+
+- Added `SchemaCommand` to `kmdb_cli` with `set`, `show`, `list`, `remove`, and
+  `validate` subcommands. All subcommands use the new `KmdbDatabase` wrappers.
+  The `formatViolations` static helper provides a consistent error format for
+  schema violations from any write command. 34 new tests.
+
+- Total new tests: 68 (19 kmdb_schema + 15 kmdb + 34 kmdb_cli). All 1,537
+  tests across the workspace continue to pass.
