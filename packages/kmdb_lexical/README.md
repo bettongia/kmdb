@@ -1,39 +1,34 @@
-<!-- 
-This README describes the package. If you publish this package to pub.dev,
-this README's contents appear on the landing page for your package.
+# kmdb_lexical
 
-For information about how to write a good package README, see the guide for
-[writing package pages](https://dart.dev/tools/pub/writing-package-pages). 
+Lexical text utilities used by the KMDB BM25 full-text search engine.
 
-For general information about developing packages, see the Dart guide for
-[creating packages](https://dart.dev/guides/libraries/create-packages)
-and the Flutter guide for
-[developing packages and plugins](https://flutter.dev/to/develop-packages). 
--->
+This package provides the language-side primitives used in the KMDB
+preprocessing pipeline (§21):
 
-TODO: Put a short description of the package here that helps potential users
-know whether this package might be useful for them.
+- A regex-based default tokeniser (`RegExpTokeniser`).
+- A vendored Snowball English stemmer.
+- A curated default English stopword list.
 
-## Features
-
-TODO: List what your package can do. Maybe include images, gifs, or videos.
-
-## Getting started
-
-TODO: List prerequisites and provide or point to information on how to
-start using the package.
+These utilities are consumed by the `FtsManager` in `package:kmdb` and by the
+`kmdb search` CLI command. They are intentionally lightweight and have no
+dependencies on the storage engine — applications can also use them directly
+to pre-tokenise text before storage.
 
 ## Usage
 
-TODO: Include short and useful examples for package users. Add longer examples
-to `/example` folder. 
-
 ```dart
-const like = 'sample';
+import 'package:kmdb_lexical/lexical.dart';
+
+final tokens = const RegExpTokeniser().tokenise('Hello, mTLS world');
+final stemmed = tokens.map(stem).toList();
+final filtered = stemmed.where((t) => !defaultStopwords.contains(t));
 ```
 
-## Additional information
+## Status
 
-TODO: Tell users more about the package: where to find more information, how to 
-contribute to the package, how to file issues, what response they can expect 
-from the package authors, and more.
+Internal package — not published to pub.dev. The Snowball stemmer under
+`lib/src/third_party/` retains its original BSD-style license.
+
+## License
+
+Apache-2.0 (excluding `lib/src/third_party/`, which is BSD-licensed).

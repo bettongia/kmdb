@@ -1,7 +1,7 @@
 name: kmdb_lexical
-description: A starting point for Dart libraries or applications.
+description: Lexical text utilities (tokeniser, stemmer, stopwords) used by the KMDB BM25 full-text search engine.
 version: 1.0.0
-# repository: https://github.com/my_org/my_repo
+publish_to: none
 
 resolution: workspace
 

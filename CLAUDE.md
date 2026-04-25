@@ -41,17 +41,16 @@ only; all source code lives under `packages/`:
 
 ```
 packages/
-  kmdb/                — the core library (lib/, test/, example/)
+  kmdb/                — the core library (lib/, test/, example/, benchmark/)
   kmdb_cli/            — the CLI tool (bin/, lib/, test/)
   kmdb_zstd/           — Zstd FFI compression provider
-  kmdb_ui/             — Flutter UI widgets
+  kmdb_ui/             — Flutter desktop browser
   kmdb_tokenizer_icu/  — ICU FFI word tokeniser for lexical search
   kmdb_inferencing/    — ONNX Runtime + BGE embedding model for semantic search
   kmdb_lexical/        — lexical utilities (stemmer, stopwords) used by FTS
   kmdb_mimeinfo/       — FreeDesktop shared-mime-info file-type identification
   kmdb_schema/         — JSON schema validation
   kmdb_tooling/        — dev_loader helpers (code-generation tooling)
-  kmdb_util/           — shared utility types (strings, lists, range, result, mapper)
 ```
 
 Run `dart pub get` once from the workspace root to resolve dependencies for all
@@ -60,8 +59,15 @@ packages.
 ## Commands
 
 ```bash
-# Run all tests (kmdb package)
+# Run all tests in every package (preferred)
+make test
+melos test --no-select
+
+# Run all tests for a single package
 dart test packages/kmdb
+
+# Note: kmdb_cli tests must be run from the package directory so build hooks fire
+cd packages/kmdb_cli && dart test
 
 # Run a single test file
 dart test packages/kmdb/test/some_test.dart
@@ -69,15 +75,19 @@ dart test packages/kmdb/test/some_test.dart
 # Run tests matching a name pattern
 dart test packages/kmdb --name "some pattern"
 
-# Analyze/lint (all packages)
-dart analyze packages/kmdb
-dart analyze packages/kmdb_cli
+# Analyze/lint across all packages
+make analyze
+melos run analyze
 
-# Format (all packages)
-dart format packages/
+# Format across all packages
+make format
+melos format
+
+# Coverage (writes site/coverage/lcov.info and per-package summaries)
+make coverage
 
 # Build docs site (requires pandoc)
-make docs
+make site
 
 # Run performance benchmarks (§18 P99 targets)
 dart run packages/kmdb/benchmark/main.dart
@@ -100,7 +110,7 @@ dart run packages/kmdb/benchmark/main.dart
 | 9c    | Hybrid search (Reciprocal Rank Fusion, `--mode` flag, unified SearchResult types)                | ✅ Complete |
 | 10    | Vault (content-addressable blob store, KVLT packaging, ref-counted GC, distributed sync)         | ✅ Complete |
 
-All 1018 kmdb + 403 kmdb_cli tests pass as of 2026-04-17.
+All 1162 kmdb + 454 kmdb_cli tests pass as of 2026-04-25 (E2E tests skipped by default).
 
 ## Architecture
 
@@ -272,3 +282,6 @@ HTML lives in [site/](site/) and is generated via `make docs`. Key spec files:
 - `21_lexical_search.md` — BM25 inverted index, preprocessing pipeline, write/query/compaction
 - `22_semantic_search.md` — BGE model, SQ8 quantization, vector index, write/query paths
 - `23_hybrid_search.md` — Reciprocal Rank Fusion, candidate set, mode flag, score structure
+- `24_vault.md` — content-addressable blob store and KVLT packaging
+- `25_collection_schemas.md` — JSON Schema admission gate for collection writes
+- `99_glossary.md` — terminology reference
