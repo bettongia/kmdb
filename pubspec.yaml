@@ -38,6 +38,13 @@ melos:
       description: Format dart code
       exec: dart format lib test
 
+    benchmarks:
+      description: Run all benchmarks
+      exec: dart run benchmark/main.dart
+      packageFilters:
+        dirExists: benchmark
+        flutter: false
+
     test:
       description: Test all packages
       exec: dart test
