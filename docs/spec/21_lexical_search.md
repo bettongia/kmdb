@@ -14,20 +14,20 @@ The same pipeline is applied to query strings at search time.
 
 ### Stage 1 — Tokenisation
 
-The field value is segmented into word tokens using a `Tokeniser` implementation.
-Two implementations are provided:
+The field value is segmented into word tokens using a `Tokenizer`
+implementation. Two implementations are provided:
 
 | Implementation    | Approach                        | Default |
 | :---------------- | :------------------------------ | :------ |
-| `RegExpTokeniser` | Pure Dart, Unicode `\p{L}\p{N}` | Yes     |
-| `IcuTokeniser`    | ICU C FFI, UAX #29              | No      |
+| `RegExpTokenizer` | Pure Dart, Unicode `\p{L}\p{N}` | Yes     |
+| `IcuTokenizer`    | ICU C FFI, UAX #29              | No      |
 
-`RegExpTokeniser` produces equivalent output to `IcuTokeniser` for English prose
-and common technical identifiers (`mTLS`, `0x8004210B`). `IcuTokeniser` is
+`RegExpTokenizer` produces equivalent output to `IcuTokenizer` for English prose
+and common technical identifiers (`mTLS`, `0x8004210B`). `IcuTokenizer` is
 available as a drop-in substitute where full UAX #29 compliance is required; ICU
 is a system library on all target platforms and requires no bundling.
 
-The `Tokeniser` interface is intentionally narrow — a single `tokenise(String)`
+The `Tokenizer` interface is intentionally narrow — a single `tokenise(String)`
 method — so implementations can be swapped without touching the indexing
 pipeline.
 
@@ -52,27 +52,27 @@ Words are reduced to their base form using the Snowball algorithm
 (`snowball_stemmer` Dart package) so that a search for `investigating` finds
 `investigate`.
 
-Examples: `investigates` → `investig`, `occurring` → `occur`,
-`disturbing` → `disturb`.
+Examples: `investigates` → `investig`, `occurring` → `occur`, `disturbing` →
+`disturb`.
 
 ## Index Structure
 
 Four namespace types are written to the KV store, all exempt from the session
 object cache and materialised view cache (§15). Because the KvStore enforces
-32-char hex (UUIDv7) keys, compound `{term}:{docId}` keys are not possible.
-The solution mirrors the secondary index design: each term gets its own
-namespace, with document IDs as keys within it.
+32-char hex (UUIDv7) keys, compound `{term}:{docId}` keys are not possible. The
+solution mirrors the secondary index design: each term gets its own namespace,
+with document IDs as keys within it.
 
 Terms are hex-encoded from their UTF-8 byte representation
-(`utf8.encode(term).map(toHex).join()`), satisfying the KvStore namespace
-naming constraint.
+(`utf8.encode(term).map(toHex).join()`), satisfying the KvStore namespace naming
+constraint.
 
-| Namespace | Key | Value |
-| :--- | :--- | :--- |
-| `$fts:{ns}:{field}:{hexTerm}` | `{docId}` (32-char hex) | CBOR int — term frequency (tf) |
-| `$fts:overlay:{ns}:{field}` | `{docId}` (32-char hex) | CBOR map (term→tf) \| TOMBSTONE string |
-| `$fts:corpus:{ns}:{field}` | fixed 32-char hex sentinel | CBOR map `{n, totalTokens}` |
-| `$fts:doc:{ns}:{field}` | `{docId}` (32-char hex) | CBOR map `{n: tokenCount, t: [terms]}` |
+| Namespace                     | Key                        | Value                                  |
+| :---------------------------- | :------------------------- | :------------------------------------- |
+| `$fts:{ns}:{field}:{hexTerm}` | `{docId}` (32-char hex)    | CBOR int — term frequency (tf)         |
+| `$fts:overlay:{ns}:{field}`   | `{docId}` (32-char hex)    | CBOR map (term→tf) \| TOMBSTONE string |
+| `$fts:corpus:{ns}:{field}`    | fixed 32-char hex sentinel | CBOR map `{n, totalTokens}`            |
+| `$fts:doc:{ns}:{field}`       | `{docId}` (32-char hex)    | CBOR map `{n: tokenCount, t: [terms]}` |
 
 **Base index** — one entry per `(term, document)` pair. The namespace encodes
 the hex term; the key is the document ID. The value is the term frequency (tf):
@@ -82,8 +82,8 @@ Required for BM25 scoring.
 **Overlay** — the authoritative state for documents modified since the last
 compaction. Stores the current `term → tf` map for updated documents, or a
 `TOMBSTONE` sentinel for deleted documents. Query time filters base index
-results through the overlay to ensure correctness without a read-before-write
-on the write path.
+results through the overlay to ensure correctness without a read-before-write on
+the write path.
 
 **Corpus stats** — maintained across all writes. `n` is the total number of
 indexed documents; `totalTokens` is the sum of all document token counts.
@@ -116,8 +116,10 @@ sequentially across multiple batches; a crash mid-build leaves the index in the
 
 1. Tokenise, normalise, and stem the field value.
 2. In the `WriteBatch`:
-   - `PUT $fts:{ns}:{field}:{hexTerm}` / key=`{docId}` → tf, for each unique term.
-   - `PUT $fts:doc:{ns}:{field}` / key=`{docId}` → `{n: tokenCount, t: [terms]}`.
+   - `PUT $fts:{ns}:{field}:{hexTerm}` / key=`{docId}` → tf, for each unique
+     term.
+   - `PUT $fts:doc:{ns}:{field}` / key=`{docId}` →
+     `{n: tokenCount, t: [terms]}`.
    - Increment `n` and add token count to `totalTokens` in corpus stats.
 
 No overlay entry is written on insert — there is no prior state to invalidate.
@@ -132,8 +134,8 @@ No overlay entry is written on insert — there is no prior state to invalidate.
      the new value (additive — stale entries in old per-term namespaces are left
      in place for compaction).
    - `PUT $fts:overlay:{ns}:{field}` / key=`{docId}` → new `term → tf` map.
-   - `PUT $fts:doc:{ns}:{field}` / key=`{docId}` → updated `{n, t}` map
-     (retains old terms list so compaction can enumerate stale namespaces).
+   - `PUT $fts:doc:{ns}:{field}` / key=`{docId}` → updated `{n, t}` map (retains
+     old terms list so compaction can enumerate stale namespaces).
    - Adjust `totalTokens` by `newCount − oldCount` in corpus stats. `n` is
      unchanged.
 
@@ -151,18 +153,18 @@ Stale base index keys are left in place and cleaned up at compaction.
 ## Query Behaviour
 
 1. If a `filter` was provided, resolve the set of matching docIds using
-   secondary indexes (§16) if available, or a full namespace scan with
-   in-memory filter evaluation otherwise. This produces a `candidateIds` set
-   used to restrict all subsequent steps.
-2. For each query term (after the same tokenise → normalise → stem pipeline):
-   a. Scan the per-term namespace `$fts:{ns}:{field}:{hexTerm}` to collect
-      `(docId, tf)` pairs (all keys in the namespace are docIds), restricting to
-      `candidateIds` when present.
-   b. Filter each result through the overlay (`$fts:overlay:{ns}:{field}`):
-      - No overlay entry → trust the base index tf.
-      - Overlay entry present → include only if the term appears in the overlay
-        map; use the overlay tf (supersedes the base index value).
-      - TOMBSTONE present → exclude unconditionally.
+   secondary indexes (§16) if available, or a full namespace scan with in-memory
+   filter evaluation otherwise. This produces a `candidateIds` set used to
+   restrict all subsequent steps.
+2. For each query term (after the same tokenise → normalise → stem pipeline): a.
+   Scan the per-term namespace `$fts:{ns}:{field}:{hexTerm}` to collect
+   `(docId, tf)` pairs (all keys in the namespace are docIds), restricting to
+   `candidateIds` when present. b. Filter each result through the overlay
+   (`$fts:overlay:{ns}:{field}`):
+   - No overlay entry → trust the base index tf.
+   - Overlay entry present → include only if the term appears in the overlay
+     map; use the overlay tf (supersedes the base index value).
+   - TOMBSTONE present → exclude unconditionally.
 3. `df` for the term is the count of surviving results — derived from the scan,
    not stored separately.
 4. Read corpus stats from `$fts:corpus:{ns}:{field}` once per query to obtain
@@ -177,13 +179,13 @@ Stale base index keys are left in place and cleaned up at compaction.
 
 $$\text{BM25}(D, Q) = \sum_{i=1}^{n} \text{IDF}(q_i) \cdot \frac{f(q_i, D) \cdot (k_1 + 1)}{f(q_i, D) + k_1 \cdot \left(1 - b + b \cdot \frac{|D|}{\text{avgdl}}\right)}$$
 
-| Symbol       | Meaning                                            | Default |
-| :----------- | :------------------------------------------------- | :------ |
-| $f(q_i, D)$  | Term frequency of query term $i$ in document $D$   | —       |
-| $\|D\|$      | Token count of document $D$                        | —       |
+| Symbol         | Meaning                                          | Default |
+| :------------- | :----------------------------------------------- | :------ |
+| $f(q_i, D)$    | Term frequency of query term $i$ in document $D$ | —       |
+| $\|D\|$        | Token count of document $D$                      | —       |
 | $\text{avgdl}$ | Average token count across all indexed documents | —       |
-| $k_1$        | Term frequency saturation constant                 | 1.2     |
-| $b$          | Length normalisation constant                      | 0.75    |
+| $k_1$          | Term frequency saturation constant               | 1.2     |
+| $b$            | Length normalisation constant                    | 0.75    |
 
 $k_1$ and $b$ are configurable per index at creation time.
 
@@ -193,7 +195,7 @@ Compaction reconciles the overlay with the base index, removing stale entries.
 Each document in the overlay is processed as a single atomic `WriteBatch`.
 
 The per-doc forward index (`$fts:doc:{ns}:{field}`) stores the terms list from
-the *previous* write, which lets compaction enumerate all per-term namespaces
+the _previous_ write, which lets compaction enumerate all per-term namespaces
 that may hold stale entries for the document.
 
 **Live overlay entry** (term → tf map):
@@ -229,7 +231,8 @@ The unsafe state — overlay cleared but stale entries remaining — cannot occu
 
 All `$fts:` system namespaces are exempt from the session object cache and the
 materialised view cache. FTS index data does not pass through these caches and
-therefore does not trigger namespace generation counter churn on document writes.
+therefore does not trigger namespace generation counter churn on document
+writes.
 
 ## Post-Sync Delta Rebuild
 

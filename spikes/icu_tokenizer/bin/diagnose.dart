@@ -19,7 +19,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-// Raw ICU FFI — mirrors icu_tokeniser.dart but prints every span + status
+// Raw ICU FFI — mirrors icu_tokenizer.dart but prints every span + status
 // value so we can see exactly what Apple's libicucore is returning.
 
 typedef _UbrkOpenNative =

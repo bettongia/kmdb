@@ -4,7 +4,7 @@
 
 The vault (§24) provides content-addressable binary object storage for file
 attachments. Today, the text search subsystem (§20–23) indexes only `String`
-fields on documents — vault blob *content* is opaque to the search engine. This
+fields on documents — vault blob _content_ is opaque to the search engine. This
 proposal defines an architecture for making text inside vault blobs searchable
 using the same lexical and semantic modes already provided by
 `KmdbCollection.search()`.
@@ -16,15 +16,15 @@ using the same lexical and semantic modes already provided by
 - Expose a search API consistent with the existing `KmdbCollection.search()`
   surface.
 - Provide a pluggable text extraction interface so that additional format
-  support (HTML, PDF, etc.) can be added in separate packages without changes
-  to the core library.
+  support (HTML, PDF, etc.) can be added in separate packages without changes to
+  the core library.
 - Keep all indexing local and offline-capable, consistent with kmdb's
   local-first design principles.
 
 ### Non-goals (v1)
 
-- Text extraction for non-plain-text formats (HTML, Markdown, PDF, DOCX).
-  These are explicitly deferred; see §8.
+- Text extraction for non-plain-text formats (HTML, Markdown, PDF, DOCX). These
+  are explicitly deferred; see §8.
 - Web platform support (consistent with §20–23 exclusion of web for FTS and
   vector search).
 - Syncing computed index artifacts (vectors, inverted index terms) across
@@ -36,12 +36,12 @@ using the same lexical and semantic modes already provided by
 
 ### 2.1 Supported formats in v1
 
-Only `text/plain` (UTF-8) is supported in the initial implementation. The
-vault `manifest.json` already carries the `mediaType` field detected by
-`FreedesktopMediaTypeDetector` at ingest time (§24). This value is used to
-route blobs to the appropriate extractor — in v1, any blob whose
-`mediaType` is not `text/plain` is left unindexed, and the extraction status
-is recorded as `unsupported` (see §4.2).
+Only `text/plain` (UTF-8) is supported in the initial implementation. The vault
+`manifest.json` already carries the `mediaType` field detected by
+`FreedesktopMediaTypeDetector` at ingest time (§24). This value is used to route
+blobs to the appropriate extractor — in v1, any blob whose `mediaType` is not
+`text/plain` is left unindexed, and the extraction status is recorded as
+`unsupported` (see §4.2).
 
 ### 2.2 VaultTextExtractor interface
 
@@ -70,14 +70,14 @@ Additional format extractors live in dedicated optional packages following the
 convention `kmdb_extractor_<name>`, analogous to `kmdb_zstd` and
 `kmdb_inferencing`. Examples:
 
-| Package | Format |
-|---|---|
-| `kmdb_extractor_html` | `text/html` |
-| `kmdb_extractor_markdown` | `text/markdown` |
-| `kmdb_extractor_pdf` | `application/pdf` |
+| Package                   | Format            |
+| ------------------------- | ----------------- |
+| `kmdb_extractor_html`     | `text/html`       |
+| `kmdb_extractor_markdown` | `text/markdown`   |
+| `kmdb_extractor_pdf`      | `application/pdf` |
 
-This is inspired by the Apache Tika approach of a pluggable, format-aware
-text extraction layer. Each package is independently versioned and optional —
+This is inspired by the Apache Tika approach of a pluggable, format-aware text
+extraction layer. Each package is independently versioned and optional —
 applications include only the extractors they need.
 
 Extractors are registered at `KmdbDatabase.open()` time, alongside index and
@@ -107,23 +107,23 @@ If `vaultSearch` is omitted or `null`, no vault search indexing takes place.
 
 ### 3.1 Why chunking is required
 
-The BGE Small En v1.5 embedding model accepts at most 510 WordPiece tokens
-(≈ 350–400 English words). Vault attachments — particularly plain-text files
-and future PDF exports — can be arbitrarily long. The existing document-field
-vector index silently truncates at this limit (§22), which is acceptable for
-short document fields but unacceptable for file content.
+The BGE Small En v1.5 embedding model accepts at most 510 WordPiece tokens (≈
+350–400 English words). Vault attachments — particularly plain-text files and
+future PDF exports — can be arbitrarily long. The existing document-field vector
+index silently truncates at this limit (§22), which is acceptable for short
+document fields but unacceptable for file content.
 
-Chunking divides extracted text into overlapping fixed-size segments. Each
-chunk is embedded independently. At query time, the top-scoring chunks are
-retrieved and deduplicated to document level; the winning chunk's text
-provides a result snippet.
+Chunking divides extracted text into overlapping fixed-size segments. Each chunk
+is embedded independently. At query time, the top-scoring chunks are retrieved
+and deduplicated to document level; the winning chunk's text provides a result
+snippet.
 
 Lexical (BM25) search does not require chunking for correctness, but uses the
 same chunk boundaries for snippet extraction.
 
 ### 3.2 Chunking algorithm
 
-1. Tokenise extracted text into words using the same `RegExpTokeniser` already
+1. Tokenise extracted text into words using the same `RegExpTokenizer` already
    used by the lexical pipeline (§21).
 2. Slide a window of `chunkSize` words with `chunkOverlap` words of overlap
    across the full token sequence.
@@ -132,11 +132,12 @@ same chunk boundaries for snippet extraction.
    blob.
 
 Default parameters (configurable per `VaultSearchConfig`):
+
 - `chunkSize`: 300 words
 - `chunkOverlap`: 50 words
 
-These values keep each chunk well inside the 510-token ceiling while
-maintaining semantic continuity at boundaries.
+These values keep each chunk well inside the 510-token ceiling while maintaining
+semantic continuity at boundaries.
 
 ---
 
@@ -145,10 +146,10 @@ maintaining semantic continuity at boundaries.
 ### 4.1 Vault filesystem: derived artifacts
 
 Extracted text and computed artifacts are stored alongside the blob in an
-`extract/` subdirectory of the blob's hash directory. This is a natural fit:
-the artifacts are deterministically derived from the blob content, so they
-share the same content-addressable identity. If the blob is GC'd, the
-`extract/` directory is deleted with it.
+`extract/` subdirectory of the blob's hash directory. This is a natural fit: the
+artifacts are deterministically derived from the blob content, so they share the
+same content-addressable identity. If the blob is GC'd, the `extract/` directory
+is deleted with it.
 
 ```
 {local-db-dir}/
@@ -180,12 +181,12 @@ independently (consistent with the `$fts:` and `$vec:` exclusion from sync in
 
 ```jsonc
 {
-  "status": "indexed",        // "pending" | "extracting" | "indexed" | "failed" | "unsupported"
+  "status": "indexed", // "pending" | "extracting" | "indexed" | "failed" | "unsupported"
   "modelVersion": "bge-small-en-v1.5",
   "chunkingParams": { "chunkSize": 300, "chunkOverlap": 50 },
   "chunkCount": 12,
-  "extractedAt": "2026-04-22T...",  // HLC timestamp
-  "error": null                     // populated on "failed" status
+  "extractedAt": "2026-04-22T...", // HLC timestamp
+  "error": null, // populated on "failed" status
 }
 ```
 
@@ -204,53 +205,53 @@ retrieval without re-reading or re-extracting the blob.
 
 ### 4.2 LSM: search indexes
 
-The vault filesystem holds the canonical, deduplicated artifacts. The LSM
-holds two derived structures optimised for fast search:
+The vault filesystem holds the canonical, deduplicated artifacts. The LSM holds
+two derived structures optimised for fast search:
 
 #### Inverted index (lexical)
 
-BM25 term lookup requires an inverted index — this cannot be expressed as a
-flat file. Term entries follow the same pattern as the document FTS namespaces
-(§21) but scoped to vault content:
+BM25 term lookup requires an inverted index — this cannot be expressed as a flat
+file. Term entries follow the same pattern as the document FTS namespaces (§21)
+but scoped to vault content:
 
-| Namespace | Key | Value |
-|---|---|---|
-| `$vfts:{sha256}:{hexTerm}` | chunk index (zero-padded 8-digit hex) | CBOR int — term frequency in chunk |
-| `$vfts:corpus:{sha256}` | fixed sentinel | CBOR `{n: chunkCount, totalTokens: N}` |
+| Namespace                  | Key                                   | Value                                  |
+| -------------------------- | ------------------------------------- | -------------------------------------- |
+| `$vfts:{sha256}:{hexTerm}` | chunk index (zero-padded 8-digit hex) | CBOR int — term frequency in chunk     |
+| `$vfts:corpus:{sha256}`    | fixed sentinel                        | CBOR `{n: chunkCount, totalTokens: N}` |
 
 The chunk index key ordering enables efficient per-term chunk enumeration.
 
 #### Vector scan index (semantic)
 
 Brute-force vector similarity search requires sequential access to all vectors
-for all indexed blobs. The KV store's sequential scan is far more efficient
-than per-file filesystem reads across hundreds of blob directories. The LSM
-scan index is a compact cache of the vault vectors:
+for all indexed blobs. The KV store's sequential scan is far more efficient than
+per-file filesystem reads across hundreds of blob directories. The LSM scan
+index is a compact cache of the vault vectors:
 
-| Namespace | Key | Value |
-|---|---|---|
+| Namespace   | Key                                   | Value                                    |
+| ----------- | ------------------------------------- | ---------------------------------------- |
 | `$vvec:idx` | `{sha256}:{chunkIndex}` (zero-padded) | SQ8-quantized 384-dim vector (384 bytes) |
 
-The vault `extract/vectors_*.bin` file remains the **source of truth** — the
-LSM entry is a derived cache. If the LSM index is absent but the vault vectors
-exist (e.g. after a database move or import), the scan index can be rebuilt
-cheaply from the vault files without re-embedding.
+The vault `extract/vectors_*.bin` file remains the **source of truth** — the LSM
+entry is a derived cache. If the LSM index is absent but the vault vectors exist
+(e.g. after a database move or import), the scan index can be rebuilt cheaply
+from the vault files without re-embedding.
 
 #### Reverse index and extraction state
 
-| Namespace | Key | Value |
-|---|---|---|
-| `$vault:docref:{sha256}` | `{docId}` | field path string (e.g. `"attachment"`) |
-| `$vault:extract:{sha256}` | fixed sentinel | CBOR `{status, chunkCount?}` |
+| Namespace                 | Key            | Value                                   |
+| ------------------------- | -------------- | --------------------------------------- |
+| `$vault:docref:{sha256}`  | `{docId}`      | field path string (e.g. `"attachment"`) |
+| `$vault:extract:{sha256}` | fixed sentinel | CBOR `{status, chunkCount?}`            |
 
 `$vault:docref` is maintained by `VaultRefInterceptor` in the same `WriteBatch`
 as the document write, consistent with how ref-counts are maintained today
 (§24). This reverse index is the bridge from a matching vault blob back to the
 documents that reference it.
 
-`$vault:extract` mirrors the `extract_status.json` on-disk file in the KV
-store for fast status queries without filesystem access (e.g. progress
-reporting, re-index detection).
+`$vault:extract` mirrors the `extract_status.json` on-disk file in the KV store
+for fast status queries without filesystem access (e.g. progress reporting,
+re-index detection).
 
 ---
 
@@ -275,17 +276,19 @@ after `VaultStore.ingest()` completes, if vault search is configured.
 
 ### 5.2 Async isolate
 
-Extraction and embedding run in a dedicated Dart `Isolate` to avoid blocking
-the main thread or UI. The isolate is spawned lazily when the first `pending`
-blob is detected and kept alive as a worker pool for the database session.
+Extraction and embedding run in a dedicated Dart `Isolate` to avoid blocking the
+main thread or UI. The isolate is spawned lazily when the first `pending` blob
+is detected and kept alive as a worker pool for the database session.
 
 The isolate receives:
+
 - The blob's `sha256` and `mediaType`
 - The vault root path (to locate the blob)
 - Registered extractor instances (passed via `SendPort` / `Isolate.spawn`)
 - Chunking parameters and embedding model reference
 
 On completion, the isolate writes:
+
 1. `extract/text.txt` — extracted text
 2. `extract/chunks_v1.json` — chunk metadata
 3. `extract/vectors_*.bin` — SQ8 vectors
@@ -304,8 +307,8 @@ blob is hydrated. On hydration, the blob transitions back through the normal
 
 On `KmdbDatabase.open()`, the vault search manager scans `$vault:extract` for
 blobs in `extracting` state (orphaned by a previous crash mid-indexing) and
-resets them to `pending` before starting the indexing isolate. This mirrors
-WAL replay recovery (§17).
+resets them to `pending` before starting the indexing isolate. This mirrors WAL
+replay recovery (§17).
 
 ---
 
@@ -315,21 +318,20 @@ The `extract/` directory and all `$vfts:`, `$vvec:`, and `$vault:extract`
 namespaces are **local-only** and excluded from sync. This is consistent with
 the exclusion of `$fts:` and `$vec:` namespaces (§20).
 
-The LSM scan index (`$vvec:idx`) is a derived cache of the vault vectors. When
-a device receives a blob via vault sync (§24 §5.1) and the blob transitions from
-stub to fully hydrated, the indexing isolate picks it up as `pending` and
-builds the index locally. This means:
+The LSM scan index (`$vvec:idx`) is a derived cache of the vault vectors. When a
+device receives a blob via vault sync (§24 §5.1) and the blob transitions from
+stub to fully hydrated, the indexing isolate picks it up as `pending` and builds
+the index locally. This means:
 
 - Immediately after sync, vault search results on the receiving device may be
   incomplete — the blob is present but not yet indexed.
 - The `$vault:extract` status key provides a signal that the application can
   expose to the user ("X files are still being indexed").
-- The LSM sync index catches up quickly for short documents; long documents
-  take proportionally longer.
+- The LSM sync index catches up quickly for short documents; long documents take
+  proportionally longer.
 
-This allows a fast sync of the LSM (SSTables) while vault content indexes
-build in the background — an explicit design goal noted in the proposal
-discussion.
+This allows a fast sync of the LSM (SSTables) while vault content indexes build
+in the background — an explicit design goal noted in the proposal discussion.
 
 ---
 
@@ -357,8 +359,8 @@ final class VaultSearchHit<T> extends SearchHit<T> {
 ### 7.2 API sketch
 
 The initial API is a dedicated method on `KmdbCollection<T>` rather than
-extending the existing `search()` to avoid conflating document-field scores
-with chunk-level scores:
+extending the existing `search()` to avoid conflating document-field scores with
+chunk-level scores:
 
 ```dart
 Future<SearchResult<VaultSearchHit<T>>> searchVault(
@@ -371,6 +373,7 @@ Future<SearchResult<VaultSearchHit<T>>> searchVault(
 ```
 
 Internally this:
+
 1. Identifies all document IDs in the collection via `$vault:docref`.
 2. For each referenced blob, scores chunks against the query (lexical via BM25,
    semantic via dot-product over SQ8 vectors, or hybrid via RRF — §23).
@@ -397,12 +400,12 @@ domains is well understood.
 
 2. **Chunk size configurability** — Should `chunkSize` and `chunkOverlap` be
    configurable per `VaultSearchConfig` (global) or per collection (via a
-   per-collection `VaultSearchIndexDefinition`)? Global configuration is simpler;
-   per-collection configuration allows tuning for known document sizes (e.g.
-   short notes vs. long reports).
+   per-collection `VaultSearchIndexDefinition`)? Global configuration is
+   simpler; per-collection configuration allows tuning for known document sizes
+   (e.g. short notes vs. long reports).
 
-3. **Re-index trigger** — When the embedding model version or chunking parameters
-   change, all computed vectors and chunk metadata are stale. The
+3. **Re-index trigger** — When the embedding model version or chunking
+   parameters change, all computed vectors and chunk metadata are stale. The
    version-encoded artifact filenames detect staleness automatically, but a
    deliberate re-index API is needed to trigger reprocessing (e.g.
    `db.reindexVault()` or a CLI `vault reindex` command). The exact surface is
@@ -410,9 +413,9 @@ domains is well understood.
 
 4. **Indexing observability** — The `$vault:extract` namespace gives per-blob
    status, but the application needs a convenient way to query overall indexing
-   progress (e.g. "N of M blobs indexed"). A `VaultSearchStatus` aggregate
-   type returned from `db.vaultSearchStatus()` seems reasonable, but the design
-   is open.
+   progress (e.g. "N of M blobs indexed"). A `VaultSearchStatus` aggregate type
+   returned from `db.vaultSearchStatus()` seems reasonable, but the design is
+   open.
 
 5. **Stub blob interaction** — When a stub is hydrated mid-session (the user
    explicitly downloads a file), the indexing isolate should pick it up
@@ -439,16 +442,16 @@ additional formats. Likely first candidates, in approximate priority order:
 
 - **`kmdb_extractor_html`** — parse and strip HTML tags using the Dart `html`
   package. Low complexity; high value for web-clipped content.
-- **`kmdb_extractor_markdown`** — strip Markdown syntax. Most tokens are
-  already readable text; a simple pass to remove fenced code blocks and link
-  syntax is likely sufficient.
-- **`kmdb_extractor_pdf`** — the most complex case. No robust pure-Dart PDF
-  text extraction library currently exists. Options include: best-effort with
-  the `pdf` package; a native FFI wrapper around poppler or pdfium (similar to
-  how `kmdb_zstd` wraps libzstd); or an external process (`pdftotext`) on
-  desktop. This work is analogous to what Apache Tika provides in Java — a
-  structured, metadata-aware extraction pipeline that goes beyond raw text.
-  A separate proposal should evaluate these options before implementation.
+- **`kmdb_extractor_markdown`** — strip Markdown syntax. Most tokens are already
+  readable text; a simple pass to remove fenced code blocks and link syntax is
+  likely sufficient.
+- **`kmdb_extractor_pdf`** — the most complex case. No robust pure-Dart PDF text
+  extraction library currently exists. Options include: best-effort with the
+  `pdf` package; a native FFI wrapper around poppler or pdfium (similar to how
+  `kmdb_zstd` wraps libzstd); or an external process (`pdftotext`) on desktop.
+  This work is analogous to what Apache Tika provides in Java — a structured,
+  metadata-aware extraction pipeline that goes beyond raw text. A separate
+  proposal should evaluate these options before implementation.
 
 ### Unified search surface
 
@@ -467,9 +470,9 @@ proposal should assess feasibility independently.
 
 The fixed-size word-count chunking proposed here is simple and predictable.
 Sentence- or paragraph-boundary chunking produces more semantically coherent
-chunks and typically improves retrieval quality. This is a known improvement
-but adds tokenisation complexity; deferred until baseline fixed-size chunking
-is validated in practice.
+chunks and typically improves retrieval quality. This is a known improvement but
+adds tokenisation complexity; deferred until baseline fixed-size chunking is
+validated in practice.
 
 ---
 

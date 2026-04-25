@@ -116,13 +116,13 @@ _None — all design decisions resolved in spec §21._
 ### Phase 2 — Text preprocessing pipeline
 
 - [x] Create `packages/kmdb/lib/src/search/lexical/pipeline.dart`:
-  - `List<String> tokeniseAndNormalise(String text, Tokeniser tokeniser)` —
-    calls `tokeniser.tokenise(text)` then lowercases each token
+  - `List<String> tokeniseAndNormalise(String text, Tokenizer tokenizer)` —
+    calls `tokenizer.tokenise(text)` then lowercases each token
   - `List<String> filterStopWords(List<String> tokens, Set<String> stopWords)` —
     removes tokens that appear in `stopWords`; no-op if `stopWords` is empty
   - `List<String> stem(List<String> tokens)` — applies the Snowball English
     stemmer from `snowball_stemmer` to each token
-  - `List<String> preprocess(String text, Tokeniser tokeniser,   {Set<String> stopWords = const {}})`
+  - `List<String> preprocess(String text, Tokenizer tokenizer,   {Set<String> stopWords = const {}})`
     — chains the three steps; this is the function called by both indexing and
     query paths
   - English stop-word list constant `kEnglishStopWords` (Stopwords ISO `en` list
@@ -209,7 +209,7 @@ _None — all design decisions resolved in spec §21._
 
 - [x] Add `Future<SearchResult<T>> search<T>(...)` to `FtsManager`:
   - Accept `String query`, `List<String> fields`, `Filter? filter`,
-    `SearchMode mode`, `int limit`, `int offset`, `Tokeniser tokeniser`
+    `SearchMode mode`, `int limit`, `int offset`, `Tokenizer tokenizer`
   - If `filter` is supplied, resolve `candidateIds` first via secondary index
     lookup (§16) or full namespace scan — this is the pre-filter step
   - Apply preprocessing pipeline to query string

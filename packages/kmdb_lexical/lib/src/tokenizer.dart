@@ -21,11 +21,11 @@
 ///
 /// ## Current limitation — English only
 ///
-/// The production implementation ([RegExpTokeniser]) is adequate for
+/// The production implementation ([RegExpTokenizer]) is adequate for
 /// English-language prose and technical identifiers but is **not** suitable
 /// for non-Latin scripts (CJK, Thai, Arabic, etc.) where word boundaries do
 /// not follow whitespace. A future implementation should replace
-/// [RegExpTokeniser] with an ICU FFI binding (see `IcuTokeniser` in the
+/// [RegExpTokenizer] with an ICU FFI binding (see `IcuTokenizer` in the
 /// `kmdb_tokenizer_icu` package) once multi-language support is added to the
 /// lexical search index.
 ///
@@ -35,17 +35,17 @@
 /// ## Unicode Text Segmentation
 ///
 /// Conformant implementations should follow UAX #29 Unicode Text Segmentation
-/// rules for word boundaries. The `IcuTokeniser` in `kmdb_tokenizer_icu`
+/// rules for word boundaries. The `IcuTokenizer` in `kmdb_tokenizer_icu`
 /// provides a full UAX #29 implementation via the system ICU library.
 ///
 /// ## Example
 ///
 /// ```dart
-/// final tokeniser = RegExpTokeniser();
-/// final tokens = tokeniser.tokenise('Dr. Jekyll and Mr. Hyde');
+/// final tokenizer = RegExpTokenizer();
+/// final tokens = tokenizer.tokenise('Dr. Jekyll and Mr. Hyde');
 /// // → ['Dr', 'Jekyll', 'and', 'Mr', 'Hyde']
 /// ```
-abstract interface class Tokeniser {
+abstract interface class Tokenizer {
   /// Segments [text] into word tokens.
   ///
   /// Returns only word-like spans (letters, numbers, mixed-case identifiers).

@@ -14,10 +14,10 @@
 
 import 'package:kmdb_tokenizer_icu/kmdb_tokenizer_icu.dart';
 
-/// Example demonstrating [IcuTokeniser] usage.
+/// Example demonstrating [IcuTokenizer] usage.
 void main() {
-  final tokeniser = IcuTokeniser();
-  final tokens = tokeniser.tokenise(
+  final tokenizer = IcuTokenizer();
+  final tokens = tokenizer.tokenise(
     '"The Strange Case of Dr. Jekyll and Mr. Hyde" by Robert Louis Stevenson.',
   );
   print('Tokens: $tokens');

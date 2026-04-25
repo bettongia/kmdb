@@ -18,7 +18,7 @@ import 'dart:typed_data';
 
 import 'package:cbor/cbor.dart';
 import 'package:intl/locale.dart' show Locale;
-import 'package:kmdb_lexical/lexical.dart' show RegExpTokeniser, getStopWords;
+import 'package:kmdb_lexical/lexical.dart' show RegExpTokenizer, getStopWords;
 import 'package:meta/meta.dart' show visibleForTesting;
 
 import '../../encoding/value_codec.dart';
@@ -217,7 +217,7 @@ final class FtsManager implements WriteAugmentor {
         : const <String>{};
     final tokens = preprocess(
       fieldValue,
-      RegExpTokeniser(),
+      RegExpTokenizer(),
       stopWords: stopWords,
     );
     if (tokens.isEmpty) return;
@@ -283,7 +283,7 @@ final class FtsManager implements WriteAugmentor {
 
     final newTokens = preprocess(
       newFieldValue,
-      RegExpTokeniser(),
+      RegExpTokenizer(),
       stopWords: stopWords,
     );
     final newTf = _termFrequencies(newTokens);
@@ -463,7 +463,7 @@ final class FtsManager implements WriteAugmentor {
 
         final tokens = preprocess(
           fieldValue,
-          RegExpTokeniser(),
+          RegExpTokenizer(),
           stopWords: stopWords,
         );
         if (tokens.isEmpty) continue;
@@ -593,7 +593,7 @@ final class FtsManager implements WriteAugmentor {
         : const <String>{};
     final queryTerms = preprocess(
       query,
-      RegExpTokeniser(),
+      RegExpTokenizer(),
       stopWords: stopWords,
     ).toSet().toList();
 

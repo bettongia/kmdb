@@ -16,7 +16,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:kmdb/kmdb.dart';
-import 'package:kmdb_lexical/lexical.dart' show Tokeniser;
+import 'package:kmdb_lexical/lexical.dart' show Tokenizer;
 import 'package:path/path.dart' as p;
 
 import 'bert_tokenizer.dart';
@@ -73,8 +73,8 @@ class OnnxEmbeddingModel implements EmbeddingModel {
   /// directory relative to the compiled executable:
   /// `<executableDir>/assets/models/bge-small-en/bge_small.onnx`.
   ///
-  /// [tokeniser] overrides the word-segmentation step inside
-  /// [BertTokenizer]. Defaults to [RegExpTokeniser]. Supply `IcuTokeniser()`
+  /// [tokenizer] overrides the word-segmentation step inside
+  /// [BertTokenizer]. Defaults to [RegExpTokenizer]. Supply `IcuTokenizer()`
   /// from `package:kmdb_tokenizer_icu` for superior Unicode coverage.
   ///
   /// Throws [UnsupportedError] if [modelPath] (or the default path) does not
@@ -84,7 +84,7 @@ class OnnxEmbeddingModel implements EmbeddingModel {
   /// model file is corrupt.
   static Future<OnnxEmbeddingModel> load({
     String? modelPath,
-    Tokeniser? tokeniser,
+    Tokenizer? tokenizer,
   }) async {
     final resolvedModelPath = modelPath ?? _defaultModelPath();
     _assertModelExists(resolvedModelPath);
@@ -94,7 +94,7 @@ class OnnxEmbeddingModel implements EmbeddingModel {
 
     final lib = await openOrtLibrary();
     final session = OrtInferenceSession.create(lib, resolvedModelPath);
-    final tok = await BertTokenizer.load(vocabPath, tokeniser: tokeniser);
+    final tok = await BertTokenizer.load(vocabPath, tokenizer: tokenizer);
     return OnnxEmbeddingModel._(session, tok);
   }
 

@@ -14,48 +14,48 @@
 
 import 'package:intl/locale.dart';
 import 'package:kmdb/kmdb.dart';
-import 'package:kmdb_lexical/lexical.dart' show RegExpTokeniser, getStopWords;
+import 'package:kmdb_lexical/lexical.dart' show RegExpTokenizer, getStopWords;
 import 'package:test/test.dart';
 
 final defaultStopwords = getStopWords(Locale.fromSubtags(languageCode: 'en'));
 
 void main() {
-  final tokeniser = RegExpTokeniser();
+  final tokenizer = RegExpTokenizer();
 
   // ── tokeniseAndNormalise ────────────────────────────────────────────────────
 
   group('tokeniseAndNormalise', () {
     test('empty string returns empty list', () {
-      expect(tokeniseAndNormalise('', tokeniser), isEmpty);
+      expect(tokeniseAndNormalise('', tokenizer), isEmpty);
     });
 
     test('whitespace-only string returns empty list', () {
-      expect(tokeniseAndNormalise('   \t\n  ', tokeniser), isEmpty);
+      expect(tokeniseAndNormalise('   \t\n  ', tokenizer), isEmpty);
     });
 
     test('lowercases ASCII tokens', () {
       expect(
-        tokeniseAndNormalise('Hello World', tokeniser),
+        tokeniseAndNormalise('Hello World', tokenizer),
         equals(['hello', 'world']),
       );
     });
 
     test('lowercases mixed-case identifier (Jekyll → jekyll)', () {
-      expect(tokeniseAndNormalise('Jekyll', tokeniser), equals(['jekyll']));
+      expect(tokeniseAndNormalise('Jekyll', tokenizer), equals(['jekyll']));
     });
 
     test('lowercases sentence with punctuation', () {
-      final result = tokeniseAndNormalise('Dr. Jekyll and Mr. Hyde', tokeniser);
+      final result = tokeniseAndNormalise('Dr. Jekyll and Mr. Hyde', tokenizer);
       expect(result, equals(['dr', 'jekyll', 'and', 'mr', 'hyde']));
     });
 
-    test('produces same result as calling tokeniser + lowercase manually', () {
+    test('produces same result as calling tokenizer + lowercase manually', () {
       const text = 'The Quick Brown Fox';
-      final expected = tokeniser
+      final expected = tokenizer
           .tokenise(text)
           .map((t) => t.toLowerCase())
           .toList();
-      expect(tokeniseAndNormalise(text, tokeniser), equals(expected));
+      expect(tokeniseAndNormalise(text, tokenizer), equals(expected));
     });
   });
 
@@ -136,12 +136,12 @@ void main() {
 
   group('preprocess', () {
     test('empty string returns empty list', () {
-      expect(preprocess('', tokeniser), isEmpty);
+      expect(preprocess('', tokenizer), isEmpty);
     });
 
     test('stop-word filtering disabled by default', () {
       // 'the' and 'is' should survive without stopWords option.
-      final result = preprocess('the dog is running', tokeniser);
+      final result = preprocess('the dog is running', tokenizer);
       // 'the' → stem('the') = 'the'; 'is' → stem('is') = 'is'
       expect(result, contains('the'));
       expect(result, contains('is'));
@@ -150,7 +150,7 @@ void main() {
     test('stop-word filtering removes stop words when enabled', () {
       final result = preprocess(
         'the dog is running',
-        tokeniser,
+        tokenizer,
         stopWords: defaultStopwords.listing,
       );
       // 'the' and 'is' removed; 'dog' and 'run' remain.
@@ -165,7 +165,7 @@ void main() {
       () {
         final result = preprocess(
           'The quick brown fox jumps over the lazy dog',
-          tokeniser,
+          tokenizer,
           stopWords: defaultStopwords.listing,
         );
         // 'the', 'over' are stop words; remaining: quick→quick, brown→brown,
@@ -182,21 +182,21 @@ void main() {
     test('technical identifiers survive pipeline (mTLS)', () {
       // 'mTLS' → normalise → 'mtls' → stem → 'mtl' (acceptable) or 'mtls'
       // The key requirement is: no error and the token is present.
-      final result = preprocess('mTLS protocol', tokeniser);
+      final result = preprocess('mTLS protocol', tokenizer);
       expect(result.length, greaterThan(0));
     });
 
     test('hex identifier survives pipeline (0x8004210B)', () {
-      // RegExpTokeniser strips non-word chars; '0x8004210B' → '0x8004210B'
+      // RegExpTokenizer strips non-word chars; '0x8004210B' → '0x8004210B'
       // (one token). The pipeline must not panic.
-      final result = preprocess('error code 0x8004210B', tokeniser);
+      final result = preprocess('error code 0x8004210B', tokenizer);
       expect(result.length, greaterThan(0));
     });
 
     test('query with all stop words returns empty list when filtering on', () {
       final result = preprocess(
         'the and is',
-        tokeniser,
+        tokenizer,
         stopWords: defaultStopwords.listing,
       );
       expect(result, isEmpty);
@@ -206,12 +206,12 @@ void main() {
       const text = 'full text search is powerful';
       final indexed = preprocess(
         text,
-        tokeniser,
+        tokenizer,
         stopWords: defaultStopwords.listing,
       );
       final queried = preprocess(
         text,
-        tokeniser,
+        tokenizer,
         stopWords: defaultStopwords.listing,
       );
       expect(indexed, equals(queried));

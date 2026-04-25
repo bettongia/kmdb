@@ -21,11 +21,11 @@
 ///
 /// ## Current limitation — English only
 ///
-/// The production implementation ([RegExpTokeniser]) is adequate for
+/// The production implementation ([RegExpTokenizer]) is adequate for
 /// English-language prose and technical identifiers but is **not** suitable
 /// for non-Latin scripts (CJK, Thai, Arabic, etc.) where word boundaries do
 /// not follow whitespace. A future implementation should replace
-/// [RegExpTokeniser] with an ICU FFI binding (see [IcuTokeniser]) once
+/// [RegExpTokenizer] with an ICU FFI binding (see [IcuTokenizer]) once
 /// multi-language support is added to the lexical search index.
 ///
 /// The interface is intentionally narrow so the implementation can be swapped
@@ -33,11 +33,11 @@
 ///
 /// Example:
 /// ```dart
-/// final tokeniser = RegExpTokeniser();
-/// final tokens = tokeniser.tokenise('Dr. Jekyll and Mr. Hyde');
+/// final tokenizer = RegExpTokenizer();
+/// final tokens = tokenizer.tokenise('Dr. Jekyll and Mr. Hyde');
 /// // → ['Dr', 'Jekyll', 'and', 'Mr', 'Hyde']
 /// ```
-abstract interface class Tokeniser {
+abstract interface class Tokenizer {
   /// Segment [text] into word tokens.
   ///
   /// Returns only word-like spans (letters, numbers, mixed-case identifiers).

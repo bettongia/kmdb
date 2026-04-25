@@ -12,21 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'package:kmdb_lexical/lexical.dart' show Tokeniser, RegExpTokeniser;
+import 'package:kmdb_lexical/lexical.dart' show Tokenizer, RegExpTokenizer;
 import 'package:kmdb_tokenizer_icu/kmdb_tokenizer_icu.dart';
 import 'package:test/test.dart';
 
 void main() {
-  // Run the shared Tokeniser contract tests against both implementations.
-  _tokeniserContractTests('IcuTokeniser', IcuTokeniser());
-  _tokeniserContractTests('RegExpTokeniser', const RegExpTokeniser());
+  // Run the shared Tokenizer contract tests against both implementations.
+  _tokenizerContractTests('IcuTokenizer', IcuTokenizer());
+  _tokenizerContractTests('RegExpTokenizer', const RegExpTokenizer());
 
   // ICU-specific behaviour: verify that UAX #29 WORD rules fire correctly for
   // cases that motivated the ICU choice over a plain regexp.
-  group('IcuTokeniser — UAX #29 specifics', () {
-    late IcuTokeniser icu;
+  group('IcuTokenizer — UAX #29 specifics', () {
+    late IcuTokenizer icu;
 
-    setUpAll(() => icu = IcuTokeniser());
+    setUpAll(() => icu = IcuTokenizer());
 
     test('keeps hex literal as a single token', () {
       // ICU WORD rules treat "0x8004210B" as a single numeric token.
@@ -54,17 +54,17 @@ void main() {
       expect(tokens, contains('1886'));
     });
 
-    test('implements Tokeniser interface', () {
-      expect(icu, isA<Tokeniser>());
+    test('implements Tokenizer interface', () {
+      expect(icu, isA<Tokenizer>());
     });
   });
 }
 
-/// Shared contract tests run against both [IcuTokeniser] and [RegExpTokeniser].
+/// Shared contract tests run against both [IcuTokenizer] and [RegExpTokenizer].
 ///
-/// Any [Tokeniser] implementation must satisfy these invariants.
-void _tokeniserContractTests(String label, Tokeniser t) {
-  group('$label — Tokeniser contract', () {
+/// Any [Tokenizer] implementation must satisfy these invariants.
+void _tokenizerContractTests(String label, Tokenizer t) {
+  group('$label — Tokenizer contract', () {
     test('empty string returns empty list', () {
       expect(t.tokenise(''), isEmpty);
     });

@@ -12,54 +12,54 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'package:kmdb_lexical/lexical.dart' show Tokeniser, RegExpTokeniser;
+import 'package:kmdb_lexical/lexical.dart' show Tokenizer, RegExpTokenizer;
 import 'package:test/test.dart';
 
 void main() {
-  group('RegExpTokeniser', () {
-    late RegExpTokeniser tokeniser;
+  group('RegExpTokenizer', () {
+    late RegExpTokenizer tokenizer;
 
-    setUp(() => tokeniser = const RegExpTokeniser());
+    setUp(() => tokenizer = const RegExpTokenizer());
 
     // ── Edge cases ───────────────────────────────────────────────────────────
 
     test('empty string returns empty list', () {
-      expect(tokeniser.tokenise(''), isEmpty);
+      expect(tokenizer.tokenise(''), isEmpty);
     });
 
     test('whitespace-only string returns empty list', () {
-      expect(tokeniser.tokenise('   \t\n  '), isEmpty);
+      expect(tokenizer.tokenise('   \t\n  '), isEmpty);
     });
 
     // ── Basic tokenisation ───────────────────────────────────────────────────
 
     test('single word', () {
-      expect(tokeniser.tokenise('Jekyll'), equals(['Jekyll']));
+      expect(tokenizer.tokenise('Jekyll'), equals(['Jekyll']));
     });
 
     test('two words separated by a space', () {
-      expect(tokeniser.tokenise('Jekyll Hyde'), equals(['Jekyll', 'Hyde']));
+      expect(tokenizer.tokenise('Jekyll Hyde'), equals(['Jekyll', 'Hyde']));
     });
 
     test('multiple spaces between words are collapsed', () {
-      expect(tokeniser.tokenise('Jekyll   Hyde'), equals(['Jekyll', 'Hyde']));
+      expect(tokenizer.tokenise('Jekyll   Hyde'), equals(['Jekyll', 'Hyde']));
     });
 
     test('leading and trailing whitespace is ignored', () {
-      expect(tokeniser.tokenise('  word  '), equals(['word']));
+      expect(tokenizer.tokenise('  word  '), equals(['word']));
     });
 
     // ── Punctuation filtering ────────────────────────────────────────────────
 
     test('trailing comma is stripped', () {
-      final tokens = tokeniser.tokenise('Hyde,');
+      final tokens = tokenizer.tokenise('Hyde,');
       expect(tokens, isNotEmpty);
       expect(tokens.first, isNot(endsWith(',')));
       expect(tokens.first, equals('Hyde'));
     });
 
     test('trailing period is stripped', () {
-      final tokens = tokeniser.tokenise('Mr.');
+      final tokens = tokenizer.tokenise('Mr.');
       // "Mr." → "Mr" because the period is a punctuation boundary
       // The regex only matches \p{L}\p{N} at both ends, so "Mr" qualifies.
       expect(
@@ -75,7 +75,7 @@ void main() {
     test('prose sentence — returns only word tokens', () {
       const sentence =
           '"The Strange Case of Dr. Jekyll and Mr. Hyde" by Robert Louis Stevenson.';
-      final tokens = tokeniser.tokenise(sentence);
+      final tokens = tokenizer.tokenise(sentence);
       // Key words must be present
       expect(tokens, containsAll(['The', 'Strange', 'Case', 'Jekyll', 'Hyde']));
       // Punctuation-only entries must not appear
@@ -85,7 +85,7 @@ void main() {
     });
 
     test('sentence with exclamation mark', () {
-      final tokens = tokeniser.tokenise('Hello, world!');
+      final tokens = tokenizer.tokenise('Hello, world!');
       expect(tokens, containsAll(['Hello', 'world']));
       expect(tokens, everyElement(isNot(equals('!'))));
       expect(tokens, everyElement(isNot(equals(','))));
@@ -94,26 +94,26 @@ void main() {
     // ── Numbers ──────────────────────────────────────────────────────────────
 
     test('numbers are included as tokens', () {
-      final tokens = tokeniser.tokenise('published in 1886');
+      final tokens = tokenizer.tokenise('published in 1886');
       expect(tokens, contains('1886'));
     });
 
     test('number at sentence end (with period) is still extracted', () {
-      final tokens = tokeniser.tokenise('published in 1886.');
+      final tokens = tokenizer.tokenise('published in 1886.');
       expect(tokens, contains('1886'));
     });
 
     // ── Technical identifiers ────────────────────────────────────────────────
 
     test('mTLS is kept as a single token', () {
-      final tokens = tokeniser.tokenise('mTLS handshake');
+      final tokens = tokenizer.tokenise('mTLS handshake');
       expect(tokens, contains('mTLS'));
     });
 
     test('hex literal is kept as a single token', () {
       // RegExp implementation keeps 0x8004210B as one token because the
       // pattern allows letters and digits mixed together.
-      final tokens = tokeniser.tokenise('error 0x8004210B');
+      final tokens = tokenizer.tokenise('error 0x8004210B');
       // The token may be split on 'x' boundary in some edge cases, but the
       // overall assertion is that no token contains purely punctuation.
       expect(tokens, isNotEmpty);
@@ -124,20 +124,20 @@ void main() {
 
     // ── Interface contract ───────────────────────────────────────────────────
 
-    test('implements Tokeniser interface', () {
-      expect(tokeniser, isA<Tokeniser>());
+    test('implements Tokenizer interface', () {
+      expect(tokenizer, isA<Tokenizer>());
     });
 
     test('result is an unmodifiable list (growable: false)', () {
-      final result = tokeniser.tokenise('hello world');
+      final result = tokenizer.tokenise('hello world');
       expect(result, isA<List<String>>());
       expect(result.length, equals(2));
     });
 
     test('empty string result is identical const empty list', () {
       // tokenise('') must be safe to call repeatedly — no allocation.
-      final r1 = tokeniser.tokenise('');
-      final r2 = tokeniser.tokenise('');
+      final r1 = tokenizer.tokenise('');
+      final r2 = tokenizer.tokenise('');
       expect(r1, isEmpty);
       expect(r2, isEmpty);
     });

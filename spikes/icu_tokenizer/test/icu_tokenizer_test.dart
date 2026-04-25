@@ -16,15 +16,15 @@ import 'package:icu_tokenizer/icu_tokenizer.dart';
 import 'package:test/test.dart';
 
 void main() {
-  _tokeniserTests('IcuTokeniser', IcuTokeniser());
-  _tokeniserTests('RegExpTokeniser', RegExpTokeniser());
+  _tokenizerTests('IcuTokenizer', IcuTokenizer());
+  _tokenizerTests('RegExpTokenizer', RegExpTokenizer());
 
   // ICU-specific behaviour: verify that UAX #29 WORD rules fire correctly for
   // cases that motivated the ICU choice over a plain regexp.
-  group('IcuTokeniser — UAX #29 specifics', () {
-    late IcuTokeniser icu;
+  group('IcuTokenizer — UAX #29 specifics', () {
+    late IcuTokenizer icu;
 
-    setUpAll(() => icu = IcuTokeniser());
+    setUpAll(() => icu = IcuTokenizer());
 
     test('keeps hex literal as a single token', () {
       // ICU WORD rules treat "0x8004210B" as a single numeric token.
@@ -55,7 +55,7 @@ void main() {
 }
 
 /// Shared contract tests run against both implementations.
-void _tokeniserTests(String label, Tokeniser t) {
+void _tokenizerTests(String label, Tokenizer t) {
   group(label, () {
     test('empty string returns empty list', () {
       expect(t.tokenise(''), isEmpty);

@@ -138,17 +138,18 @@ following options should be evaluated:
 
 > **pub.dev publishing note:** The bundled model (~127MB) exceeds pub.dev's
 > 100MB package archive limit. Publishing `kmdb` to pub.dev will require
-> resolving this first — likely by moving to on-demand download or splitting
-> the model into a separate package that is excluded from the pub.dev tarball.
-> This must be addressed before any pub.dev release is attempted.
+> resolving this first — likely by moving to on-demand download or splitting the
+> model into a separate package that is excluded from the pub.dev tarball. This
+> must be addressed before any pub.dev release is attempted.
 
 ### Tokenisation
 
 The BERT tokenizer pipeline has two stages:
 
 1. **Word segmentation** — the text is split into whole words using a
-   `Tokeniser` implementation (UAX #29 / [`icu_tokenizer`](../../spikes/icu_tokenizer)
-   spike). This stage is shared with the lexical search pipeline.
+   `Tokenizer` implementation (UAX #29 /
+   [`icu_tokenizer`](../../spikes/icu_tokenizer) spike). This stage is shared
+   with the lexical search pipeline.
 2. **WordPiece subword splitting** — each word is further split against the
    model vocabulary, producing subword token IDs (e.g. `[CLS]`, `##vest`,
    `##ig`) consumed by the ONNX model.
@@ -157,11 +158,12 @@ The two stages produce fundamentally different output: lexical search ends at
 normalised whole-word stems (`investig`), while the BERT pipeline continues to
 numeric subword IDs for model inference.
 
-`BertTokenizer` accepts a `Tokeniser` in its constructor; `RegExpTokeniser` is
-the default. The `IcuTokeniser` (ICU FFI, full UAX #29 compliance) can be
-substituted where available — both produce equivalent results for English-language
-prose and technical identifiers (see
-[icu_tokenizer spike](../../spikes/icu_tokenizer) for the investigation findings).
+`BertTokenizer` accepts a `Tokenizer` in its constructor; `RegExpTokenizer` is
+the default. The `IcuTokenizer` (ICU FFI, full UAX #29 compliance) can be
+substituted where available — both produce equivalent results for
+English-language prose and technical identifiers (see
+[icu_tokenizer spike](../../spikes/icu_tokenizer) for the investigation
+findings).
 
 ### Token limit and truncation
 
@@ -217,8 +219,8 @@ cosine similarity ranking (see SQ8 Quantization below).
 
 **Corpus stats** maintains the count of indexed documents (`n`) for index
 metadata and state reporting. Unlike the lexical index, no `totalTokens`
-equivalent is needed — cosine similarity scoring requires only the stored vectors
-and the query vector.
+equivalent is needed — cosine similarity scoring requires only the stored
+vectors and the query vector.
 
 **Truncation marker** is written only when a field value exceeded the 510-token
 limit and was truncated before embedding. The key's presence is sufficient; the
@@ -232,7 +234,8 @@ so individual dimension values lie within $[-1, 1]$. This fixed, known range
 makes quantization straightforward without per-vector or per-dimension
 calibration:
 
-- **Encode:** $u = \text{clamp}(\text{round}((f + 1.0) / 2.0 \times 255), 0, 255)$
+- **Encode:**
+  $u = \text{clamp}(\text{round}((f + 1.0) / 2.0 \times 255), 0, 255)$
 - **Decode:** $f = u / 255.0 \times 2.0 - 1.0$
 
 No calibration metadata (per-dimension min/max) needs to be stored. If a future
@@ -248,8 +251,8 @@ more battery-efficient than maintaining a graph-based index (HNSW etc.):
    → WordPiece → ONNX → mean pool → normalize → truncate at 510 tokens).
 2. Prefix scan `$vec:{ns}:{field}:` to retrieve all `(docId, Uint8List)` pairs.
 3. Dequantize each stored vector to float32.
-4. Compute the dot product of each document vector with the query vector. Because
-   both are L2-normalized, dot product equals cosine similarity.
+4. Compute the dot product of each document vector with the query vector.
+   Because both are L2-normalized, dot product equals cosine similarity.
 5. Rank by score descending; return the top-`--candidates` results for RRF (or
    top-`--limit` directly for semantic-only queries).
 
@@ -288,16 +291,17 @@ the same pattern as lexical tokenization.
   new value was truncated `PUT $vec:truncated:{ns}:{field}:{docId}` → empty. `n`
   is unchanged.
 
-- **Delete:** no inference needed. In the WriteBatch: `DELETE
-  $vec:{ns}:{field}:{docId}`; `DELETE $vec:truncated:{ns}:{field}:{docId}`
-  (safe no-op if absent); decrement `n` in `$vec:corpus:{ns}:{field}`.
+- **Delete:** no inference needed. In the WriteBatch:
+  `DELETE $vec:{ns}:{field}:{docId}`;
+  `DELETE $vec:truncated:{ns}:{field}:{docId}` (safe no-op if absent); decrement
+  `n` in `$vec:corpus:{ns}:{field}`.
 
 ##### Inference failure
 
 If ONNX inference fails before the WriteBatch is committed, the entire operation
 is rejected — the document write does not proceed. This keeps the document store
-and the semantic index always consistent: a document either has a vector entry or
-it was never written.
+and the semantic index always consistent: a document either has a vector entry
+or it was never written.
 
 Inference failures indicate a systemic problem (model not loaded, out of memory)
 rather than a data error. At kmdb's expected scale, inference on BGE Small is

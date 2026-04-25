@@ -16,16 +16,16 @@
 
 import 'package:icu_tokenizer/icu_tokenizer.dart';
 
-/// Demonstrates ICU and RegExp tokenisers side-by-side on a range of inputs.
+/// Demonstrates ICU and RegExp tokenizers side-by-side on a range of inputs.
 ///
 /// Run with:
 ///   dart run example/icu_tokenizer_example.dart
 void main() {
-  _section('ICU tokeniser (UAX #29)', IcuTokeniser());
-  _section('RegExp fallback tokeniser', RegExpTokeniser());
+  _section('ICU tokenizer (UAX #29)', IcuTokenizer());
+  _section('RegExp fallback tokenizer', RegExpTokenizer());
 }
 
-void _section(String label, Tokeniser t) {
+void _section(String label, Tokenizer t) {
   print('=== $label ===\n');
 
   _demo(
@@ -55,7 +55,7 @@ void _section(String label, Tokeniser t) {
   print('');
 }
 
-void _demo(Tokeniser t, String label, String input) {
+void _demo(Tokenizer t, String label, String input) {
   final tokens = t.tokenise(input);
   final preview = input.length > 60 ? '${input.substring(0, 57)}...' : input;
   print('  [$label]');

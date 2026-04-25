@@ -48,8 +48,8 @@ than WAL on OPFS) and increase page cache to 8–16MB.
 
 ## Package Structure
 
-KMDB is published as a **Pub workspace**. The root `pubspec.yaml` is a
-workspace coordinator only; all source code lives under `packages/`:
+KMDB is published as a **Pub workspace**. The root `pubspec.yaml` is a workspace
+coordinator only; all source code lives under `packages/`:
 
 ```
 packages/
@@ -71,12 +71,12 @@ packages/
   |
   kmdb_ui/                 — Flutter UI widgets
   |
-  kmdb_lexical/            — tokeniser pipeline and English stop-word list
-  |                          (RegExpTokeniser, IcuTokeniser, Snowball stemmer)
+  kmdb_lexical/            — tokenizer pipeline and English stop-word list
+  |                          (RegExpTokenizer, IcuTokenizer, Snowball stemmer)
   |                          used by FtsManager (§21) and VecManager (§22)
   |
-  kmdb_tokenizer_icu/      — ICU FFI word tokeniser (UAX #29; optional
-  |                          substitute for RegExpTokeniser)
+  kmdb_tokenizer_icu/      — ICU FFI word tokenizer (UAX #29; optional
+  |                          substitute for RegExpTokenizer)
   |
   kmdb_inferencing/        — ONNX Runtime + BGE Small En v1.5 embedding model
   |                          used by VecManager (§22); native only
@@ -96,16 +96,16 @@ export 'storage_adapter_impl.dart'
     if (dart.library.js_interop) 'storage_adapter_web.dart';
 ```
 
-`dart.library.js_interop` is tested (not the deprecated `dart.library.html`)
-for correct WASM targeting.
+`dart.library.js_interop` is tested (not the deprecated `dart.library.html`) for
+correct WASM targeting.
 
 ### Feature Constraints by Platform
 
-| Feature              | Native (iOS/Android/macOS/Windows/Linux) | Web (OPFS) |
-| :------------------- | :--------------------------------------- | :--------- |
-| Core LSM engine      | ✓                                        | ✓          |
-| Zstd compression     | ✓ (FFI via kmdb_zstd)                    | ✓ (WASM fallback: Deflate) |
-| Sync                 | ✓                                        | ✓          |
-| Lexical text search  | ✓                                        | ✗ (deferred) |
-| Semantic search      | ✓ (ONNX via kmdb_inferencing)            | ✗ (deferred) |
-| Vault                | ✓                                        | ✗ (deferred) |
+| Feature             | Native (iOS/Android/macOS/Windows/Linux) | Web (OPFS)                 |
+| :------------------ | :--------------------------------------- | :------------------------- |
+| Core LSM engine     | ✓                                        | ✓                          |
+| Zstd compression    | ✓ (FFI via kmdb_zstd)                    | ✓ (WASM fallback: Deflate) |
+| Sync                | ✓                                        | ✓                          |
+| Lexical text search | ✓                                        | ✗ (deferred)               |
+| Semantic search     | ✓ (ONNX via kmdb_inferencing)            | ✗ (deferred)               |
+| Vault               | ✓                                        | ✗ (deferred)               |

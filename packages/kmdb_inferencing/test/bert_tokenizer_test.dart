@@ -18,7 +18,7 @@ library;
 import 'dart:io';
 
 import 'package:kmdb_inferencing/kmdb_inferencing.dart';
-import 'package:kmdb_lexical/lexical.dart' show Tokeniser;
+import 'package:kmdb_lexical/lexical.dart' show Tokenizer;
 import 'package:test/test.dart';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -158,16 +158,16 @@ void main() {
     });
   });
 
-  group('BertTokenizer — tokeniser substitution', () {
+  group('BertTokenizer — tokenizer substitution', () {
     test(
-      'custom Tokeniser is used for word segmentation without error',
+      'custom Tokenizer is used for word segmentation without error',
       () async {
-        // Provide a trivially correct Tokeniser — same contract as RegExpTokeniser.
+        // Provide a trivially correct Tokenizer — same contract as RegExpTokenizer.
         // We just verify that BertTokenizer.load accepts the parameter and
         // encode() runs without error.
         final customTokenizer = await BertTokenizer.load(
           _vocabPath,
-          tokeniser: const _WhitespaceTokeniser(),
+          tokenizer: const _WhitespaceTokenizer(),
         );
         final out = customTokenizer.encode('hello world');
         expect(out.inputIds[0], equals(BertTokenizer.clsId));
@@ -177,10 +177,10 @@ void main() {
   });
 }
 
-/// Minimal [Tokeniser] that splits on whitespace — used to verify that
-/// [BertTokenizer] honours the [Tokeniser] injection point.
-final class _WhitespaceTokeniser implements Tokeniser {
-  const _WhitespaceTokeniser();
+/// Minimal [Tokenizer] that splits on whitespace — used to verify that
+/// [BertTokenizer] honours the [Tokenizer] injection point.
+final class _WhitespaceTokenizer implements Tokenizer {
+  const _WhitespaceTokenizer();
 
   @override
   List<String> tokenise(String text) =>

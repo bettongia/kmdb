@@ -1,10 +1,10 @@
-// Copyright 2026 The KMDB Authors.
+// Copyright 2026 The KMDB Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     https://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'tokeniser.dart';
+import 'tokenizer.dart';
 
-/// The default [Tokeniser] implementation, written in pure Dart using [RegExp].
+/// The default [Tokenizer] implementation, written in pure Dart using [RegExp].
 ///
 /// ## Scope — English only
 ///
@@ -24,19 +24,32 @@ import 'tokeniser.dart';
 /// not follow whitespace rules.
 ///
 /// When multi-language support is added to the lexical search index this class
-/// should be replaced with (or fall back to) [IcuTokeniser], which uses the
-/// system ICU library and conforms to UAX #29 Unicode Text Segmentation. The
-/// [Tokeniser] interface makes that swap transparent to the indexing pipeline.
+/// should be replaced with (or fall back to) `IcuTokenizer` from the
+/// `kmdb_tokenizer_icu` package, which uses the system ICU library and conforms
+/// to UAX #29 Unicode Text Segmentation. The [Tokenizer] interface makes that
+/// swap transparent to the indexing pipeline.
 ///
 /// ## Why not ICU now?
 ///
-/// Spike investigation confirmed that [IcuTokeniser] works correctly on all
+/// Spike investigation confirmed that `IcuTokenizer` works correctly on all
 /// target platforms and requires no bundling (ICU ships with every OS). The
-/// RegExp path is used for Phase A because it is simpler (zero FFI), produces
+/// RegExp path is used for Phase 1 because it is simpler (zero FFI), produces
 /// identical output for English prose and common technical identifiers, and
 /// avoids the platform-specific library-loading code until it is actually
 /// needed.
-class RegExpTokeniser implements Tokeniser {
+///
+/// ## Example
+///
+/// ```dart
+/// final tokenizer = RegExpTokenizer();
+/// print(tokenizer.tokenise('Hello, world!')); // ['Hello', 'world']
+/// print(tokenizer.tokenise('')); // []
+/// print(tokenizer.tokenise('mTLS handshake')); // ['mTLS', 'handshake']
+/// ```
+class RegExpTokenizer implements Tokenizer {
+  /// Creates a new [RegExpTokenizer].
+  const RegExpTokenizer();
+
   /// Matches sequences of Unicode word characters (letters, digits, and
   /// underscores), optionally allowing internal hyphens and apostrophes so
   /// that contractions and hyphenated terms are kept intact.

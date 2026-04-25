@@ -14,7 +14,7 @@
 
 // import 'package:snowball_stemmer/snowball_stemmer.dart';
 import 'package:intl/locale.dart';
-import 'package:kmdb_lexical/lexical.dart' show Stemmer, Tokeniser;
+import 'package:kmdb_lexical/lexical.dart' show Stemmer, Tokenizer;
 
 /// Singleton English Snowball stemmer used by [stem].
 ///
@@ -24,24 +24,24 @@ import 'package:kmdb_lexical/lexical.dart' show Stemmer, Tokeniser;
 /// This is accessed via the kmdb_lexical package
 final _englishStemmer = Stemmer(Locale.fromSubtags(languageCode: 'en'));
 
-/// Stage 1 + 2: tokenise [text] with [tokeniser] and lowercase each token.
+/// Stage 1 + 2: tokenise [text] with [tokenizer] and lowercase each token.
 ///
 /// Returns an empty list for empty or whitespace-only input without error.
-/// Lowercasing is applied after tokenisation, so the tokeniser sees the
+/// Lowercasing is applied after tokenisation, so the tokenizer sees the
 /// original casing and boundary detection is not affected.
 ///
 /// ## Example
 ///
 /// ```dart
-/// final t = RegExpTokeniser();
+/// final t = RegExpTokenizer();
 /// tokeniseAndNormalise('Dr. Jekyll and Mr. Hyde', t);
 /// // → ['dr', 'jekyll', 'and', 'mr', 'hyde']
 /// ```
-List<String> tokeniseAndNormalise(String text, Tokeniser tokeniser) {
+List<String> tokeniseAndNormalise(String text, Tokenizer tokenizer) {
   if (text.isEmpty) return const [];
   // Tokenise first, then lowercase. Unicode-safe: toLowerCase() uses platform
   // locale for case folding, adequate for English.
-  return tokeniser.tokenise(text).map((t) => t.toLowerCase()).toList();
+  return tokenizer.tokenise(text).map((t) => t.toLowerCase()).toList();
 }
 
 /// Stage 3 (optional): remove tokens that appear in [stopWords].
@@ -89,7 +89,7 @@ List<String> stem(List<String> tokens) {
 /// ## Parameters
 ///
 /// - [text] — the raw input string (document field value or query string).
-/// - [tokeniser] — the [Tokeniser] implementation to use for segmentation.
+/// - [tokenizer] — the [Tokenizer] implementation to use for segmentation.
 /// - [stopWords] — the stop-word set to apply. Pass [kEnglishStopWords] to
 ///   enable English stop-word removal; pass an empty set (the default) to
 ///   disable filtering. Custom sets may also be supplied.
@@ -104,18 +104,18 @@ List<String> stem(List<String> tokens) {
 /// ```dart
 /// final tokens = preprocess(
 ///   'The quick brown fox jumps over the lazy dog',
-///   RegExpTokeniser(),
+///   RegExpTokenizer(),
 ///   stopWords: kEnglishStopWords,
 /// );
 /// // → ['quick', 'brown', 'fox', 'jump', 'lazi', 'dog']
 /// ```
 List<String> preprocess(
   String text,
-  Tokeniser tokeniser, {
+  Tokenizer tokenizer, {
   Set<String> stopWords = const {},
 }) {
   if (text.isEmpty) return const [];
-  final tokens = tokeniseAndNormalise(text, tokeniser);
+  final tokens = tokeniseAndNormalise(text, tokenizer);
   final filtered = filterStopWords(tokens, stopWords);
   return stem(filtered);
 }
