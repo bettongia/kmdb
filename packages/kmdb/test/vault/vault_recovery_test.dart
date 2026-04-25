@@ -268,6 +268,25 @@ void main() {
       });
 
       test(
+        'blob only (no manifest) but WITH KV ref — leave alone',
+        () async {
+          // This covers the defensive branch in _shouldDelete: a blob exists in
+          // the final path without a manifest, but there is already a KV ref.
+          // This should not happen normally, but recovery must not delete it.
+          final sha256 =
+              'bbccdd1234567890bbccdd1234567890bbccdd1234567890bbccdd1234567890';
+          adapter.files[store.blobPath(sha256)] = Uint8List(8);
+          // Manifest is absent but a KV ref exists — leave it alone.
+          kvStore.setRefCount(sha256, 1);
+
+          final result = await makeRecovery().recover();
+          // Hash dir must NOT be deleted.
+          expect(result.hashDirsDeleted, equals(0));
+          expect(await store.isHydrated(sha256), isTrue);
+        },
+      );
+
+      test(
         'tombstoned object with zero ref count is preserved (GC handles it)',
         () async {
           final bytes = Uint8List.fromList('tombstone'.codeUnits);
