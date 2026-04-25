@@ -57,6 +57,54 @@ void main() {
     test('implements Tokenizer interface', () {
       expect(icu, isA<Tokenizer>());
     });
+
+    test('CJK characters are returned as tokens', () {
+      // ICU UBRK_WORD treats each CJK ideograph as its own word boundary.
+      final tokens = icu.tokenise('日本語のテスト');
+      expect(tokens, isNotEmpty);
+    });
+
+    test('Arabic text produces word tokens', () {
+      final tokens = icu.tokenise('مرحبا بالعالم');
+      expect(tokens, isNotEmpty);
+      for (final t in tokens) {
+        expect(t.trim(), isNotEmpty);
+      }
+    });
+
+    test('text with combining diacritics tokenises correctly', () {
+      // "café" — 'e' + combining acute accent U+0301
+      final tokens = icu.tokenise('café latte');
+      expect(tokens, contains('café'));
+    });
+
+    test('emoji-only input returns no word tokens', () {
+      // Emoji are not \p{L} or \p{N}, so the span filter drops them.
+      final tokens = icu.tokenise('🎉🚀💡');
+      expect(tokens, isEmpty);
+    });
+
+    test('mixed emoji and words keeps word tokens', () {
+      final tokens = icu.tokenise('hello 🎉 world');
+      expect(tokens, containsAll(['hello', 'world']));
+    });
+
+    test('punctuation-only input returns no tokens', () {
+      final tokens = icu.tokenise('!@#\$%^&*()');
+      expect(tokens, isEmpty);
+    });
+
+    test('long text tokenises without error', () {
+      final longText = 'The quick brown fox jumps over the lazy dog. ' * 200;
+      final tokens = icu.tokenise(longText);
+      expect(tokens.length, greaterThan(100));
+    });
+
+    test('leading and trailing whitespace does not produce empty tokens', () {
+      final tokens = icu.tokenise('   hello world   ');
+      expect(tokens, equals(['hello', 'world']));
+      expect(tokens, everyElement(isNotEmpty));
+    });
   });
 }
 

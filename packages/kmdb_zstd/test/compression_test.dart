@@ -62,5 +62,62 @@ void main() {
       final invalidData = Uint8List.fromList([1, 2, 3, 4, 5]);
       expect(() => zstd.decompress(invalidData), throwsException);
     });
+
+    test('compress and decompress at minimum compression level', () {
+      final zstdMin = ZstdSimple(level: minCLevel());
+      final original = Uint8List.fromList(List.generate(256, (i) => i & 0xFF));
+      final decompressed = zstdMin.decompress(zstdMin.compress(original));
+      expect(decompressed, equals(original));
+    });
+
+    test('compress and decompress at maximum compression level', () {
+      final zstdMax = ZstdSimple(level: maxCLevel());
+      final original = Uint8List.fromList(List.generate(256, (i) => i & 0xFF));
+      final decompressed = zstdMax.decompress(zstdMax.compress(original));
+      expect(decompressed, equals(original));
+    });
+
+    test('just below minimum level throws ArgumentError', () {
+      expect(() => ZstdSimple(level: minCLevel() - 1), throwsArgumentError);
+    });
+
+    test('just above maximum level throws ArgumentError', () {
+      expect(() => ZstdSimple(level: maxCLevel() + 1), throwsArgumentError);
+    });
+
+    test('truncated compressed data throws Exception', () {
+      final original = Uint8List.fromList(
+        List.generate(1000, (i) => i & 0xFF),
+      );
+      final compressed = zstd.compress(original);
+      // Keep the header (so getFrameContentSize returns the real size) but
+      // cut the payload so decompress fails mid-stream.
+      final truncated = compressed.sublist(0, compressed.length ~/ 2);
+      expect(() => zstd.decompress(truncated), throwsException);
+    });
+
+    test('single byte round-trip', () {
+      final original = Uint8List.fromList([0x42]);
+      final decompressed = zstd.decompress(zstd.compress(original));
+      expect(decompressed, equals(original));
+    });
+
+    test('highly compressible data produces smaller output', () {
+      // All-zero bytes compress extremely well.
+      final original = Uint8List(4096);
+      final compressed = zstd.compress(original);
+      expect(compressed.length, lessThan(original.length));
+    });
+
+    test('compress returns Uint8List', () {
+      final result = zstd.compress(Uint8List.fromList([1, 2, 3]));
+      expect(result, isA<Uint8List>());
+    });
+
+    test('decompress returns Uint8List', () {
+      final compressed = zstd.compress(Uint8List.fromList([1, 2, 3]));
+      final result = zstd.decompress(compressed);
+      expect(result, isA<Uint8List>());
+    });
   });
 }
