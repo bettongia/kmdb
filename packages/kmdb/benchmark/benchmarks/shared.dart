@@ -31,7 +31,8 @@ Map<String, dynamic> benchPayload(int index) => {
   'value': index,
   'active': true,
   'tags': ['bench', 'kmdb', 'perf'],
-  'description': 'A fixed-size document used as a consistent benchmark payload '
+  'description':
+      'A fixed-size document used as a consistent benchmark payload '
       'to exercise the write and read paths with realistic field counts.',
 };
 
