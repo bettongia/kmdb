@@ -54,8 +54,8 @@ final class CommandContext {
     StringSink? out,
     StringSink? err,
   }) : config = config ?? KmdbConfig.empty(),
-       out = out ?? _StdoutSink(),
-       err = err ?? _StderrSink();
+       out = out ?? _StdoutSink(), // coverage:ignore-line
+       err = err ?? _StderrSink(); // coverage:ignore-line
 
   /// The open database.
   ///
@@ -163,7 +163,7 @@ abstract class CliCommand {
   /// Called by the help-text builder so that `kmdb help <command>` shows a
   /// structured options table rather than a hand-written synopsis string.
   /// The default implementation is a no-op for commands with no flags.
-  void configureArgParser(ArgParser parser) {}
+  void configureArgParser(ArgParser parser) {} // coverage:ignore-line
 
   /// Executes the command with the given positional [args] and [flags].
   ///
@@ -178,6 +178,7 @@ abstract class CliCommand {
 
 // ── Stdout/stderr sinks ────────────────────────────────────────────────────
 
+// coverage:ignore-start
 class _StdoutSink implements StringSink {
   @override
   void write(Object? object) => io.stdout.write(object);
@@ -201,3 +202,5 @@ class _StderrSink implements StringSink {
   @override
   void writeln([Object? object = '']) => io.stderr.writeln(object);
 }
+
+// coverage:ignore-end

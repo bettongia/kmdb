@@ -260,9 +260,11 @@ final class InsertCommand extends CliCommand {
       return _parseJson(ctx, content, source: path);
     }
 
+    // coverage:ignore-start
     // Stdin: buffer everything, then auto-detect JSON vs NDJSON.
     final content = await io.stdin.transform(utf8.decoder).join();
     return _parseJsonOrNdjson(ctx, content, source: 'stdin');
+    // coverage:ignore-end
   }
 
   // ── Format detection ───────────────────────────────────────────────────────

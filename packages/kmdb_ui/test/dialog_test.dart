@@ -27,13 +27,16 @@ class MockDatabaseProvider extends Mock implements DatabaseProvider {}
 // Helpers
 // ---------------------------------------------------------------------------
 
-Widget _wrap(Widget child) =>
-    MaterialApp(home: Scaffold(body: Builder(builder: (ctx) => child)));
+Widget _wrap(Widget child) => MaterialApp(
+  home: Scaffold(body: Builder(builder: (ctx) => child)),
+);
 
 Widget _wrapWithProvider(Widget child, DatabaseProvider provider) =>
     ChangeNotifierProvider<DatabaseProvider>.value(
       value: provider,
-      child: MaterialApp(home: Scaffold(body: Builder(builder: (ctx) => child))),
+      child: MaterialApp(
+        home: Scaffold(body: Builder(builder: (ctx) => child)),
+      ),
     );
 
 // ---------------------------------------------------------------------------
@@ -207,10 +210,11 @@ void main() {
               builder: (ctx) => ElevatedButton(
                 onPressed: () => showDialog<void>(
                   context: ctx,
-                  builder: (_) => ChangeNotifierProvider<DatabaseProvider>.value(
-                    value: mockProvider,
-                    child: const NewCollectionDialog(),
-                  ),
+                  builder: (_) =>
+                      ChangeNotifierProvider<DatabaseProvider>.value(
+                        value: mockProvider,
+                        child: const NewCollectionDialog(),
+                      ),
                 ),
                 child: const Text('Open'),
               ),
@@ -244,10 +248,11 @@ void main() {
               builder: (ctx) => ElevatedButton(
                 onPressed: () => showDialog<void>(
                   context: ctx,
-                  builder: (_) => ChangeNotifierProvider<DatabaseProvider>.value(
-                    value: mockProvider,
-                    child: const NewCollectionDialog(),
-                  ),
+                  builder: (_) =>
+                      ChangeNotifierProvider<DatabaseProvider>.value(
+                        value: mockProvider,
+                        child: const NewCollectionDialog(),
+                      ),
                 ),
                 child: const Text('Open'),
               ),
@@ -374,8 +379,7 @@ class _NewDatabaseDialogForTest extends StatefulWidget {
       _NewDatabaseDialogForTestState();
 }
 
-class _NewDatabaseDialogForTestState
-    extends State<_NewDatabaseDialogForTest> {
+class _NewDatabaseDialogForTestState extends State<_NewDatabaseDialogForTest> {
   final _nameController = TextEditingController();
   bool _canCreate = false;
 
