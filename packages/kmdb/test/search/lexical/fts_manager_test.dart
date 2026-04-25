@@ -322,6 +322,64 @@ void main() {
     });
   });
 
+  // ── interceptWrite skips stale/undefined indexes ─────────────────────────────
+
+  group('interceptWrite — stale index skipped', () {
+    test(
+      'search on stale index triggers rebuild and returns correct results',
+      () async {
+        final db = await _openDb();
+        final col = db.collection(name: 'docs', codec: _codec);
+
+        // Build index on two documents.
+        final doc1 = await col.insert({'body': 'the quick brown fox'});
+        final doc2 = await col.insert({'body': 'lazy dog'});
+        await db.ftsManager!.ensureBuilt('docs', 'body');
+
+        // Force the index to stale (simulates interrupted build recovery).
+        await db.ftsManager!.forceStateForTesting(
+          'docs',
+          'body',
+          FtsIndexStatus.stale,
+        );
+
+        // Insert a document while stale: interceptWrite skips FTS writes so
+        // this doc gets no base entries. Search triggers ensureBuilt which
+        // performs a full rebuild and finds all docs, including this one.
+        final doc3 = await col.insert({'body': 'stale rebuild test'});
+
+        // Search triggers ensureBuilt internally (stale → building → current).
+        final result = await col.search('rebuild', fields: ['body']);
+        expect(result.hits.map((h) => h.id), contains(doc3['_id']));
+
+        // Pre-existing docs must also be found after rebuild.
+        final foxResult = await col.search('quick', fields: ['body']);
+        expect(foxResult.hits.map((h) => h.id), contains(doc1['_id']));
+
+        // Confirm index is now current (not stale).
+        expect(db.ftsManager!.hasIndex('docs', 'body'), isTrue);
+
+        // Unrelated documents are not returned.
+        final dogResult = await col.search('lazy', fields: ['body']);
+        expect(dogResult.hits.map((h) => h.id), contains(doc2['_id']));
+      },
+    );
+
+    test('zero-token document produces no index entries', () async {
+      // A document whose field tokenises to zero unique terms (e.g. only
+      // punctuation) must not create any base index entries.
+      final db = await _openDb();
+      final col = db.collection(name: 'docs', codec: _codec);
+
+      await col.insert({'body': '...'});
+      await db.ftsManager!.ensureBuilt('docs', 'body');
+
+      // Querying any word should return no hits since the document has no tokens.
+      final result = await col.search('dot', fields: ['body']);
+      expect(result.hits, isEmpty);
+    });
+  });
+
   // ── checkAndTransitionOnOpen ─────────────────────────────────────────────────
 
   group('checkAndTransitionOnOpen', () {

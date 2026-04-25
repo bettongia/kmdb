@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// coverage:ignore-file
 // This file is compiled only when `dart.library.js_interop` is available
 // (i.e. on web targets). It must not import `dart:io`.
 
