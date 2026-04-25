@@ -98,6 +98,21 @@ void main() {
     expect(err.toString(), contains("remote 'nosuch' not found"));
   });
 
+  test('returns false when config.json is corrupt', () async {
+    // Write a malformed config.json into the database's local/ dir so that
+    // KmdbConfig.load throws a FormatException when resolving the remote.
+    final localDir = io.Directory('${dbDir.path}/local')..createSync();
+    io.File(
+      '${localDir.path}/config.json',
+    ).writeAsStringSync('{ this is not valid json }');
+
+    final ctx = _ctx(db, out: out, err: err);
+    // Use a named remote (not --sync-dir) so the command loads config.json.
+    final ok = await pullCmd.execute(ctx, ['origin'], {});
+    expect(ok, isFalse);
+    expect(err.toString(), isNotEmpty);
+  });
+
   // ── Error: --sync-dir + remote name ──────────────────────────────────────
 
   test(

@@ -89,6 +89,18 @@ void main() {
     expect(err.toString(), contains("remote 'nosuchremote' not found"));
   });
 
+  test('returns false when config.json is corrupt', () async {
+    final localDir = io.Directory('${dbDir.path}/local')..createSync();
+    io.File(
+      '${localDir.path}/config.json',
+    ).writeAsStringSync('{ this is not valid json }');
+
+    final ctx = _ctx(db, out: out, err: err);
+    final ok = await pushCmd.execute(ctx, ['origin'], {});
+    expect(ok, isFalse);
+    expect(err.toString(), isNotEmpty);
+  });
+
   // ── Error: both remote name and --sync-dir ────────────────────────────────
 
   test(
