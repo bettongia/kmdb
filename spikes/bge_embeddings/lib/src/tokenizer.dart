@@ -15,7 +15,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:icu_tokenizer/icu_tokenizer.dart' show RegExpTokeniser;
+import 'package:icu_tokenizer/icu_tokenizer.dart' show RegExpTokenizer;
 
 // Replace with your actual UAX #29 import, e.g.:
 // import 'package:your_uax29_package/your_uax29_package.dart';
@@ -49,7 +49,7 @@ class BertTokenizer {
 
     // ── Replace with your UAX #29 word segmentation call: ────────────────────
     // final words = segmentWords(normalized);
-    final words = RegExpTokeniser().tokenise(normalized);
+    final words = RegExpTokenizer().tokenise(normalized);
     // ─────────────────────────────────────────────────────────────────────────
 
     final tokenIds = <int>[_clsId];

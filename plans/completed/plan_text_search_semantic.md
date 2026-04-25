@@ -35,13 +35,13 @@ _None — all design decisions resolved in spec §22._
 ### Design decisions (see spec §22)
 
 - `kmdb_inferencing` is the sole package that holds ONNX FFI and model assets.
-  It depends on `kmdb` for `EmbeddingModel` and `Tokeniser`. Keeping FFI out of
+  It depends on `kmdb` for `EmbeddingModel` and `Tokenizer`. Keeping FFI out of
   `kmdb` mirrors how `kmdb_zstd` holds Zstd FFI.
 - The BGE Small En v1.5 model binary (`bge_small.onnx`, ~127 MB) is tracked via
   **Git LFS**. Supporting assets (`vocab.txt`, `tokenizer_config.json`) are
   small enough to track normally. All assets live under
   `packages/kmdb_inferencing/assets/models/bge-small-en/`.
-- `BertTokenizer` accepts a `Tokeniser` in its constructor (`RegExpTokeniser` by
+- `BertTokenizer` accepts a `Tokenizer` in its constructor (`RegExpTokenizer` by
   default). The word segmentation output feeds into WordPiece subword splitting;
   the BERT token IDs are entirely distinct from the stemmed tokens produced by
   the lexical pipeline.
@@ -131,14 +131,14 @@ _None — all design decisions resolved in spec §22._
 
 - [x] Move `BertTokenizer` from spike into
       `packages/kmdb_inferencing/lib/src/bert_tokenizer.dart`
-  - Accepts injected `Tokeniser` with `RegExpTokeniser()` as default
+  - Accepts injected `Tokenizer` with `RegExpTokenizer()` as default
   - Doc comments on `load()`, `encode()`, `TokenizerOutput`
 - [x] Tests (`packages/kmdb_inferencing/test/bert_tokenizer_test.dart`):
   - [x] `encode()` produces `[CLS]` and `[SEP]` sentinels
   - [x] Known token IDs
   - [x] Truncation at 512 tokens
   - [x] Empty string produces `[CLS][SEP]` only
-  - [x] Custom `Tokeniser` substitution
+  - [x] Custom `Tokenizer` substitution
 
 ### Phase 3 — SQ8 quantisation helpers
 
@@ -153,7 +153,7 @@ _None — all design decisions resolved in spec §22._
 
 - [x] Completed `packages/kmdb_inferencing/lib/src/embedding_model.dart`
 - [x] Updated barrel to export `OnnxEmbeddingModel`, `BertTokenizer`, `sq8.dart`
-      helpers, and re-export `Tokeniser` from `kmdb`
+      helpers, and re-export `Tokenizer` from `kmdb`
 - [x] Tests skip gracefully when model assets are absent
 
 ### Phase 5 — Git LFS setup and model asset migration

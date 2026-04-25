@@ -6,18 +6,18 @@ search.
 This package provides `OnnxEmbeddingModel`, an implementation of the
 `EmbeddingModel` interface (defined in `package:kmdb`) that generates
 384-dimensional dense vector embeddings using the
-[BGE Small En v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5) model. It
-is the inference backend for `VecManager` in KMDB semantic and hybrid search.
+[BGE Small En v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5) model. It is
+the inference backend for `VecManager` in KMDB semantic and hybrid search.
 
 ## Model assets
 
-The model binary (`bge_small.onnx`, ~127 MB) is tracked in the repository
-using **Git LFS**. Supporting assets (`vocab.txt`, `tokenizer_config.json`,
+The model binary (`bge_small.onnx`, ~127 MB) is tracked in the repository using
+**Git LFS**. Supporting assets (`vocab.txt`, `tokenizer_config.json`,
 `tokenizer.json`, `config.json`, `special_tokens_map.json`) are tracked
 normally. All assets live under `assets/models/bge-small-en/`.
 
-Run `git lfs pull` after cloning to fetch the model binary before running
-tests that require inference.
+Run `git lfs pull` after cloning to fetch the model binary before running tests
+that require inference.
 
 ## Getting started
 
@@ -33,8 +33,8 @@ workspace:
 
 The ONNX Runtime native library must be available on the host system. See the
 [ONNX Runtime release page](https://github.com/microsoft/onnxruntime/releases)
-for pre-built binaries. Construction throws `UnsupportedError` if the library
-or model file cannot be loaded.
+for pre-built binaries. Construction throws `UnsupportedError` if the library or
+model file cannot be loaded.
 
 ## Usage
 
@@ -78,8 +78,8 @@ final (embedding, truncated) = await model.embed('The quick brown fox');
 - Inference runs synchronously on the calling isolate. For production Flutter
   applications, run `SyncEngine.sync()` and any delta indexing on a background
   isolate to keep the UI thread responsive.
-- Field values exceeding 510 BERT tokens are truncated; the first 510 tokens
-  are embedded. A truncation marker is recorded in the index.
+- Field values exceeding 510 BERT tokens are truncated; the first 510 tokens are
+  embedded. A truncation marker is recorded in the index.
 - `KmdbDatabase.close()` calls `model.dispose()` automatically — do not call
   `dispose()` separately if the model was passed to `open()`.
 
@@ -87,6 +87,6 @@ final (embedding, truncated) = await model.embed('The quick brown fox');
 
 - `package:kmdb` — core library; defines `EmbeddingModel`, `VecIndexDefinition`,
   and `VecManager`
-- `package:kmdb_tokenizer_icu` — ICU-backed word tokeniser, accepted by
-  `OnnxEmbeddingModel` as a substitute for the default `RegExpTokeniser`
+- `package:kmdb_tokenizer_icu` — ICU-backed word tokenizer, accepted by
+  `OnnxEmbeddingModel` as a substitute for the default `RegExpTokenizer`
 - KMDB specification §22 — semantic search index structure and query path

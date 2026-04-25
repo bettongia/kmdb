@@ -14,6 +14,6 @@
 library;
 
 export 'src/stemmer.dart' show Stemmer;
-export 'src/tokenizer.dart' show Tokeniser;
-export 'src/regexp_tokeniser.dart' show RegExpTokeniser;
+export 'src/tokenizer.dart' show Tokenizer;
+export 'src/regexp_tokenizer.dart' show RegExpTokenizer;
 export 'src/stopwords.dart' show getStopWords, Stopwords;

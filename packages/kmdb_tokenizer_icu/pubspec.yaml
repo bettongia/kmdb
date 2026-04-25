@@ -1,5 +1,5 @@
 name: kmdb_tokenizer_icu
-description: ICU-backed word tokeniser for KMDB lexical search.
+description: ICU-backed word tokenizer for KMDB lexical search.
 version: 1.0.0
 publish_to: none
 

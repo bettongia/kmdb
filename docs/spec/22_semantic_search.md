@@ -14,13 +14,13 @@ vectors in the KV store under `$vec:` system namespaces.
 
 **Model:** [BGE Small En v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5)
 
-| Property   | Value                            |
-| :--------- | :------------------------------- |
-| Format     | ONNX                             |
-| Size       | ~127 MB                          |
-| Dimensions | 384                              |
+| Property    | Value                              |
+| :---------- | :--------------------------------- |
+| Format      | ONNX                               |
+| Size        | ~127 MB                            |
+| Dimensions  | 384                                |
 | Token limit | 512 (510 usable after [CLS]/[SEP]) |
-| Output     | L2-normalized float32 vectors    |
+| Output      | L2-normalized float32 vectors      |
 
 ### Bundling
 
@@ -40,15 +40,15 @@ Producing an embedding from a field value requires four stages:
 
 ```
 field value
-  → word segmentation  (Tokeniser — shared with §21 lexical pipeline)
+  → word segmentation  (Tokenizer — shared with §21 lexical pipeline)
   → WordPiece subword splitting  (BertTokenizer, 30k-entry vocabulary)
   → ONNX model inference
   → mean pool + L2 normalise
   → 384-dim float32 vector
 ```
 
-`BertTokenizer` accepts a `Tokeniser` in its constructor; `RegExpTokeniser` is
-the default. `IcuTokeniser` (ICU FFI, UAX #29) can be substituted. Both produce
+`BertTokenizer` accepts a `Tokenizer` in its constructor; `RegExpTokenizer` is
+the default. `IcuTokenizer` (ICU FFI, UAX #29) can be substituted. Both produce
 equivalent results for English-language text. The word segmentation step is the
 only part shared with the lexical pipeline — the output of BERT tokenization
 (numeric subword IDs consumed by the model) is entirely different from the
@@ -131,8 +131,8 @@ the semantic index always consistent.
      the previous entry).
    - `DELETE $vec:truncated:{ns}:{field}:{docId}` — safe no-op if absent;
      removes the marker if the new value no longer truncates.
-   - If the new value was truncated: `PUT $vec:truncated:{ns}:{field}:{docId}`
-     → empty.
+   - If the new value was truncated: `PUT $vec:truncated:{ns}:{field}:{docId}` →
+     empty.
    - `n` is unchanged.
 
 No read-before-write is needed on the update path.
@@ -153,8 +153,8 @@ neighbour index (HNSW, IVF-Flat, etc.):
 
 1. Run inference on the query string using the same pipeline as indexing.
 2. If a `filter` was provided, resolve the set of matching docIds using
-   secondary indexes (§16) if available, or a full namespace scan with
-   in-memory filter evaluation otherwise. This produces a `candidateIds` set.
+   secondary indexes (§16) if available, or a full namespace scan with in-memory
+   filter evaluation otherwise. This produces a `candidateIds` set.
 3. Fetch `(docId, Uint8List)` vector entries: if `candidateIds` is set, perform
    targeted key lookups (`$vec:{ns}:{field}:{docId}` per id) rather than a full
    prefix scan. When no filter is present, prefix-scan `$vec:{ns}:{field}:` to
@@ -198,12 +198,12 @@ necessary to guarantee that a document and its embedding are never out of sync.
 For delta processing, the `WriteBatch` for the document itself has already been
 committed by the LSM engine during SSTable ingestion; there is no consistency
 risk in running inference asynchronously in the calling isolate. Applications
-must ensure delta processing runs on a background isolate (§20.8) so that
-ONNX inference does not block the UI thread.
+must ensure delta processing runs on a background isolate (§20.8) so that ONNX
+inference does not block the UI thread.
 
-ONNX inference is the throughput bottleneck for vec delta processing.
-First-load scenarios on mobile devices — where the full collection arrives via
-sync — can take from several seconds to several minutes depending on collection
-size and device capability. Applications should surface a progress indicator
-for collections of meaningful size and allow search to begin against the
-(pre-sync) index while the delta is applied.
+ONNX inference is the throughput bottleneck for vec delta processing. First-load
+scenarios on mobile devices — where the full collection arrives via sync — can
+take from several seconds to several minutes depending on collection size and
+device capability. Applications should surface a progress indicator for
+collections of meaningful size and allow search to begin against the (pre-sync)
+index while the delta is applied.

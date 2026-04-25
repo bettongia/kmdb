@@ -74,7 +74,7 @@ Importantly, case folding depends on the language in use. The
 provides a mapping of characters to their other case.
 
 The [icu_tokenizer](../..spikes/icu_tokenizer) spike solution has proven out the
-tokeniser approach.
+tokenizer approach.
 
 ### 3. Remove stop words (maybe)
 
@@ -215,7 +215,7 @@ calls three functions (`ubrk_open()`, `ubrk_next()`, `ubrk_previous()`) against
 a library that is already present on the target device. ICU's word rules also
 include built-in handling for numeric literals and mixed-case identifiers, which
 directly covers the technical identifier cases (`0x8004210B`, `mTLS`) that a
-custom tokeniser would need explicit rules for.
+custom tokenizer would need explicit rules for.
 
 The investigation should confirm:
 
@@ -227,10 +227,10 @@ The investigation should confirm:
 ##### Fallback
 
 If the ICU FFI path proves impractical on any target platform, the fallback is a
-custom `RegExp`-based tokeniser written in pure Dart. This would handle the
+custom `RegExp`-based tokenizer written in pure Dart. This would handle the
 common English prose cases well but would require explicit rules for technical
 identifiers and would not provide full UAX #29 compliance. Either way, the
-tokeniser is implemented behind a `Tokeniser` interface so that the
+tokenizer is implemented behind a `Tokenizer` interface so that the
 implementation can be swapped without changes to the indexing pipeline — this
 also satisfies the pluggability requirement for future multi-language support
 (see [top-level proposal](text_search.md) §3.1).

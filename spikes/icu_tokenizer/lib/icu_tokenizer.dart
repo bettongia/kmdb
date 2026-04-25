@@ -15,11 +15,11 @@
 /// Spike: UAX #29 word segmentation via ICU FFI, with a pure-Dart fallback.
 ///
 /// Exports:
-/// - [Tokeniser] — abstract segmentation interface
-/// - [IcuTokeniser] — FFI-backed implementation using the system ICU library
-/// - [RegExpTokeniser] — pure-Dart fallback for unsupported platforms
+/// - [Tokenizer] — abstract segmentation interface
+/// - [IcuTokenizer] — FFI-backed implementation using the system ICU library
+/// - [RegExpTokenizer] — pure-Dart fallback for unsupported platforms
 library;
 
-export 'src/icu_tokeniser.dart' show IcuTokeniser;
-export 'src/regexp_tokeniser.dart' show RegExpTokeniser;
-export 'src/tokeniser.dart' show Tokeniser;
+export 'src/icu_tokenizer.dart' show IcuTokenizer;
+export 'src/regexp_tokenizer.dart' show RegExpTokenizer;
+export 'src/tokenizer.dart' show Tokenizer;

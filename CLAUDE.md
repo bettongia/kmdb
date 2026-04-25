@@ -45,7 +45,7 @@ packages/
   kmdb_cli/            — the CLI tool (bin/, lib/, test/)
   kmdb_zstd/           — Zstd FFI compression provider
   kmdb_ui/             — Flutter desktop browser
-  kmdb_tokenizer_icu/  — ICU FFI word tokeniser for lexical search
+  kmdb_tokenizer_icu/  — ICU FFI word tokenizer for lexical search
   kmdb_inferencing/    — ONNX Runtime + BGE embedding model for semantic search
   kmdb_lexical/        — lexical utilities (stemmer, stopwords) used by FTS
   kmdb_mimeinfo/       — FreeDesktop shared-mime-info file-type identification
@@ -106,11 +106,12 @@ dart run packages/kmdb/benchmark/main.dart
 | 7     | Query layer (KmdbDatabase, KmdbCollection, KmdbQuery, Filter DSL, secondary indexes, reactivity) | ✅ Complete |
 | 8     | Platform hardening (OPFS web storage, Zstd FFI/WASM, cloud adapters, performance benchmarks)     | ✅ Complete |
 | 9a    | Lexical search (BM25 inverted index, tokenisation pipeline, FtsManager, `search` CLI command)    | ✅ Complete |
-| 9b    | Semantic search (BGE Small En v1.5, SQ8 vector index, VecManager, ONNX inference)               | ✅ Complete |
+| 9b    | Semantic search (BGE Small En v1.5, SQ8 vector index, VecManager, ONNX inference)                | ✅ Complete |
 | 9c    | Hybrid search (Reciprocal Rank Fusion, `--mode` flag, unified SearchResult types)                | ✅ Complete |
 | 10    | Vault (content-addressable blob store, KVLT packaging, ref-counted GC, distributed sync)         | ✅ Complete |
 
-All 1162 kmdb + 454 kmdb_cli tests pass as of 2026-04-25 (E2E tests skipped by default).
+All 1162 kmdb + 454 kmdb_cli tests pass as of 2026-04-25 (E2E tests skipped by
+default).
 
 ## Architecture
 
@@ -151,7 +152,8 @@ incidental benefit.
 - **SSTables:** 4KB data blocks, Bloom filter block (10 bits/key, ~0.8% FPR),
   index block, footer. XXH64 checksums throughout.
 - **Value encoding (§5):** `KmdbCodec<T>` → CBOR → optional Zstd (native) or
-  compression (native only — web stores uncompressed). 1-byte flag prefix on each value.
+  compression (native only — web stores uncompressed). 1-byte flag prefix on
+  each value.
 - **Keys:** UUIDv7 (16-byte binary internally, hex string at KvStore boundary).
   HLC timestamps (48-bit physical + 16-bit logical) on WAL records and SSTables.
 
@@ -180,9 +182,8 @@ identifies which consolidation round produced the file.
     config.json             ← CLI-only: named sync remotes
 ```
 
-The `local/` subdirectory holds per-machine, non-synced CLI state. It is
-created lazily on first `remote add` and is never uploaded or read by
-`SyncEngine`.
+The `local/` subdirectory holds per-machine, non-synced CLI state. It is created
+lazily on first `remote add` and is never uploaded or read by `SyncEngine`.
 
 ### Sync Folder Layout
 
@@ -239,8 +240,8 @@ Three modes: **lexical** (BM25 inverted index, `$fts:` namespaces), **semantic**
 (BGE Small En v1.5 embeddings, SQ8 quantization, `$vec:` namespaces), and
 **hybrid** (Reciprocal Rank Fusion combining both). All `$fts:` and `$vec:`
 namespaces are excluded from sync and cache. Managed via `FtsManager` and
-`VecManager`; queried via `KmdbCollection.search()`. English-language only;
-web browser excluded. See §20 for shared types and CLI, §21–23 for each mode.
+`VecManager`; queried via `KmdbCollection.search()`. English-language only; web
+browser excluded. See §20 for shared types and CLI, §21–23 for each mode.
 
 ### Sync Protocol (§12)
 
@@ -279,9 +280,12 @@ HTML lives in [site/](site/) and is generated via `make docs`. Key spec files:
 - `18_concurrency.md` — synchronous model and performance targets
 - `19_platform.md` — platform conditional exports and package layout
 - `20_text_search.md` — text search overview, shared types, CLI, sync exclusion
-- `21_lexical_search.md` — BM25 inverted index, preprocessing pipeline, write/query/compaction
-- `22_semantic_search.md` — BGE model, SQ8 quantization, vector index, write/query paths
-- `23_hybrid_search.md` — Reciprocal Rank Fusion, candidate set, mode flag, score structure
+- `21_lexical_search.md` — BM25 inverted index, preprocessing pipeline,
+  write/query/compaction
+- `22_semantic_search.md` — BGE model, SQ8 quantization, vector index,
+  write/query paths
+- `23_hybrid_search.md` — Reciprocal Rank Fusion, candidate set, mode flag,
+  score structure
 - `24_vault.md` — content-addressable blob store and KVLT packaging
 - `25_collection_schemas.md` — JSON Schema admission gate for collection writes
 - `99_glossary.md` — terminology reference

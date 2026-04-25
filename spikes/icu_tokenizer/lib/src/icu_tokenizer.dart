@@ -1,10 +1,10 @@
-// Copyright 2026 The KMDB Authors
+// Copyright 2026 The KMDB Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,7 +16,8 @@ import 'dart:ffi';
 import 'dart:io';
 
 import 'package:ffi/ffi.dart';
-import 'package:kmdb_lexical/lexical.dart' show Tokeniser;
+
+import 'tokenizer.dart';
 
 // ---------------------------------------------------------------------------
 // ICU constants
@@ -26,7 +27,6 @@ import 'package:kmdb_lexical/lexical.dart' show Tokeniser;
 const int _ubrkWord = 2;
 
 /// Sentinel returned by ubrk_next() when iteration is complete.
-///
 /// ICU defines UBRK_DONE as (int32_t)0xFFFFFFFF — i.e. -1 in signed form.
 const int _ubrkDone = -1;
 
@@ -34,7 +34,7 @@ const int _ubrkDone = -1;
 // Native function typedefs
 // ---------------------------------------------------------------------------
 
-/// `ubrk_open` — allocates a UBreakIterator.
+/// ubrk_open — allocate a UBreakIterator.
 ///
 /// Passing address 0 for [locale] selects ICU's default (root) locale, which
 /// is sufficient for script-level word boundary rules.
@@ -55,11 +55,11 @@ typedef _UbrkOpen =
       Pointer<Int32> status,
     );
 
-/// `ubrk_next` — advance to the next boundary; returns position or [_ubrkDone].
+/// ubrk_next — advance to the next boundary; returns position or [_ubrkDone].
 typedef _UbrkNextNative = Int32 Function(Pointer<Void> bi);
 typedef _UbrkNext = int Function(Pointer<Void> bi);
 
-/// `ubrk_close` — release the UBreakIterator.
+/// ubrk_close — release the UBreakIterator.
 typedef _UbrkCloseNative = Void Function(Pointer<Void> bi);
 typedef _UbrkClose = void Function(Pointer<Void> bi);
 
@@ -69,7 +69,7 @@ typedef _UbrkClose = void Function(Pointer<Void> bi);
 
 /// Opens the system ICU library appropriate for the current platform.
 ///
-/// ICU is bundled with every target OS that KMDB supports:
+/// ICU is bundled with every target OS that kmdb supports:
 ///
 /// | Platform    | Library                              |
 /// |-------------|--------------------------------------|
@@ -127,15 +127,15 @@ DynamicLibrary _openIcuLibrary() {
   }
 
   throw UnsupportedError(
-    'IcuTokeniser is not supported on ${Platform.operatingSystem}.',
+    'IcuTokenizer is not supported on ${Platform.operatingSystem}.',
   );
 }
 
 // ---------------------------------------------------------------------------
-// IcuTokeniser
+// IcuTokenizer
 // ---------------------------------------------------------------------------
 
-/// A [Tokeniser] backed by the ICU C library's UBRK_WORD break iterator.
+/// A [Tokenizer] backed by the ICU C library's UBRK_WORD break iterator.
 ///
 /// Conforms to UAX #29 Unicode Text Segmentation and handles non-Latin scripts
 /// (CJK, Thai, Arabic, etc.) correctly. This is the implementation to adopt
@@ -143,7 +143,7 @@ DynamicLibrary _openIcuLibrary() {
 ///
 /// ## Deployment
 ///
-/// ICU is a system library on all of KMDB's target platforms — no bundling is
+/// ICU is a system library on all of kmdb's target platforms — no bundling is
 /// required and there is no App Store risk:
 ///
 /// | Platform    | Library                              |
@@ -167,9 +167,9 @@ DynamicLibrary _openIcuLibrary() {
 ///
 /// Throws [UnsupportedError] if the ICU library cannot be found or if the
 /// required symbols are absent.
-class IcuTokeniser implements Tokeniser {
+class IcuTokenizer implements Tokenizer {
   // Retain the DynamicLibrary reference to prevent the OS from unloading the
-  // library while this tokeniser is alive.
+  // library while this tokenizer is alive.
   // ignore: unused_field
   final DynamicLibrary _lib;
   final _UbrkOpen _ubrkOpen;
@@ -177,11 +177,9 @@ class IcuTokeniser implements Tokeniser {
   final _UbrkClose _ubrkClose;
 
   /// Opens the system ICU library and resolves the FFI symbols.
-  ///
-  /// Throws [UnsupportedError] if the library cannot be found on this platform.
-  IcuTokeniser() : this._fromLib(_openIcuLibrary());
+  IcuTokenizer() : this._fromLib(_openIcuLibrary());
 
-  IcuTokeniser._fromLib(DynamicLibrary lib)
+  IcuTokenizer._fromLib(DynamicLibrary lib)
     : _lib = lib,
       _ubrkOpen = lib.lookupFunction<_UbrkOpenNative, _UbrkOpen>('ubrk_open'),
       _ubrkNext = lib.lookupFunction<_UbrkNextNative, _UbrkNext>('ubrk_next'),

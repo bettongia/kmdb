@@ -80,7 +80,7 @@ abstract final class SyncHelpers {
   /// Returns the set of collections to sync.
   ///
   /// If the `collection` flag is present (it can appear multiple times as a
-  /// space-separated list because the CLI tokeniser treats each flag value
+  /// space-separated list because the CLI tokenizer treats each flag value
   /// as a single token), the result is restricted to those collections.
   /// Otherwise, all non-`$`-prefixed collections from the store are returned.
   ///

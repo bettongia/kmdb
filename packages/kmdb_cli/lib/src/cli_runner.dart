@@ -473,7 +473,7 @@ abstract final class KmdbCli {
         'new database, or point init at an existing KMDB database path.';
   }
 
-  // ── Tokeniser ─────────────────────────────────────────────────────────────
+  // ── Tokenizer ─────────────────────────────────────────────────────────────
 
   /// Splits [line] into tokens, respecting single and double quoted strings.
   ///

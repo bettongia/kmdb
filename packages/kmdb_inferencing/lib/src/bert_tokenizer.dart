@@ -15,9 +15,9 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:kmdb_lexical/lexical.dart' show Tokeniser, RegExpTokeniser;
+import 'package:kmdb_lexical/lexical.dart' show Tokenizer, RegExpTokenizer;
 
-/// A BERT WordPiece tokeniser backed by a `vocab.txt` file.
+/// A BERT WordPiece tokenizer backed by a `vocab.txt` file.
 ///
 /// Converts arbitrary text into BERT token IDs suitable for feeding into the
 /// BGE Small En v1.5 ONNX model via [OrtInferenceSession.run].
@@ -25,8 +25,8 @@ import 'package:kmdb_lexical/lexical.dart' show Tokeniser, RegExpTokeniser;
 /// ## Pipeline
 ///
 /// 1. **Normalise** — lower-case and strip combining accent characters.
-/// 2. **Word segmentation** — delegate to the [Tokeniser] supplied at
-///    construction time. [RegExpTokeniser] is used by default; `IcuTokeniser`
+/// 2. **Word segmentation** — delegate to the [Tokenizer] supplied at
+///    construction time. [RegExpTokenizer] is used by default; `IcuTokenizer`
 ///    from `package:kmdb_tokenizer_icu` can be substituted as a drop-in
 ///    replacement for superior Unicode coverage.
 /// 3. **WordPiece** — split each word into sub-word pieces and look up IDs in
@@ -40,17 +40,17 @@ import 'package:kmdb_lexical/lexical.dart' show Tokeniser, RegExpTokeniser;
 /// produced by the lexical search pipeline (FtsManager / BM25). They must
 /// not be interchanged.
 ///
-/// ## IcuTokeniser
+/// ## IcuTokenizer
 ///
 /// ```dart
 /// import 'package:kmdb_tokenizer_icu/kmdb_tokenizer_icu.dart';
 /// final tokenizer = await BertTokenizer.load(vocabPath,
-///   tokeniser: IcuTokeniser());
+///   tokenizer: IcuTokenizer());
 /// ```
 class BertTokenizer {
   final Map<String, int> _vocab;
   final int _maxLength;
-  final Tokeniser _tokeniser;
+  final Tokenizer _tokenizer;
 
   /// [CLS] token ID — always the first token in BERT input sequences.
   static const int clsId = 101;
@@ -65,7 +65,7 @@ class BertTokenizer {
   /// [PAD] token ID — used to fill sequences shorter than [maxLength].
   static const int padId = 0;
 
-  BertTokenizer._(this._vocab, this._maxLength, this._tokeniser);
+  BertTokenizer._(this._vocab, this._maxLength, this._tokenizer);
 
   /// Loads the vocabulary from [vocabPath] and returns a [BertTokenizer].
   ///
@@ -76,20 +76,20 @@ class BertTokenizer {
   /// [maxLength] is the maximum sequence length including the `[CLS]` and
   /// `[SEP]` sentinel tokens (default 512 per the BERT specification).
   ///
-  /// [tokeniser] controls word segmentation before WordPiece splitting.
-  /// Defaults to [RegExpTokeniser]. Supply `IcuTokeniser()` from
+  /// [tokenizer] controls word segmentation before WordPiece splitting.
+  /// Defaults to [RegExpTokenizer]. Supply `IcuTokenizer()` from
   /// `package:kmdb_tokenizer_icu` for improved Unicode coverage.
   static Future<BertTokenizer> load(
     String vocabPath, {
     int maxLength = 512,
-    Tokeniser? tokeniser,
+    Tokenizer? tokenizer,
   }) async {
     final lines = await File(vocabPath).readAsLines();
     final vocab = <String, int>{};
     for (var i = 0; i < lines.length; i++) {
       vocab[lines[i].trim()] = i;
     }
-    return BertTokenizer._(vocab, maxLength, tokeniser ?? RegExpTokeniser());
+    return BertTokenizer._(vocab, maxLength, tokenizer ?? RegExpTokenizer());
   }
 
   /// Encodes [text] into a [TokenizerOutput] ready for ONNX inference.
@@ -108,7 +108,7 @@ class BertTokenizer {
   /// exactly [maxLength] elements.
   TokenizerOutput encode(String text) {
     final normalized = _normalize(text);
-    final words = _tokeniser.tokenise(normalized);
+    final words = _tokenizer.tokenise(normalized);
 
     // Build the token ID list starting with [CLS].
     // Leave one slot for the closing [SEP] token.
