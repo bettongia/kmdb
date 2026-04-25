@@ -84,7 +84,9 @@ final class ImportCommand extends CliCommand {
         inputPath,
       ).openRead().transform(utf8.decoder).transform(const LineSplitter());
     } else {
-      lines = io.stdin.transform(utf8.decoder).transform(const LineSplitter());
+      lines = io.stdin
+          .transform(utf8.decoder)
+          .transform(const LineSplitter()); // coverage:ignore-line
     }
 
     var imported = 0;

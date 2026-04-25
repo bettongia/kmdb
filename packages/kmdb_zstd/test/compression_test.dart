@@ -86,9 +86,7 @@ void main() {
     });
 
     test('truncated compressed data throws Exception', () {
-      final original = Uint8List.fromList(
-        List.generate(1000, (i) => i & 0xFF),
-      );
+      final original = Uint8List.fromList(List.generate(1000, (i) => i & 0xFF));
       final compressed = zstd.compress(original);
       // Keep the header (so getFrameContentSize returns the real size) but
       // cut the payload so decompress fails mid-stream.

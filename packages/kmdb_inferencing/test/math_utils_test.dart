@@ -106,7 +106,10 @@ void main() {
     test('returns Float32List', () {
       final hidden = List<double>.filled(seqLen * hiddenDim, 0.0);
       final mask = [1, 0, 0];
-      expect(meanPool(hidden, mask, seqLen: seqLen, hiddenDim: hiddenDim), isA<Float32List>());
+      expect(
+        meanPool(hidden, mask, seqLen: seqLen, hiddenDim: hiddenDim),
+        isA<Float32List>(),
+      );
     });
   });
 

@@ -299,11 +299,7 @@ void main() {
   group('Match — big32 type', () {
     test('matches big-endian 32-bit value', () {
       // PNG magic: 0x89504E47 in big-endian.
-      final m = Match(
-        offset: '0',
-        type: MatchType.big32,
-        value: '0x89504E47',
-      );
+      final m = Match(offset: '0', type: MatchType.big32, value: '0x89504E47');
       expect(m.matches([0x89, 0x50, 0x4E, 0x47, 0x00]), isTrue);
     });
   });
@@ -424,7 +420,9 @@ void main() {
         matches: [Match(offset: '0', type: MatchType.byte, value: '0x00')],
       );
       expect(
-        () => magic.matches.add(Match(offset: '0', type: MatchType.byte, value: '0x01')),
+        () => magic.matches.add(
+          Match(offset: '0', type: MatchType.byte, value: '0x01'),
+        ),
         throwsUnsupportedError,
       );
     });

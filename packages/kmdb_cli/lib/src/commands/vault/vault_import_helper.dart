@@ -37,6 +37,7 @@ VaultPackageContents? readVaultPackage({
       return null;
     }
   } else {
+    // coverage:ignore-start
     // Read from stdin synchronously.
     final chunks = <int>[];
     int byte;
@@ -49,6 +50,7 @@ VaultPackageContents? readVaultPackage({
       // stdin closed.
     }
     bytes = Uint8List.fromList(chunks);
+    // coverage:ignore-end
   }
 
   try {
