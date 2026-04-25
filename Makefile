@@ -78,14 +78,14 @@ test: test.log
 .PHONY: test
 
 test.log: packages/**
-	melos test --no-select | tee test.log
+	melos test --no-select 2>&1 | tee test.log
 
 
 e2e_test: e2e_test.log
 .PHONY: e2e_test
 
 e2e_test.log: packages/**
-	melos e2e-test | tee e2e_test.log
+	melos e2e-test 2>&1 | tee e2e_test.log
 
 checks: coverage.log license_check
 .PHONY: checks
@@ -98,7 +98,7 @@ license_add:
 
 .PHONY: license_add license_check
 
-site: styles site/index.html site/spec.html site/api/index.html site/roadmap.html site/primer.html site/spec.pdf site/primer.pdf | site/
+site: styles site/index.html site/api.html site/spec.html site/api-docs site/roadmap.html site/primer.html site/spec.pdf site/primer.pdf | site/
 .PHONY: site
 
 site/:
@@ -112,6 +112,9 @@ site/styles/styles.css: docs/styles/styles.css | site/
 	cp docs/styles/styles.css site/styles/styles.css
 
 
+site/api.html:
+	pandoc --defaults="docs/.pandoc" docs/api.md -o "site/api.html";
+
 site/spec.html:  docs/spec/*.md docs/spec/.pandoc docs/template/header.html | site/
 	pandoc --defaults="docs/spec/.pandoc" --mathml docs/spec/*.md -o "site/spec.html";
 
@@ -124,8 +127,8 @@ site/roadmap.html: docs/roadmap/*.md docs/.pandoc docs/template/header.html | si
 site/primer.html: docs/primer.md docs/.pandoc docs/template/header.html | site/
 	pandoc --defaults="docs/.pandoc" docs/primer.md -o "site/primer.html";
 
-site/api/index.html: $(KMDB_PKG)/**/*.dart | site/
-	dart doc $(KMDB_PKG) -o site/api
+site/api-docs: $(KMDB_PKG)/**/*.dart | site/
+	melos doc --no-select 2>&1 | tee doc.log
 
 site/spec.epub: docs/spec/*.md | site/
 	pandoc docs/spec/*.md -o site/spec.epub \
@@ -135,7 +138,7 @@ coverage: coverage.log
 .PHONY: coverage
 
 coverage.log: packages/*/** | site/
-	melos coverage | tee coverage.log
+	melos coverage 2>&1 | tee coverage.log
 
 site/spec.pdf: docs/spec/*.md | site/
 	pandoc docs/spec/*.md --pdf-engine=xelatex -o site/spec.pdf \
@@ -203,9 +206,10 @@ release_clean:
 .PHONY: release_clean
 
 clean:
-	melos clean
+	melos clean_packages
 	rm -rf site dist
 	rm -f *.log
+	melos clean
 	melos bootstrap
 
 .PHONY: clean

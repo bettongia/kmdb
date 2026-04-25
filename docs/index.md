@@ -7,7 +7,7 @@ toc-title: "Contents"
 - [Primer](primer.html)
 - [Specification](spec.html)
 - [Roadmap](roadmap.html)
-- [API](api/index.html)
+- [API](api.html)
 - [Coverage](coverage/html/index.html)
 
 ---

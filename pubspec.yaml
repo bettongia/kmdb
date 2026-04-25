@@ -132,7 +132,15 @@ melos:
       description: Check the license header in all necessary files.
 
     doc:
-      exec: dart doc
+      exec: dart doc -o MELOS_ROOT_PATH/site/api-docs/MELOS_PACKAGE_NAME/api
+      packageFilters:
+        flutter: false
 
     pubspec_checker:
       exec: dart run pubspec_checker all -s -l
+
+    clean_packages:
+      exec: |
+        rm -rf site
+        rm -rf coverage
+        rm -rf doc
