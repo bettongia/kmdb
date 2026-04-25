@@ -274,4 +274,260 @@ void main() {
       expect(out.toString(), isNot(contains('Query plan')));
     });
   });
+
+  // ── scan --key-prefix ──────────────────────────────────────────────────────
+
+  group('scan --key-prefix', () {
+    late KmdbDatabase db;
+    late StringBuffer out;
+    late StringBuffer err;
+
+    setUp(() async {
+      db = await _openStore();
+      out = StringBuffer();
+      err = StringBuffer();
+    });
+    tearDown(() => db.close());
+
+    // Note: --key-prefix passes the value directly to store.scan(startKey:),
+    // so the value must be a valid 32-char UUIDv7 key. The scan returns all
+    // documents from that start key onward (not a substring prefix match).
+    test('scans from the given start key onward', () async {
+      // Three keys in ascending sort order. All are valid UUIDv7 keys.
+      final keyA = _key('aaa'); // sorts first
+      final keyB = _key('bbb'); // sorts second
+      final keyC = _key('ccc'); // sorts third
+
+      await db.store.put('items', keyA, ValueCodec.encode({'n': 1}));
+      await db.store.put('items', keyB, ValueCodec.encode({'n': 2}));
+      await db.store.put('items', keyC, ValueCodec.encode({'n': 3}));
+
+      // Scanning from keyB should return keyB and keyC.
+      final ctx = _ctx(db, out: out, err: err);
+      final ok = await ScanCommand().execute(
+        ctx,
+        ['items'],
+        {'key-prefix': keyB},
+      );
+
+      expect(ok, isTrue);
+      final docs = json.decode(out.toString()) as List;
+      // keyB and keyC should be returned; keyA is before the start.
+      expect(docs, hasLength(greaterThanOrEqualTo(1)));
+      final ids = docs.map((d) => (d as Map)['_id']).toSet();
+      expect(ids, contains(keyB));
+      expect(ids, isNot(contains(keyA)));
+    });
+
+    test('scan from a key beyond all stored keys returns empty', () async {
+      // Insert a document with keyA (sorts before keyC).
+      final keyA = _key('abc');
+      final keyC = _key('zzz'); // sorts after keyA
+      await db.store.put('items', keyA, ValueCodec.encode({'x': 1}));
+
+      // Scanning from keyC (which sorts after keyA) yields nothing.
+      final ctx = _ctx(db, out: out, err: err);
+      final ok = await ScanCommand().execute(
+        ctx,
+        ['items'],
+        {'key-prefix': keyC},
+      );
+
+      expect(ok, isTrue);
+      final docs = json.decode(out.toString()) as List;
+      expect(docs, isEmpty);
+    });
+
+    test('applies filter within key-prefix scan', () async {
+      final keyA = _key('aaa');
+      final keyB = _key('bbb');
+      await db.store.put('items', keyA, ValueCodec.encode({'n': 1}));
+      await db.store.put('items', keyB, ValueCodec.encode({'n': 2}));
+
+      final ctx = _ctx(db, out: out, err: err);
+      final ok = await ScanCommand().execute(
+        ctx,
+        ['items'],
+        {'key-prefix': keyA, 'filter': '{"field":"n","op":"eq","value":2}'},
+      );
+
+      expect(ok, isTrue);
+      final docs = json.decode(out.toString()) as List;
+      expect(docs, hasLength(1));
+      expect((docs.first as Map)['n'], equals(2));
+    });
+  });
+
+  // ── scan --explain full-scan path ─────────────────────────────────────────
+
+  group('scan --explain full-scan path', () {
+    late KmdbDatabase db;
+    late StringBuffer out;
+    late StringBuffer err;
+
+    setUp(() async {
+      db = await _openStore();
+      out = StringBuffer();
+      err = StringBuffer();
+    });
+    tearDown(() => db.close());
+
+    test('--explain with no filter outputs fullScan strategy', () async {
+      await _putDoc(db, 'notes', {'text': 'hello'});
+
+      final ctx = _ctx(db, out: out, err: err);
+      final ok = await ScanCommand().execute(ctx, ['notes'], {'explain': true});
+
+      expect(ok, isTrue);
+      final output = out.toString();
+      expect(output, contains('fullScan'));
+      expect(output, contains('documentsScanned'));
+    });
+
+    test('--explain with complex filter uses fullScan strategy', () async {
+      await _putDoc(db, 'notes', {'score': 5});
+
+      final ctx = _ctx(db, out: out, err: err);
+      final ok = await ScanCommand().execute(
+        ctx,
+        ['notes'],
+        {'explain': true, 'filter': '{"field":"score","op":"gt","value":3}'},
+      );
+
+      expect(ok, isTrue);
+      final output = out.toString();
+      expect(output, contains('fullScan'));
+    });
+  });
+
+  // ── scan --order-by ───────────────────────────────────────────────────────
+
+  group('scan --order-by', () {
+    late KmdbDatabase db;
+    late StringBuffer out;
+    late StringBuffer err;
+
+    setUp(() async {
+      db = await _openStore();
+      out = StringBuffer();
+      err = StringBuffer();
+    });
+    tearDown(() => db.close());
+
+    test('sorts documents by a string field', () async {
+      await _putDoc(db, 'people', {'name': 'Charlie'});
+      await _putDoc(db, 'people', {'name': 'Alice'});
+      await _putDoc(db, 'people', {'name': 'Bob'});
+
+      final ctx = _ctx(db, out: out, err: err);
+      final ok = await ScanCommand().execute(
+        ctx,
+        ['people'],
+        {'order-by': 'name'},
+      );
+
+      expect(ok, isTrue);
+      final docs = json.decode(out.toString()) as List;
+      final names = docs.map((d) => (d as Map)['name']).toList();
+      expect(names, equals(['Alice', 'Bob', 'Charlie']));
+    });
+
+    test('handles null field values during sort', () async {
+      // One doc lacks the sort field (null), two have string values.
+      // Exercises the null-left branch in _compareValues.
+      await _putDoc(db, 'widgets', {'x': 1}); // no 'label'
+      await _putDoc(db, 'widgets', {'x': 2, 'label': 'B'});
+      await _putDoc(db, 'widgets', {'x': 3, 'label': 'A'});
+
+      final ctx = _ctx(db, out: out, err: err);
+      final ok = await ScanCommand().execute(
+        ctx,
+        ['widgets'],
+        {'order-by': 'label'},
+      );
+
+      expect(ok, isTrue);
+      final docs = json.decode(out.toString()) as List;
+      expect(docs, hasLength(3));
+    });
+
+    test('accepts limit passed as a string', () async {
+      await _putDoc(db, 'things', {'v': 1});
+      await _putDoc(db, 'things', {'v': 2});
+      await _putDoc(db, 'things', {'v': 3});
+
+      final ctx = _ctx(db, out: out, err: err);
+      final ok = await ScanCommand().execute(ctx, ['things'], {'limit': '2'});
+
+      expect(ok, isTrue);
+      final docs = json.decode(out.toString()) as List;
+      expect(docs, hasLength(2));
+    });
+  });
+
+  // ── scan --explain with building index ────────────────────────────────────
+
+  group('scan --explain with building index', () {
+    late StringBuffer out;
+    late StringBuffer err;
+
+    setUp(() {
+      out = StringBuffer();
+      err = StringBuffer();
+    });
+
+    test('falls back to full scan when index is not yet current', () async {
+      final dbIdx = await _openStore(
+        indexes: [IndexDefinition('nodes', 'tag')],
+      );
+      addTearDown(() => dbIdx.close());
+
+      await _putDoc(dbIdx, 'nodes', {'tag': 'x'});
+      await _putDoc(dbIdx, 'nodes', {'tag': 'y'});
+
+      // Do NOT call _waitForCurrent — on first getOrActivate the index manager
+      // returns IndexStatus.building and triggers the async build. The scan
+      // must fall back to a full scan and still report indexStatus != 'none'.
+      final ctx = _ctx(dbIdx, mode: OutputMode.json, out: out, err: err);
+      final ok = await ScanCommand().execute(
+        ctx,
+        ['nodes'],
+        {'filter': '{"field":"tag","op":"eq","value":"x"}', 'explain': true},
+      );
+
+      expect(ok, isTrue);
+      final raw = out.toString();
+      final firstBrace = raw.indexOf('{');
+      var depth = 0;
+      var end = firstBrace;
+      for (var i = firstBrace; i < raw.length; i++) {
+        if (raw[i] == '{') depth++;
+        if (raw[i] == '}') depth--;
+        if (depth == 0) {
+          end = i;
+          break;
+        }
+      }
+      final explainMap =
+          json.decode(raw.substring(firstBrace, end + 1))
+              as Map<String, dynamic>;
+      final explain = explainMap['_explain'] as Map<String, dynamic>;
+      expect(explain['strategy'], 'fullScan');
+      final filters = explain['filters'] as List<dynamic>;
+      expect(filters, hasLength(1));
+      final f = filters.first as Map<String, dynamic>;
+      expect(f['indexUsed'], isFalse);
+      // Status is 'building' (not 'none') because the index IS defined.
+      expect(f['indexStatus'], isNot('none'));
+    });
+  });
+
+  // ── OutputMode.displayName ────────────────────────────────────────────────
+
+  group('OutputMode', () {
+    test('displayName returns mode name', () {
+      expect(OutputMode.json.displayName, equals('json'));
+      expect(OutputMode.table.displayName, equals('table'));
+    });
+  });
 }

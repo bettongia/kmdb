@@ -874,6 +874,16 @@ void main() {
         expect(ok, isFalse);
         expect(err.toString(), contains('collection name required'));
       });
+
+      test('returns false for a system namespace name', () async {
+        final ctx = _ctx(db, out: out, err: err);
+        final ok = await CollectionsCommand().execute(ctx, [
+          'create',
+          r'$system',
+        ], {});
+        expect(ok, isFalse);
+        expect(err.toString(), isNotEmpty);
+      });
     });
 
     // ── delete ────────────────────────────────────────────────────────────────
@@ -1257,6 +1267,24 @@ void main() {
       );
       expect(ok, isFalse);
       expect(err.toString(), contains('invalid JSON'));
+
+      tmp.delete();
+    });
+
+    test('returns false when a JSON line is not an object', () async {
+      final id = _key('okid2');
+      final tmp = _TmpFile();
+      // Second line is a JSON array, not a JSON object.
+      tmp.write('{"_id":"$id","x":1}\n[1,2,3]\n');
+
+      final ctx = _ctx(db, out: out, err: err);
+      final ok = await ImportCommand().execute(
+        ctx,
+        ['ns'],
+        {'input': tmp.path},
+      );
+      expect(ok, isFalse);
+      expect(err.toString(), contains('expected JSON object'));
 
       tmp.delete();
     });

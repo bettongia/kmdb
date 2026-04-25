@@ -169,5 +169,37 @@ void main() {
       expect(err.toString(), contains('aaaaaaaa'));
       expect(err.toString(), contains('highwater'));
     });
+
+    // ── Config-load failure ─────────────────────────────────────────────────
+
+    test('returns false when config.json is corrupt', () async {
+      final tmpDir = await io.Directory.systemTemp.createTemp('kmdb_test_');
+      addTearDown(() => tmpDir.deleteSync(recursive: true));
+
+      // Write a corrupt config.json so KmdbConfig.load throws FormatException.
+      final localDir = io.Directory('${tmpDir.path}/local');
+      await localDir.create();
+      final configFile = io.File('${tmpDir.path}/local/config.json');
+      await configFile.writeAsString('{ this is not valid json }');
+
+      final db = await KmdbDatabase.open(
+        path: tmpDir.path,
+        adapter: StorageAdapterNative(),
+        config: KvStoreConfig.forTesting(),
+        deviceId: 'aaaaaaaa',
+      );
+      addTearDown(() => db.close());
+
+      final out = StringBuffer();
+      final err = StringBuffer();
+      final ok = await NewDeviceIdCommand().execute(
+        _ctx(db, out: out, err: err),
+        [],
+        {},
+      );
+
+      expect(ok, isFalse);
+      expect(err.toString(), contains('failed to load config'));
+    });
   });
 }

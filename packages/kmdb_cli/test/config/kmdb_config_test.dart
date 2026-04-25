@@ -539,4 +539,250 @@ void main() {
       expect(config.indexesForCollection('unknowncoll'), isEmpty);
     });
   });
+
+  // ── FTS index load error paths ─────────────────────────────────────────────
+
+  group('KmdbConfig — ftsIndexes load', () {
+    test('throws FormatException when ftsIndexes is not a list', () async {
+      final localDir = io.Directory('${tmpDir.path}/local');
+      localDir.createSync();
+      io.File(
+        '${tmpDir.path}/local/config.json',
+      ).writeAsStringSync(jsonEncode({'ftsIndexes': 'bad'}));
+      expect(
+        () => KmdbConfig.load(tmpDir.path),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains("'ftsIndexes' must be a JSON array"),
+          ),
+        ),
+      );
+    });
+
+    test(
+      'throws FormatException when an ftsIndex entry is not an object',
+      () async {
+        final localDir = io.Directory('${tmpDir.path}/local');
+        localDir.createSync();
+        io.File('${tmpDir.path}/local/config.json').writeAsStringSync(
+          jsonEncode({
+            'ftsIndexes': ['not-an-object'],
+          }),
+        );
+        expect(
+          () => KmdbConfig.load(tmpDir.path),
+          throwsA(isA<FormatException>()),
+        );
+      },
+    );
+
+    test(
+      'throws FormatException when ftsIndex entry missing collection',
+      () async {
+        final localDir = io.Directory('${tmpDir.path}/local');
+        localDir.createSync();
+        io.File('${tmpDir.path}/local/config.json').writeAsStringSync(
+          jsonEncode({
+            'ftsIndexes': [
+              {'field': 'body'},
+            ],
+          }),
+        );
+        expect(
+          () => KmdbConfig.load(tmpDir.path),
+          throwsA(
+            isA<FormatException>().having(
+              (e) => e.message,
+              'message',
+              contains("missing required string field 'collection'"),
+            ),
+          ),
+        );
+      },
+    );
+
+    test('throws FormatException when ftsIndex entry missing field', () async {
+      final localDir = io.Directory('${tmpDir.path}/local');
+      localDir.createSync();
+      io.File('${tmpDir.path}/local/config.json').writeAsStringSync(
+        jsonEncode({
+          'ftsIndexes': [
+            {'collection': 'docs'},
+          ],
+        }),
+      );
+      expect(
+        () => KmdbConfig.load(tmpDir.path),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains("missing required string field 'field'"),
+          ),
+        ),
+      );
+    });
+  });
+
+  // ── embeddingModel load error paths ───────────────────────────────────────
+
+  group('KmdbConfig — embeddingModel load', () {
+    test(
+      'throws FormatException when embeddingModel is not an object',
+      () async {
+        final localDir = io.Directory('${tmpDir.path}/local');
+        localDir.createSync();
+        io.File(
+          '${tmpDir.path}/local/config.json',
+        ).writeAsStringSync(jsonEncode({'embeddingModel': 'bad'}));
+        expect(
+          () => KmdbConfig.load(tmpDir.path),
+          throwsA(
+            isA<FormatException>().having(
+              (e) => e.message,
+              'message',
+              contains("'embeddingModel' must be a JSON object"),
+            ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'throws FormatException when embeddingModel.type is missing',
+      () async {
+        final localDir = io.Directory('${tmpDir.path}/local');
+        localDir.createSync();
+        io.File('${tmpDir.path}/local/config.json').writeAsStringSync(
+          jsonEncode({
+            'embeddingModel': {'modelPath': '/models/bge.onnx'},
+          }),
+        );
+        expect(
+          () => KmdbConfig.load(tmpDir.path),
+          throwsA(
+            isA<FormatException>().having(
+              (e) => e.message,
+              'message',
+              contains("'embeddingModel.type'"),
+            ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'throws FormatException when embeddingModel.modelPath is missing',
+      () async {
+        final localDir = io.Directory('${tmpDir.path}/local');
+        localDir.createSync();
+        io.File('${tmpDir.path}/local/config.json').writeAsStringSync(
+          jsonEncode({
+            'embeddingModel': {'type': 'onnx'},
+          }),
+        );
+        expect(
+          () => KmdbConfig.load(tmpDir.path),
+          throwsA(
+            isA<FormatException>().having(
+              (e) => e.message,
+              'message',
+              contains("'embeddingModel.modelPath'"),
+            ),
+          ),
+        );
+      },
+    );
+
+    test('round-trips embeddingModel through save/load', () async {
+      final config = KmdbConfig.empty();
+      config.embeddingModel = (type: 'onnx', modelPath: '/models/bge.onnx');
+      await config.save(tmpDir.path);
+
+      final reloaded = await KmdbConfig.load(tmpDir.path);
+      expect(reloaded.embeddingModel?.type, 'onnx');
+      expect(reloaded.embeddingModel?.modelPath, '/models/bge.onnx');
+    });
+  });
+
+  // ── addFtsIndex / removeFtsIndex / ftsIndexesForCollection ────────────────
+
+  group('addFtsIndex', () {
+    test('adds an FTS index', () {
+      final config = KmdbConfig.empty();
+      config.addFtsIndex('docs', 'body');
+      expect(config.ftsIndexes, hasLength(1));
+      expect(config.ftsIndexes.first.collection, 'docs');
+      expect(config.ftsIndexes.first.field, 'body');
+    });
+
+    test('defaults stopWords=false, k1=1.2, b=0.75', () {
+      final config = KmdbConfig.empty();
+      config.addFtsIndex('docs', 'body');
+      final idx = config.ftsIndexes.first;
+      expect(idx.stopWords, isFalse);
+      expect(idx.k1, closeTo(1.2, 0.001));
+      expect(idx.b, closeTo(0.75, 0.001));
+    });
+
+    test('throws on duplicate (collection, field) pair', () {
+      final config = KmdbConfig.empty();
+      config.addFtsIndex('docs', 'body');
+      expect(
+        () => config.addFtsIndex('docs', 'body'),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+  });
+
+  group('removeFtsIndex', () {
+    test('removes an existing FTS index', () {
+      final config = KmdbConfig.empty();
+      config.addFtsIndex('docs', 'body');
+      config.removeFtsIndex('docs', 'body');
+      expect(config.ftsIndexes, isEmpty);
+    });
+
+    test('throws when FTS index does not exist', () {
+      final config = KmdbConfig.empty();
+      expect(
+        () => config.removeFtsIndex('docs', 'body'),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
+    test('addFtsIndex/removeFtsIndex round-trip', () {
+      final config = KmdbConfig.empty();
+      config.addFtsIndex('docs', 'title');
+      config.addFtsIndex('docs', 'body');
+      config.removeFtsIndex('docs', 'title');
+      expect(config.ftsIndexes, hasLength(1));
+      expect(config.ftsIndexes.first.field, 'body');
+    });
+  });
+
+  group('ftsIndexesForCollection', () {
+    test('returns empty list when no FTS indexes configured', () {
+      expect(KmdbConfig.empty().ftsIndexesForCollection('docs'), isEmpty);
+    });
+
+    test('returns only indexes for the requested collection', () {
+      final config = KmdbConfig.empty();
+      config.addFtsIndex('docs', 'body');
+      config.addFtsIndex('docs', 'title');
+      config.addFtsIndex('notes', 'content');
+
+      final docsIndexes = config.ftsIndexesForCollection('docs');
+      expect(docsIndexes, hasLength(2));
+      expect(docsIndexes.map((r) => r.field), containsAll(['body', 'title']));
+    });
+
+    test('returns empty list for unknown collection', () {
+      final config = KmdbConfig.empty();
+      config.addFtsIndex('docs', 'body');
+      expect(config.ftsIndexesForCollection('notes'), isEmpty);
+    });
+  });
 }
