@@ -70,6 +70,10 @@ prepare:
 	melos bootstrap
 .PHONY: prepare
 
+benchmarks:
+	melos benchmarks
+.PHONY: benchmarks
+
 test: test.log
 .PHONY: test
 
