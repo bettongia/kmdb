@@ -290,6 +290,56 @@ void main() {
       expect(entries.map((e) => e.key), containsAll([k1, k2]));
     });
 
+    // ── write to a different namespace does not evict other caches ────────────
+
+    test(
+      'write to a different user namespace does not evict cache for tasks',
+      () async {
+        // Prime the cache with a 'tasks' entry.
+        final key = '0000000000007000800000000000aa01';
+        await store.put('tasks', key, _b(1));
+        await cache.get('tasks', key);
+        final count = cache.cachedObjectCount;
+
+        // Write to 'notes' — should evict only 'notes' namespace entries.
+        await cache.put('notes', key, _b(2));
+        await Future<void>.delayed(Duration.zero);
+
+        // 'tasks' entry should still be in cache.
+        expect(cache.cachedObjectCount, greaterThanOrEqualTo(count));
+        expect(await cache.get('tasks', key), equals(_b(1)));
+      },
+    );
+
+    // ── misc delegates ────────────────────────────────────────────────────────
+
+    test('flush delegates to underlying store', () async {
+      await expectLater(cache.flush(), completes);
+    });
+
+    test('compactAll delegates to underlying store', () async {
+      await expectLater(cache.compactAll(), completes);
+    });
+
+    test('listNamespaces delegates to underlying store', () async {
+      final ns = await cache.listNamespaces();
+      expect(ns, isList);
+    });
+
+    test('stats delegates to underlying store', () async {
+      final s = await cache.stats();
+      expect(s, isA<StoreStats>());
+    });
+
+    test('storeInfo delegates to underlying store', () async {
+      final info = await cache.storeInfo();
+      expect(info, isA<StoreInfo>());
+    });
+
+    test('tier getter returns the configured tier', () {
+      expect(cache.tier, equals(CacheTier.desktop));
+    });
+
     // ── writeBatch ────────────────────────────────────────────────────────────
 
     test('writeBatch delegates to underlying store', () async {

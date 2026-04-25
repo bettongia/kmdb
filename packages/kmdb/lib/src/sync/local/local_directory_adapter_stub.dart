@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// coverage:ignore-file
 // Stub for platforms where dart:io is unavailable (web/WASM).
 // LocalDirectoryAdapter requires filesystem access and cannot be used on these
 // platforms. Attempting to instantiate it throws [UnsupportedError].

@@ -283,6 +283,23 @@ void main() {
         },
       );
 
+      test('sweep is idempotent — second sweep finds nothing to do', () async {
+        final ref = await store.ingest(
+          bytes: _bytes('idempotent'),
+          hlcTimestamp: 't1',
+        );
+        kvStore.clearRefCount(ref.sha256);
+        await gc.onZeroRefs(ref.sha256);
+
+        final first = await gc.sweep();
+        expect(first.deleted, equals(1));
+
+        // Second sweep — hash dir already deleted, nothing to examine.
+        final second = await gc.sweep();
+        expect(second.examined, equals(0));
+        expect(second.deleted, equals(0));
+      });
+
       test('empty vault returns empty result', () async {
         final result = await gc.sweep();
         expect(result.examined, equals(0));

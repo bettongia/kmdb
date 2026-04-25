@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// coverage:ignore-file
 // Stub compression implementation used when neither dart:io nor
 // dart:js_interop is available. Stores all values uncompressed.
 

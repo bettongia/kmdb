@@ -20,6 +20,6 @@ import 'cache_tier.dart';
 ///
 /// Returns [CacheTier.mobile] on Android or iOS, [CacheTier.desktop] otherwise.
 CacheTier detectCacheTier() {
-  if (Platform.isAndroid || Platform.isIOS) return CacheTier.mobile;
+  if (Platform.isAndroid || Platform.isIOS) return CacheTier.mobile; // coverage:ignore-line
   return CacheTier.desktop;
 }
