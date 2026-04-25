@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// coverage:ignore-file
 import 'cache_tier.dart';
 
 /// Detects the [CacheTier] for web environments. Always returns

@@ -169,6 +169,72 @@ void main() {
     });
   });
 
+  group('HlcClock.current', () {
+    test('returns (0, 0) before any tick', () {
+      final clock = HlcClock(wallClock: () => 1000);
+      expect(clock.current, equals(const Hlc(0, 0)));
+    });
+
+    test('reflects latest now() result', () {
+      var wall = 5000;
+      final clock = HlcClock(wallClock: () => wall);
+      final t = clock.now();
+      expect(clock.current, equals(t));
+    });
+  });
+
+  group('HlcClock logical counter overflow', () {
+    test('overflows 0xFFFF and waits for wall clock to advance', () {
+      // Arrange: start with physical=1000, logical at 0xFFFE so next now()
+      // increments to 0xFFFF, and the one after that overflows.
+      var wall = 1000;
+      final clock = HlcClock(wallClock: () => wall);
+
+      // Advance logical counter to 0xFFFF - 1 by calling now() 0xFFFF times
+      // at the same wall clock value, then the next call triggers overflow.
+      //
+      // Doing 65535 iterations is too slow; instead we use update() to set
+      // the clock to (1000, 0xFFFE) in one step, then call now() twice:
+      // first now() → (1000, 0xFFFF), second now() → overflow → wall advances.
+      clock.update(const Hlc(1000, 0xFFFE)); // sets current to (1000, 0xFFFF)
+
+      // Verify state is (1000, 0xFFFF).
+      expect(clock.current.physicalMs, equals(1000));
+      expect(clock.current.logical, equals(0xFFFF));
+
+      // The next now() must increment logical, which would overflow.
+      // Wall clock is still at 1000, so _waitForClockAdvance spins.
+      // Advance wall clock to 1001 after one spin.
+      var callCount = 0;
+      final overflowClock = HlcClock(
+        wallClock: () {
+          callCount++;
+          // First two calls return 1000 (initial + overflow check); then advance.
+          return callCount <= 2 ? 1000 : 1001;
+        },
+      );
+      overflowClock.update(const Hlc(1000, 0xFFFE));
+      // State: (1000, 0xFFFF)
+      final result = overflowClock.now();
+      // Overflow triggers _waitForClockAdvance which loops until wall > 1000.
+      expect(result.physicalMs, equals(1001));
+      expect(result.logical, equals(0));
+    });
+  });
+
+  group('ClockSkewException', () {
+    test('toString includes skew details', () {
+      const e = ClockSkewException(
+        received: Hlc(2000, 0),
+        wallClockMs: 1000,
+        maxSkewMs: 60000,
+      );
+      final s = e.toString();
+      expect(s, contains('1000ms'));
+      expect(s, contains('60000ms'));
+    });
+  });
+
   group('HlcClock.update()', () {
     test('adopts remote physical when remote is newest', () {
       var wall = 1000;

@@ -169,6 +169,111 @@ void main() {
     });
   });
 
+  group('ManifestReader — truncation edge cases', () {
+    test('truncated header (< 12 bytes) yields empty state', () async {
+      final adapter = MemoryStorageAdapter();
+      // Write 8 bytes — less than the minimum 12-byte header.
+      adapter.files[_manifestPath] = Uint8List.fromList(List.filled(8, 0xAB));
+      final state = await ManifestReader(
+        adapter: adapter,
+      ).replay(_manifestPath);
+      expect(state.levels[0], isEmpty);
+    });
+
+    test(
+      'record whose declared CBOR length exceeds remaining bytes is skipped',
+      () async {
+        // Write a valid first record then a second record whose length field
+        // claims more bytes than the file contains.
+        final adapter = MemoryStorageAdapter();
+        final writer = ManifestWriter(path: _manifestPath, adapter: adapter);
+        await writer.append(_edit(log: 1, seq: 50, added: [_meta('good.sst')]));
+
+        // Append a malformed header: checksum (8B) + length (4B) declaring
+        // 1 000 000 bytes, but no payload follows.
+        final raw = adapter.files[_manifestPath]!;
+        final corrupt = ByteData(raw.length + 12);
+        for (var i = 0; i < raw.length; i++) {
+          corrupt.setUint8(i, raw[i]);
+        }
+        // Length = 1_000_000 with no payload
+        corrupt.setInt64(raw.length, 0, Endian.big);
+        corrupt.setUint32(raw.length + 8, 1000000, Endian.big);
+        adapter.files[_manifestPath] = corrupt.buffer.asUint8List();
+
+        final state = await ManifestReader(
+          adapter: adapter,
+        ).replay(_manifestPath);
+        // Only the valid first record should contribute.
+        expect(state.levels[0], contains('good.sst'));
+        expect(state.maxLogNumber, equals(1));
+      },
+    );
+  });
+
+  group('ManifestReader.replayEdits()', () {
+    test('returns raw edits in order', () async {
+      final adapter = MemoryStorageAdapter();
+      final writer = ManifestWriter(path: _manifestPath, adapter: adapter);
+      await writer.append(_edit(log: 1, seq: 100, added: [_meta('a.sst')]));
+      await writer.append(_edit(log: 2, seq: 200, added: [_meta('b.sst')]));
+
+      final edits = await ManifestReader(
+        adapter: adapter,
+      ).replayEdits(_manifestPath);
+      expect(edits, hasLength(2));
+      expect(edits[0].logNumber, equals(1));
+      expect(edits[1].logNumber, equals(2));
+    });
+
+    test('returns empty list for missing file', () async {
+      final adapter = MemoryStorageAdapter();
+      final edits = await ManifestReader(
+        adapter: adapter,
+      ).replayEdits('/nonexistent/MANIFEST-00001');
+      expect(edits, isEmpty);
+    });
+
+    test(
+      'stops at corrupted record and returns only prior valid edits',
+      () async {
+        final adapter = MemoryStorageAdapter();
+        final writer = ManifestWriter(path: _manifestPath, adapter: adapter);
+        await writer.append(_edit(log: 1, seq: 100, added: [_meta('ok.sst')]));
+        await writer.append(_edit(log: 2, seq: 200, added: [_meta('ok2.sst')]));
+
+        // Corrupt the last byte of the second record.
+        final raw = adapter.files[_manifestPath]!;
+        final corrupted = Uint8List.fromList(raw);
+        corrupted[corrupted.length - 1] ^= 0xFF;
+        adapter.files[_manifestPath] = corrupted;
+
+        final edits = await ManifestReader(
+          adapter: adapter,
+        ).replayEdits(_manifestPath);
+        expect(edits, hasLength(1));
+        expect(edits[0].added.first.filename, equals('ok.sst'));
+      },
+    );
+
+    test('truncated header in replayEdits returns prior valid edits', () async {
+      final adapter = MemoryStorageAdapter();
+      final writer = ManifestWriter(path: _manifestPath, adapter: adapter);
+      await writer.append(_edit(log: 1, seq: 10, added: [_meta('x.sst')]));
+
+      final raw = adapter.files[_manifestPath]!;
+      // Append 5 trailing bytes — less than the 12-byte minimum header.
+      final withTrail = Uint8List(raw.length + 5);
+      withTrail.setAll(0, raw);
+      adapter.files[_manifestPath] = withTrail;
+
+      final edits = await ManifestReader(
+        adapter: adapter,
+      ).replayEdits(_manifestPath);
+      expect(edits, hasLength(1));
+    });
+  });
+
   group('CurrentFile', () {
     test('write then read returns same manifest name', () async {
       final adapter = MemoryStorageAdapter();
