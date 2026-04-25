@@ -30,3 +30,4 @@ demodb/
 dist/
 packages/kmdb_inferencing/assets/native/
 todo.txt
+*.log
