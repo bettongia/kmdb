@@ -50,6 +50,7 @@ import 'commands/vault/vault_command.dart';
 import 'config/kmdb_config.dart';
 import 'database_opener.dart';
 import 'output/output_mode.dart';
+import 'repl/repl_runner.dart';
 
 /// @docImport 'commands/command.dart';
 
@@ -330,10 +331,9 @@ abstract final class KmdbCli {
           .transform(const LineSplitter())
           .toList();
     } else {
-      io.stderr.writeln('Error: no command provided.');
-      _printUsage();
-      await db.close();
-      return 1;
+      // Interactive mode: stdin is a tty and no inline commands were given.
+      final repl = ReplRunner(ctx: ctx, dbPath: dbPath);
+      return repl.run();
     }
 
     // ── Execute commands ─────────────────────────────────────────────────────
@@ -366,7 +366,17 @@ abstract final class KmdbCli {
     return exitCode;
   }
 
-  // ── Command line parsing & dispatch ───────────────────────────────────────
+  // ── Command line parsing & dispatch ─────────────────��─────────────────────
+
+  /// Public entry point for the REPL to dispatch a single command line.
+  ///
+  /// Tokenises [line] and dispatches to the appropriate [CliCommand] using the
+  /// provided [ctx]. Dot-commands must be intercepted by the caller before
+  /// reaching this method.
+  ///
+  /// Returns `true` on success, `false` on error.
+  static Future<bool> dispatchLine(String line, CommandContext ctx) =>
+      _dispatchTokens(_tokenize(line), ctx, ctx.err);
 
   /// Parses [line] into tokens, then dispatches.
   ///
