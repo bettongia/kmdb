@@ -71,6 +71,152 @@ dart run bin/kmdb.dart mydb scan notes
 | `csv`     | Comma-separated values with header row                    |
 | `line`    | `field = value` pairs, documents separated by blank lines |
 
+## Interactive mode (REPL)
+
+Run `kmdb` with only a database path and no inline command to enter the
+interactive shell:
+
+```bash
+kmdb mydb
+```
+
+```
+kmdb 0.1.0  •  mydb
+Type .help for dot-commands or .quit to exit.
+kmdb[mydb]>
+```
+
+The REPL is a document-focused shell for exploring and editing a single
+database. All 20 document-focused batch commands work unchanged inside the
+session. Diagnostic, maintenance, and setup commands (`flush`, `compact`,
+`verify`, `stats`, `info`, `util`, `init`, `new_device_id`) remain batch-only.
+
+### Prompt format
+
+| State | Prompt |
+|---|---|
+| Default | `kmdb[mydb]> ` |
+| Active collection set | `kmdb[mydb:notes]> ` |
+| Continuation line | `   ...> ` |
+
+### Line editing
+
+- **Left / Right** — move cursor
+- **Ctrl+A / Home** — jump to start of line
+- **Ctrl+E / End** — jump to end of line
+- **Ctrl+K** — delete to end of line
+- **Ctrl+U** — delete to start of line
+- **Up / Down** — navigate command history
+- **Tab** — context-aware completion
+- **Ctrl+C** — cancel current line
+- **Ctrl+D** (empty line) — exit
+
+### Tab completion
+
+| Cursor position | Completions offered |
+|---|---|
+| First token, `.` prefix | Dot-command names |
+| First token, no `.` | Command names |
+| After `scan`/`get`/`count`/`delete`/`update` | Collection names |
+| After `schema` | `set show list remove validate` |
+| After `schema show\|remove\|validate` | Collections with registered schemas |
+| After `search` | Collection names + `list create delete` |
+| After `search create` | Collection names |
+| After `index` | `list create info delete` |
+| After `index <sub>` | Collection names |
+| After `--order-by` | Field names sampled from the collection |
+| After `.mode` | Output mode names |
+| After `.collection` | Collection names |
+| After `vault` | `get` |
+| After `remote` | `add list remove` |
+
+### Command history
+
+History is persisted to `~/.kmdb_history` (UTF-8, 1000-entry cap) and loaded
+on startup. Use **Up/Down** to navigate previous entries. Use `!n` to
+re-execute entry number `n` (`.history` shows the numbered list).
+
+### Multi-line input
+
+A line ending with `\` continues on the next line. A JSON argument with
+unbalanced `{` or `[` also triggers continuation until the expression is
+balanced — useful for long `--filter` values:
+
+```
+kmdb[mydb]> scan notes --filter '{"field":"status",
+   ...>   "op":"eq","value":"active"}'
+```
+
+### Dot-commands
+
+Dot-commands control the session. They are intercepted before dispatch and
+never reach the batch command layer.
+
+#### Session settings
+
+| Command | Description |
+|---|---|
+| `.mode <mode>` | Set output format: `json` `compact` `ndjson` `table` `csv` `line` |
+| `.output [file]` | Redirect all output to a file; no arg resets to stdout |
+| `.once [file]` | Redirect only the next command's output to a file |
+| `.compact on\|off` | Toggle compact output |
+| `.color on\|off\|auto` | Control ANSI colour (default: `auto`) |
+| `.headers on\|off` | Show/hide column headers in table/csv mode |
+| `.nullvalue <str>` | String to display for null values (default: empty) |
+| `.limit <n>` | Default row limit for scan (0 = no limit) |
+| `.collection [name]` | Set active collection; no arg clears it |
+| `.echo on\|off` | Echo each command before executing |
+| `.bail on\|off` | Exit on first error |
+| `.timer on\|off` | Print execution time after each command |
+
+#### Introspection
+
+| Command | Description |
+|---|---|
+| `.collections` | List all collections |
+| `.indexes [collection]` | List indexes for a collection |
+| `.schema [collection]` | Show schema for a collection |
+| `.show` | Print all current session settings |
+| `.history [n]` | Print last n history entries (default 20) |
+
+#### I/O and scripting
+
+| Command | Description |
+|---|---|
+| `.read <file>` | Execute commands from a script file |
+| `.export <collection> [file]` | Export collection to NDJSON |
+| `.import <collection> <file>` | Import NDJSON into a collection |
+| `.dump [file]` | Dump entire database as NDJSON |
+| `.restore <file>` | Restore database from a dump |
+
+#### Database
+
+| Command | Description |
+|---|---|
+| `.open <path>` | Close current database and open a new one |
+| `.close` | Close the current database |
+
+#### Help and exit
+
+| Command | Description |
+|---|---|
+| `.help [command]` | List all dot-commands, or show help for one |
+| `.quit` | Exit with code 0 |
+| `.exit [code]` | Exit with the given code (default 0) |
+
+### Schema validation errors
+
+When an `insert` or `update` violates a registered collection schema, the REPL
+pretty-prints the error with per-field colour highlighting (field names in
+yellow, messages in red) rather than dumping the raw exception.
+
+### Sync commands
+
+`push`, `pull`, and `sync` show an animated spinner while running. The spinner
+is suppressed when stdout is not a terminal.
+
+---
+
 ## Commands
 
 ### Data commands
