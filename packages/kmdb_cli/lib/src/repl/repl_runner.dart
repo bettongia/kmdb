@@ -50,6 +50,11 @@ const _kVersion = '0.1.0';
 /// inline commands are provided. It owns the event loop: read → dispatch →
 /// print, until `.quit`, `.exit`, or Ctrl+D.
 ///
+/// Any unhandled exception that escapes the loop (including [io.StdinException]
+/// from [InputReader.readLine] when the terminal cannot be put into raw mode)
+/// is caught, a human-readable message is written to stderr, and [run] returns
+/// exit code 1 rather than propagating a raw stack trace to `main`.
+///
 /// ## Architecture
 ///
 /// - [InputReader] abstracts raw-mode terminal I/O; [FakeInputReader] is used
@@ -140,6 +145,11 @@ final class ReplRunner {
       }
     } on QuitException catch (e) {
       exitCode = e.code;
+    } catch (e) {
+      _errSink().writeln(
+        'Error: unexpected REPL failure ($e). The session has ended.',
+      );
+      exitCode = 1;
     } finally {
       await _history.save();
       await _ctx.db.close(flush: true);

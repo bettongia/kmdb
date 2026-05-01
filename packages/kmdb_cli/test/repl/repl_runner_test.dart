@@ -23,6 +23,22 @@ import 'package:kmdb_cli/src/repl/session_state.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
+// ── Test helpers ──────────────────────────────────────────────────────────────
+
+/// An [InputReader] that throws [io.StdinException] on the first [readLine].
+final class _ThrowingInputReader implements InputReader {
+  @override
+  void setHistory(List<String> history) {}
+
+  @override
+  Future<ReadLineOutcome> readLine(
+    String prompt, {
+    CompletionCallback? completer,
+  }) async {
+    throw const io.StdinException('Bad file descriptor');
+  }
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 Future<KmdbDatabase> _openDb() => KmdbDatabase.open(
@@ -403,6 +419,26 @@ void main() {
 
       expect(out.toString(), contains('ms'));
     });
+  });
+
+  group('unhandled errors', () {
+    test(
+      'StdinException from InputReader returns exit code 1 with friendly message',
+      () async {
+        final db = await _openDb();
+        final err = StringBuffer();
+        final ctx = CommandContext(db: db, out: StringBuffer(), err: err);
+
+        final code = await ReplRunner(
+          ctx: ctx,
+          dbPath: '/testdb',
+          reader: _ThrowingInputReader(),
+        ).run();
+
+        expect(code, 1);
+        expect(err.toString(), contains('Error:'));
+      },
+    );
   });
 
   group('schema validation error pretty-printing', () {

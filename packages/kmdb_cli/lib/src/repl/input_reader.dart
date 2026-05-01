@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import 'dart:async';
+import 'dart:collection';
 import 'dart:io' as io;
 
 /// Result of a single [InputReader.readLine] call.
@@ -70,6 +71,71 @@ abstract class InputReader {
 typedef CompletionCallback =
     Future<List<String>> Function(String text, int position);
 
+// ── ByteQueue ─────────────────────────────────────────────────────────────────
+
+/// Async single-consumer byte queue that bridges a [StreamSubscription] to
+/// point-in-time [next] / [nextTimeout] reads without creating and tearing
+/// down stream subscriptions on every byte.
+///
+/// [TtyInputReader] opens one [io.stdin] subscription per [InputReader.readLine]
+/// call and drains every incoming chunk into this queue. The key reader then
+/// pulls individual bytes via [next] and [nextTimeout] without touching the
+/// underlying stream, avoiding the macOS-native bug where cancelling the stdin
+/// subscription closes fd 0 and makes subsequent `ioctl` calls fail with EBADF.
+///
+/// Only one consumer may await [next] or [nextTimeout] at a time.
+final class ByteQueue {
+  final _pending = Queue<int>();
+  Completer<int>? _waiter;
+  bool _closed = false;
+
+  /// Delivers [byte] to a waiting [next] / [nextTimeout] call, or enqueues it.
+  ///
+  /// No-ops if the queue has been [close]d.
+  void add(int byte) {
+    if (_closed) return;
+    if (_waiter != null) {
+      _waiter!.complete(byte);
+      _waiter = null;
+    } else {
+      _pending.add(byte);
+    }
+  }
+
+  /// Signals EOF; any pending [next] call receives the EOF sentinel (`0x04`).
+  ///
+  /// Idempotent — safe to call more than once.
+  void close() {
+    if (_closed) return;
+    _closed = true;
+    _waiter?.complete(0x04);
+    _waiter = null;
+  }
+
+  /// Returns the next byte, waiting until one is available.
+  ///
+  /// Returns `0x04` (Ctrl+D / EOF sentinel) if the queue has been [close]d.
+  Future<int> next() async {
+    if (_pending.isNotEmpty) return _pending.removeFirst();
+    if (_closed) return 0x04;
+    _waiter = Completer<int>();
+    return _waiter!.future;
+  }
+
+  /// Returns the next byte, or `null` if [timeout] elapses before one arrives.
+  Future<int?> nextTimeout(Duration timeout) async {
+    if (_pending.isNotEmpty) return _pending.removeFirst();
+    if (_closed) return null;
+    _waiter = Completer<int>();
+    try {
+      return await _waiter!.future.timeout(timeout);
+    } on TimeoutException {
+      _waiter = null;
+      return null;
+    }
+  }
+}
+
 // ── TtyInputReader ────────────────────────────────────────────────────────────
 
 // coverage:ignore-start
@@ -87,6 +153,12 @@ typedef CompletionCallback =
 /// - Enter to submit the line.
 /// - Ctrl+D on an empty line for EOF.
 /// - Ctrl+C for interrupt.
+///
+/// A single [io.stdin] subscription is held for the full duration of each
+/// [readLine] call and all byte reads are routed through a [ByteQueue].
+/// This avoids the macOS-native behaviour where cancelling the stdin
+/// subscription closes fd 0, causing subsequent `ioctl` calls (including
+/// [io.Stdin.echoMode] and [io.Stdin.lineMode]) to fail with EBADF.
 final class TtyInputReader implements InputReader {
   /// Creates a [TtyInputReader] that writes to [output] (defaults to stdout).
   TtyInputReader({io.IOSink? output}) : _out = output ?? io.stdout;
@@ -111,12 +183,36 @@ final class TtyInputReader implements InputReader {
 
     _out.write(prompt);
 
-    io.stdin
-      ..echoMode = false
-      ..lineMode = false;
+    // Open one stdin subscription for the lifetime of this readLine call.
+    // All bytes are funnelled through the queue; _readByte and _readByteTimeout
+    // pull from it rather than re-subscribing on every byte.
+    final queue = ByteQueue();
+    final sub = io.stdin.listen(
+      (chunk) {
+        for (final b in chunk) {
+          queue.add(b);
+        }
+      },
+      onDone: queue.close,
+      onError: (_) => queue.close(),
+      cancelOnError: false,
+    );
+
+    try {
+      io.stdin
+        ..echoMode = false
+        ..lineMode = false;
+    } on io.StdinException {
+      // Terminal mode setup failed (e.g. stdin is not a real TTY).
+      // Clean up and rethrow so ReplRunner can show a friendly message.
+      await sub.cancel();
+      queue.close();
+      rethrow;
+    }
+
     try {
       while (true) {
-        final key = await _readKey();
+        final key = await _readKey(queue);
 
         switch (key.type) {
           case _KeyType.char:
@@ -199,9 +295,17 @@ final class TtyInputReader implements InputReader {
         }
       }
     } finally {
-      io.stdin
-        ..echoMode = true
-        ..lineMode = true;
+      // Restore terminal mode BEFORE cancelling the subscription. On macOS
+      // native, sub.cancel() closes fd 0, which would make the ioctl calls
+      // inside echoMode= and lineMode= fail with EBADF.
+      try {
+        io.stdin.echoMode = true;
+      } catch (_) {}
+      try {
+        io.stdin.lineMode = true;
+      } catch (_) {}
+      await sub.cancel();
+      queue.close();
     }
   }
 
@@ -294,18 +398,18 @@ final class TtyInputReader implements InputReader {
 
   // ── Key reader ──────────────────────────────────────────────────────────────
 
-  Future<_Key> _readKey() async {
-    final b = await _readByte();
+  Future<_Key> _readKey(ByteQueue queue) async {
+    final b = await _readByte(queue);
 
     // Escape sequence
     if (b == 0x1b) {
       // Try to read '[' within a short timeout.
-      final next = await _readByteTimeout(50);
+      final next = await _readByteTimeout(queue, 50);
       if (next == null) return const _Key(_KeyType.unknown);
 
       if (next == 0x5b) {
         // CSI sequence: \x1b[
-        final ch = await _readByteTimeout(50);
+        final ch = await _readByteTimeout(queue, 50);
         if (ch == null) return const _Key(_KeyType.unknown);
 
         switch (ch) {
@@ -322,13 +426,13 @@ final class TtyInputReader implements InputReader {
           case 0x46:
             return const _Key(_KeyType.end);
           case 0x31: // \x1b[1~  Home
-            await _consumeUntilTilde();
+            await _consumeUntilTilde(queue);
             return const _Key(_KeyType.home);
           case 0x33: // \x1b[3~  Delete
-            await _consumeUntilTilde();
+            await _consumeUntilTilde(queue);
             return const _Key(_KeyType.delete);
           case 0x34: // \x1b[4~  End
-            await _consumeUntilTilde();
+            await _consumeUntilTilde(queue);
             return const _Key(_KeyType.end);
           default:
             return const _Key(_KeyType.unknown);
@@ -337,7 +441,7 @@ final class TtyInputReader implements InputReader {
 
       if (next == 0x4f) {
         // SS3 sequence: \x1bO
-        final ch = await _readByteTimeout(50);
+        final ch = await _readByteTimeout(queue, 50);
         switch (ch) {
           case 0x48:
             return const _Key(_KeyType.home);
@@ -381,26 +485,14 @@ final class TtyInputReader implements InputReader {
     return const _Key(_KeyType.unknown);
   }
 
-  Future<int> _readByte() async {
-    await for (final chunk in io.stdin) {
-      if (chunk.isNotEmpty) return chunk[0];
-    }
-    return 0x04; // Treat closed stdin as Ctrl+D.
-  }
+  Future<int> _readByte(ByteQueue queue) => queue.next();
 
-  Future<int?> _readByteTimeout(int ms) async {
-    try {
-      return await io.stdin.first
-          .then((chunk) => chunk.isEmpty ? null : chunk[0])
-          .timeout(Duration(milliseconds: ms));
-    } on TimeoutException {
-      return null;
-    }
-  }
+  Future<int?> _readByteTimeout(ByteQueue queue, int ms) =>
+      queue.nextTimeout(Duration(milliseconds: ms));
 
-  Future<void> _consumeUntilTilde() async {
+  Future<void> _consumeUntilTilde(ByteQueue queue) async {
     while (true) {
-      final b = await _readByteTimeout(50);
+      final b = await _readByteTimeout(queue, 50);
       if (b == null || b == 0x7e) return; // 0x7e == '~'
     }
   }
