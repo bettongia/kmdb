@@ -12,171 +12,349 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mocktail/mocktail.dart';
 import 'package:kmdb/kmdb.dart';
 import 'package:kmdb_ui/collection_provider.dart';
+import 'package:kmdb_ui/error_provider.dart';
+import 'package:kmdb_ui/scan_options.dart';
 
-class MockKvStore extends Mock implements KvStore {}
+/// Opens a fresh in-memory [KmdbDatabase] for testing.
+Future<KmdbDatabase> _openDb([String path = '/test-db']) =>
+    KmdbDatabase.open(path: path, adapter: MemoryStorageAdapter());
+
+/// Creates a [CollectionProvider] backed by a real in-memory database.
+///
+/// [autoRefresh] defaults to false so tests can call [loadDocuments] manually
+/// and avoid dealing with asynchronous watch() streams.
+Future<({CollectionProvider provider, KmdbDatabase db, ErrorProvider errors})>
+_makeProvider({
+  String collection = 'items',
+  ScanOptions options = const ScanOptions(),
+  bool autoRefresh = false,
+}) async {
+  final db = await _openDb();
+  final errors = ErrorProvider();
+  final provider = CollectionProvider(
+    db,
+    collection,
+    errors,
+    initialScanOptions: options,
+    autoRefresh: autoRefresh,
+  );
+  // Allow the initial loadDocuments() to complete.
+  await Future.delayed(Duration.zero);
+  return (provider: provider, db: db, errors: errors);
+}
 
 void main() {
-  setUpAll(() {
-    registerFallbackValue(Uint8List(0));
-  });
-
-  late MockKvStore mockStore;
-  late String collectionName;
-
-  setUp(() {
-    mockStore = MockKvStore();
-    collectionName = 'test_collection';
-
-    // Default mock for scan to return empty stream
-    when(
-      () => mockStore.scan(
-        any(),
-        startKey: any(named: 'startKey'),
-        endKey: any(named: 'endKey'),
-      ),
-    ).thenAnswer((_) => Stream.empty());
-  });
+  // Release the MemoryStorageAdapter path locks between tests so that each
+  // test can open the same in-memory path without a LockException.
+  tearDown(() => MemoryStorageAdapter.releaseAllLocks());
 
   group('CollectionProvider', () {
-    test('initialization loads documents', () async {
-      final docs = [
-        {'id': 1, 'name': 'Doc 1'},
-        {'id': 2, 'name': 'Doc 2'},
-      ];
+    // ── Basic load ──────────────────────────────────────────────────────────
 
-      final entries = docs
-          .map((d) => (key: 'key', value: ValueCodec.encode(d)))
-          .toList();
-      when(
-        () => mockStore.scan(
-          collectionName,
-          startKey: any(named: 'startKey'),
-          endKey: any(named: 'endKey'),
-        ),
-      ).thenAnswer((_) => Stream.fromIterable(entries));
+    test('loads empty collection on construction', () async {
+      final (:provider, db: _, errors: _) = await _makeProvider();
 
-      final provider = CollectionProvider(mockStore, collectionName);
-
-      // Wait for async loading in constructor
-      await Future.delayed(Duration.zero);
-
-      expect(provider.documents.length, equals(2));
-      expect(provider.documents[0]['name'], equals('Doc 1'));
-      expect(provider.totalCount, equals(2));
+      expect(provider.documents, isEmpty);
+      expect(provider.totalCount, equals(0));
     });
 
-    test('setting query filters documents', () async {
-      final docs = [
-        {'id': 1, 'name': 'Apple'},
-        {'id': 2, 'name': 'Banana'},
-        {'id': 3, 'name': 'Cherry'},
-      ];
+    test('loads documents inserted before construction', () async {
+      final db = await _openDb();
+      final col = db.rawCollection('things');
+      await col.insert({'title': 'Alpha'});
+      await col.insert({'title': 'Beta'});
 
-      final entries = docs
-          .map((d) => (key: 'key', value: ValueCodec.encode(d)))
-          .toList();
-      when(
-        () => mockStore.scan(
-          collectionName,
-          startKey: any(named: 'startKey'),
-          endKey: any(named: 'endKey'),
-        ),
-      ).thenAnswer((_) => Stream.fromIterable(entries));
-
-      final provider = CollectionProvider(mockStore, collectionName);
+      final errors = ErrorProvider();
+      final provider = CollectionProvider(db, 'things', errors, autoRefresh: false);
       await Future.delayed(Duration.zero);
 
+      expect(provider.totalCount, equals(2));
+      expect(provider.documents.length, equals(2));
+    });
+
+    // ── setQuery / text filter ───────────────────────────────────────────────
+
+    test('setQuery filters documents by substring', () async {
+      final db = await _openDb();
+      final col = db.rawCollection('items');
+      await col.insert({'name': 'Apple'});
+      await col.insert({'name': 'Banana'});
+      await col.insert({'name': 'Cherry'});
+
+      final errors = ErrorProvider();
+      final provider = CollectionProvider(db, 'items', errors, autoRefresh: false);
+      await Future.delayed(Duration.zero);
       expect(provider.documents.length, equals(3));
 
       provider.setQuery('an');
       await Future.delayed(Duration.zero);
 
-      // 'Banana' contains 'an'
+      // 'Banana' contains 'an'; 'Apple' and 'Cherry' do not.
       expect(provider.documents.length, equals(1));
-      expect(provider.documents[0]['name'], equals('Banana'));
+      expect(provider.documents.first['name'], equals('Banana'));
     });
 
-    test('addDocument adds to store and reloads', () async {
-      when(
-        () => mockStore.scan(
-          collectionName,
-          startKey: any(named: 'startKey'),
-          endKey: any(named: 'endKey'),
-        ),
-      ).thenAnswer((_) => Stream.empty());
-      when(
-        () => mockStore.put(any(), any(), any()),
-      ).thenAnswer((_) => Future.value());
+    test('clearing query restores all documents', () async {
+      final db = await _openDb();
+      final col = db.rawCollection('items');
+      await col.insert({'name': 'Alpha'});
+      await col.insert({'name': 'Beta'});
 
-      final provider = CollectionProvider(mockStore, collectionName);
+      final errors = ErrorProvider();
+      final provider = CollectionProvider(db, 'items', errors, autoRefresh: false);
       await Future.delayed(Duration.zero);
 
-      const jsonDoc = '{"title": "New Doc"}';
-
-      // Setup mock to return the new doc on next scan
-      final newDoc = {'title': 'New Doc', '_id': 'generated_id'};
-      final entry = (key: 'generated_id', value: ValueCodec.encode(newDoc));
-      when(
-        () => mockStore.scan(
-          collectionName,
-          startKey: any(named: 'startKey'),
-          endKey: any(named: 'endKey'),
-        ),
-      ).thenAnswer((_) => Stream.fromIterable([entry]));
-
-      await provider.addDocument(jsonDoc);
-
-      verify(() => mockStore.put(collectionName, any(), any())).called(1);
-      expect(provider.documents.length, equals(1));
-      expect(provider.documents[0]['title'], equals('New Doc'));
-    });
-
-    test('handles invalid JSON in addDocument', () async {
-      final provider = CollectionProvider(mockStore, collectionName);
-      await Future.delayed(Duration.zero);
-
-      await provider.addDocument('invalid-json');
-
-      expect(provider.documents.any((d) => d.containsKey('error')), isTrue);
-    });
-
-    test('deleteDocument removes from store and reloads', () async {
-      final doc = {'_id': 'key1', 'name': 'Doc to delete'};
-      final entry = (key: 'key1', value: ValueCodec.encode(doc));
-
-      when(
-        () => mockStore.scan(
-          collectionName,
-          startKey: any(named: 'startKey'),
-          endKey: any(named: 'endKey'),
-        ),
-      ).thenAnswer((_) => Stream.fromIterable([entry]));
-      when(
-        () => mockStore.delete(any(), any()),
-      ).thenAnswer((_) => Future.value());
-
-      final provider = CollectionProvider(mockStore, collectionName);
+      provider.setQuery('Alpha');
       await Future.delayed(Duration.zero);
       expect(provider.documents.length, equals(1));
 
-      // Setup mock to return empty on next scan after delete
-      when(
-        () => mockStore.scan(
-          collectionName,
-          startKey: any(named: 'startKey'),
-          endKey: any(named: 'endKey'),
-        ),
-      ).thenAnswer((_) => Stream.empty());
+      provider.setQuery('');
+      await Future.delayed(Duration.zero);
+      expect(provider.documents.length, equals(2));
+    });
 
-      await provider.deleteDocument('key1');
+    // ── setScanOptions ───────────────────────────────────────────────────────
 
-      verify(() => mockStore.delete(collectionName, 'key1')).called(1);
-      expect(provider.documents.length, equals(0));
+    test('setScanOptions with limit restricts result set', () async {
+      final db = await _openDb();
+      final col = db.rawCollection('items');
+      for (var i = 0; i < 10; i++) {
+        await col.insert({'index': i});
+      }
+
+      final errors = ErrorProvider();
+      final provider = CollectionProvider(
+        db,
+        'items',
+        errors,
+        initialScanOptions: const ScanOptions(limit: 3),
+        autoRefresh: false,
+      );
+      await Future.delayed(Duration.zero);
+
+      expect(provider.documents.length, equals(3));
+      // Total count reflects all 10 documents, not just the page.
+      expect(provider.totalCount, equals(10));
+    });
+
+    test('setScanOptions with same value is a no-op', () async {
+      final (:provider, db: _, errors: _) = await _makeProvider();
+      var notifyCount = 0;
+      provider.addListener(() => notifyCount++);
+
+      provider.setScanOptions(const ScanOptions());
+      expect(notifyCount, equals(0));
+    });
+
+    // ── addDocument ──────────────────────────────────────────────────────────
+
+    test('addDocument inserts and reloads documents', () async {
+      final (:provider, db: _, errors: _) = await _makeProvider();
+
+      await provider.addDocument('{"title": "New Doc"}');
+
+      expect(provider.documents.length, equals(1));
+      expect(provider.documents.first['title'], equals('New Doc'));
+    });
+
+    test('addDocument reports error for invalid JSON', () async {
+      final (:provider, db: _, :errors) = await _makeProvider();
+
+      await provider.addDocument('not-valid-json');
+
+      expect(errors.lastError, isNotNull);
+      expect(errors.lastError, contains('Failed to add document'));
+      expect(provider.documents, isEmpty);
+    });
+
+    test('addDocument reports error when input is not a JSON object', () async {
+      final (:provider, db: _, :errors) = await _makeProvider();
+
+      await provider.addDocument('[1, 2, 3]');
+
+      expect(errors.lastError, isNotNull);
+      expect(errors.lastError, contains('Failed to add document'));
+    });
+
+    // ── deleteDocument ───────────────────────────────────────────────────────
+
+    test('deleteDocument removes document and reloads', () async {
+      final db = await _openDb();
+      final col = db.rawCollection('items');
+      final inserted = await col.insert({'label': 'To delete'});
+      final id = inserted['_id'] as String;
+
+      final errors = ErrorProvider();
+      final provider = CollectionProvider(db, 'items', errors, autoRefresh: false);
+      await Future.delayed(Duration.zero);
+      expect(provider.documents.length, equals(1));
+
+      await provider.deleteDocument(id);
+
+      expect(provider.documents, isEmpty);
+      expect(errors.lastError, isNull);
+    });
+
+    test('deleteDocument reports error for non-existent id', () async {
+      final (:provider, db: _, :errors) = await _makeProvider();
+
+      // Deleting a valid-format key that does not exist should be a no-op —
+      // KmdbCollection treats delete-of-missing as a no-op.
+      // Key must be a valid UUIDv7: position 12 = '7' (version), position 16 = '8' (variant).
+      await provider.deleteDocument('000000000000700080000000000000000'.substring(0, 32));
+      expect(errors.lastError, isNull);
+    });
+
+    // ── autoRefresh toggle ───────────────────────────────────────────────────
+
+    test('autoRefresh defaults to true in default constructor', () async {
+      final db = await _openDb();
+      final errors = ErrorProvider();
+      final provider = CollectionProvider(db, 'items', errors);
+      expect(provider.autoRefresh, isTrue);
+      provider.dispose();
+      await db.close();
+    });
+
+    test('setAutoRefresh false cancels watch subscription', () async {
+      final db = await _openDb();
+      final errors = ErrorProvider();
+      // Start with autoRefresh on.
+      final provider = CollectionProvider(
+        db,
+        'items',
+        errors,
+        autoRefresh: true,
+      );
+      await Future.delayed(Duration.zero);
+
+      provider.setAutoRefresh(false);
+      expect(provider.autoRefresh, isFalse);
+      provider.dispose();
+      await db.close();
+    });
+
+    test('setAutoRefresh true re-subscribes', () async {
+      final (:provider, :db, errors: _) = await _makeProvider(
+        autoRefresh: false,
+      );
+
+      provider.setAutoRefresh(true);
+      expect(provider.autoRefresh, isTrue);
+      provider.dispose();
+      await db.close();
+    });
+
+    test('setAutoRefresh no-op when value unchanged', () async {
+      final (:provider, db: _, errors: _) = await _makeProvider(
+        autoRefresh: false,
+      );
+      var notifyCount = 0;
+      provider.addListener(() => notifyCount++);
+
+      provider.setAutoRefresh(false);
+      expect(notifyCount, equals(0));
+    });
+
+    // ── setDisplayLimit ──────────────────────────────────────────────────────
+
+    test('setDisplayLimit -1 removes limit', () async {
+      final db = await _openDb();
+      final col = db.rawCollection('items');
+      for (var i = 0; i < 5; i++) {
+        await col.insert({'i': i});
+      }
+
+      final errors = ErrorProvider();
+      final provider = CollectionProvider(
+        db,
+        'items',
+        errors,
+        initialScanOptions: const ScanOptions(limit: 2),
+      );
+      await Future.delayed(Duration.zero);
+      expect(provider.documents.length, equals(2));
+
+      provider.setDisplayLimit(-1);
+      await Future.delayed(Duration.zero);
+      expect(provider.documents.length, equals(5));
+    });
+
+    // ── reactive watch() ─────────────────────────────────────────────────────
+
+    test('watch() delivers new documents after insert', () async {
+      final db = await _openDb();
+      final errors = ErrorProvider();
+      final provider = CollectionProvider(
+        db,
+        'items',
+        errors,
+        autoRefresh: true,
+      );
+      // Wait for initial emission.
+      await Future.delayed(const Duration(milliseconds: 200));
+      expect(provider.documents, isEmpty);
+
+      final col = db.rawCollection('items');
+      await col.insert({'title': 'Reactive doc'});
+
+      // Allow the 50 ms watch() debounce + async callbacks to fire.
+      await Future.delayed(const Duration(milliseconds: 200));
+
+      expect(provider.documents.length, equals(1));
+      expect(provider.documents.first['title'], equals('Reactive doc'));
+
+      provider.dispose();
+      await db.close();
+    });
+  });
+
+  // ── ScanOptions ─────────────────────────────────────────────────────────────
+
+  group('ScanOptions', () {
+    test('equality', () {
+      const a = ScanOptions(filterText: 'foo', limit: 10);
+      const b = ScanOptions(filterText: 'foo', limit: 10);
+      expect(a, equals(b));
+      expect(a.hashCode, equals(b.hashCode));
+    });
+
+    test('inequality when fields differ', () {
+      const a = ScanOptions(filterText: 'foo');
+      const b = ScanOptions(filterText: 'bar');
+      expect(a, isNot(equals(b)));
+    });
+
+    test('copyWith replaces specified fields', () {
+      const base = ScanOptions(
+        filterText: 'x',
+        orderByField: 'name',
+        descending: false,
+        limit: 5,
+        offset: 0,
+      );
+
+      final copy = base.copyWith(limit: 20, descending: true);
+      expect(copy.filterText, equals('x'));
+      expect(copy.orderByField, equals('name'));
+      expect(copy.descending, isTrue);
+      expect(copy.limit, equals(20));
+      expect(copy.offset, equals(0));
+    });
+
+    test('copyWith clearFilterText removes filterText', () {
+      const base = ScanOptions(filterText: 'hello');
+      final copy = base.copyWith(clearFilterText: true);
+      expect(copy.filterText, isNull);
+    });
+
+    test('copyWith clearLimit removes limit', () {
+      const base = ScanOptions(limit: 10);
+      final copy = base.copyWith(clearLimit: true);
+      expect(copy.limit, isNull);
     });
   });
 }

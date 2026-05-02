@@ -17,37 +17,41 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:provider/provider.dart';
 import 'package:kmdb_ui/main.dart';
-import 'package:kmdb_ui/database_provider.dart';
+import 'package:kmdb_ui/app_provider.dart';
+import 'package:kmdb_ui/error_provider.dart';
 import 'package:kmdb_ui/collection_provider.dart';
 
-class MockDatabaseProvider extends Mock implements DatabaseProvider {}
-
-class MockCollectionProvider extends Mock implements CollectionProvider {}
+class MockAppProvider extends Mock implements AppProvider {}
 
 void main() {
-  late MockDatabaseProvider mockDatabaseProvider;
+  late MockAppProvider mockAppProvider;
 
   setUp(() {
-    mockDatabaseProvider = MockDatabaseProvider();
+    mockAppProvider = MockAppProvider();
 
-    // Default mock behaviors
+    // Default mock behaviours required by HomePage widgets.
     when(
-      () => mockDatabaseProvider.recentDatabasePaths,
+      () => mockAppProvider.recentDatabasePaths,
     ).thenReturn(['/path/to/db1']);
-    when(() => mockDatabaseProvider.selectedDatabasePath).thenReturn(null);
-    when(() => mockDatabaseProvider.selectedCollection).thenReturn(null);
-    when(() => mockDatabaseProvider.selectedDocument).thenReturn(null);
-    when(() => mockDatabaseProvider.themeMode).thenReturn(ThemeMode.light);
-    when(() => mockDatabaseProvider.isOpening).thenReturn(false);
-    when(() => mockDatabaseProvider.loadError).thenReturn(null);
-    when(() => mockDatabaseProvider.collections).thenReturn([]);
+    when(() => mockAppProvider.selectedDatabasePath).thenReturn(null);
+    when(() => mockAppProvider.selectedCollection).thenReturn(null);
+    when(() => mockAppProvider.selectedDocument).thenReturn(null);
+    when(() => mockAppProvider.themeMode).thenReturn(ThemeMode.light);
+    when(() => mockAppProvider.isOpening).thenReturn(false);
+    when(() => mockAppProvider.loadError).thenReturn(null);
+    when(() => mockAppProvider.collections).thenReturn([]);
+    when(() => mockAppProvider.isBusy).thenReturn(false);
+    when(() => mockAppProvider.busyMessage).thenReturn('');
   });
 
   Widget createTestWidget() {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider<DatabaseProvider>.value(
-          value: mockDatabaseProvider,
+        ChangeNotifierProvider<ErrorProvider>(
+          create: (_) => ErrorProvider(),
+        ),
+        ChangeNotifierProvider<AppProvider>.value(
+          value: mockAppProvider,
         ),
         Provider<CollectionProvider?>.value(value: null),
       ],
@@ -66,7 +70,7 @@ void main() {
     WidgetTester tester,
   ) async {
     when(
-      () => mockDatabaseProvider.selectDatabase(any()),
+      () => mockAppProvider.selectDatabase(any()),
     ).thenAnswer((_) async {});
 
     await tester.pumpWidget(createTestWidget());
@@ -74,6 +78,33 @@ void main() {
     await tester.tap(find.text('db1'));
     await tester.pump();
 
-    verify(() => mockDatabaseProvider.selectDatabase(any())).called(1);
+    verify(() => mockAppProvider.selectDatabase(any())).called(1);
+  });
+
+  testWidgets('HomePage shows narrow layout when window is narrow', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(600, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+
+    await tester.pumpWidget(createTestWidget());
+
+    // On narrow screens, only the database history column is visible (root).
+    expect(find.text('DATABASES'), findsOneWidget);
+    // No collection list since no database is selected.
+    expect(find.text('COLLECTIONS'), findsNothing);
+  });
+
+  testWidgets('HomePage shows wide layout when window is wide', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+
+    await tester.pumpWidget(createTestWidget());
+
+    expect(find.text('DATABASES'), findsOneWidget);
   });
 }

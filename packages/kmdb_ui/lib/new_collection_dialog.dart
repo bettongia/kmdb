@@ -14,8 +14,9 @@
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'database_provider.dart';
+import 'app_provider.dart';
 
+/// Dialog for creating a new collection in the open database.
 class NewCollectionDialog extends StatefulWidget {
   const NewCollectionDialog({super.key});
 
@@ -47,7 +48,7 @@ class _NewCollectionDialogState extends State<NewCollectionDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final provider = context.watch<DatabaseProvider>();
+    final provider = context.watch<AppProvider>();
     final existing = provider.collections;
 
     return AlertDialog(
@@ -108,7 +109,7 @@ class _NewCollectionDialogState extends State<NewCollectionDialog> {
 
   Future<void> _handleCreate(
     BuildContext context,
-    DatabaseProvider provider,
+    AppProvider provider,
   ) async {
     final name = _nameController.text.trim();
     if (name.isEmpty) return;

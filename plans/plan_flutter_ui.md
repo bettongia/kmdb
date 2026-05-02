@@ -1,6 +1,6 @@
 # Flutter UI — CLI Feature Parity
 
-**Status**: Investigated
+**Status**: Implementing
 
 **PR link**: {A link to the PR submitted for this plan}
 
@@ -149,7 +149,7 @@ which depends on this plan as a prerequisite.
 
 ### Phase 0 — Foundation (prerequisites for all later phases)
 
-- [ ] **Responsive layout scaffold**: Replace the fixed 4-column horizontal scroll
+- [x] **Responsive layout scaffold**: Replace the fixed 4-column horizontal scroll
       with an adaptive layout:
   - Wide (>= 900 px): keep the existing multi-column side-by-side layout.
   - Narrow (< 900 px): `Navigator`-based push model (collection list → document
@@ -158,30 +158,30 @@ which depends on this plan as a prerequisite.
     an `AdaptiveColumnLayout` widget that switches between the two modes.
   - Guard `PlatformMenuBar` behind `defaultTargetPlatform == TargetPlatform.macOS`.
 
-- [ ] **Server-side scan in `CollectionProvider`**: Replace full in-memory scan
+- [x] **Server-side scan in `CollectionProvider`**: Replace full in-memory scan
       with `KmdbCollection.where(filter).get()` (filtered) and
       `KmdbCollection.all().get()` (unfiltered), via a `ScanOptions` value object
       (filter, orderBy, descending, limit, offset).
 
-- [ ] **`AppProvider`**: New top-level provider exposing `KmdbDatabase` (not just
+- [x] **`AppProvider`**: New top-level provider exposing `KmdbDatabase` (not just
       `KvStore`) to downstream consumers. Required for schema, index, and FTS
       operations.
   - Fix the collection-count efficiency problem: `_loadCollections` currently
     streams every document across every collection just to count it. Replace with
     `KmdbCollection.count()` so startup does not materialise all documents.
 
-- [ ] **Error handling pattern**: Standardise on a `SnackBarService` or
+- [x] **Error handling pattern**: Standardise on a `SnackBarService` or
       `ErrorProvider` for surfacing operation errors as dismissable snackbars.
       Currently errors silently inject `{'error': '...'}` documents into the list.
 
-- [ ] **Progress indicator for long-running operations**: All blocking operations
+- [x] **Progress indicator for long-running operations**: All blocking operations
       (`compact`, `verify`, large import/restore, sync push/pull, and any other
       operation that may take more than ~200 ms) must show a modal or inline
       progress indicator and disable the UI to prevent concurrent mutations. Use a
       shared `AsyncOperationOverlay` widget so the pattern is consistent across
       all phases.
 
-- [ ] **Reactive document list via `watch()`**: Switch `CollectionProvider` from
+- [x] **Reactive document list via `watch()`**: Switch `CollectionProvider` from
       manual `loadDocuments()` refresh to `KmdbCollection.watch()` so mutations
       propagate automatically.
   - Expose a user-controlled "auto-refresh" toggle in the UI (e.g. toolbar
@@ -190,7 +190,7 @@ which depends on this plan as a prerequisite.
   - This replaces the current pattern of calling `loadDocuments()` directly
     after each `addDocument` / `deleteDocument`.
 
-- [ ] **Widget test infrastructure**: Add widget tests for the two provider
+- [x] **Widget test infrastructure**: Add widget tests for the two provider
       classes using `MemoryStorageAdapter` from the `kmdb` package. Target ≥ 50%
       test coverage for `kmdb_ui` (lower than the library packages, but every new
       provider state and every dialog's happy/error path must have a corresponding
