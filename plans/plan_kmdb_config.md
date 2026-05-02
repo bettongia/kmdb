@@ -1,6 +1,6 @@
 # Move KmdbConfig into the `kmdb` package
 
-**Status**: Implementing
+**Status**: Complete
 
 **PR link**: {A link to the PR submitted for this plan}
 
@@ -181,8 +181,13 @@ sites that use `KmdbConfig.load(dbPath)` are replaced with
 
 ## Summary
 
-{Dot points highlighting the work undertaken — to be filled in after
-implementation}
+- Created `package:kmdb/kmdb_config.dart` library with `KmdbConfigStore` (abstract interface), `IoKmdbConfigStore` (dart:io, native-only), and `KmdbConfig` (platform-neutral, all JSON parsing and mutation).
+- Moved `KmdbConfig`, `RemoteConfig`/`LocalRemoteConfig`, `IndexRecord`, `FtsIndexRecord`, and `EmbeddingModelConfig` out of `kmdb_cli` into `packages/kmdb/lib/src/config/`.
+- `KmdbConfig` now stores unknown top-level JSON keys in `_extra` and round-trips them verbatim, ensuring forward compatibility with newer config versions.
+- `adapterFor` left in `kmdb_cli/lib/src/config/remote_config.dart` — it is CLI-only and non-CLI consumers construct adapters directly.
+- All `kmdb_cli` call sites updated: `KmdbConfig.load(path)` → `KmdbConfig.forDatabase(path)`, `config.save(path)` → `config.save()`.
+- Tests updated throughout `kmdb_cli` to use the new API; one `IndexCommand delete` test fixed to use `forDatabase` so `save()` has a real backing store.
+- All 1246 `kmdb` tests and 839 `kmdb_cli` tests pass.
 
 ---
 
