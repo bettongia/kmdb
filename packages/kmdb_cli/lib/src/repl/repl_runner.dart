@@ -24,6 +24,7 @@ import 'dot_command.dart';
 import 'dot_commands/collection_command.dart';
 import 'dot_commands/color_command.dart';
 import 'dot_commands/database_commands.dart';
+import 'dot_commands/commands_command.dart';
 import 'dot_commands/help_command.dart';
 import 'dot_commands/history_command.dart';
 import 'dot_commands/introspection_commands.dart';
@@ -38,6 +39,7 @@ import 'dot_commands/toggle_commands.dart';
 import 'history.dart';
 import 'input_reader.dart';
 import 'prompt.dart';
+import 'repl_config.dart';
 import 'session_state.dart';
 import 'spinner.dart';
 
@@ -68,12 +70,16 @@ final class ReplRunner {
   ReplRunner({
     required CommandContext ctx,
     required String dbPath,
+    Map<String, CliCommand>? commands,
     InputReader? reader,
     History? history,
+    ReplConfig? config,
     SessionState? state,
   }) : _dbPath = dbPath,
+       _commands = commands ?? const {},
        _state = state ?? SessionState(),
        _history = history ?? History(),
+       _config = config ?? ReplConfig(),
        _reader = reader ?? TtyInputReader() {
     _ctx = ctx;
     _registry = _buildRegistry();
@@ -81,8 +87,10 @@ final class ReplRunner {
   }
 
   final String _dbPath;
+  final Map<String, CliCommand> _commands;
   final SessionState _state;
   final History _history;
+  final ReplConfig _config;
   final InputReader _reader;
 
   late CommandContext _ctx;
@@ -95,6 +103,7 @@ final class ReplRunner {
   ///
   /// Returns the exit code: 0 for normal exit, non-zero from `.exit <code>`.
   Future<int> run() async {
+    await _config.load(_state);
     await _history.load();
     _reader.setHistory(_history.entries);
 
@@ -411,11 +420,12 @@ final class ReplRunner {
       const ExitCommand(),
     ];
 
-    // Build a temporary registry so HelpCommand can reference all commands.
-    final tempReg = DotCommandRegistry(commands);
+    // CommandsCommand is added before building tempReg so that HelpCommand
+    // sees it in its listing.
+    final allButHelp = [...commands, CommandsCommand(_commands)];
+    final tempReg = DotCommandRegistry(allButHelp);
 
-    // Rebuild with HelpCommand now that tempReg is available.
-    return DotCommandRegistry([...commands, HelpCommand(tempReg)]);
+    return DotCommandRegistry([...allButHelp, HelpCommand(tempReg)]);
   }
 
   // ── Tokenizer ─────────────────────────────────────────────────────────────

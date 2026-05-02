@@ -332,7 +332,15 @@ abstract final class KmdbCli {
           .toList();
     } else {
       // Interactive mode: stdin is a tty and no inline commands were given.
-      final repl = ReplRunner(ctx: ctx, dbPath: dbPath);
+      final replCommands = {
+        for (final e in _commands.entries)
+          if (e.value.replVisible) e.key: e.value,
+      };
+      final repl = ReplRunner(
+        ctx: ctx,
+        dbPath: dbPath,
+        commands: replCommands,
+      );
       return repl.run();
     }
 
