@@ -15,12 +15,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mocktail/mocktail.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:kmdb/kmdb.dart';
-import 'package:kmdb_ui/database_provider.dart';
-
-class MockKvStore extends Mock implements KvStore {}
+import 'package:kmdb_ui/app_provider.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -28,12 +25,14 @@ void main() {
   late SharedPreferences prefs;
   late MemoryStorageAdapter memoryAdapter;
 
+  tearDown(() => MemoryStorageAdapter.releaseAllLocks());
+
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
     prefs = await SharedPreferences.getInstance();
     memoryAdapter = MemoryStorageAdapter();
 
-    // Mock MethodChannel for bookmarks
+    // Mock MethodChannel for macOS bookmark calls.
     const bookmarkChannel = MethodChannel('com.kmdb.browser/bookmarks');
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(bookmarkChannel, (
@@ -45,7 +44,7 @@ void main() {
           return null;
         });
 
-    // Mock MethodChannel for file_picker
+    // Mock MethodChannel for file_picker.
     const pickerChannel = MethodChannel(
       'miguelruivo.flutter.plugins.file_picker',
     );
@@ -58,24 +57,34 @@ void main() {
         });
   });
 
-  group('DatabaseProvider', () {
+  group('AppProvider', () {
     test('initialization loads default values', () {
-      final provider = DatabaseProvider(prefs, adapter: memoryAdapter);
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
       expect(provider.recentDatabasePaths, isEmpty);
       expect(provider.themeMode, equals(ThemeMode.system));
+      expect(provider.database, isNull);
     });
 
     test('setThemeMode updates state and prefs', () async {
-      final provider = DatabaseProvider(prefs, adapter: memoryAdapter);
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
       provider.setThemeMode(ThemeMode.dark);
 
       expect(provider.themeMode, equals(ThemeMode.dark));
       expect(prefs.getString('theme_mode'), equals('dark'));
     });
 
+    test('setThemeMode no-op when same mode', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      var notifyCount = 0;
+      provider.addListener(() => notifyCount++);
+
+      provider.setThemeMode(ThemeMode.system); // same as default
+      expect(notifyCount, equals(0));
+    });
+
     test('removeDatabase updates state and saves to prefs', () async {
       await prefs.setStringList('recent_databases', ['/path/to/db']);
-      final provider = DatabaseProvider(prefs, adapter: memoryAdapter);
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
 
       expect(provider.recentDatabasePaths, contains(endsWith('db')));
 
@@ -85,16 +94,108 @@ void main() {
       expect(prefs.getStringList('recent_databases'), isEmpty);
     });
 
-    test('selectDatabase opens store and loads collections', () async {
-      final provider = DatabaseProvider(prefs, adapter: memoryAdapter);
+    test('selectDatabase opens KmdbDatabase and loads collections', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
 
-      // selectDatabase will try to open the database.
-      // MemoryStorageAdapter will work fine in test environment.
       await provider.selectDatabase('/path/to/test-db');
 
       expect(provider.selectedDatabasePath, contains('test-db'));
-      expect(provider.store, isNotNull);
+      expect(provider.database, isNotNull);
       expect(provider.isOpening, isFalse);
+      expect(provider.loadError, isNull);
+    });
+
+    test('selectDatabase adds path to recent list', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+
+      await provider.selectDatabase('/path/to/new-db');
+
+      expect(
+        provider.recentDatabasePaths,
+        contains(endsWith('new-db')),
+      );
+    });
+
+    test('selectDatabase is a no-op when same database already open', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/db');
+      final db1 = provider.database;
+
+      // Calling again with the same path should not reopen.
+      await provider.selectDatabase('/path/to/db');
+      expect(provider.database, same(db1));
+    });
+
+    test('collections are empty on fresh open with no namespaces', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/empty-db');
+
+      expect(provider.collections, isEmpty);
+    });
+
+    test('selectCollection updates selectedCollection', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/db');
+      await provider.createCollection('notes');
+
+      provider.selectCollection('notes');
+      expect(provider.selectedCollection, equals('notes'));
+      expect(provider.selectedDocument, isNull);
+    });
+
+    test('createCollection returns true and updates collection list', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/db');
+
+      final created = await provider.createCollection('tasks');
+      expect(created, isTrue);
+      expect(provider.collections, contains('tasks'));
+    });
+
+    test('createCollection returns false when no database is open', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+
+      final created = await provider.createCollection('tasks');
+      expect(created, isFalse);
+    });
+
+    test('selectDocument updates selectedDocument', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      final doc = {'_id': 'abc', 'title': 'Hello'};
+
+      provider.selectDocument(doc);
+      expect(provider.selectedDocument, equals(doc));
+
+      provider.selectDocument(null);
+      expect(provider.selectedDocument, isNull);
+    });
+
+    test('isBusy is set while runBusy operation runs', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      bool wasBusy = false;
+
+      await provider.runBusy('Working...', () async {
+        wasBusy = provider.isBusy;
+        expect(provider.busyMessage, equals('Working...'));
+      });
+
+      expect(wasBusy, isTrue);
+      expect(provider.isBusy, isFalse);
+      expect(provider.busyMessage, isEmpty);
+    });
+
+    test('runBusy clears busy state even when operation throws', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+
+      await expectLater(
+        provider.runBusy('Failing...', () async {
+          throw Exception('test error');
+        }),
+        throwsA(isA<Exception>()),
+      );
+
+      expect(provider.isBusy, isFalse);
+      expect(provider.busyMessage, isEmpty);
     });
   });
 }

@@ -19,9 +19,9 @@ import 'package:provider/provider.dart';
 
 import 'package:kmdb_ui/add_document_dialog.dart';
 import 'package:kmdb_ui/new_collection_dialog.dart';
-import 'package:kmdb_ui/database_provider.dart';
+import 'package:kmdb_ui/app_provider.dart';
 
-class MockDatabaseProvider extends Mock implements DatabaseProvider {}
+class MockAppProvider extends Mock implements AppProvider {}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -31,8 +31,8 @@ Widget _wrap(Widget child) => MaterialApp(
   home: Scaffold(body: Builder(builder: (ctx) => child)),
 );
 
-Widget _wrapWithProvider(Widget child, DatabaseProvider provider) =>
-    ChangeNotifierProvider<DatabaseProvider>.value(
+Widget _wrapWithProvider(Widget child, AppProvider provider) =>
+    ChangeNotifierProvider<AppProvider>.value(
       value: provider,
       child: MaterialApp(
         home: Scaffold(body: Builder(builder: (ctx) => child)),
@@ -156,10 +156,10 @@ void main() {
   // ──────────────────────────────────────────────────────────────────────────
 
   group('NewCollectionDialog', () {
-    late MockDatabaseProvider mockProvider;
+    late MockAppProvider mockProvider;
 
     setUp(() {
-      mockProvider = MockDatabaseProvider();
+      mockProvider = MockAppProvider();
       when(() => mockProvider.collections).thenReturn([]);
     });
 
@@ -211,7 +211,7 @@ void main() {
                 onPressed: () => showDialog<void>(
                   context: ctx,
                   builder: (_) =>
-                      ChangeNotifierProvider<DatabaseProvider>.value(
+                      ChangeNotifierProvider<AppProvider>.value(
                         value: mockProvider,
                         child: const NewCollectionDialog(),
                       ),
@@ -249,7 +249,7 @@ void main() {
                 onPressed: () => showDialog<void>(
                   context: ctx,
                   builder: (_) =>
-                      ChangeNotifierProvider<DatabaseProvider>.value(
+                      ChangeNotifierProvider<AppProvider>.value(
                         value: mockProvider,
                         child: const NewCollectionDialog(),
                       ),

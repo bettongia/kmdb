@@ -19,17 +19,19 @@ import 'package:provider/provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:flutter_json_view/flutter_json_view.dart';
 import 'dart:convert';
-import 'database_provider.dart';
+
+import 'app_provider.dart';
 import 'collection_provider.dart';
 import 'new_collection_dialog.dart';
 import 'add_document_dialog.dart';
 
+/// Column showing the list of recently opened databases.
 class DatabaseHistoryColumn extends StatelessWidget {
   const DatabaseHistoryColumn({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final provider = context.watch<DatabaseProvider>();
+    final provider = context.watch<AppProvider>();
     return Container(
       decoration: BoxDecoration(
         color: Theme.of(
@@ -139,12 +141,13 @@ class DatabaseHistoryColumn extends StatelessWidget {
   }
 }
 
+/// Column showing all collections in the open database.
 class CollectionListColumn extends StatelessWidget {
   const CollectionListColumn({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final provider = context.watch<DatabaseProvider>();
+    final provider = context.watch<AppProvider>();
     final isVisible = provider.selectedDatabasePath != null;
 
     if (!isVisible) {
@@ -231,7 +234,8 @@ class CollectionListColumn extends StatelessWidget {
                     itemBuilder: (context, index) {
                       final name = provider.collections[index];
                       final count = provider.getCollectionCount(name);
-                      final isSelected = provider.selectedCollection == name;
+                      final isSelected =
+                          provider.selectedCollection == name;
                       return Padding(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 8.0,
@@ -260,8 +264,8 @@ class CollectionListColumn extends StatelessWidget {
                           ),
                           trailing: Text(
                             '$count',
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
                                   fontWeight: isSelected
                                       ? FontWeight.bold
                                       : FontWeight.normal,
@@ -279,6 +283,11 @@ class CollectionListColumn extends StatelessWidget {
   }
 }
 
+/// Column showing the document list for the selected collection.
+///
+/// Includes a text filter field and an auto-refresh toggle. When auto-refresh
+/// is enabled, the list reacts to writes automatically via [KmdbCollection.watch].
+/// When disabled, a manual refresh button is shown instead.
 class DocumentContentColumn extends StatefulWidget {
   const DocumentContentColumn({super.key});
 
@@ -290,15 +299,26 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
   final _queryController = TextEditingController();
 
   @override
+  void dispose() {
+    _queryController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final databaseProvider = context.watch<DatabaseProvider>();
+    final appProvider = context.watch<AppProvider>();
     final collectionProvider = context.watch<CollectionProvider?>();
 
     if (collectionProvider == null) {
-      return const Expanded(child: Center(child: Text('Select a collection')));
+      return const Center(child: Text('Select a collection'));
     }
 
-    _queryController.text = collectionProvider.query;
+    // Keep the text field in sync with the provider state without causing a
+    // rebuild loop: only update the controller when the value has changed.
+    final currentQuery = collectionProvider.query;
+    if (_queryController.text != currentQuery) {
+      _queryController.text = currentQuery;
+    }
 
     return Container(
       decoration: BoxDecoration(
@@ -308,19 +328,43 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
         children: [
           AppBar(
             title: Text(
-              '${collectionProvider.collectionName} (${collectionProvider.totalCount})',
+              '${collectionProvider.collectionName}'
+              ' (${collectionProvider.totalCount})',
               style: const TextStyle(fontSize: 14),
             ),
             actions: [
+              // Auto-refresh toggle: sync icon when on, refresh icon when off.
+              IconButton(
+                icon: Icon(
+                  collectionProvider.autoRefresh
+                      ? Icons.sync
+                      : Icons.sync_disabled,
+                  size: 18,
+                ),
+                tooltip: collectionProvider.autoRefresh
+                    ? 'Auto-refresh on — tap to disable'
+                    : 'Auto-refresh off — tap to enable',
+                onPressed: () => collectionProvider.setAutoRefresh(
+                  !collectionProvider.autoRefresh,
+                ),
+              ),
+              // Manual refresh button, only visible when auto-refresh is off.
+              if (!collectionProvider.autoRefresh)
+                IconButton(
+                  icon: const Icon(Icons.refresh, size: 18),
+                  tooltip: 'Refresh documents',
+                  onPressed: collectionProvider.loadDocuments,
+                ),
               IconButton(
                 icon: const Icon(Icons.add, size: 18),
+                tooltip: 'Add Document',
                 onPressed: () {
                   showDialog(
                     context: context,
                     builder: (_) => AddDocumentDialog(
                       onAddJson: (json) async {
                         await collectionProvider.addDocument(json);
-                        await databaseProvider.refreshCollections();
+                        await appProvider.refreshCollections();
                       },
                     ),
                   );
@@ -341,13 +385,16 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
               onChanged: (value) => collectionProvider.setQuery(value),
             ),
           ),
+          // Loading indicator while a document fetch is in progress.
+          if (collectionProvider.isLoading)
+            const LinearProgressIndicator(minHeight: 2),
           Expanded(
             child: ListView.builder(
               itemCount: collectionProvider.documents.length,
               itemBuilder: (context, index) {
                 final document = collectionProvider.documents[index];
                 final isSelected =
-                    databaseProvider.selectedDocument?['_id'] ==
+                    appProvider.selectedDocument?['_id'] ==
                     document['_id'];
 
                 final title =
@@ -371,7 +418,7 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
                       context,
                     ).colorScheme.tertiaryContainer.withValues(alpha: 0.4),
                     title: Text(
-                      title,
+                      title.toString(),
                       style: TextStyle(
                         fontWeight: isSelected
                             ? FontWeight.bold
@@ -382,7 +429,7 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
                       ),
                     ),
                     subtitle: Text(
-                      document['_id'] ?? '',
+                      document['_id']?.toString() ?? '',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -401,7 +448,8 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
                           builder: (context) => AlertDialog(
                             title: const Text('Delete Document'),
                             content: const Text(
-                              'Are you sure you want to delete this document? This action cannot be undone.',
+                              'Are you sure you want to delete this document?'
+                              ' This action cannot be undone.',
                             ),
                             actions: [
                               TextButton(
@@ -415,12 +463,12 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
                                 ),
                                 onPressed: () async {
                                   Navigator.pop(context);
-                                  final id = document['_id'];
+                                  final id = document['_id']?.toString();
                                   if (id != null) {
                                     await collectionProvider.deleteDocument(id);
-                                    await databaseProvider.refreshCollections();
+                                    await appProvider.refreshCollections();
                                     if (isSelected) {
-                                      databaseProvider.selectDocument(null);
+                                      appProvider.selectDocument(null);
                                     }
                                   }
                                 },
@@ -430,7 +478,7 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
                         );
                       },
                     ),
-                    onTap: () => databaseProvider.selectDocument(document),
+                    onTap: () => appProvider.selectDocument(document),
                   ),
                 );
               },
@@ -442,12 +490,13 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
   }
 }
 
+/// Column showing the full JSON detail of the selected document.
 class DocumentDetailColumn extends StatelessWidget {
   const DocumentDetailColumn({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final provider = context.watch<DatabaseProvider>();
+    final provider = context.watch<AppProvider>();
     final doc = provider.selectedDocument;
 
     if (doc == null) {
