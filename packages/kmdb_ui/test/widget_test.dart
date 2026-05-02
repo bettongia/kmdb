@@ -47,12 +47,8 @@ void main() {
   Widget createTestWidget() {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider<ErrorProvider>(
-          create: (_) => ErrorProvider(),
-        ),
-        ChangeNotifierProvider<AppProvider>.value(
-          value: mockAppProvider,
-        ),
+        ChangeNotifierProvider<ErrorProvider>(create: (_) => ErrorProvider()),
+        ChangeNotifierProvider<AppProvider>.value(value: mockAppProvider),
         Provider<CollectionProvider?>.value(value: null),
       ],
       child: MaterialApp(home: const HomePage()),
@@ -69,9 +65,7 @@ void main() {
   testWidgets('Selecting a database calls provider', (
     WidgetTester tester,
   ) async {
-    when(
-      () => mockAppProvider.selectDatabase(any()),
-    ).thenAnswer((_) async {});
+    when(() => mockAppProvider.selectDatabase(any())).thenAnswer((_) async {});
 
     await tester.pumpWidget(createTestWidget());
 

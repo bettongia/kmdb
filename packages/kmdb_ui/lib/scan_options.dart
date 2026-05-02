@@ -71,8 +71,9 @@ class ScanOptions {
   }) {
     return ScanOptions(
       filterText: clearFilterText ? null : (filterText ?? this.filterText),
-      orderByField:
-          clearOrderByField ? null : (orderByField ?? this.orderByField),
+      orderByField: clearOrderByField
+          ? null
+          : (orderByField ?? this.orderByField),
       descending: descending ?? this.descending,
       limit: clearLimit ? null : (limit ?? this.limit),
       offset: offset ?? this.offset,
@@ -89,11 +90,6 @@ class ScanOptions {
       other.offset == offset;
 
   @override
-  int get hashCode => Object.hash(
-    filterText,
-    orderByField,
-    descending,
-    limit,
-    offset,
-  );
+  int get hashCode =>
+      Object.hash(filterText, orderByField, descending, limit, offset);
 }

@@ -24,6 +24,7 @@ import 'app_provider.dart';
 import 'collection_provider.dart';
 import 'new_collection_dialog.dart';
 import 'add_document_dialog.dart';
+import 'edit_document_dialog.dart';
 
 /// Column showing the list of recently opened databases.
 class DatabaseHistoryColumn extends StatelessWidget {
@@ -142,8 +143,45 @@ class DatabaseHistoryColumn extends StatelessWidget {
 }
 
 /// Column showing all collections in the open database.
+///
+/// Right-click (secondary tap) on a collection shows a context menu with a
+/// Delete option. Deletion requires explicit confirmation.
 class CollectionListColumn extends StatelessWidget {
   const CollectionListColumn({super.key});
+
+  void _confirmDelete(
+    BuildContext context,
+    AppProvider provider,
+    String name,
+  ) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Collection'),
+        content: Text(
+          'Delete "$name" and all its documents?\n\n'
+          'This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            onPressed: () async {
+              Navigator.pop(context);
+              await provider.runBusy(
+                'Deleting collection "$name"…',
+                () => provider.deleteCollection(name),
+              );
+            },
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -234,44 +272,47 @@ class CollectionListColumn extends StatelessWidget {
                     itemBuilder: (context, index) {
                       final name = provider.collections[index];
                       final count = provider.getCollectionCount(name);
-                      final isSelected =
-                          provider.selectedCollection == name;
+                      final isSelected = provider.selectedCollection == name;
                       return Padding(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 8.0,
                           vertical: 2.0,
                         ),
-                        child: ListTile(
-                          dense: true,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          selected: isSelected,
-                          selectedTileColor: Theme.of(context)
-                              .colorScheme
-                              .secondaryContainer
-                              .withValues(alpha: 0.4),
-                          title: Text(
-                            name,
-                            style: TextStyle(
-                              fontWeight: isSelected
-                                  ? FontWeight.bold
-                                  : FontWeight.normal,
-                              color: isSelected
-                                  ? Theme.of(context).colorScheme.secondary
-                                  : null,
+                        child: GestureDetector(
+                          onSecondaryTap: () =>
+                              _confirmDelete(context, provider, name),
+                          child: ListTile(
+                            dense: true,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
                             ),
+                            selected: isSelected,
+                            selectedTileColor: Theme.of(context)
+                                .colorScheme
+                                .secondaryContainer
+                                .withValues(alpha: 0.4),
+                            title: Text(
+                              name,
+                              style: TextStyle(
+                                fontWeight: isSelected
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                                color: isSelected
+                                    ? Theme.of(context).colorScheme.secondary
+                                    : null,
+                              ),
+                            ),
+                            trailing: Text(
+                              '$count',
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(
+                                    fontWeight: isSelected
+                                        ? FontWeight.bold
+                                        : FontWeight.normal,
+                                  ),
+                            ),
+                            onTap: () => provider.selectCollection(name),
                           ),
-                          trailing: Text(
-                            '$count',
-                            style:
-                                Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  fontWeight: isSelected
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
-                                ),
-                          ),
-                          onTap: () => provider.selectCollection(name),
                         ),
                       );
                     },
@@ -285,9 +326,13 @@ class CollectionListColumn extends StatelessWidget {
 
 /// Column showing the document list for the selected collection.
 ///
-/// Includes a text filter field and an auto-refresh toggle. When auto-refresh
-/// is enabled, the list reacts to writes automatically via [KmdbCollection.watch].
-/// When disabled, a manual refresh button is shown instead.
+/// Features:
+/// - Text filter field (wired to [CollectionProvider.setQuery]).
+/// - Sort row: order-by field name text field and ASC/DESC toggle.
+/// - Auto-refresh toggle via [CollectionProvider.setAutoRefresh].
+/// - Manual refresh button when auto-refresh is off.
+/// - Find-by-ID button that opens an input dialog.
+/// - Pagination bar (page size selector + prev/next page controls).
 class DocumentContentColumn extends StatefulWidget {
   const DocumentContentColumn({super.key});
 
@@ -297,11 +342,79 @@ class DocumentContentColumn extends StatefulWidget {
 
 class _DocumentContentColumnState extends State<DocumentContentColumn> {
   final _queryController = TextEditingController();
+  final _sortFieldController = TextEditingController();
+
+  static const List<int?> _pageSizeOptions = [10, 25, 50, null];
 
   @override
   void dispose() {
     _queryController.dispose();
+    _sortFieldController.dispose();
     super.dispose();
+  }
+
+  Future<void> _showFindByIdDialog(
+    BuildContext context,
+    CollectionProvider collectionProvider,
+    AppProvider appProvider,
+  ) async {
+    final controller = TextEditingController();
+    String? errorText;
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Find Document by ID'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: InputDecoration(
+              labelText: 'Document ID',
+              hintText: 'Enter the UUIDv7 key',
+              border: const OutlineInputBorder(),
+              errorText: errorText,
+            ),
+            onSubmitted: (_) async {
+              final id = controller.text.trim();
+              if (id.isEmpty) return;
+              final doc = await collectionProvider.getDocumentById(id);
+              if (doc != null) {
+                appProvider.selectDocument(doc);
+                if (context.mounted) Navigator.pop(context);
+              } else {
+                setDialogState(
+                  () => errorText = 'No document found with that ID.',
+                );
+              }
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                final id = controller.text.trim();
+                if (id.isEmpty) return;
+                final doc = await collectionProvider.getDocumentById(id);
+                if (doc != null) {
+                  appProvider.selectDocument(doc);
+                  if (context.mounted) Navigator.pop(context);
+                } else {
+                  setDialogState(
+                    () => errorText = 'No document found with that ID.',
+                  );
+                }
+              },
+              child: const Text('Find'),
+            ),
+          ],
+        ),
+      ),
+    );
+    controller.dispose();
   }
 
   @override
@@ -313,12 +426,22 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
       return const Center(child: Text('Select a collection'));
     }
 
-    // Keep the text field in sync with the provider state without causing a
-    // rebuild loop: only update the controller when the value has changed.
+    // Keep the filter text field in sync with provider state without looping.
     final currentQuery = collectionProvider.query;
     if (_queryController.text != currentQuery) {
       _queryController.text = currentQuery;
     }
+
+    final opts = collectionProvider.scanOptions;
+    final limit = opts.limit ?? 25;
+    final offset = opts.offset;
+    final currentPage = offset ~/ limit + 1;
+    final totalPages =
+        collectionProvider.totalCount == 0
+            ? 1
+            : (collectionProvider.totalCount / limit).ceil();
+    final hasPrev = offset > 0;
+    final hasNext = offset + limit < collectionProvider.totalCount;
 
     return Container(
       decoration: BoxDecoration(
@@ -333,7 +456,15 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
               style: const TextStyle(fontSize: 14),
             ),
             actions: [
-              // Auto-refresh toggle: sync icon when on, refresh icon when off.
+              IconButton(
+                icon: const Icon(Icons.search, size: 18),
+                tooltip: 'Find by ID',
+                onPressed: () => _showFindByIdDialog(
+                  context,
+                  collectionProvider,
+                  appProvider,
+                ),
+              ),
               IconButton(
                 icon: Icon(
                   collectionProvider.autoRefresh
@@ -348,7 +479,6 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
                   !collectionProvider.autoRefresh,
                 ),
               ),
-              // Manual refresh button, only visible when auto-refresh is off.
               if (!collectionProvider.autoRefresh)
                 IconButton(
                   icon: const Icon(Icons.refresh, size: 18),
@@ -372,30 +502,80 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
               ),
             ],
           ),
+
+          // Filter row.
           Padding(
-            padding: const EdgeInsets.all(8.0),
+            padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
             child: TextField(
               controller: _queryController,
               decoration: const InputDecoration(
                 hintText: 'Filter...',
-                prefixIcon: Icon(Icons.search, size: 16),
+                prefixIcon: Icon(Icons.filter_list, size: 16),
                 isDense: true,
                 border: OutlineInputBorder(),
               ),
               onChanged: (value) => collectionProvider.setQuery(value),
             ),
           ),
-          // Loading indicator while a document fetch is in progress.
+
+          // Sort row: order-by field + ASC/DESC toggle.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _sortFieldController,
+                    decoration: const InputDecoration(
+                      hintText: 'Sort field (optional)',
+                      prefixIcon: Icon(Icons.sort, size: 16),
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
+                    onSubmitted: (value) {
+                      final field = value.trim().isEmpty ? null : value.trim();
+                      collectionProvider.setScanOptions(
+                        opts.copyWith(
+                          orderByField: field,
+                          clearOrderByField: field == null,
+                          offset: 0,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  icon: Icon(
+                    opts.descending
+                        ? Icons.arrow_downward
+                        : Icons.arrow_upward,
+                    size: 18,
+                  ),
+                  tooltip: opts.descending ? 'Descending' : 'Ascending',
+                  onPressed: () {
+                    collectionProvider.setScanOptions(
+                      opts.copyWith(
+                        descending: !opts.descending,
+                        offset: 0,
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+
           if (collectionProvider.isLoading)
             const LinearProgressIndicator(minHeight: 2),
+
           Expanded(
             child: ListView.builder(
               itemCount: collectionProvider.documents.length,
               itemBuilder: (context, index) {
                 final document = collectionProvider.documents[index];
                 final isSelected =
-                    appProvider.selectedDocument?['_id'] ==
-                    document['_id'];
+                    appProvider.selectedDocument?['_id'] == document['_id'];
 
                 final title =
                     document['title'] ??
@@ -484,6 +664,82 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
               },
             ),
           ),
+
+          // Pagination bar.
+          Container(
+            decoration: BoxDecoration(
+              border: Border(top: BorderSide(color: Colors.grey.shade300)),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: Row(
+              children: [
+                // Page size selector.
+                DropdownButton<int?>(
+                  value: opts.limit,
+                  isDense: true,
+                  underline: const SizedBox.shrink(),
+                  items: _pageSizeOptions
+                      .map(
+                        (n) => DropdownMenuItem(
+                          value: n,
+                          child: Text(
+                            n == null ? 'All' : '$n',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (n) {
+                    collectionProvider.setScanOptions(
+                      opts.copyWith(
+                        limit: n,
+                        clearLimit: n == null,
+                        offset: 0,
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  'per page',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const Spacer(),
+                // Page info.
+                Text(
+                  opts.limit == null
+                      ? 'All ${collectionProvider.totalCount}'
+                      : 'Page $currentPage of $totalPages',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                // Prev / next buttons.
+                IconButton(
+                  icon: const Icon(Icons.chevron_left, size: 18),
+                  tooltip: 'Previous page',
+                  onPressed: hasPrev
+                      ? () {
+                          collectionProvider.setScanOptions(
+                            opts.copyWith(
+                              offset: (offset - limit).clamp(0, offset),
+                            ),
+                          );
+                        }
+                      : null,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.chevron_right, size: 18),
+                  tooltip: 'Next page',
+                  onPressed: hasNext
+                      ? () {
+                          collectionProvider.setScanOptions(
+                            opts.copyWith(offset: offset + limit),
+                          );
+                        }
+                      : null,
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -491,13 +747,16 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
 }
 
 /// Column showing the full JSON detail of the selected document.
+///
+/// The Edit button opens [EditDocumentDialog] to update the document in place.
 class DocumentDetailColumn extends StatelessWidget {
   const DocumentDetailColumn({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final provider = context.watch<AppProvider>();
-    final doc = provider.selectedDocument;
+    final appProvider = context.watch<AppProvider>();
+    final collectionProvider = context.watch<CollectionProvider?>();
+    final doc = appProvider.selectedDocument;
 
     if (doc == null) {
       return const SizedBox.shrink();
@@ -511,6 +770,30 @@ class DocumentDetailColumn extends StatelessWidget {
           AppBar(
             title: const Text('Details', style: TextStyle(fontSize: 16)),
             actions: [
+              if (collectionProvider != null)
+                IconButton(
+                  tooltip: 'Edit Document',
+                  icon: const Icon(Icons.edit_outlined, size: 18),
+                  onPressed: () {
+                    showDialog<void>(
+                      context: context,
+                      builder: (_) => EditDocumentDialog(
+                        document: doc,
+                        onSave: (json) async {
+                          final id = doc['_id'] as String;
+                          await collectionProvider.updateDocument(id, json);
+                          // Refresh the selected document to show updated content.
+                          final updated =
+                              await collectionProvider.getDocumentById(id);
+                          if (updated != null) {
+                            appProvider.selectDocument(updated);
+                          }
+                          await appProvider.refreshCollections();
+                        },
+                      ),
+                    );
+                  },
+                ),
               IconButton(
                 tooltip: 'Copy JSON',
                 icon: const Icon(Icons.copy, size: 18),
@@ -532,7 +815,7 @@ class DocumentDetailColumn extends StatelessWidget {
               ),
               IconButton(
                 icon: const Icon(Icons.close),
-                onPressed: () => provider.selectDocument(null),
+                onPressed: () => appProvider.selectDocument(null),
               ),
             ],
           ),

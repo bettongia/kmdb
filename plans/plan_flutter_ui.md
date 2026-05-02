@@ -198,30 +198,30 @@ which depends on this plan as a prerequisite.
 
 ### Phase 1 — Document CRUD parity
 
-- [ ] **Document edit UI**: Add an "Edit" action to `DocumentDetailColumn`.
+- [x] **Document edit UI**: Add an "Edit" action to `DocumentDetailColumn`.
   - JSON text editor pre-populated with formatted JSON.
   - On save: decode JSON, preserve `_id`, call `store.put(collection, id, ...)`.
   - Surface `SchemaValidationException` as a field-level error list in the dialog.
 
-- [ ] **Get document by key**: Add a "Find by ID" search bar to
+- [x] **Get document by key**: Add a "Find by ID" search bar to
       `DocumentContentColumn` that calls `store.get(collection, key)`.
 
-- [ ] **Scan filtering (server-side)**: Filter bar in `DocumentContentColumn`:
+- [x] **Scan filtering (server-side)**: Filter bar in `DocumentContentColumn`:
   - Simple mode: field + operator + value → `Filter` object.
   - Advanced mode: raw JSON filter string matching the CLI `--filter` format.
   - Wired through `CollectionProvider.ScanOptions`.
 
-- [ ] **Scan ordering and pagination**: Order-by field selector and
+- [x] **Scan ordering and pagination**: Order-by field selector and
       ascending/descending toggle; next/prev page controls using
       `ScanOptions.limit` and `offset`.
   - **Note**: `--explain` (query plan output) is out of scope for this plan.
     It is a developer diagnostic that is better suited to a future search/filter
     enhancement work item.
 
-- [ ] **Document count**: Display live document count for the selected collection
+- [x] **Document count**: Display live document count for the selected collection
       via `KmdbCollection.count()` in the collection header or detail column.
 
-- [ ] **Collection delete**: Swipe-to-delete or context menu on collection list
+- [x] **Collection delete**: Swipe-to-delete or context menu on collection list
       items; call via `KmdbDatabase` API (not `store.deleteNamespace`) so that
       index and FTS namespace cleanup is handled correctly.
 

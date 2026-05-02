@@ -107,10 +107,7 @@ class _NewCollectionDialogState extends State<NewCollectionDialog> {
     );
   }
 
-  Future<void> _handleCreate(
-    BuildContext context,
-    AppProvider provider,
-  ) async {
+  Future<void> _handleCreate(BuildContext context, AppProvider provider) async {
     final name = _nameController.text.trim();
     if (name.isEmpty) return;
 
