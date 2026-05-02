@@ -546,10 +546,9 @@ final class _NoOpConfigStore implements KmdbConfigStore {
   Future<String?> read() async => null;
 
   @override
-  Future<void> write(String json) =>
-      throw UnsupportedError(
-        'KmdbConfig.empty() has no backing store.  '
-        'Use KmdbConfig.forDatabase() or KmdbConfig.load(store) to obtain '
-        'a config that can be persisted.',
-      );
+  Future<void> write(String json) => throw UnsupportedError(
+    'KmdbConfig.empty() has no backing store.  '
+    'Use KmdbConfig.forDatabase() or KmdbConfig.load(store) to obtain '
+    'a config that can be persisted.',
+  );
 }
