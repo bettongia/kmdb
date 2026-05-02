@@ -158,6 +158,14 @@ abstract class CliCommand {
   /// generated options table below the invocation line.
   String get usage;
 
+  /// Whether this command is meaningful inside an interactive REPL session.
+  ///
+  /// Commands that operate at database-open time (e.g. `init`) or are
+  /// one-time setup operations (e.g. `new-device-id`) return `false` so they
+  /// are excluded from the `.commands` dot-command listing. All other commands
+  /// default to `true`.
+  bool get replVisible => true;
+
   /// Registers this command's flags and options on [parser].
   ///
   /// Called by the help-text builder so that `kmdb help <command>` shows a

@@ -52,6 +52,9 @@ final class NewDeviceIdCommand extends CliCommand {
   String get name => 'new-device-id';
 
   @override
+  bool get replVisible => false;
+
+  @override
   String get description =>
       'Generate a new device identity for this database copy.';
 

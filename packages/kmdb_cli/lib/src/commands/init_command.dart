@@ -35,6 +35,9 @@ final class InitCommand extends CliCommand {
   String get name => 'init';
 
   @override
+  bool get replVisible => false;
+
+  @override
   String get description =>
       'Create a new database or verify an existing one. '
       'Outputs path, deviceId, and whether the database was created.';
