@@ -62,6 +62,12 @@ abstract class InputReader {
   /// Called by [ReplRunner] after every successful entry so the new entry is
   /// immediately available on the next readLine call.
   void setHistory(List<String> history);
+
+  /// Releases any resources held by this reader.
+  ///
+  /// Must be called once when the owning REPL session ends. Safe to call if
+  /// [readLine] was never invoked.
+  Future<void> dispose() async {}
 }
 
 /// Callback invoked when the user presses Tab.
@@ -154,17 +160,48 @@ final class ByteQueue {
 /// - Ctrl+D on an empty line for EOF.
 /// - Ctrl+C for interrupt.
 ///
-/// A single [io.stdin] subscription is held for the full duration of each
-/// [readLine] call and all byte reads are routed through a [ByteQueue].
-/// This avoids the macOS-native behaviour where cancelling the stdin
-/// subscription closes fd 0, causing subsequent `ioctl` calls (including
-/// [io.Stdin.echoMode] and [io.Stdin.lineMode]) to fail with EBADF.
+/// A single [io.stdin] subscription is opened on the first [readLine] call and
+/// kept alive for the full REPL session. All byte reads are routed through a
+/// shared [ByteQueue]. This avoids the macOS-native behaviour where
+/// cancelling and re-opening the stdin subscription throws "Stream has already
+/// been listened to" (single-subscription stream) and/or closes fd 0, causing
+/// subsequent `ioctl` calls to fail with EBADF. Call [dispose] once when the
+/// REPL session ends.
 final class TtyInputReader implements InputReader {
   /// Creates a [TtyInputReader] that writes to [output] (defaults to stdout).
   TtyInputReader({io.IOSink? output}) : _out = output ?? io.stdout;
 
   final io.IOSink _out;
   List<String> _history = const [];
+
+  // Shared subscription and queue, opened lazily on the first readLine call
+  // and kept alive across calls. io.stdin is a single-subscription stream —
+  // cancelling and re-listening throws "Stream has already been listened to".
+  ByteQueue? _queue;
+  StreamSubscription<List<int>>? _sub;
+
+  void _ensureSubscribed() {
+    if (_sub != null) return;
+    _queue = ByteQueue();
+    _sub = io.stdin.listen(
+      (chunk) {
+        for (final b in chunk) {
+          _queue!.add(b);
+        }
+      },
+      onDone: _queue!.close,
+      onError: (_) => _queue!.close(),
+      cancelOnError: false,
+    );
+  }
+
+  @override
+  Future<void> dispose() async {
+    await _sub?.cancel();
+    _queue?.close();
+    _sub = null;
+    _queue = null;
+  }
 
   @override
   void setHistory(List<String> history) {
@@ -183,20 +220,12 @@ final class TtyInputReader implements InputReader {
 
     _out.write(prompt);
 
-    // Open one stdin subscription for the lifetime of this readLine call.
-    // All bytes are funnelled through the queue; _readByte and _readByteTimeout
-    // pull from it rather than re-subscribing on every byte.
-    final queue = ByteQueue();
-    final sub = io.stdin.listen(
-      (chunk) {
-        for (final b in chunk) {
-          queue.add(b);
-        }
-      },
-      onDone: queue.close,
-      onError: (_) => queue.close(),
-      cancelOnError: false,
-    );
+    // Lazily open the shared stdin subscription. io.stdin is a
+    // single-subscription stream — re-listening after cancel throws "Stream
+    // has already been listened to", so the subscription must live for the
+    // full session and be closed only via dispose().
+    _ensureSubscribed();
+    final queue = _queue!;
 
     try {
       io.stdin
@@ -204,9 +233,8 @@ final class TtyInputReader implements InputReader {
         ..lineMode = false;
     } on io.StdinException {
       // Terminal mode setup failed (e.g. stdin is not a real TTY).
-      // Clean up and rethrow so ReplRunner can show a friendly message.
-      await sub.cancel();
-      queue.close();
+      // Rethrow so ReplRunner can show a friendly message; the subscription
+      // is cleaned up by dispose() when the session ends.
       rethrow;
     }
 
@@ -295,17 +323,16 @@ final class TtyInputReader implements InputReader {
         }
       }
     } finally {
-      // Restore terminal mode BEFORE cancelling the subscription. On macOS
-      // native, sub.cancel() closes fd 0, which would make the ioctl calls
-      // inside echoMode= and lineMode= fail with EBADF.
+      // Restore terminal mode only. The subscription lives for the full
+      // session and is released by dispose() — cancelling it here would
+      // prevent re-use on the next readLine call ("Stream has already been
+      // listened to").
       try {
         io.stdin.echoMode = true;
       } catch (_) {}
       try {
         io.stdin.lineMode = true;
       } catch (_) {}
-      await sub.cancel();
-      queue.close();
     }
   }
 
@@ -527,6 +554,9 @@ final class FakeInputReader implements InputReader {
     submitted.add(line);
     return ReadLineOutcome.line(line);
   }
+
+  @override
+  Future<void> dispose() async {}
 }
 
 // ── Internal types (tty-only; not reachable from FakeInputReader) ─────────────

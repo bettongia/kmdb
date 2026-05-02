@@ -153,6 +153,7 @@ final class ReplRunner {
     } finally {
       await _history.save();
       await _ctx.db.close(flush: true);
+      await _reader.dispose();
     }
 
     return exitCode;

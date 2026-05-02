@@ -37,6 +37,9 @@ final class _ThrowingInputReader implements InputReader {
   }) async {
     throw const io.StdinException('Bad file descriptor');
   }
+
+  @override
+  Future<void> dispose() async {}
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
