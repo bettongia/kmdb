@@ -116,66 +116,66 @@ sites that use `KmdbConfig.load(dbPath)` are replaced with
 
 ### Step 1 — Audit current `KmdbConfig` code
 
-- [ ] Confirm no types in `kmdb_cli/lib/src/config/` reference CLI-only types
+- [x] Confirm no types in `kmdb_cli/lib/src/config/` reference CLI-only types
       (`CliCommand`, `CommandContext`, `ArgParser`, etc.) that must stay in
       `kmdb_cli`. The investigation above indicates they do not, but verify
       before moving.
 
 ### Step 2 — Create `package:kmdb/kmdb_config.dart`
 
-- [ ] Create `packages/kmdb/lib/src/config/kmdb_config_store.dart` defining the
+- [x] Create `packages/kmdb/lib/src/config/kmdb_config_store.dart` defining the
       `KmdbConfigStore` abstract interface (`read()`, `write(String json)`).
-- [ ] Create `packages/kmdb/lib/src/config/io_kmdb_config_store.dart` with
+- [x] Create `packages/kmdb/lib/src/config/io_kmdb_config_store.dart` with
       `IoKmdbConfigStore` — the `dart:io` implementation. Document that it is
       not supported on web. Lazy-create the `local/` subdirectory on first
       write.
-- [ ] Create `packages/kmdb/lib/src/config/kmdb_config.dart` with the moved
+- [x] Create `packages/kmdb/lib/src/config/kmdb_config.dart` with the moved
       types and JSON parsing logic. `KmdbConfig` depends only on
       `KmdbConfigStore`. Add a `KmdbConfig.forDatabase(String dbPath)` factory
       that wires up `IoKmdbConfigStore`.
-- [ ] Create `packages/kmdb/lib/kmdb_config.dart` as the public library entry
+- [x] Create `packages/kmdb/lib/kmdb_config.dart` as the public library entry
       point exporting `KmdbConfigStore`, `IoKmdbConfigStore`, `KmdbConfig`, and
       the associated data types.
-- [ ] Add doc comments to all public classes, methods, and properties.
+- [x] Add doc comments to all public classes, methods, and properties.
 
 ### Step 3 — Update `kmdb_cli`
 
-- [ ] Replace all internal imports of the moved types with
+- [x] Replace all internal imports of the moved types with
       `package:kmdb/kmdb_config.dart`.
-- [ ] Remove the now-redundant type definitions from `kmdb_cli`.
-- [ ] **Keep `adapterFor` in `kmdb_cli`** — it is a CLI-only convenience that
+- [x] Remove the now-redundant type definitions from `kmdb_cli`.
+- [x] **Keep `adapterFor` in `kmdb_cli`** — it is a CLI-only convenience that
       maps a `RemoteConfig` subtype to its concrete `SyncStorageAdapter`
       constructor (currently a one-liner: `LocalRemoteConfig` →
       `LocalDirectoryAdapter(path)`). Non-CLI consumers construct adapters
       directly and have no need for this function. Leave it in
       `remote_config.dart` where it lives today; do not move it to `kmdb`.
-- [ ] Confirm `CommandContext` continues to carry `KmdbConfig?` and that all
+- [x] Confirm `CommandContext` continues to carry `KmdbConfig?` and that all
       command tests pass.
 
 ### Step 4 — Tests
 
-- [ ] Move any existing `KmdbConfig` unit tests from `kmdb_cli/test/` to
+- [x] Move any existing `KmdbConfig` unit tests from `kmdb_cli/test/` to
       `kmdb/test/config/`.
-- [ ] Add a `FakeKmdbConfigStore` test double (in-memory `String?`) usable
+- [x] Add a `FakeKmdbConfigStore` test double (in-memory `String?`) usable
       across all `KmdbConfig` tests — no `dart:io` required in tests.
-- [ ] Add tests for the new public library in `kmdb/test/config/`:
+- [x] Add tests for the new public library in `kmdb/test/config/`:
   - Read/write round-trip for each config section (remotes, FTS indexes,
     secondary indexes) using `FakeKmdbConfigStore`.
   - Graceful handling of a `null` read (missing config) and corrupt JSON.
   - Unknown keys preserved on round-trip (forward compatibility).
-- [ ] Add integration tests for `IoKmdbConfigStore` using a temp directory:
+- [x] Add integration tests for `IoKmdbConfigStore` using a temp directory:
   - Lazy `local/` directory creation on first write.
   - Round-trip survives process restart (write then read from disk).
-- [ ] Run the full `kmdb_cli` test suite to confirm no regressions.
-- [ ] Maintain ≥ 90% test coverage in both packages.
+- [x] Run the full `kmdb_cli` test suite to confirm no regressions.
+- [x] Maintain ≥ 90% test coverage in both packages.
 
 ### Step 5 — Documentation
 
-- [ ] Update `packages/kmdb/README.md` to mention `kmdb_config.dart` and its
+- [x] Update `packages/kmdb/README.md` to mention `kmdb_config.dart` and its
       purpose.
-- [ ] Update any relevant spec files in `docs/spec/` if config management is
+- [x] Update any relevant spec files in `docs/spec/` if config management is
       described there.
-- [ ] Update `docs/primer.md` as required.
+- [x] Update `docs/primer.md` as required.
 
 ---
 
