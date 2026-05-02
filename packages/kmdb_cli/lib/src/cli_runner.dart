@@ -47,7 +47,7 @@ import 'commands/schema_command.dart';
 import 'commands/search_command.dart';
 import 'commands/verify_command.dart';
 import 'commands/vault/vault_command.dart';
-import 'config/kmdb_config.dart';
+import 'package:kmdb/kmdb_config.dart';
 import 'database_opener.dart';
 import 'output/output_mode.dart';
 import 'repl/repl_runner.dart';
@@ -279,7 +279,7 @@ abstract final class KmdbCli {
     // can still run non-index commands.
     KmdbConfig config;
     try {
-      config = await KmdbConfig.load(dbPath);
+      config = await KmdbConfig.forDatabase(dbPath);
     } on FormatException catch (e) {
       io.stderr.writeln('Warning: could not load config: ${e.message}');
       config = KmdbConfig.empty();
@@ -336,11 +336,7 @@ abstract final class KmdbCli {
         for (final e in _commands.entries)
           if (e.value.replVisible) e.key: e.value,
       };
-      final repl = ReplRunner(
-        ctx: ctx,
-        dbPath: dbPath,
-        commands: replCommands,
-      );
+      final repl = ReplRunner(ctx: ctx, dbPath: dbPath, commands: replCommands);
       return repl.run();
     }
 

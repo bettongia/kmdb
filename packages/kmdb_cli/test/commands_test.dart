@@ -20,7 +20,7 @@ import 'package:kmdb_cli/src/commands/collections_command.dart';
 import 'package:kmdb_cli/src/commands/command.dart';
 import 'package:kmdb_cli/src/commands/create_collection_command.dart';
 import 'package:kmdb_cli/src/commands/index_command.dart';
-import 'package:kmdb_cli/src/config/kmdb_config.dart';
+import 'package:kmdb/kmdb_config.dart';
 import 'package:kmdb_cli/src/commands/compact_command.dart';
 import 'package:kmdb_cli/src/commands/count_command.dart';
 import 'package:kmdb_cli/src/commands/delete_command.dart';
@@ -2188,7 +2188,7 @@ void main() {
             config: KvStoreConfig.forTesting(),
           );
           try {
-            final config = KmdbConfig.empty();
+            final config = await KmdbConfig.forDatabase(tmpDir.path);
             config.addIndex('contacts', 'city');
             expect(config.indexesForCollection('contacts'), hasLength(1));
 

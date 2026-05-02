@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import '../../commands/command.dart';
-import '../../config/kmdb_config.dart';
+import 'package:kmdb/kmdb_config.dart';
 import '../../database_opener.dart';
 import '../dot_command.dart';
 import '../prompt.dart';
@@ -100,7 +100,7 @@ final class CloseCommand extends DotCommand {
 Future<CommandContext?> openDatabase(String dbPath, StringSink errSink) async {
   KmdbConfig config;
   try {
-    config = await KmdbConfig.load(dbPath);
+    config = await KmdbConfig.forDatabase(dbPath);
   } on FormatException catch (e) {
     errSink.writeln('Warning: could not load config: ${e.message}');
     config = KmdbConfig.empty();

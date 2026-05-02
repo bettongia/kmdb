@@ -14,8 +14,7 @@
 
 import 'package:kmdb/kmdb.dart';
 
-import '../config/kmdb_config.dart';
-import '../config/remote_config.dart';
+import 'package:kmdb/kmdb_config.dart';
 import 'command.dart';
 
 /// Shared logic for `push`, `pull`, and `sync` commands.
@@ -60,7 +59,7 @@ abstract final class SyncHelpers {
     // Look up by name or default to 'origin'.
     final name = remoteName ?? 'origin';
     // FormatException propagates directly (corrupt config).
-    final config = await KmdbConfig.load(dbDir);
+    final config = await KmdbConfig.forDatabase(dbDir);
 
     final remote = config.remotes[name];
     if (remote == null) {
@@ -205,7 +204,7 @@ abstract final class SyncHelpers {
     // 3. Persist the updated config once after all mutations.
     if (configMutated) {
       try {
-        await ctx.config.save(dbDir);
+        await ctx.config.save();
       } catch (e) {
         ctx.err.writeln('Warning: purge: failed to save config: $e');
       }

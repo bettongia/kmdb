@@ -131,7 +131,6 @@ final class IndexCommand extends CliCommand {
       return false;
     }
 
-    final dbDir = (await ctx.store.storeInfo()).dbDir;
     try {
       ctx.config.addIndex(collection, path);
     } on ArgumentError catch (e) {
@@ -140,7 +139,7 @@ final class IndexCommand extends CliCommand {
     }
 
     try {
-      await ctx.config.save(dbDir);
+      await ctx.config.save();
     } catch (e) {
       ctx.writeError('index create: failed to save config: $e');
       return false;
@@ -209,8 +208,6 @@ final class IndexCommand extends CliCommand {
       return false;
     }
 
-    final dbDir = (await ctx.store.storeInfo()).dbDir;
-
     // Remove all stored index entries via IndexManager.
     try {
       await ctx.indexManager.removeIndex(collection, path);
@@ -229,7 +226,7 @@ final class IndexCommand extends CliCommand {
     }
 
     try {
-      await ctx.config.save(dbDir);
+      await ctx.config.save();
     } catch (e) {
       ctx.writeError('index delete: failed to save config: $e');
       return false;

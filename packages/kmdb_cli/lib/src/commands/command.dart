@@ -19,7 +19,7 @@ import 'package:args/args.dart';
 export 'package:args/args.dart' show ArgParser;
 import 'package:kmdb/kmdb.dart';
 
-import '../config/kmdb_config.dart';
+import 'package:kmdb/kmdb_config.dart';
 import '../output/document_formatter.dart';
 import '../output/output_mode.dart';
 

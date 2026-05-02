@@ -14,7 +14,9 @@
 
 import 'package:kmdb/kmdb.dart';
 
-import '../config/remote_config.dart';
+import 'package:kmdb/kmdb_config.dart' show RemoteConfig;
+
+import '../config/remote_config.dart' show adapterFor;
 import 'command.dart';
 import 'sync_helpers.dart';
 

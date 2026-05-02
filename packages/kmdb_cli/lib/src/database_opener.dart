@@ -16,7 +16,7 @@ import 'dart:io' as io;
 
 import 'package:kmdb/kmdb.dart';
 
-import 'config/kmdb_config.dart';
+import 'package:kmdb/kmdb_config.dart';
 
 /// Opens a [KmdbDatabase] from a filesystem path.
 ///

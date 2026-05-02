@@ -63,9 +63,7 @@ final class CommandsCommand extends DotCommand {
     for (final cmd in sorted) {
       ctx.out.writeln('  ${cmd.name.padRight(nameWidth)} ${cmd.description}');
     }
-    ctx.out.writeln(
-      '\nType .commands <name> for full syntax and options.',
-    );
+    ctx.out.writeln('\nType .commands <name> for full syntax and options.');
     return true;
   }
 
@@ -73,9 +71,7 @@ final class CommandsCommand extends DotCommand {
     final cmd = _commands[cmdName];
     if (cmd == null) {
       ctx.err.writeln("Error: unknown command '$cmdName'.");
-      ctx.err.writeln(
-        'Type .commands to see available commands.',
-      );
+      ctx.err.writeln('Type .commands to see available commands.');
       return false;
     }
 

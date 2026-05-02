@@ -16,7 +16,7 @@ import 'dart:convert';
 
 import 'package:kmdb/kmdb.dart';
 
-import '../config/kmdb_config.dart';
+import 'package:kmdb/kmdb_config.dart';
 import 'command.dart';
 
 /// Executes search queries and manages FTS index definitions.
@@ -519,8 +519,6 @@ final class SearchCommand extends CliCommand {
       return false;
     }
 
-    final dbDir = (await ctx.store.storeInfo()).dbDir;
-
     try {
       ctx.config.addFtsIndex(
         collection,
@@ -535,7 +533,7 @@ final class SearchCommand extends CliCommand {
     }
 
     try {
-      await ctx.config.save(dbDir);
+      await ctx.config.save();
     } catch (e) {
       ctx.writeError('search create: failed to save config: $e');
       return false;
@@ -571,8 +569,6 @@ final class SearchCommand extends CliCommand {
       return false;
     }
 
-    final dbDir = (await ctx.store.storeInfo()).dbDir;
-
     try {
       ctx.config.removeFtsIndex(collection, field);
     } on ArgumentError catch (e) {
@@ -581,7 +577,7 @@ final class SearchCommand extends CliCommand {
     }
 
     try {
-      await ctx.config.save(dbDir);
+      await ctx.config.save();
     } catch (e) {
       ctx.writeError('search delete: failed to save config: $e');
       return false;

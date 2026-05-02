@@ -17,7 +17,7 @@ import 'dart:io' as io;
 import 'package:kmdb/kmdb.dart';
 import 'package:kmdb_cli/src/commands/command.dart';
 import 'package:kmdb_cli/src/commands/remote_command.dart';
-import 'package:kmdb_cli/src/config/kmdb_config.dart';
+import 'package:kmdb/kmdb_config.dart';
 import 'package:kmdb_cli/src/config/remote_config.dart';
 import 'package:test/test.dart';
 
@@ -119,7 +119,7 @@ void main() {
     expect(out.toString(), contains("Remote 'origin' added"));
 
     // Verify persistence.
-    final config = await KmdbConfig.load(dbDir.path);
+    final config = await KmdbConfig.forDatabase(dbDir.path);
     expect(config.remotes['origin'], isA<LocalRemoteConfig>());
     expect((config.remotes['origin'] as LocalRemoteConfig).path, '/tmp/sync');
   });
@@ -156,7 +156,7 @@ void main() {
     );
     expect(ok, isTrue);
 
-    final config = await KmdbConfig.load(dbDir.path);
+    final config = await KmdbConfig.forDatabase(dbDir.path);
     expect((config.remotes['origin'] as LocalRemoteConfig).path, '/path/b');
   });
 
@@ -187,7 +187,7 @@ void main() {
     expect(ok, isTrue);
     expect(out.toString(), contains("Remote 'origin' removed"));
 
-    final config = await KmdbConfig.load(dbDir.path);
+    final config = await KmdbConfig.forDatabase(dbDir.path);
     expect(config.remotes, isEmpty);
   });
 
