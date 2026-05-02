@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import '../config/kmdb_config.dart';
-import '../config/remote_config.dart';
+import 'package:kmdb/kmdb_config.dart';
 import 'command.dart';
 
 /// Manages named sync remotes for a KMDB database.
@@ -115,7 +114,7 @@ final class RemoteCommand extends CliCommand {
     final dbDir = (await ctx.store.storeInfo()).dbDir;
     final KmdbConfig config;
     try {
-      config = await KmdbConfig.load(dbDir);
+      config = await KmdbConfig.forDatabase(dbDir);
     } on FormatException catch (e) {
       ctx.writeError(e.message);
       return false;
@@ -129,7 +128,7 @@ final class RemoteCommand extends CliCommand {
     }
 
     try {
-      await config.save(dbDir);
+      await config.save();
     } catch (e) {
       ctx.writeError('remote add: failed to save config: $e');
       return false;
@@ -151,7 +150,7 @@ final class RemoteCommand extends CliCommand {
 
     final KmdbConfig config;
     try {
-      config = await KmdbConfig.load(dbDir);
+      config = await KmdbConfig.forDatabase(dbDir);
     } on FormatException catch (e) {
       ctx.writeError(e.message);
       return false;
@@ -165,7 +164,7 @@ final class RemoteCommand extends CliCommand {
     }
 
     try {
-      await config.save(dbDir);
+      await config.save();
     } catch (e) {
       ctx.writeError('remote remove: failed to save config: $e');
       return false;
@@ -182,7 +181,7 @@ final class RemoteCommand extends CliCommand {
 
     final KmdbConfig config;
     try {
-      config = await KmdbConfig.load(dbDir);
+      config = await KmdbConfig.forDatabase(dbDir);
     } on FormatException catch (e) {
       ctx.writeError(e.message);
       return false;

@@ -190,9 +190,8 @@ final class CollectionsCommand extends CliCommand {
 
     // Persist the updated config (if any index definitions were removed).
     if (indexRecords.isNotEmpty) {
-      final dbDir = (await ctx.store.storeInfo()).dbDir;
       try {
-        await ctx.config.save(dbDir);
+        await ctx.config.save();
       } catch (e) {
         ctx.writeError('collections delete: failed to save config: $e');
         return false;

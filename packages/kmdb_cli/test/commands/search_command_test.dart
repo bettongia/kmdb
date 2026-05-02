@@ -17,7 +17,7 @@ import 'dart:convert';
 import 'package:kmdb/kmdb.dart';
 import 'package:kmdb_cli/src/commands/command.dart';
 import 'package:kmdb_cli/src/commands/search_command.dart';
-import 'package:kmdb_cli/src/config/kmdb_config.dart';
+import 'package:kmdb/kmdb_config.dart';
 import 'package:test/test.dart';
 
 // ── Test helpers ───────────────────────────────────────────────────────────────

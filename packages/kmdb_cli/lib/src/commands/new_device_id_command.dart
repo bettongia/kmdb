@@ -14,7 +14,7 @@
 
 import 'package:uuid/uuid.dart';
 
-import '../config/kmdb_config.dart';
+import 'package:kmdb/kmdb_config.dart';
 import 'command.dart';
 
 /// Assigns a fresh device identity to the database.
@@ -81,7 +81,7 @@ final class NewDeviceIdCommand extends CliCommand {
     final dbDir = info.dbDir;
     final KmdbConfig config;
     try {
-      config = await KmdbConfig.load(dbDir);
+      config = await KmdbConfig.forDatabase(dbDir);
     } on FormatException catch (e) {
       ctx.writeError('new-device-id: failed to load config: ${e.message}');
       return false;

@@ -116,7 +116,11 @@ void main() {
           'Count documents.',
           'count <collection>',
         ),
-        'get': const _SimpleCommand('get', 'Get a document.', 'get <col> <key>'),
+        'get': const _SimpleCommand(
+          'get',
+          'Get a document.',
+          'get <col> <key>',
+        ),
         'scan': const _FlaggedCommand(),
       };
 
@@ -162,9 +166,7 @@ void main() {
 
   group('CommandsCommand — detail', () {
     test('shows usage and description for known command', () async {
-      final commands = <String, CliCommand>{
-        'scan': const _FlaggedCommand(),
-      };
+      final commands = <String, CliCommand>{'scan': const _FlaggedCommand()};
       final ok = await CommandsCommand(commands).execute(state, ctx, ['scan']);
 
       expect(ok, isTrue);
@@ -174,9 +176,7 @@ void main() {
     });
 
     test('shows options block when command has flags', () async {
-      final commands = <String, CliCommand>{
-        'scan': const _FlaggedCommand(),
-      };
+      final commands = <String, CliCommand>{'scan': const _FlaggedCommand()};
       await CommandsCommand(commands).execute(state, ctx, ['scan']);
 
       final text = out.toString();
@@ -187,7 +187,11 @@ void main() {
 
     test('omits options block when command has no flags', () async {
       final commands = <String, CliCommand>{
-        'get': const _SimpleCommand('get', 'Get a document.', 'get <col> <key>'),
+        'get': const _SimpleCommand(
+          'get',
+          'Get a document.',
+          'get <col> <key>',
+        ),
       };
       await CommandsCommand(commands).execute(state, ctx, ['get']);
 
@@ -207,11 +211,9 @@ void main() {
     });
 
     test('returns false and writes to err for unknown command', () async {
-      final ok = await CommandsCommand(const {}).execute(
-        state,
-        ctx,
-        ['nonexistent'],
-      );
+      final ok = await CommandsCommand(
+        const {},
+      ).execute(state, ctx, ['nonexistent']);
 
       expect(ok, isFalse);
       expect(err.toString(), contains("unknown command 'nonexistent'"));

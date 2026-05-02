@@ -50,8 +50,9 @@ void main() {
     test('written file contains all expected keys', () async {
       await ReplConfig(filePath: configPath).load(SessionState());
 
-      final json = jsonDecode(await io.File(configPath).readAsString())
-          as Map<String, dynamic>;
+      final json =
+          jsonDecode(await io.File(configPath).readAsString())
+              as Map<String, dynamic>;
       for (final key in [
         'bail',
         'color',
@@ -195,9 +196,9 @@ void main() {
     });
 
     test('wrong type for bool field is ignored', () async {
-      await io.File(configPath).writeAsString(
-        jsonEncode({'bail': 'yes', 'timer': 1}),
-      );
+      await io.File(
+        configPath,
+      ).writeAsString(jsonEncode({'bail': 'yes', 'timer': 1}));
       final state = SessionState();
       await ReplConfig(filePath: configPath).load(state);
 

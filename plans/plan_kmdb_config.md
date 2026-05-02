@@ -1,6 +1,6 @@
 # Move KmdbConfig into the `kmdb` package
 
-**Status**: Investigated
+**Status**: Implementing
 
 **PR link**: {A link to the PR submitted for this plan}
 

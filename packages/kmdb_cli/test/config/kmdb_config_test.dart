@@ -15,7 +15,7 @@
 import 'dart:convert';
 import 'dart:io' as io;
 
-import 'package:kmdb_cli/src/config/kmdb_config.dart';
+import 'package:kmdb/kmdb_config.dart';
 import 'package:kmdb_cli/src/config/remote_config.dart';
 import 'package:test/test.dart';
 
@@ -39,7 +39,7 @@ void main() {
 
   group('KmdbConfig.load', () {
     test('returns empty config when file does not exist', () async {
-      final config = await KmdbConfig.load(tmpDir.path);
+      final config = await KmdbConfig.forDatabase(tmpDir.path);
       expect(config.remotes, isEmpty);
     });
 
@@ -56,7 +56,7 @@ void main() {
         }),
       );
 
-      final config = await KmdbConfig.load(tmpDir.path);
+      final config = await KmdbConfig.forDatabase(tmpDir.path);
       expect(config.remotes, hasLength(1));
       expect(config.remotes['origin'], isA<LocalRemoteConfig>());
       expect(
@@ -81,7 +81,7 @@ void main() {
         }),
       );
 
-      final config = await KmdbConfig.load(tmpDir.path);
+      final config = await KmdbConfig.forDatabase(tmpDir.path);
       expect(config.remotes, hasLength(2));
       expect(
         (config.remotes['dropbox'] as LocalRemoteConfig).path,
@@ -96,7 +96,7 @@ void main() {
       file.writeAsStringSync('{ not json }');
 
       expect(
-        () => KmdbConfig.load(tmpDir.path),
+        () => KmdbConfig.forDatabase(tmpDir.path),
         throwsA(
           isA<FormatException>().having(
             (e) => e.message,
@@ -114,7 +114,7 @@ void main() {
       file.writeAsStringSync('[1, 2, 3]');
 
       expect(
-        () => KmdbConfig.load(tmpDir.path),
+        () => KmdbConfig.forDatabase(tmpDir.path),
         throwsA(
           isA<FormatException>().having(
             (e) => e.message,
@@ -132,7 +132,7 @@ void main() {
       file.writeAsStringSync(jsonEncode({'remotes': 'oops'}));
 
       expect(
-        () => KmdbConfig.load(tmpDir.path),
+        () => KmdbConfig.forDatabase(tmpDir.path),
         throwsA(isA<FormatException>()),
       );
     });
@@ -150,7 +150,7 @@ void main() {
       );
 
       expect(
-        () => KmdbConfig.load(tmpDir.path),
+        () => KmdbConfig.forDatabase(tmpDir.path),
         throwsA(
           isA<FormatException>().having(
             (e) => e.message,
@@ -174,7 +174,7 @@ void main() {
       );
 
       expect(
-        () => KmdbConfig.load(tmpDir.path),
+        () => KmdbConfig.forDatabase(tmpDir.path),
         throwsA(isA<FormatException>()),
       );
     });
@@ -192,7 +192,7 @@ void main() {
         );
 
         expect(
-          () => KmdbConfig.load(tmpDir.path),
+          () => KmdbConfig.forDatabase(tmpDir.path),
           throwsA(isA<FormatException>()),
         );
       },
@@ -201,14 +201,14 @@ void main() {
 
   group('KmdbConfig.save', () {
     test('creates local/ directory lazily and writes config', () async {
-      final config = KmdbConfig.empty();
+      final config = await KmdbConfig.forDatabase(tmpDir.path);
       config.addRemote('origin', LocalRemoteConfig(path: '/tmp/sync'));
-      await config.save(tmpDir.path);
+      await config.save();
 
       final file = io.File('${tmpDir.path}/local/config.json');
       expect(await file.exists(), isTrue);
 
-      final reloaded = await KmdbConfig.load(tmpDir.path);
+      final reloaded = await KmdbConfig.forDatabase(tmpDir.path);
       expect(reloaded.remotes, hasLength(1));
       expect(
         (reloaded.remotes['origin'] as LocalRemoteConfig).path,
@@ -218,20 +218,20 @@ void main() {
 
     test('overwrites existing config atomically', () async {
       // Write initial state.
-      final config1 = KmdbConfig.empty();
+      final config1 = await KmdbConfig.forDatabase(tmpDir.path);
       config1.addRemote('origin', LocalRemoteConfig(path: '/path/a'));
-      await config1.save(tmpDir.path);
+      await config1.save();
 
       // Overwrite.
-      final config2 = await KmdbConfig.load(tmpDir.path);
+      final config2 = await KmdbConfig.forDatabase(tmpDir.path);
       config2.addRemote(
         'origin',
         LocalRemoteConfig(path: '/path/b'),
         force: true,
       );
-      await config2.save(tmpDir.path);
+      await config2.save();
 
-      final reloaded = await KmdbConfig.load(tmpDir.path);
+      final reloaded = await KmdbConfig.forDatabase(tmpDir.path);
       expect((reloaded.remotes['origin'] as LocalRemoteConfig).path, '/path/b');
     });
   });
@@ -345,19 +345,19 @@ void main() {
         }),
       );
 
-      final config = await KmdbConfig.load(tmpDir.path);
+      final config = await KmdbConfig.forDatabase(tmpDir.path);
       expect(config.indexes, isEmpty);
     });
   });
 
   group('KmdbConfig — indexes load', () {
     test('round-trips indexes through save/load', () async {
-      final config = KmdbConfig.empty();
+      final config = await KmdbConfig.forDatabase(tmpDir.path);
       config.addIndex('contacts', 'address.city');
       config.addIndex('contacts', 'tags[]');
-      await config.save(tmpDir.path);
+      await config.save();
 
-      final reloaded = await KmdbConfig.load(tmpDir.path);
+      final reloaded = await KmdbConfig.forDatabase(tmpDir.path);
       expect(reloaded.indexes, hasLength(2));
       expect(reloaded.indexes[0].collection, equals('contacts'));
       expect(reloaded.indexes[0].path, equals('address.city'));
@@ -372,7 +372,7 @@ void main() {
         '${tmpDir.path}/local/config.json',
       ).writeAsStringSync(jsonEncode({'indexes': 'oops'}));
       expect(
-        () => KmdbConfig.load(tmpDir.path),
+        () => KmdbConfig.forDatabase(tmpDir.path),
         throwsA(
           isA<FormatException>().having(
             (e) => e.message,
@@ -394,7 +394,7 @@ void main() {
           }),
         );
         expect(
-          () => KmdbConfig.load(tmpDir.path),
+          () => KmdbConfig.forDatabase(tmpDir.path),
           throwsA(isA<FormatException>()),
         );
       },
@@ -411,7 +411,7 @@ void main() {
         }),
       );
       expect(
-        () => KmdbConfig.load(tmpDir.path),
+        () => KmdbConfig.forDatabase(tmpDir.path),
         throwsA(
           isA<FormatException>().having(
             (e) => e.message,
@@ -433,7 +433,7 @@ void main() {
         }),
       );
       expect(
-        () => KmdbConfig.load(tmpDir.path),
+        () => KmdbConfig.forDatabase(tmpDir.path),
         throwsA(
           isA<FormatException>().having(
             (e) => e.message,
@@ -550,7 +550,7 @@ void main() {
         '${tmpDir.path}/local/config.json',
       ).writeAsStringSync(jsonEncode({'ftsIndexes': 'bad'}));
       expect(
-        () => KmdbConfig.load(tmpDir.path),
+        () => KmdbConfig.forDatabase(tmpDir.path),
         throwsA(
           isA<FormatException>().having(
             (e) => e.message,
@@ -572,7 +572,7 @@ void main() {
           }),
         );
         expect(
-          () => KmdbConfig.load(tmpDir.path),
+          () => KmdbConfig.forDatabase(tmpDir.path),
           throwsA(isA<FormatException>()),
         );
       },
@@ -591,7 +591,7 @@ void main() {
           }),
         );
         expect(
-          () => KmdbConfig.load(tmpDir.path),
+          () => KmdbConfig.forDatabase(tmpDir.path),
           throwsA(
             isA<FormatException>().having(
               (e) => e.message,
@@ -614,7 +614,7 @@ void main() {
         }),
       );
       expect(
-        () => KmdbConfig.load(tmpDir.path),
+        () => KmdbConfig.forDatabase(tmpDir.path),
         throwsA(
           isA<FormatException>().having(
             (e) => e.message,
@@ -638,7 +638,7 @@ void main() {
           '${tmpDir.path}/local/config.json',
         ).writeAsStringSync(jsonEncode({'embeddingModel': 'bad'}));
         expect(
-          () => KmdbConfig.load(tmpDir.path),
+          () => KmdbConfig.forDatabase(tmpDir.path),
           throwsA(
             isA<FormatException>().having(
               (e) => e.message,
@@ -661,7 +661,7 @@ void main() {
           }),
         );
         expect(
-          () => KmdbConfig.load(tmpDir.path),
+          () => KmdbConfig.forDatabase(tmpDir.path),
           throwsA(
             isA<FormatException>().having(
               (e) => e.message,
@@ -684,7 +684,7 @@ void main() {
           }),
         );
         expect(
-          () => KmdbConfig.load(tmpDir.path),
+          () => KmdbConfig.forDatabase(tmpDir.path),
           throwsA(
             isA<FormatException>().having(
               (e) => e.message,
@@ -697,11 +697,11 @@ void main() {
     );
 
     test('round-trips embeddingModel through save/load', () async {
-      final config = KmdbConfig.empty();
+      final config = await KmdbConfig.forDatabase(tmpDir.path);
       config.embeddingModel = (type: 'onnx', modelPath: '/models/bge.onnx');
-      await config.save(tmpDir.path);
+      await config.save();
 
-      final reloaded = await KmdbConfig.load(tmpDir.path);
+      final reloaded = await KmdbConfig.forDatabase(tmpDir.path);
       expect(reloaded.embeddingModel?.type, 'onnx');
       expect(reloaded.embeddingModel?.modelPath, '/models/bge.onnx');
     });
