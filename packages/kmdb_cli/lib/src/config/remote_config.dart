@@ -18,8 +18,7 @@ import 'package:kmdb/kmdb_config.dart';
 // Re-export the config types so existing CLI imports of this file continue to
 // resolve without change.  New code should import from
 // `package:kmdb/kmdb_config.dart` directly.
-export 'package:kmdb/kmdb_config.dart'
-    show LocalRemoteConfig, RemoteConfig;
+export 'package:kmdb/kmdb_config.dart' show LocalRemoteConfig, RemoteConfig;
 
 // ── Adapter factory ──────────────────────────────────────────────────────────
 
