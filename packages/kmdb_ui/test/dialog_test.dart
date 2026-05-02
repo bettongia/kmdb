@@ -210,11 +210,10 @@ void main() {
               builder: (ctx) => ElevatedButton(
                 onPressed: () => showDialog<void>(
                   context: ctx,
-                  builder: (_) =>
-                      ChangeNotifierProvider<AppProvider>.value(
-                        value: mockProvider,
-                        child: const NewCollectionDialog(),
-                      ),
+                  builder: (_) => ChangeNotifierProvider<AppProvider>.value(
+                    value: mockProvider,
+                    child: const NewCollectionDialog(),
+                  ),
                 ),
                 child: const Text('Open'),
               ),
@@ -248,11 +247,10 @@ void main() {
               builder: (ctx) => ElevatedButton(
                 onPressed: () => showDialog<void>(
                   context: ctx,
-                  builder: (_) =>
-                      ChangeNotifierProvider<AppProvider>.value(
-                        value: mockProvider,
-                        child: const NewCollectionDialog(),
-                      ),
+                  builder: (_) => ChangeNotifierProvider<AppProvider>.value(
+                    value: mockProvider,
+                    child: const NewCollectionDialog(),
+                  ),
                 ),
                 child: const Text('Open'),
               ),

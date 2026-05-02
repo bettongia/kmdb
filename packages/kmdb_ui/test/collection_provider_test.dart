@@ -68,7 +68,12 @@ void main() {
       await col.insert({'title': 'Beta'});
 
       final errors = ErrorProvider();
-      final provider = CollectionProvider(db, 'things', errors, autoRefresh: false);
+      final provider = CollectionProvider(
+        db,
+        'things',
+        errors,
+        autoRefresh: false,
+      );
       await Future.delayed(Duration.zero);
 
       expect(provider.totalCount, equals(2));
@@ -85,7 +90,12 @@ void main() {
       await col.insert({'name': 'Cherry'});
 
       final errors = ErrorProvider();
-      final provider = CollectionProvider(db, 'items', errors, autoRefresh: false);
+      final provider = CollectionProvider(
+        db,
+        'items',
+        errors,
+        autoRefresh: false,
+      );
       await Future.delayed(Duration.zero);
       expect(provider.documents.length, equals(3));
 
@@ -104,7 +114,12 @@ void main() {
       await col.insert({'name': 'Beta'});
 
       final errors = ErrorProvider();
-      final provider = CollectionProvider(db, 'items', errors, autoRefresh: false);
+      final provider = CollectionProvider(
+        db,
+        'items',
+        errors,
+        autoRefresh: false,
+      );
       await Future.delayed(Duration.zero);
 
       provider.setQuery('Alpha');
@@ -179,6 +194,103 @@ void main() {
       expect(errors.lastError, contains('Failed to add document'));
     });
 
+    // ── updateDocument ──────────────────────────────────────────────────────
+
+    test('updateDocument replaces document body', () async {
+      final db = await _openDb();
+      final col = db.rawCollection('items');
+      final inserted = await col.insert({'title': 'Original'});
+      final id = inserted['_id'] as String;
+
+      final errors = ErrorProvider();
+      final provider = CollectionProvider(db, 'items', errors, autoRefresh: false);
+      await Future.delayed(Duration.zero);
+
+      await provider.updateDocument(id, '{"title": "Updated"}');
+
+      expect(provider.documents.first['title'], equals('Updated'));
+      expect(provider.documents.first['_id'], equals(id));
+      expect(errors.lastError, isNull);
+    });
+
+    test('updateDocument preserves _id even when not in JSON', () async {
+      final db = await _openDb();
+      final col = db.rawCollection('items');
+      final inserted = await col.insert({'x': 1});
+      final id = inserted['_id'] as String;
+
+      final errors = ErrorProvider();
+      final provider = CollectionProvider(db, 'items', errors, autoRefresh: false);
+      await Future.delayed(Duration.zero);
+
+      // JSON without _id — provider must inject it.
+      await provider.updateDocument(id, '{"x": 2}');
+
+      expect(provider.documents.first['_id'], equals(id));
+      expect(provider.documents.first['x'], equals(2));
+    });
+
+    test('updateDocument reports error for invalid JSON', () async {
+      final (:provider, db: _, :errors) = await _makeProvider();
+      await provider.addDocument('{"x": 1}');
+      await Future.delayed(Duration.zero);
+      final id = provider.documents.first['_id'] as String;
+
+      await provider.updateDocument(id, 'not-json');
+
+      expect(errors.lastError, contains('Failed to update document'));
+    });
+
+    test('updateDocument reports error when JSON is not an object', () async {
+      final (:provider, db: _, :errors) = await _makeProvider();
+      await provider.addDocument('{"x": 1}');
+      await Future.delayed(Duration.zero);
+      final id = provider.documents.first['_id'] as String;
+
+      await provider.updateDocument(id, '[1, 2]');
+
+      expect(errors.lastError, contains('Failed to update document'));
+    });
+
+    // ── getDocumentById ──────────────────────────────────────────────────────
+
+    test('getDocumentById returns existing document', () async {
+      final db = await _openDb();
+      final col = db.rawCollection('items');
+      final inserted = await col.insert({'label': 'Hello'});
+      final id = inserted['_id'] as String;
+
+      final errors = ErrorProvider();
+      final provider = CollectionProvider(db, 'items', errors, autoRefresh: false);
+      await Future.delayed(Duration.zero);
+
+      final doc = await provider.getDocumentById(id);
+
+      expect(doc, isNotNull);
+      expect(doc!['label'], equals('Hello'));
+      expect(doc['_id'], equals(id));
+    });
+
+    test('getDocumentById returns null for missing id', () async {
+      final (:provider, db: _, :errors) = await _makeProvider();
+      // Valid UUIDv7 format that does not exist.
+      final doc = await provider.getDocumentById(
+        '000000000000700080000000000000000'.substring(0, 32),
+      );
+
+      expect(doc, isNull);
+      expect(errors.lastError, isNull);
+    });
+
+    test('getDocumentById reports error for malformed id', () async {
+      final (:provider, db: _, :errors) = await _makeProvider();
+
+      final doc = await provider.getDocumentById('not-a-uuid');
+
+      expect(doc, isNull);
+      expect(errors.lastError, contains('Failed to get document'));
+    });
+
     // ── deleteDocument ───────────────────────────────────────────────────────
 
     test('deleteDocument removes document and reloads', () async {
@@ -188,7 +300,12 @@ void main() {
       final id = inserted['_id'] as String;
 
       final errors = ErrorProvider();
-      final provider = CollectionProvider(db, 'items', errors, autoRefresh: false);
+      final provider = CollectionProvider(
+        db,
+        'items',
+        errors,
+        autoRefresh: false,
+      );
       await Future.delayed(Duration.zero);
       expect(provider.documents.length, equals(1));
 
@@ -204,7 +321,9 @@ void main() {
       // Deleting a valid-format key that does not exist should be a no-op —
       // KmdbCollection treats delete-of-missing as a no-op.
       // Key must be a valid UUIDv7: position 12 = '7' (version), position 16 = '8' (variant).
-      await provider.deleteDocument('000000000000700080000000000000000'.substring(0, 32));
+      await provider.deleteDocument(
+        '000000000000700080000000000000000'.substring(0, 32),
+      );
       expect(errors.lastError, isNull);
     });
 

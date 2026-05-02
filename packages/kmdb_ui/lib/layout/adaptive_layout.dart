@@ -91,10 +91,7 @@ class ColumnDivider extends StatelessWidget {
           width: 8,
           color: Colors.transparent,
           child: Center(
-            child: Container(
-              width: 1,
-              color: Theme.of(context).dividerColor,
-            ),
+            child: Container(width: 1, color: Theme.of(context).dividerColor),
           ),
         ),
       ),

@@ -81,9 +81,7 @@ class MyApp extends StatelessWidget {
                 brightness: Brightness.dark,
               ),
               useMaterial3: true,
-              textTheme: GoogleFonts.interTextTheme(
-                ThemeData.dark().textTheme,
-              ),
+              textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme),
             ),
             themeMode: appProvider.themeMode,
             home: const HomePage(),
@@ -201,18 +199,15 @@ class _HomePageState extends State<HomePage> {
               menus: [
                 PlatformMenuItem(
                   label: 'Light',
-                  onSelected: () =>
-                      appProvider.setThemeMode(ThemeMode.light),
+                  onSelected: () => appProvider.setThemeMode(ThemeMode.light),
                 ),
                 PlatformMenuItem(
                   label: 'Dark',
-                  onSelected: () =>
-                      appProvider.setThemeMode(ThemeMode.dark),
+                  onSelected: () => appProvider.setThemeMode(ThemeMode.dark),
                 ),
                 PlatformMenuItem(
                   label: 'System',
-                  onSelected: () =>
-                      appProvider.setThemeMode(ThemeMode.system),
+                  onSelected: () => appProvider.setThemeMode(ThemeMode.system),
                 ),
               ],
             ),
@@ -234,10 +229,7 @@ class _HomePageState extends State<HomePage> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            SizedBox(
-              width: _dbWidth,
-              child: const DatabaseHistoryColumn(),
-            ),
+            SizedBox(width: _dbWidth, child: const DatabaseHistoryColumn()),
             ColumnDivider(
               onDrag: (delta) {
                 setState(() {
@@ -253,8 +245,10 @@ class _HomePageState extends State<HomePage> {
               ColumnDivider(
                 onDrag: (delta) {
                   setState(() {
-                    _collectionWidth =
-                        (_collectionWidth + delta).clamp(150.0, 600.0);
+                    _collectionWidth = (_collectionWidth + delta).clamp(
+                      150.0,
+                      600.0,
+                    );
                   });
                 },
               ),
@@ -267,8 +261,7 @@ class _HomePageState extends State<HomePage> {
               ColumnDivider(
                 onDrag: (delta) {
                   setState(() {
-                    _contentWidth =
-                        (_contentWidth + delta).clamp(200.0, 800.0);
+                    _contentWidth = (_contentWidth + delta).clamp(200.0, 800.0);
                   });
                 },
               ),
@@ -281,8 +274,7 @@ class _HomePageState extends State<HomePage> {
               ColumnDivider(
                 onDrag: (delta) {
                   setState(() {
-                    _detailWidth =
-                        (_detailWidth + delta).clamp(200.0, 1000.0);
+                    _detailWidth = (_detailWidth + delta).clamp(200.0, 1000.0);
                   });
                 },
               ),

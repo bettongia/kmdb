@@ -20,6 +20,7 @@ import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:kmdb/kmdb.dart';
+import 'package:kmdb/kmdb_config.dart';
 
 /// Top-level application state provider.
 ///
@@ -247,6 +248,58 @@ class AppProvider with ChangeNotifier {
       debugPrint('Error creating collection: $e');
       return false;
     }
+  }
+
+  /// Deletes the collection named [name] and all its documents, secondary
+  /// indexes, and FTS/vector index data.
+  ///
+  /// After deletion the selected collection and document are cleared if they
+  /// pointed at [name]. The collection list is refreshed automatically.
+  Future<void> deleteCollection(String name) async {
+    final db = _database;
+    final dbPath = _selectedDatabasePath;
+    if (db == null || dbPath == null) return;
+
+    // 1. Delete all documents in batches of 200 via the query layer so that
+    //    write events fire and any active watch() streams are notified.
+    const batchSize = 200;
+    var batch = WriteBatch();
+    var count = 0;
+    final col = db.rawCollection(name);
+    await for (final doc in col.all().stream()) {
+      final id = doc['_id'] as String;
+      batch.delete(name, id);
+      count++;
+      if (count >= batchSize) {
+        await db.store.writeBatch(batch);
+        batch = WriteBatch();
+        count = 0;
+      }
+    }
+    if (!batch.isEmpty) await db.store.writeBatch(batch);
+
+    // 2. Remove secondary index definitions from config and drop index data.
+    try {
+      final config = await KmdbConfig.forDatabase(dbPath);
+      final records = config.indexesForCollection(name).toList();
+      for (final record in records) {
+        await db.indexManager.removeIndex(name, record.path);
+        config.removeIndex(name, record.path);
+      }
+      if (records.isNotEmpty) await config.save();
+    } catch (e) {
+      debugPrint('Error cleaning up indexes for collection $name: $e');
+    }
+
+    // 3. Unregister the namespace so it no longer appears in collections list.
+    await db.store.unregisterNamespace(name);
+
+    if (_selectedCollection == name) {
+      _selectedCollection = null;
+      _selectedDocument = null;
+    }
+    await _loadCollections();
+    notifyListeners();
   }
 
   /// Reloads the collection list and notifies listeners.

@@ -110,10 +110,7 @@ void main() {
 
       await provider.selectDatabase('/path/to/new-db');
 
-      expect(
-        provider.recentDatabasePaths,
-        contains(endsWith('new-db')),
-      );
+      expect(provider.recentDatabasePaths, contains(endsWith('new-db')));
     });
 
     test('selectDatabase is a no-op when same database already open', () async {
@@ -196,6 +193,51 @@ void main() {
 
       expect(provider.isBusy, isFalse);
       expect(provider.busyMessage, isEmpty);
+    });
+
+    // ── deleteCollection ─────────────────────────────────────────────────────
+
+    test('deleteCollection removes collection from list', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/db');
+      await provider.createCollection('to-delete');
+      expect(provider.collections, contains('to-delete'));
+
+      await provider.deleteCollection('to-delete');
+
+      expect(provider.collections, isNot(contains('to-delete')));
+    });
+
+    test('deleteCollection removes all documents in the collection', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/db');
+      await provider.createCollection('items');
+      final col = provider.database!.rawCollection('items');
+      await col.insert({'x': 1});
+      await col.insert({'x': 2});
+
+      await provider.deleteCollection('items');
+
+      expect(provider.collections, isNot(contains('items')));
+    });
+
+    test('deleteCollection clears selectedCollection when it is deleted', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/db');
+      await provider.createCollection('active');
+      provider.selectCollection('active');
+      expect(provider.selectedCollection, equals('active'));
+
+      await provider.deleteCollection('active');
+
+      expect(provider.selectedCollection, isNull);
+    });
+
+    test('deleteCollection is a no-op when no database is open', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      // Should not throw even without an open database.
+      await provider.deleteCollection('ghost');
+      expect(provider.collections, isEmpty);
     });
   });
 }

@@ -116,7 +116,9 @@ class CollectionProvider with ChangeNotifier {
   /// This convenience method preserves all other [ScanOptions] fields.
   void setQuery(String query) {
     final text = query.isEmpty ? null : query;
-    setScanOptions(_scanOptions.copyWith(filterText: text, clearFilterText: text == null));
+    setScanOptions(
+      _scanOptions.copyWith(filterText: text, clearFilterText: text == null),
+    );
   }
 
   /// Sets the display limit and reloads.
@@ -169,6 +171,38 @@ class CollectionProvider with ChangeNotifier {
       if (!_autoRefresh) await loadDocuments();
     } catch (e) {
       _errorProvider.show('Failed to add document: $e');
+    }
+  }
+
+  /// Updates the document with [id] using [jsonContent] as the new body.
+  ///
+  /// The `_id` field is always preserved from [id] regardless of what
+  /// [jsonContent] contains. Errors are forwarded to [ErrorProvider].
+  Future<void> updateDocument(String id, String jsonContent) async {
+    try {
+      final decoded = json.decode(jsonContent);
+      if (decoded is! Map<String, dynamic>) {
+        throw const FormatException('Input must be a JSON object.');
+      }
+      decoded['_id'] = id;
+      final col = _database.rawCollection(_collectionName);
+      await col.put(decoded);
+      if (!_autoRefresh) await loadDocuments();
+    } catch (e) {
+      _errorProvider.show('Failed to update document: $e');
+    }
+  }
+
+  /// Returns the document with [id], or null if it does not exist.
+  ///
+  /// Errors (including malformed keys) are forwarded to [ErrorProvider].
+  Future<Map<String, dynamic>?> getDocumentById(String id) async {
+    try {
+      final col = _database.rawCollection(_collectionName);
+      return await col.get(id);
+    } catch (e) {
+      _errorProvider.show('Failed to get document: $e');
+      return null;
     }
   }
 
@@ -262,15 +296,19 @@ class CollectionProvider with ChangeNotifier {
           ..clear()
           ..addAll(docs);
         // Refresh the total count whenever the list changes.
-        col.all().count().then((c) {
-          if (!_disposed) {
-            _totalCount = c;
-            notifyListeners();
-          }
-        }).catchError((Object e) {
-          // Non-fatal — list already updated.
-          debugPrint('count refresh error: $e');
-        });
+        col
+            .all()
+            .count()
+            .then((c) {
+              if (!_disposed) {
+                _totalCount = c;
+                notifyListeners();
+              }
+            })
+            .catchError((Object e) {
+              // Non-fatal — list already updated.
+              debugPrint('count refresh error: $e');
+            });
         notifyListeners();
       },
       onError: (Object e) {
