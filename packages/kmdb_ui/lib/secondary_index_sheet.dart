@@ -164,87 +164,98 @@ class _SecondaryIndexContent extends StatelessWidget {
     BuildContext context,
     AppProvider appProvider,
   ) async {
-    final controller = TextEditingController();
-    String? errorText;
-
     await showDialog<void>(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          title: Text('Create Index — $collectionName'),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            decoration: InputDecoration(
-              labelText: 'Field path',
-              hintText: 'e.g. email  or  address.city  or  tags[]',
-              border: const OutlineInputBorder(),
-              errorText: errorText,
-            ),
-            onSubmitted: (_) => _submit(
-              context,
-              setState,
-              controller,
-              appProvider,
-              (e) => errorText = e,
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => _submit(
-                context,
-                setState,
-                controller,
-                appProvider,
-                (e) => errorText = e,
-              ),
-              child: const Text('Create'),
-            ),
-          ],
-        ),
+      builder: (_) => _CreateIndexDialog(
+        collectionName: collectionName,
+        appProvider: appProvider,
       ),
     );
-    controller.dispose();
+  }
+}
+
+/// Dialog for creating a new secondary index on a field path.
+class _CreateIndexDialog extends StatefulWidget {
+  const _CreateIndexDialog({
+    required this.collectionName,
+    required this.appProvider,
+  });
+
+  final String collectionName;
+  final AppProvider appProvider;
+
+  @override
+  State<_CreateIndexDialog> createState() => _CreateIndexDialogState();
+}
+
+class _CreateIndexDialogState extends State<_CreateIndexDialog> {
+  final _controller = TextEditingController();
+  String? _errorText;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 
-  Future<void> _submit(
-    BuildContext context,
-    StateSetter setState,
-    TextEditingController controller,
-    AppProvider appProvider,
-    void Function(String?) setError,
-  ) async {
-    final path = controller.text.trim();
+  Future<void> _submit() async {
+    final path = _controller.text.trim();
     if (path.isEmpty) {
-      setState(() => setError('Field path cannot be empty.'));
+      setState(() => _errorText = 'Field path cannot be empty.');
       return;
     }
     if (path.startsWith('_')) {
-      setState(() => setError('Field paths must not start with "_".'));
+      setState(() => _errorText = 'Field paths must not start with "_".');
       return;
     }
 
-    // Dismiss the dialog before starting the async operation so that
-    // notifyListeners() calls inside runBusy don't rebuild a half-dismissed
-    // dialog and trigger widget-scope assertion errors.
-    if (context.mounted) Navigator.pop(context);
+    // Dismiss before the async operation so notifyListeners() inside runBusy
+    // doesn't rebuild a mid-dismiss dialog.
+    if (mounted) Navigator.pop(context);
 
     try {
-      await appProvider.runBusy(
+      await widget.appProvider.runBusy(
         'Creating index…',
-        () => appProvider.createSecondaryIndex(collectionName, path),
+        () => widget.appProvider.createSecondaryIndex(
+          widget.collectionName,
+          path,
+        ),
       );
     } catch (e) {
-      if (context.mounted) {
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to create index: $e')));
       }
     }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('Create Index — ${widget.collectionName}'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        decoration: InputDecoration(
+          labelText: 'Field path',
+          hintText: 'e.g. email  or  address.city  or  tags[]',
+          border: const OutlineInputBorder(),
+          errorText: _errorText,
+        ),
+        onSubmitted: (_) => _submit(),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          child: const Text('Create'),
+        ),
+      ],
+    );
   }
 }
 
