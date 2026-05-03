@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -342,6 +344,342 @@ void main() {
       // Should not throw.
       await provider.deleteFtsIndex('notes', 'title');
       expect(provider.hasFtsCapability, isFalse);
+    });
+
+    // ── Secondary index management ───────────────────────────────────────────
+
+    test('secondaryIndexPathsForCollection returns empty before index created',
+        () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/db');
+
+      expect(provider.secondaryIndexPathsForCollection('items'), isEmpty);
+    });
+
+    test('createSecondaryIndex adds path to indexed list', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/sidx-db');
+      await provider.createCollection('contacts');
+
+      await provider.createSecondaryIndex('contacts', 'email');
+
+      expect(
+        provider.secondaryIndexPathsForCollection('contacts'),
+        contains('email'),
+      );
+    });
+
+    test('deleteSecondaryIndex removes path from indexed list', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/sidx-del-db');
+      await provider.createCollection('users');
+      await provider.createSecondaryIndex('users', 'name');
+      expect(
+        provider.secondaryIndexPathsForCollection('users'),
+        contains('name'),
+      );
+
+      await provider.deleteSecondaryIndex('users', 'name');
+
+      expect(
+        provider.secondaryIndexPathsForCollection('users'),
+        isNot(contains('name')),
+      );
+    });
+
+    test('createSecondaryIndex preserves selectedCollection across reopen',
+        () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/sidx-reopen-db');
+      await provider.createCollection('orders');
+      provider.selectCollection('orders');
+
+      await provider.createSecondaryIndex('orders', 'status');
+
+      expect(provider.selectedCollection, equals('orders'));
+    });
+
+    test('createSecondaryIndex is a no-op when no database is open', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.createSecondaryIndex('items', 'field');
+      expect(provider.secondaryIndexPathsForCollection('items'), isEmpty);
+    });
+
+    // ── Schema management ────────────────────────────────────────────────────
+
+    test('registeredSchemas is empty before any schema is registered',
+        () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/db');
+
+      expect(provider.registeredSchemas, isEmpty);
+    });
+
+    test('registerSchema returns null on success', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/schema-db');
+
+      final err = await provider.registerSchema(
+        'things',
+        '{"properties": {"name": {"type": "string"}}}',
+      );
+
+      expect(err, isNull);
+    });
+
+    test('registerSchema adds collection to registeredSchemas', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/schema-list-db');
+
+      await provider.registerSchema(
+        'books',
+        '{"properties": {"title": {"type": "string"}}}',
+      );
+
+      expect(provider.registeredSchemas, contains('books'));
+    });
+
+    test('schemaForCollection returns the schema map', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/schema-get-db');
+
+      await provider.registerSchema(
+        'docs',
+        '{"properties": {"body": {"type": "string"}}}',
+      );
+
+      final schema = provider.schemaForCollection('docs');
+      expect(schema, isNotNull);
+      expect(schema!['properties'], isA<Map>());
+    });
+
+    test('registerSchema returns error for invalid JSON', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/db');
+
+      final err = await provider.registerSchema('items', 'not-json');
+
+      expect(err, isNotNull);
+      expect(err, contains('Failed to register schema'));
+    });
+
+    test('registerSchema returns error for non-object JSON', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/db');
+
+      final err = await provider.registerSchema('items', '[1,2,3]');
+
+      expect(err, isNotNull);
+      expect(err, contains('JSON object'));
+    });
+
+    test('deregisterSchema removes collection from registeredSchemas',
+        () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/schema-dereg-db');
+      await provider.registerSchema(
+        'logs',
+        '{"properties": {"msg": {"type": "string"}}}',
+      );
+      expect(provider.registeredSchemas, contains('logs'));
+
+      await provider.deregisterSchema('logs');
+
+      expect(provider.registeredSchemas, isNot(contains('logs')));
+    });
+
+    test('validateDocumentJson returns null for valid document', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/schema-val-db');
+      await provider.registerSchema(
+        'items',
+        '{"required": ["name"], "properties": {"name": {"type": "string"}}}',
+      );
+
+      final err = provider.validateDocumentJson('items', '{"name": "Alice"}');
+      expect(err, isNull);
+    });
+
+    test('validateDocumentJson returns error for schema violation', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/schema-val-err-db');
+      await provider.registerSchema(
+        'items',
+        '{"required": ["name"]}',
+      );
+
+      final err = provider.validateDocumentJson('items', '{"age": 30}');
+      expect(err, isNotNull);
+    });
+
+    test('validateDocumentJson returns null when no schema registered',
+        () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/db');
+
+      final err = provider.validateDocumentJson('items', '{"any": "thing"}');
+      expect(err, isNull);
+    });
+
+    // ── Export / Import / Dump / Restore ────────────────────────────────────
+
+    test('exportCollection writes NDJSON and returns document count', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/export-db');
+      await provider.createCollection('notes');
+      final col = provider.database!.rawCollection('notes');
+      await col.insert({'title': 'Alpha'});
+      await col.insert({'title': 'Beta'});
+
+      final tmpFile = '${Directory.systemTemp.path}/export_test.ndjson';
+      final count = await provider.exportCollection('notes', tmpFile);
+
+      expect(count, equals(2));
+      final lines = File(tmpFile).readAsLinesSync();
+      expect(lines.where((l) => l.trim().isNotEmpty).length, equals(2));
+      File(tmpFile).deleteSync();
+    });
+
+    test('importCollection inserts documents from NDJSON', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/import-db');
+      await provider.createCollection('tasks');
+
+      final tmpFile = '${Directory.systemTemp.path}/import_test.ndjson';
+      // Write two docs in NDJSON format with valid UUIDv7 _id values.
+      // Use the collection to insert first, export, then reimport into another.
+      final srcProvider = AppProvider(prefs, adapter: memoryAdapter);
+      await srcProvider.selectDatabase('/path/to/src-db');
+      await srcProvider.createCollection('tasks');
+      final srcCol = srcProvider.database!.rawCollection('tasks');
+      await srcCol.insert({'title': 'Task 1'});
+      await srcCol.insert({'title': 'Task 2'});
+      await srcProvider.exportCollection('tasks', tmpFile);
+
+      final (:imported, :skipped, :errors) =
+          await provider.importCollection('tasks', tmpFile);
+
+      expect(imported, equals(2));
+      expect(skipped, equals(0));
+      expect(errors, isEmpty);
+      File(tmpFile).deleteSync();
+    });
+
+    test('importCollection ignores conflicting docs by default', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/import-conflict-db');
+      await provider.createCollection('items');
+
+      // Export one doc, import it, then import again — second should be skipped.
+      final tmpFile = '${Directory.systemTemp.path}/import_conflict_test.ndjson';
+      final col = provider.database!.rawCollection('items');
+      await col.insert({'x': 1});
+      await provider.exportCollection('items', tmpFile);
+
+      final first = await provider.importCollection('items', tmpFile);
+      expect(first.skipped, equals(1));
+
+      File(tmpFile).deleteSync();
+    });
+
+    test('dumpDatabase writes headers and returns totals', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/dump-db');
+      await provider.createCollection('col1');
+      await provider.createCollection('col2');
+      await provider.database!.rawCollection('col1').insert({'v': 1});
+      await provider.database!.rawCollection('col2').insert({'v': 2});
+      await provider.database!.rawCollection('col2').insert({'v': 3});
+
+      final tmpFile = '${Directory.systemTemp.path}/dump_test.ndjson';
+      final (:total, :collections) =
+          await provider.dumpDatabase(tmpFile);
+
+      expect(total, equals(3));
+      expect(collections, equals(2));
+      final content = File(tmpFile).readAsStringSync();
+      expect(content, contains('# collection: col1'));
+      expect(content, contains('# collection: col2'));
+      File(tmpFile).deleteSync();
+    });
+
+    test('restoreDatabase restores documents from dump', () async {
+      final srcProvider = AppProvider(prefs, adapter: memoryAdapter);
+      await srcProvider.selectDatabase('/path/to/restore-src-db');
+      await srcProvider.createCollection('alpha');
+      await srcProvider.database!.rawCollection('alpha').insert({'k': 1});
+      final tmpFile = '${Directory.systemTemp.path}/restore_test.ndjson';
+      await srcProvider.dumpDatabase(tmpFile);
+
+      final dstProvider = AppProvider(prefs, adapter: memoryAdapter);
+      await dstProvider.selectDatabase('/path/to/restore-dst-db');
+      final (:restored, :collections) =
+          await dstProvider.restoreDatabase(tmpFile);
+
+      expect(restored, equals(1));
+      expect(collections, equals(1));
+      expect(dstProvider.collections, contains('alpha'));
+      File(tmpFile).deleteSync();
+    });
+
+    // ── Maintenance ──────────────────────────────────────────────────────────
+
+    test('storeInfo returns non-null when database is open', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/db');
+
+      final info = await provider.storeInfo();
+      expect(info, isNotNull);
+      expect(info!.deviceId, isNotEmpty);
+    });
+
+    test('storeStats returns non-null when database is open', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/db');
+
+      final stats = await provider.storeStats();
+      expect(stats, isNotNull);
+      expect(stats!.totalDbBytes, greaterThanOrEqualTo(0));
+    });
+
+    test('storeInfo returns null when no database is open', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      final info = await provider.storeInfo();
+      expect(info, isNull);
+    });
+
+    test('flushDatabase completes without error', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/db');
+      await provider.flushDatabase(); // should not throw
+    });
+
+    test('compactDatabase completes without error', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/db');
+      await provider.compactDatabase(); // should not throw
+    });
+
+    test('verifyDatabase returns checked count and zero errors', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/verify-db');
+      await provider.createCollection('data');
+      final col = provider.database!.rawCollection('data');
+      await col.insert({'x': 1});
+      await col.insert({'x': 2});
+
+      final (:checked, :errors) = await provider.verifyDatabase();
+
+      expect(checked, equals(2));
+      expect(errors, equals(0));
+    });
+
+    test('verifyDatabase returns zero checked when no database is open',
+        () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      final result = await provider.verifyDatabase();
+      expect(result.checked, equals(0));
+      expect(result.errors, equals(0));
     });
   });
 }

@@ -26,6 +26,10 @@ import 'new_collection_dialog.dart';
 import 'add_document_dialog.dart';
 import 'edit_document_dialog.dart';
 import 'search_sheet.dart';
+import 'schema_sheet.dart';
+import 'secondary_index_sheet.dart';
+import 'import_export_dialogs.dart';
+import 'database_info_sheet.dart';
 
 /// Column showing the list of recently opened databases.
 class DatabaseHistoryColumn extends StatelessWidget {
@@ -45,13 +49,24 @@ class DatabaseHistoryColumn extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Text(
-              'DATABASES',
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                color: Theme.of(context).colorScheme.primary,
-                fontWeight: FontWeight.bold,
-              ),
+            padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'DATABASES',
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: Theme.of(context).colorScheme.primary,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                if (provider.database != null)
+                  IconButton(
+                    icon: const Icon(Icons.info_outline, size: 20),
+                    tooltip: 'Database Info & Maintenance',
+                    onPressed: () => showDatabaseInfoSheet(context),
+                  ),
+              ],
             ),
           ),
           Expanded(
@@ -504,6 +519,58 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
                     ),
                   );
                 },
+              ),
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, size: 18),
+                tooltip: 'More actions',
+                onSelected: (value) {
+                  final col = collectionProvider.collectionName;
+                  switch (value) {
+                    case 'schema':
+                      showSchemaSheet(context, col);
+                    case 'indexes':
+                      showSecondaryIndexSheet(context, col);
+                    case 'export':
+                      showExportCollectionDialog(context, col, appProvider);
+                    case 'import':
+                      showImportCollectionDialog(context, col, appProvider);
+                  }
+                },
+                itemBuilder: (_) => const [
+                  PopupMenuItem(
+                    value: 'schema',
+                    child: ListTile(
+                      leading: Icon(Icons.rule_outlined),
+                      title: Text('Schema'),
+                      dense: true,
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'indexes',
+                    child: ListTile(
+                      leading: Icon(Icons.account_tree_outlined),
+                      title: Text('Secondary Indexes'),
+                      dense: true,
+                    ),
+                  ),
+                  PopupMenuDivider(),
+                  PopupMenuItem(
+                    value: 'export',
+                    child: ListTile(
+                      leading: Icon(Icons.upload_outlined),
+                      title: Text('Export Collection…'),
+                      dense: true,
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'import',
+                    child: ListTile(
+                      leading: Icon(Icons.download_outlined),
+                      title: Text('Import Collection…'),
+                      dense: true,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),

@@ -14,6 +14,7 @@
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -38,6 +39,11 @@ import 'package:kmdb/kmdb_config.dart';
 /// - Managing FTS index definitions: loading from [KmdbConfig], passing to
 ///   [KmdbDatabase.open], and creating/deleting via [createFtsIndex] /
 ///   [deleteFtsIndex] (which reopen the database to apply the change).
+/// - Managing secondary index definitions: same pattern as FTS.
+/// - Schema management: register/deregister JSON schemas and validate documents.
+/// - Export/import single collections and dump/restore the whole database as
+///   NDJSON files (matching the CLI export/import/dump/restore format).
+/// - Database maintenance: flush, compact, verify, and device-ID rotation.
 /// - Managing the app theme preference.
 class AppProvider with ChangeNotifier {
   static const _channel = MethodChannel('com.kmdb.browser/bookmarks');
@@ -55,6 +61,13 @@ class AppProvider with ChangeNotifier {
   /// with [createFtsIndex] / [deleteFtsIndex]. Always passed to
   /// [KmdbDatabase.open] so the FTS manager is wired at open time.
   List<FtsIndexDefinition> _ftsIndexDefs = [];
+
+  /// Secondary index definitions active for the open database.
+  ///
+  /// Loaded from [KmdbConfig] when the database is opened and kept in sync
+  /// with [createSecondaryIndex] / [deleteSecondaryIndex]. Always passed to
+  /// [KmdbDatabase.open] so the index manager is wired at open time.
+  List<IndexDefinition> _secondaryIndexDefs = [];
 
   Map<String, int> _collections = {};
   String? _selectedCollection;
@@ -141,6 +154,25 @@ class AppProvider with ChangeNotifier {
           .map((d) => d.field)
           .toList();
 
+  // ── Secondary index capabilities ──────────────────────────────────────────────
+
+  /// The field paths with a secondary index configured for [collection].
+  List<String> secondaryIndexPathsForCollection(String collection) =>
+      _secondaryIndexDefs
+          .where((d) => d.namespace == collection)
+          .map((d) => d.path)
+          .toList();
+
+  // ── Schema capabilities ────────────────────────────────────────────────────────
+
+  /// The names of all collections that have a registered JSON schema.
+  List<String> get registeredSchemas =>
+      _database?.schemaManager.registeredCollections ?? [];
+
+  /// The raw JSON schema map for [collection], or null if none is registered.
+  Map<String, dynamic>? schemaForCollection(String collection) =>
+      _database?.schemaManager.getSchema(collection);
+
   // ── Theme ────────────────────────────────────────────────────────────────────
 
   /// Updates the theme mode and persists the choice to shared preferences.
@@ -201,15 +233,17 @@ class AppProvider with ChangeNotifier {
       _selectedDocument = null;
       notifyListeners();
 
-      // Load FTS index definitions from config so the FtsManager is wired at
-      // open time. Errors are non-fatal (no FTS indexes means no FTS search).
+      // Load FTS and secondary index definitions from config so the respective
+      // managers are wired at open time. Errors are non-fatal.
       _ftsIndexDefs = await _loadFtsDefsFromConfig(absolutePath);
+      _secondaryIndexDefs = await _loadSecondaryIndexDefsFromConfig(absolutePath);
 
       // Open via KmdbDatabase so downstream consumers can use the query layer.
       _database = await KmdbDatabase.open(
         path: _selectedDatabasePath!,
         adapter: _adapter,
         ftsIndexes: _ftsIndexDefs,
+        indexes: _secondaryIndexDefs,
       );
 
       // Request/refresh the macOS security-scoped bookmark for future launches.
@@ -407,6 +441,368 @@ class AppProvider with ChangeNotifier {
     await _reopenDatabase();
   }
 
+  // ── Secondary index management ───────────────────────────────────────────────
+
+  /// Creates a secondary index on [path] in [collection].
+  ///
+  /// Updates the in-memory [_secondaryIndexDefs] list, persists the definition
+  /// to [KmdbConfig] (best-effort), then reopens the database so the new
+  /// [IndexDefinition] is registered with [IndexManager].
+  Future<void> createSecondaryIndex(String collection, String path) async {
+    if (_selectedDatabasePath == null) return;
+
+    _secondaryIndexDefs = [
+      ..._secondaryIndexDefs.where(
+        (d) => !(d.namespace == collection && d.path == path),
+      ),
+      IndexDefinition(collection, path),
+    ];
+
+    try {
+      final config = await KmdbConfig.forDatabase(_selectedDatabasePath!);
+      config.addIndex(collection, path);
+      await config.save();
+    } catch (e) {
+      debugPrint('Could not persist secondary index to config: $e');
+    }
+
+    await _reopenDatabase();
+  }
+
+  /// Removes the secondary index on [path] in [collection].
+  ///
+  /// Drops stored index data while the database is still open, then updates
+  /// the in-memory list, persists the change, and reopens.
+  Future<void> deleteSecondaryIndex(String collection, String path) async {
+    if (_selectedDatabasePath == null) return;
+
+    // Remove stored index data while the DB is still open.
+    try {
+      await _database?.indexManager.removeIndex(collection, path);
+    } catch (e) {
+      debugPrint('Could not remove stored index data: $e');
+    }
+
+    _secondaryIndexDefs = _secondaryIndexDefs
+        .where((d) => !(d.namespace == collection && d.path == path))
+        .toList();
+
+    try {
+      final config = await KmdbConfig.forDatabase(_selectedDatabasePath!);
+      config.removeIndex(collection, path);
+      await config.save();
+    } catch (e) {
+      debugPrint('Could not remove secondary index from config: $e');
+    }
+
+    await _reopenDatabase();
+  }
+
+  /// Returns the current [IndexState] for the index at [path] in [collection],
+  /// or null if no database is open or the state cannot be determined.
+  Future<IndexState?> getIndexState(String collection, String path) async {
+    try {
+      return await _database?.indexManager.getState(collection, path);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // ── Schema management ────────────────────────────────────────────────────────
+
+  /// Registers a JSON schema for [collection] from a JSON string.
+  ///
+  /// Returns null on success, or a human-readable error string on failure.
+  Future<String?> registerSchema(String collection, String jsonString) async {
+    final db = _database;
+    if (db == null) return 'No database open.';
+
+    try {
+      final raw = jsonDecode(jsonString);
+      if (raw is! Map<String, dynamic>) return 'Schema must be a JSON object.';
+      await db.registerSchema(
+        CollectionSchema(collection: collection, jsonSchema: raw),
+      );
+      notifyListeners();
+      return null;
+    } catch (e) {
+      return 'Failed to register schema: $e';
+    }
+  }
+
+  /// Removes the registered schema for [collection].
+  Future<void> deregisterSchema(String collection) async {
+    final db = _database;
+    if (db == null) return;
+
+    await db.deregisterSchema(collection);
+    notifyListeners();
+  }
+
+  /// Validates [jsonString] against the registered schema for [collection].
+  ///
+  /// Returns null when the document is valid (or no schema is registered),
+  /// or a human-readable error string describing the violation.
+  String? validateDocumentJson(String collection, String jsonString) {
+    final db = _database;
+    if (db == null) return 'No database open.';
+
+    try {
+      final raw = jsonDecode(jsonString);
+      if (raw is! Map<String, dynamic>) return 'Document must be a JSON object.';
+      db.schemaManager.validate(collection, raw);
+      return null;
+    } catch (e) {
+      return e.toString();
+    }
+  }
+
+  // ── Export / Import / Dump / Restore ─────────────────────────────────────────
+
+  /// Exports all documents in [collection] as NDJSON to [filePath].
+  ///
+  /// Returns the number of documents written. The format is one JSON object
+  /// per line, matching the CLI `export` command output.
+  Future<int> exportCollection(String collection, String filePath) async {
+    final db = _database;
+    if (db == null) return 0;
+
+    final sink = File(filePath).openWrite();
+    const enc = JsonEncoder();
+    int count = 0;
+
+    try {
+      await for (final doc in db.rawCollection(collection).all().stream()) {
+        sink.writeln(enc.convert(doc));
+        count++;
+      }
+    } finally {
+      await sink.close();
+    }
+
+    return count;
+  }
+
+  /// Imports documents from an NDJSON file at [filePath] into [collection].
+  ///
+  /// [onConflict] controls behaviour when a document with the same `_id`
+  /// already exists: `'ignore'` skips it, `'replace'` overwrites it,
+  /// `'error'` records an error and stops. Returns counts and any error
+  /// messages. The collection list is refreshed after a successful import.
+  Future<({int imported, int skipped, List<String> errors})> importCollection(
+    String collection,
+    String filePath, {
+    String onConflict = 'ignore',
+  }) async {
+    final db = _database;
+    if (db == null) return (imported: 0, skipped: 0, errors: <String>[]);
+
+    final col = db.rawCollection(collection);
+    final lines = await File(filePath).readAsLines();
+    int imported = 0;
+    int skipped = 0;
+    final errors = <String>[];
+
+    for (var i = 0; i < lines.length; i++) {
+      final line = lines[i].trim();
+      if (line.isEmpty) continue;
+
+      try {
+        final raw = jsonDecode(line);
+        if (raw is! Map<String, dynamic>) {
+          errors.add('Line ${i + 1}: not a JSON object');
+          continue;
+        }
+
+        if (raw['_id'] == null) {
+          errors.add('Line ${i + 1}: missing _id field');
+          continue;
+        }
+
+        final id = '${raw['_id']}';
+
+        if (onConflict != 'replace') {
+          final existing = await db.store.get(collection, id);
+          if (existing != null) {
+            if (onConflict == 'error') {
+              errors.add('Line ${i + 1}: document $id already exists');
+            } else {
+              skipped++;
+            }
+            continue;
+          }
+        }
+
+        await col.put(raw);
+        imported++;
+      } catch (e) {
+        errors.add('Line ${i + 1}: $e');
+      }
+    }
+
+    await _loadCollections();
+    notifyListeners();
+    return (imported: imported, skipped: skipped, errors: errors);
+  }
+
+  /// Dumps all collections to [filePath] as multi-collection NDJSON.
+  ///
+  /// Each collection is preceded by a `# collection: <name>` header line,
+  /// matching the CLI `dump` format. Returns a record with the total document
+  /// count and the number of collections written.
+  Future<({int total, int collections})> dumpDatabase(String filePath) async {
+    final db = _database;
+    if (db == null) return (total: 0, collections: 0);
+
+    final sink = File(filePath).openWrite();
+    const enc = JsonEncoder();
+    int total = 0;
+    int collectionCount = 0;
+
+    try {
+      final namespaces = await db.store.listNamespaces();
+      for (final name in namespaces) {
+        if (name.startsWith(r'$')) continue;
+        sink.writeln('# collection: $name');
+        await for (final doc in db.rawCollection(name).all().stream()) {
+          sink.writeln(enc.convert(doc));
+          total++;
+        }
+        collectionCount++;
+      }
+    } finally {
+      await sink.close();
+    }
+
+    return (total: total, collections: collectionCount);
+  }
+
+  /// Restores collections from a dump file at [filePath].
+  ///
+  /// Parses the multi-collection NDJSON format written by [dumpDatabase].
+  /// Missing collections are created automatically. Returns a record with the
+  /// total documents restored and the number of distinct collections seen.
+  Future<({int restored, int collections})> restoreDatabase(
+    String filePath,
+  ) async {
+    final db = _database;
+    if (db == null) return (restored: 0, collections: 0);
+
+    final lines = await File(filePath).readAsLines();
+    String? currentCollection;
+    int restored = 0;
+    final collectionsSeen = <String>{};
+
+    for (var i = 0; i < lines.length; i++) {
+      final line = lines[i].trim();
+      if (line.isEmpty) continue;
+
+      if (line.startsWith('# collection:')) {
+        currentCollection = line.substring('# collection:'.length).trim();
+        collectionsSeen.add(currentCollection);
+        await db.store.createNamespace(currentCollection);
+        continue;
+      }
+
+      if (currentCollection == null) continue;
+
+      try {
+        final raw = jsonDecode(line);
+        if (raw is! Map<String, dynamic>) continue;
+        if (raw['_id'] == null) continue;
+
+        await db.rawCollection(currentCollection).put(raw);
+        restored++;
+      } catch (e) {
+        debugPrint('Restore line ${i + 1}: $e');
+      }
+    }
+
+    await _loadCollections();
+    notifyListeners();
+    return (restored: restored, collections: collectionsSeen.length);
+  }
+
+  // ── Maintenance ──────────────────────────────────────────────────────────────
+
+  /// Returns storage statistics for the open database, or null if not open.
+  Future<StoreStats?> storeStats() async {
+    try {
+      return await _database?.store.stats();
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// Returns identifying information about the open database, or null.
+  Future<StoreInfo?> storeInfo() async {
+    try {
+      return await _database?.store.storeInfo();
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// Flushes the active memtable to an SSTable on disk.
+  Future<void> flushDatabase() async => _database?.store.flush();
+
+  /// Runs full compaction until no further compaction is needed.
+  Future<void> compactDatabase() async => _database?.store.compactAll();
+
+  /// Verifies all documents in every collection by scanning and decoding them.
+  ///
+  /// Returns a count of documents checked and errors encountered. Errors do
+  /// not throw — they are counted so the caller can show a summary.
+  Future<({int checked, int errors})> verifyDatabase() async {
+    final db = _database;
+    if (db == null) return (checked: 0, errors: 0);
+
+    int checked = 0;
+    int errors = 0;
+
+    try {
+      final namespaces = await db.store.listNamespaces();
+      for (final name in namespaces) {
+        if (name.startsWith(r'$')) continue;
+        try {
+          await for (final _ in db.rawCollection(name).all().stream()) {
+            checked++;
+          }
+        } catch (e) {
+          errors++;
+          debugPrint('Verify error in $name: $e');
+        }
+      }
+    } catch (e) {
+      debugPrint('Verify failed: $e');
+    }
+
+    return (checked: checked, errors: errors);
+  }
+
+  /// Rotates the device identity to a fresh random 8-character hex ID.
+  ///
+  /// Reassigns the device ID in the engine metadata, then reopens the database
+  /// to refresh all in-memory state. Returns null on success, or an error
+  /// string on failure.
+  Future<String?> rotateDeviceId() async {
+    final db = _database;
+    if (db == null) return 'No database open.';
+
+    try {
+      final rng = Random.secure();
+      final newId = List.generate(4, (_) => rng.nextInt(256))
+          .map((b) => b.toRadixString(16).padLeft(2, '0'))
+          .join();
+
+      await db.store.reassignDeviceId(newId);
+      await _reopenDatabase();
+      return null;
+    } catch (e) {
+      return 'Failed to rotate device ID: $e';
+    }
+  }
+
   /// Closes and reopens the database with the current [_ftsIndexDefs].
   ///
   /// Used after FTS index changes to register the new definitions with
@@ -430,6 +826,7 @@ class AppProvider with ChangeNotifier {
         path: path,
         adapter: _adapter,
         ftsIndexes: _ftsIndexDefs,
+        indexes: _secondaryIndexDefs,
       );
       await _loadCollections();
       _selectedCollection = savedCollection;
@@ -462,6 +859,23 @@ class AppProvider with ChangeNotifier {
           .toList();
     } catch (e) {
       debugPrint('Could not load FTS indexes from config: $e');
+      return const [];
+    }
+  }
+
+  /// Loads [IndexDefinition]s from [KmdbConfig] for the database at [dbPath].
+  ///
+  /// Returns an empty list on any error (e.g. config file not yet created).
+  Future<List<IndexDefinition>> _loadSecondaryIndexDefsFromConfig(
+    String dbPath,
+  ) async {
+    try {
+      final config = await KmdbConfig.forDatabase(dbPath);
+      return config.indexes
+          .map((r) => IndexDefinition(r.collection, r.path))
+          .toList();
+    } catch (e) {
+      debugPrint('Could not load secondary indexes from config: $e');
       return const [];
     }
   }

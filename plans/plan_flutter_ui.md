@@ -247,20 +247,20 @@ which depends on this plan as a prerequisite.
 
 ### Phase 3 — Schema, secondary indexes, and import/export
 
-- [ ] **Schema management panel**:
+- [x] **Schema management panel**:
   - List collections with registered schemas.
   - Show schema JSON (read-only collapsible view).
   - Set schema: JSON editor → `KmdbDatabase.registerSchema()`.
   - Remove: confirmation → `KmdbDatabase.deregisterSchema()`.
   - Validate: paste a JSON document; show field-level validation results.
 
-- [ ] **Secondary index management panel**:
+- [x] **Secondary index management panel**:
   - List indexes from `KmdbConfig` for the current collection.
   - Create: field path input; validate no `_` prefix.
   - Delete: confirmation; call index removal via the `kmdb` public API.
   - Show status (status, `builtThrough` generation, `builtAt` timestamp).
 
-- [ ] **Export / Import / Dump / Restore**:
+- [x] **Export / Import / Dump / Restore**:
   - Export: save file picker → NDJSON line-by-line.
   - Import: file picker → NDJSON → `store.put` per doc with conflict selector
     (ignore / replace / error). The conflict dialog must prominently warn that
@@ -279,7 +279,7 @@ which depends on this plan as a prerequisite.
     package handles macOS sandbox entitlements correctly for save operations,
     not just open/directory picks.
 
-- [ ] **Database info / stats / maintenance panel**: Toolbar or menu entry giving
+- [x] **Database info / stats / maintenance panel**: Toolbar or menu entry giving
       access to:
   - Read-only info: `store.storeInfo()` (dbDir, deviceId, HLC) and
     `store.stats()` (SSTable counts, total bytes).
