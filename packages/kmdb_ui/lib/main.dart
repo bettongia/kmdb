@@ -105,7 +105,7 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  double _dbWidth = 200;
+  double _dbWidth = 260;
   double _collectionWidth = 250;
   double _contentWidth = 400;
   double _detailWidth = 500;

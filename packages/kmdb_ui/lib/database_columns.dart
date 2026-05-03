@@ -76,61 +76,183 @@ class DatabaseHistoryColumn extends StatelessWidget {
                     horizontal: 8.0,
                     vertical: 2.0,
                   ),
-                  child: ListTile(
-                      dense: true,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      selected: isSelected,
-                      selectedTileColor: Theme.of(
-                        context,
-                      ).colorScheme.primaryContainer.withValues(alpha: 0.4),
-                      title: Text(
-                        p.basename(path),
-                        style: TextStyle(
-                          fontWeight: isSelected
-                              ? FontWeight.bold
-                              : FontWeight.normal,
-                          color: isSelected
-                              ? Theme.of(context).colorScheme.primary
-                              : null,
-                        ),
-                      ),
-                      leading: isSelected
-                          ? Icon(
-                              Icons.storage,
-                              size: 18,
-                              color: Theme.of(context).colorScheme.primary,
-                            )
-                          : const Icon(Icons.storage_outlined, size: 18),
-                      onTap: () => provider.selectDatabase(path),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (isSelected) ...[
-                            IconButton(
-                              icon: const Icon(Icons.sync_outlined, size: 16),
-                              tooltip: 'Sync & Remotes',
-                              onPressed: () => showSyncSheet(context),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.info_outline, size: 16),
-                              tooltip: 'Database Info & Maintenance',
-                              onPressed: () => showDatabaseInfoSheet(context),
-                            ),
-                          ],
-                          IconButton(
-                            icon: const Icon(Icons.close, size: 14),
-                            onPressed: () => provider.removeDatabase(path),
-                          ),
-                        ],
-                      ),
-                    ),
+                  child: _DatabaseTile(
+                    path: path,
+                    isSelected: isSelected,
+                    provider: provider,
+                  ),
                 );
               },
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Custom tile for a database list entry.
+///
+/// Uses a plain [Row] instead of [ListTile] so the close button can be
+/// top-aligned with the database name rather than centred across the full
+/// tile height (which includes the subtitle actions row).
+class _DatabaseTile extends StatelessWidget {
+  const _DatabaseTile({
+    required this.path,
+    required this.isSelected,
+    required this.provider,
+  });
+
+  final String path;
+  final bool isSelected;
+  final AppProvider provider;
+
+  @override
+  Widget build(BuildContext context) {
+    final primaryColor = Theme.of(context).colorScheme.primary;
+    final selectedBg = Theme.of(
+      context,
+    ).colorScheme.primaryContainer.withValues(alpha: 0.4);
+
+    return Material(
+      color: isSelected ? selectedBg : Colors.transparent,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: () => provider.selectDatabase(path),
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Leading icon — top-aligned with the name.
+              Padding(
+                padding: const EdgeInsets.only(top: 1, right: 16),
+                child: isSelected
+                    ? Icon(Icons.storage, size: 18, color: primaryColor)
+                    : const Icon(Icons.storage_outlined, size: 18),
+              ),
+              // Name + actions.
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      p.basename(path),
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: isSelected
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                        color: isSelected ? primaryColor : null,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    _DatabaseActions(
+                      path: path,
+                      provider: provider,
+                      isSelected: isSelected,
+                    ),
+                  ],
+                ),
+              ),
+              // Close button — top-aligned with the name.
+              IconButton(
+                icon: const Icon(Icons.close, size: 14),
+                constraints: const BoxConstraints(),
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                onPressed: () => provider.removeDatabase(path),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Compact row of action buttons shown beneath each database name.
+///
+/// Selecting a non-current database is handled automatically: tapping an
+/// action first opens the database if it isn't already selected, then shows
+/// the relevant sheet.
+class _DatabaseActions extends StatelessWidget {
+  const _DatabaseActions({
+    required this.path,
+    required this.provider,
+    required this.isSelected,
+  });
+
+  final String path;
+  final AppProvider provider;
+  final bool isSelected;
+
+  Future<void> _open(BuildContext context) async {
+    if (!isSelected) await provider.selectDatabase(path);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.onSurfaceVariant;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _ActionChip(
+          icon: Icons.sync_outlined,
+          label: 'Sync',
+          color: color,
+          onTap: () async {
+            await _open(context);
+            if (context.mounted) showSyncSheet(context);
+          },
+        ),
+        const SizedBox(width: 6),
+        _ActionChip(
+          icon: Icons.info_outline,
+          label: 'Info',
+          color: color,
+          onTap: () async {
+            await _open(context);
+            if (context.mounted) showDatabaseInfoSheet(context);
+          },
+        ),
+      ],
+    );
+  }
+}
+
+/// Tiny icon + label button used inside [_DatabaseActions].
+class _ActionChip extends StatelessWidget {
+  const _ActionChip({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(4),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 12, color: color),
+            const SizedBox(width: 3),
+            Text(
+              label,
+              style: TextStyle(fontSize: 11, color: color),
+            ),
+          ],
+        ),
       ),
     );
   }
