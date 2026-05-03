@@ -203,7 +203,12 @@ void main() {
       final id = inserted['_id'] as String;
 
       final errors = ErrorProvider();
-      final provider = CollectionProvider(db, 'items', errors, autoRefresh: false);
+      final provider = CollectionProvider(
+        db,
+        'items',
+        errors,
+        autoRefresh: false,
+      );
       await Future.delayed(Duration.zero);
 
       await provider.updateDocument(id, '{"title": "Updated"}');
@@ -220,7 +225,12 @@ void main() {
       final id = inserted['_id'] as String;
 
       final errors = ErrorProvider();
-      final provider = CollectionProvider(db, 'items', errors, autoRefresh: false);
+      final provider = CollectionProvider(
+        db,
+        'items',
+        errors,
+        autoRefresh: false,
+      );
       await Future.delayed(Duration.zero);
 
       // JSON without _id — provider must inject it.
@@ -261,7 +271,12 @@ void main() {
       final id = inserted['_id'] as String;
 
       final errors = ErrorProvider();
-      final provider = CollectionProvider(db, 'items', errors, autoRefresh: false);
+      final provider = CollectionProvider(
+        db,
+        'items',
+        errors,
+        autoRefresh: false,
+      );
       await Future.delayed(Duration.zero);
 
       final doc = await provider.getDocumentById(id);
