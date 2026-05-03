@@ -46,11 +46,10 @@ class _SchemaSheet extends StatelessWidget {
       minChildSize: 0.4,
       maxChildSize: 0.95,
       expand: false,
-      builder: (context, scrollController) =>
-          _SchemaSheetContent(
-            collectionName: collectionName,
-            scrollController: scrollController,
-          ),
+      builder: (context, scrollController) => _SchemaSheetContent(
+        collectionName: collectionName,
+        scrollController: scrollController,
+      ),
     );
   }
 }
@@ -110,8 +109,7 @@ class _SchemaSheetContent extends StatelessWidget {
                   style: TextButton.styleFrom(
                     foregroundColor: Theme.of(context).colorScheme.error,
                   ),
-                  onPressed: () =>
-                      _confirmRemove(context, appProvider),
+                  onPressed: () => _confirmRemove(context, appProvider),
                 ),
             ],
           ),
@@ -123,7 +121,12 @@ class _SchemaSheetContent extends StatelessWidget {
         Expanded(
           child: schema == null
               ? _buildEmpty(context)
-              : _buildSchemaView(context, appProvider, schema, scrollController),
+              : _buildSchemaView(
+                  context,
+                  appProvider,
+                  schema,
+                  scrollController,
+                ),
         ),
       ],
     );
@@ -206,8 +209,9 @@ class _SchemaSheetContent extends StatelessWidget {
   ) async {
     final controller = TextEditingController(
       text: appProvider.schemaForCollection(collectionName) != null
-          ? const JsonEncoder.withIndent('  ')
-                .convert(appProvider.schemaForCollection(collectionName))
+          ? const JsonEncoder.withIndent(
+              '  ',
+            ).convert(appProvider.schemaForCollection(collectionName))
           : '',
     );
     String? errorText;

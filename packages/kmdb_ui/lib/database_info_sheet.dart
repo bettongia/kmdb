@@ -160,19 +160,25 @@ class _DatabaseInfoSheetState extends State<_DatabaseInfoSheet> {
                             icon: Icons.upload_outlined,
                             label: 'Flush',
                             tooltip: 'Flush the memtable to an SSTable',
-                            onPressed: () =>
-                                _runAction(context, appProvider, 'Flushing…',
-                                    appProvider.flushDatabase,
-                                    'Flush complete.'),
+                            onPressed: () => _runAction(
+                              context,
+                              appProvider,
+                              'Flushing…',
+                              appProvider.flushDatabase,
+                              'Flush complete.',
+                            ),
                           ),
                           _ActionButton(
                             icon: Icons.compress_outlined,
                             label: 'Compact',
                             tooltip: 'Run full compaction',
-                            onPressed: () =>
-                                _runAction(context, appProvider, 'Compacting…',
-                                    appProvider.compactDatabase,
-                                    'Compaction complete.'),
+                            onPressed: () => _runAction(
+                              context,
+                              appProvider,
+                              'Compacting…',
+                              appProvider.compactDatabase,
+                              'Compaction complete.',
+                            ),
                           ),
                           _ActionButton(
                             icon: Icons.verified_outlined,
@@ -206,12 +212,13 @@ class _DatabaseInfoSheetState extends State<_DatabaseInfoSheet> {
                       _SectionHeader('Danger Zone'),
                       const SizedBox(height: 8),
                       OutlinedButton.icon(
-                        icon: const Icon(Icons.device_unknown_outlined,
-                            size: 16),
+                        icon: const Icon(
+                          Icons.device_unknown_outlined,
+                          size: 16,
+                        ),
                         label: const Text('Rotate Device ID'),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor:
-                              Theme.of(context).colorScheme.error,
+                          foregroundColor: Theme.of(context).colorScheme.error,
                           side: BorderSide(
                             color: Theme.of(context).colorScheme.error,
                           ),
@@ -245,19 +252,16 @@ class _DatabaseInfoSheetState extends State<_DatabaseInfoSheet> {
   ) async {
     await appProvider.runBusy(busyMessage, action);
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(successMessage)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(successMessage)));
       // Refresh stats after maintenance.
       setState(() => _loading = true);
       _load();
     }
   }
 
-  Future<void> _runVerify(
-    BuildContext context,
-    AppProvider appProvider,
-  ) async {
+  Future<void> _runVerify(BuildContext context, AppProvider appProvider) async {
     final (:checked, :errors) = await appProvider.runBusy(
       'Verifying…',
       appProvider.verifyDatabase,
@@ -314,9 +318,9 @@ class _DatabaseInfoSheetState extends State<_DatabaseInfoSheet> {
     if (!context.mounted) return;
 
     if (error != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed: $error')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed: $error')));
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Device ID rotated successfully.')),

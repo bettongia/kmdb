@@ -46,9 +46,9 @@ Future<void> showExportCollectionDialog(
     }
   } catch (e) {
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Export failed: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
     }
   }
 }
@@ -110,9 +110,9 @@ Future<void> showImportCollectionDialog(
     );
   } catch (e) {
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Import failed: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Import failed: $e')));
     }
   }
 }
@@ -146,7 +146,8 @@ class _ConflictModeDialogState extends State<_ConflictModeDialog> {
             value: 'replace',
             selected: _mode,
             label: 'Replace',
-            subtitle: 'Overwrite existing documents.\n\n'
+            subtitle:
+                'Overwrite existing documents.\n\n'
                 'Warning: each replaced document\'s import timestamp wins '
                 'on all synced devices after the next sync.',
             subtitleColor: Theme.of(context).colorScheme.error,
@@ -207,9 +208,9 @@ Future<void> showDumpDialog(
     }
   } catch (e) {
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Dump failed: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Dump failed: $e')));
     }
   }
 }
@@ -275,9 +276,9 @@ Future<void> showRestoreDialog(
     }
   } catch (e) {
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Restore failed: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Restore failed: $e')));
     }
   }
 }
@@ -321,13 +322,13 @@ class _RadioOption extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(label,
-                      style: Theme.of(context).textTheme.bodyMedium),
+                  Text(label, style: Theme.of(context).textTheme.bodyMedium),
                   const SizedBox(height: 2),
                   Text(
                     subtitle,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: subtitleColor ??
+                      color:
+                          subtitleColor ??
                           Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
