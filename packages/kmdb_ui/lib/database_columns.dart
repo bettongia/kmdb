@@ -30,6 +30,7 @@ import 'schema_sheet.dart';
 import 'secondary_index_sheet.dart';
 import 'import_export_dialogs.dart';
 import 'database_info_sheet.dart';
+import 'sync_sheet.dart';
 
 /// Column showing the list of recently opened databases.
 class DatabaseHistoryColumn extends StatelessWidget {
@@ -60,12 +61,18 @@ class DatabaseHistoryColumn extends StatelessWidget {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                if (provider.database != null)
+                if (provider.database != null) ...[
+                  IconButton(
+                    icon: const Icon(Icons.sync_outlined, size: 20),
+                    tooltip: 'Sync & Remotes',
+                    onPressed: () => showSyncSheet(context),
+                  ),
                   IconButton(
                     icon: const Icon(Icons.info_outline, size: 20),
                     tooltip: 'Database Info & Maintenance',
                     onPressed: () => showDatabaseInfoSheet(context),
                   ),
+                ],
               ],
             ),
           ),
