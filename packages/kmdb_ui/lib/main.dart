@@ -69,7 +69,7 @@ class MyApp extends StatelessWidget {
       child: Consumer<AppProvider>(
         builder: (context, appProvider, child) {
           return MaterialApp(
-            title: 'KMDB Browser',
+            title: 'KMDB',
             debugShowCheckedModeBanner: false,
             theme: ThemeData(
               colorScheme: ColorScheme.fromSeed(seedColor: Colors.blueGrey),
@@ -153,7 +153,7 @@ class _HomePageState extends State<HomePage> {
     return PlatformMenuBar(
       menus: [
         PlatformMenu(
-          label: 'KMDB Browser',
+          label: 'KMDB',
           menus: [
             if (PlatformProvidedMenuItem.hasMenu(
               PlatformProvidedMenuItemType.about,
