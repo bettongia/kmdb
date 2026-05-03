@@ -227,14 +227,14 @@ which depends on this plan as a prerequisite.
 
 ### Phase 2 — Lexical search
 
-- [ ] **FTS index management panel**: Accessible from the collection header.
+- [x] **FTS index management panel**: Accessible from the collection header.
       Requires `KmdbConfig` from `kmdb` (see [plan_kmdb_config.md](plan_kmdb_config.md)).
   - List FTS indexes for the current collection (from `KmdbConfig`).
   - Create: field name input + stopwords toggle + BM25 k1/b sliders.
   - Delete: confirmation dialog.
   - Show index status (current / pending / error).
 
-- [ ] **Search panel**: Accessible from a search icon on the collection header.
+- [x] **Search panel**: Accessible from a search icon on the collection header.
   - Query text field.
   - Mode selector: auto / lexical / semantic / hybrid. **Gate semantic/hybrid
     modes behind a platform-capability check from day one** (e.g.

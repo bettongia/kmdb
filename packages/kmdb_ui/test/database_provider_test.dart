@@ -221,23 +221,127 @@ void main() {
       expect(provider.collections, isNot(contains('items')));
     });
 
-    test('deleteCollection clears selectedCollection when it is deleted', () async {
-      final provider = AppProvider(prefs, adapter: memoryAdapter);
-      await provider.selectDatabase('/path/to/db');
-      await provider.createCollection('active');
-      provider.selectCollection('active');
-      expect(provider.selectedCollection, equals('active'));
+    test(
+      'deleteCollection clears selectedCollection when it is deleted',
+      () async {
+        final provider = AppProvider(prefs, adapter: memoryAdapter);
+        await provider.selectDatabase('/path/to/db');
+        await provider.createCollection('active');
+        provider.selectCollection('active');
+        expect(provider.selectedCollection, equals('active'));
 
-      await provider.deleteCollection('active');
+        await provider.deleteCollection('active');
 
-      expect(provider.selectedCollection, isNull);
-    });
+        expect(provider.selectedCollection, isNull);
+      },
+    );
 
     test('deleteCollection is a no-op when no database is open', () async {
       final provider = AppProvider(prefs, adapter: memoryAdapter);
       // Should not throw even without an open database.
       await provider.deleteCollection('ghost');
       expect(provider.collections, isEmpty);
+    });
+
+    // ── FTS index management ─────────────────────────────────────────────────
+
+    test('hasFtsCapability is false before any FTS index is created', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/db');
+
+      expect(provider.hasFtsCapability, isFalse);
+    });
+
+    test('createFtsIndex enables hasFtsCapability', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/fts-db');
+      await provider.createCollection('notes');
+
+      await provider.createFtsIndex(collection: 'notes', field: 'title');
+
+      expect(provider.hasFtsCapability, isTrue);
+    });
+
+    test('ftsIndexedFieldsForCollection returns empty before index created',
+        () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/db');
+
+      expect(provider.ftsIndexedFieldsForCollection('notes'), isEmpty);
+    });
+
+    test('ftsIndexedFieldsForCollection lists created index', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/fts-fields-db');
+      await provider.createCollection('docs');
+
+      await provider.createFtsIndex(collection: 'docs', field: 'body');
+
+      expect(
+        provider.ftsIndexedFieldsForCollection('docs'),
+        contains('body'),
+      );
+    });
+
+    test('deleteFtsIndex removes index from ftsIndexedFieldsForCollection',
+        () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/fts-delete-db');
+      await provider.createCollection('articles');
+      await provider.createFtsIndex(collection: 'articles', field: 'content');
+      expect(
+        provider.ftsIndexedFieldsForCollection('articles'),
+        contains('content'),
+      );
+
+      await provider.deleteFtsIndex('articles', 'content');
+
+      expect(
+        provider.ftsIndexedFieldsForCollection('articles'),
+        isNot(contains('content')),
+      );
+    });
+
+    test('deleteFtsIndex disables hasFtsCapability when last index removed',
+        () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/fts-last-db');
+      await provider.createCollection('logs');
+      await provider.createFtsIndex(collection: 'logs', field: 'message');
+      expect(provider.hasFtsCapability, isTrue);
+
+      await provider.deleteFtsIndex('logs', 'message');
+
+      expect(provider.hasFtsCapability, isFalse);
+    });
+
+    test('createFtsIndex preserves selectedCollection across reopen', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+      await provider.selectDatabase('/path/to/fts-reopen-db');
+      await provider.createCollection('notes');
+      provider.selectCollection('notes');
+      expect(provider.selectedCollection, equals('notes'));
+
+      await provider.createFtsIndex(collection: 'notes', field: 'title');
+
+      // After reopen, selected collection must still be set.
+      expect(provider.selectedCollection, equals('notes'));
+    });
+
+    test('createFtsIndex is a no-op when no database is open', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+
+      // Should not throw.
+      await provider.createFtsIndex(collection: 'notes', field: 'title');
+      expect(provider.hasFtsCapability, isFalse);
+    });
+
+    test('deleteFtsIndex is a no-op when no database is open', () async {
+      final provider = AppProvider(prefs, adapter: memoryAdapter);
+
+      // Should not throw.
+      await provider.deleteFtsIndex('notes', 'title');
+      expect(provider.hasFtsCapability, isFalse);
     });
   });
 }

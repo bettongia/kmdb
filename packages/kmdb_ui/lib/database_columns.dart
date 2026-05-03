@@ -25,6 +25,7 @@ import 'collection_provider.dart';
 import 'new_collection_dialog.dart';
 import 'add_document_dialog.dart';
 import 'edit_document_dialog.dart';
+import 'search_sheet.dart';
 
 /// Column showing the list of recently opened databases.
 class DatabaseHistoryColumn extends StatelessWidget {
@@ -149,11 +150,7 @@ class DatabaseHistoryColumn extends StatelessWidget {
 class CollectionListColumn extends StatelessWidget {
   const CollectionListColumn({super.key});
 
-  void _confirmDelete(
-    BuildContext context,
-    AppProvider provider,
-    String name,
-  ) {
+  void _confirmDelete(BuildContext context, AppProvider provider, String name) {
     showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
@@ -436,10 +433,9 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
     final limit = opts.limit ?? 25;
     final offset = opts.offset;
     final currentPage = offset ~/ limit + 1;
-    final totalPages =
-        collectionProvider.totalCount == 0
-            ? 1
-            : (collectionProvider.totalCount / limit).ceil();
+    final totalPages = collectionProvider.totalCount == 0
+        ? 1
+        : (collectionProvider.totalCount / limit).ceil();
     final hasPrev = offset > 0;
     final hasNext = offset + limit < collectionProvider.totalCount;
 
@@ -456,6 +452,15 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
               style: const TextStyle(fontSize: 14),
             ),
             actions: [
+              if (appProvider.hasFtsCapability)
+                IconButton(
+                  icon: const Icon(Icons.manage_search, size: 18),
+                  tooltip: 'Search & FTS Indexes',
+                  onPressed: () => showSearchSheet(
+                    context,
+                    collectionProvider.collectionName,
+                  ),
+                ),
               IconButton(
                 icon: const Icon(Icons.search, size: 18),
                 tooltip: 'Find by ID',
@@ -547,18 +552,13 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
                 const SizedBox(width: 4),
                 IconButton(
                   icon: Icon(
-                    opts.descending
-                        ? Icons.arrow_downward
-                        : Icons.arrow_upward,
+                    opts.descending ? Icons.arrow_downward : Icons.arrow_upward,
                     size: 18,
                   ),
                   tooltip: opts.descending ? 'Descending' : 'Ascending',
                   onPressed: () {
                     collectionProvider.setScanOptions(
-                      opts.copyWith(
-                        descending: !opts.descending,
-                        offset: 0,
-                      ),
+                      opts.copyWith(descending: !opts.descending, offset: 0),
                     );
                   },
                 ),
@@ -691,19 +691,12 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
                       .toList(),
                   onChanged: (n) {
                     collectionProvider.setScanOptions(
-                      opts.copyWith(
-                        limit: n,
-                        clearLimit: n == null,
-                        offset: 0,
-                      ),
+                      opts.copyWith(limit: n, clearLimit: n == null, offset: 0),
                     );
                   },
                 ),
                 const SizedBox(width: 4),
-                Text(
-                  'per page',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
+                Text('per page', style: Theme.of(context).textTheme.bodySmall),
                 const Spacer(),
                 // Page info.
                 Text(
@@ -783,8 +776,8 @@ class DocumentDetailColumn extends StatelessWidget {
                           final id = doc['_id'] as String;
                           await collectionProvider.updateDocument(id, json);
                           // Refresh the selected document to show updated content.
-                          final updated =
-                              await collectionProvider.getDocumentById(id);
+                          final updated = await collectionProvider
+                              .getDocumentById(id);
                           if (updated != null) {
                             appProvider.selectDocument(updated);
                           }

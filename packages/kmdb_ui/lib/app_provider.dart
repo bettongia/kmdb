@@ -35,6 +35,9 @@ import 'package:kmdb/kmdb_config.dart';
 /// - Exposing the list of user collections with efficient [KmdbCollection.count]
 ///   calls (not full-scan materialisation).
 /// - Tracking selected collection and document for column-based navigation.
+/// - Managing FTS index definitions: loading from [KmdbConfig], passing to
+///   [KmdbDatabase.open], and creating/deleting via [createFtsIndex] /
+///   [deleteFtsIndex] (which reopen the database to apply the change).
 /// - Managing the app theme preference.
 class AppProvider with ChangeNotifier {
   static const _channel = MethodChannel('com.kmdb.browser/bookmarks');
@@ -45,6 +48,14 @@ class AppProvider with ChangeNotifier {
 
   String? _selectedDatabasePath;
   KmdbDatabase? _database;
+
+  /// FTS index definitions active for the open database.
+  ///
+  /// Loaded from [KmdbConfig] when the database is opened and kept in sync
+  /// with [createFtsIndex] / [deleteFtsIndex]. Always passed to
+  /// [KmdbDatabase.open] so the FTS manager is wired at open time.
+  List<FtsIndexDefinition> _ftsIndexDefs = [];
+
   Map<String, int> _collections = {};
   String? _selectedCollection;
   Map<String, dynamic>? _selectedDocument;
@@ -110,6 +121,26 @@ class AppProvider with ChangeNotifier {
   /// Human-readable label for the currently running operation.
   String get busyMessage => _busyMessage;
 
+  // ── FTS capabilities ─────────────────────────────────────────────────────────
+
+  /// True when the open database has an active [FtsManager] (i.e. at least one
+  /// FTS index definition was passed at open time).
+  bool get hasFtsCapability => _database?.ftsManager != null;
+
+  /// True when the open database has an active [VecManager].
+  ///
+  /// Semantic search requires an embedding model backed by ONNX Runtime, which
+  /// is only available on macOS. This guard prevents the search panel from
+  /// showing the semantic mode selector on unsupported platforms.
+  bool get hasVecCapability => _database?.vecManager != null;
+
+  /// The fields with an active FTS index for [collection].
+  List<String> ftsIndexedFieldsForCollection(String collection) =>
+      _ftsIndexDefs
+          .where((d) => d.collection == collection)
+          .map((d) => d.field)
+          .toList();
+
   // ── Theme ────────────────────────────────────────────────────────────────────
 
   /// Updates the theme mode and persists the choice to shared preferences.
@@ -170,10 +201,15 @@ class AppProvider with ChangeNotifier {
       _selectedDocument = null;
       notifyListeners();
 
+      // Load FTS index definitions from config so the FtsManager is wired at
+      // open time. Errors are non-fatal (no FTS indexes means no FTS search).
+      _ftsIndexDefs = await _loadFtsDefsFromConfig(absolutePath);
+
       // Open via KmdbDatabase so downstream consumers can use the query layer.
       _database = await KmdbDatabase.open(
         path: _selectedDatabasePath!,
         adapter: _adapter,
+        ftsIndexes: _ftsIndexDefs,
       );
 
       // Request/refresh the macOS security-scoped bookmark for future launches.
@@ -305,6 +341,130 @@ class AppProvider with ChangeNotifier {
   /// Reloads the collection list and notifies listeners.
   Future<void> refreshCollections() =>
       _loadCollections().then((_) => notifyListeners());
+
+  // ── FTS index management ─────────────────────────────────────────────────────
+
+  /// Creates an FTS index on [field] in [collection].
+  ///
+  /// Updates the in-memory [_ftsIndexDefs] list, persists the definition to
+  /// [KmdbConfig] (best-effort — config save failures are logged but do not
+  /// prevent the index from becoming active), then reopens the database so the
+  /// new [FtsIndexDefinition] is registered with [FtsManager].
+  Future<void> createFtsIndex({
+    required String collection,
+    required String field,
+    bool stopWords = false,
+    double k1 = 1.2,
+    double b = 0.75,
+  }) async {
+    if (_selectedDatabasePath == null) return;
+
+    // Deduplicate: replace any existing definition for the same field.
+    _ftsIndexDefs = [
+      ..._ftsIndexDefs.where(
+        (d) => !(d.collection == collection && d.field == field),
+      ),
+      FtsIndexDefinition(
+        collection: collection,
+        field: field,
+        k1: k1,
+        b: b,
+        stopWords: stopWords,
+        lazy: true,
+      ),
+    ];
+
+    try {
+      final config = await KmdbConfig.forDatabase(_selectedDatabasePath!);
+      config.addFtsIndex(collection, field, stopWords: stopWords, k1: k1, b: b);
+      await config.save();
+    } catch (e) {
+      debugPrint('Could not persist FTS index to config: $e');
+    }
+
+    await _reopenDatabase();
+  }
+
+  /// Removes the FTS index on [field] in [collection].
+  ///
+  /// Mirrors [createFtsIndex]: updates in-memory list, best-effort config
+  /// save, then reopens the database.
+  Future<void> deleteFtsIndex(String collection, String field) async {
+    if (_selectedDatabasePath == null) return;
+
+    _ftsIndexDefs = _ftsIndexDefs
+        .where((d) => !(d.collection == collection && d.field == field))
+        .toList();
+
+    try {
+      final config = await KmdbConfig.forDatabase(_selectedDatabasePath!);
+      config.removeFtsIndex(collection, field);
+      await config.save();
+    } catch (e) {
+      debugPrint('Could not remove FTS index from config: $e');
+    }
+
+    await _reopenDatabase();
+  }
+
+  /// Closes and reopens the database with the current [_ftsIndexDefs].
+  ///
+  /// Used after FTS index changes to register the new definitions with
+  /// [FtsManager] at open time. Temporarily nulls [_selectedCollection] so the
+  /// [ChangeNotifierProxyProvider] discards the stale [CollectionProvider]
+  /// (which holds a reference to the old [KmdbDatabase] instance) and creates
+  /// a fresh one with the new database.
+  Future<void> _reopenDatabase() async {
+    final path = _selectedDatabasePath;
+    if (path == null) return;
+
+    final savedCollection = _selectedCollection;
+    _isOpening = true;
+    _selectedCollection = null;
+    _selectedDocument = null;
+    notifyListeners();
+
+    try {
+      await _closeCurrentDatabase();
+      _database = await KmdbDatabase.open(
+        path: path,
+        adapter: _adapter,
+        ftsIndexes: _ftsIndexDefs,
+      );
+      await _loadCollections();
+      _selectedCollection = savedCollection;
+    } catch (e, stack) {
+      debugPrint('Error reopening database at $path: $e\n$stack');
+      _loadError = e.toString();
+    } finally {
+      _isOpening = false;
+      notifyListeners();
+    }
+  }
+
+  /// Loads [FtsIndexDefinition]s from [KmdbConfig] for the database at [dbPath].
+  ///
+  /// Returns an empty list on any error (e.g. config file not yet created).
+  Future<List<FtsIndexDefinition>> _loadFtsDefsFromConfig(String dbPath) async {
+    try {
+      final config = await KmdbConfig.forDatabase(dbPath);
+      return config.ftsIndexes
+          .map(
+            (r) => FtsIndexDefinition(
+              collection: r.collection,
+              field: r.field,
+              k1: r.k1,
+              b: r.b,
+              stopWords: r.stopWords,
+              lazy: true,
+            ),
+          )
+          .toList();
+    } catch (e) {
+      debugPrint('Could not load FTS indexes from config: $e');
+      return const [];
+    }
+  }
 
   // ── Document selection ───────────────────────────────────────────────────────
 
