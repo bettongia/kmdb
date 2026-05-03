@@ -225,7 +225,7 @@ Future<void> showRestoreDialog(
   // Warn that restore adds / overwrites documents.
   final confirmed = await showDialog<bool>(
     context: context,
-    builder: (_) => AlertDialog(
+    builder: (dialogContext) => AlertDialog(
       title: const Text('Restore Database'),
       content: const Text(
         'This will import all documents from the dump file into the current '
@@ -236,11 +236,11 @@ Future<void> showRestoreDialog(
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(context, false),
+          onPressed: () => Navigator.pop(dialogContext, false),
           child: const Text('Cancel'),
         ),
         FilledButton(
-          onPressed: () => Navigator.pop(context, true),
+          onPressed: () => Navigator.pop(dialogContext, true),
           child: const Text('Continue'),
         ),
       ],

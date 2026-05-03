@@ -228,14 +228,22 @@ class _SecondaryIndexContent extends StatelessWidget {
       return;
     }
 
+    // Dismiss the dialog before starting the async operation so that
+    // notifyListeners() calls inside runBusy don't rebuild a half-dismissed
+    // dialog and trigger widget-scope assertion errors.
+    if (context.mounted) Navigator.pop(context);
+
     try {
       await appProvider.runBusy(
         'Creating index…',
         () => appProvider.createSecondaryIndex(collectionName, path),
       );
-      if (context.mounted) Navigator.pop(context);
     } catch (e) {
-      setState(() => setError('Failed: $e'));
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to create index: $e')));
+      }
     }
   }
 }

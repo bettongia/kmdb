@@ -22,6 +22,12 @@ class MainFlutterWindow: NSWindow {
     self.contentViewController = flutterViewController
     self.setFrame(windowFrame, display: true)
 
+    // Disable automatic window tabbing (removes the "Show/Hide Tab" View menu item).
+    NSWindow.allowsAutomaticWindowTabbing = false
+
+    // Prevent the window from being resized so small that layout overflows occur.
+    self.minSize = NSSize(width: 700, height: 500)
+
     RegisterGeneratedPlugins(registry: flutterViewController)
 
     super.awakeFromNib()

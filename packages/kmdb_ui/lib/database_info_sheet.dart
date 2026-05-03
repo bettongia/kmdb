@@ -191,18 +191,18 @@ class _DatabaseInfoSheetState extends State<_DatabaseInfoSheet> {
                             icon: Icons.download_outlined,
                             label: 'Dump',
                             tooltip: 'Dump all collections to NDJSON',
-                            onPressed: () {
-                              Navigator.pop(context);
-                              showDumpDialog(context, appProvider);
+                            onPressed: () async {
+                              await showDumpDialog(context, appProvider);
+                              if (context.mounted) Navigator.pop(context);
                             },
                           ),
                           _ActionButton(
                             icon: Icons.restore_outlined,
                             label: 'Restore',
                             tooltip: 'Restore from an NDJSON dump file',
-                            onPressed: () {
-                              Navigator.pop(context);
-                              showRestoreDialog(context, appProvider);
+                            onPressed: () async {
+                              await showRestoreDialog(context, appProvider);
+                              if (context.mounted) Navigator.pop(context);
                             },
                           ),
                         ],

@@ -31,6 +31,7 @@ import 'secondary_index_sheet.dart';
 import 'import_export_dialogs.dart';
 import 'database_info_sheet.dart';
 import 'sync_sheet.dart';
+import 'layout/adaptive_layout.dart';
 
 /// Column showing the list of recently opened databases.
 class DatabaseHistoryColumn extends StatelessWidget {
@@ -61,18 +62,6 @@ class DatabaseHistoryColumn extends StatelessWidget {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                if (provider.database != null) ...[
-                  IconButton(
-                    icon: const Icon(Icons.sync_outlined, size: 20),
-                    tooltip: 'Sync & Remotes',
-                    onPressed: () => showSyncSheet(context),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.info_outline, size: 20),
-                    tooltip: 'Database Info & Maintenance',
-                    onPressed: () => showDatabaseInfoSheet(context),
-                  ),
-                ],
               ],
             ),
           ),
@@ -87,41 +76,7 @@ class DatabaseHistoryColumn extends StatelessWidget {
                     horizontal: 8.0,
                     vertical: 2.0,
                   ),
-                  child: GestureDetector(
-                    onSecondaryTap: () {
-                      showDialog(
-                        context: context,
-                        builder: (context) => AlertDialog(
-                          title: const Text('Database Information'),
-                          content: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'LOCATION',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.blueGrey,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              SelectableText(
-                                path,
-                                style: const TextStyle(fontSize: 13),
-                              ),
-                            ],
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(context),
-                              child: const Text('Close'),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                    child: ListTile(
+                  child: ListTile(
                       dense: true,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
@@ -149,12 +104,28 @@ class DatabaseHistoryColumn extends StatelessWidget {
                             )
                           : const Icon(Icons.storage_outlined, size: 18),
                       onTap: () => provider.selectDatabase(path),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.close, size: 14),
-                        onPressed: () => provider.removeDatabase(path),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (isSelected) ...[
+                            IconButton(
+                              icon: const Icon(Icons.sync_outlined, size: 16),
+                              tooltip: 'Sync & Remotes',
+                              onPressed: () => showSyncSheet(context),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.info_outline, size: 16),
+                              tooltip: 'Database Info & Maintenance',
+                              onPressed: () => showDatabaseInfoSheet(context),
+                            ),
+                          ],
+                          IconButton(
+                            icon: const Icon(Icons.close, size: 14),
+                            onPressed: () => provider.removeDatabase(path),
+                          ),
+                        ],
                       ),
                     ),
-                  ),
                 );
               },
             ),
@@ -219,10 +190,18 @@ class CollectionListColumn extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+            padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
+                // Back button shown only in narrow layout.
+                if (MediaQuery.of(context).size.width <
+                    LayoutBreakpoints.multiColumn)
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back, size: 20),
+                    tooltip: 'Back to Databases',
+                    onPressed: () => provider.deselectDatabase(),
+                  ),
                 Text(
                   'COLLECTIONS',
                   style: Theme.of(context).textTheme.labelLarge?.copyWith(
@@ -399,8 +378,9 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
               if (id.isEmpty) return;
               final doc = await collectionProvider.getDocumentById(id);
               if (doc != null) {
-                appProvider.selectDocument(doc);
+                // Pop before notifying so no dialog widgets rebuild mid-dismiss.
                 if (context.mounted) Navigator.pop(context);
+                appProvider.selectDocument(doc);
               } else {
                 setDialogState(
                   () => errorText = 'No document found with that ID.',
@@ -419,8 +399,8 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
                 if (id.isEmpty) return;
                 final doc = await collectionProvider.getDocumentById(id);
                 if (doc != null) {
-                  appProvider.selectDocument(doc);
                   if (context.mounted) Navigator.pop(context);
+                  appProvider.selectDocument(doc);
                 } else {
                   setDialogState(
                     () => errorText = 'No document found with that ID.',
@@ -468,6 +448,14 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
       child: Column(
         children: [
           AppBar(
+            leading: MediaQuery.of(context).size.width <
+                    LayoutBreakpoints.multiColumn
+                ? IconButton(
+                    icon: const Icon(Icons.arrow_back),
+                    tooltip: 'Back to Collections',
+                    onPressed: () => appProvider.clearCollectionSelection(),
+                  )
+                : null,
             title: Text(
               '${collectionProvider.collectionName}'
               ' (${collectionProvider.totalCount})',
@@ -835,6 +823,14 @@ class DocumentDetailColumn extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           AppBar(
+            leading: MediaQuery.of(context).size.width <
+                    LayoutBreakpoints.multiColumn
+                ? IconButton(
+                    icon: const Icon(Icons.arrow_back),
+                    tooltip: 'Back to Documents',
+                    onPressed: () => appProvider.selectDocument(null),
+                  )
+                : null,
             title: const Text('Details', style: TextStyle(fontSize: 16)),
             actions: [
               if (collectionProvider != null)

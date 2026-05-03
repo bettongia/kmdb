@@ -302,6 +302,30 @@ class AppProvider with ChangeNotifier {
     }
   }
 
+  /// Clears the collection and document selection without closing the database.
+  ///
+  /// Used for narrow-layout back navigation from the document content column to
+  /// the collection list column.
+  void clearCollectionSelection() {
+    _selectedCollection = null;
+    _selectedDocument = null;
+    notifyListeners();
+  }
+
+  /// Closes the current database and clears the path selection.
+  ///
+  /// Unlike [removeDatabase], this keeps the path in [recentDatabasePaths] so
+  /// the user can reopen it by tapping it. Used for narrow-layout back
+  /// navigation from the collection list column to the database history column.
+  Future<void> deselectDatabase() async {
+    await _closeCurrentDatabase();
+    _selectedDatabasePath = null;
+    _selectedCollection = null;
+    _selectedDocument = null;
+    _collections = {};
+    notifyListeners();
+  }
+
   /// Creates a new collection named [name] via the underlying KvStore.
   ///
   /// Returns true if the collection was created, false if it already existed
@@ -964,6 +988,20 @@ class AppProvider with ChangeNotifier {
 
     try {
       await _closeCurrentDatabase();
+
+      // Re-activate the macOS security-scoped bookmark after close, mirroring
+      // the pattern in selectDatabase(). stopAccessing is called by
+      // _closeCurrentDatabase, so the sandbox scope must be re-entered before
+      // KmdbDatabase.open attempts to acquire the LOCK file.
+      final bookmark = _bookmarks[path];
+      if (bookmark != null && Platform.isMacOS) {
+        try {
+          await _channel.invokeMethod('startAccessing', {'bookmark': bookmark});
+        } catch (e) {
+          debugPrint('Error restarting access for bookmark: $e');
+        }
+      }
+
       _database = await KmdbDatabase.open(
         path: path,
         adapter: _adapter,
