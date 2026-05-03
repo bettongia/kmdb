@@ -148,11 +148,10 @@ class AppProvider with ChangeNotifier {
   bool get hasVecCapability => _database?.vecManager != null;
 
   /// The fields with an active FTS index for [collection].
-  List<String> ftsIndexedFieldsForCollection(String collection) =>
-      _ftsIndexDefs
-          .where((d) => d.collection == collection)
-          .map((d) => d.field)
-          .toList();
+  List<String> ftsIndexedFieldsForCollection(String collection) => _ftsIndexDefs
+      .where((d) => d.collection == collection)
+      .map((d) => d.field)
+      .toList();
 
   // ── Secondary index capabilities ──────────────────────────────────────────────
 
@@ -236,7 +235,9 @@ class AppProvider with ChangeNotifier {
       // Load FTS and secondary index definitions from config so the respective
       // managers are wired at open time. Errors are non-fatal.
       _ftsIndexDefs = await _loadFtsDefsFromConfig(absolutePath);
-      _secondaryIndexDefs = await _loadSecondaryIndexDefsFromConfig(absolutePath);
+      _secondaryIndexDefs = await _loadSecondaryIndexDefsFromConfig(
+        absolutePath,
+      );
 
       // Open via KmdbDatabase so downstream consumers can use the query layer.
       _database = await KmdbDatabase.open(
@@ -549,7 +550,8 @@ class AppProvider with ChangeNotifier {
 
     try {
       final raw = jsonDecode(jsonString);
-      if (raw is! Map<String, dynamic>) return 'Document must be a JSON object.';
+      if (raw is! Map<String, dynamic>)
+        return 'Document must be a JSON object.';
       db.schemaManager.validate(collection, raw);
       return null;
     } catch (e) {
@@ -723,6 +725,145 @@ class AppProvider with ChangeNotifier {
     return (restored: restored, collections: collectionsSeen.length);
   }
 
+  // ── Remote management ────────────────────────────────────────────────────────
+
+  /// Returns all named sync remotes for the open database.
+  ///
+  /// Reads [KmdbConfig] from disk on every call so the list is always current.
+  /// Returns an empty map when no database is open or the config does not exist.
+  Future<Map<String, RemoteConfig>> remotes() async {
+    final dbPath = _selectedDatabasePath;
+    if (dbPath == null) return {};
+    try {
+      final config = await KmdbConfig.forDatabase(dbPath);
+      return config.remotes;
+    } catch (e) {
+      debugPrint('Could not load remotes: $e');
+      return {};
+    }
+  }
+
+  /// Adds a local sync remote named [name] pointing at [path].
+  ///
+  /// Persists the change to [KmdbConfig] and notifies listeners. Returns null
+  /// on success or a human-readable error string on failure.
+  Future<String?> addRemote(String name, String path) async {
+    final dbPath = _selectedDatabasePath;
+    if (dbPath == null) return 'No database open.';
+
+    try {
+      final config = await KmdbConfig.forDatabase(dbPath);
+      config.addRemote(name, LocalRemoteConfig(path: path));
+      await config.save();
+      notifyListeners();
+      return null;
+    } catch (e) {
+      return 'Failed to add remote: $e';
+    }
+  }
+
+  /// Removes the sync remote named [name].
+  ///
+  /// Returns null on success or an error string on failure.
+  Future<String?> removeRemote(String name) async {
+    final dbPath = _selectedDatabasePath;
+    if (dbPath == null) return 'No database open.';
+
+    try {
+      final config = await KmdbConfig.forDatabase(dbPath);
+      config.removeRemote(name);
+      await config.save();
+      notifyListeners();
+      return null;
+    } catch (e) {
+      return 'Failed to remove remote: $e';
+    }
+  }
+
+  // ── Sync operations ────────────────────────────────────────────────────────────
+
+  /// Pushes local SSTables to the named remote [remoteName].
+  ///
+  /// Returns null on success or a human-readable error string on failure.
+  /// This operation is only meaningful on macOS (filesystem sync).
+  Future<String?> pushTo(String remoteName) async {
+    final engine = await _buildSyncEngine(remoteName);
+    if (engine is String) return engine; // error string
+    try {
+      await (engine as SyncEngine).push();
+      return null;
+    } catch (e) {
+      return 'Push failed: $e';
+    }
+  }
+
+  /// Pulls SSTables from the named remote [remoteName] and reloads collections.
+  ///
+  /// Returns null on success or a human-readable error string on failure.
+  Future<String?> pullFrom(String remoteName) async {
+    final engine = await _buildSyncEngine(remoteName);
+    if (engine is String) return engine;
+    try {
+      await (engine as SyncEngine).pull();
+      await _loadCollections();
+      notifyListeners();
+      return null;
+    } catch (e) {
+      return 'Pull failed: $e';
+    }
+  }
+
+  /// Pushes then pulls with the named remote [remoteName].
+  ///
+  /// Returns null on success or a human-readable error string on failure.
+  Future<String?> syncWith(String remoteName) async {
+    final engine = await _buildSyncEngine(remoteName);
+    if (engine is String) return engine;
+    try {
+      await (engine as SyncEngine).sync();
+      await _loadCollections();
+      notifyListeners();
+      return null;
+    } catch (e) {
+      return 'Sync failed: $e';
+    }
+  }
+
+  /// Builds a [SyncEngine] for the named remote, or returns an error string.
+  Future<Object> _buildSyncEngine(String remoteName) async {
+    final db = _database;
+    final dbPath = _selectedDatabasePath;
+    if (db == null || dbPath == null) return 'No database open.';
+
+    final Map<String, RemoteConfig> remoteMap;
+    try {
+      final config = await KmdbConfig.forDatabase(dbPath);
+      remoteMap = config.remotes;
+    } catch (e) {
+      return 'Could not read remotes: $e';
+    }
+
+    final remote = remoteMap[remoteName];
+    if (remote == null) return 'Remote "$remoteName" not found.';
+    if (remote is! LocalRemoteConfig) {
+      return 'Unsupported remote type: ${remote.type}';
+    }
+
+    final info = await db.store.storeInfo();
+    final namespaces = await db.store.listNamespaces();
+    final syncNamespaces = namespaces.where((n) => !n.startsWith(r'$')).toSet();
+
+    return SyncEngine(
+      store: db.store,
+      cloudAdapter: LocalDirectoryAdapter(remote.path),
+      localAdapter: _adapter,
+      deviceId: info.deviceId,
+      dbDir: info.dbDir,
+      syncRoot: '',
+      syncNamespaces: syncNamespaces,
+    );
+  }
+
   // ── Maintenance ──────────────────────────────────────────────────────────────
 
   /// Returns storage statistics for the open database, or null if not open.
@@ -791,9 +932,10 @@ class AppProvider with ChangeNotifier {
 
     try {
       final rng = Random.secure();
-      final newId = List.generate(4, (_) => rng.nextInt(256))
-          .map((b) => b.toRadixString(16).padLeft(2, '0'))
-          .join();
+      final newId = List.generate(
+        4,
+        (_) => rng.nextInt(256),
+      ).map((b) => b.toRadixString(16).padLeft(2, '0')).join();
 
       await db.store.reassignDeviceId(newId);
       await _reopenDatabase();

@@ -1,6 +1,6 @@
 # Flutter UI — CLI Feature Parity
 
-**Status**: Implementing
+**Status**: Complete
 
 **PR link**: {A link to the PR submitted for this plan}
 
@@ -292,12 +292,12 @@ which depends on this plan as a prerequisite.
 
 ### Phase 4 — Sync and remote management (desktop only)
 
-- [ ] **Remote management UI**: Settings panel for the open database.
+- [x] **Remote management UI**: Settings panel for the open database.
   - List named remotes (name, type, path) from `KmdbConfig`.
   - Add remote: name + directory picker + type selector.
   - Remove remote: confirmation.
 
-- [ ] **Push / Pull / Sync actions**: Toolbar buttons (or menu items).
+- [x] **Push / Pull / Sync actions**: Toolbar buttons (or menu items).
   - Use `AsyncOperationOverlay` (see Phase 0) while running.
   - Show result (files pushed/pulled count) or error in a snackbar.
   - Guard with `defaultTargetPlatform == TargetPlatform.macOS`; show "Sync is
@@ -307,7 +307,11 @@ which depends on this plan as a prerequisite.
 
 ## Summary
 
-{Dot points highlighting the work undertaken — to be filled in after implementation}
+- **Phase 0** laid the foundation: replaced the fixed 4-column layout with an `AdaptiveColumnLayout` that switches to a navigator-push stack on narrow screens; replaced full-scan-then-filter in `CollectionProvider` with server-side `KmdbCollection.where()` via a `ScanOptions` value object; introduced `AppProvider` wrapping `KmdbDatabase`; added `ErrorProvider` + `ErrorListener` for snackbar-based error surfacing; added `AsyncOperationOverlay` for blocking operation progress; switched the document list to `KmdbCollection.watch()` for reactive updates; and set up widget-test infrastructure using `MemoryStorageAdapter`.
+- **Phase 1** completed document CRUD parity: document edit dialog, get-by-ID search bar, server-side scan filtering (simple + advanced JSON modes), order-by + pagination controls, live document count, and collection delete with confirmation.
+- **Phase 2** added lexical search: FTS index management panel (create/delete with status display), and a full search panel with mode selector (lexical/semantic/hybrid gated behind platform-capability checks), results list, and document selection integration.
+- **Phase 3** added schema management (view/set/remove/validate), secondary index management (list/create/delete with status), export/import/dump/restore dialogs using `file_picker` with NDJSON format and conflict-mode selection (ignore/replace/error), and a database info/stats/maintenance panel exposing `storeInfo()`, `stats()`, flush, compact, verify, and device ID rotation.
+- **Phase 4** added sync and remote management: `sync_sheet.dart` bottom sheet with remote listing, add-remote dialog (name + directory picker), remove-remote with confirmation, and Push/Pull/Sync buttons per remote wired through `AppProvider.runBusy()`; macOS-only guard shows an informational message on other platforms; macOS native menu bar gained a "Sync" menu entry and a toolbar sync button in `DatabaseHistoryColumn`; 111 tests pass.
 
 ---
 

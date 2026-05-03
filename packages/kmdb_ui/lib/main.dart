@@ -25,6 +25,7 @@ import 'async_operation_overlay.dart';
 import 'database_columns.dart';
 import 'layout/adaptive_layout.dart';
 import 'new_database_dialog.dart';
+import 'sync_sheet.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -191,6 +192,16 @@ class _HomePageState extends State<HomePage> {
             ),
           ],
         ),
+        if (appProvider.database != null)
+          PlatformMenu(
+            label: 'Sync',
+            menus: [
+              PlatformMenuItem(
+                label: 'Remotes & Sync…',
+                onSelected: () => showSyncSheet(context),
+              ),
+            ],
+          ),
         PlatformMenu(
           label: 'View',
           menus: [
