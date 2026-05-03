@@ -29,6 +29,11 @@ using the same lexical and semantic modes already provided by
   vector search).
 - Syncing computed index artifacts (vectors, inverted index terms) across
   devices. Each device builds its own index independently.
+- Multilingual support beyond English. Both the default embedding model (BGE
+  Small En v1.5) and the BM25 tokenization pipeline (§21) are English-oriented.
+  A multilingual path requires charset detection, language detection, an
+  alternative embedding model, and a language-aware tokenizer; these are
+  addressed in §10 (Multilingual Support).
 
 ---
 
@@ -476,7 +481,149 @@ validated in practice.
 
 ---
 
-## 10. References
+## 10. Multilingual Support
+
+Multilingual vault search requires four capabilities to be layered on top of the
+v1 English-only foundation. They are listed in dependency order — each builds on
+the one before.
+
+### 10.1 Charset detection
+
+`PlainTextExtractor` currently decodes `text/plain` bytes as UTF-8 and fails
+silently on other encodings (BOM stripping aside). Many plain-text files in the
+wild are ISO-8859-*, Windows-1252, Shift-JIS, or other legacy encodings.
+Incorrect decoding produces garbled text that propagates into the inverted index and
+embedding input, corrupting both search paths.
+
+A charset detection step must be inserted before UTF-8 decoding in
+`PlainTextExtractor.extract()`. The detected charset (or a confidence-weighted
+best guess) should be stored in `extract_status.json` under a `"charset"` field
+for diagnostics.
+
+Recommended approach: integrate a pure-Dart port of the ICU charset detection
+heuristics, or expose charset detection from `kmdb_tokenizer_icu` (which already
+links the ICU native library). A dedicated `kmdb_extractor_charset` helper
+package following the `kmdb_extractor_<name>` convention keeps the dependency
+optional.
+
+### 10.2 Language detection
+
+Once text is correctly decoded, the language must be identified so that the
+lexical tokenizer and (in future) the embedding model can be selected
+appropriately. Language is stored in `extract_status.json` under a `"language"`
+field (BCP 47 tag, e.g. `"en"`, `"ja"`, `"fr"`).
+
+The appropriate detector depends on content length:
+
+| Scenario              | Recommended library                                                                                |
+| --------------------- | -------------------------------------------------------------------------------------------------- |
+| Short texts (< ~200 words) | [Lingua](https://github.com/pemistahl/lingua-rs) (Rust FFI) — high accuracy on short, mixed-language input |
+| Long texts (≥ ~200 words) | [Floret / FastText](https://fasttext.cc/docs/en/language-identification.html) via ONNX — fast, compact model |
+
+A mixed-length heuristic (use Lingua below a word-count threshold, Floret above)
+is likely the right default. Both libraries are to be packaged as optional
+`kmdb_detector_<name>` packages:
+
+| Package                    | Library       |
+| -------------------------- | ------------- |
+| `kmdb_detector_lingua`     | Lingua (Rust FFI) |
+| `kmdb_detector_fasttext`   | FastText / Floret (ONNX) |
+
+Detectors are registered in `VaultSearchConfig` analogously to extractors:
+
+```dart
+final db = await KmdbDatabase.open(
+  path: '/path/to/db',
+  vaultSearch: VaultSearchConfig(
+    extractors: [PlainTextExtractor()],
+    languageDetectors: [
+      LinguaDetector(),     // from kmdb_detector_lingua
+      FastTextDetector(),   // from kmdb_detector_fasttext
+    ],
+    // ...
+  ),
+);
+```
+
+If no detector is registered, language defaults to `"und"` (undetermined) and
+the English-only pipeline is used as a fallback.
+
+### 10.3 Multilingual embedding model
+
+BGE Small En v1.5 accepts only English input. Embeddings for other languages
+produce vectors in an arbitrary space that is not meaningful for retrieval.
+
+The recommended upgrade is **BGE-M3**, a single model supporting
+100+ languages via a unified embedding space. The tradeoffs relative to BGE
+Small En v1.5:
+
+| Property           | BGE Small En v1.5 | BGE-M3         |
+| ------------------ | ----------------- | -------------- |
+| Model size         | ~33 MB            | ~570 MB        |
+| Vector dimensions  | 384               | 1024           |
+| Languages          | English only      | 100+           |
+| Inference speed    | Fast              | ~3–5× slower   |
+| Storage per chunk  | 384 bytes (SQ8)   | 1024 bytes (SQ8) |
+
+Because the vector filename encodes the model name
+(`vectors_bge-m3_sq8.bin` vs `vectors_bge-small-en-v1.5_sq8.bin`), switching
+models does not require a migration — old files are ignored and recomputed. The
+`$vvec:idx` LSM key space is similarly model-agnostic since the key encodes only
+the sha256 and chunk index; a re-index clears and repopulates it.
+
+BGE-M3 would be packaged in a new `kmdb_inferencing_m3` package (or as an
+additional model option within `kmdb_inferencing`) to keep the large model
+download optional for applications that do not need multilingual support.
+
+A per-blob model selection strategy (choose the model based on detected language)
+is left as future work; in v2 the model is still a single global configuration
+in `VaultSearchConfig`.
+
+### 10.4 Language-aware BM25 tokenization
+
+The lexical (BM25) pipeline in §21 uses `RegExpTokenizer`, which splits on
+Unicode word boundaries. This is adequate for space-delimited languages but
+produces incorrect or empty token sequences for:
+
+- **CJK languages** (Chinese, Japanese, Korean) — no inter-word spaces; each
+  character or n-gram must be treated as a token.
+- **Arabic / Hebrew** — right-to-left scripts with complex morphology.
+- **Agglutinative languages** (Finnish, Turkish, Korean) — compound words
+  that benefit from morphological decomposition.
+
+The `kmdb_tokenizer_icu` package already wraps the ICU `BreakIterator`, which
+handles word segmentation correctly across all Unicode scripts. Vault search
+should select the tokenizer based on the detected language from §10.2:
+
+- English (and most Latin-script languages): existing `RegExpTokenizer`
+- All others: `IcuTokenizer` from `kmdb_tokenizer_icu`
+
+The tokenizer selection is encapsulated in the indexing isolate and requires no
+API changes — it is an internal routing decision based on the `"language"` field
+stored in `extract_status.json`.
+
+Stop-word filtering and stemming (currently English-only via `kmdb_lexical`) are
+left as language-specific future work; disabling them for non-English content
+produces a valid (if unoptimized) BM25 index.
+
+### 10.5 Staging recommendation
+
+The four capabilities above have hard dependencies but can be shipped
+incrementally:
+
+| Phase | Capability            | Dependency          |
+| ----- | --------------------- | ------------------- |
+| A     | Charset detection     | None                |
+| B     | Language detection    | Phase A             |
+| C     | BGE-M3 model option   | Phase B (language tag stored for diagnostics) |
+| D     | ICU-backed BM25       | Phase B             |
+
+Phase A alone fixes silent data corruption for non-UTF-8 plain-text files and is
+worthwhile independently of the multilingual search story.
+
+---
+
+## 11. References
 
 - [§20 — Text Search Overview](../spec/20_text_search.md)
 - [§21 — Lexical Search](../spec/21_lexical_search.md)
