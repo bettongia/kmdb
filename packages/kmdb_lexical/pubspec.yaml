@@ -2,7 +2,7 @@ name: kmdb_lexical
 description:
   Lexical text utilities (tokenizer, stemmer, stopwords) used by the KMDB BM25
   full-text search engine.
-version: 1.0.0
+version: 0.1.0
 publish_to: none
 
 resolution: workspace
