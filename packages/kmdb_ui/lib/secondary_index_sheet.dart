@@ -96,8 +96,7 @@ class _SecondaryIndexContent extends StatelessWidget {
                 ),
               ),
               FilledButton.tonal(
-                onPressed: () =>
-                    _showCreateDialog(context, appProvider),
+                onPressed: () => _showCreateDialog(context, appProvider),
                 child: const Text('Create'),
               ),
             ],
@@ -182,8 +181,13 @@ class _SecondaryIndexContent extends StatelessWidget {
               border: const OutlineInputBorder(),
               errorText: errorText,
             ),
-            onSubmitted: (_) => _submit(context, setState, controller,
-                appProvider, (e) => errorText = e),
+            onSubmitted: (_) => _submit(
+              context,
+              setState,
+              controller,
+              appProvider,
+              (e) => errorText = e,
+            ),
           ),
           actions: [
             TextButton(
@@ -192,7 +196,10 @@ class _SecondaryIndexContent extends StatelessWidget {
             ),
             FilledButton(
               onPressed: () => _submit(
-                context, setState, controller, appProvider,
+                context,
+                setState,
+                controller,
+                appProvider,
                 (e) => errorText = e,
               ),
               child: const Text('Create'),
@@ -265,7 +272,11 @@ class _IndexTileState extends State<_IndexTile> {
       widget.collectionName,
       widget.path,
     );
-    if (mounted) setState(() { _state = state; _loading = false; });
+    if (mounted)
+      setState(() {
+        _state = state;
+        _loading = false;
+      });
   }
 
   @override
@@ -277,7 +288,10 @@ class _IndexTileState extends State<_IndexTile> {
     return ListTile(
       leading: Icon(Icons.account_tree_outlined, color: statusColor),
       title: Text(widget.path),
-      subtitle: Text(statusLabel, style: TextStyle(color: statusColor, fontSize: 11)),
+      subtitle: Text(
+        statusLabel,
+        style: TextStyle(color: statusColor, fontSize: 11),
+      ),
       trailing: IconButton(
         icon: const Icon(Icons.delete_outline, size: 20),
         tooltip: 'Delete index',

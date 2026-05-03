@@ -268,7 +268,9 @@ class _SearchTabState extends State<_SearchTab> {
     if (result == null) {
       return Center(
         child: Text(
-          appProvider.ftsIndexedFieldsForCollection(widget.collectionName).isEmpty
+          appProvider
+                  .ftsIndexedFieldsForCollection(widget.collectionName)
+                  .isEmpty
               ? 'Create an FTS index in the Indexes tab, then search.'
               : 'Enter a query and press Search.',
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
@@ -704,9 +706,9 @@ class _SliderRow extends StatelessWidget {
           width: 36,
           child: Text(
             value.toStringAsFixed(2),
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              fontFamily: 'monospace',
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.labelSmall?.copyWith(fontFamily: 'monospace'),
           ),
         ),
       ],
