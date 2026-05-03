@@ -1,6 +1,6 @@
 name: kmdb_inferencing
 description: ONNX runtime and BGE embedding model for KMDB semantic search.
-version: 1.0.0
+version: 0.1.0
 publish_to: none
 
 resolution: workspace

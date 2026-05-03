@@ -1,7 +1,7 @@
 name: kmdb
 description:
   A local-first document database for Dart/Flutter with multi-device sync.
-version: 1.0.0
+version: 0.1.0
 repository: https://github.com/aurochs-kmesh/kmdb
 publish_to: none
 
