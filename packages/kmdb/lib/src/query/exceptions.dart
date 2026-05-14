@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'package:kmdb_schema/schema.dart' show SchemaViolation;
-
-export 'package:kmdb_schema/schema.dart' show SchemaViolation;
+import 'package:betto_schema/schema.dart' show SchemaViolation;
 
 /// Thrown by [KmdbCollection] write methods when a document fails validation
 /// against the collection's registered [CollectionSchema].
