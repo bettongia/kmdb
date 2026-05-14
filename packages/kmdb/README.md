@@ -2,12 +2,12 @@
 
 A local-first document database for Dart and Flutter.
 
-KMDB provides a typed, reactive query API over a Log-Structured Merge Tree
-(LSM) storage engine, with multi-device sync via commodity cloud storage
-(Google Drive, iCloud) — no central server required. The architecture treats
-immutable SSTables as the natural sync unit: file creation is atomic in cloud
-storage, file mutation is not. Sync-safety is a first-class architectural
-requirement, not an incidental benefit.
+KMDB provides a typed, reactive query API over a Log-Structured Merge Tree (LSM)
+storage engine, with multi-device sync via commodity cloud storage (Google
+Drive, iCloud) — no central server required. The architecture treats immutable
+SSTables as the natural sync unit: file creation is atomic in cloud storage,
+file mutation is not. Sync-safety is a first-class architectural requirement,
+not an incidental benefit.
 
 This is the **core** library package. See the [project README](../../README.md)
 for the full feature list, design notes, and worked examples, and the
@@ -81,18 +81,17 @@ package's own SemVer commitments.
 
 ## Platform support
 
-| Platform | Status |
-| :------- | :----- |
-| macOS, Linux, Windows (native) | Full support |
-| iOS, Android (Flutter) | Full support |
-| Web (Wasm/JS) | Read-only against native-written stores; Zstd values throw `UnsupportedError` (see §5) |
+| Platform                       | Status                                                                                 |
+| :----------------------------- | :------------------------------------------------------------------------------------- |
+| macOS, Linux, Windows (native) | Full support                                                                           |
+| iOS, Android (Flutter)         | Full support                                                                           |
+| Web (Wasm/JS)                  | Read-only against native-written stores; Zstd values throw `UnsupportedError` (see §5) |
 
 ## Documentation
 
 - [Project README](../../README.md) — overview and worked examples.
 - [Specification](../../docs/spec/) — Pandoc-rendered authoritative spec.
-- [API reference](https://aurochs-kmesh.github.io/kmdb/api/) — generated from
-  doc comments via `dart doc`.
+- API reference — generated from doc comments via `dart doc`.
 
 ## License
 

@@ -18,7 +18,6 @@ import 'package:kmdb/kmdb.dart';
 import 'package:kmdb_cli/src/commands/command.dart';
 import 'package:kmdb_cli/src/commands/remote_command.dart';
 import 'package:kmdb/kmdb_config.dart';
-import 'package:kmdb_cli/src/config/remote_config.dart';
 import 'package:test/test.dart';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
