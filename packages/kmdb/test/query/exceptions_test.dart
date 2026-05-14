@@ -12,7 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'package:kmdb/src/query/exceptions.dart';
+import 'package:betto_schema/schema.dart' show SchemaViolation;
+import 'package:kmdb/kmdb.dart'
+    show
+        DocumentAlreadyExistsException,
+        DocumentNotFoundException,
+        StaleIndexException,
+        ReservedFieldException,
+        ReservedIndexPathException,
+        SchemaValidationException,
+        IndexRebuildEvent;
 import 'package:test/test.dart';
 
 void main() {
