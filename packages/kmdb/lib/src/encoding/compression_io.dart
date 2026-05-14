@@ -21,7 +21,7 @@
 
 import 'dart:typed_data';
 
-import 'package:kmdb_zstd/zstd.dart';
+import 'package:betto_zstd/zstd.dart' show ZstdSimple;
 
 import 'compression_flag.dart';
 

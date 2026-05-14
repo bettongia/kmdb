@@ -7,7 +7,6 @@ environment:
 workspace:
   - packages/kmdb
   - packages/kmdb_cli
-  - packages/kmdb_zstd
   - packages/kmdb_ui
   - packages/kmdb_tokenizer_icu
   - packages/kmdb_inferencing
@@ -26,6 +25,8 @@ dependency_overrides:
   # (requires ^1.18.2) and flutter_test from sdk (pins 1.17.0). This override
   # allows the non-Flutter packages to build while keeping Flutter UI tests working.
   meta: ^1.18.2
+  betto_zstd:
+    path: ../zstd
   betto_builder_tools:
     path: ../builder_tools
 
