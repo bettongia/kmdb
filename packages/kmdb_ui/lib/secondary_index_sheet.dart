@@ -250,10 +250,7 @@ class _CreateIndexDialogState extends State<_CreateIndexDialog> {
           onPressed: () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),
-        FilledButton(
-          onPressed: _submit,
-          child: const Text('Create'),
-        ),
+        FilledButton(onPressed: _submit, child: const Text('Create')),
       ],
     );
   }
@@ -291,11 +288,12 @@ class _IndexTileState extends State<_IndexTile> {
       widget.collectionName,
       widget.path,
     );
-    if (mounted)
+    if (mounted) {
       setState(() {
         _state = state;
         _loading = false;
       });
+    }
   }
 
   @override

@@ -574,8 +574,9 @@ class AppProvider with ChangeNotifier {
 
     try {
       final raw = jsonDecode(jsonString);
-      if (raw is! Map<String, dynamic>)
+      if (raw is! Map<String, dynamic>) {
         return 'Document must be a JSON object.';
+      }
       db.schemaManager.validate(collection, raw);
       return null;
     } catch (e) {
