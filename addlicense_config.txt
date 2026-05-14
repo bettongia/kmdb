@@ -1,5 +1,5 @@
 -l=apache
--c="The KMDB Authors"
+-c="The Authors"
 --ignore="**/*.yml"
 --ignore="**/*.yaml"
 --ignore="**/*.xml"
