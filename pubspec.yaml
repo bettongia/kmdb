@@ -13,7 +13,6 @@ workspace:
   - packages/kmdb_inferencing
   - packages/kmdb_lexical
   - packages/kmdb_schema
-  - packages/kmdb_tooling
   - packages/kmdb_mimeinfo
 
 dev_dependencies:
@@ -27,6 +26,8 @@ dependency_overrides:
   # (requires ^1.18.2) and flutter_test from sdk (pins 1.17.0). This override
   # allows the non-Flutter packages to build while keeping Flutter UI tests working.
   meta: ^1.18.2
+  betto_builder_tools:
+    path: ../builder_tools
 
 melos:
   scripts:
