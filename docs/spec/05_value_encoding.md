@@ -47,7 +47,7 @@ Each stored value is prefixed with a 1-byte compression flag:
 | Flag   | Algorithm | Platform       | Notes                                                              |
 | :----- | :-------- | :------------- | :----------------------------------------------------------------- |
 | `0x00` | None      | All            | Used when value is small, already compressed, or written on web.   |
-| `0x01` | Zstd      | Native (FFI)   | Level 3. Via `kmdb_zstd` (compiles libzstd from source via `native_toolchain_c`). |
+| `0x01` | Zstd      | Native (FFI)   | Level 3. Via `betto_zstd` (compiles libzstd from source via `native_toolchain_c`). |
 
 Any other flag byte is rejected with `ArgumentError` — unknown flags indicate
 data written by a future version of KMDB or silent corruption.
@@ -67,7 +67,7 @@ between native and web clients requires the web client to operate in a
 native-primary setup where it only reads documents it wrote itself.
 
 Cross-native reads are fully transparent: any native device can decompress any
-other native device's Zstd values because `kmdb_zstd` produces standard Zstd
+other native device's Zstd values because `betto_zstd` produces standard Zstd
 frames.
 
 ## CBOR Boundary

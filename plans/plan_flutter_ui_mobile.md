@@ -32,13 +32,13 @@ Scope constraints carried over from the desktop plan:
 
 ## Open questions
 
-- [ ] **`kmdb_zstd` on iOS arm64**: The Zstd FFI package uses
+- [ ] **`betto_zstd` on iOS arm64**: The Zstd FFI package uses
       `native_toolchain_c` (`CBuilder.library`, `LinkModePreference.dynamic`).
       Can it produce a valid `.dylib`/`.a` for iOS arm64 via Dart Native Assets?
       Run `flutter build ios --no-codesign` and check for link errors. **This is
       the gating question — do not proceed with iOS work until answered.**
 
-- [ ] **`kmdb_zstd` on Android arm64**: Same question for Android. Run
+- [ ] **`betto_zstd` on Android arm64**: Same question for Android. Run
       `flutter build apk` and check the Gradle/NDK build output.
 
 - [ ] **`kmdb_tokenizer_icu` on iOS**: The package loads `libicucore.dylib` on
@@ -77,7 +77,7 @@ Scope constraints carried over from the desktop plan:
 | Component                             | iOS           | Android       | Notes                                                              |
 | :------------------------------------ | :------------ | :------------ | :----------------------------------------------------------------- |
 | `kmdb` core (pure Dart)               | Yes           | Yes           | No platform code in core                                           |
-| `kmdb_zstd` (FFI, native_toolchain_c) | Unknown       | Unknown       | **Gating question** — needs build validation                       |
+| `betto_zstd` (FFI, native_toolchain_c) | Unknown       | Unknown       | **Gating question** — needs build validation                       |
 | `kmdb_tokenizer_icu`                  | Likely        | Likely        | Branches on `Platform.isIOS`/`isAndroid`; needs runtime test       |
 | `kmdb_inferencing` (ONNX Runtime)     | No            | Yes           | iOS path throws `UnsupportedError`                                 |
 | `file_picker` (directory picking)     | Limited       | Limited       | Mobile pickers are file-not-directory oriented; UX redesign needed |
@@ -122,10 +122,10 @@ mobile database path UX, and suppressing unsupported features per platform.
       `flutter create --platform ios,android .` (run from `packages/kmdb_ui/`).
       Check in the generated shell.
 
-- [ ] Attempt `flutter build ios --no-codesign` and record whether `kmdb_zstd`
+- [ ] Attempt `flutter build ios --no-codesign` and record whether `betto_zstd`
       and `kmdb_tokenizer_icu` link successfully.
 
-- [ ] Attempt `flutter build apk` and record whether `kmdb_zstd` and
+- [ ] Attempt `flutter build apk` and record whether `betto_zstd` and
       `kmdb_tokenizer_icu` link and load successfully.
 
 - [ ] Run a minimal smoke test on a real iOS device (simulator may suppress FFI
@@ -134,7 +134,7 @@ mobile database path UX, and suppressing unsupported features per platform.
 
 - [ ] Run the same smoke test on an Android device.
 
-- [ ] **Decision gate**: If `kmdb_zstd` fails to link on iOS, either (a) disable
+- [ ] **Decision gate**: If `betto_zstd` fails to link on iOS, either (a) disable
       compression on iOS (Zstd is optional — the engine can store uncompressed
       values) or (b) defer iOS support. Document the decision before continuing.
 

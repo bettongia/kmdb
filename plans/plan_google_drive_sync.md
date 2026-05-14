@@ -21,7 +21,7 @@ This plan covers **Google Drive only**. GCS is a separate work item.
 ## Open questions
 
 - [x] **Package location** — new `packages/kmdb_google_drive` package (mirrors
-  `kmdb_zstd` / `kmdb_tokenizer_icu` pattern). Heavy OAuth dependencies stay
+  `betto_zstd` / `kmdb_tokenizer_icu` pattern). Heavy OAuth dependencies stay
   out of core `kmdb`; consumers opt in explicitly.
 
 - [x] **Authentication approach** — the adapter accepts a pre-built `AuthClient`
@@ -133,7 +133,7 @@ The adapter will cache folder IDs in memory to avoid repeated metadata lookups.
 
 ### Package placement decision
 
-Following the `kmdb_zstd` / `kmdb_tokenizer_icu` pattern, a new
+Following the `betto_zstd` / `kmdb_tokenizer_icu` pattern, a new
 `packages/kmdb_google_drive` package is the right home. It:
 - Keeps heavy OAuth deps out of core `kmdb`
 - Allows separate versioning and optional inclusion
