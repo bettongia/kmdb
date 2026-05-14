@@ -1,4 +1,4 @@
-// Copyright 2026 The KMDB Authors
+// Copyright 2026 The Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -247,10 +247,7 @@ class _ActionChip extends StatelessWidget {
           children: [
             Icon(icon, size: 12, color: color),
             const SizedBox(width: 3),
-            Text(
-              label,
-              style: TextStyle(fontSize: 11, color: color),
-            ),
+            Text(label, style: TextStyle(fontSize: 11, color: color)),
           ],
         ),
       ),
@@ -570,7 +567,8 @@ class _DocumentContentColumnState extends State<DocumentContentColumn> {
       child: Column(
         children: [
           AppBar(
-            leading: MediaQuery.of(context).size.width <
+            leading:
+                MediaQuery.of(context).size.width <
                     LayoutBreakpoints.multiColumn
                 ? IconButton(
                     icon: const Icon(Icons.arrow_back),
@@ -945,7 +943,8 @@ class DocumentDetailColumn extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           AppBar(
-            leading: MediaQuery.of(context).size.width <
+            leading:
+                MediaQuery.of(context).size.width <
                     LayoutBreakpoints.multiColumn
                 ? IconButton(
                     icon: const Icon(Icons.arrow_back),

@@ -11,4 +11,4 @@ PRODUCT_NAME = kmdb_ui
 PRODUCT_BUNDLE_IDENTIFIER = com.example.kmdbUi
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © The KMDB Authors - Licensed under the Apache License, Version 2.0.
+PRODUCT_COPYRIGHT = Copyright © The Authors - Licensed under the Apache License, Version 2.0.

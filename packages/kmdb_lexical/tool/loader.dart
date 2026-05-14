@@ -1,5 +1,5 @@
 /*
- Copyright 2026 The KMDB Authors
+ Copyright 2026 The Authors
 
  Licensed under the Apache License, Version 2.0 (the "License");
  you may not use this file except in compliance with the License.
@@ -17,11 +17,11 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:kmdb_tooling/loader.dart';
+import 'package:betto_builder_tools/loader.dart';
 import 'package:code_builder/code_builder.dart';
 
 final copyrightHeader = '''
- Copyright 2026 The KMDB Authors
+ Copyright 2026 The Authors
 
  Licensed under the Apache License, Version 2.0 (the "License");
  you may not use this file except in compliance with the License.
