@@ -72,7 +72,7 @@ present.
 ### 2.3 Extractor package naming
 
 Additional format extractors live in dedicated optional packages following the
-convention `kmdb_extractor_<name>`, analogous to `kmdb_zstd` and
+convention `kmdb_extractor_<name>`, analogous to `betto_zstd` and
 `kmdb_inferencing`. Examples:
 
 | Package                   | Format            |
@@ -453,7 +453,7 @@ additional formats. Likely first candidates, in approximate priority order:
 - **`kmdb_extractor_pdf`** — the most complex case. No robust pure-Dart PDF text
   extraction library currently exists. Options include: best-effort with the
   `pdf` package; a native FFI wrapper around poppler or pdfium (similar to how
-  `kmdb_zstd` wraps libzstd); or an external process (`pdftotext`) on desktop.
+  `betto_zstd` wraps libzstd); or an external process (`pdftotext`) on desktop.
   This work is analogous to what Apache Tika provides in Java — a structured,
   metadata-aware extraction pipeline that goes beyond raw text. A separate
   proposal should evaluate these options before implementation.

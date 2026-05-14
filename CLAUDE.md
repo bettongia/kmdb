@@ -43,14 +43,16 @@ only; all source code lives under `packages/`:
 packages/
   kmdb/                — the core library (lib/, test/, example/, benchmark/)
   kmdb_cli/            — the CLI tool (bin/, lib/, test/)
-  kmdb_zstd/           — Zstd FFI compression provider
   kmdb_ui/             — Flutter desktop browser
   kmdb_tokenizer_icu/  — ICU FFI word tokenizer for lexical search
   kmdb_inferencing/    — ONNX Runtime + BGE embedding model for semantic search
   kmdb_lexical/        — lexical utilities (stemmer, stopwords) used by FTS
   kmdb_mimeinfo/       — FreeDesktop shared-mime-info file-type identification
-  kmdb_schema/         — JSON schema validation
   kmdb_tooling/        — dev_loader helpers (code-generation tooling)
+
+External packages (separate repos, path-overridden in pubspec.yaml):
+  betto_zstd           — Zstd FFI compression provider (https://github.com/bettongia/zstd)
+  betto_schema         — JSON schema validation (https://github.com/bettongia/schema)
 ```
 
 Run `dart pub get` once from the workspace root to resolve dependencies for all

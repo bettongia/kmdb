@@ -66,7 +66,7 @@ packages/
   |
   kmdb_cli/                — CLI tool (bin/, lib/, test/)
   |
-  kmdb_zstd/               — Zstd FFI compression provider
+  betto_zstd/              — Zstd FFI compression provider (external repo)
   |                          (native only; kmdb depends on it conditionally)
   |
   kmdb_ui/                 — Flutter UI widgets
@@ -104,7 +104,7 @@ correct WASM targeting.
 | Feature             | Native (iOS/Android/macOS/Windows/Linux) | Web (OPFS)                 |
 | :------------------ | :--------------------------------------- | :------------------------- |
 | Core LSM engine     | ✓                                        | ✓                          |
-| Zstd compression    | ✓ (FFI via kmdb_zstd)                    | ✓ (WASM fallback: Deflate) |
+| Zstd compression    | ✓ (FFI via betto_zstd)                   | ✓ (WASM fallback: Deflate) |
 | Sync                | ✓                                        | ✓                          |
 | Lexical text search | ✓                                        | ✗ (deferred)               |
 | Semantic search     | ✓ (ONNX via kmdb_inferencing)            | ✗ (deferred)               |
