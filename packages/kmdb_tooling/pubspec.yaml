@@ -1,7 +1,6 @@
 name: kmdb_tooling
 description: Helpful methods for loaders.
 version: 0.1.0
-repository: https://github.com/aurochs-kmesh/kmesh
 
 environment:
   sdk: ">=3.10.0 <4.0.0"

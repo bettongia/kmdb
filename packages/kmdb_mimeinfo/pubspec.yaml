@@ -1,7 +1,8 @@
 name: kmdb_mimeinfo
-description: Dart implementation of the FreeDesktop shared-mime-info database for file type identification.
+description:
+  Dart implementation of the FreeDesktop shared-mime-info database for file type
+  identification.
 version: 0.1.0
-repository: https://github.com/aurochs-kmesh/kmesh
 
 environment:
   sdk: ">=3.10.0 <4.0.0"
