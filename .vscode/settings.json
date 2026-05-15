@@ -1,4 +1,5 @@
 {
   "makefile.configureOnOpen": false,
-  "copyrightInserter.holder": "The Authors"
+  "copyrightInserter.holder": "The Authors",
+  "dart.analysisExcludedFolders": [".worktrees", ".claude/worktrees"]
 }
