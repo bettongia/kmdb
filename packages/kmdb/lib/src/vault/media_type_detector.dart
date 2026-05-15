@@ -14,18 +14,18 @@
 
 import 'dart:typed_data';
 
-import 'package:betto_registry/mimeinfo.dart' as kmdb_mimeinfo;
+import 'package:betto_registry/mimeinfo.dart' as betto_registry;
 
 /// Abstract interface for detecting the MIME type of raw bytes.
 ///
 /// The vault subsystem uses [MediaTypeDetector] at ingestion time to determine
 /// the canonical `mediaType` stored in `manifest.json`. A concrete
 /// implementation delegates to the FreeDesktop shared-mime-info database via
-/// `package:kmdb_mediatype`.
+/// `package:betto_registry`.
 ///
 /// ## Design
 ///
-/// The interface returns the full [MatchList] from `kmdb_mediatype`, giving
+/// The interface returns the full [MatchList] from `betto_registry`, giving
 /// callers access to both `MatchList.bestMatch` (the top-priority type) and
 /// `MatchList.candidates` (all viable types in descending priority order).
 ///
@@ -73,5 +73,5 @@ final class FreedesktopMediaTypeDetector implements MediaTypeDetector {
 
   @override
   Iterable<String> detect(Uint8List bytes, {String? fileName}) =>
-      kmdb_mimeinfo.detect(bytes: bytes, fileName: fileName).candidates;
+      betto_registry.detect(bytes: bytes, fileName: fileName).candidates;
 }
