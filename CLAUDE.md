@@ -47,12 +47,12 @@ packages/
   kmdb_tokenizer_icu/  — ICU FFI word tokenizer for lexical search
   kmdb_inferencing/    — ONNX Runtime + BGE embedding model for semantic search
   kmdb_lexical/        — lexical utilities (stemmer, stopwords) used by FTS
-  kmdb_mimeinfo/       — FreeDesktop shared-mime-info file-type identification
   kmdb_tooling/        — dev_loader helpers (code-generation tooling)
 
 External packages (separate repos, path-overridden in pubspec.yaml):
   betto_zstd           — Zstd FFI compression provider (https://github.com/bettongia/zstd)
   betto_schema         — JSON schema validation (https://github.com/bettongia/schema)
+  betto_registry       — FreeDesktop shared-mime-info file-type identification (https://github.com/bettongia/registry)
 ```
 
 Run `dart pub get` once from the workspace root to resolve dependencies for all

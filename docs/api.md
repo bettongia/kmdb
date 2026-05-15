@@ -8,8 +8,6 @@ toc-title: "Contents"
 - [kmdb_cli](api-docs/kmdb_cli/api/index.html)
 - [kmdb_inferencing](api-docs/kmdb_inferencing/api/index.html)
 - [kmdb_lexical](api-docs/kmdb_lexical/api/index.html)
-- [kmdb_mimeinfo](api-docs/kmdb_mimeinfo/api/index.html)
 - [kmdb_tokenizer_icu](api-docs/kmdb_tokenizer_icu/api/index.html)
-- [kmdb_tooling](api-docs/kmdb_tooling/api/index.html)
 
 ---

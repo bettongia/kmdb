@@ -81,10 +81,10 @@ test.log: packages/**
 	melos test --no-select 2>&1 | tee test.log
 
 
-e2e_test: e2e_test.log
+e2e_test: e2e_test.log packages/*/**
 .PHONY: e2e_test
 
-e2e_test.log: packages/**
+e2e_test.log: packages/*/**
 	melos e2e-test 2>&1 | tee e2e_test.log
 
 checks: coverage.log license_check
