@@ -73,7 +73,6 @@ export 'src/query/exceptions.dart'
         ReservedFieldException,
         ReservedIndexPathException,
         SchemaValidationException,
-        SchemaViolation,
         StaleIndexException;
 export 'src/query/collection_schema.dart' show CollectionSchema;
 export 'src/query/schema/schema_manager.dart' show SchemaManager;
