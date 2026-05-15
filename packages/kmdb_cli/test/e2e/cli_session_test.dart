@@ -93,11 +93,11 @@ void main() {
         final flush = random.nextBool();
 
         final note = NoteGenerator.generate(i, random);
-        final noteResult = await harness.put('notes', note, flush: flush);
+        final noteResult = await harness.insert('notes', note, flush: flush);
         if (i % 10 == 0) capturedNotes.add(noteResult);
 
         final reading = ReadingListGenerator.generate(i, random);
-        final readingResult = await harness.put(
+        final readingResult = await harness.insert(
           'reading_list',
           reading,
           flush: flush,
@@ -105,7 +105,7 @@ void main() {
         if (i % 10 == 0) capturedReading.add(readingResult);
 
         final shopping = ShoppingListGenerator.generate(i, random);
-        final shoppingResult = await harness.put(
+        final shoppingResult = await harness.insert(
           'shopping_list',
           shopping,
           flush: flush,
@@ -244,22 +244,22 @@ class CliHarness {
     return Process.run(exePath, allArgs);
   }
 
-  Future<Map<String, dynamic>> put(
+  Future<Map<String, dynamic>> insert(
     String ns,
     Map<String, dynamic> doc, {
     bool flush = true,
   }) async {
     final result = await run([
-      'put',
+      'insert',
       ns,
       '--value',
       jsonEncode(doc),
     ], flush: flush);
     if (result.exitCode != 0) {
-      throw Exception('put failed: ${result.stderr}');
+      throw Exception('insert failed: ${result.stderr}');
     }
     final output = jsonDecode(result.stdout as String);
-    // put echoes an array of inserted documents
+    // insert echoes an array of inserted documents
     return (output as List).first as Map<String, dynamic>;
   }
 
