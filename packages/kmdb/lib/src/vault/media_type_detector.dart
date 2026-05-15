@@ -14,7 +14,7 @@
 
 import 'dart:typed_data';
 
-import 'package:kmdb_mimeinfo/registry.dart' as kmdb_mimeinfo;
+import 'package:betto_registry/mimeinfo.dart' as kmdb_mimeinfo;
 
 /// Abstract interface for detecting the MIME type of raw bytes.
 ///
