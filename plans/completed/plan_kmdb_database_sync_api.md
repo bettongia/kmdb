@@ -1,6 +1,6 @@
 # KmdbDatabase Sync API
 
-**Status**: Investigated
+**Status**: Complete
 
 **PR link**: {A link to the PR submitted for this plan}
 
@@ -196,9 +196,9 @@ uses the nullable approach.
 
 ### Phase 1 — `KmdbDatabase.open()` device ID self-management
 
-- [ ] Change `KmdbDatabase.open()` `deviceId` parameter from `String` (default
+- [x] Change `KmdbDatabase.open()` `deviceId` parameter from `String` (default
       `'00000000'`) to `String?` (default `null`).
-- [ ] After `KvStoreImpl.open()`, if `deviceId` is null, call
+- [x] After `KvStoreImpl.open()`, if `deviceId` is null, call
       `store.ensureDeviceId()` and use the result for subsequent SSTable naming
       by re-opening with the stable ID — **or** by calling
       `store.reassignDeviceId()` if the initial open used the engine default.
@@ -215,9 +215,9 @@ uses the nullable approach.
       - **Decision**: expose `String get deviceId` on `KvStoreImpl` (package-internal,
         annotated `@internal`). Call `ensureDeviceId()` during open when `deviceId`
         parameter is null. Use `_store.deviceId` inside `sync()` / `push()` / `pull()`.
-- [ ] Update all existing tests that pass `deviceId: '00000000'` to continue
+- [x] Update all existing tests that pass `deviceId: '00000000'` to continue
       passing it explicitly; no behaviour change for tests.
-- [ ] Update `DatabaseOpener` to pass `deviceId: null` and remove its own
+- [x] Update `DatabaseOpener` to pass `deviceId: null` and remove its own
       `ensureDeviceId()` call (it will now happen inside `open()`).
       - **Wait**: `DatabaseOpener` does a two-phase open specifically because
         `ensureDeviceId()` writes to `$meta`, and that write must use the correct
@@ -234,7 +234,7 @@ uses the nullable approach.
         sync identity must call this before the first `push()`. The harness
         will call `db.ensureDeviceId()` during its `CreateDb` action.
         The CLI's `DatabaseOpener` is already correct and needs no change.
-- [ ] Update doc comment on `KmdbDatabase.open()` `deviceId` parameter to
+- [x] Update doc comment on `KmdbDatabase.open()` `deviceId` parameter to
       explain that `'00000000'` is a test sentinel and production callers should
       call `db.ensureDeviceId()` (or use `DatabaseOpener`).
 
@@ -320,15 +320,15 @@ Future<String> ensureDeviceId() => _store.ensureDeviceId();
 
 In `sync_command.dart`, `push_command.dart`, `pull_command.dart`:
 
-- [ ] Replace the manual `storeInfo()`, adapter construction, `SyncEngine`
+- [x] Replace the manual `storeInfo()`, adapter construction, `SyncEngine`
       construction, and `engine.push()` / `engine.pull()` calls with calls to
       `ctx.db.sync()` / `ctx.db.push()` / `ctx.db.pull()`.
-- [ ] The CLI commands must still call `SyncHelpers.resolveRemote()` to resolve
+- [x] The CLI commands must still call `SyncHelpers.resolveRemote()` to resolve
       the `SyncStorageAdapter` (this is CLI-specific business logic).
-- [ ] The CLI commands must still call `SyncHelpers.purgeOrphanedIndexes()` after
+- [x] The CLI commands must still call `SyncHelpers.purgeOrphanedIndexes()` after
       sync (this is CLI-specific post-sync cleanup; it is not part of
       `KmdbDatabase`).
-- [ ] Verify that `CommandContext` exposes `ctx.db` — check whether commands
+- [x] Verify that `CommandContext` exposes `ctx.db` — check whether commands
       currently use `ctx.store` directly and whether a `ctx.db` accessor is
       available. If not, add one. The `KvStore` reference in commands should be
       replaced with `KmdbDatabase` calls where possible. For methods that
@@ -342,27 +342,49 @@ must still work; pass the resolved set to the `syncNamespaces` parameter.
 
 ### Phase 5 — Tests
 
-- [ ] Unit tests for `KmdbDatabase.sync()` / `push()` / `pull()` using
+- [x] Unit tests for `KmdbDatabase.sync()` / `push()` / `pull()` using
       `MemoryStorageAdapter` (local) and `MemorySyncAdapter` (cloud).
-- [ ] Test that `syncNamespaces` defaults to all registered user namespaces.
-- [ ] Test that `syncRoot` is forwarded correctly (verify paths in
+- [x] Test that `syncNamespaces` defaults to all registered user namespaces.
+- [x] Test that `syncRoot` is forwarded correctly (verify paths in
       `MemorySyncAdapter` contain the expected prefix).
-- [ ] Test that `ConsolidationConfig` is forwarded correctly by confirming
+- [x] Test that `ConsolidationConfig` is forwarded correctly by confirming
       consolidation fires at the configured threshold.
-- [ ] Test `ensureDeviceId()` — verify that calling it updates `storeInfo().deviceId`
+- [x] Test `ensureDeviceId()` — verify that calling it updates `storeInfo().deviceId`
       from `'00000000'` to a valid 8-char hex string.
-- [ ] Regression test that CLI sync commands still work end-to-end (existing
+- [x] Regression test that CLI sync commands still work end-to-end (existing
       CLI e2e tests should cover this after the refactor).
-- [ ] Maintain ≥ 90% coverage for the `kmdb` package after changes.
+- [x] Maintain ≥ 90% coverage for the `kmdb` package after changes.
 
 ### Phase 6 — Documentation
 
-- [ ] Update `docs/spec/12_sync.md` to document the new `KmdbDatabase` sync API.
-- [ ] Update `docs/spec/13_query_api.md` to include `sync()`, `push()`,
+- [x] Update `docs/spec/12_sync.md` to document the new `KmdbDatabase` sync API.
+- [x] Update `docs/spec/13_query_api.md` to include `sync()`, `push()`,
       `pull()`, and `ensureDeviceId()` in the `KmdbDatabase` public API table.
-- [ ] Add example to `KmdbDatabase` class doc comment showing sync usage.
+- [x] Add example to `KmdbDatabase` class doc comment showing sync usage.
 
 ## Summary
 
-{Dot points highlighting the work undertaken — to be completed after
-implementation}
+- Added `sync()`, `push()`, `pull()`, and `ensureDeviceId()` public methods to
+  `KmdbDatabase`, making sync a first-class feature of the Query Layer API
+  (previously only accessible via the CLI's internal `SyncEngine` construction).
+- Added a private `_buildSyncEngine()` helper to `KmdbDatabase` that resolves
+  `syncNamespaces`, `dbDir`, and `deviceId` from the store, and constructs the
+  `SyncEngine` with all required parameters.
+- Fixed a path-construction bug in `SyncEngine._remoteSstDir` and
+  `_remoteHwmDir`: when `syncRoot` is empty, the computed paths had a leading
+  slash (`'/sstables'` instead of `'sstables'`), which broke exact-string-match
+  adapters like `MemorySyncAdapter` while working incidentally on the filesystem
+  (where `rootPath//sstables/` is collapsed). Fixed by returning the bare name
+  when `syncRoot.isEmpty`.
+- Applied the same empty-root fix to `ConsolidationCoordinator._leasePath` and
+  `_sstablesDir` for consistency.
+- Added 14 unit tests in `kmdb/test/query/kmdb_database_sync_test.dart` covering
+  `ensureDeviceId`, `sync`, `push`, `pull`, default `syncNamespaces`, `syncRoot`
+  path prefixing, and `ConsolidationConfig` forwarding — all using
+  `MemoryStorageAdapter` and `MemorySyncAdapter` so no real filesystem is needed.
+- Fixed a test design issue: tests that write with a specific key then later
+  retrieve by that key must use `rawCollection.put()` (which honours the `_id`
+  field) rather than `insert()` (which always generates a fresh key).
+- Fixed a test isolation issue: tests that open two concurrent databases must use
+  distinct `path` values (e.g. `'/dba'` and `'/dbb'`) because
+  `MemoryStorageAdapter` uses a shared static lock table keyed by path string.

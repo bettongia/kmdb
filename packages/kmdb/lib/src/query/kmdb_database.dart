@@ -16,11 +16,15 @@ import '../cache/cache_layer.dart';
 import '../engine/kvstore/kv_store.dart';
 import '../engine/kvstore/kv_store_impl.dart';
 import '../engine/platform/storage_adapter_interface.dart';
+import '../engine/platform/storage_adapter_native.dart';
 import '../search/embedding_model.dart';
 import '../search/fts_index_definition.dart';
 import '../search/lexical/fts_manager.dart';
 import '../search/semantic/vec_manager.dart';
 import '../search/vec_index_definition.dart';
+import '../sync/consolidation_config.dart';
+import '../sync/sync_engine.dart';
+import '../sync/sync_storage_adapter.dart';
 import '../vault/vault_gc.dart';
 import '../vault/vault_recovery.dart';
 import '../vault/vault_ref_interceptor.dart';
@@ -226,8 +230,10 @@ final class KmdbDatabase {
   /// recovery runs during open. If `null`, vault features are disabled.
   ///
   /// [deviceId] must be an 8-character lowercase hex string. Defaults to
-  /// `'00000000'` for tests; production code should supply a stable per-device
-  /// identifier via `DeviceId.load`.
+  /// `'00000000'`, which is a test sentinel — SSTable files written with this
+  /// ID are not meaningful for multi-device sync. Production callers should
+  /// call [ensureDeviceId] after opening the database (or use `DatabaseOpener`
+  /// in the CLI, which handles this automatically).
   ///
   /// Throws [LockException] if another process holds the database lock.
   static Future<KmdbDatabase> open({
@@ -336,6 +342,158 @@ final class KmdbDatabase {
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
+
+  /// Loads or generates a stable device identifier for this database instance.
+  ///
+  /// Reads the `DEVICE_ID` file in the database directory. If the file does not
+  /// exist, a new random 8-character lowercase hex ID is generated and persisted
+  /// to `$meta`. Subsequent calls return the same ID without re-reading the
+  /// file.
+  ///
+  /// Call this once after [open] in production code before the first [sync],
+  /// [push], or [pull]. Callers that omit this call will use the [deviceId]
+  /// supplied at [open] time; the default `'00000000'` is only suitable for
+  /// tests and should not be used in production sync scenarios.
+  ///
+  /// Returns the 8-character lowercase hex device identifier.
+  ///
+  /// Example:
+  /// ```dart
+  /// final db = await KmdbDatabase.open(path: '/path/to/db', adapter: adapter);
+  /// final deviceId = await db.ensureDeviceId();
+  /// await db.sync(syncAdapter: myCloudAdapter);
+  /// ```
+  Future<String> ensureDeviceId() => _store.ensureDeviceId();
+
+  /// Flushes, pushes local SSTables to [syncAdapter], then pulls peer SSTables.
+  ///
+  /// [syncAdapter] is the remote sync storage backend. [syncRoot] is a path
+  /// prefix within the adapter (empty string means the adapter root, which is
+  /// correct for single-database setups). [syncNamespaces] restricts which user
+  /// collections participate in sync; when `null`, all registered user
+  /// collections (non-`$` namespaces) are included. [localAdapter] overrides
+  /// the local [StorageAdapter] used to read local SSTables; when `null`, a
+  /// [StorageAdapterNative] is constructed automatically. [consolidationConfig]
+  /// controls the peer-file consolidation threshold and lease parameters;
+  /// defaults to production values.
+  ///
+  /// Equivalent to calling [push] then [pull] in sequence.
+  ///
+  /// **Native-only.** Sync requires direct SSTable file access via [dart:io].
+  /// On web this method throws [UnsupportedError] at the point where the
+  /// [StorageAdapterNative] is constructed (or immediately if [localAdapter] is
+  /// supplied but is itself unsupported on web).
+  ///
+  /// Example:
+  /// ```dart
+  /// await db.sync(
+  ///   syncAdapter: LocalDirectoryAdapter('/path/to/sync-folder'),
+  /// );
+  /// ```
+  Future<void> sync({
+    required SyncStorageAdapter syncAdapter,
+    String syncRoot = '',
+    Set<String>? syncNamespaces,
+    StorageAdapter? localAdapter,
+    ConsolidationConfig consolidationConfig = const ConsolidationConfig(),
+  }) async {
+    final engine = await _buildSyncEngine(
+      syncAdapter: syncAdapter,
+      syncRoot: syncRoot,
+      syncNamespaces: syncNamespaces,
+      localAdapter: localAdapter,
+      consolidationConfig: consolidationConfig,
+    );
+    await engine.sync();
+  }
+
+  /// Flushes and uploads local SSTables to [syncAdapter].
+  ///
+  /// See [sync] for full parameter documentation.
+  ///
+  /// **Native-only.** See [sync] for web behaviour.
+  Future<void> push({
+    required SyncStorageAdapter syncAdapter,
+    String syncRoot = '',
+    Set<String>? syncNamespaces,
+    StorageAdapter? localAdapter,
+    ConsolidationConfig consolidationConfig = const ConsolidationConfig(),
+  }) async {
+    final engine = await _buildSyncEngine(
+      syncAdapter: syncAdapter,
+      syncRoot: syncRoot,
+      syncNamespaces: syncNamespaces,
+      localAdapter: localAdapter,
+      consolidationConfig: consolidationConfig,
+    );
+    await engine.push();
+  }
+
+  /// Downloads peer SSTables from [syncAdapter] and ingests them locally.
+  ///
+  /// See [sync] for full parameter documentation.
+  ///
+  /// **Native-only.** See [sync] for web behaviour.
+  Future<void> pull({
+    required SyncStorageAdapter syncAdapter,
+    String syncRoot = '',
+    Set<String>? syncNamespaces,
+    StorageAdapter? localAdapter,
+    ConsolidationConfig consolidationConfig = const ConsolidationConfig(),
+  }) async {
+    final engine = await _buildSyncEngine(
+      syncAdapter: syncAdapter,
+      syncRoot: syncRoot,
+      syncNamespaces: syncNamespaces,
+      localAdapter: localAdapter,
+      consolidationConfig: consolidationConfig,
+    );
+    await engine.pull();
+  }
+
+  /// Constructs a [SyncEngine] with resolved [syncNamespaces], [dbDir], and
+  /// [deviceId] from the store.
+  ///
+  /// When [syncNamespaces] is `null`, all registered user namespaces (those not
+  /// starting with `$`) are resolved via [KvStore.listNamespaces].
+  ///
+  /// When [localAdapter] is `null`, a [StorageAdapterNative] is constructed.
+  /// This construction throws [UnsupportedError] on web, which propagates to
+  /// the caller as-is — making [sync], [push], and [pull] effectively
+  /// native-only in the same way that [SyncEngine] itself is native-only.
+  Future<SyncEngine> _buildSyncEngine({
+    required SyncStorageAdapter syncAdapter,
+    required String syncRoot,
+    required Set<String>? syncNamespaces,
+    required StorageAdapter? localAdapter,
+    required ConsolidationConfig consolidationConfig,
+  }) async {
+    // Resolve namespaces: use caller-supplied set or list all user namespaces.
+    final resolvedNamespaces =
+        syncNamespaces ??
+        (await _store.listNamespaces())
+            .where((ns) => !ns.startsWith(r'$'))
+            .toSet();
+
+    // Retrieve the database directory and stable device ID from the store.
+    final info = await _store.storeInfo();
+
+    // Resolve local adapter: default to StorageAdapterNative (native-only).
+    // On web, StorageAdapterNative() throws UnsupportedError, which bubbles up
+    // to the caller of sync/push/pull — the intended behaviour.
+    final resolvedLocalAdapter = localAdapter ?? StorageAdapterNative();
+
+    return SyncEngine(
+      store: _store,
+      cloudAdapter: syncAdapter,
+      localAdapter: resolvedLocalAdapter,
+      deviceId: info.deviceId,
+      dbDir: info.dbDir,
+      syncRoot: syncRoot,
+      syncNamespaces: resolvedNamespaces,
+      consolidationConfig: consolidationConfig,
+    );
+  }
 
   /// Returns a typed collection for [name] using [codec] for encode/decode.
   ///

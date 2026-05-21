@@ -206,10 +206,20 @@ final class ConsolidationCoordinator {
   ConsolidationState get state => _state;
 
   /// Path to the lease file in the sync folder.
-  String get _leasePath => '$syncRoot/.consolidation-lease';
+  ///
+  /// When [syncRoot] is empty, the path is `'.consolidation-lease'` (no
+  /// leading slash). When [syncRoot] is non-empty, the path is
+  /// `'$syncRoot/.consolidation-lease'`. This avoids a leading-slash mismatch
+  /// in adapters that use exact string matching (e.g. [MemorySyncAdapter]).
+  String get _leasePath => syncRoot.isEmpty
+      ? '.consolidation-lease'
+      : '$syncRoot/.consolidation-lease';
 
   /// Path prefix for SSTable files in the sync folder.
-  String get _sstablesDir => '$syncRoot/sstables';
+  ///
+  /// Same empty-root handling as [_leasePath].
+  String get _sstablesDir =>
+      syncRoot.isEmpty ? 'sstables' : '$syncRoot/sstables';
 
   // ── Public API ─────────────────────────────────────────────────────────────
 

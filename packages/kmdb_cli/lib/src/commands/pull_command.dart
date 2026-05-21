@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'package:kmdb/kmdb.dart';
-
 import 'package:kmdb/kmdb_config.dart' show RemoteConfig;
 
 import '../config/remote_config.dart' show adapterFor;
@@ -72,9 +70,7 @@ final class PullCommand extends CliCommand {
     List<String> args,
     Map<String, dynamic> flags,
   ) async {
-    final storeInfo = await ctx.store.storeInfo();
-    final dbDir = storeInfo.dbDir;
-    final deviceId = storeInfo.deviceId;
+    final dbDir = (await ctx.store.storeInfo()).dbDir;
 
     // Resolve the remote configuration.
     final RemoteConfig remote;
@@ -97,19 +93,13 @@ final class PullCommand extends CliCommand {
       return false;
     }
 
-    final adapter = adapterFor(remote);
-    final engine = SyncEngine(
-      store: ctx.store,
-      cloudAdapter: adapter,
-      localAdapter: StorageAdapterNative(),
-      deviceId: deviceId,
-      dbDir: dbDir,
-      syncRoot: '',
-      syncNamespaces: collections,
-    );
+    final syncAdapter = adapterFor(remote);
 
     try {
-      await engine.pull();
+      await ctx.db.pull(
+        syncAdapter: syncAdapter,
+        syncNamespaces: collections,
+      );
     } catch (e) {
       ctx.writeError('pull failed: $e');
       return false;
@@ -120,6 +110,7 @@ final class PullCommand extends CliCommand {
     // `collections delete` to keep index entries and config in sync.
     await SyncHelpers.purgeOrphanedIndexes(ctx, dbDir);
 
+    final deviceId = (await ctx.store.storeInfo()).deviceId;
     ctx.out.writeln('pull: complete (device: $deviceId).');
     return true;
   }

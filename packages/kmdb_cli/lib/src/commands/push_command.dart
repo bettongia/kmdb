@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'package:kmdb/kmdb.dart';
-
 import '../config/remote_config.dart';
 import 'command.dart';
 import 'sync_helpers.dart';
@@ -72,9 +70,7 @@ final class PushCommand extends CliCommand {
     List<String> args,
     Map<String, dynamic> flags,
   ) async {
-    final storeInfo = await ctx.store.storeInfo();
-    final dbDir = storeInfo.dbDir;
-    final deviceId = storeInfo.deviceId;
+    final dbDir = (await ctx.store.storeInfo()).dbDir;
 
     // Resolve the remote configuration.
     final RemoteConfig remote;
@@ -102,29 +98,19 @@ final class PushCommand extends CliCommand {
       return true;
     }
 
-    // Flush the memtable so all recent writes are materialised as SSTables
-    // before we try to upload them.  Without this flush, data still in the
-    // memtable would be silently excluded from the push.
-    await ctx.store.flush();
-
-    final adapter = adapterFor(remote);
-    final engine = SyncEngine(
-      store: ctx.store,
-      cloudAdapter: adapter,
-      localAdapter: StorageAdapterNative(),
-      deviceId: deviceId,
-      dbDir: dbDir,
-      syncRoot: '',
-      syncNamespaces: collections,
-    );
+    final syncAdapter = adapterFor(remote);
 
     try {
-      await engine.push();
+      await ctx.db.push(
+        syncAdapter: syncAdapter,
+        syncNamespaces: collections,
+      );
     } catch (e) {
       ctx.writeError('push failed: $e');
       return false;
     }
 
+    final deviceId = (await ctx.store.storeInfo()).deviceId;
     ctx.out.writeln('push: complete (device: $deviceId).');
     return true;
   }

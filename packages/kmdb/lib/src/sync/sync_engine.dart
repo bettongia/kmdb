@@ -124,10 +124,20 @@ final class SyncEngine {
   String get _sstDir => '$_dbDir/sst';
 
   /// Remote SSTable directory path in the sync folder.
-  String get _remoteSstDir => '$_syncRoot/sstables';
+  ///
+  /// When [_syncRoot] is empty, the path is `'sstables'` (no leading slash).
+  /// When [_syncRoot] is non-empty, the path is `'$_syncRoot/sstables'`.
+  /// This avoids a leading-slash mismatch in adapters that use exact string
+  /// matching (e.g. [MemorySyncAdapter]), while remaining compatible with
+  /// filesystem adapters where a leading slash in a subpath is collapsed.
+  String get _remoteSstDir =>
+      _syncRoot.isEmpty ? 'sstables' : '$_syncRoot/sstables';
 
   /// Remote highwater directory path in the sync folder.
-  String get _remoteHwmDir => '$_syncRoot/highwater';
+  ///
+  /// Same empty-root handling as [_remoteSstDir].
+  String get _remoteHwmDir =>
+      _syncRoot.isEmpty ? 'highwater' : '$_syncRoot/highwater';
 
   /// Remote HWM file path for this device.
   String get _remoteHwmPath => '$_remoteHwmDir/$_deviceId.hwm';

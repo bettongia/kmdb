@@ -58,7 +58,8 @@ final db = await KmdbDatabase.open(
 
 `adapter` provides the platform file I/O backend (`StorageAdapter`).
 `deviceId` is an 8-character lowercase hex string identifying this device;
-production code should supply a stable value via `DeviceId.load`.
+production code should call `db.ensureDeviceId()` after `open()` to load or
+generate a stable value.
 
 Indexes are **declared, not built**. The `indexes` list registers dot-path
 definitions so the write interception path knows which fields to maintain. No
@@ -545,3 +546,19 @@ Field path resolution returns a `Missing` sentinel for fields that do not exist
 on a document. `isNull()` matches both `null` values and missing fields.
 `isNotNull()` requires the field to be present and non-null. This distinction
 is preserved through all filter composition.
+
+## Sync Methods
+
+Sync is a first-class feature of `KmdbDatabase`. See §12 for the full sync
+protocol. The public API surface:
+
+| Method | Signature | Description |
+| ------ | --------- | ----------- |
+| `ensureDeviceId` | `Future<String> ensureDeviceId()` | Load or generate the stable device identifier. Call once after `open()` on production devices before the first `push()`. |
+| `sync` | `Future<void> sync({required SyncStorageAdapter syncAdapter, String syncRoot, Set<String>? syncNamespaces, StorageAdapter? localAdapter, ConsolidationConfig consolidationConfig})` | Flush, push, then pull in one step. **Native-only.** |
+| `push` | `Future<void> push({required SyncStorageAdapter syncAdapter, String syncRoot, Set<String>? syncNamespaces, StorageAdapter? localAdapter, ConsolidationConfig consolidationConfig})` | Flush and upload local SSTables. **Native-only.** |
+| `pull` | `Future<void> pull({required SyncStorageAdapter syncAdapter, String syncRoot, Set<String>? syncNamespaces, StorageAdapter? localAdapter, ConsolidationConfig consolidationConfig})` | Download and ingest peer SSTables. **Native-only.** |
+
+All three sync methods default `syncNamespaces` to all registered user (non-`$`)
+collections when omitted. System namespaces are always excluded from sync
+regardless of this parameter.
