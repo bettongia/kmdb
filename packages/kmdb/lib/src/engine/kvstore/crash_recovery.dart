@@ -26,6 +26,7 @@ import '../util/key_codec.dart';
 import '../wal/wal_reader.dart';
 import '../wal/wal_record.dart';
 import '../wal/wal_writer.dart';
+import '../../sync/hlc_clock.dart';
 import 'kv_store.dart';
 import 'lsm_engine.dart';
 
@@ -58,9 +59,16 @@ final class CrashRecovery {
   ///
   /// [deviceId] is used to name new SSTable files. It must be an 8-character
   /// hex string. If omitted, a deterministic fallback is used.
+  ///
+  /// [clock] is an optional pre-built [HlcClock]. When provided it is used
+  /// directly, bypassing the clock construction from [KvStoreConfig.maxClockSkew].
+  /// This seam is intended for tests that need a deterministic, injectable clock.
+  /// Production code always omits [clock] so that [CrashRecovery] owns
+  /// construction and seeds the clock from the replayed WAL maximum.
   Future<(LsmEngine engine, OpenResult result)> open(
     String dbDir, {
     String deviceId = '00000000',
+    HlcClock? clock,
   }) async {
     final sstDir = '$dbDir/sst';
     final lockPath = '$dbDir/LOCK';
@@ -134,7 +142,10 @@ final class CrashRecovery {
 
     // Replay WAL files with sequence > maxLogNumber.
     final restoredMemtable = Memtable();
-    Hlc clock = Hlc.fromEncoded(state.maxNextSeq);
+    // Track the maximum HLC seen across all replayed WAL records so we can
+    // seed the engine clock after recovery. Named distinctly from the [clock]
+    // parameter to avoid shadowing.
+    Hlc replayedMaxHlc = Hlc.fromEncoded(state.maxNextSeq);
 
     for (final (seq, name) in sortedWals) {
       // Build the full path from the bare filename.
@@ -177,7 +188,7 @@ final class CrashRecovery {
         if (keyBytes.length != 16) continue; // malformed — skip
 
         final hlc = record.sequence;
-        if (hlc > clock) clock = hlc;
+        if (hlc > replayedMaxHlc) replayedMaxHlc = hlc;
 
         final internalKey = KeyCodec.encodeInternalKey(
           record.namespace,
@@ -201,11 +212,29 @@ final class CrashRecovery {
       fsyncOnWrite: config.fsyncOnWrite,
     );
 
-    // Advance clock to wall time.
-    final nowMs = DateTime.now().millisecondsSinceEpoch;
-    final initialHlc = nowMs > clock.physicalMs
-        ? Hlc(nowMs, 0)
-        : Hlc(clock.physicalMs, clock.logical + 1);
+    // Construct or adopt the HLC clock.
+    //
+    // Production path (clock == null): build a fresh HlcClock seeded from the
+    // replayed WAL maximum, then call now() to advance past wall time so the
+    // first local write is causally after all replayed data. HlcClock.update()
+    // handles the wall-clock comparison internally, so the old manual
+    // "nowMs > clock.physicalMs" branch is no longer needed. ClockSkewException
+    // propagates naturally if the stored HLC is more than maxClockSkew ahead of
+    // the local wall clock, which indicates clock regression or a corrupted DB.
+    //
+    // Test path (clock != null): use the caller-supplied clock as-is. The test
+    // is responsible for pre-seeding it; we do not call update() or now() so
+    // the injected wall-clock function retains full control.
+    final HlcClock hlcClock;
+    if (clock != null) {
+      hlcClock = clock;
+    } else {
+      hlcClock = HlcClock(maxClockSkew: config.maxClockSkew);
+      if (replayedMaxHlc > const Hlc(0, 0)) {
+        hlcClock.update(replayedMaxHlc);
+      }
+      hlcClock.now();
+    }
 
     final engine = LsmEngine.create(
       dbDir: dbDir,
@@ -216,7 +245,7 @@ final class CrashRecovery {
       levels: levels,
       manifestWriter: manifestWriter,
       walWriter: walWriter,
-      initialHlc: initialHlc,
+      clock: hlcClock,
       restoredMemtable: restoredMemtable,
     );
 

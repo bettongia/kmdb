@@ -363,6 +363,12 @@ final class KvStoreConfig {
   final Duration watchDebounce;
 
   /// Maximum allowable clock skew for HLC updates.
+  ///
+  /// Forwarded to the engine's [HlcClock] and governs both the SSTable ingest
+  /// path ([KvStore.ingestSstable]) and the write path. An [HlcClock] with this
+  /// skew limit is constructed by [CrashRecovery] and injected into [LsmEngine].
+  /// If an observed HLC (from a peer SSTable) exceeds the local wall clock by
+  /// more than this duration, a [ClockSkewException] is thrown.
   final Duration maxClockSkew;
 
   /// Maximum encoded value size in bytes.

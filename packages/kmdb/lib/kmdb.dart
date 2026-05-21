@@ -39,6 +39,7 @@ export 'src/engine/platform/storage_adapter_native.dart'
     show StorageAdapterNative;
 
 // ── Sync ──────────────────────────────────────────────────────────────────────
+export 'src/sync/hlc_clock.dart' show HlcClock, ClockSkewException;
 export 'src/sync/sync_engine.dart' show SyncEngine;
 export 'src/sync/consolidation_coordinator.dart' show ConsolidationCoordinator;
 export 'src/sync/consolidation_config.dart' show ConsolidationConfig;

@@ -28,6 +28,7 @@ import '../sstable/sstable_info.dart';
 import '../util/hlc.dart';
 import '../util/key_codec.dart';
 import '../wal/wal_writer.dart';
+import '../../sync/hlc_clock.dart';
 import 'kv_store.dart';
 
 /// The core LSM engine.
@@ -58,7 +59,7 @@ final class LsmEngine {
     required Map<int, List<String>> levels,
     required ManifestWriter manifestWriter,
     required WalWriter walWriter,
-    required Hlc initialHlc,
+    required HlcClock clock,
   }) : _dbDir = dbDir,
        _sstDir = sstDir,
        _adapter = adapter,
@@ -67,7 +68,7 @@ final class LsmEngine {
        _levels = levels,
        _manifestWriter = manifestWriter,
        _walWriter = walWriter,
-       _hlc = initialHlc,
+       _clock = clock,
        _active = Memtable(),
        // sync: true delivers events synchronously to subscribers — correct for
        // KMDB's single-isolate model where listeners are set up before writes.
@@ -91,8 +92,8 @@ final class LsmEngine {
   ManifestWriter _manifestWriter;
   final WalWriter _walWriter;
 
-  /// Current HLC timestamp. Monotonically advanced on every write.
-  Hlc _hlc;
+  /// The injected HLC clock. Advances on every write via [_clock.now()].
+  final HlcClock _clock;
 
   /// The active (mutable) memtable. Incoming writes go here.
   Memtable _active;
@@ -116,6 +117,10 @@ final class LsmEngine {
 
   /// Creates an [LsmEngine] from the result of crash recovery.
   ///
+  /// [clock] is the seeded [HlcClock] constructed by [CrashRecovery.open].
+  /// Tests may pass a pre-built clock with an injected wall-clock function to
+  /// obtain deterministic HLC values without going through [CrashRecovery].
+  ///
   /// Callers should use [CrashRecovery.open] instead of this constructor.
   static LsmEngine create({
     required String dbDir,
@@ -126,7 +131,7 @@ final class LsmEngine {
     required Map<int, List<String>> levels,
     required ManifestWriter manifestWriter,
     required WalWriter walWriter,
-    required Hlc initialHlc,
+    required HlcClock clock,
     required Memtable restoredMemtable,
   }) {
     final engine = LsmEngine._(
@@ -138,7 +143,7 @@ final class LsmEngine {
       levels: levels,
       manifestWriter: manifestWriter,
       walWriter: walWriter,
-      initialHlc: initialHlc,
+      clock: clock,
     );
     engine._active = restoredMemtable;
     return engine;
@@ -146,29 +151,14 @@ final class LsmEngine {
 
   // ── HLC clock ─────────────────────────────────────────────────────────────
 
-  /// Advances the HLC clock and returns the new timestamp.
+  /// Advances the local clock to be at least [observed] (causal consistency).
   ///
-  /// Uses the system wall clock as the physical component. The logical counter
-  /// is incremented when multiple writes land in the same physical millisecond.
-  Hlc _tick() {
-    final nowMs = DateTime.now().millisecondsSinceEpoch;
-    if (nowMs > _hlc.physicalMs) {
-      _hlc = Hlc(nowMs, 0);
-    } else if (_hlc.logical < 0xFFFF) {
-      _hlc = Hlc(_hlc.physicalMs, _hlc.logical + 1);
-    } else {
-      // Logical counter exhausted — advance physical time by 1ms.
-      _hlc = Hlc(_hlc.physicalMs + 1, 0);
-    }
-    return _hlc;
-  }
-
-  /// Advances the clock to be at least [observed], then ticks once.
-  ///
-  /// Used when replaying WAL records or ingesting external SSTables so the
-  /// engine never generates a timestamp earlier than one it has already seen.
+  /// Used when ingesting external SSTables so the engine never generates a
+  /// timestamp earlier than one it has already seen. Propagates
+  /// [ClockSkewException] if [observed] is more than [KvStoreConfig.maxClockSkew]
+  /// ahead of the local wall clock.
   void advanceClock(Hlc observed) {
-    if (observed > _hlc) _hlc = observed;
+    _clock.update(observed);
   }
 
   // ── Write operations ──────────────────────────────────────────────────────
@@ -176,7 +166,7 @@ final class LsmEngine {
   /// Writes a single value to the WAL and memtable.
   Future<void> put(String namespace, String key, Uint8List value) async {
     final keyBytes = KeyCodec.keyToBytes(key);
-    final hlc = _tick();
+    final hlc = _clock.now();
     final internalKey = KeyCodec.encodeInternalKey(
       namespace,
       keyBytes,
@@ -197,7 +187,7 @@ final class LsmEngine {
   /// Writes a delete tombstone to the WAL and memtable.
   Future<void> delete(String namespace, String key) async {
     final keyBytes = KeyCodec.keyToBytes(key);
-    final hlc = _tick();
+    final hlc = _clock.now();
     final internalKey = KeyCodec.encodeInternalKey(
       namespace,
       keyBytes,
@@ -220,7 +210,7 @@ final class LsmEngine {
     final namespaces = <String>{};
     for (final entry in batch.entries) {
       final keyBytes = KeyCodec.keyToBytes(entry.key);
-      final hlc = _tick();
+      final hlc = _clock.now();
       if (entry.isDelete) {
         final internalKey = KeyCodec.encodeInternalKey(
           entry.namespace,
@@ -501,7 +491,7 @@ final class LsmEngine {
     _active = Memtable();
 
     // 2. Rotate WAL.
-    final hlc = _tick();
+    final hlc = _clock.now();
     await _walWriter.rotate(hlc);
 
     // 3. Write SSTable from frozen memtable.
@@ -620,7 +610,7 @@ final class LsmEngine {
     final inputs = [...l0, ...l1];
     if (inputs.isEmpty) return;
 
-    final hlc = _tick();
+    final hlc = _clock.now();
     final job = CompactionJob(
       sstDir: _sstDir,
       deviceId: _deviceId,
@@ -657,7 +647,7 @@ final class LsmEngine {
         .toList();
     if (inputs.isEmpty) return;
 
-    final hlc = _tick();
+    final hlc = _clock.now();
     final job = CompactionJob(
       sstDir: _sstDir,
       deviceId: _deviceId,
@@ -694,7 +684,7 @@ final class LsmEngine {
     if (inputs.isEmpty) return;
 
     // Run a single job treating all inputs as a single merge and outputting to L2.
-    final hlc = _tick();
+    final hlc = _clock.now();
     final job = CompactionJob(
       sstDir: _sstDir,
       deviceId: _deviceId,
@@ -764,7 +754,7 @@ final class LsmEngine {
     final newPath = '$_dbDir/$newName';
 
     // Build snapshot edit.
-    final hlc = _tick();
+    final hlc = _clock.now();
     final allFiles = <SstableMeta>[];
     for (final lvlEntry in _levels.entries) {
       for (final filename in lvlEntry.value) {
@@ -826,7 +816,7 @@ final class LsmEngine {
     final info = SstableInfo.parse(filename);
     advanceClock(info.maxHlc);
 
-    final hlc = _tick();
+    final hlc = _clock.now();
 
     final meta = SstableMeta(
       level: 0,
@@ -958,7 +948,7 @@ final class LsmEngine {
     // the old names are still in the Manifest and the renamed files on disk
     // are treated as orphans (deleted) — a safe, recoverable state.
     if (removed.isNotEmpty) {
-      final hlc = _tick();
+      final hlc = _clock.now();
       await _manifestWriter.append(
         VersionEdit(
           logNumber: _walWriter.activeSequence,
@@ -1152,8 +1142,10 @@ final class LsmEngine {
   ///
   /// Format: `<12 hex chars for physical ms>:<4 hex chars for logical counter>`
   String get currentHlcString {
-    final physHex = _hlc.physicalMs.toRadixString(16).padLeft(12, '0');
-    final logHex = _hlc.logical.toRadixString(16).padLeft(4, '0');
+    final physHex = _clock.current.physicalMs
+        .toRadixString(16)
+        .padLeft(12, '0');
+    final logHex = _clock.current.logical.toRadixString(16).padLeft(4, '0');
     return '$physHex:$logHex';
   }
 
