@@ -75,6 +75,39 @@ All ETags are implementation-specific opaque strings. The lease protocol in
 `ConsolidationCoordinator` depends entirely on `compareAndSwap` behaving
 atomically from the server's perspective.
 
+### Quota capability interface
+
+A separate optional interface `QuotaAwareAdapter` should be defined alongside
+`SyncStorageAdapter` for adapters that operate under service-imposed quotas.
+The test harness (and any other caller) checks for this interface before
+running and uses it to gate or cap activity:
+
+```dart
+abstract interface class QuotaAwareAdapter {
+  /// Maximum storage operations (upload + download + list + delete) per minute.
+  /// Null means the adapter imposes no rate limit.
+  int? get maxOperationsPerMinute;
+
+  /// Maximum bytes uploadable per 24-hour window. Null means unlimited.
+  int? get maxUploadBytesPerDay;
+
+  /// Returns an estimate of whether the described workload is likely to
+  /// exceed quota. Callers should reject or reduce the workload if this
+  /// returns false.
+  bool isWithinQuota({
+    required int estimatedOperations,
+    required Duration testDuration,
+    required int estimatedUploadBytes,
+  });
+}
+```
+
+`GoogleDriveAdapter` implements `QuotaAwareAdapter`. `LocalDirectoryAdapter`
+and `MemorySyncAdapter` do not — absence of the interface signals no quota
+constraint. Default values for `GoogleDriveAdapter` should reflect current
+Drive API limits and be documented with a reference to the Google API Console
+so they can be updated when limits change.
+
 ### Google Drive REST API capabilities
 
 - **Files.list** — list files in a folder by `parents` query; supports
@@ -149,6 +182,14 @@ Following the `betto_zstd` / `kmdb_tokenizer_icu` pattern, a new
 - [ ] Add `kmdb_google_drive` to root workspace `pubspec.yaml`
 - [ ] Add license header to all new Dart source files (use `@header_template.txt`)
 - [ ] Add `kmdb_google_drive` entry to `melos.yaml` if one exists
+
+### Phase 1b — Quota capability interface
+
+- [ ] Define `QuotaAwareAdapter` interface in
+  `packages/kmdb/lib/src/sync/quota_aware_adapter.dart`
+- [ ] Export `QuotaAwareAdapter` from `lib/kmdb.dart`
+- [ ] Implement `QuotaAwareAdapter` on `GoogleDriveAdapter` with Drive API
+  default limits documented and linked to the Google API Console reference
 
 ### Phase 2 — Core adapter implementation
 
