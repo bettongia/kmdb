@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'package:kmdb/kmdb.dart';
-
 import '../config/remote_config.dart';
 import 'command.dart';
 import 'sync_helpers.dart';
@@ -71,7 +69,7 @@ final class SyncCommand extends CliCommand {
     final dbDir = storeInfo.dbDir;
     final deviceId = storeInfo.deviceId;
 
-    // Resolve the remote configuration.
+    // Resolve the remote configuration (CLI-specific: reads local/config.json).
     final RemoteConfig remote;
     try {
       remote = await SyncHelpers.resolveRemote(dbDir, args, flags);
@@ -92,45 +90,19 @@ final class SyncCommand extends CliCommand {
       return false;
     }
 
-    final adapter = adapterFor(remote);
-    final engine = SyncEngine(
-      store: ctx.store,
-      cloudAdapter: adapter,
-      localAdapter: StorageAdapterNative(),
-      deviceId: deviceId,
-      dbDir: dbDir,
-      syncRoot: '',
-      syncNamespaces: collections,
-    );
+    final syncAdapter = adapterFor(remote);
 
-    // Push phase: only if there are local collections to upload.
-    // An empty local store has nothing to push — skip flush and upload,
-    // but still proceed to pull so peer data can be received.
-    if (collections.isNotEmpty) {
-      // Flush the memtable so all recent writes are materialised as SSTables
-      // before uploading.  Without this flush, data still in the memtable
-      // would be silently excluded from the push.
-      await ctx.store.flush();
-      try {
-        await engine.push();
-      } catch (e) {
-        ctx.writeError('sync push failed: $e');
-        return false;
-      }
-    }
-
-    // Pull phase: always run, even on an empty local store, so that a device
-    // with no collections yet can receive data from peers on its first sync.
     try {
-      await engine.pull();
+      await ctx.db.sync(syncAdapter: syncAdapter, syncNamespaces: collections);
     } catch (e) {
-      ctx.writeError('sync pull failed: $e');
+      ctx.writeError('sync failed: $e');
       return false;
     }
 
     // After ingesting peer SSTables, check whether any indexed collection has
     // been entirely tombstoned. If so, cascade the same cleanup as
     // `collections delete` to keep index entries and config in sync.
+    // This is CLI-specific logic that belongs here, not in KmdbDatabase.
     await SyncHelpers.purgeOrphanedIndexes(ctx, dbDir);
 
     ctx.out.writeln('sync: complete (device: $deviceId).');

@@ -156,32 +156,70 @@ track this:
   device that produced the SSTable is responsible for deleting it, avoiding race
   conditions on deletion.
 
-## Namespace-Scoped Sync
+## `KmdbDatabase` Sync API
 
-Not all namespaces should sync. A local_cache or settings namespace typically
-contains device-specific data. The sync layer supports opt-in per namespace:
+Sync is exposed as first-class methods on `KmdbDatabase`. Application code never
+needs to construct `SyncEngine` directly.
 
 ```dart
-// Cloud-backed sync (mobile / web)
-final db = KmdbDatabase(
-  store: kvStore,
-  syncConfig: SyncConfig(
-    adapter: GoogleDriveAdapter(...),
-    syncNamespaces: {'notes', 'contacts', 'tasks'},
-    // 'settings' and 'cache' excluded
-  ),
-);
+// Open the database (deviceId is established by ensureDeviceId before sync).
+final db = await KmdbDatabase.open(path: '/path/to/db', adapter: adapter);
+await db.ensureDeviceId(); // loads or generates stable device identity
 
-// Local folder sync (desktop) — shared NAS volume, SMB mount,
-// or a locally-synced cloud folder such as iCloud Drive or Dropbox
-final db = KmdbDatabase(
-  store: kvStore,
-  syncConfig: SyncConfig(
-    adapter: LocalDirectoryAdapter('/Volumes/NAS/MyApp/sync'),
-    syncNamespaces: {'notes', 'contacts', 'tasks'},
-  ),
+// Full push-then-pull cycle against a named remote adapter.
+await db.sync(syncAdapter: GoogleDriveAdapter(...));
+
+// Push only.
+await db.push(syncAdapter: LocalDirectoryAdapter('/Volumes/NAS/MyApp/sync'));
+
+// Pull only, with consolidation tuned for testing.
+await db.pull(
+  syncAdapter: MemorySyncAdapter(),
+  consolidationConfig: ConsolidationConfig.forTesting(),
 );
 ```
+
+All three methods accept the same named parameters:
+
+| Parameter             | Type                  | Default                      | Description |
+| --------------------- | --------------------- | ---------------------------- | ----------- |
+| `syncAdapter`         | `SyncStorageAdapter`  | required                     | Remote adapter (cloud folder, NAS, etc.) |
+| `syncRoot`            | `String`              | `''`                         | Path prefix within the adapter root |
+| `syncNamespaces`      | `Set<String>?`        | all user (non-`$`) namespaces | Restrict sync to a subset of collections |
+| `localAdapter`        | `StorageAdapter?`     | `StorageAdapterNative()`     | Local file I/O adapter; override in tests |
+| `consolidationConfig` | `ConsolidationConfig` | `ConsolidationConfig()`      | Controls the consolidation threshold and lease TTL |
+
+**Native-only.** These methods use `dart:io` for local SSTable I/O and throw
+`UnsupportedError` on web.
+
+### `ensureDeviceId()`
+
+```dart
+final deviceId = await db.ensureDeviceId();
+```
+
+Loads or generates a stable 8-character lowercase hex device identifier.
+Production apps should call this once after opening the database, before the
+first `push()`. The default `'00000000'` identifier used by tests is not
+suitable for real sync: SSTables named with it will collide across machines.
+
+## Namespace-Scoped Sync
+
+Not all namespaces should sync. A `local_cache` or `settings` namespace
+typically contains device-specific data. Pass `syncNamespaces` to restrict sync
+to a subset of collections:
+
+```dart
+// Sync only 'notes', 'contacts', and 'tasks'; exclude 'settings' and 'cache'.
+await db.sync(
+  syncAdapter: GoogleDriveAdapter(...),
+  syncNamespaces: {'notes', 'contacts', 'tasks'},
+);
+```
+
+When `syncNamespaces` is omitted, all registered user collections (those without
+a `$` prefix) are synced. System namespaces (`$meta`, `$index:*`, `$fts:*`,
+`$vec:*`, `$cache`) are never uploaded regardless of this parameter.
 
 During SSTable upload, the sync layer filters to include only entries for
 sync-enabled namespaces. This avoids uploading megabytes of device-local cache
