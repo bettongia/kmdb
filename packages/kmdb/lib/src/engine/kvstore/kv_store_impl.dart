@@ -62,6 +62,18 @@ final class KvStoreImpl implements KvStore {
     required bool dirtyFlagPresent,
   }) : _dirtyFlagPresent = dirtyFlagPresent;
 
+  /// Testing constructor that wraps a pre-built [LsmEngine].
+  ///
+  /// Use this only in tests where [CrashRecovery.open] has been called with an
+  /// injected [HlcClock]. Production code must use [KvStoreImpl.open].
+  @internal
+  KvStoreImpl.forTesting(
+    this._engine,
+    this._meta,
+    this._config, {
+    required bool dirtyFlagPresent,
+  }) : _dirtyFlagPresent = dirtyFlagPresent;
+
   final LsmEngine _engine;
   final MetaStore _meta;
   final KvStoreConfig _config;

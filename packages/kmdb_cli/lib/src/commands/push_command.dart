@@ -101,10 +101,7 @@ final class PushCommand extends CliCommand {
     final syncAdapter = adapterFor(remote);
 
     try {
-      await ctx.db.push(
-        syncAdapter: syncAdapter,
-        syncNamespaces: collections,
-      );
+      await ctx.db.push(syncAdapter: syncAdapter, syncNamespaces: collections);
     } catch (e) {
       ctx.writeError('push failed: $e');
       return false;

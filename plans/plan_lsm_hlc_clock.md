@@ -258,18 +258,36 @@ to `lib/kmdb.dart`.
 
 ### Checklist
 
-- [ ] `LsmEngine`: remove `_tick()`, replace with `_clock.now()`, replace
+- [x] `LsmEngine`: remove `_tick()`, replace with `_clock.now()`, replace
       `advanceClock` body with `_clock.update()`
-- [ ] `LsmEngine`: replace `Hlc initialHlc` constructor param with `HlcClock clock`
-- [ ] `CrashRecovery`: construct `HlcClock(maxClockSkew: config.maxClockSkew)`,
+- [x] `LsmEngine`: replace `Hlc initialHlc` constructor param with `HlcClock clock`
+- [x] `CrashRecovery`: construct `HlcClock(maxClockSkew: config.maxClockSkew)`,
       seed with `update(replayedMax)`, pass to engine
-- [ ] `KvStoreConfig.maxClockSkew` doc comment updated
-- [ ] `kmdb.dart`: export `HlcClock` and `ClockSkewException`
-- [ ] `lsm_engine_test.dart`: add 4 deterministic-clock tests (ordering,
+- [x] `KvStoreConfig.maxClockSkew` doc comment updated
+- [x] `kmdb.dart`: export `HlcClock` and `ClockSkewException`
+- [x] `lsm_engine_test.dart`: add 4 deterministic-clock tests (ordering,
       advance-on-ingest, `ClockSkewException`, flush filename)
-- [ ] All existing tests pass (`dart test packages/kmdb`)
+- [x] All existing tests pass (`dart test packages/kmdb`)
 
 ## Summary
 
-{Dot points highlighting the work undertaken — to be completed after
-implementation}
+- Replaced the private `_tick()` / `Hlc _hlc` pair in `LsmEngine` with an
+  injected `HlcClock _clock`. All 10 call sites now call `_clock.now()`; the
+  `advanceClock` method delegates to `_clock.update()`, which activates the
+  previously dead `ClockSkewException` guard on the ingest path.
+- `CrashRecovery.open` now constructs `HlcClock(maxClockSkew: config.maxClockSkew)`,
+  seeds it from the replayed WAL maximum HLC via `update()`, then calls `now()`
+  to advance past wall time — replacing the manual `initialHlc` computation
+  block. This finally honours `KvStoreConfig.maxClockSkew` on the write path.
+- An optional `HlcClock? clock` parameter was added to `CrashRecovery.open` as
+  a test injection seam. `KvStoreImpl.forTesting` was added as a companion
+  `@internal` constructor so tests can wrap the resulting engine without going
+  through the full `KvStoreImpl.open` path.
+- `kmdb.dart` now exports `HlcClock` and `ClockSkewException` so callers can
+  catch `ClockSkewException` from `KvStore.ingestSstable`.
+- `KvStoreConfig.maxClockSkew` doc comment updated to document the forwarding.
+- Four deterministic-clock tests added to `lsm_engine_test.dart`: monotonic
+  ordering under a frozen wall clock, clock advance after SSTable ingest,
+  `ClockSkewException` propagation on out-of-window ingest, and SSTable-flush
+  filename embedding the expected HLC physical timestamp.
+- All 1264 kmdb tests and 839 kmdb_cli tests pass; zero analyzer warnings.

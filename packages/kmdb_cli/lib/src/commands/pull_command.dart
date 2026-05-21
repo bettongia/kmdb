@@ -96,10 +96,7 @@ final class PullCommand extends CliCommand {
     final syncAdapter = adapterFor(remote);
 
     try {
-      await ctx.db.pull(
-        syncAdapter: syncAdapter,
-        syncNamespaces: collections,
-      );
+      await ctx.db.pull(syncAdapter: syncAdapter, syncNamespaces: collections);
     } catch (e) {
       ctx.writeError('pull failed: $e');
       return false;

@@ -14,10 +14,16 @@
 
 import 'dart:typed_data';
 
+import 'package:kmdb/src/engine/kvstore/crash_recovery.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store_impl.dart';
+import 'package:kmdb/src/engine/kvstore/meta_store.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
+import 'package:kmdb/src/engine/sstable/sstable_info.dart';
+import 'package:kmdb/src/engine/sstable/sstable_writer.dart';
+import 'package:kmdb/src/engine/util/hlc.dart';
 import 'package:kmdb/src/engine/util/key_codec.dart';
+import 'package:kmdb/src/sync/hlc_clock.dart';
 import 'package:test/test.dart';
 
 const _dbDir = '/db';
@@ -33,6 +39,49 @@ Future<(KvStoreImpl, OpenResult)> _open(
   config: config ?? KvStoreConfig.forTesting(),
   deviceId: 'testdev1',
 );
+
+/// Opens a [KvStoreImpl] with [clock] injected via [CrashRecovery] so that
+/// the wall clock seen by [LsmEngine] is fully deterministic.
+Future<KvStoreImpl> openWithClock(
+  MemoryStorageAdapter adapter,
+  HlcClock clock,
+) async {
+  final config = KvStoreConfig.forTesting();
+  final recovery = CrashRecovery(adapter: adapter, config: config);
+  final (engine, recoveryResult) = await recovery.open(
+    _dbDir,
+    deviceId: 'testdev1',
+    clock: clock,
+  );
+  final meta = MetaStore(engine);
+  final hadUnclosedSession = await meta.getDirtyFlag();
+  return KvStoreImpl.forTesting(
+    engine,
+    meta,
+    config,
+    dirtyFlagPresent: hadUnclosedSession || recoveryResult.hadInterruptedWrites,
+  );
+}
+
+/// Builds a minimal valid SSTable in memory with [count] entries whose HLC
+/// physical component starts at [basePhysical].
+Uint8List buildSst({int count = 2, required int basePhysical}) {
+  final writer = SstableWriter();
+  for (var i = 0; i < count; i++) {
+    final hlc = Hlc(basePhysical + i, 0);
+    final keyHex =
+        '${i.toRadixString(16).padLeft(12, '0')}70008${i.toRadixString(16).padLeft(15, '0')}';
+    final keyBytes = KeyCodec.keyToBytes(keyHex);
+    final internalKey = KeyCodec.encodeInternalKey(
+      'ns',
+      keyBytes,
+      hlc,
+      RecordType.put,
+    );
+    writer.add(internalKey, Uint8List.fromList([i + 1]));
+  }
+  return writer.finish();
+}
 
 Uint8List _bytes(String s) => Uint8List.fromList(s.codeUnits);
 
@@ -299,5 +348,147 @@ void main() {
       expect(await store2.get('ns', _key(1)), equals(_bytes('v')));
       await store2.close();
     });
+  });
+
+  // ── HLC clock injection ──────────────────────────────────────────────────────
+  //
+  // These tests use CrashRecovery.open with an injected HlcClock so that the
+  // wall clock seen by LsmEngine is fully deterministic. The injected clock
+  // eliminates all reliance on DateTime.now() inside the write path.
+
+  group('LsmEngine — HLC clock injection', () {
+    test(
+      'monotonic ordering: successive writes get strictly increasing HLCs',
+      () async {
+        // Freeze the wall clock at a fixed millisecond. Both writes happen within
+        // the same "millisecond" so the logical counter must increment.
+        const frozenMs = 1_000_000_000;
+        final clock = HlcClock(wallClock: () => frozenMs);
+
+        final adapter = _newAdapter();
+        final store = await openWithClock(adapter, clock);
+
+        await store.put('ns', _key(1), _bytes('a'));
+        await store.put('ns', _key(2), _bytes('b'));
+
+        // currentHlc reflects the most-recently issued HLC. After two puts
+        // into the same frozen millisecond the logical counter should be ≥ 1.
+        final hlcStr = (await store.storeInfo()).currentHlc;
+        // Format: 12-hex-physical:4-hex-logical
+        final parts = hlcStr.split(':');
+        expect(parts, hasLength(2), reason: 'expected <physical>:<logical>');
+        final logical = int.parse(parts[1], radix: 16);
+        expect(
+          logical,
+          greaterThanOrEqualTo(1),
+          reason: 'second write must have logical > 0 in the same ms',
+        );
+
+        await store.close();
+      },
+    );
+
+    test('clock advances after SSTable ingest', () async {
+      // Wall clock fixed at 1 000 000 ms. Ingest a peer SSTable whose maxHlc
+      // is 1 030 000 ms — 30 s ahead, within the 60 s skew limit. After ingest
+      // the engine clock must reflect that value.
+      const localMs = 1_000_000;
+      const peerPhysical = 1_030_000; // 30 s ahead — within the 60 s skew limit
+      final clock = HlcClock(wallClock: () => localMs);
+
+      final adapter = _newAdapter();
+      final store = await openWithClock(adapter, clock);
+
+      final filename = SstableInfo.flushName(
+        'peer0099',
+        const Hlc(peerPhysical, 0),
+        const Hlc(peerPhysical, 1),
+      );
+      final bytes = buildSst(basePhysical: peerPhysical);
+      await store.ingestSstable(filename, bytes);
+
+      // After ingest the clock must have advanced to at least peerPhysical.
+      final hlcStr = (await store.storeInfo()).currentHlc;
+      final physHex = hlcStr.split(':').first;
+      final physMs = int.parse(physHex, radix: 16);
+      expect(
+        physMs,
+        greaterThanOrEqualTo(peerPhysical),
+        reason: 'engine clock must advance to ingested maxHlc',
+      );
+
+      await store.close();
+    });
+
+    test(
+      'ClockSkewException thrown when ingested maxHlc exceeds skew limit',
+      () async {
+        // Wall clock at 0 ms. SSTable maxHlc is 61 000 ms — just beyond the
+        // default 60-second skew window (60 000 ms).
+        const localMs = 0;
+        const skewExceededMs = 61_000; // > 60 s default limit
+        final clock = HlcClock(
+          wallClock: () => localMs,
+          maxClockSkew: const Duration(seconds: 60),
+        );
+
+        final adapter = _newAdapter();
+        final store = await openWithClock(adapter, clock);
+
+        final filename = SstableInfo.flushName(
+          'peer0099',
+          const Hlc(skewExceededMs, 0),
+          const Hlc(skewExceededMs, 1),
+        );
+        final bytes = buildSst(basePhysical: skewExceededMs);
+
+        expect(
+          () => store.ingestSstable(filename, bytes),
+          throwsA(isA<ClockSkewException>()),
+          reason: 'ingesting an SSTable beyond maxClockSkew must throw',
+        );
+
+        await store.close();
+      },
+    );
+
+    test(
+      'flush filename contains the expected HLC physical timestamp',
+      () async {
+        // Freeze wall clock at a known value. After a flush the SSTable filename
+        // must embed that physical timestamp in its encoded HLC segments.
+        const frozenMs = 0xABCDEF; // arbitrary fixed millisecond
+        final clock = HlcClock(wallClock: () => frozenMs);
+
+        final adapter = _newAdapter();
+        final store = await openWithClock(adapter, clock);
+
+        // Write one entry then flush explicitly.
+        await store.put('ns', _key(1), _bytes('hello'));
+        await store.flush();
+
+        // Find the SSTable file created in the sst/ directory.
+        final sstFiles = await adapter.listFiles(
+          '$_dbDir/sst',
+          extension: '.sst',
+        );
+        expect(
+          sstFiles,
+          isNotEmpty,
+          reason: 'flush should have created an SSTable',
+        );
+
+        // The filename format is: {deviceId}-{minHlcHex}-{maxHlcHex}.sst
+        // Parse and verify the physical component matches the injected clock.
+        final info = SstableInfo.parse(sstFiles.first);
+        expect(
+          info.minHlc.physicalMs,
+          equals(frozenMs),
+          reason: 'SSTable minHlc physical must match injected wall clock',
+        );
+
+        await store.close();
+      },
+    );
   });
 }
