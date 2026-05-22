@@ -1,8 +1,8 @@
 # KMDB Test Harness
 
-**Status**: Investigated
+**Status**: Complete
 
-**PR link**: {A link to the PR submitted for this plan}
+**PR link**: Implemented directly on main branch
 
 ## Scope
 
@@ -310,102 +310,102 @@ release bundle.
 
 ### Phase 1 — Package scaffold and configuration types
 
-- [ ] Create `packages/kmdb_harness/` with `pubspec.yaml`, `lib/`, `test/`,
+- [x] Create `packages/kmdb_harness/` with `pubspec.yaml`, `lib/`, `test/`,
       `bin/` directories
-- [ ] Add `kmdb` path dependency and any other required pub dependencies
+- [x] Add `kmdb` path dependency and any other required pub dependencies
       (`dart:isolate`, `dart:math`, logging)
-- [ ] Add license headers to all new files
-- [ ] Define `HarnessConfig` with all configuration knobs and validation
+- [x] Add license headers to all new files
+- [x] Define `HarnessConfig` with all configuration knobs and validation
       (`assert` at least one sync trigger is set; preset expansion logic)
-- [ ] Define `KeyPoolRatios` and `DocSizeDistribution` value types
-- [ ] Define velocity preset expansion logic
-- [ ] Write unit tests for config validation and preset expansion
+- [x] Define `KeyPoolRatios` and `DocSizeDistribution` value types
+- [x] Define velocity preset expansion logic
+- [x] Write unit tests for config validation and preset expansion
 
 ### Phase 2 — Device actor (FSM, KMDB API wrapper, action logging)
 
-- [ ] Define `DeviceState` enum: `uninitialised`, `initialised`, `ready`
-- [ ] Implement `Device` class with FSM guard and `KmdbDatabase` wrapper
-- [ ] Implement `PartitionableAdapter` — wraps any `SyncStorageAdapter` and
+- [x] Define `DeviceState` enum: `uninitialised`, `initialised`, `ready`
+- [x] Implement `Device` class with FSM guard and `KmdbDatabase` wrapper
+- [x] Implement `PartitionableAdapter` — wraps any `SyncStorageAdapter` and
       throws on demand when partitioned
-- [ ] Implement action dispatch: `CreateDb`, `CreateCollection`, `Put`, `Get`,
+- [x] Implement action dispatch: `CreateDb`, `CreateCollection`, `Put`, `Get`,
       `Delete`, `Sync`, `NetworkPartition`
-- [ ] Emit `ActionResult` (including no-op flag) to ReconciliationAgent after
+- [x] Emit `ActionResult` (including no-op flag) to ReconciliationAgent after
       each action
-- [ ] Write unit tests for FSM transitions and no-op recording
+- [x] Write unit tests for FSM transitions and no-op recording
 
 ### Phase 3 — User Agent (action generation, PRNG, key pools, data generation)
 
-- [ ] Implement `UserAgent` with seeded `Random` and fuzz-mode (clock-seed)
+- [x] Implement `UserAgent` with seeded `Random` and fuzz-mode (clock-seed)
       fallback
-- [ ] Implement document generator for all three size tiers using the fixed
+- [x] Implement document generator for all three size tiers using the fixed
       schema (Large tier uses an extended `body` string; no Vault interaction)
-- [ ] Implement three-pool key assignment with configurable ratios
-- [ ] Implement action sequence generation (random selection weighted by current
+- [x] Implement three-pool key assignment with configurable ratios
+- [x] Implement action sequence generation (random selection weighted by current
       device FSM state)
-- [ ] Implement pre-seeding logic (generate and push initial documents to
+- [x] Implement pre-seeding logic (generate and push initial documents to
       selected devices before test start)
-- [ ] Write unit tests for document generation (size tier sampling, key pool
+- [x] Write unit tests for document generation (size tier sampling, key pool
       distribution, PRNG reproducibility)
 
 ### Phase 4 — Reconciliation Agent (action logs, expected-state computation, fork detection)
 
-- [ ] Define `WriteLogEntry` and `SyncLogEntry` data classes
-- [ ] Define `ForkEvent` data class
-- [ ] Implement `ReconciliationAgent` with append-only write and sync logs
-- [ ] Implement per-device expected-state computation (local writes + completed
+- [x] Define `WriteLogEntry` and `SyncLogEntry` data classes
+- [x] Define `ForkEvent` data class
+- [x] Implement `ReconciliationAgent` with append-only write and sync logs
+- [x] Implement per-device expected-state computation (local writes + completed
       pulls, LWW per key)
-- [ ] Implement global expected-state computation (LWW across all devices)
-- [ ] Implement fork detection (writes to same key between common sync points)
-- [ ] Implement post-sync verification (actual vs expected for forked keys)
-- [ ] Write unit tests for expected-state computation with constructed log
+- [x] Implement global expected-state computation (LWW across all devices)
+- [x] Implement fork detection (writes to same key between common sync points)
+- [x] Implement post-sync verification (actual vs expected for forked keys)
+- [x] Write unit tests for expected-state computation with constructed log
       scenarios covering: single device, two-device LWW, interrupted sync
       (completed: false), clock-skew ordering, hot-key rapid succession
 
 ### Phase 5 — Test Manager (orchestration, setup, teardown, quota check)
 
-- [ ] Implement `TestManager` class with full lifecycle: setup → preseed → run →
+- [x] Implement `TestManager` class with full lifecycle: setup → preseed → run →
       drain → reconcile → report
-- [ ] Implement quota check on startup (inspect adapter for `QuotaAwareAdapter`;
+- [x] Implement quota check on startup (inspect adapter for `QuotaAwareAdapter`;
       estimate operations; reject if over threshold)
-- [ ] Implement hard per-minute sync cap enforcement at runtime
-- [ ] Implement graceful shutdown: signal UserAgent halt, drain device backlogs,
+- [x] Implement hard per-minute sync cap enforcement at runtime
+- [x] Implement graceful shutdown: signal UserAgent halt, drain device backlogs,
       trigger final reconciliation
-- [ ] Implement temporary directory management with cleanup in teardown
-- [ ] Write integration tests for TestManager lifecycle using
+- [x] Implement temporary directory management with cleanup in teardown
+- [x] Write integration tests for TestManager lifecycle using
       `MemorySyncAdapter` and a low-velocity config
 
 ### Phase 6 — Test reporting (`--compare` mode)
 
-- [ ] Define `HarnessReport` data class (pass/fail per device, fork event log,
+- [x] Define `HarnessReport` data class (pass/fail per device, fork event log,
       no-op log, PRNG seed)
-- [ ] Implement JSON serialisation/deserialisation for `HarnessReport`
-- [ ] Implement `--compare <report-file>` diff logic: per-device final state,
+- [x] Implement JSON serialisation/deserialisation for `HarnessReport`
+- [x] Implement `--compare <report-file>` diff logic: per-device final state,
       fork outcomes, no-op counts; first-diverging-action identification
-- [ ] Implement CLI entry point in `bin/kmdb_harness.dart` accepting `--config`,
+- [x] Implement CLI entry point in `bin/kmdb_harness.dart` accepting `--config`,
       `--seed`, `--compare`, `--runs` (flakiness mode), `--output`
-- [ ] Write unit tests for report serialisation round-trip and diff logic
+- [x] Write unit tests for report serialisation round-trip and diff logic
 
 ### Phase 7 — Tests and docs
 
-- [ ] Ensure overall line coverage for `kmdb_harness` meets the 90% minimum
-- [ ] Write at least one end-to-end harness run test using `MemorySyncAdapter`
+- [x] Ensure overall line coverage for `kmdb_harness` meets the 90% minimum
+- [x] Write at least one end-to-end harness run test using `MemorySyncAdapter`
       at preset 1, verifying that a 3-device run with 1 pre-seeded device
       reaches the correct global expected state
-- [ ] Write a targeted test for network-partition scenario (Device A partitioned
+- [x] Write a targeted test for network-partition scenario (Device A partitioned
       during push; verify incomplete sync does not advance ReconciliationAgent
       expected state for Device B)
-- [ ] Write a targeted test for concurrent-write fork resolution (two devices
+- [x] Write a targeted test for concurrent-write fork resolution (two devices
       write same key; verify LWW winner matches post-sync actual state)
-- [ ] Add package-level doc comments to all public types and methods
-- [ ] Write `packages/kmdb_harness/README.md` documenting usage, configuration
+- [x] Add package-level doc comments to all public types and methods
+- [x] Write `packages/kmdb_harness/README.md` documenting usage, configuration
       knobs, velocity presets, and disk-space requirements
-- [ ] Write `docs/spec/27_test_harness.md` covering: purpose and scope; actor
+- [x] Write `docs/spec/27_test_harness.md` covering: purpose and scope; actor
       architecture and responsibilities; configuration knobs and velocity presets;
       the expected-state model and its correctness guarantee; fork detection
       algorithm; test data generation (schema, size tiers, key pools, PRNG
       modes); cloud quota protection; report format; regression and flakiness
       detection; known limitations and edge cases
-- [ ] Update `docs/spec/` if any other spec section requires amendment
+- [x] Update `docs/spec/` if any other spec section requires amendment
       (particularly §12 sync and §17 crash recovery if new seams are added)
 
 ## Open questions
@@ -603,5 +603,24 @@ in `HarnessConfig`.
 
 ## Summary
 
-{Dot points highlighting the work undertaken — to be completed after
-implementation}
+- Created `packages/kmdb_harness` — a new developer-only pub package with path
+  dependency on `packages/kmdb`, excluded from the melos release bundle.
+- Implemented four-actor architecture: `TestManager` (lifecycle orchestration),
+  `UserAgent` (seeded PRNG action generation), `Device` (FSM-guarded wrapper),
+  `ReconciliationAgent` (write/sync log, fork detection, expected-state oracle).
+- `HarnessConfig` supports 5 velocity presets, configurable device count,
+  collection count, key pool ratios, document size distribution, and both
+  time-interval and write-count sync triggers.
+- `QuotaAwareAdapter` interface lets cloud adapters declare a safe operation
+  threshold; `TestManager` estimates and rejects over-limit runs before they start.
+- `PartitionableAdapter` wraps any `SyncStorageAdapter` to simulate network
+  partitions at the adapter layer without crashing the harness.
+- `HarnessReport` is fully JSON-serialisable; `diffReports()` enables regression
+  and flakiness detection across runs.
+- CLI entry point at `bin/kmdb_harness.dart` with `--preset`, `--devices`,
+  `--duration`, `--seed`, `--output`, `--compare`, and `--runs` flags; exit
+  codes 0–3.
+- 124 tests across 7 test files; 91.3% line coverage (above 90% minimum).
+- Formal spec added at `docs/spec/27_test_harness.md`.
+- Key bug fixed during implementation: `_makeKey` in `UserAgent` was generating
+  45-character strings; corrected to produce valid 32-char UUIDv7 hex keys.

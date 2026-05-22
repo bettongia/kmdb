@@ -1,0 +1,19 @@
+name: kmdb_harness
+description: Developer test harness for KMDB's multi-device sync protocol.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.10.8
+
+resolution: workspace
+
+dependencies:
+  kmdb:
+  args: ^2.6.0
+  uuid: ^4.5.3
+
+dev_dependencies:
+  lints: ^6.1.0
+  path: ^1.9.0
+  test: ^1.30.0
