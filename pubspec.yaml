@@ -8,7 +8,6 @@ workspace:
   - packages/kmdb
   - packages/kmdb_cli
   - packages/kmdb_harness
-  - packages/kmdb_ui
   - packages/kmdb_tokenizer_icu
   - packages/kmdb_inferencing
   - packages/kmdb_lexical
