@@ -13,6 +13,9 @@ abstract: |
   checksums, Zstd dictionary compression, Xor filters). v2.1 adds §20–23: text search
   (BM25 inverted index, BGE embedding model, Reciprocal Rank Fusion). v2.2 adds §24:
   vault — content-addressable binary object store with deduplication, stub-based sync,
-  on-demand hydration, and GC via reference counting.
+  on-demand hydration, and GC via reference counting. v2.3 adds §25 (collection
+  schemas — a JSON Schema admission gate for collection writes), §27 (the
+  multi-device sync test harness), and §28 (the release checklist cataloguing
+  manual / out-of-band tests that the automated suite cannot cover).
 ...
 ---

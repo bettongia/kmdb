@@ -4,10 +4,30 @@
 
 **PR link**: _pending_
 
+**Implementation model:** Sonnet, after its prerequisites (H2/H3/H4) land;
+moderate review of the soft-delete and full-drain semantics.
+
 **Proposal**: [docs/proposals/test_harness.md](../docs/proposals/test_harness.md) (sync testing
 context that informed the priority of this work)
 
-**Spec**: _to be created as `docs/spec/26_document_versioning.md`_
+**Spec**: _to be created as `docs/spec/NN_document_versioning.md`, where `NN` is
+the next available section number assigned when the spec is written (see the
+spec-numbering convention in `plans/README.md`)._
+
+**Dependencies** (fixes from the 2026-05-22 code review this plan builds on):
+- `plan_writebatch_atomicity.md` (H2) — this plan's core guarantee ("the version
+  entry is written in the same `WriteBatch` as the document, so a crash that
+  prevents one prevents both") relies on atomic batches, which are **not**
+  provided today. H2 must land first, or this plan's atomicity claim is false.
+- `plan_compaction_reclamation.md` (H4) — `$ver:` trimming plugs into H4's
+  per-namespace reclamation framework: `$ver:` namespaces are **exempt** from
+  H4's collapse-to-newest and instead use the keep-N / retention predicate.
+- `plan_vault_gc_failsafe.md` (H3) — the vault ref-count interaction below must
+  use H3's single fail-safe ref-count helper, not introduce another decoder.
+
+**Spec numbering:** the section number is assigned at creation time (the next
+available `NN`), not pre-reserved here — see `plans/README.md`. This avoids
+collisions with other in-flight plans (e.g. `plan_google_drive_sync.md`).
 
 ## Problem statement
 
@@ -34,6 +54,22 @@ respects version refs, no data is silently discarded on any device.
   defaults apply. **Defaults: `maxVersions: 4`, `retentionDays: 90`.**
   Setting `maxVersions: 0` with no `retentionDays` disables versioning for the
   collection entirely.
+
+- [x] **Delete is a soft delete (Option B):** a delete records a `$ver:`
+  *delete-version* (a tombstone version) in addition to the main-namespace
+  tombstone. The document reads as absent immediately, but its history stays
+  promotable until trimmed — the soft-delete behaviour users expect from other
+  tools. `getVersions` includes the delete-version; `promoteVersion` of a prior
+  put un-deletes the document.
+
+- [x] **Deleted documents are fully reclaimed (no unbounded growth):** the
+  `maxVersions` keep-N count is a floor for **live** documents only. Once a
+  document is deleted, the keep-N floor is lifted and the **entire** `$ver:`
+  chain — every put-version *and* the delete-version — is purged once the
+  delete-version is older than `retentionDays` (the post-delete grace). Combined
+  with H4's GC of the main-namespace tombstone and release of the vault refs held
+  by trimmed versions, a deleted document drains to **zero** residue across all
+  namespaces. See "Complete reclamation of deleted documents".
 
 ## Investigation
 
@@ -76,11 +112,50 @@ No special sync handling is required; the promoted write propagates as any other
 
 ### Version trimming at compaction
 
+Trimming is implemented as a `$ver:`-specific reclamation policy registered in
+the compaction framework from `plan_compaction_reclamation.md` (H4). H4 collapses
+ordinary namespaces to the newest version per key; `$ver:` namespaces are exempt
+from that collapse and instead use the policy below.
+
 During compaction, for each document key the merge iterator collects all `$ver:`
 entries sorted by HLC descending. Entries beyond the configured limit are dropped
 from the output SSTable. Trimming happens on every device independently after
 sync, so all devices converge to the same retained set (assuming the same config,
 which is guaranteed since config is in `$meta`).
+
+### Complete reclamation of deleted documents
+
+A hard requirement: a deleted document — and all of its versions — must
+eventually disappear entirely, so storage does not creep upward as users delete
+content over time. A naive keep-N would pin up to N `$ver:` entries per deleted
+document **forever**; that is the leak this design must avoid.
+
+**Rule: keep-N is a floor for live documents only.** Once a document's newest
+version is its delete-version, the keep-N floor no longer applies and the whole
+`$ver:` chain is purged once the delete-version ages past `retentionDays`.
+
+After a delete, each residue location drains to zero:
+
+| Location | Drains via |
+| -------- | ---------- |
+| Main-namespace value versions | H4 collapse → only the tombstone remains |
+| Main-namespace tombstone | H4 tombstone GC (all-levels + sync horizon) |
+| `$ver:` put-versions | retention trim (keep-N while live; age-out once deleted) |
+| `$ver:` delete-version | post-delete grace: purged once older than `retentionDays` |
+| Vault refs held by `$ver:` entries | decremented as entries trim (H3); blob GC'd at zero refs |
+| `$index:` entries | index tombstones follow the doc; reclaimed by H4 |
+| `$fts:` / `$vec:` postings | removed when the live doc is deleted (managers handle delete) |
+
+End state: zero entries for the document in every namespace, and any vault blob
+it solely referenced is GC'd.
+
+**Sync interaction.** The main-namespace tombstone is the authority for
+"deleted"; H4 retains it until the sync horizon, so purging `$ver:` history early
+can never cause a live resurrection (a late peer's old put loses LWW to the
+tombstone). `$ver:` purge is therefore a storage/recoverability concern, not a
+correctness one. Because `retentionDays` (default 90) far exceeds normal sync
+lag, the purge converges across devices; a peer re-sending not-yet-trimmed
+history causes only transient, self-correcting churn.
 
 ### Vault GC integration
 
@@ -106,8 +181,9 @@ are explicitly excluded. No changes to the sync filter are needed beyond ensurin
 ### Key design decisions
 
 - **Atomic writes:** version entries are always written in the same `WriteBatch`
-  as the document write — consistency is guaranteed by the existing batch
-  atomicity.
+  as the document write. **This requires atomic batches from H2
+  (`plan_writebatch_atomicity.md`)** — batches are not crash-atomic today, so this
+  guarantee holds only once H2 lands.
 - **Config in `$meta`:** `VersionConfig` is stored alongside the collection
   definition so it propagates via normal sync; no out-of-band config channel.
 - **Promote = new write:** promotion generates a standard LWW-eligible write, not
@@ -117,10 +193,13 @@ are explicitly excluded. No changes to the sync filter are needed beyond ensurin
 - **No cross-device trim coordination:** each device trims independently using
   the same config. Because config is synced, the outcome is the same on every
   device.
-- **Delete behaviour:** deleting a document marks it deleted via a tombstone in
-  the normal LSM path. The `$ver:` entries for the deleted document are retained
-  until trimmed by compaction; this allows a delete to be "undone" by promoting a
-  prior version within the retention window.
+- **Delete behaviour (soft delete, Option B):** a delete writes a main-namespace
+  tombstone (live reads return absent) **and** a `$ver:` delete-version (the
+  history records the deletion). The document is recoverable via `promoteVersion`
+  of a prior put until retention trims it. The delete-version, being newest, is
+  retained longest; once it is the last remaining version and ages past
+  `retentionDays`, the post-delete grace purges it too, so the document drains to
+  zero — see "Complete reclamation of deleted documents".
 
 ### Key files to modify / create
 
@@ -136,7 +215,7 @@ are explicitly excluded. No changes to the sync filter are needed beyond ensurin
 | kmdb      | Modify | `lib/kmdb.dart` — export new public types                         |
 | kmdb_cli  | Create | `lib/src/commands/versions_command.dart`                          |
 | kmdb_cli  | Modify | `lib/src/commands/promote_command.dart` (new)                     |
-| docs/spec | Create | `docs/spec/26_document_versioning.md`                             |
+| docs/spec | Create | `docs/spec/NN_document_versioning.md` (next available)                             |
 
 ### Edge cases and failure scenarios
 
@@ -159,19 +238,21 @@ are explicitly excluded. No changes to the sync filter are needed beyond ensurin
 
 ### Phase 1 — Core types and storage
 
-- [ ] Write spec `docs/spec/26_document_versioning.md`
+- [ ] Write spec `docs/spec/NN_document_versioning.md` (take the next available
+  section number at this point)
 - [ ] Implement `VersionEntry` (`hlc`, `encodedValue`, `promotedFrom?`)
 - [ ] Implement `VersionConfig` (`maxVersions: 4`, `retentionDays: 90`, both
-  nullable/optional; `maxVersions: 0` + no `retentionDays` = versioning
-  disabled)
+  nullable/optional; `maxVersions: 0` + no `retentionDays` = versioning disabled).
+  keep-N is a floor for **live** documents only; for a deleted document the floor
+  is lifted so the chain fully purges after the post-delete grace
 - [ ] Implement `VersionManager` — write a version entry, list versions for a
   key (sorted HLC descending), delete a version entry
 
 ### Phase 2 — Write path and query API
 
 - [ ] Extend `KmdbCollection` write interception to emit a `$ver:` entry in the
-  same `WriteBatch` as every document write (skip if versioning disabled for the
-  collection)
+  same `WriteBatch` as every document write **and every delete** (a delete writes
+  a `$ver:` delete-version); skip if versioning is disabled for the collection
 - [ ] Add `KmdbCollection.getVersions(String docKey)` → `List<DocumentVersion>`
 - [ ] Add `KmdbCollection.promoteVersion(String docKey, HlcTimestamp version)` →
   `Future<void>` (errors with `VersionNotFoundError` if the entry has been
@@ -183,12 +264,17 @@ are explicitly excluded. No changes to the sync filter are needed beyond ensurin
 
 ### Phase 3 — Compaction trimming
 
-- [ ] Extend `CompactionJob` merge iterator: for each document key collect all
-  `$ver:` entries, sort HLC descending, drop any entry that satisfies neither
-  the count limit nor the retention window
-- [ ] Ensure dropped version entries trigger vault ref-counter decrements in the
-  same compaction output (extend `VaultGc` to scan `$ver:` namespaces as ref
-  sources)
+- [ ] Register a `$ver:` reclamation policy in the H4 framework
+  (`plan_compaction_reclamation.md`): `$ver:` is exempt from collapse-to-newest;
+  instead, per document key, collect all `$ver:` entries sorted by HLC descending
+  and drop any that satisfies neither the count limit nor the retention window
+- [ ] Implement the **post-delete purge**: when the newest `$ver:` entry for a
+  key is a delete-version, lift the keep-N floor and drop the **entire** chain
+  (all puts and the delete-version) once the delete-version is older than
+  `retentionDays`, so deleted documents leave zero residue
+- [ ] Ensure dropped version entries trigger vault ref-counter **decrements** in
+  the same compaction output, using H3's single fail-safe ref-count helper
+  (`plan_vault_gc_failsafe.md`) — counter-based, not a new live scan
 
 ### Phase 4 — CLI
 
@@ -206,6 +292,13 @@ are explicitly excluded. No changes to the sync filter are needed beyond ensurin
   by version is not GC'd; vault ref released when version trimmed; promote
   deleted document un-deletes it; promote trimmed version returns
   `VersionNotFoundError`
+- [ ] Delete records a `$ver:` delete-version: after a delete, `getVersions`
+  includes the delete-version and `promoteVersion` of a prior put un-deletes it
+- [ ] **Deleted-document full drain (anti-leak):** delete a doc, advance past
+  `retentionDays`, compact, then assert **zero** entries remain for the doc in the
+  main, `$ver:`, and `$index:` namespaces, and that any vault blob it solely
+  referenced is GC'd — guards against the keep-N-pins-forever leak
+- [ ] Live document retains keep-N history (the floor applies while the doc lives)
 - [ ] CLI tests: `versions`, `promote`
 - [ ] Update `CLAUDE.md` implementation status table
 

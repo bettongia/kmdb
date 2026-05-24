@@ -23,11 +23,20 @@ Implementation work on a plan should follow the guidance provided in
    way we can continue work effectively after an interruption.
 4. All implementation work must include writing tests (and ensuring they pass)
    and updating documentation (Code docs, user and spec docs etc) as
-   appropriate.
+   appropriate. If the work introduces a test that cannot run in the automated
+   suite (a real cloud service, real-OS durability/`fsync`, cross-process or
+   multi-host concurrency, etc.), add an entry describing it to the release
+   checklist at `docs/spec/28_release_checklist.md` so it is run at release time.
 5. When the plan has been completely implemented, make sure the status is
    updated to "Complete" and move the plan into the `plans/completed` directory.
 6. When you complete the implementation work, submit the changes as a pull
    request.
+
+**Spec section numbering:** Spec files in `docs/spec/` are numbered sequentially
+(`NN_topic.md`) and the spec is built serially as work is done. A plan that will
+add a spec section must **not** hard-code its number — refer to the spec by topic
+and take the next available `NN` when the file is actually created. This prevents
+number collisions between plans drafted in parallel.
 
 ## Plan template
 
