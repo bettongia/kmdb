@@ -31,3 +31,5 @@ dist/
 packages/kmdb_inferencing/assets/native/
 todo.txt
 *.log
+
+api-docs/
