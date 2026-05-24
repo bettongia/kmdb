@@ -3,7 +3,6 @@
 COVERAGE_DIR=site/coverage
 KMDB_PKG=packages/kmdb
 KMDB_CLI_PKG=packages/kmdb_cli
-KMDB_UI_PKG=packages/kmdb_ui
 
 ADDLICENSE_CONFIG=addlicense_config.txt
 
