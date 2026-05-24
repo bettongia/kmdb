@@ -408,6 +408,191 @@ different things.)
 10. Rewrite §17 (and tighten §09/§12) to match the corrected behaviour; refresh
     the spec index version history; clear the §6 dead code/doc drifts.
 
+### Implementation work
+
+Plans are being authored in `plans/` (per `plans/README.md`) to resolve the
+findings above, in priority order. Status of each, with notes that surfaced
+while preparing them:
+
+1. **C1 — crash-recovery WAL replay** →
+   [plans/plan_crash_recovery_wal_replay.md](plans/plan_crash_recovery_wal_replay.md)
+   *(Status: Investigated — ready to implement first).*
+   - The fix is **recovery-side only**; the write path (the WAL itself) is
+     correct, so no change to how data is logged is needed — recovery just has to
+     stop deleting and start replaying the active WAL.
+   - The trigger surface is **broader than flush**: every `VersionEdit` records
+     `logNumber = activeSequence`, so compaction, sync **ingest** (a sync *pull*
+     can lose local unflushed writes), and manifest rotation all arm the same
+     bug. The plan's regression suite covers each trigger.
+   - Two combining defects: the `<=`/`<` off-by-one **and** flush markers being
+     written before their SSTable is durable. The fix removes marker-based
+     skipping in favour of full WAL replay (idempotent under HLC LWW).
+   - **Testable with the existing in-memory adapter** — the bug is recovery
+     deleting genuinely-durable data, which the memory adapter models faithfully.
+     So C1 and its tests can land immediately, without waiting on the harness
+     below.
+
+2. **C2 + H1 + M3 — manifest fsync & durability ordering** →
+   [plans/plan_manifest_fsync_ordering.md](plans/plan_manifest_fsync_ordering.md)
+   *(Status: Investigated — sequenced **after** C1).*
+   - H1 (`syncDir` never called) and M3 (`CURRENT` swap not fsynced) are folded
+     in deliberately: fsyncing the manifest is meaningless on Linux unless the
+     directory entry is also synced, so the three cannot be correctly fixed
+     apart. They share one root cause and one fix.
+   - Most of the work is **inserting missing `syncFile`/`syncDir` calls** — flush
+     and compaction already order *append-before-delete*; the only genuine
+     re-ordering hazard is manifest rotation (publish `CURRENT` only after the new
+     manifest is durable, else a crash loses the entire level map). No
+     `StorageAdapter` interface change is needed.
+   - **Caveat — this plan cannot use the in-memory adapter.** Its
+     `syncFile`/`syncDir` are no-ops and a "crash" never loses buffered data, so
+     the entire C2/H1/M3 bug class is invisible to it. The plan therefore makes
+     **building a `FaultyStorageAdapter`** (the fault-injection harness from §8)
+     its Step 0 — modelling pending-vs-fsynced content, directory-entry
+     durability, and a `crash()` that discards un-synced state. This harness is
+     the gating dependency for all durability testing and is reusable for C1's
+     mid-flush case and any future ordering work; each C2 regression test is
+     specified to be confirmed *failing before the fix, passing after*.
+   - One accepted cost: an extra manifest `syncFile` plus one or two `syncDir`
+     calls per flush/compaction/ingest. Marginal against the fsyncs already on
+     those paths; can be batched later if profiling demands.
+
+3. **H3 — vault GC / recovery fail-safe ref counts** →
+   [plans/plan_vault_gc_failsafe.md](plans/plan_vault_gc_failsafe.md)
+   *(Status: Investigated — independent of C1/C2; land before document
+   versioning).*
+   - Investigation found the ref count is decoded in **three** places: the
+     interceptor already uses the real `ValueCodec` (correct), while `VaultGc`
+     **and** `VaultRecovery` each hand-roll their own CBOR micro-parser that
+     returns `0`/"no ref" on any surprise — and both then permanently delete.
+     `VaultRecovery._hasKvRef` is worse: it `catch (_) => false`, so a decode
+     *exception* also reads as "unreferenced," and this runs on every unclean
+     open.
+   - The fix unifies all readers on **one fail-safe helper** and inverts the
+     default: deletion requires a positive determination of zero references
+     (absent counter, which the protocol guarantees means zero, or a decoded
+     `refCount == 0`); an **undecodable** counter is treated as *referenced* and
+     retained. Removes ~120 lines of duplicated hand-rolled CBOR.
+   - **Coordinates with document versioning**
+     ([plans/plan_document_versioning.md](plans/plan_document_versioning.md)),
+     which edits the same files and adds `$ver:` entries as new ref sources with
+     compaction-time decrements. H3 should land first so versioning reuses the
+     shared helper instead of adding a fourth decoder; the versioning plan's
+     "scan `$ver:` for refs" wording should be reconciled to the counter-based
+     model.
+   - Flags a **related, separately-scoped** risk: `VaultRecovery` deletes
+     "manifest present, no ref" objects as orphans, which also matches a
+     freshly-synced stub whose referencing document hasn't arrived yet — a
+     sync-ordering data-loss to address in its own follow-up.
+
+4. **H5 — sync lease CAS atomicity** →
+   [plans/plan_sync_cas_atomicity.md](plans/plan_sync_cas_atomicity.md)
+   *(Status: Investigated)*, plus its testing companion
+   **harness mixed-storage + behavioural cloud simulation** →
+   [plans/plan_harness_mixed_storage.md](plans/plan_harness_mixed_storage.md)
+   *(Status: Investigated)*.
+   - Investigation reframed H5: CAS atomicity is a property of the *backend's
+     consistency model*, not just adapter code — the same `LocalDirectoryAdapter`
+     can be atomic on a real disk (via `O_EXCL` / advisory locks) but **cannot**
+     be on a cloud-synced folder. So the fix is a written CAS contract, an honest
+     per-adapter atomic-CAS capability, and a coordinator that **skips
+     consolidation** (loss-free, since it is only an optimisation) when atomicity
+     isn't guaranteed — backed by a reusable conformance/**contention** test
+     every adapter must pass.
+   - These two plans directly answer the review's §8 testing gap: H5 ships the
+     adapter contention test; the harness plan adds per-device adapters, a
+     `CloudProfile` abstraction, and a **behavioural cloud-API simulator**
+     framework (fake `http.Client` driving the *real* adapter) so eventual
+     consistency and CAS atomicity are tested deterministically in CI, with real
+     services reserved for pre-release. The framework is **general across
+     providers** (Drive, Dropbox, iCloud, …).
+   - Sequenced **H5 → harness mixed-storage → `plan_google_drive_sync.md`**; the
+     Drive plan was updated to depend on both, ship a Drive simulator +
+     `CloudProfile`, and verify the open atomicity risk that **Drive permits
+     duplicate filenames**, so a name-keyed lease create may not be exclusive.
+
+5. **H2 — atomic `WriteBatch`** →
+   [plans/plan_writebatch_atomicity.md](plans/plan_writebatch_atomicity.md)
+   *(Status: Investigated — sequenced after C1; complements C2).*
+   - Confirmed the batch is non-atomic two ways: across a crash (each entry is a
+     separate, separately-fsynced WAL record with no group boundary) **and**
+     in-process (the loop awaits between memtable mutations, so a concurrent
+     `get()` can see a half-applied batch). Also found the surrounding
+     generation-counter and namespace-registry writes are *separate* engine ops,
+     so a single user write is up to four un-grouped WAL records today.
+   - Fix is a single **batch frame** (one checksum, one append, **one fsync**) +
+     synchronous memtable application — which makes the batch all-or-nothing and,
+     as a bonus, collapses N fsyncs into one. Recommends folding the meta-writes
+     into the same frame so a user write is one atomic unit, and keeps the WAL
+     decoder back-compatible with legacy individual records.
+   - Fully **CI-testable** with the in-memory adapter (truncate the frame →
+     recovery drops the whole batch), so no §28 release-checklist entry is needed.
+
+6. **H4 — compaction space reclamation** →
+   [plans/plan_compaction_reclamation.md](plans/plan_compaction_reclamation.md)
+   *(Status: Investigated).*
+   - Investigation split this into two operations with very different safety,
+     which the review's one-line fix had conflated. **Version collapse** (drop
+     superseded versions per key) is safe at *any* compaction level because reads
+     re-merge all levels — a large, low-risk win. **Tombstone GC** is *not*: it is
+     only safe in an all-levels compaction (KMDB levels do not imply recency, so
+     "bottom level" is insufficient) **and**, in a synced database, only past a
+     sync horizon — otherwise dropping a tombstone lets a late-syncing peer
+     resurrect deleted data.
+   - The principled horizon is `min(currentHlc)` across all devices' high-water
+     marks (everyone has synced past it); compaction must be *given* that horizon
+     since it doesn't read the sync folder today. Plan sequences collapse first,
+     gated tombstone GC second.
+   - It is the **general reclamation framework** the document-versioning feature
+     plugs into: `$ver:` namespaces are exempt from collapse and use a keep-N /
+     retention policy instead. That feature's plan was hardened in lockstep —
+     dependencies on H2 (atomic `$ver:` writes), H3 (fail-safe vault refs), and
+     H4; a soft-delete model (delete recorded as a `$ver:` version); and an
+     explicit **full-drain guarantee** (keep-N is a floor for *live* docs only, so
+     deleted documents reclaim to zero residue rather than leaking storage).
+   - Core no-resurrection case is **CI-testable** (drop a tombstone, ingest a
+     crafted older-HLC SSTable, assert no resurrection); the multi-device case is
+     covered by the harness once `plan_harness_mixed_storage.md` lands.
+
+7. **M1 — SSTable reader caching** →
+   [plans/plan_sstable_reader_cache.md](plans/plan_sstable_reader_cache.md)
+   *(Status: Investigated).*
+   - The fix splits cleanly: a **table cache** of open readers (footer + index +
+     filter) is the high-value, **format-change-free, backward-compatible** part —
+     it turns the whole-file hash from a per-*read* cost into a one-time
+     per-*file* cost. "Footer-only cheap open" is deferred to a second phase
+     because the footer/index/filter are currently covered only by the whole-file
+     hash, so skipping it would need per-section checksums (a format change).
+   - Distinct from the §15 query-layer cache; named `TableCache` to avoid
+     confusion. Eviction is tied to level-map mutations (flush/compaction/ingest/
+     rotation/rename). Benchmark-measured; no §28 entry needed.
+
+8. **M2 — real UTF-8 namespace encoding** →
+   [plans/plan_utf8_namespace_encoding.md](plans/plan_utf8_namespace_encoding.md)
+   *(Status: Investigated).*
+   - Investigation found the namespace is encoded to bytes in **three divergent
+     paths** (`KeyCodec._toUtf8`, `WalRecord._toUtf8`, and `LsmEngine`'s prefix
+     builders calling `codeUnits` directly) that must be unified on one UTF-8
+     helper or non-ASCII scans silently miss. Keys are ASCII UUIDv7 hex and are
+     unaffected — only namespaces (collection names) carry the bug.
+   - **Backward-compatible by construction:** ASCII namespaces are byte-identical
+     under `utf8.encode`, so every working database is unchanged (no migration);
+     only the currently-corrupted non-ASCII case changes. The one new design
+     choice is NFC normalisation of namespaces at the boundary (recommended).
+
+9. **§6 code & doc tidy-up** →
+   [plans/plan_code_doc_tidyup.md](plans/plan_code_doc_tidyup.md)
+   *(Status: Investigated).*
+   - Clears the §6 dead-code / doc-drift items in one small PR. Two carry
+     subtleties flagged in the plan: the `LsmEngine.get()` `found` flag must keep
+     its three-state (absent vs tombstone vs hit) semantics — collapsing it to a
+     plain `Uint8List?` would resurrect deleted data — and the manifest-rotation
+     metadata loss is documented now, with the proper fix (track `SstableMeta`)
+     deferred as it exceeds tidy-up.
+   - (The earlier §26 spec-number collision is avoided going forward by a
+     convention in `plans/README.md`: spec section numbers are assigned at
+     creation time, not pre-reserved in plans.)
+
 ---
 
 ## 10. Note on `packages/kmdb_ui`

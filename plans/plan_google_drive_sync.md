@@ -4,7 +4,20 @@
 
 **PR link**: {A link to the PR submitted for this plan}
 
+**Implementation model:** Sonnet, after H5 + harness land; the empirical Drive
+probe (Phase 4a) is human-run with real credentials.
+
 **Roadmap**: docs/roadmap/0_04.md
+
+**Prerequisites**:
+- `plan_sync_cas_atomicity.md` (H5) — defines the `compareAndSwap` atomicity
+  contract, the adapter conformance/contention suite, and the
+  atomic-CAS capability/gating this adapter must satisfy and declare.
+- `plan_harness_mixed_storage.md` — defines per-device adapters, the
+  `CloudProfile` abstraction, and the behavioural-cloud-simulation framework
+  this package must implement for Drive (so the adapter is tested against
+  realistic Drive semantics, not canned responses, with the real service
+  reserved for pre-release).
 
 ## Problem statement
 
@@ -114,8 +127,14 @@ so they can be updated when limits change.
   `orderBy`, `pageToken`, and `fields` projection.
 - **Files.get** (media download) — download file bytes; response includes
   `ETag` header (and Drive's own `md5Checksum` field on metadata).
-- **Files.create** (multipart/resumable upload) — create new file; supports
-  `If-None-Match: *` to prevent overwriting an existing file.
+- **Files.create** (multipart/resumable upload) — creates a **new file with a
+  new unique ID every time**. Drive identifies files by ID, not name, and
+  permits multiple files with the same name in one folder (confirmed:
+  <https://developers.google.com/workspace/drive/api/guides/create-file#copy-existing-file>
+  — "the `copy` method produces a file with the same name as the original").
+  There is therefore **no name-based `If-None-Match: *` precondition** on create;
+  the earlier assumption that create can "prevent overwriting an existing file"
+  by name does not hold. See the atomicity caveat below.
 - **Files.update** (media update) — update existing file bytes; supports
   `If-Match: <etag>` for conditional update.
 - **Files.delete** — delete a file by ID.
@@ -131,13 +150,32 @@ expect, and mirrors how GCS and S3 work.
 
 ### compareAndSwap on Drive
 
-Drive supports conditional requests via standard HTTP headers:
-- Create (if-none-match: \*): `Files.create` with `If-None-Match: *`
-- Update (if-match: etag): `Files.update` with `If-Match: <etag>`
+Drive supports conditional requests for **updates to a known file ID**:
+- Update (if-match: etag): `Files.update` with `If-Match: <etag>` → `412
+  Precondition Failed` on mismatch → return `false`. This is sound.
 
-A 412 Precondition Failed response means ETag mismatch → return `false`.
-A 409 Conflict on create means file already exists → return `false`.
-These map cleanly to the interface semantics.
+The **create** case does **not** map cleanly. Because `Files.create` always
+mints a new ID and Drive allows duplicate names in a folder (see "Files.create"
+above and the cited doc), a name-keyed "create if absent" is **not exclusive** —
+two devices can each create a `.consolidation-lease` and both succeed. The
+previously-assumed "`409 Conflict` on create means the file already exists" does
+not occur for name-based creation. The lease design must not rely on it.
+
+**Atomicity caveat — must be verified, not assumed.** Google Drive permits
+**multiple files with the same name in a folder**, so a *name-keyed*
+create-if-absent (`If-None-Match: *`) may not be exclusive: two devices could
+each create a `.consolidation-lease` and both succeed, defeating the lease. The
+consolidation lease's safety therefore hinges on whether Drive genuinely
+enforces single-winner create for our addressing scheme. This must be:
+1. **Verified empirically** against the behavioural Drive simulator and the real
+   service using the H5 contention test from
+   `plan_sync_cas_atomicity.md`.
+2. **Declared honestly** via the H5 atomic-CAS capability and a `CloudProfile`
+   (`atomicConditionalCreate`, `allowsDuplicateNames: true`). If Drive cannot
+   guarantee atomic create for the lease, the adapter declares non-atomic CAS and
+   the coordinator skips consolidation (loss-free) per H5 — rather than silently
+   risking concurrent consolidation. An addressing change (e.g. a fixed file ID
+   or app-data single-file lease) may be needed to obtain true atomicity.
 
 ### Dart packages
 
@@ -208,9 +246,12 @@ Following the `betto_zstd` / `kmdb_tokenizer_icu` pattern, a new
   if not create with `Files.create` (multipart); use resumable upload for
   files >5MB
 - [ ] `delete(path)` — resolve file ID, call `Files.delete`; swallow 404
-- [ ] `compareAndSwap(path, bytes, {ifMatchEtag})` — for null etag use
-  `If-None-Match: *` on create; for non-null use `If-Match: <etag>` on
-  update; return `false` on 412/409, `true` on success
+- [ ] `compareAndSwap(path, bytes, {ifMatchEtag})` — for non-null etag use
+  `If-Match: <etag>` on `Files.update` (atomic; `412` → `false`). The **null-etag
+  create-if-absent** path must follow the lease design established by Phase 4a
+  (name-keyed create is **not** exclusive on Drive — see the atomicity caveat);
+  do not assume `If-None-Match: *`/`409` works for create. If no atomic create
+  design is found, declare non-atomic CAS (H5) so consolidation is gated.
 - [ ] `getEtag(path)` — call `Files.get` (metadata only, no download),
   return the `ETag` header value (or `null` if 404)
 - [ ] Expose `GoogleDriveAdapter` as the package's public API via
@@ -226,16 +267,63 @@ Following the `betto_zstd` / `kmdb_tokenizer_icu` pattern, a new
 - [ ] Document which Drive scope to request (`drive.appdata` vs `drive.file`)
   and surface this clearly in the constructor / helper
 
-### Phase 4 — Tests
+### Phase 4 — Behavioural Drive simulator + tests
 
-- [ ] Unit tests with a `FakeHttpClient` / hand-rolled Drive stub that returns
-  canned responses — cover all 6 interface methods
-- [ ] Tests for `compareAndSwap` edge cases: 412, 409, success with and without
-  etag, `LockConflictException` path
-- [ ] Integration test (skipped by default, enabled by env var
-  `GOOGLE_DRIVE_TEST_CREDENTIALS`) that runs the full `SyncEngine` push/pull
-  cycle against a real Drive folder
-- [ ] Achieve ≥90% line coverage on the package
+The default test backend is a **behavioural Google Drive API simulator**, not
+canned responses. It is a fake `http.Client` (the seam below the real
+`googleapis` `DriveApi`) implementing the Drive REST endpoints with realistic
+behaviour, so the **actual `GoogleDriveAdapter` code is exercised**. It is the
+Drive provider's implementation of the simulation framework defined in
+`plan_harness_mixed_storage.md`, and ships with a Drive `CloudProfile`
+(`allowsDuplicateNames: true`, an `atomicConditionalCreate` value established by
+the verification below, eventual-consistency and quota parameters).
+
+#### Phase 4a — Empirical Drive behaviour probe (must run first)
+
+The simulator's fidelity and the lease design both depend on **observed** Drive
+behaviour, not assumptions. Build a small, credential-gated probe harness that
+records what real Drive actually does, and treat its findings as the
+specification the simulator must reproduce:
+
+- [ ] Probe conditional **create** semantics: concurrent `Files.create` of the
+  same name in one folder — does Drive reject any, or produce N distinct files?
+  What status codes? Does `If-None-Match: *` change anything on create?
+- [ ] Probe conditional **update** semantics: concurrent `Files.update` on one
+  file ID with `If-Match: <etag>` — confirm exactly one wins, others get `412`.
+- [ ] Probe the candidate **ID-addressed lease** design (single well-known file,
+  CAS via `If-Match` on its ETag): is it atomic under contention? What is the
+  first-time-create race (before any ID exists), and how is it resolved?
+- [ ] Probe consistency: time-to-visibility of a newly created/updated/deleted
+  file to a second client; whether `Files.list` is read-your-writes consistent.
+- [ ] Probe rate-limit/quota responses (429/503 shapes, `Retry-After`).
+- [ ] **Record the findings in this plan** (a results table) and derive the
+  Drive `CloudProfile` values and the lease design from them.
+
+This probe runs against real Drive (credential-gated, manual/pre-release), but
+its **output is captured as fixtures/parameters** so the deterministic simulator
+encodes the same behaviour — closing the loop so simulator passes imply real
+Drive passes.
+
+- [ ] Implement the behavioural Drive simulator (fake `http.Client`) modelling:
+  conditional create/update (`If-None-Match: *` / `If-Match`), **duplicate-name
+  creation semantics**, eventual-consistency/propagation delay, 429/503
+  rate-limit responses, and resumable upload.
+- [ ] Run the **H5 adapter conformance + contention suite**
+  (`plan_sync_cas_atomicity.md`) against the real adapter over the simulator —
+  including the lease create-contention test that settles the atomicity caveat
+  above.
+- [ ] Publish the Drive `CloudProfile`; if create is not atomic, declare
+  non-atomic CAS so the coordinator gates consolidation.
+- [ ] Unit tests for all six `SyncStorageAdapter` methods and back-off/cancel
+  behaviour, driven through the simulator.
+- [ ] Wire the real-adapter-over-simulator into a `kmdb_harness` mixed-mode
+  scenario (per-device adapters; REST + FS-view of one shared backend) and assert
+  convergence.
+- [ ] **Pre-release integration test** (skipped by default, enabled by env var
+  `GOOGLE_DRIVE_TEST_CREDENTIALS`): full `SyncEngine` push/pull cycle and the
+  contention test against a **real** Drive folder — confirming the simulator's
+  fidelity and the real atomicity behaviour. Not part of per-commit CI.
+- [ ] Achieve ≥90% line coverage on the package (via the simulator path).
 
 ### Phase 5 — CLI integration (`kmdb_cli`)
 
@@ -264,8 +352,12 @@ Following the `betto_zstd` / `kmdb_tokenizer_icu` pattern, a new
 
 ### Phase 7 — Spec and docs
 
-- [ ] Add `26_google_drive_adapter.md` to `docs/spec/` covering auth,
-  folder layout, ETag strategy, CAS semantics, and platform notes
+- [ ] Add `docs/spec/NN_google_drive_adapter.md` (next available section number,
+  assigned at creation time — see `plans/README.md`) covering auth, folder
+  layout, ETag strategy, CAS semantics, and platform notes
+- [ ] Record the Phase 4a probe results table in this plan, and register
+  **RC-1 (Drive behaviour probe)** and **RC-2 (Drive real-service soak)** in
+  the release checklist `docs/spec/28_release_checklist.md`
 - [ ] Update `docs/roadmap/0_04.md` to mark Google Drive item done
 - [ ] Update `CLAUDE.md` package table with `kmdb_google_drive` entry
 - [ ] Add usage example to `packages/kmdb_google_drive/example/`
