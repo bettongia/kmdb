@@ -20,8 +20,6 @@
 --ignore="vendor/**"
 --ignore=".claude/**"
 --ignore=".worktrees/**"
---ignore="**/packages/kmdb_ui/build/**"
---ignore="**/packages/kmdb_ui/macos/**"
 --ignore="**/third_party/**"
 --ignore="**/.venv/**"
 .
