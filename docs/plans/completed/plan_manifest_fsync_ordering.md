@@ -2,7 +2,7 @@
 
 **Status**: Complete
 
-**PR link**: {pending}
+**PR link**: https://github.com/bettongia/kmdb/pull/20
 
 **Implementation model:** Opus — data-loss-critical, and the `FaultyStorageAdapter`
 (Step 0) is novel design, not transcription.
