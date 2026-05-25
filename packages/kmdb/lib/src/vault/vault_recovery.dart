@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import '../engine/kvstore/kv_store.dart';
+import 'vault_ref_count.dart';
 import 'vault_store.dart';
 
 /// Performs vault crash recovery after an unclean shutdown.
@@ -37,6 +38,17 @@ import 'vault_store.dart';
 /// A hash directory with a `manifest.json` **and** a KV ref is a valid stub or
 /// fully hydrated object — leave it alone.
 ///
+/// ## Fail-safe ref-count rule
+///
+/// Reference counts are read through the shared, fail-safe [VaultRefCount.read].
+/// Recovery deletes an object only on a **positive determination of zero
+/// references** — an absent counter or a decoded `refCount == 0`. A ref-count
+/// entry that is *present but undecodable* (corrupt, truncated, or written by a
+/// future/older codec) is treated as **referenced and retained**, and counted
+/// in [VaultRecoveryResult.retainedUndecodable]. This prevents a single
+/// malformed `$vault` entry from wiping a blob that documents still reference
+/// (review finding H3).
+///
 /// ## Crash table (§24)
 ///
 /// | Crash after step | State                                  | Recovery action       |
@@ -44,6 +56,7 @@ import 'vault_store.dart';
 /// | 1 or 2           | Orphaned staging file, no final dir    | Delete staging file   |
 /// | 3                | Blob in final dir, no manifest, no ref | Delete hash directory |
 /// | 4                | manifest.json + blob, no ref           | Delete hash directory |
+/// | —                | manifest.json + blob, undecodable ref  | Retain (fail-safe)    |
 final class VaultRecovery {
   /// Creates a [VaultRecovery] instance.
   const VaultRecovery({required this.store, required this.kvStore});
@@ -61,18 +74,16 @@ final class VaultRecovery {
   /// This method is called from [CrashRecovery.open] after the LSM engine has
   /// been fully recovered.
   Future<VaultRecoveryResult> recover() async {
-    var stagingDeleted = 0;
-    var hashDirsDeleted = 0;
-
     // Step 1: staging sweep — delete all files under vault/staging/.
-    stagingDeleted = await _sweepStaging();
+    final stagingDeleted = await _sweepStaging();
 
     // Step 2: hash directory sweep — delete orphaned or incomplete objects.
-    hashDirsDeleted = await _sweepHashDirs();
+    final (hashDirsDeleted, retainedUndecodable) = await _sweepHashDirs();
 
     return VaultRecoveryResult(
       stagingFilesDeleted: stagingDeleted,
       hashDirsDeleted: hashDirsDeleted,
+      retainedUndecodable: retainedUndecodable,
     );
   }
 
@@ -100,189 +111,93 @@ final class VaultRecovery {
 
   /// Scans all hash directories and deletes orphaned or incomplete objects.
   ///
-  /// Returns the number of hash directories deleted.
-  Future<int> _sweepHashDirs() async {
+  /// Returns a record of `(deleted, retainedUndecodable)` — the number of hash
+  /// directories deleted and the number retained because their ref-count entry
+  /// was present but undecodable (the fail-safe case).
+  Future<(int, int)> _sweepHashDirs() async {
     var deleted = 0;
+    var retainedUndecodable = 0;
 
     final hashes = await store.listAllHashes();
     for (final sha256 in hashes) {
-      if (await _shouldDelete(sha256)) {
-        await store.deleteHashDir(sha256);
-        deleted++;
+      switch (await _classify(sha256)) {
+        case _RecoveryAction.delete:
+          await store.deleteHashDir(sha256);
+          deleted++;
+        case _RecoveryAction.retain:
+          // Referenced (or defensively retained) — leave the object in place.
+          break;
+        case _RecoveryAction.retainUndecodable:
+          retainedUndecodable++;
       }
     }
-    return deleted;
+    return (deleted, retainedUndecodable);
   }
 
-  /// Returns `true` if the hash directory for [sha256] should be deleted.
+  /// Decides what recovery should do with the hash directory for [sha256].
   ///
-  /// Deletion criteria (§24 crash table):
-  /// - `manifest.json` absent → possibly an incomplete write (blob only, or
-  ///   neither file). Check for KV ref and delete if absent.
-  /// - `manifest.json` present, no KV ref → orphaned object. Delete.
+  /// The decision is **fail-safe**: an object is only deleted on a positive
+  /// determination of zero references. Specifically:
   ///
-  /// If neither a manifest nor a blob exists (the directory is empty or the
-  /// scanner picked up something else), we still delete to clean up.
-  Future<bool> _shouldDelete(String sha256) async {
+  /// - Ref entry present but undecodable → [_RecoveryAction.retainUndecodable].
+  ///   A corrupt, truncated, or unrecognised `$vault` entry must never be read
+  ///   as "no reference"; the object is kept so a malformed ref cannot wipe a
+  ///   blob that documents still reference (review finding H3).
+  /// - `manifest.json` absent, no KV ref → [_RecoveryAction.delete] (incomplete
+  ///   write — blob only, or empty directory).
+  /// - `manifest.json` absent, KV ref present → [_RecoveryAction.retain]. This
+  ///   should not happen normally (the manifest is written before the KV write),
+  ///   but if it does, leave it alone; it will be re-examined on the next
+  ///   recovery if the manifest is still absent.
+  /// - `manifest.json` present, no KV ref → [_RecoveryAction.delete] (orphaned
+  ///   object — the `WriteBatch` that was supposed to create the ref never
+  ///   committed).
+  /// - `manifest.json` present, KV ref present → [_RecoveryAction.retain] (a
+  ///   valid stub or fully hydrated object).
+  ///
+  // TODO(vault): The "manifest present, no KV ref → delete" rule also matches a
+  // freshly synced stub whose referencing document has not yet synced to this
+  // device. Deleting it loses a blob the about-to-arrive document needs. This
+  // sync-ordering ambiguity is a distinct fail-dangerous case tracked as a
+  // follow-up to H3 (see plan_vault_gc_failsafe.md, decision D3) — e.g. gating
+  // orphan deletion on an age/grace window or a "seen this session" marker.
+  Future<_RecoveryAction> _classify(String sha256) async {
+    final refResult = await VaultRefCount.read(kvStore, sha256);
+
+    // Fail-safe short-circuit: a present-but-undecodable ref entry means we
+    // cannot prove the object is unreferenced. Treat it as referenced and keep
+    // it — never delete on uncertainty.
+    if (refResult is RefCountUndecodable) {
+      return _RecoveryAction.retainUndecodable;
+    }
+
+    // Absent or Value(0) → no active reference; Value(n>0) → referenced.
+    final hasRef = refResult is RefCountValue && refResult.count > 0;
     final hasManifest = await store.exists(sha256);
 
-    // Check for a KV reference in the $vault namespace.
-    final hasRef = await _hasKvRef(sha256);
-
     if (!hasManifest) {
-      // Blob without manifest (or empty dir) and no KV ref → delete.
-      if (!hasRef) return true;
-      // Blob without manifest but with KV ref — this should not happen normally
-      // (the manifest is written before the KV write), but if it does, leave it
-      // alone; it will be caught on the next recovery if the manifest is still
-      // absent.
-      return false;
+      // Blob without manifest (or empty dir): delete only if there is no ref.
+      return hasRef ? _RecoveryAction.retain : _RecoveryAction.delete;
     }
 
-    // Manifest present — check for KV ref.
-    // If no KV ref exists, the vault object is orphaned (the WriteBatch
-    // that was supposed to create the ref never committed).
-    return !hasRef;
+    // Manifest present: orphaned (delete) if there is no KV ref, otherwise a
+    // valid stub/hydrated object (retain).
+    return hasRef ? _RecoveryAction.retain : _RecoveryAction.delete;
   }
+}
 
-  /// Returns `true` if the KV store contains a reference for [sha256] in the
-  /// `$vault` namespace.
-  Future<bool> _hasKvRef(String sha256) async {
-    // The $vault ref count key uses the sha256 as the key.
-    // A non-null, non-zero value indicates an active reference.
-    final bytes = await kvStore.get(kVaultNamespace, sha256);
-    if (bytes == null) return false;
-    // Decode the ref count. A count of 0 means tombstoned (no active ref).
-    try {
-      final count = _decodeRefCount(bytes);
-      return count > 0;
-    } catch (_) {
-      // Corrupt ref count — treat as absent.
-      return false;
-    }
-  }
+/// The action vault recovery takes for a single hash directory.
+enum _RecoveryAction {
+  /// The object is provably unreferenced (or an incomplete write) — delete it.
+  delete,
 
-  /// Decodes a vault ref count from raw bytes.
-  ///
-  /// The ref count is stored as a CBOR-encoded integer (via [WriteBatch]).
-  static int _decodeRefCount(List<int> bytes) {
-    // The vault ref counts are stored as plain integers encoded by ValueCodec.
-    // We use a simple big-endian int decode since vault ref counts are small.
-    if (bytes.isEmpty) return 0;
-    // Handle CBOR-encoded int: if first byte is 0x18 (uint8), read next byte,
-    // if 0x19 (uint16), read next 2 bytes, etc. For small counts (0–23),
-    // the value is in the low 5 bits of the first byte.
-    // For simplicity in v1, the ref count is stored as a raw CBOR integer.
-    // We reuse the ValueCodec decoding path via the KvStore API.
-    //
-    // Since the KvStore stores vault refs via WriteBatch.put with a CBOR map
-    // value (via ValueCodec.encode), we decode accordingly.
-    // The actual stored format is: ValueCodec prefix byte + CBOR map {"v": N}.
-    //
-    // If the first byte is 0x00 (raw, no compression), skip it and decode CBOR.
-    // A minimal CBOR map {"v": N} is: A1 61 76 [N]
-    //
-    // For now, extract from the ValueCodec-encoded form.
-    final view = bytes.toList();
-    // Simple extraction: skip the 1-byte codec flag, find the integer value.
-    // The vault ref-count map has the shape {"refCount": N}.
-    // We use a lightweight extraction rather than full CBOR decoding.
-    for (var i = 0; i < view.length - 1; i++) {
-      // CBOR positive integer: 0x00–0x17 (0–23 inline), 0x18 (1-byte follow)
-      // We just look for a positive integer in the CBOR stream.
-      if (view[i] >= 0 && view[i] <= 23) {
-        // Could be an inline CBOR integer — but this is too naive.
-        // Fall through to the CBOR map extraction.
-        break;
-      }
-    }
-    // Use a simple heuristic: the last numeric byte-sequence is the count.
-    // For a proper implementation, use the CBOR library.
-    // In practice, ref counts are small (1–100) and stored as CBOR ints.
-    return _extractRefCountFromCborMap(view);
-  }
+  /// The object is referenced, or defensively retained — leave it in place.
+  retain,
 
-  /// Extracts the `refCount` integer from a CBOR-encoded map value.
-  ///
-  /// This is a minimal CBOR map parser sufficient for vault ref counts.
-  static int _extractRefCountFromCborMap(List<int> bytes) {
-    // The vault writes: ValueCodec.encode({"refCount": N})
-    // ValueCodec output: [flagByte, CBOR({"refCount": N})]
-    // We skip the flagByte and parse the CBOR map.
-    if (bytes.length < 2) return 0;
-
-    // Skip ValueCodec flag byte (index 0), then parse CBOR map.
-    var pos = 1;
-    if (pos >= bytes.length) return 0;
-
-    // CBOR map: first byte is 0xA0 | count (for maps with 0–23 entries)
-    final mapByte = bytes[pos++];
-    if ((mapByte & 0xE0) != 0xA0) return 0; // Not a map
-    final numPairs = mapByte & 0x1F;
-
-    for (var i = 0; i < numPairs && pos < bytes.length; i++) {
-      // Read key (text string)
-      final keyByte = bytes[pos++];
-      if ((keyByte & 0xE0) != 0x60) return 0; // Not a text string
-      final keyLen = keyByte & 0x1F;
-      if (pos + keyLen > bytes.length) return 0;
-      final key = String.fromCharCodes(bytes.sublist(pos, pos + keyLen));
-      pos += keyLen;
-
-      // Read value
-      if (pos >= bytes.length) return 0;
-      final valByte = bytes[pos++];
-
-      if (key == 'refCount') {
-        // Decode integer
-        if (valByte <= 0x17) return valByte; // 0–23 inline
-        if (valByte == 0x18 && pos < bytes.length) return bytes[pos]; // uint8
-        if (valByte == 0x19 && pos + 1 < bytes.length) {
-          return (bytes[pos] << 8) | bytes[pos + 1]; // uint16
-        }
-        return 0;
-      } else {
-        // Skip value — handle common CBOR types.
-        pos = _skipCborValue(bytes, pos - 1);
-      }
-    }
-    return 0;
-  }
-
-  static int _skipCborValue(List<int> bytes, int pos) {
-    if (pos >= bytes.length) return pos;
-    final b = bytes[pos++];
-    final majorType = b >> 5;
-    final additionalInfo = b & 0x1F;
-
-    switch (majorType) {
-      case 0:
-      case 1: // unsigned/negative int
-        if (additionalInfo == 24) return pos + 1;
-        if (additionalInfo == 25) return pos + 2;
-        if (additionalInfo == 26) return pos + 4;
-        if (additionalInfo == 27) return pos + 8;
-        return pos;
-      case 2:
-      case 3: // byte/text string
-        if (additionalInfo <= 23) return pos + additionalInfo;
-        if (additionalInfo == 24 && pos < bytes.length) {
-          return pos + 1 + bytes[pos];
-        }
-        return pos + 2;
-      case 4:
-      case 5: // array/map
-        final count = additionalInfo <= 23 ? additionalInfo : 1;
-        var p = pos;
-        final items = majorType == 4 ? count : count * 2;
-        for (var i = 0; i < items; i++) {
-          p = _skipCborValue(bytes, p);
-        }
-        return p;
-      default:
-        return pos;
-    }
-  }
+  /// The object's ref-count entry is present but undecodable — retain it under
+  /// the fail-safe rule and report it via
+  /// [VaultRecoveryResult.retainedUndecodable].
+  retainUndecodable,
 }
 
 // ── Result types ───────────────────────────────────────────────────────────────
@@ -293,6 +208,7 @@ final class VaultRecoveryResult {
   const VaultRecoveryResult({
     required this.stagingFilesDeleted,
     required this.hashDirsDeleted,
+    this.retainedUndecodable = 0,
   });
 
   /// Number of staging files deleted (incomplete writes).
@@ -301,13 +217,23 @@ final class VaultRecoveryResult {
   /// Number of hash directories deleted (orphaned or incomplete objects).
   final int hashDirsDeleted;
 
+  /// Number of hash directories retained because their `$vault` ref-count entry
+  /// was present but undecodable.
+  ///
+  /// Under the fail-safe rule, recovery never deletes an object whose reference
+  /// count cannot be proven zero. A non-zero value here surfaces corrupt or
+  /// unrecognised ref-count entries that warrant investigation, instead of the
+  /// silent blob deletion the previous decoder would have caused.
+  final int retainedUndecodable;
+
   /// Returns `true` if any cleanup was performed.
   bool get hadWork => stagingFilesDeleted > 0 || hashDirsDeleted > 0;
 
   @override
   String toString() =>
       'VaultRecoveryResult(stagingFilesDeleted: $stagingFilesDeleted, '
-      'hashDirsDeleted: $hashDirsDeleted)';
+      'hashDirsDeleted: $hashDirsDeleted, '
+      'retainedUndecodable: $retainedUndecodable)';
 }
 
 /// The `$vault` system namespace key prefix for reference counts.

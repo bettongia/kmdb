@@ -164,12 +164,16 @@ after the standard LSM crash recovery (§17):
      (incomplete write — not a stub).
    - `manifest.json` present, no KV ref → delete hash directory (orphaned
      vault object).
+   - Ref entry present but **undecodable** → **retain** the hash directory (see
+     [Fail-safe ref-count rule](#fail-safe-ref-count-rule)). Recovery reports a
+     count of such objects so corruption is visible rather than silent.
 
 | Crash after step | State | Recovery action |
 | :--------------- | :---- | :-------------- |
 | 1 or 2 | Orphaned staging file, no final directory | Delete staging file |
 | 3 | Blob in final dir, no `manifest.json`, no KV ref | Delete hash directory |
 | 4 | `manifest.json` + blob in final dir, no KV ref | Delete hash directory |
+| — | `manifest.json` + blob, ref entry present but undecodable | **Retain** (fail-safe) |
 
 ## Deletion & Garbage Collection
 
@@ -185,15 +189,47 @@ record and are replayed together on crash recovery.
 $vault:{sha256}  →  integer reference count
 ```
 
-When the count reaches zero, the vault subsystem creates `tombstone.json`
-alongside `manifest.json` in the hash directory.
+When the count reaches zero, the vault subsystem deletes the `$vault:{sha256}`
+entry entirely (so that *absence of the entry is an authoritative "zero
+references" signal*) and creates `tombstone.json` alongside `manifest.json` in
+the hash directory.
+
+### Fail-safe ref-count rule
+
+Both deletion paths — the GC sweep and crash recovery — read reference counts
+through a single, fail-safe reader (`VaultRefCount.read`) that uses the same
+`ValueCodec` that wrote them, never a hand-rolled partial decoder. The reader
+returns one of three results, and **an object may be deleted only on a positive
+determination of zero references**:
+
+| Read result | Meaning | GC / recovery action |
+| :---------- | :------ | :------------------- |
+| Absent (no entry) | Genuinely zero references (entry deleted at zero) | Delete eligible |
+| `refCount == 0` | Zero references | Delete eligible |
+| `refCount > 0` | Referenced | Retain |
+| **Undecodable** | Present but cannot be decoded (corrupt, truncated, or a future/older codec) | **Retain** |
+
+The critical case is the last one. A content store must fail *safe*: when it
+cannot prove an object is unreferenced, it keeps it. A corrupt or unexpected
+`$vault` entry is therefore treated as *referenced* and the blob is preserved —
+never deleted on uncertainty. Both `VaultGcResult` and `VaultRecoveryResult`
+expose a `retainedUndecodable` count so that such entries surface for
+investigation instead of being silently retained forever.
+
+> Historical note: earlier builds decoded ref counts with hand-rolled partial
+> CBOR parsers that returned `0` ("unreferenced") on any unanticipated byte
+> pattern and then permanently deleted the blob. That was a fail-*dangerous*
+> default and is replaced by the rule above.
 
 ### Tombstoning
 
 `tombstone.json` signals unreferenced state without mutating the immutable
-`manifest.json`. Its presence (not its content) is the signal. The GC sweep
-deletes the entire hash directory on its next pass after `tombstone.json` is
-found.
+`manifest.json`. Its presence (not its content) is the signal. On its next pass
+after `tombstone.json` is found, the GC sweep **re-reads the reference count**
+(via the fail-safe reader above) and deletes the entire hash directory only if
+the count is still a positive zero (absent or `0`). If the count is now positive
+the object was re-referenced — the sweep removes the tombstone instead; if the
+count is undecodable the object is retained.
 
 To un-tombstone (when a new document references the hash), delete
 `tombstone.json`. The ref-count increment and the `tombstone.json` deletion

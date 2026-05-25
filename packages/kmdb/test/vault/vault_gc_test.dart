@@ -83,6 +83,15 @@ class _FakeKvStore implements KvStore {
     _data[kVaultNamespace]![sha256] = builder.toBytes();
   }
 
+  /// Injects raw (possibly malformed) bytes for [sha256] under `$vault`.
+  ///
+  /// Used to simulate a corrupt/undecodable ref-count entry that the fail-safe
+  /// reader must refuse to interpret as zero references.
+  void setRawRefCount(String sha256, Uint8List bytes) {
+    _data[kVaultNamespace] ??= {};
+    _data[kVaultNamespace]![sha256] = bytes;
+  }
+
   void clearRefCount(String sha256) {
     _data[kVaultNamespace]?.remove(sha256);
   }
@@ -326,6 +335,70 @@ void main() {
         expect(result.deleted, equals(1));
         expect(await store.exists(sha256), isFalse);
       });
+
+      // ── Fail-safe ref-count decoding (H3) ───────────────────────────────────
+
+      test('FAIL-SAFE: corrupt ref entry is retained, not deleted', () async {
+        // A tombstoned object whose $vault entry is present but undecodable.
+        // The old hand-rolled decoder read this as "0 references" and deleted
+        // the blob; the fail-safe reader must retain it.
+        final ref = await store.ingest(
+          bytes: _bytes('precious binary'),
+          hlcTimestamp: 't1',
+        );
+        await gc.onZeroRefs(ref.sha256); // tombstone created
+        // Inject a malformed value (valid ValueCodec flag, but a CBOR int
+        // rather than the expected map) — undecodable as a ref-count map.
+        kvStore.setRawRefCount(ref.sha256, Uint8List.fromList([0x00, 0x01]));
+
+        final result = await gc.sweep();
+        expect(result.examined, equals(1));
+        expect(result.deleted, equals(0)); // NOT deleted
+        expect(result.retainedUndecodable, equals(1));
+        expect(await store.exists(ref.sha256), isTrue); // blob preserved
+        expect(
+          await store.isTombstoned(ref.sha256),
+          isTrue, // tombstone left for a future sweep
+        );
+      });
+
+      test('FAIL-SAFE: garbage bytes are retained, not deleted', () async {
+        final ref = await store.ingest(
+          bytes: _bytes('also precious'),
+          hlcTimestamp: 't1',
+        );
+        await gc.onZeroRefs(ref.sha256);
+        // Completely unstructured bytes (unknown compression flag).
+        kvStore.setRawRefCount(
+          ref.sha256,
+          Uint8List.fromList([0xEE, 0xFF, 0x00, 0x12]),
+        );
+
+        final result = await gc.sweep();
+        expect(result.deleted, equals(0));
+        expect(result.retainedUndecodable, equals(1));
+        expect(await store.exists(ref.sha256), isTrue);
+      });
+
+      test(
+        'deletes a genuinely zero-ref object with an explicit refCount==0 entry',
+        () async {
+          // Distinct from the absent-entry happy path: the entry is present and
+          // decodes to exactly zero, which is a positive determination of zero
+          // references and therefore safe to delete.
+          final ref = await store.ingest(
+            bytes: _bytes('zero ref'),
+            hlcTimestamp: 't1',
+          );
+          kvStore.setRefCount(ref.sha256, 0);
+          await gc.onZeroRefs(ref.sha256);
+
+          final result = await gc.sweep();
+          expect(result.deleted, equals(1));
+          expect(result.retainedUndecodable, equals(0));
+          expect(await store.exists(ref.sha256), isFalse);
+        },
+      );
     });
 
     group('VaultGcResult', () {
@@ -340,11 +413,22 @@ void main() {
       });
 
       test('toString contains field values', () {
-        const r = VaultGcResult(examined: 5, deleted: 3, skipped: 2);
+        const r = VaultGcResult(
+          examined: 5,
+          deleted: 3,
+          skipped: 2,
+          retainedUndecodable: 4,
+        );
         final s = r.toString();
         expect(s, contains('5'));
         expect(s, contains('3'));
         expect(s, contains('2'));
+        expect(s, contains('retainedUndecodable: 4'));
+      });
+
+      test('retainedUndecodable defaults to 0', () {
+        const r = VaultGcResult(examined: 1, deleted: 0, skipped: 0);
+        expect(r.retainedUndecodable, equals(0));
       });
     });
   });

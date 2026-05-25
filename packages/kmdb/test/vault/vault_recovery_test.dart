@@ -88,6 +88,15 @@ class _FakeKvStore implements KvStore {
     _data[kVaultNamespace]![sha256] = builder.toBytes();
   }
 
+  /// Injects raw (possibly malformed) bytes for [sha256] under `$vault`.
+  ///
+  /// Used to simulate a corrupt/undecodable ref-count entry that recovery must
+  /// treat as "referenced" (retain), never as "no reference" (delete).
+  void setRawRefCount(String sha256, Uint8List bytes) {
+    _data[kVaultNamespace] ??= {};
+    _data[kVaultNamespace]![sha256] = bytes;
+  }
+
   @override
   Future<Uint8List?> get(String namespace, String key) async =>
       _data[namespace]?[key];
@@ -319,6 +328,57 @@ void main() {
           expect(result.hashDirsDeleted, equals(1));
         },
       );
+
+      // ── Fail-safe ref-count decoding (H3) ───────────────────────────────────
+
+      test(
+        'FAIL-SAFE: manifest + corrupt ref entry → object survives recovery',
+        () async {
+          // A single malformed $vault entry must not let recovery wipe a blob
+          // that documents may still reference. The old decoder read this as
+          // "no reference" and deleted the hash directory.
+          final bytes = Uint8List.fromList('keep on crash'.codeUnits);
+          final ref = await store.ingest(bytes: bytes, hlcTimestamp: 't1');
+          // Corrupt ref entry: valid codec flag, CBOR int instead of a map.
+          kvStore.setRawRefCount(ref.sha256, Uint8List.fromList([0x00, 0x01]));
+
+          final result = await makeRecovery().recover();
+          expect(result.hashDirsDeleted, equals(0)); // NOT deleted
+          expect(result.retainedUndecodable, equals(1));
+          expect(await store.exists(ref.sha256), isTrue);
+          expect(await store.isHydrated(ref.sha256), isTrue);
+        },
+      );
+
+      test('FAIL-SAFE: garbage ref bytes → object survives recovery', () async {
+        final bytes = Uint8List.fromList('garbage guard'.codeUnits);
+        final ref = await store.ingest(bytes: bytes, hlcTimestamp: 't1');
+        kvStore.setRawRefCount(
+          ref.sha256,
+          Uint8List.fromList([0xEE, 0xFF, 0x00, 0x99]),
+        );
+
+        final result = await makeRecovery().recover();
+        expect(result.hashDirsDeleted, equals(0));
+        expect(result.retainedUndecodable, equals(1));
+        expect(await store.exists(ref.sha256), isTrue);
+      });
+
+      test(
+        'true orphan (manifest present, no ref entry) is still deleted',
+        () async {
+          // Happy-path regression guard: a genuinely absent ref entry is a
+          // positive determination of zero references → delete.
+          final bytes = Uint8List.fromList('orphan'.codeUnits);
+          final ref = await store.ingest(bytes: bytes, hlcTimestamp: 't1');
+          // No KV ref set at all.
+
+          final result = await makeRecovery().recover();
+          expect(result.hashDirsDeleted, equals(1));
+          expect(result.retainedUndecodable, equals(0));
+          expect(await store.exists(ref.sha256), isFalse);
+        },
+      );
     });
 
     group('VaultRecoveryResult', () {
@@ -350,9 +410,19 @@ void main() {
         const r = VaultRecoveryResult(
           stagingFilesDeleted: 3,
           hashDirsDeleted: 2,
+          retainedUndecodable: 7,
         );
         expect(r.toString(), contains('3'));
         expect(r.toString(), contains('2'));
+        expect(r.toString(), contains('retainedUndecodable: 7'));
+      });
+
+      test('retainedUndecodable defaults to 0', () {
+        const r = VaultRecoveryResult(
+          stagingFilesDeleted: 0,
+          hashDirsDeleted: 0,
+        );
+        expect(r.retainedUndecodable, equals(0));
       });
     });
   });

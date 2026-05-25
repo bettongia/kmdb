@@ -1,8 +1,8 @@
 # Fix H3: Vault GC / recovery ref-count decoding is fail-dangerous (can delete referenced blobs)
 
-**Status**: Investigated
+**Status**: Complete
 
-**PR link**: {pending}
+**PR link**: https://github.com/bettongia/kmdb/pull/22
 
 **Implementation model:** Sonnet, with careful review of the fail-safe default —
 the data-destruction risk is reverting to "delete on uncertainty."
@@ -143,87 +143,151 @@ zero at compaction.
 
 ## Decisions (recommended answers — confirm before implementation)
 
-- [ ] **D1 — Shared helper shape.** Recommended: a small result type
-  `sealed RefCountReadResult { Absent; Value(int n); Undecodable; }` returned by
-  `VaultRefCount.read(...)`, so each caller decides policy explicitly. Avoids the
-  ambiguous "0 means both zero and error" overload that caused the bug.
-- [ ] **D2 — Use `ValueCodec.decode` directly?** Recommended: **yes** — it is
-  already the writer and is used by the interceptor. Wrap in try/catch to map
-  failure to `Undecodable`. Removes ~120 lines of hand-rolled CBOR across two
-  files.
-- [ ] **D3 — Scope of the stub-orphan risk.** Recommended: **note here, fix
-  separately.** The decode fail-safe is a clean, self-contained change; the
-  stub/sync-ordering ambiguity in `_shouldDelete` deserves its own analysis
+- [x] **D1 — Shared helper shape.** **Accepted (recommended).** A small result
+  type `sealed RefCountReadResult { Absent; Value(int n); Undecodable; }`
+  returned by `VaultRefCount.read(...)`, so each caller decides policy
+  explicitly. Avoids the ambiguous "0 means both zero and error" overload that
+  caused the bug.
+- [x] **D2 — Use `ValueCodec.decode` directly?** **Accepted (recommended): yes**
+  — it is already the writer and is used by the interceptor. Wrap in try/catch to
+  map failure to `Undecodable`. Removes the hand-rolled CBOR across two files.
+- [x] **D3 — Scope of the stub-orphan risk.** **Accepted (recommended): note
+  here, fix separately.** The decode fail-safe is a clean, self-contained change;
+  the stub/sync-ordering ambiguity in `_shouldDelete` deserves its own analysis
   (e.g. gating orphan deletion on an age/grace window or a "seen during this
-  session" marker). Folding it in widens the blast radius of this fix. Flag it as
-  a follow-up finding.
-- [ ] **D4 — Telemetry on retained-undecodable.** Recommended: surface a count of
-  skipped-undecodable objects in `VaultGcResult` / `VaultRecoveryResult` so a
-  corrupt ref entry is visible rather than silently retained forever.
+  session" marker). Folding it in widens the blast radius of this fix. Recorded
+  as a follow-up finding (see Summary).
+- [x] **D4 — Telemetry on retained-undecodable.** **Accepted (recommended).**
+  Surface a count of skipped-undecodable objects in `VaultGcResult` /
+  `VaultRecoveryResult` so a corrupt ref entry is visible rather than silently
+  retained forever.
 
 ## Implementation plan
 
 ### Step 1 — Extract the fail-safe ref-count reader
-- [ ] Add `VaultRefCount.read(KvStore, String sha256) async -> RefCountReadResult`
+- [x] Add `VaultRefCount.read(KvStore, String sha256) async -> RefCountReadResult`
       using `ValueCodec.decode`; `null` bytes ⇒ `Absent`, a valid map ⇒
       `Value(refCount)`, any decode error or missing/!int `refCount` ⇒
-      `Undecodable`.
-- [ ] Unit-test the helper directly: well-formed counts (0–23, uint8, uint16
+      `Undecodable`. *(New file `lib/src/vault/vault_ref_count.dart` with a
+      `sealed RefCountReadResult` = `RefCountAbsent | RefCountValue | RefCountUndecodable`.
+      Negative stored counts clamp to 0.)*
+- [x] Unit-test the helper directly: well-formed counts (0–23, uint8, uint16
       ranges), absent, truncated bytes, wrong-major-type, missing key, non-int
-      value.
+      value. *(New `test/vault/vault_ref_count_test.dart`, 18 cases.)*
 
 ### Step 2 — Make `VaultGc` fail-safe
-- [ ] Replace `_readRefCount`/`_decodeRefCount`/`_skipValue` with the helper.
-- [ ] In `sweep()`: delete only on `Absent` or `Value(0)`; on `Value(n>0)` remove
+- [x] Replace `_readRefCount`/`_decodeRefCount`/`_skipValue` with the helper.
+- [x] In `sweep()`: delete only on `Absent` or `Value(0)`; on `Value(n>0)` remove
       the tombstone (existing re-reference behaviour); on `Undecodable` **skip
       the object, leave the tombstone, increment a `retainedUndecodable` counter**.
-- [ ] Add `retainedUndecodable` to `VaultGcResult` (D4).
+- [x] Add `retainedUndecodable` to `VaultGcResult` (D4) (defaulted to 0 so
+      existing const constructions stay valid).
 
 ### Step 3 — Make `VaultRecovery` fail-safe
-- [ ] Replace `_decodeRefCount`/`_extractRefCountFromCborMap`/`_skipCborValue`
+- [x] Replace `_decodeRefCount`/`_extractRefCountFromCborMap`/`_skipCborValue`
       and the `catch (_) => false` in `_hasKvRef` with the helper.
-- [ ] `_shouldDelete`: treat `Undecodable` as **referenced** (do not delete);
-      keep current behaviour for `Absent` (no ref) and `Value(n>0)` (referenced).
-- [ ] Add `retainedUndecodable` to `VaultRecoveryResult` (D4).
-- [ ] (D3) Add a TODO/cross-reference for the stub-orphan follow-up.
+- [x] Recovery decision (`_classify`, replacing `_shouldDelete`): treat
+      `Undecodable` as **referenced** (do not delete); keep current behaviour for
+      `Absent` (no ref) and `Value(n>0)` (referenced).
+- [x] Add `retainedUndecodable` to `VaultRecoveryResult` (D4).
+- [x] (D3) Add a `TODO(vault)` in `_classify` cross-referencing the stub-orphan
+      follow-up.
 
 ### Step 4 — Consolidate the interceptor (optional)
-- [ ] Route `VaultRefInterceptor._readRefCount` through the helper so all four
-      call sites share one implementation. Behaviour is unchanged (it already
-      uses `ValueCodec`), but it removes the last divergent copy and gives
-      versioning a single seam to reuse.
+- [x] Route `VaultRefInterceptor._readRefCount` through the helper so all four
+      call sites share one implementation. Behaviour is unchanged for valid data
+      (absent/value → same int); an undecodable entry maps to `0` here, with a
+      doc comment noting the deletion authorities (GC/recovery) are the fail-safe
+      readers.
 
 ### Step 5 — Tests
-- [ ] **GC keeps a blob with a corrupt ref entry** — tombstone present,
+- [x] **GC keeps a blob with a corrupt ref entry** — tombstone present,
       `$vault` entry present but malformed; assert the hash dir is **not** deleted
-      and `retainedUndecodable == 1`. Confirm this **fails before the fix**
-      (currently deletes) and passes after.
-- [ ] **GC deletes a genuinely zero-ref object** — tombstone present, `$vault`
-      entry absent; assert deletion (regression guard for the happy path).
-- [ ] **GC un-tombstones a re-referenced object** — `Value(n>0)`; assert
-      tombstone removed, not deleted.
-- [ ] **Recovery keeps an object whose ref entry is corrupt** — manifest present,
-      `$vault` entry present but malformed; assert the hash dir survives recovery.
-- [ ] **Recovery deletes a true orphan** — manifest present, no `$vault` entry;
-      assert deletion (happy-path regression guard) — pending D3 scope.
-- [ ] **Helper round-trips** all integer encodings the interceptor can produce.
+      and `retainedUndecodable == 1`. (Two variants: CBOR-int-not-map, and
+      garbage bytes.)
+- [x] **GC deletes a genuinely zero-ref object** — covered for both `Absent`
+      (existing test) and explicit `Value(0)` (new test).
+- [x] **GC un-tombstones a re-referenced object** — `Value(n>0)` (existing TOCTOU
+      guard test).
+- [x] **Recovery keeps an object whose ref entry is corrupt** — manifest present,
+      `$vault` entry present but malformed; assert the hash dir survives recovery
+      and `retainedUndecodable == 1`. (Two variants.)
+- [x] **Recovery deletes a true orphan** — manifest present, no `$vault` entry;
+      assert deletion (happy-path regression guard).
+- [x] **Helper round-trips** all integer encodings the interceptor can produce.
 
 ### Step 6 — Documentation
-- [ ] `docs/spec/24_vault.md`: document the invariant — *the GC and recovery
-      sweeps delete an object only on a positive determination of zero references
-      (absent counter or decoded `refCount == 0`); an undecodable counter is
-      treated as referenced and retained.* Update the §24 crash table row for
-      "manifest present, no ref."
-- [ ] Update doc comments on `VaultGc.sweep`, `VaultRecovery._shouldDelete`, and
-      the new helper to state the fail-safe contract.
-- [ ] If D3 is deferred, record the stub-orphan risk in the review doc's
-      follow-ups.
+- [x] `docs/spec/24_vault.md`: documented the invariant — deletion requires a
+      positive determination of zero references (absent counter or decoded
+      `refCount == 0`); an undecodable counter is treated as referenced and
+      retained. Added a "Fail-safe ref-count rule" subsection, a crash-table row
+      for the undecodable case, and a historical note.
+- [x] Updated doc comments on `VaultGc.sweep`, `VaultRecovery` (class +
+      `_classify`), `VaultRefInterceptor`, and the new helper to state the
+      fail-safe contract.
+- [x] (D3) Recorded the stub-orphan risk as a follow-up in
+      `docs/roadmap/0_02_01.md` (H3 entry) and an inline `TODO(vault)`.
 
 ### Step 7 — Verify
-- [ ] `dart test packages/kmdb` — all pass, including the new vault tests.
-- [ ] `cd packages/kmdb_cli && dart test` — all pass.
-- [ ] `make analyze` — clean.
+- [x] `dart test packages/kmdb` — all pass (1311 pass, ~9 E2E skipped),
+      including the new `vault_ref_count_test.dart` and the fail-safe GC/recovery
+      cases.
+- [x] `cd packages/kmdb_cli && dart test` — all pass (839).
+- [x] `make analyze` — clean across all packages.
+
+> Worktree note: native-asset build hooks (`betto_zstd`) only fire when `dart
+> test` is first run from *inside* a package directory (e.g.
+> `cd packages/kmdb && dart test`), not from the workspace root in a fresh
+> worktree. After that first run populates `.dart_tool/native_assets.yaml` +
+> `hooks_runner/`, root-level `dart test packages/kmdb` and `make pre_commit`
+> work normally. This matches the existing CLAUDE.md note about `kmdb_cli` build
+> hooks.
 
 ## Summary
 
-{To be completed during implementation.}
+- **New single fail-safe reader.** Added `lib/src/vault/vault_ref_count.dart`
+  with a `sealed RefCountReadResult` (`RefCountAbsent` / `RefCountValue(int)` /
+  `RefCountUndecodable`) and `VaultRefCount.read(KvStore, sha256)`. It decodes
+  via the real `ValueCodec.decode` (the same codec that writes the entries), maps
+  any decode failure or missing/non-int `refCount` to `Undecodable`, and clamps a
+  negative stored count to `0`. This replaces the two hand-rolled partial CBOR
+  parsers that returned `0` ("unreferenced") on any surprise.
+- **GC is now fail-safe.** `VaultGc.sweep` deletes only on a positive
+  determination of zero references (`Absent` or `Value(0)`), un-tombstones on
+  `Value(n>0)`, and on `Undecodable` retains the object (tombstone left in place)
+  and counts it in the new `VaultGcResult.retainedUndecodable`.
+- **Recovery is now fail-safe.** `VaultRecovery` reads through the helper; the
+  decision logic (`_classify`, replacing `_shouldDelete`) treats an undecodable
+  ref entry as *referenced* (retain) instead of the previous
+  `catch (_) => false` "no reference" → delete. Undecodable retentions are
+  reported via the new `VaultRecoveryResult.retainedUndecodable`. This path runs
+  on every unclean open, so the old behaviour could wipe a referenced blob on
+  restart.
+- **Interceptor consolidated.** `VaultRefInterceptor._readRefCount` now routes
+  through the shared helper, removing the last divergent reader and giving the
+  document-versioning work (`$ver:` ref counting) a single seam to reuse.
+- **~150 lines of duplicated hand-rolled CBOR removed** across `vault_gc.dart`
+  and `vault_recovery.dart`.
+- **Tests.** New `test/vault/vault_ref_count_test.dart` (18 cases: round-trips
+  for inline/uint8/uint16 counts, absent, empty, truncated, wrong-major-type,
+  unknown flag, missing key, non-int, negative-clamp). New fail-safe cases in
+  `vault_gc_test.dart` and `vault_recovery_test.dart` proving a corrupt ref entry
+  is **retained, not deleted**, plus happy-path regression guards and
+  `retainedUndecodable` result-field tests.
+- **Docs.** `docs/spec/24_vault.md` gains a "Fail-safe ref-count rule" section, a
+  crash-table row for the undecodable case, and a historical note; doc comments
+  on the affected classes state the contract.
+- **D3 follow-up (deferred, as recommended).** The stub-orphan / sync-ordering
+  risk in recovery — a freshly synced stub (manifest present, no ref yet) looks
+  like an orphan and is deleted before its referencing document arrives — is left
+  as a separately-scoped follow-up. Recorded in the H3 entry of
+  `docs/roadmap/0_02_01.md` and as an inline `TODO(vault)` in
+  `VaultRecovery._classify`.
+- **Verification note.** Done in a git worktree. The workspace's native
+  dependencies (`betto_zstd`, ICU, ONNX) are path-resolved relative to the repo
+  root, so the worktree was relocated to a sibling of `kmdb/` so those paths
+  resolve to the real packages. The native-asset build hook only fires when
+  `dart test` is first run from *inside* a package directory (`cd packages/kmdb
+  && dart test`); once that populates `.dart_tool/native_assets.yaml` +
+  `hooks_runner/`, the full `packages/kmdb` (1311) and `packages/kmdb_cli` (839)
+  suites and `make analyze` all pass from the worktree.
