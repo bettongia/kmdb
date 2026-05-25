@@ -53,16 +53,8 @@ Future<void> main(List<String> args) async {
       help: 'Number of simulated devices',
       defaultsTo: '3',
     )
-    ..addOption(
-      'duration',
-      help: 'Run duration in seconds',
-      defaultsTo: '30',
-    )
-    ..addOption(
-      'seed',
-      abbr: 's',
-      help: 'Fixed PRNG seed (omit for fuzz mode)',
-    )
+    ..addOption('duration', help: 'Run duration in seconds', defaultsTo: '30')
+    ..addOption('seed', abbr: 's', help: 'Fixed PRNG seed (omit for fuzz mode)')
     ..addOption('output', abbr: 'o', help: 'Write JSON report to file')
     ..addOption(
       'compare',
