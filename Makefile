@@ -54,7 +54,23 @@ analyze:
 	melos run analyze
 .PHONY: analyze
 
-pre_commit: clean default
+# Pre-commit gate: formatting, static analysis, license headers, and the core
+# test suites (kmdb + kmdb_cli). Deliberately excludes coverage, the docs site
+# build, and `clean` (full clean + bootstrap) — too slow and side-effecting for
+# a commit hook; those run in CI / via `make coverage` and `make site`.
+#
+# Tests run as two separate `dart test` invocations (not `melos test`) on
+# purpose:
+#   - it scopes the gate to the actively-developed core, keeping it fast;
+#   - running each package sequentially in its own invocation avoids the
+#     concurrent native-asset build race (shared betto_zstd dylib) that can
+#     transiently fail `melos test`;
+#   - kmdb_cli must run from its own directory so its build hooks fire.
+# The full multi-package suite (incl. native-asset / Flutter packages) runs in
+# CI and via `make test`.
+pre_commit: format_check analyze license_check
+	dart test packages/kmdb
+	cd packages/kmdb_cli && dart test
 .PHONY: pre_commit
 
 cicd: clean test default e2e_test
@@ -152,9 +168,20 @@ site/primer.pdf: docs/primer.md | site/
   		-V monofont="DejaVu Sans Mono" \
 		-H docs/template/header.tex
 
+## Format all Dart sources under packages/ in place. Uses `dart format` directly
+## (not `melos format`) to avoid the name collision with the `format` melos
+## script and to cover the whole package tree (bin/, example/, benchmark/), not
+## just lib/ and test/.
 format:
-	melos format
+	dart format packages
 .PHONY: format
+
+## Check formatting without modifying files. Fails if any file is unformatted —
+## used by the pre-commit hook so the commit is blocked (rather than silently
+## reformatting already-staged files). Mirrors `format`'s scope exactly.
+format_check:
+	dart format --output=none --set-exit-if-changed packages
+.PHONY: format_check
 
 ## Build the CLI binary with native assets (for local development).
 ## Binary output: packages/kmdb_cli/build/cli/<platform>/bundle/bin/kmdb

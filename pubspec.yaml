@@ -37,6 +37,15 @@ dependency_overrides:
     path: ../builder_tools
 
 melos:
+  # Disable generation of IntelliJ/Android Studio run configurations. Melos's
+  # `cleanIntelliJ` deletes these while iterating a live directory listing and
+  # only retries on Windows, so on macOS/Linux it intermittently crashes with a
+  # PathNotFoundException during `melos clean`. We don't rely on the generated
+  # run configs, so turning generation off removes the failure at its source.
+  ide:
+    intellij:
+      enabled: false
+
   scripts:
     analyze:
       description: Analyze all packages
