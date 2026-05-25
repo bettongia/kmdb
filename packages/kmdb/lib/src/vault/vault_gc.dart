@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import '../engine/kvstore/kv_store.dart';
-import 'vault_recovery.dart' show kVaultNamespace;
+import 'vault_ref_count.dart';
 import 'vault_store.dart';
 
 /// Manages tombstone-based garbage collection for the vault.
@@ -71,14 +71,24 @@ final class VaultGc {
   /// ref-count increment.
   Future<void> onRefRestored(String sha256) => store.deleteTombstone(sha256);
 
-  /// Sweeps tombstoned vault objects, deleting those whose ref count is still
-  /// zero.
+  /// Sweeps tombstoned vault objects, deleting only those that are provably
+  /// unreferenced.
   ///
   /// This method:
   /// 1. Enumerates all known vault hashes.
   /// 2. For each tombstoned hash, re-reads the current ref count from the KV
-  ///    store.
-  /// 3. Deletes the hash directory only if the ref count is still zero.
+  ///    store via the fail-safe [VaultRefCount.read].
+  /// 3. Acts on the [RefCountReadResult]:
+  ///    - [RefCountAbsent] or [RefCountValue] `== 0` → ref count is still zero,
+  ///      delete the hash directory.
+  ///    - [RefCountValue] `> 0` → object was re-referenced since tombstoning;
+  ///      remove the tombstone and count it as skipped (TOCTOU guard).
+  ///    - [RefCountUndecodable] → the ref entry is present but cannot be
+  ///      decoded. **Fail-safe: the object is retained** (tombstone left in
+  ///      place) and counted in [VaultGcResult.retainedUndecodable]. Deletion
+  ///      requires a positive determination of zero references — an undecodable
+  ///      counter never qualifies, because a corrupt entry must not be allowed
+  ///      to destroy a blob that documents may still reference.
   ///
   /// The re-validation guard prevents deleting objects that have been
   /// re-referenced since the tombstone was created (e.g. via a concurrent sync
@@ -89,6 +99,7 @@ final class VaultGc {
     var examined = 0;
     var deleted = 0;
     var skipped = 0;
+    var retainedUndecodable = 0;
 
     final hashes = await store.listAllHashes();
     for (final sha256 in hashes) {
@@ -96,101 +107,40 @@ final class VaultGc {
       if (!await store.isTombstoned(sha256)) continue;
       examined++;
 
-      // Re-validate ref count before deleting — guard against TOCTOU.
-      final refCount = await _readRefCount(sha256);
-      if (refCount > 0) {
-        // Object has been re-referenced since tombstoning. Remove the tombstone
-        // to restore it to the normal hydrated/stub state.
-        await store.deleteTombstone(sha256);
-        skipped++;
-        continue;
+      // Re-validate ref count before deleting — guard against TOCTOU and,
+      // crucially, against acting on an undecodable counter.
+      final result = await VaultRefCount.read(kvStore, sha256);
+      switch (result) {
+        case RefCountAbsent():
+          // No entry → genuinely zero references (the entry is deleted when the
+          // count reaches zero). Safe to delete.
+          await store.deleteHashDir(sha256);
+          deleted++;
+        case RefCountValue(:final count):
+          if (count > 0) {
+            // Object has been re-referenced since tombstoning. Remove the
+            // tombstone to restore it to the normal hydrated/stub state.
+            await store.deleteTombstone(sha256);
+            skipped++;
+          } else {
+            // Decoded to exactly zero references. Safe to delete.
+            await store.deleteHashDir(sha256);
+            deleted++;
+          }
+        case RefCountUndecodable():
+          // Fail-safe: we cannot prove the object is unreferenced, so retain it
+          // and leave the tombstone in place for a future sweep (once the entry
+          // is readable again or the object is genuinely dereferenced).
+          retainedUndecodable++;
       }
-
-      // Safe to delete: ref count is still zero.
-      await store.deleteHashDir(sha256);
-      deleted++;
     }
 
     return VaultGcResult(
       examined: examined,
       deleted: deleted,
       skipped: skipped,
+      retainedUndecodable: retainedUndecodable,
     );
-  }
-
-  // ── Internal helpers ───────────────────────────────────────────────────────
-
-  /// Reads the current reference count for [sha256] from the KV store.
-  ///
-  /// Returns 0 if no entry exists or if the stored value cannot be decoded.
-  Future<int> _readRefCount(String sha256) async {
-    final bytes = await kvStore.get(kVaultNamespace, sha256);
-    if (bytes == null) return 0;
-    return _decodeRefCount(bytes);
-  }
-
-  /// Decodes a vault reference count from KV-store bytes.
-  ///
-  /// The ref count is stored as a ValueCodec-encoded integer map:
-  /// `flag_byte + CBOR({"refCount": N})`.
-  ///
-  /// Returns 0 if the bytes cannot be decoded.
-  static int _decodeRefCount(List<int> bytes) {
-    if (bytes.length < 2) return 0;
-    var pos = 1; // skip ValueCodec flag byte
-    if (pos >= bytes.length) return 0;
-
-    final mapByte = bytes[pos++];
-    if ((mapByte & 0xE0) != 0xA0) return 0; // not a CBOR map
-    final numPairs = mapByte & 0x1F;
-
-    for (var i = 0; i < numPairs && pos < bytes.length; i++) {
-      // Read text key.
-      final keyByte = bytes[pos++];
-      if ((keyByte & 0xE0) != 0x60) return 0;
-      final keyLen = keyByte & 0x1F;
-      if (pos + keyLen > bytes.length) return 0;
-      final key = String.fromCharCodes(bytes.sublist(pos, pos + keyLen));
-      pos += keyLen;
-
-      if (pos >= bytes.length) return 0;
-      final valByte = bytes[pos++];
-
-      if (key == 'refCount') {
-        if (valByte <= 0x17) return valByte;
-        if (valByte == 0x18 && pos < bytes.length) return bytes[pos];
-        if (valByte == 0x19 && pos + 1 < bytes.length) {
-          return (bytes[pos] << 8) | bytes[pos + 1];
-        }
-        return 0;
-      } else {
-        pos = _skipValue(bytes, pos - 1);
-      }
-    }
-    return 0;
-  }
-
-  static int _skipValue(List<int> bytes, int pos) {
-    if (pos >= bytes.length) return pos;
-    final b = bytes[pos++];
-    final mt = b >> 5;
-    final ai = b & 0x1F;
-    switch (mt) {
-      case 0:
-      case 1:
-        if (ai == 24) return pos + 1;
-        if (ai == 25) return pos + 2;
-        if (ai == 26) return pos + 4;
-        if (ai == 27) return pos + 8;
-        return pos;
-      case 2:
-      case 3:
-        if (ai <= 23) return pos + ai;
-        if (ai == 24 && pos < bytes.length) return pos + 1 + bytes[pos];
-        return pos + 2;
-      default:
-        return pos;
-    }
   }
 }
 
@@ -203,6 +153,7 @@ final class VaultGcResult {
     required this.examined,
     required this.deleted,
     required this.skipped,
+    this.retainedUndecodable = 0,
   });
 
   /// Total number of tombstoned objects found during the sweep.
@@ -215,10 +166,20 @@ final class VaultGcResult {
   /// was restored before the sweep ran (TOCTOU guard).
   final int skipped;
 
+  /// Number of tombstoned objects retained because their `$vault` ref-count
+  /// entry was present but undecodable.
+  ///
+  /// These objects are *not* deleted — the fail-safe rule keeps any object whose
+  /// reference count cannot be proven zero. A non-zero value signals corrupt or
+  /// unrecognised ref-count entries that warrant investigation, rather than the
+  /// silent data loss the previous decoder would have caused.
+  final int retainedUndecodable;
+
   /// Returns `true` if any deletions occurred.
   bool get hadWork => deleted > 0;
 
   @override
   String toString() =>
-      'VaultGcResult(examined: $examined, deleted: $deleted, skipped: $skipped)';
+      'VaultGcResult(examined: $examined, deleted: $deleted, '
+      'skipped: $skipped, retainedUndecodable: $retainedUndecodable)';
 }
