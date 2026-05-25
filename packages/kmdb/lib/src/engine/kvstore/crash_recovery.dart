@@ -23,7 +23,6 @@ import '../memtable/memtable.dart';
 import '../platform/storage_adapter_interface.dart';
 import '../util/hlc.dart';
 import '../util/key_codec.dart';
-import '../wal/wal_reader.dart';
 import '../wal/wal_record.dart';
 import '../wal/wal_writer.dart';
 import '../../sync/hlc_clock.dart';
@@ -38,9 +37,11 @@ import 'lsm_engine.dart';
 /// 2. Read `CURRENT` → identify active Manifest.
 /// 3. Replay Manifest → reconstruct levels, logNumber, nextSeq.
 /// 4. Delete orphan SSTable files (in `sst/` but not referenced by Manifest).
-/// 5. Collect `wal-*.log` files, sorted by sequence; skip ≤ `maxLogNumber`.
-/// 6. Replay remaining WAL files from last FlushMarker; stop on bad checksum.
-/// 7. Delete fully-persisted WAL files (sequence ≤ `maxLogNumber`).
+/// 5. Collect `wal-*.log` files, sorted by sequence.
+/// 6. Delete obsolete WAL files (sequence < `maxLogNumber`).
+/// 7. Replay every retained WAL file (sequence ≥ `maxLogNumber`) in full,
+///    stopping on the first bad checksum. Full replay is idempotent under HLC
+///    last-write-wins, so no flush-marker skipping is required.
 /// 8. Prepare dirty-open flag (written on first WriteBatch, not during open).
 /// 9. Return `(LsmEngine, OpenResult)`.
 final class CrashRecovery {
@@ -132,15 +133,12 @@ final class CrashRecovery {
     // Sort WAL files by their sequence number (wal-NNNNN.log).
     final sortedWals = _sortWalFiles(walFiles);
 
-    // Files with sequence ≤ maxLogNumber are already fully persisted.
-    final walReader = WalReader(adapter: adapter);
-
     // Determine the highest WAL sequence number for the active writer.
     // After recovery, the engine starts a new WAL with sequence = maxWalSeq + 1
     // (or 1 for a fresh database).
     var maxWalSeq = state.maxLogNumber;
 
-    // Replay WAL files with sequence > maxLogNumber.
+    // Replay WAL files with sequence ≥ maxLogNumber in full.
     final restoredMemtable = Memtable();
     // Track the maximum HLC seen across all replayed WAL records so we can
     // seed the engine clock after recovery. Named distinctly from the [clock]
@@ -151,37 +149,36 @@ final class CrashRecovery {
       // Build the full path from the bare filename.
       final path = '$dbDir/$name';
 
-      if (seq <= state.maxLogNumber) {
-        // Already persisted in an SSTable — safe to delete.
+      // WAL files strictly below maxLogNumber are obsolete: their records are
+      // already durable in an SSTable referenced by the manifest. Files at or
+      // above maxLogNumber may still hold writes that were never flushed —
+      // crucially, the active WAL's own sequence equals maxLogNumber — so they
+      // MUST be replayed, not deleted. Using `<` here rather than `<=` is what
+      // prevents the active WAL from being discarded on an unclean reopen
+      // (review finding C1, Defect 1).
+      if (seq < state.maxLogNumber) {
         await adapter.deleteFile(path);
         continue;
       }
       maxWalSeq = seq > maxWalSeq ? seq : maxWalSeq;
 
-      // Detect truncation: count bytes consumed by replay and compare to
-      // the file size. If consumed < file size, a partial record was written.
+      // Replay the retained file in full with a single decode walk. Tracking
+      // the bytes consumed lets us detect a truncated tail (a partial final
+      // append interrupted by the crash) without decoding the file twice.
+      // Replaying in full — rather than skipping to a trailing flush marker —
+      // is safe because every re-applied record is idempotent under HLC
+      // last-write-wins, and it closes the window where a flush marker whose
+      // SSTable never became durable would hide live records (C1, Defect 2).
       final fileBytes = await adapter.readFile(path);
-      var consumed = 0;
-      final afterFlushRecords = <WalRecord>[];
-      {
-        // Count bytes consumed by the full replay (stops at first bad checksum).
-        var pos = 0;
-        while (pos < fileBytes.length) {
-          final result = WalRecord.tryDecode(fileBytes, pos);
-          if (result == null) break;
-          final (_, size) = result;
-          pos += size;
-          consumed = pos;
-        }
-        if (consumed < fileBytes.length) hadInterruptedWrites = true;
+      var pos = 0;
+      while (pos < fileBytes.length) {
+        final result = WalRecord.tryDecode(fileBytes, pos);
+        if (result == null) break; // truncation or corruption — stop here
+        final (record, size) = result;
+        pos += size;
 
-        // Collect the records to apply (from last flush marker onward).
-        await for (final r in walReader.replayFromLastFlush(path)) {
-          afterFlushRecords.add(r);
-        }
-      }
-
-      for (final record in afterFlushRecords) {
+        // Skip any flush marker left by an older build. Markers are no longer
+        // written but remain decodable for backward compatibility.
         if (record.type == WalRecordType.flushMarker) continue;
 
         final keyBytes = Uint8List.fromList(record.key);
@@ -199,6 +196,7 @@ final class CrashRecovery {
         restoredMemtable.put(internalKey, Uint8List.fromList(record.value));
         affectedNamespaces.add(record.namespace);
       }
+      if (pos < fileBytes.length) hadInterruptedWrites = true;
     }
 
     // ── Step 8: Open Manifest writer for new writes ───────────────────────────

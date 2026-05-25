@@ -37,9 +37,9 @@ import 'wal_record.dart';
 ///
 /// ## Crash recovery
 ///
-/// [replay] returns *all* records from the beginning of the file. The
-/// `LsmEngine` uses [replayFromLastFlush] to efficiently skip records that
-/// are already safely in an SSTable.
+/// [replay] returns *all* records from the beginning of the file. Crash
+/// recovery replays each retained WAL file in full; re-applying a record that
+/// is already in an SSTable is idempotent under HLC last-write-wins.
 final class WalReader {
   const WalReader({required this.adapter});
 
@@ -66,44 +66,6 @@ final class WalReader {
       final (record, consumed) = result;
       offset += consumed;
       yield record;
-    }
-  }
-
-  /// Replays only the records that follow the last [WalRecordType.flushMarker]
-  /// in [path].
-  ///
-  /// Records before (and including) the flush marker are already persisted in
-  /// an SSTable and should not be re-applied to the memtable. If no flush
-  /// marker exists, all records are returned (the file was never fully flushed
-  /// before the crash).
-  Stream<WalRecord> replayFromLastFlush(String path) async* {
-    // We must buffer all records to find the last flush marker.
-    final all = <WalRecord>[];
-    await for (final r in replay(path)) {
-      all.add(r);
-    }
-
-    // Find the last flush marker position.
-    var startIndex = 0;
-    for (var i = all.length - 1; i >= 0; i--) {
-      if (all[i].type == WalRecordType.flushMarker) {
-        startIndex = i + 1; // start replay from the record after the marker
-        break;
-      }
-    }
-
-    for (var i = startIndex; i < all.length; i++) {
-      yield all[i];
-    }
-  }
-
-  /// Replays all records from each WAL file in [paths] (sorted by sequence).
-  ///
-  /// Each file is replayed using [replayFromLastFlush]. The files must be
-  /// provided in ascending sequence-number order.
-  Stream<WalRecord> replayAll(List<String> paths) async* {
-    for (final path in paths) {
-      yield* replayFromLastFlush(path);
     }
   }
 

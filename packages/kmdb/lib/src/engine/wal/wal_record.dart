@@ -27,11 +27,16 @@ enum WalRecordType {
   /// A delete tombstone. Value field is absent (zero length).
   delete(0x02),
 
-  /// Marks the boundary between two memtable generations.
+  /// Legacy boundary marker between two memtable generations.
   ///
-  /// Written immediately before a new WAL file is opened during memtable
-  /// rotation. Recovery uses this marker to skip records already flushed to an
-  /// SSTable.
+  /// Older builds wrote this immediately before opening a new WAL file during
+  /// memtable rotation, and recovery used it to skip already-flushed records.
+  /// It is **no longer written**: recovery now replays each retained WAL file
+  /// in full (idempotent under HLC last-write-wins), which removed a data-loss
+  /// hazard where a marker fsync'd before its SSTable became durable hid still
+  /// -live records (review finding C1). The value remains decodable so that
+  /// databases written by older builds still replay — recovery skips any marker
+  /// it encounters as a no-op.
   flushMarker(0x03);
 
   const WalRecordType(this.byte);
