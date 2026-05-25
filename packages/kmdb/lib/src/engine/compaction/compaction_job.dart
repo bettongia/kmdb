@@ -158,6 +158,11 @@ final class CompactionJob {
     final outputBytes = writer.finish();
     await adapter.writeFile(outputPath, outputBytes);
     await adapter.syncFile(outputPath);
+    // Durably link the output's directory entry before the manifest records it
+    // (review finding H1). The manifest append below fsyncs the manifest, so the
+    // edit is durable before the engine deletes the input SSTables after run()
+    // returns (review finding C2).
+    await adapter.syncDir(sstDir);
 
     final meta = SstableMeta(
       level: outputLevel,

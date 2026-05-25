@@ -57,15 +57,23 @@ final class ManifestWriter {
 
   // ── Write ─────────────────────────────────────────────────────────────────
 
-  /// Appends [edit] to the Manifest.
+  /// Appends [edit] to the Manifest and fsyncs the file.
   ///
-  /// Encodes the edit to CBOR, prepends a [length + checksum] header, and
-  /// appends to the file. No fsync is issued here — the caller (engine) is
-  /// responsible for fsyncing the SSTable first to ensure the data block is
-  /// durable before the Manifest records it.
+  /// Encodes the edit to CBOR, prepends a [length + checksum] header, appends to
+  /// the file, then issues [StorageAdapter.syncFile] so the record is durable
+  /// before control returns. This is the linchpin of the LSM commit ordering:
+  /// callers fsync the new SSTable (and `syncDir` its directory) *before*
+  /// appending here, and delete the now-obsolete WAL / input files *only after*
+  /// this returns. Making the manifest durable inside `append` means no call site
+  /// can forget it (review finding C2).
+  ///
+  /// Note: when this append creates a *new* manifest file (fresh database or a
+  /// manifest rotation), the caller must additionally `syncDir` the database
+  /// directory so the new file's directory entry is durable on Linux.
   Future<void> append(VersionEdit edit) async {
     final payload = _encode(edit);
     await adapter.appendFile(path, payload);
+    await adapter.syncFile(path);
     _byteCount += payload.length;
   }
 

@@ -24,13 +24,18 @@ import '../platform/storage_adapter_interface.dart';
 /// MANIFEST-00001\n
 /// ```
 ///
-/// Updates are atomic via write-then-rename:
+/// Updates are atomic *and* durable via write-fsync-rename-syncDir:
 /// 1. Write the new content to a temp file (`CURRENT.tmp`).
-/// 2. `renameFile(CURRENT.tmp → CURRENT)` — atomic on POSIX.
+/// 2. `syncFile(CURRENT.tmp)` — the temp's content is durable before it is named
+///    `CURRENT`.
+/// 3. `renameFile(CURRENT.tmp → CURRENT)` — atomic on POSIX.
+/// 4. `syncDir(dbDir)` — the rename (a directory-entry change) is durable.
 ///
-/// This ensures a crash between steps 1 and 2 leaves either the old or the new
-/// `CURRENT` intact; a partially written `CURRENT.tmp` is harmless and is
-/// cleaned up on the next open.
+/// This ensures a crash leaves either the old or the new `CURRENT` intact, and
+/// that the surviving `CURRENT` always names a manifest whose content is already
+/// on disk. Without steps 2 and 4 the rename is atomic but not durable: after
+/// power loss `CURRENT` could revert or point at bytes that were never flushed
+/// (review finding M3).
 final class CurrentFile {
   const CurrentFile({required this.dbDir, required this.adapter});
 
@@ -67,7 +72,9 @@ final class CurrentFile {
   Future<void> write(String manifestFilename) async {
     final content = utf8.encode('$manifestFilename\n');
     await adapter.writeFile(_tmpPath, content);
+    await adapter.syncFile(_tmpPath);
     await adapter.renameFile(_tmpPath, _currentPath);
+    await adapter.syncDir(dbDir);
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────

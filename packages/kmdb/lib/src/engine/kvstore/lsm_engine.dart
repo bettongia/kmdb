@@ -17,6 +17,7 @@ import 'dart:typed_data';
 
 import '../compaction/compaction_job.dart';
 import '../compaction/merge_iterator.dart';
+import '../manifest/current_file.dart';
 import '../manifest/manifest_writer.dart';
 import '../manifest/version_edit.dart';
 import '../memtable/memtable.dart';
@@ -526,8 +527,14 @@ final class LsmEngine {
     final sstBytes = writer.finish();
     await _adapter.writeFile(sstPath, sstBytes);
     await _adapter.syncFile(sstPath);
+    // Durably link the new SSTable's directory entry before the manifest records
+    // it; on Linux the fsync above does not persist the name (review finding H1).
+    await _adapter.syncDir(_sstDir);
 
-    // 4. Append VersionEdit to Manifest.
+    // 4. Append VersionEdit to Manifest (append() now fsyncs the manifest, so
+    // the edit is durable before the retired WAL is deleted below — review
+    // finding C2). The new SSTable is on disk and linked, so this ordering makes
+    // the flush atomic with respect to a crash.
     final meta = SstableMeta(
       level: 0,
       filename: filename,
@@ -742,17 +749,10 @@ final class LsmEngine {
   }
 
   Future<void> _doManifestRotation() async {
-    // The new manifest name is derived from the current one.
-    // We import CurrentFile lazily here to keep this file self-contained.
-    // CurrentFile is imported in crash_recovery.dart; here we replicate
-    // the lightweight naming logic directly.
-    final currentPath = '$_dbDir/CURRENT';
-    final currentBytes = await _adapter.readFile(currentPath);
-    final currentName = String.fromCharCodes(currentBytes).trimRight();
-
-    const prefix = 'MANIFEST-';
-    final seq = int.parse(currentName.substring(prefix.length));
-    final newName = '$prefix${(seq + 1).toString().padLeft(5, '0')}';
+    // Derive the new manifest name from the current one.
+    final currentFile = CurrentFile(dbDir: _dbDir, adapter: _adapter);
+    final currentName = await currentFile.read();
+    final newName = CurrentFile.nextManifestName(currentName);
     final newPath = '$_dbDir/$newName';
 
     // Build snapshot edit.
@@ -777,16 +777,17 @@ final class LsmEngine {
       added: allFiles,
     );
 
-    // Write new manifest.
+    // Durable commit order for the rotation (review findings C2 / M3):
+    // 1. Write the new manifest; append() fsyncs its content.
     final newWriter = ManifestWriter(path: newPath, adapter: _adapter);
     await newWriter.append(snapshotEdit);
-
-    // Atomically update CURRENT.
-    final tmp = '$_dbDir/CURRENT.tmp';
-    await _adapter.writeFile(tmp, Uint8List.fromList('$newName\n'.codeUnits));
-    await _adapter.renameFile(tmp, currentPath);
-
-    // Delete old manifest.
+    // 2. Link the new manifest's directory entry before anything points to it.
+    await _adapter.syncDir(_dbDir);
+    // 3. Publish CURRENT durably (write+fsync tmp → rename → syncDir). Only now
+    //    is the new manifest authoritative; a crash before this leaves the old
+    //    manifest valid.
+    await currentFile.write(newName);
+    // 4. The old manifest is now unreferenced — delete it last.
     await _adapter.deleteFile(_manifestWriter.path);
 
     _manifestWriter = newWriter;

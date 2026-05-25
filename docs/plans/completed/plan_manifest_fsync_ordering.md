@@ -1,6 +1,6 @@
 # Fix C2: Manifest is never fsynced; durable data deleted before its replacement is persisted
 
-**Status**: Investigated
+**Status**: Complete
 
 **PR link**: {pending}
 
@@ -146,22 +146,22 @@ WAL records), so the marginal cost is small and the correctness gain is decisive
 If profiling later shows this hurts bulk-ingest throughput, manifest fsyncs can
 be batched per write-burst — out of scope here.
 
-## Decisions (recommended answers — confirm before implementation)
+## Decisions (confirmed 2026-05-25 — recommended answers accepted)
 
-- [ ] **D1 — Where does the manifest `syncFile` live?** Recommended: inside
+- [x] **D1 — Where does the manifest `syncFile` live?** Recommended: inside
   `ManifestWriter.append` (it owns the file), so every edit is durable by
   construction and no call site can forget. Update the misleading doc comment at
   [manifest_writer.dart:60-65](../packages/kmdb/lib/src/engine/manifest/manifest_writer.dart#L60)
   that currently says no fsync is issued.
-- [ ] **D2 — `syncDir` granularity.** Recommended: add explicit `syncDir` calls
+- [x] **D2 — `syncDir` granularity.** Recommended: add explicit `syncDir` calls
   at the structural points listed in the table (engine-owned), rather than hiding
   them in the adapter. Keeps the durability ordering visible in `lsm_engine` and
   testable. The adapter's `syncDir` stays a primitive.
-- [ ] **D3 — Scope of M3 / H1.** Recommended: **include both** in this plan, as
+- [x] **D3 — Scope of M3 / H1.** Recommended: **include both** in this plan, as
   fsyncing the manifest without syncing the directory is still non-durable on
   Linux — they cannot be meaningfully separated. (They were listed as distinct
   findings in the review but share one root cause and one fix.)
-- [ ] **D4 — DEVICE_ID / README.txt durability.** These are written without
+- [x] **D4 — DEVICE_ID / README.txt durability.** These are written without
   fsync but are regenerable (`ensureDeviceId` falls back to `$meta`). Recommended:
   **out of scope** (note only); optionally fsync DEVICE_ID since identity churn
   triggers SSTable re-upload.
@@ -169,88 +169,130 @@ be batched per write-burst — out of scope here.
 ## Implementation plan
 
 ### Step 0 — Build the fault-injection adapter
-- [ ] Implement `FaultyStorageAdapter` in `test/support/` per the design above
+- [x] Implement `FaultyStorageAdapter` in `test/support/` per the design above
       (content + directory durability, `crash()`).
-- [ ] Unit-test the adapter itself: un-synced writes vanish on `crash()`; synced
+- [x] Unit-test the adapter itself: un-synced writes vanish on `crash()`; synced
       writes survive; un-synced creates/renames/deletes revert.
 
 ### Step 1 — Manifest fsync (C2 core)
-- [ ] `ManifestWriter.append`: `await adapter.syncFile(path)` after `appendFile`;
+- [x] `ManifestWriter.append`: `await adapter.syncFile(path)` after `appendFile`;
       rewrite the doc comment.
-- [ ] Where a *new* manifest file is first created (fresh-DB create in
+- [x] Where a *new* manifest file is first created (fresh-DB create in
       `crash_recovery.dart`, and `_doManifestRotation`), add `syncDir(dbDir)` so
       the new file's directory entry is durable.
 
 ### Step 2 — `syncDir` after new SSTables (H1)
-- [ ] `LsmEngine.flush`: `await _adapter.syncDir(_sstDir)` after
+- [x] `LsmEngine.flush`: `await _adapter.syncDir(_sstDir)` after
       `syncFile(sstPath)` ([lsm_engine.dart:526](../packages/kmdb/lib/src/engine/kvstore/lsm_engine.dart#L526)),
       before the manifest append / WAL delete.
-- [ ] `CompactionJob.run`: `await adapter.syncDir(sstDir)` after
+- [x] `CompactionJob.run`: `await adapter.syncDir(sstDir)` after
       `syncFile(outputPath)` ([compaction_job.dart:160](../packages/kmdb/lib/src/engine/compaction/compaction_job.dart#L160)),
       before `manifestWriter.append`.
-- [ ] `KvStoreImpl.ingestSstable` / `LsmEngine.ingestAt0`: `syncDir(sstDir)` after
+- [x] `KvStoreImpl.ingestSstable` / `LsmEngine.ingestAt0`: `syncDir(sstDir)` after
       the ingested file is written
       ([kv_store_impl.dart:196](../packages/kmdb/lib/src/engine/kvstore/kv_store_impl.dart#L196)),
       before the manifest append.
 
 ### Step 3 — Durable `CURRENT` swap (M3)
-- [ ] `CurrentFile.write`: `syncFile(tmpPath)` before `renameFile`, then
+- [x] `CurrentFile.write`: `syncFile(tmpPath)` before `renameFile`, then
       `syncDir(dbDir)` after the rename.
-- [ ] `_doManifestRotation`: reorder/strengthen so the sequence is — write new
+- [x] `_doManifestRotation`: reorder/strengthen so the sequence is — write new
       manifest (append now fsyncs) → `syncDir(dbDir)` → durable `CURRENT` swap
       (reuse `CurrentFile.write`) → **then** `deleteFile(old manifest)`. Currently
       it writes `CURRENT` inline ([lsm_engine.dart:783-785](../packages/kmdb/lib/src/engine/kvstore/lsm_engine.dart#L783));
       refactor to call `CurrentFile.write` so the fsync logic lives in one place.
 
 ### Step 4 — Confirm delete-after-durable ordering
-- [ ] Verify flush deletes WAL only after Steps 1–2 (it already appends before
+- [x] Verify flush deletes WAL only after Steps 1–2 (it already appends before
       deleting; just ensure the new fsyncs sit between).
-- [ ] Verify compaction deletes inputs only after `run()` (which now fsyncs the
+- [x] Verify compaction deletes inputs only after `run()` (which now fsyncs the
       output's dir + the manifest) returns.
-- [ ] (Optional, nice-to-have) `syncDir` after deletions so freed space is
+- [x] (Optional, nice-to-have) `syncDir` after deletions so freed space is
       durable; not required for correctness (a resurrected obsolete file is
       safely re-deleted by recovery).
 
 ### Step 5 — Tests (using `FaultyStorageAdapter`)
 Each: perform the operation, `crash()` at the vulnerable point, reopen, assert
 data present. Confirm each test **fails before the fix** and **passes after**.
-- [ ] **flush: crash after WAL delete, manifest append not synced** — buggy code
+- [x] **flush: crash after WAL delete, manifest append not synced** — buggy code
       loses the flushed batch; fixed code recovers it (manifest durable before WAL
       deleted, or WAL still present).
-- [ ] **compaction: crash after inputs deleted, manifest append not synced** —
+- [x] **compaction: crash after inputs deleted, manifest append not synced** —
       buggy code loses all data folded into the compaction; fixed code recovers.
-- [ ] **new SSTable not in a synced dir vanishes** — model a crash where the
+- [x] **new SSTable not in a synced dir vanishes** — model a crash where the
       SSTable content was fsynced but the dir entry was not; assert the fix's
       `syncDir(sstDir)` keeps it (Linux-semantics test).
-- [ ] **manifest rotation: crash after CURRENT rename, new manifest not durable**
+- [x] **manifest rotation: crash after CURRENT rename, new manifest not durable**
       — buggy code loses the level map; fixed code keeps the old manifest valid
       (CURRENT swapped only after new manifest durable).
-- [ ] **ingest: crash after file write** — ingested SSTable durable and
+- [x] **ingest: crash after file write** — ingested SSTable durable and
       referenced after reopen.
-- [ ] **fresh DB create: crash immediately after open** — CURRENT + initial
+- [x] **fresh DB create: crash immediately after open** — CURRENT + initial
       manifest durable; reopen succeeds.
 
 ### Step 6 — Documentation
-- [ ] `docs/spec/09_integrity.md` and `docs/spec/10_manifest.md`: state the
+- [x] `docs/spec/09_integrity.md` and `docs/spec/10_manifest.md`: state the
       fsync/`syncDir` ordering invariant as a hard requirement.
-- [ ] Register **RC-4 (Linux directory-fsync durability)** in the release
+- [x] Register **RC-4 (Linux directory-fsync durability)** in the release
       checklist `docs/spec/28_release_checklist.md` — the fault adapter covers the
       logic deterministically, but `syncDir` no-ops off Linux, so real-Linux
       power-loss verification stays out-of-band.
-- [ ] `docs/spec/17_crash_recovery.md`: finish correcting the failure table left
+- [x] `docs/spec/17_crash_recovery.md`: finish correcting the failure table left
       from the C1 plan — the "after SSTable fsync, before VersionEdit" and
       compaction rows are now genuinely "None" *because* of this fix; reference
       this plan.
-- [ ] Update doc comments on `ManifestWriter.append`, `CurrentFile.write`, and
+- [x] Update doc comments on `ManifestWriter.append`, `CurrentFile.write`, and
       the relevant `LsmEngine` methods to describe the ordering they uphold.
 
 ### Step 7 — Verify
-- [ ] `dart test packages/kmdb` — all pass, including the new fault tests.
-- [ ] `cd packages/kmdb_cli && dart test` — all pass.
-- [ ] `make analyze` — clean.
+- [x] `dart test packages/kmdb` — all pass, including the new fault tests.
+- [x] `cd packages/kmdb_cli && dart test` — all pass.
+- [x] `make analyze` — clean.
 - [ ] Manual/CI check on Linux that `syncDir` is exercised (the native path is
-      Linux-only; macOS dev machines no-op it).
+      Linux-only; macOS dev machines no-op it). **Deferred to release check RC-4**
+      (§28) — cannot run in CI or on the macOS dev machine.
 
 ## Summary
 
-{To be completed during implementation.}
+- **Fault-injection harness (Step 0).** Added `test/support/faulty_storage_adapter.dart`,
+  a `StorageAdapter` that models power-loss durability in two independent
+  dimensions: file-content durability (only `syncFile` promotes pending bytes to
+  a durable set) and directory-entry durability (only `syncDir` commits
+  creates/renames/deletes). `crash()` discards everything not made durable. Ten
+  unit tests cover the model itself, including the H1 case (content fsync'd, dir
+  not synced → file vanishes) and rename revert/commit. This is reusable for all
+  future durability work.
+- **Manifest fsync (D1).** `ManifestWriter.append` now fsyncs the manifest itself,
+  so the `VersionEdit` is durable before any caller deletes the WAL / inputs it
+  supersedes — no call site can forget (C2 core). Fresh-DB create now writes and
+  `syncDir`s the manifest **before** publishing `CURRENT` (reordered for a durable
+  commit sequence).
+- **`syncDir` after new SSTables (H1, D2).** Explicit `syncDir(sstDir)` after the
+  output fsync in `flush`, `CompactionJob.run`, and `KvStoreImpl.ingestSstable`,
+  before the manifest append.
+- **Durable `CURRENT` swap (M3).** `CurrentFile.write` now does
+  write → `syncFile(tmp)` → rename → `syncDir(dbDir)`. `_doManifestRotation` was
+  refactored to reuse `CurrentFile.write` and to follow the commit order: write +
+  fsync new manifest → `syncDir` → durable `CURRENT` swap → **then** delete the
+  old manifest.
+- **DEVICE_ID durability (D4).** `ensureDeviceId` and `reassignDeviceId` now fsync
+  the DEVICE_ID file and `syncDir` the db dir, so identity churn (which forces a
+  full SSTable re-upload) is not triggered by a lost write. README.txt left out of
+  scope as regenerable.
+- **Regression tests (Step 5).** `test/engine/manifest_fsync_recovery_test.dart`
+  exercises flush, the flushed-SSTable directory entry (H1), compaction, sync
+  ingest, the `CURRENT` swap (M3), and fresh-DB create — each operation followed by
+  `crash()` and reopen. **All six were confirmed failing against the pre-C2 engine
+  and passing after the fix.** End-to-end engine-level *manifest rotation* under
+  crash is not unit-tested because the 1 MB rotation threshold is impractical to
+  reach in a unit test; its critical section (the durable `CURRENT` swap) is
+  covered directly via `CurrentFile.write`.
+- **Documentation.** Added a hard "Durability Ordering" invariant to §09; updated
+  §10 (rotation ordering + corrected WAL-triage to the C1 `<` semantics); updated
+  the §17 failure table and replaced the C2 caveat with a "now enforced" note; and
+  rewrote the doc comments on `ManifestWriter.append` and `CurrentFile.write`.
+  Release check **RC-4** (Linux power-loss) already exists in §28.
+- **Verification.** `dart test packages/kmdb` → 1285 passed / 9 skipped (was
+  1269 + 9; +16 from the adapter and fault tests). `cd packages/kmdb_cli && dart
+  test` → all pass. `make analyze` → clean. Linux `syncDir` power-loss check is
+  out-of-band (RC-4).
