@@ -2,7 +2,7 @@
 
 **Status**: Complete
 
-**PR link**: {pending — added after the PR is opened}
+**PR link**: https://github.com/bettongia/kmdb/pull/22
 
 **Implementation model:** Sonnet, with careful review of the fail-safe default —
 the data-destruction risk is reverting to "delete on uncertainty."
