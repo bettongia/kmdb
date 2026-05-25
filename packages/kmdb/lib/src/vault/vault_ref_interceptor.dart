@@ -18,6 +18,7 @@ import '../query/write_augmentor.dart';
 import 'vault_gc.dart';
 import 'vault_recovery.dart' show kVaultNamespace;
 import 'vault_ref.dart';
+import 'vault_ref_count.dart';
 
 /// Intercepts document writes to maintain vault object reference counts.
 ///
@@ -34,8 +35,9 @@ import 'vault_ref.dart';
 /// ## How the `$vault` namespace stores ref counts
 ///
 /// Each entry is keyed by the SHA-256 hex string and encoded as a
-/// [ValueCodec]-encoded map: `{"refCount": N}`. The miniature CBOR decoder
-/// in [VaultGc] and [VaultRecovery] reads this format.
+/// [ValueCodec]-encoded map: `{"refCount": N}`. All readers — this interceptor,
+/// [VaultGc], and [VaultRecovery] — decode it through the shared, fail-safe
+/// [VaultRefCount.read] rather than a hand-rolled parser.
 ///
 /// Implements [WriteAugmentor] so it integrates with the formal write pipeline
 /// without requiring special-casing in [KmdbCollection]. The [namespace] and
@@ -126,13 +128,21 @@ final class VaultRefInterceptor implements WriteAugmentor {
 
   /// Reads the current ref count for [sha256] from the KV store.
   ///
-  /// Returns 0 if no entry exists.
+  /// Delegates to the shared [VaultRefCount.read] so all four call sites share
+  /// one decoder. Returns `0` when no entry exists. An undecodable entry is also
+  /// reported as `0` here: the interceptor is the *writer* of these entries and
+  /// only ever encounters its own valid [ValueCodec] encodings in practice, so a
+  /// corrupt entry can only arise from external corruption — in which case the
+  /// fail-safe authorities are the deletion paths ([VaultGc.sweep] and
+  /// [VaultRecovery]), both of which now re-read via [VaultRefCount.read] and
+  /// retain on `undecodable`.
   Future<int> _readRefCount(String sha256) async {
-    final bytes = await kvStore.get(kVaultNamespace, sha256);
-    if (bytes == null) return 0;
-    final decoded = ValueCodec.decode(bytes);
-    final count = decoded['refCount'];
-    return count is int ? count : 0;
+    final result = await VaultRefCount.read(kvStore, sha256);
+    return switch (result) {
+      RefCountValue(:final count) => count,
+      RefCountAbsent() => 0,
+      RefCountUndecodable() => 0,
+    };
   }
 
   /// Increments the ref count for [sha256] in [batch].
