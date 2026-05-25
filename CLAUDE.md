@@ -5,16 +5,16 @@ code in this repository.
 
 ## General
 
-Work is planned using specifications in the `plans` directory. When working on
-plans make sure you review `plans/README.md` file for guidance. When asked to
+Work is planned using specifications in the `docs/plans` directory. When working on
+plans make sure you review `docs/plans/README.md` file for guidance. When asked to
 plan something do not commence implementation until explicitly told to do so.
 
 The `docs/roadmap.md` is used to track future work items and their priority.
 This is informational only but worth reviewing when working on the codebase as
 current work may intersect with the roadmap.
 
-We'll create plans for our work and place them in the `plans/` directory. When
-the planned work has been completed we'll move them to `plans/completed`.
+We'll create plans for our work and place them in the `docs/plans/` directory. When
+the planned work has been completed we'll move them to `docs/plans/completed`.
 
 Quality assurance is critical to this project and you need to maintain a minimum
 of 90% test coverage at all times. You must also run all tests successfully
@@ -43,11 +43,13 @@ only; all source code lives under `packages/`:
 packages/
   kmdb/                — the core library (lib/, test/, example/, benchmark/)
   kmdb_cli/            — the CLI tool (bin/, lib/, test/)
-  kmdb_ui/             — Flutter desktop browser
+  kmdb_harness/        — multi-device sync test harness
   kmdb_tokenizer_icu/  — ICU FFI word tokenizer for lexical search
   kmdb_inferencing/    — ONNX Runtime + BGE embedding model for semantic search
   kmdb_lexical/        — lexical utilities (stemmer, stopwords) used by FTS
-  kmdb_tooling/        — dev_loader helpers (code-generation tooling)
+
+External packages (separate repos, path-overridden in pubspec.yaml):
+  kmdb_ui              — Flutter desktop/browser UI (https://github.com/bettongia/kmdb-ui)
 
 External packages (separate repos, path-overridden in pubspec.yaml):
   betto_zstd           — Zstd FFI compression provider (https://github.com/bettongia/zstd)
