@@ -86,6 +86,13 @@ currently live SSTables as `add` entries, no `remove` entries), then atomically
 updates `CURRENT` to point to the new file, then deletes the old Manifest. This
 keeps replay fast on open regardless of database age.
 
+Rotation follows the durability ordering in §9: the new manifest is written and
+fsynced (by `ManifestWriter.append`) and its directory entry is `syncDir`'d
+**before** `CURRENT` is swapped, and `CURRENT` is swapped durably (fsync the temp
+file, rename, `syncDir`) **before** the old manifest is deleted. A crash at any
+point therefore leaves `CURRENT` pointing at a fully-durable manifest — either the
+old one or the new one, never a partial file (review finding M3).
+
 ## Update Triggers
 
 | Event | VersionEdit written |
@@ -105,9 +112,10 @@ See §17 for the full recovery sequence. The Manifest's role:
   produced by a flush or compaction that crashed before the VersionEdit was
   appended. Orphans are deleted before normal operation resumes.
 
-- **WAL triage:** The highest `logNumber` across all replayed VersionEdits
-  identifies which WAL files have been fully persisted. WAL files with sequence
-  numbers ≤ this value are safe to delete. WAL files above it are replayed.
+- **WAL triage:** The highest `logNumber` across all replayed VersionEdits is the
+  active WAL's sequence. WAL files with sequence numbers **strictly less than** it
+  are obsolete and deleted; files with sequence **≥** it (including the active
+  WAL) are replayed in full (§17, review finding C1).
 
 - **Level reconstruction:** Replaying all VersionEdits in order reconstructs the
   full `levels` map (L0 array + L1/L2 sorted by key range) in memory.

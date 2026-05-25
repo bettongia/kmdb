@@ -66,18 +66,16 @@
 | After SSTable fsync, before VersionEdit appended | SSTable is an orphan and deleted; `logNumber` is unchanged, so the retired WAL is still ≥ `logNumber` and is replayed in full. | None. |
 | During VersionEdit append | Manifest replay stops at checksum failure. The previous VersionEdit is the current state; the new SSTable is an orphan and deleted; the WAL is replayed in full. | None. |
 | During compaction (output SSTable write) | Output SSTable not in Manifest — deleted as orphan. Input SSTables still valid and present. | None. |
-| After compaction VersionEdit, before input SSTable deletion | Both old and new SSTables present. Manifest is the authority — old SSTables listed in `remove` entries are deleted on open. | None **if the VersionEdit is durable** — see the manifest-durability caveat below. |
+| After compaction VersionEdit, before input SSTable deletion | The compaction's `VersionEdit` is fsynced and the output's directory entry `syncDir`'d before any input is deleted, so the durable manifest already names the output. Old inputs in `remove` entries are deleted on open. | None. |
 | Process killed without clean close | Dirty-open flag in `$meta` set on next open. Reported in `OpenResult.hadUnclosedSession`. Writes since the last flush are replayed from the WAL. | None (WAL is durable). |
 | During sync upload | Local state intact. SSTable is re-uploaded on next sync cycle. | None locally. |
 
-> **Manifest-durability caveat (separate work item C2).** The "None" guarantees
-> above assume that a `VersionEdit` is durable on disk before any file it
-> supersedes is deleted. Today `ManifestWriter.append` does not fsync, and flush
-> and compaction delete the retired WAL / input SSTables immediately after
-> appending. If a crash loses the un-fsynced `VersionEdit` *after* those source
-> files were deleted, the new SSTable is orphaned (and removed on open) while its
-> sources are already gone — losing that flush's or compaction's data. Closing
-> this window requires fsyncing the Manifest (and `syncDir`) before deleting any
-> source file, and is tracked as finding **C2 (manifest fsync & durability
-> ordering)**. The WAL-replay correctness described in this section is
-> independent of C2 and holds whenever the Manifest is durable.
+> **Durability ordering (review findings C2 / H1 / M3, now enforced).** The
+> "None" guarantees above hold because every operation that replaces durable
+> state makes its replacement durable *before* deleting what it supersedes:
+> `ManifestWriter.append` fsyncs the manifest; new SSTables (flush, compaction,
+> ingest) are `syncDir`'d so their directory entries are durable on Linux; and the
+> `CURRENT` swap is fsynced and `syncDir`'d. Only then is the retired WAL /
+> compaction input / old manifest deleted. See §9 (Durability Ordering) for the
+> full invariant. This ordering is verified in CI by a fault-injecting storage
+> adapter; real-Linux power-loss verification is release check **RC-4** (§28).
