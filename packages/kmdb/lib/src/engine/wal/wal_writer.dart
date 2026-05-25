@@ -106,19 +106,18 @@ final class WalWriter {
 
   // ── Rotation ──────────────────────────────────────────────────────────────
 
-  /// Writes a flush marker to the current file and opens a new WAL file.
+  /// Closes the current WAL file and opens the next one, returning the path of
+  /// the old (now inactive) file.
   ///
-  /// The flush marker signals that everything written before this point has
-  /// been (or is being) flushed to an SSTable. On recovery, replay starts
-  /// from the record after the last flush marker.
-  ///
-  /// Returns the path of the old (now inactive) WAL file. The engine should
-  /// delete it after the corresponding SSTable is confirmed in the Manifest.
-  Future<String> rotate(Hlc sequence) async {
+  /// No boundary marker is written into the retiring file: recovery replays
+  /// every retained WAL in full (idempotent under HLC last-write-wins), so a
+  /// marker would add no information and historically created a data-loss
+  /// hazard — a marker fsync'd before its SSTable became durable caused
+  /// recovery to skip still-live records (review finding C1). The engine should
+  /// delete the returned file only after the corresponding SSTable is confirmed
+  /// in the Manifest.
+  Future<String> rotate() async {
     final oldPath = activePath;
-    await append(
-      WalRecord(type: WalRecordType.flushMarker, sequence: sequence),
-    );
     _sequence++;
     return oldPath;
   }

@@ -135,7 +135,7 @@ void main() {
       expect(records[1].type, equals(WalRecordType.delete));
     });
 
-    test('rotate writes flush marker and increments sequence', () async {
+    test('rotate increments sequence and returns the retired path', () async {
       final adapter = MemoryStorageAdapter();
       final writer = _writer(adapter, seq: 3);
 
@@ -146,115 +146,59 @@ void main() {
         keyBytes: _key,
         value: _value,
       );
-      final oldPath = await writer.rotate(_seq2);
+      final oldPath = await writer.rotate();
       expect(oldPath, contains('wal-00003.log'));
       expect(writer.activeSequence, equals(4));
       expect(writer.activePath, contains('wal-00004.log'));
 
-      // Old file ends with a flush marker.
+      // Rotate no longer writes a boundary marker: the retired file holds only
+      // the records that were appended to it.
       final reader = _reader(adapter);
       final records = await reader.replay(oldPath).toList();
-      expect(records.last.type, equals(WalRecordType.flushMarker));
+      expect(records, hasLength(1));
+      expect(records.single.type, equals(WalRecordType.put));
     });
   });
 
-  group('WalReader.replayFromLastFlush', () {
-    test('skips records before flush marker', () async {
-      final adapter = MemoryStorageAdapter();
-      final writer = _writer(adapter);
+  group('WalReader.replay', () {
+    test(
+      'returns every record in full, including legacy flush markers',
+      () async {
+        final adapter = MemoryStorageAdapter();
+        final writer = _writer(adapter);
 
-      // Write two records, then a flush marker, then one more record.
-      await writer.writePut(
-        sequence: const Hlc(1, 0),
-        namespace: 'ns',
-        keyBytes: _key,
-        value: _value,
-      );
-      await writer.writePut(
-        sequence: const Hlc(2, 0),
-        namespace: 'ns',
-        keyBytes: _key,
-        value: _value,
-      );
-      // Manually write a flush marker mid-file.
-      await writer.append(
-        WalRecord(type: WalRecordType.flushMarker, sequence: const Hlc(3, 0)),
-      );
-      await writer.writePut(
-        sequence: const Hlc(4, 0),
-        namespace: 'ns',
-        keyBytes: _key,
-        value: _value,
-      );
-
-      final reader = _reader(adapter);
-      final records = await reader
-          .replayFromLastFlush(writer.activePath)
-          .toList();
-      // Only the record after the flush marker should be returned.
-      expect(records.length, equals(1));
-      expect(records[0].sequence, equals(const Hlc(4, 0)));
-    });
-
-    test('returns all records when no flush marker present', () async {
-      final adapter = MemoryStorageAdapter();
-      final writer = _writer(adapter);
-
-      for (var i = 1; i <= 3; i++) {
         await writer.writePut(
-          sequence: Hlc(i, 0),
+          sequence: const Hlc(1, 0),
           namespace: 'ns',
           keyBytes: _key,
           value: _value,
         );
-      }
+        // A legacy marker (as written by older builds) must still decode and be
+        // returned by full replay; crash recovery skips it as a no-op.
+        await writer.append(
+          WalRecord(type: WalRecordType.flushMarker, sequence: const Hlc(2, 0)),
+        );
+        await writer.writePut(
+          sequence: const Hlc(3, 0),
+          namespace: 'ns',
+          keyBytes: _key,
+          value: _value,
+        );
 
-      final reader = _reader(adapter);
-      final records = await reader
-          .replayFromLastFlush(writer.activePath)
-          .toList();
-      expect(records.length, equals(3));
-    });
+        final reader = _reader(adapter);
+        final records = await reader.replay(writer.activePath).toList();
+        expect(records, hasLength(3));
+        expect(records[0].type, equals(WalRecordType.put));
+        expect(records[1].type, equals(WalRecordType.flushMarker));
+        expect(records[2].type, equals(WalRecordType.put));
+      },
+    );
 
     test('returns empty stream for non-existent file', () async {
       final adapter = MemoryStorageAdapter();
       final reader = _reader(adapter);
       final records = await reader.replay('/missing.log').toList();
       expect(records, isEmpty);
-    });
-  });
-
-  group('WalReader.replayAll', () {
-    test('replays multiple files in order', () async {
-      final adapter = MemoryStorageAdapter();
-      final writer = _writer(adapter, seq: 1);
-
-      // File 1: two puts + flush marker.
-      await writer.writePut(
-        sequence: const Hlc(1, 0),
-        namespace: 'ns',
-        keyBytes: _key,
-        value: _value,
-      );
-      final file1 = await writer.rotate(const Hlc(2, 0));
-
-      // File 2: one put.
-      await writer.writePut(
-        sequence: const Hlc(3, 0),
-        namespace: 'ns',
-        keyBytes: _key,
-        value: _value,
-      );
-
-      final reader = _reader(adapter);
-      final records = await reader.replayAll([
-        file1,
-        writer.activePath,
-      ]).toList();
-      // file1 has flush marker at end — replay from flush gives 0 records.
-      // file2 has no flush marker — all 1 record returned.
-      expect(records.length, equals(1));
-      expect(records[0].sequence, equals(const Hlc(3, 0)));
     });
   });
 

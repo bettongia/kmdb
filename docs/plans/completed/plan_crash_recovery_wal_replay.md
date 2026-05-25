@@ -1,8 +1,8 @@
 # Fix C1: Crash recovery silently deletes the active WAL (post-flush data loss)
 
-**Status**: Investigated
+**Status**: Complete
 
-**PR link**: {pending}
+**PR link**: https://github.com/bettongia/kmdb/pull/19
 
 **Implementation model:** Opus, or strong-model review before merge —
 data-loss-critical; the WAL-retention off-by-one and full-replay-vs-flush-marker
@@ -161,9 +161,9 @@ memory adapter models faithfully (`deleteFile` removes the key). The broader
 fault-injection adapter recommended in the review (§8) is **not required** for
 this plan; it is needed for C2/H1 (fsync ordering) and will come with those.
 
-## Decisions (recommended answers — confirm before implementation)
+## Decisions (confirmed 2026-05-25 — recommended answers accepted)
 
-- [ ] **D1 — Stop writing flush markers entirely?** Recommended: **yes.** Once
+- [x] **D1 — Stop writing flush markers entirely?** Recommended: **yes.** Once
   recovery does full replay, markers are unused. Removing the write in `rotate()`
   simplifies the format and removes a foot-gun. Keep `WalRecordType.flushMarker`
   *decodable* so databases written by older builds (which have markers in their
@@ -171,12 +171,12 @@ this plan; it is needed for C2/H1 (fsync ordering) and will come with those.
   (`crash_recovery.dart` already does `if (record.type == flushMarker) continue;`).
   Alternative: keep writing markers but ignore them in recovery (lower diff, but
   retains dead complexity).
-- [ ] **D2 — Backfill a recovery checkpoint?** Optional. After replay, recovery
+- [x] **D2 — Backfill a recovery checkpoint?** Optional. After replay, recovery
   could append a fresh `VersionEdit` (advancing `logNumber`) so replayed WALs are
   reclaimed immediately rather than at the next flush. Recommended: **no** (keep
   this plan minimal; the next flush already cleans them, and adding a write on
   open complicates read-only opens). Note for a future optimisation only.
-- [ ] **D3 — Migration / existing on-disk databases.** The change is
+- [x] **D3 — Migration / existing on-disk databases.** The change is
   backward-compatible: existing WALs (with markers) replay correctly under full
   replay, and the `<` comparison is strictly more conservative (it replays files
   the old code deleted). No data migration required. Confirm we accept that an
@@ -228,25 +228,25 @@ Add to `crash_recovery_test.dart` a group `'CrashRecovery — durable WAL replay
 All use the "crash" pattern: write, `MemoryStorageAdapter.releaseAllLocks()`
 (no `close()`), reopen with the same adapter.
 
-- [ ] **put after flush survives** — the exact reproduction above; assert key2
+- [x] **put after flush survives** — the exact reproduction above; assert key2
       restored and key1 intact.
-- [ ] **delete after flush survives** — put+flush a key, delete it, crash,
+- [x] **delete after flush survives** — put+flush a key, delete it, crash,
       reopen; assert it stays deleted (a lost tombstone *resurrects* data).
-- [ ] **write after sync ingest survives** — `ingestSstable` a peer file, then a
+- [x] **write after sync ingest survives** — `ingestSstable` a peer file, then a
       local `put`, crash, reopen; assert the local put survives (ingest writes a
       `VersionEdit` with `logNumber = activeSequence`, which also triggers C1).
-- [ ] **write after compaction survives** — force enough flushes to trigger
+- [x] **write after compaction survives** — force enough flushes to trigger
       compaction, write, crash, reopen; assert the post-compaction write survives.
-- [ ] **multiple flush cycles** — interleave flushes and writes; crash; assert
+- [x] **multiple flush cycles** — interleave flushes and writes; crash; assert
       all acknowledged writes are present.
-- [ ] **crash mid-flush (pre-SSTable)** — construct on-disk state of a WAL with
+- [x] **crash mid-flush (pre-SSTable)** — construct on-disk state of a WAL with
       records but a flush whose SSTable/`VersionEdit` never landed (e.g. via a
       seam that aborts `flush()` after `rotate()`), reopen; assert the records
       replay (covers Defect 2 directly).
-- [ ] **truncated active WAL still flags `hadInterruptedWrites`** — truncate the
+- [x] **truncated active WAL still flags `hadInterruptedWrites`** — truncate the
       last record of the active WAL; assert good records survive and
       `hadInterruptedWrites == true`.
-- [ ] **fix the mislabelled existing test** — "un-flushed WAL records restored on
+- [x] **fix the mislabelled existing test** — "un-flushed WAL records restored on
       reopen" ([crash_recovery_test.dart:79](../packages/kmdb/test/engine/crash_recovery_test.dart#L79))
       calls `close()` (which flushes), so it never exercises WAL replay. Change it
       to crash without `close()`, or rename it to reflect that it tests clean
@@ -254,25 +254,55 @@ All use the "crash" pattern: write, `MemoryStorageAdapter.releaseAllLocks()`
 
 ### Step 5 — Documentation
 
-- [ ] Rewrite `docs/spec/17_crash_recovery.md` step 5: replay WAL files with
+- [x] Rewrite `docs/spec/17_crash_recovery.md` step 5: replay WAL files with
       `seq >= logNumber` **in full**; remove "from their last flush marker".
-- [ ] Correct the §17 failure table: the "After SSTable fsync, before VersionEdit
+- [x] Correct the §17 failure table: the "After SSTable fsync, before VersionEdit
       appended" and compaction rows must reflect the corrected guarantees (and
       reference C2 for the manifest-fsync dependency rather than claiming
       unconditional "None").
-- [ ] Update `docs/spec/07_wal.md` to describe markers as legacy/decoded-only
+- [x] Update `docs/spec/07_wal.md` to describe markers as legacy/decoded-only
       (pending D1).
-- [ ] Add a short note to the `OpenResult`/recovery doc comments describing the
+- [x] Add a short note to the `OpenResult`/recovery doc comments describing the
       replay semantics.
 
 ### Step 6 — Verify
 
-- [ ] `dart test packages/kmdb` — all pass (was 1264 + 9 skipped).
-- [ ] `cd packages/kmdb_cli && dart test` — all pass.
-- [ ] `make analyze` — clean.
-- [ ] Confirm the new C1 regression tests **fail on `main`** (before the fix) and
+- [x] `dart test packages/kmdb` — all pass (was 1264 + 9 skipped).
+- [x] `cd packages/kmdb_cli && dart test` — all pass.
+- [x] `make analyze` — clean.
+- [x] Confirm the new C1 regression tests **fail on `main`** (before the fix) and
       **pass after** — proving they guard the bug.
 
 ## Summary
 
-{To be completed during implementation.}
+- **Root-cause fix (recovery-side only).** In `crash_recovery.dart` the WAL
+  retention predicate changed from `seq <= maxLogNumber` to `seq < maxLogNumber`,
+  so the active WAL (whose sequence equals `maxLogNumber`) is now replayed rather
+  than deleted. Marker-based skipping (`replayFromLastFlush`) was replaced with a
+  single decode walk that replays each retained WAL **in full** while counting
+  consumed bytes to detect a truncated tail — collapsing the previous double pass
+  into one and removing the second decode.
+- **Flush markers retired (D1 = yes).** `WalWriter.rotate()` no longer appends a
+  `flushMarker` (the now-unused `Hlc` parameter was dropped; the sole caller in
+  `lsm_engine.dart` was updated). `WalRecordType.flushMarker` remains decodable —
+  recovery skips any legacy marker as a no-op — so databases written by older
+  builds still replay correctly (D3: backward-compatible, no migration). The
+  unused `WalReader.replayFromLastFlush` and `replayAll` were removed.
+- **No recovery checkpoint (D2 = no).** Replayed WALs are reclaimed at the next
+  flush; open performs no extra write, keeping read-only opens write-free.
+- **Regression suite.** Added the group `CrashRecovery — durable WAL replay (C1)`
+  with seven tests covering each trigger of the bug (put/delete after flush, sync
+  ingest, compaction, interleaved flushes, crash mid-flush past a legacy marker
+  for Defect 2, and truncation-flag behaviour). The mislabelled
+  "un-flushed WAL records restored on reopen" test now crashes without `close()`
+  so it genuinely exercises WAL replay. `wal_test.dart` was updated for the new
+  `rotate()` signature and the removed reader methods. **All seven new tests were
+  confirmed failing against the pre-fix engine and passing after the fix.**
+- **Documentation.** Rewrote §17 recovery steps 5–7 (delete `< logNumber`, replay
+  `≥ logNumber` in full) and the failure table, adding an explicit
+  manifest-durability caveat that references the separate C2 work item. Updated
+  §07 to describe full replay and mark the flush marker as legacy/decode-only,
+  and expanded the `OpenResult` doc comment with the replay semantics.
+- **Verification.** `dart test packages/kmdb` → 1269 passed / 9 skipped (was
+  1264 + 9; +5 net from the new tests). `make analyze` → clean across all
+  packages. `kmdb_cli` suite → all pass.

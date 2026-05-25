@@ -240,6 +240,14 @@ final class StoreInfo {
 typedef KvEntry = ({String key, Uint8List value});
 
 /// Describes what happened during KvStoreImpl.open crash recovery.
+///
+/// Recovery deletes WAL files whose sequence is below the Manifest's highest
+/// `logNumber` (their writes are already in an SSTable) and replays every
+/// retained WAL file — including the active one, whose sequence equals
+/// `logNumber` — **in full**. Full replay is idempotent under HLC
+/// last-write-wins, so any record already present in an SSTable is harmlessly
+/// re-applied; this is what guarantees writes made after the last flush survive
+/// an unclean shutdown (see §17).
 final class OpenResult {
   const OpenResult({
     this.hadInterruptedWrites = false,
@@ -247,7 +255,9 @@ final class OpenResult {
     this.hadUnclosedSession = false,
   });
 
-  /// True if WAL replay discarded one or more records (checksum failure).
+  /// True if a retained WAL file was truncated and replay discarded its final
+  /// partial record (checksum failure at the tail). Records before the
+  /// truncation point are recovered.
   final bool hadInterruptedWrites;
 
   /// Namespaces that had interrupted writes. The Query Layer may need to
