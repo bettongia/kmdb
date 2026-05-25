@@ -36,23 +36,27 @@ so recovery knows which WAL files are still needed.
 5. `wal-{N}.log` is deleted — it is no longer needed for recovery.
 
 If the process crashes between steps 3 and 5, `wal-{N}.log` still exists on
-recovery. The recovery sequence replays it from the last flush marker, which is
-safe because SSTable ingestion is idempotent under LWW semantics.
+recovery. The recovery sequence replays it **in full**, which is safe because
+re-applying records is idempotent under HLC last-write-wins. Replay is *not*
+truncated at a flush boundary marker: a marker durably written before its
+SSTable became durable would otherwise cause still-live records to be skipped
+(see §17). Rotation therefore writes no boundary marker into the retiring file.
 
 ### Multiple WAL Files on Recovery
 
 On `open()`, recovery collects all `wal-*.log` files present, sorts them by
-sequence number, and replays each in order from its last flush marker. This
-handles the case where multiple flushes were in flight before a crash. Sequence
-numbers in the WAL records maintain the correct causal order across files via
-the HLC.
+sequence number, deletes those with sequence `< logNumber` (already durable in
+an SSTable), and replays each remaining file (sequence `≥ logNumber`) **in full**
+in order. This handles the case where multiple flushes were in flight before a
+crash. Sequence numbers in the WAL records maintain the correct causal order
+across files via the HLC.
 
 ## WAL Record Format
 
 | Field        | Size | Description                                                                  |
 | :----------- | :--- | :--------------------------------------------------------------------------- |
 | Checksum     | 8B   | XXH64 of all subsequent fields. Truncation detected by checksum failure.     |
-| Record type  | 1B   | 0x01 \= Put, 0x02 \= Delete, 0x03 \= Flush marker.                           |
+| Record type  | 1B   | 0x01 \= Put, 0x02 \= Delete, 0x03 \= Flush marker (legacy; decoded but no longer written — see §17). |
 | Sequence     | 8B   | HLC-encoded: upper 48 bits \= physical ms, lower 16 bits \= logical counter. |
 | NS length    | 1B   | Namespace name byte length (max 255).                                        |
 | Namespace    | NB   | UTF-8 namespace name.                                                        |

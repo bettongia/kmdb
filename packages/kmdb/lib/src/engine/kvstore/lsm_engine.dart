@@ -478,7 +478,8 @@ final class LsmEngine {
   ///
   /// Steps:
   /// 1. Freeze the active memtable; start a new one.
-  /// 2. Rotate the WAL (writes flush marker, increments sequence).
+  /// 2. Rotate the WAL (closes the current file, increments sequence). The new
+  ///    active WAL's sequence becomes the boundary recovery replays from.
   /// 3. Write the frozen memtable to an SSTable file.
   /// 4. Append a [VersionEdit] to the Manifest.
   /// 5. Discard the frozen memtable.
@@ -490,9 +491,10 @@ final class LsmEngine {
     _frozen = _active.freeze();
     _active = Memtable();
 
-    // 2. Rotate WAL.
+    // 2. Rotate WAL. The retired file is kept until its SSTable is confirmed
+    // in the Manifest, then deleted in step 6 below.
     final hlc = _clock.now();
-    await _walWriter.rotate(hlc);
+    await _walWriter.rotate();
 
     // 3. Write SSTable from frozen memtable.
     final writer = SstableWriter();

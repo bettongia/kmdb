@@ -18,7 +18,11 @@ import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store_impl.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_interface.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
+import 'package:kmdb/src/engine/sstable/sstable_info.dart';
+import 'package:kmdb/src/engine/sstable/sstable_writer.dart';
+import 'package:kmdb/src/engine/util/hlc.dart';
 import 'package:kmdb/src/engine/util/key_codec.dart';
+import 'package:kmdb/src/engine/wal/wal_record.dart';
 import 'package:test/test.dart';
 
 const _dbDir = '/db';
@@ -37,6 +41,36 @@ Future<(KvStoreImpl, OpenResult)> _open(MemoryStorageAdapter adapter) =>
 Uint8List _bytes(String s) => Uint8List.fromList(s.codeUnits);
 
 String _key(int n) => SequentialKeyGenerator(start: n).next();
+
+/// Builds a minimal valid peer SSTable in memory with [count] entries whose HLC
+/// physical component starts at [basePhysical]. Mirrors the helper in
+/// `lsm_engine_test.dart`; used to exercise the sync-ingest trigger of C1.
+Uint8List _buildPeerSst({int count = 2, required int basePhysical}) {
+  final writer = SstableWriter();
+  for (var i = 0; i < count; i++) {
+    final hlc = Hlc(basePhysical + i, 0);
+    final keyHex =
+        '${i.toRadixString(16).padLeft(12, '0')}70008${i.toRadixString(16).padLeft(15, '0')}';
+    final keyBytes = KeyCodec.keyToBytes(keyHex);
+    final internalKey = KeyCodec.encodeInternalKey(
+      'peerns',
+      keyBytes,
+      hlc,
+      RecordType.put,
+    );
+    writer.add(internalKey, Uint8List.fromList([i + 1]));
+  }
+  return writer.finish();
+}
+
+/// Returns the path of the highest-sequence `wal-*.log` file in [adapter],
+/// i.e. the active WAL at crash time.
+String _activeWalPath(MemoryStorageAdapter adapter) {
+  final wals = adapter.files.keys.where((k) => k.endsWith('.log')).toList()
+    ..sort();
+  expect(wals, isNotEmpty);
+  return wals.last;
+}
 
 void main() {
   tearDown(MemoryStorageAdapter.releaseAllLocks);
@@ -76,12 +110,14 @@ void main() {
       await store2.close();
     });
 
-    test('un-flushed WAL records restored on reopen', () async {
+    test('un-flushed WAL records restored on reopen after crash', () async {
       final adapter = _newAdapter();
       final (store, _) = await _open(adapter);
       await store.put('ns', _key(5), _bytes('wal-data'));
-      // Close WITHOUT explicit flush — WAL recovery must replay this.
-      await store.close();
+      // Crash WITHOUT close() (which would flush): the record lives only in the
+      // active WAL, so reopening must replay it. Previously this test called
+      // close(), which flushes to an SSTable and so never exercised WAL replay.
+      MemoryStorageAdapter.releaseAllLocks();
 
       final (store2, _) = await _open(adapter);
       final val = await store2.get('ns', _key(5));
@@ -219,5 +255,179 @@ void main() {
       await store2.close();
       expect(result2.hadInterruptedWrites, isTrue);
     });
+  });
+
+  // ── C1 regression suite ─────────────────────────────────────────────────────
+  //
+  // Every VersionEdit records `logNumber = activeSequence`, so after the first
+  // flush/compaction/ingest/manifest-rotation of a database's life the active
+  // WAL's own sequence equals `maxLogNumber`. The old recovery predicate
+  // (`seq <= maxLogNumber`) deleted that active WAL without replaying it,
+  // silently destroying any write that landed after the edit. These tests use
+  // the "crash" pattern — write, releaseAllLocks() (no close()), reopen — and
+  // each one fails against the pre-fix engine.
+  group('CrashRecovery — durable WAL replay (C1)', () {
+    test('put after flush survives crash', () async {
+      final adapter = _newAdapter();
+      final (store, _) = await _open(adapter);
+      await store.put('ns', _key(1), _bytes('flushed'));
+      await store.flush(); // key1 -> SSTable; WAL rotated
+      await store.put('ns', _key(2), _bytes('unflushed')); // active WAL only
+      MemoryStorageAdapter.releaseAllLocks(); // crash: no close()
+
+      final (store2, _) = await _open(adapter);
+      expect(await store2.get('ns', _key(1)), equals(_bytes('flushed')));
+      expect(
+        await store2.get('ns', _key(2)),
+        equals(_bytes('unflushed')),
+        reason: 'post-flush write must survive crash recovery',
+      );
+      await store2.close();
+    });
+
+    test('delete after flush survives crash (no resurrection)', () async {
+      final adapter = _newAdapter();
+      final (store, _) = await _open(adapter);
+      await store.put('ns', _key(1), _bytes('v'));
+      await store.flush();
+      await store.delete('ns', _key(1)); // tombstone in active WAL only
+      MemoryStorageAdapter.releaseAllLocks();
+
+      final (store2, _) = await _open(adapter);
+      expect(
+        await store2.get('ns', _key(1)),
+        isNull,
+        reason: 'a lost tombstone would resurrect deleted data',
+      );
+      await store2.close();
+    });
+
+    test('write after sync ingest survives crash', () async {
+      final adapter = _newAdapter();
+      final (store, _) = await _open(adapter);
+
+      // Ingest a peer SSTable; ingestAt0 appends a VersionEdit with
+      // logNumber = activeSequence, arming the same retention bug as flush.
+      const peerPhysical = 1_030_000;
+      final filename = SstableInfo.flushName(
+        'peer0099',
+        const Hlc(peerPhysical, 0),
+        const Hlc(peerPhysical, 1),
+      );
+      await store.ingestSstable(
+        filename,
+        _buildPeerSst(basePhysical: peerPhysical),
+      );
+
+      await store.put('ns', _key(7), _bytes('after-ingest')); // active WAL only
+      MemoryStorageAdapter.releaseAllLocks();
+
+      final (store2, _) = await _open(adapter);
+      expect(
+        await store2.get('ns', _key(7)),
+        equals(_bytes('after-ingest')),
+        reason: 'a local write after sync ingest must survive crash recovery',
+      );
+      await store2.close();
+    });
+
+    test('write after compaction survives crash', () async {
+      final adapter = _newAdapter();
+      final (store, _) = await _open(adapter);
+
+      // Several flush cycles drive automatic compaction; the last compaction's
+      // VersionEdit sets maxLogNumber to the active WAL's sequence.
+      for (var i = 0; i < 6; i++) {
+        await store.put('ns', _key(i), _bytes('v$i'));
+        await store.flush();
+      }
+      await store.put('ns', _key(100), _bytes('post-compaction')); // active WAL
+      MemoryStorageAdapter.releaseAllLocks();
+
+      final (store2, _) = await _open(adapter);
+      expect(
+        await store2.get('ns', _key(100)),
+        equals(_bytes('post-compaction')),
+        reason: 'a write after compaction must survive crash recovery',
+      );
+      expect(await store2.get('ns', _key(0)), equals(_bytes('v0')));
+      await store2.close();
+    });
+
+    test('interleaved writes and flushes all survive crash', () async {
+      final adapter = _newAdapter();
+      final (store, _) = await _open(adapter);
+      await store.put('ns', _key(1), _bytes('a'));
+      await store.flush();
+      await store.put('ns', _key(2), _bytes('b'));
+      await store.flush();
+      await store.put('ns', _key(3), _bytes('c')); // active WAL only
+      MemoryStorageAdapter.releaseAllLocks();
+
+      final (store2, _) = await _open(adapter);
+      expect(await store2.get('ns', _key(1)), equals(_bytes('a')));
+      expect(await store2.get('ns', _key(2)), equals(_bytes('b')));
+      expect(await store2.get('ns', _key(3)), equals(_bytes('c')));
+      await store2.close();
+    });
+
+    test(
+      'crash mid-flush replays records past a legacy marker (Defect 2)',
+      () async {
+        // Simulate an interrupted flush from an older build: a WAL holding a live
+        // record followed by a flush marker, whose SSTable/VersionEdit never
+        // became durable. The pre-fix `replayFromLastFlush` skipped everything up
+        // to and including the trailing marker, losing the record; full replay
+        // restores it and treats the legacy marker as a no-op.
+        final adapter = _newAdapter();
+        final (store, _) = await _open(adapter);
+        await store.put('ns', _key(1), _bytes('pre-marker'));
+        MemoryStorageAdapter.releaseAllLocks();
+
+        final walPath = _activeWalPath(adapter);
+        final existing = adapter.files[walPath]!;
+        final marker = WalRecord(
+          type: WalRecordType.flushMarker,
+          sequence: const Hlc(1, 0),
+        ).encode();
+        final combined = Uint8List(existing.length + marker.length)
+          ..setAll(0, existing)
+          ..setAll(existing.length, marker);
+        adapter.files[walPath] = combined;
+
+        final (store2, _) = await _open(adapter);
+        expect(
+          await store2.get('ns', _key(1)),
+          equals(_bytes('pre-marker')),
+          reason:
+              'records before a trailing flush marker must still be replayed',
+        );
+        await store2.close();
+      },
+    );
+
+    test(
+      'truncated active WAL after flush: good records survive and flag set',
+      () async {
+        final adapter = _newAdapter();
+        final (store, _) = await _open(adapter);
+        await store.put('ns', _key(1), _bytes('flushed'));
+        await store.flush(); // retires the first WAL; active WAL is now fresh
+        await store.put('ns', _key(2), _bytes('good'));
+        await store.put('ns', _key(3), _bytes('will-truncate'));
+        MemoryStorageAdapter.releaseAllLocks();
+
+        // Truncate the tail of the active WAL, corrupting the final record.
+        final walPath = _activeWalPath(adapter);
+        final original = adapter.files[walPath]!;
+        adapter.files[walPath] = original.sublist(0, original.length - 5);
+
+        final (store2, result) = await _open(adapter);
+        expect(result.hadInterruptedWrites, isTrue);
+        expect(await store2.get('ns', _key(1)), equals(_bytes('flushed')));
+        expect(await store2.get('ns', _key(2)), equals(_bytes('good')));
+        await store2.close();
+      },
+    );
   });
 }
