@@ -85,13 +85,17 @@ final class CrashRecovery {
     try {
       manifestName = await currentFile.read();
     } on StorageException {
-      // Fresh database — create CURRENT and write an initial empty VersionEdit
-      // so the manifest file exists and is valid on the next open.
+      // Fresh database. Establish the initial state in durable commit order:
+      // write the manifest and make it durable (append fsyncs the file; syncDir
+      // links its directory entry) BEFORE publishing CURRENT. A crash mid-create
+      // can then never leave CURRENT pointing at a manifest that is not on disk
+      // (review findings C2 / M3).
       manifestName = CurrentFile.initialManifestName();
-      await currentFile.write(manifestName);
       final initPath = '$dbDir/$manifestName';
       final initWriter = ManifestWriter(path: initPath, adapter: adapter);
       await initWriter.append(const VersionEdit(logNumber: 0, nextSeq: 0));
+      await adapter.syncDir(dbDir);
+      await currentFile.write(manifestName);
       await adapter.writeFile(
         '$dbDir/README.txt',
         Uint8List.fromList(

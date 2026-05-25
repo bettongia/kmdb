@@ -194,6 +194,9 @@ final class KvStoreImpl implements KvStore {
     final sstPath = '${_engine.sstDir}/$filename';
     await _engine.adapter.writeFile(sstPath, bytes);
     await _engine.adapter.syncFile(sstPath);
+    // Durably link the ingested file's directory entry before ingestAt0 records
+    // it in the manifest (review finding H1); the manifest append then fsyncs.
+    await _engine.adapter.syncDir(_engine.sstDir);
     await _engine.ingestAt0(filename);
   }
 
@@ -216,10 +219,14 @@ final class KvStoreImpl implements KvStore {
 
     // Also update the DEVICE_ID file so that future opens prefer it over the
     // $meta value (which is susceptible to peer-overwrite via sync ingestion).
+    // Make it durable — this is the identity-churn case decision D4 targets.
+    final deviceIdPath = '${_engine.dbDir}/$kDeviceIdFilename';
     await _engine.adapter.writeFile(
-      '${_engine.dbDir}/$kDeviceIdFilename',
+      deviceIdPath,
       Uint8List.fromList(newDeviceId.codeUnits),
     );
+    await _engine.adapter.syncFile(deviceIdPath);
+    await _engine.adapter.syncDir(_engine.dbDir);
   }
 
   @override
@@ -271,7 +278,12 @@ final class KvStoreImpl implements KvStore {
     final id = await DeviceId.load(_meta);
 
     // 3. Write to the DEVICE_ID file so future opens skip the $meta lookup.
+    //    Make it durable (content + directory entry): a lost DEVICE_ID falls back
+    //    to $meta but a changed identity forces a full SSTable re-upload, so the
+    //    fsync is cheap insurance against needless churn (decision D4).
     await _engine.adapter.writeFile(filePath, Uint8List.fromList(id.codeUnits));
+    await _engine.adapter.syncFile(filePath);
+    await _engine.adapter.syncDir(_engine.dbDir);
 
     return id;
   }
