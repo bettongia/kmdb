@@ -2,7 +2,7 @@
 
 **Status**: Complete
 
-**PR link**: {pending}
+**PR link**: https://github.com/bettongia/kmdb/pull/19
 
 **Implementation model:** Opus, or strong-model review before merge —
 data-loss-critical; the WAL-retention off-by-one and full-replay-vs-flush-marker
