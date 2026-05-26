@@ -20,6 +20,7 @@ import 'package:kmdb/src/engine/kvstore/kv_store_impl.dart';
 import 'package:kmdb/src/engine/kvstore/meta_store.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
 import 'package:kmdb/src/engine/sstable/sstable_info.dart';
+import 'package:kmdb/src/engine/sstable/sstable_reader.dart';
 import 'package:kmdb/src/engine/sstable/sstable_writer.dart';
 import 'package:kmdb/src/engine/util/hlc.dart';
 import 'package:kmdb/src/engine/util/key_codec.dart';
@@ -84,6 +85,14 @@ Uint8List buildSst({int count = 2, required int basePhysical}) {
 }
 
 Uint8List _bytes(String s) => Uint8List.fromList(s.codeUnits);
+
+bool _bytesEqual(Uint8List a, Uint8List b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
+}
 
 String _key(int n) => SequentialKeyGenerator(start: n).next();
 
@@ -310,6 +319,50 @@ void main() {
       expect(await store.get('ns', key), isNull);
       await store.close();
     });
+
+    test(
+      'H4 PR1: overwrites are collapsed by compaction — repeated writes to '
+      'one key end up as a single SSTable entry; reads return the newest',
+      () async {
+        final adapter = _newAdapter();
+        final (store, _) = await _open(adapter);
+
+        // Overwrite the same key many times across several flush boundaries.
+        // Without PR1's collapse, the post-compaction SSTable would carry
+        // every version of `key`; with collapse it carries exactly one.
+        final key = _key(0);
+        for (var i = 0; i < 20; i++) {
+          await store.put('ns', key, _bytes('v$i'));
+          if (i % 4 == 3) await store.flush();
+        }
+        await store.flush();
+        await store.compactAll();
+
+        // Reading must still return the latest value.
+        expect(await store.get('ns', key), equals(_bytes('v19')));
+
+        // Inspect on-disk SSTables: across all of them, exactly one stored
+        // entry should reference this user key (no superseded versions left
+        // behind by collapse).
+        final sstPaths = adapter.files.keys
+            .where((k) => k.endsWith('.sst'))
+            .toList();
+        expect(sstPaths, isNotEmpty);
+
+        final keyBytes = KeyCodec.keyToBytes(key);
+        var matching = 0;
+        for (final path in sstPaths) {
+          final reader = await SstableReader.open(path, adapter);
+          await for (final entry in reader.scan()) {
+            final entryKey = KeyCodec.decodeUserKey(entry.key);
+            if (_bytesEqual(entryKey, keyBytes)) matching++;
+          }
+        }
+        expect(matching, equals(1));
+
+        await store.close();
+      },
+    );
   });
 
   group('LsmEngine — writeEvents', () {
