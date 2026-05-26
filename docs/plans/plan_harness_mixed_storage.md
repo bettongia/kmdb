@@ -177,6 +177,14 @@ the same harness scenarios, switching only the per-device adapter factory.
 - [ ] Mixed-mode run (REST + FS view of one backend) converges.
 - [ ] Contention: multi-device consolidation under a non-atomic `CloudProfile`
       shows either single-consolidator (if gated per H5) or no data loss.
+- [ ] **H4-FU multi-device tombstone non-resurrection:** delete + `_compactAll`
+      with `hlc < horizon` so the tombstone is GC'd on device A; then a peer B
+      (carrying an older copy of the key in its synced SSTables) joins and
+      converges with A. Asserts the key remains deleted globally — i.e. the
+      H4-FU horizon rule + per-device HWM `min` actually prevents resurrection
+      under realistic adapter behaviour. Owner: this plan (the in-process
+      ingest test in `plan_tombstone_gc.md` covers the core invariant in CI;
+      this scenario covers the cross-device case once the harness exists).
 - [ ] Backward-compat: existing single-adapter presets still pass.
 
 ### Step 6 — Documentation

@@ -1,12 +1,22 @@
-# Fix H4: Compaction reclaims no space (version collapse + safe tombstone GC)
+# Fix H4: Compaction reclaims no space — version collapse + policy hook (PR1 of 2)
 
-**Status**: Investigated
+**Status**: Implementing
 
 **PR link**: {pending}
 
-**Implementation model:** Opus, or strong-model review, for the tombstone-GC path
-— the all-levels + sync-horizon rule is easy to get *almost* right and resurrect
-deleted data; version collapse alone is fine for Sonnet.
+**Scope of this plan (PR1).** Per D3, H4 ships in two PRs. **This plan covers
+PR1 only:** version collapse (safe at any compaction level) and the
+per-namespace-class reclamation policy hook (including `$ver:` exemption). The
+**tombstone-GC** half (which is the risky distributed part) is split into a
+separate follow-up plan, [plan_tombstone_gc.md](plan_tombstone_gc.md), and ships
+as PR2. The Problem statement and Investigation below cover the **full H4
+picture** because PR2 depends on this context — the implementation checklist at
+the bottom is PR1-only.
+
+**Implementation model:** Sonnet is fine for PR1 (version collapse is purely
+within a compaction's inputs and read-path-equivalent). The tombstone-GC PR2
+explicitly calls for Opus or strong-model review — that rule moves with it to
+the follow-up plan.
 
 **Sequencing**: Independent of C1/C2/H2 mechanically, but it is the **general
 compaction-reclamation framework** that `plan_document_versioning.md` Phase 3
@@ -125,88 +135,109 @@ This is the key cross-plan dependency the user flagged:
 | `lib/src/engine/compaction/*` (policy hook) | Per-namespace-class reclamation policy seam for versioning to extend |
 | `docs/spec/06_storage_engine.md`, `12_sync.md`, `18_concurrency.md` | Document reclamation, the all-levels rule, and the tombstone GC horizon |
 
-## Decisions (recommended answers — confirm before implementation)
+## Decisions (confirmed 2026-05-27)
 
-- [ ] **D1 — Tombstone GC horizon mechanism.** Recommended: a **hybrid** —
-  for a synced database, `min(currentHlc)` across all devices' HWM files
-  (principled, exact); for a local-only database, drop immediately. Provide a
-  conservative time-based `tombstoneGraceDuration` fallback when HWM data is
-  unavailable. Keep the horizon *injected* into the engine so compaction stays
-  decoupled from the sync folder.
-- [ ] **D2 — Where reclamation lives.** Recommended: a streaming transform in
-  `CompactionJob.run` wrapping `merge.entries` (the merge already delivers sorted,
-  grouped versions). Keeps `MergeIterator` general.
-- [ ] **D3 — Version collapse first, tombstone GC second.** Recommended: ship
-  collapse (safe everywhere, large win) as a first PR; ship tombstone GC (gated by
-  all-levels + horizon) as a second, so the risky part is isolated and separately
-  reviewable.
-- [ ] **D4 — `$ver:` exemption.** Recommended: H4 exempts `$ver:` (and any other
-  history-bearing namespace class) from collapse via the policy hook; versioning
-  supplies the retention predicate. Default policy for all other namespaces:
-  collapse + conditional tombstone drop.
+- [x] **D1 — Tombstone GC horizon mechanism.** _Resolved (revised from the
+  recommendation):_ **always require a horizon — drop the local-only
+  fast-path.** The original recommendation kept a "drop immediately when no
+  sync configured" branch, but that is unsafe across a retroactive local →
+  synced transition: a previously-local DB that has already GC'd its
+  tombstones can resurrect deleted data on first sync if any peer still holds
+  an older copy. The revised rule:
+  - **Synced database:** horizon = `min(currentHlc)` across all devices' HWM
+    files (principled, exact — every device has synced past it).
+  - **Local-only database:** horizon = `now - tombstoneGraceDuration`
+    (wall-clock, conservative — gives the user a grace window during which
+    sync can be enabled without losing tombstones). Default grace ≥ expected
+    max sync lag (target a week or so unless we have a reason for shorter).
+  - Horizon is *injected* into `CompactionJob` so compaction stays decoupled
+    from the sync folder.
+  - **All of D1 is PR2 scope** — recorded here for context. The wiring lives
+    in [plan_tombstone_gc.md](plan_tombstone_gc.md).
+- [x] **D2 — Where reclamation lives.** _Confirmed as recommended:_ a streaming
+  transform in `CompactionJob.run` wrapping `merge.entries` (the merge already
+  delivers sorted, grouped versions). Keeps `MergeIterator` general. PR1
+  introduces the transform for collapse; PR2 extends it with the
+  tombstone-drop policy.
+- [x] **D3 — Version collapse first, tombstone GC second.** _Confirmed as
+  recommended:_ collapse + policy hook + `$ver:` exemption ship as **PR1
+  (this plan)**; tombstone GC + horizon wiring + sync-resurrection tests ship
+  as **PR2 ([plan_tombstone_gc.md](plan_tombstone_gc.md))**. Each PR is
+  independently reviewable; the risky distributed part is isolated.
+- [x] **D4 — `$ver:` exemption.** _Confirmed as recommended:_ PR1 introduces a
+  per-namespace-class reclamation policy interface and registers a default
+  "collapse-to-newest" policy plus an explicit "retain all" policy for
+  `$ver:`. The document-versioning plan supplies its real keep-N / retention
+  predicate later by replacing the placeholder retain-all rule.
 
-## Implementation plan
+## Implementation plan (PR1 — version collapse + policy hook)
+
+> Steps 3 and 4 of the original H4 plan (safe tombstone GC, horizon wiring) and
+> their associated tests/docs are **deferred to [plan_tombstone_gc.md](plan_tombstone_gc.md)
+> (PR2)**. The checklist below is PR1-only.
 
 ### Step 1 — Version collapse (safe at any level)
-- [ ] In `CompactionJob.run`, stream `merge.entries`, group by `(ns, userKey)`,
-      emit only the highest-HLC entry per group. Keep tombstones for now.
-- [ ] Confirm via tests that reads are unchanged and SSTable size shrinks under
-      repeated overwrites.
+- [x] In `CompactionJob.run`, stream `merge.entries`, group by `(ns, userKey)`,
+      emit only the highest-HLC entry per group. Keep tombstones for now (PR2
+      handles tombstone GC).
+- [x] Confirm via tests that reads are unchanged and SSTable size shrinks under
+      repeated overwrites, both at `_compactAll` and at partial compaction levels.
 
 ### Step 2 — Reclamation policy hook
-- [ ] Introduce a per-namespace-class policy interface (`collapse-to-newest` vs a
-      caller-supplied predicate). Default = collapse. Exempt `$ver:` (reserved for
-      versioning) so it is never collapsed by H4.
+- [x] Introduce a per-namespace-class policy interface
+      (`ReclamationPolicy`) with a default `collapse-to-newest` rule and an
+      explicit `retain-all` rule used for `$ver:` (and any other
+      history-bearing namespace class). Resolution is by namespace prefix.
+- [x] Wire the resolver into `CompactionJob.run` so the streaming transform
+      consults the policy per group.
+- [x] Document the extension point so `plan_document_versioning.md` can later
+      replace the placeholder `$ver:` retain-all rule with its real keep-N /
+      retention predicate without further restructuring. (Documented inline
+      in `reclamation_policy.dart` and in §6 of the spec; the extension
+      mechanism is the optional `policyRegistry` argument on
+      `CompactionJob`.)
 
-### Step 3 — Safe tombstone GC
-- [ ] Thread an `allLevels` flag into `CompactionJob` — true only for
-      `_compactAll`/single-file collapse; false for partial compactions.
-- [ ] Thread a GC horizon (HLC) into `CompactionJob` per D1.
-- [ ] Drop a group's surviving tombstone only when `allLevels == true` **and**
-      its `hlc < horizon`. Never drop tombstones in partial compactions.
-- [ ] For a local-only database (no sync configured), set horizon = "now" so
-      tombstones drop promptly.
-
-### Step 4 — Config / horizon wiring
-- [ ] Add `tombstoneGraceDuration` (and/or horizon injection) to `KvStoreConfig`;
-      document the default conservatively (e.g. ≥ expected max sync lag).
-- [ ] Provide the sync layer a way to compute `min(currentHlc)` from HWM files and
-      hand it to the engine before compaction (or via config refresh).
-
-### Step 5 — Tests
-- [ ] **Collapse reclaims space:** write a key M times across several flushes;
+### Step 5 — Tests (PR1 subset)
+- [x] **Collapse reclaims space:** write a key M times across several flushes;
       after `_compactAll`, exactly one version remains; reads return the newest.
-- [ ] **Collapse safe in partial compaction:** versions split across L0/L1/L2;
+      (`lsm_engine_test.dart` — "H4 PR1: overwrites are collapsed by
+      compaction".)
+- [x] **Collapse safe in partial compaction:** versions split across L0/L1/L2;
       `_compactL0ToL1` collapses inputs but reads still return the global newest.
-- [ ] **Tombstone dropped only when safe:** in `_compactAll` with `hlc < horizon`,
-      the tombstone is gone and the key reads as absent.
-- [ ] **Tombstone NOT dropped in partial compaction:** delete a key with an older
-      value in an excluded level; partial compaction keeps the tombstone; the key
-      stays deleted (no resurrection).
-- [ ] **No resurrection across sync (CI-testable):** delete + `_compactAll`-drop a
-      tombstone whose `hlc >= horizon` must be **refused**; then `ingestSstable` a
-      crafted older-HLC SSTable for that key and assert the key is **not**
-      resurrected. (Construct the pre-delete value in an SSTable and ingest it.)
-- [ ] **Local-only drops promptly:** no sync configured → tombstone dropped in the
-      next `_compactAll`.
-- [ ] **`$ver:` exemption:** with the versioning policy registered, `$ver:`
-      entries are retained per keep-N/retention, not collapsed.
+      (`compaction_test.dart` — "collapse applied within partial-level inputs".)
+- [x] **Tombstones preserved by PR1:** writes followed by delete, then
+      compaction, must retain the tombstone (PR1 makes no behavioural change to
+      tombstones — PR2 owns dropping them). (`compaction_test.dart` —
+      "tombstones are NOT dropped by PR1".)
+- [x] **`$ver:` exemption:** `$ver:`-namespace entries are retained across
+      compactions when the `retain-all` policy is registered; flipping back to
+      the default policy proves the hook is what's exempting them.
+      (`compaction_test.dart` — three tests under "$ver: exemption (H4 PR1
+      policy hook)".)
+- [x] **Policy hook surface:** unit-test policy resolution (collapse for normal
+      namespaces, retain-all for registered prefixes, default fallback).
+      (`reclamation_policy_test.dart` — 9 unit tests.)
 
-### Step 6 — Documentation
-- [ ] `docs/spec/06_storage_engine.md`: document compaction reclamation (collapse
-      + tombstone GC), the all-levels rule, and the level-recency caveat.
-- [ ] `docs/spec/12_sync.md`: document the tombstone GC horizon (`min` HWM) and
-      why early tombstone drop would resurrect deleted data.
-- [ ] `docs/spec/18_concurrency.md`: note compaction now reclaims space.
+### Step 6 — Documentation (PR1 subset)
+- [x] `docs/spec/06_storage_engine.md`: document compaction version collapse
+      and the reclamation policy hook. Reserve a forward reference to PR2 for
+      tombstone GC.
+- [x] `docs/spec/18_concurrency.md`: note compaction now reclaims space for
+      overwrites (deletes still retain tombstones pending PR2).
 
-### Step 7 — Verify
-- [ ] `dart test packages/kmdb` and `cd packages/kmdb_cli && dart test` pass.
-- [ ] `make analyze` clean. Benchmark: confirm storage no longer grows unbounded
-      under an overwrite/delete workload.
+### Step 7 — Verify (PR1)
+- [x] `make pre_commit` clean (format_check, analyze, license_check,
+      `pre_commit_test`) — 1402 tests pass (+17 new vs `main`).
+- [x] `dart test packages/kmdb` passes from the worktree.
+- [ ] Benchmark: confirm SSTable size no longer grows unbounded under an
+      overwrite workload (deletes still grow — that's PR2's territory). _Covered
+      by the `lsm_engine_test.dart` "H4 PR1" test (post-compaction SSTable
+      contains exactly one entry per overwritten key); a dedicated
+      `benchmark/` workload is out of scope for PR1._
 
-> A `kmdb_harness` multi-device scenario should also assert no tombstone
-> resurrection after cross-device sync once `plan_harness_mixed_storage.md`
-> lands; the in-process ingest test above covers the core case in CI without it.
+### Step 8 — PR
+- [ ] Open PR1 against `main`; update **PR link** above; on merge move this
+      plan to `docs/plans/completed/` and unblock PR2.
 
 ## Summary
 
