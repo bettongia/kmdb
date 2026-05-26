@@ -69,14 +69,13 @@ const _kVersion = '0.1.0';
 final class ReplRunner {
   ReplRunner({
     required CommandContext ctx,
-    required String dbPath,
+    required this._dbPath,
     Map<String, CliCommand>? commands,
     InputReader? reader,
     History? history,
     ReplConfig? config,
     SessionState? state,
-  }) : _dbPath = dbPath,
-       _commands = commands ?? const {},
+  }) : _commands = commands ?? const {},
        _state = state ?? SessionState(),
        _history = history ?? History(),
        _config = config ?? ReplConfig(),

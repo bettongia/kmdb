@@ -59,8 +59,8 @@ final class KvStoreImpl implements KvStore {
     this._engine,
     this._meta,
     this._config, {
-    required bool dirtyFlagPresent,
-  }) : _dirtyFlagPresent = dirtyFlagPresent;
+    required this._dirtyFlagPresent,
+  });
 
   /// Testing constructor that wraps a pre-built [LsmEngine].
   ///
@@ -71,8 +71,8 @@ final class KvStoreImpl implements KvStore {
     this._engine,
     this._meta,
     this._config, {
-    required bool dirtyFlagPresent,
-  }) : _dirtyFlagPresent = dirtyFlagPresent;
+    required this._dirtyFlagPresent,
+  });
 
   final LsmEngine _engine;
   final MetaStore _meta;

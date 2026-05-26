@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/// @docImport 'vault_recovery.dart';
+library;
+
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -55,20 +58,17 @@ import 'vault_storage_adapter.dart';
 /// sync. On [getBytes], if the object is a stub and a [VaultStorageAdapter] is
 /// configured, [VaultStorageAdapter.hydrateVaultBlob] is called automatically.
 class VaultStore {
-  /// Creates a [VaultStore] for the database at [dbDir].
+  /// Creates a [VaultStore] for the database at [_dbDir].
   ///
-  /// [adapter] is the storage backend. [detector] performs MIME type detection
+  /// [_adapter] is the storage backend. [_detector] performs MIME type detection
   /// at ingestion time. [uuidGenerator] is used to name staging files — provide
   /// a custom implementation for testing.
   VaultStore({
-    required String dbDir,
-    required StorageAdapter adapter,
-    MediaTypeDetector detector = const FreedesktopMediaTypeDetector(),
+    required this._dbDir,
+    required this._adapter,
+    this._detector = const FreedesktopMediaTypeDetector(),
     String Function()? uuidGenerator,
-  }) : _dbDir = dbDir,
-       _adapter = adapter,
-       _detector = detector,
-       _uuidGen = uuidGenerator ?? _defaultUuid;
+  }) : _uuidGen = uuidGenerator ?? _defaultUuid;
 
   final String _dbDir;
   final StorageAdapter _adapter;

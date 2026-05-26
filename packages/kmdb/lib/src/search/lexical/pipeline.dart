@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/// @docImport '';
+library;
+
 // import 'package:snowball_stemmer/snowball_stemmer.dart';
 import 'package:intl/locale.dart';
 import 'package:kmdb_lexical/lexical.dart' show Stemmer, Tokenizer;

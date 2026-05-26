@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/// @docImport 'media_type_detector.dart';
+library;
+
 import 'dart:convert';
 
 /// Immutable metadata record written alongside every vault blob.

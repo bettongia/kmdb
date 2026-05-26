@@ -52,25 +52,16 @@ import 'kv_store.dart';
 /// L1 and L2 files are assumed non-overlapping after compaction.
 final class LsmEngine {
   LsmEngine._({
-    required String dbDir,
-    required String sstDir,
-    required StorageAdapter adapter,
-    required KvStoreConfig config,
-    required String deviceId,
-    required Map<int, List<String>> levels,
-    required ManifestWriter manifestWriter,
-    required WalWriter walWriter,
-    required HlcClock clock,
-  }) : _dbDir = dbDir,
-       _sstDir = sstDir,
-       _adapter = adapter,
-       _config = config,
-       _deviceId = deviceId,
-       _levels = levels,
-       _manifestWriter = manifestWriter,
-       _walWriter = walWriter,
-       _clock = clock,
-       _active = Memtable(),
+    required this._dbDir,
+    required this._sstDir,
+    required this._adapter,
+    required this._config,
+    required this._deviceId,
+    required this._levels,
+    required this._manifestWriter,
+    required this._walWriter,
+    required this._clock,
+  }) : _active = Memtable(),
        // sync: true delivers events synchronously to subscribers — correct for
        // KMDB's single-isolate model where listeners are set up before writes.
        _writeEventsController = StreamController<String>.broadcast(sync: true);

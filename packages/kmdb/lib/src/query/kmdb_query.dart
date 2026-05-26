@@ -54,22 +54,15 @@ import 'query_plan.dart';
 /// ```
 final class KmdbQuery<T> {
   KmdbQuery.fromCollection({
-    required KmdbCollection<T> collection,
+    required this._collection,
     List<Filter>? filters,
-    String? orderByField,
-    bool orderByDescending = false,
-    int? limitCount,
-    int? offsetCount,
-    String? keyPrefixValue,
-    bool requireFreshIndex = false,
-  }) : _collection = collection,
-       _filters = filters ?? const [],
-       _orderByField = orderByField,
-       _orderByDescending = orderByDescending,
-       _limitCount = limitCount,
-       _offsetCount = offsetCount,
-       _keyPrefixValue = keyPrefixValue,
-       _requireFreshIndex = requireFreshIndex;
+    this._orderByField,
+    this._orderByDescending = false,
+    this._limitCount,
+    this._offsetCount,
+    this._keyPrefixValue,
+    this._requireFreshIndex = false,
+  }) : _filters = filters ?? const [];
 
   final KmdbCollection<T> _collection;
   final List<Filter> _filters;

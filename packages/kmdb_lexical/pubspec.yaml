@@ -8,11 +8,11 @@ publish_to: none
 resolution: workspace
 
 environment:
-  sdk: ^3.11.4
+  sdk: ^3.12.0
 
 # Add regular dependencies here.
 dependencies:
-  intl: ^0.20.2
+  intl:
 
 dev_dependencies:
   code_builder: any

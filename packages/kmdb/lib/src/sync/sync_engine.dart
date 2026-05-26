@@ -79,30 +79,23 @@ import 'highwater.dart';
 final class SyncEngine {
   /// Creates a [SyncEngine].
   ///
-  /// [store] is the local [KvStore] instance. [cloudAdapter] accesses the
-  /// shared sync folder. [localAdapter] accesses the local database directory.
-  /// [deviceId] is the 8-character hex identifier for this device. [dbDir] is
+  /// [_store] is the local [KvStore] instance. [_cloudAdapter] accesses the
+  /// shared sync folder. [_localAdapter] accesses the local database directory.
+  /// [_deviceId] is the 8-character hex identifier for this device. [_dbDir] is
   /// the local database root directory (contains the `sst/` subdirectory).
-  /// [syncRoot] is the root path in the cloud adapter. [syncNamespaces] is the
+  /// [_syncRoot] is the root path in the cloud adapter. [_syncNamespaces] is the
   /// set of user namespaces to include in sync (system `$` namespaces are
   /// always excluded).
   SyncEngine({
-    required KvStore store,
-    required SyncStorageAdapter cloudAdapter,
-    required StorageAdapter localAdapter,
-    required String deviceId,
-    required String dbDir,
-    required String syncRoot,
-    required Set<String> syncNamespaces,
-    ConsolidationConfig consolidationConfig = const ConsolidationConfig(),
-  }) : _store = store,
-       _cloudAdapter = cloudAdapter,
-       _localAdapter = localAdapter,
-       _deviceId = deviceId,
-       _dbDir = dbDir,
-       _syncRoot = syncRoot,
-       _syncNamespaces = syncNamespaces,
-       _consolidationConfig = consolidationConfig;
+    required this._store,
+    required this._cloudAdapter,
+    required this._localAdapter,
+    required this._deviceId,
+    required this._dbDir,
+    required this._syncRoot,
+    required this._syncNamespaces,
+    this._consolidationConfig = const ConsolidationConfig(),
+  });
 
   final KvStore _store;
   final SyncStorageAdapter _cloudAdapter;

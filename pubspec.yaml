@@ -2,7 +2,7 @@ name: kmdb_workspace
 publish_to: none
 
 environment:
-  sdk: ^3.10.8
+  sdk: ^3.12.0
 
 workspace:
   - packages/kmdb
@@ -19,22 +19,23 @@ dev_dependencies:
   pubspec_checker: ^1.3.0
 
 dependency_overrides:
-  # Override meta to resolve conflict between betto_registry
-  # (requires ^1.18.2) and flutter_test from sdk (pins 1.17.0). This override
-  # allows the non-Flutter packages to build while keeping Flutter UI tests working.
-  meta: ^1.18.2
-  analyzer: ^8.1.1 #^13.0.0
   xml: ^7.0.0
+  uuid: ^4.5.3
+  cbor: ^6.5.1
+  web: ^1.1.0
+  ffi: ^2.2.0
+  archive: ^4.0.0
+  intl: ^0.20.2
   betto_common:
-    path: ../common
+    git: git@github.com:bettongia/common.git
   betto_schema:
-    path: ../schema
+    git: git@github.com:bettongia/schema.git
   betto_zstd:
-    path: ../zstd
+    git: git@github.com:bettongia/zstd.git
   betto_registry:
-    path: ../registry
+    git: git@github.com:bettongia/registry.git
   betto_builder_tools:
-    path: ../builder_tools
+    git: git@github.com:bettongia/builder_tools.git
 
 melos:
   # Disable generation of IntelliJ/Android Studio run configurations. Melos's
@@ -60,21 +61,20 @@ melos:
       exec: dart run benchmark/main.dart
       packageFilters:
         dirExists: benchmark
-        flutter: false
 
     test:
       description: Test all packages
       exec: dart test
       packageFilters:
         dirExists: test
-        flutter: false
 
-    flutter-test:
-      description: Test all packages that use Flutter SDK
-      exec: flutter test
+    pre_commit_test:
+      description: Test packages prior to commit
+      exec: dart test
       packageFilters:
         dirExists: test
-        flutter: true
+        scope:
+          - kmdb
 
     e2e-test:
       description: Run the e2e tests
@@ -86,7 +86,6 @@ melos:
       steps:
         - coverage:clean
         - coverage:generate
-        - coverage:generate-flutter
         - coverage:combine
         - coverage:report
 
@@ -98,22 +97,11 @@ melos:
     coverage:generate:
       description: Test all packages with coverage
       run: |
-        dart pub global run coverage:test_with_coverage &&
+        dart run coverage:test_with_coverage &&
         lcov --ignore-errors empty --summary coverage/lcov.info
       exec:
-        concurrency: 4
+        concurrency: 2
       packageFilters:
-        flutter: false
-        dirExists: test
-
-    coverage:generate-flutter:
-      description: Test all packages with coverage
-      run: |
-        flutter test --coverage
-      exec:
-        concurrency: 4
-      packageFilters:
-        flutter: true
         dirExists: test
 
     coverage:combine:
@@ -150,8 +138,6 @@ melos:
 
     doc:
       exec: dart doc -o MELOS_ROOT_PATH/site/api-docs/MELOS_PACKAGE_NAME/api
-      packageFilters:
-        flutter: false
 
     pubspec_checker:
       exec: dart run pubspec_checker all -s -l
@@ -161,3 +147,10 @@ melos:
         rm -rf site
         rm -rf coverage
         rm -rf doc
+
+    scrub_packages:
+      exec: |
+        rm -rf site
+        rm -rf coverage
+        rm -rf doc
+        rm -rf .dart_tool

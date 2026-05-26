@@ -84,14 +84,11 @@ final class SstEntry {
 final class SstableReader {
   SstableReader._({
     required this.path,
-    required StorageAdapter adapter,
-    required SstableFooter footer,
-    required BloomFilter filter,
-    required List<BlockRef> index,
-  }) : _adapter = adapter,
-       _footer = footer,
-       _filter = filter,
-       _index = index;
+    required this._adapter,
+    required this._footer,
+    required this._filter,
+    required this._index,
+  });
 
   /// Path of the SSTable file being read.
   final String path;

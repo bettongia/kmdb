@@ -90,9 +90,9 @@ const List<String> _tagWords = [
 final class UserAgent {
   /// Creates a [UserAgent].
   ///
-  /// [config] supplies the key pool ratios, doc size distribution, device count,
+  /// [_config] supplies the key pool ratios, doc size distribution, device count,
   /// and collection count. [seed] is `null` for fuzz mode (clock-derived seed).
-  UserAgent({required HarnessConfig config, int? seed}) : _config = config {
+  UserAgent({required this._config, int? seed}) {
     effectiveSeed = seed ?? DateTime.now().millisecondsSinceEpoch;
     _rng = Random(effectiveSeed);
     _buildKeyPools();

@@ -66,13 +66,12 @@ import 'session_cache.dart';
 /// await cache.close();
 /// ```
 final class CacheLayer implements KvStore {
-  /// Creates a [CacheLayer] wrapping [store].
+  /// Creates a [CacheLayer] wrapping [_store].
   ///
   /// [tier] defaults to [detectCacheTier]. [maxObjects] overrides the
   /// tier-derived session cache capacity.
-  CacheLayer({required KvStore store, CacheTier? tier, int? maxObjects})
-    : _store = store,
-      _tier = tier ?? detectCacheTier(),
+  CacheLayer({required this._store, CacheTier? tier, int? maxObjects})
+    : _tier = tier ?? detectCacheTier(),
       _cache = SessionCache(
         maxObjects: maxObjects ?? (tier ?? detectCacheTier()).maxSessionObjects,
       ) {

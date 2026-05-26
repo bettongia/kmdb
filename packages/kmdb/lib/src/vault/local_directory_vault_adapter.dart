@@ -67,14 +67,13 @@ import 'vault_store.dart';
 final class LocalDirectoryVaultAdapter implements VaultStorageAdapter {
   /// Creates a [LocalDirectoryVaultAdapter].
   ///
-  /// [syncRoot] is the base directory for all remote vault paths.
-  /// [localStore] is the local [VaultStore] used for staging and path
+  /// [_syncRoot] is the base directory for all remote vault paths.
+  /// [_localStore] is the local [VaultStore] used for staging and path
   /// resolution.
   LocalDirectoryVaultAdapter({
-    required String syncRoot,
-    required VaultStore localStore,
-  }) : _syncRoot = syncRoot,
-       _localStore = localStore;
+    required this._syncRoot,
+    required this._localStore,
+  });
 
   /// The base directory for all remote vault paths.
   final String _syncRoot;
