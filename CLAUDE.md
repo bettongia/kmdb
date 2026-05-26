@@ -48,36 +48,44 @@ packages/
   kmdb_inferencing/    — ONNX Runtime + BGE embedding model for semantic search
   kmdb_lexical/        — lexical utilities (stemmer, stopwords) used by FTS
 
-External packages (separate repos, path-overridden in pubspec.yaml):
-  kmdb_ui              — Flutter desktop/browser UI (https://github.com/bettongia/kmdb-ui)
-
-External packages (separate repos, path-overridden in pubspec.yaml):
-  betto_zstd           — Zstd FFI compression provider (https://github.com/bettongia/zstd)
+External packages pulled in via `git:` refs in `pubspec.yaml`
+`dependency_overrides`:
+  betto_common         — shared Bettongia Dart utilities (https://github.com/bettongia/common)
   betto_schema         — JSON schema validation (https://github.com/bettongia/schema)
+  betto_zstd           — Zstd FFI compression provider (https://github.com/bettongia/zstd)
   betto_registry       — FreeDesktop shared-mime-info file-type identification (https://github.com/bettongia/registry)
+  betto_builder_tools  — build helpers shared across Bettongia packages (https://github.com/bettongia/builder_tools)
+
+Downstream consumer (separate repo, not pulled in here):
+  kmdb_ui              — Flutter desktop/browser UI (https://github.com/bettongia/kmdb-ui)
 ```
 
-Run `dart pub get` once from the workspace root to resolve dependencies for all
-packages.
+Run `make prepare` once (activates `melos` and `coverage`, then bootstraps all
+packages); `dart pub get` from the workspace root also resolves dependencies but
+skips installing the dev tools.
 
 ## Commands
 
 ```bash
-# Run all tests in every package (preferred)
-make test
-melos test --no-select
+# Pre-commit gate (format_check, analyze, license_check, then the scoped
+# `pre_commit_test` melos script — runs `kmdb` tests). Run this before committing.
+make pre_commit
 
-# Run all tests for a single package
-dart test packages/kmdb
+# Run all tests in every package
+make test                  # parallel melos test --no-select
+melos test --no-select     # equivalent (when invoked directly)
 
-# Note: kmdb_cli tests must be run from the package directory so build hooks fire
+# Run all tests for a single package — `cd` so native-asset build hooks fire
+# (see the note below); equivalent to `melos run pre_commit_test --no-select`
+# for `kmdb`.
+cd packages/kmdb && dart test
 cd packages/kmdb_cli && dart test
 
 # Run a single test file
-dart test packages/kmdb/test/some_test.dart
+cd packages/kmdb && dart test test/some_test.dart
 
 # Run tests matching a name pattern
-dart test packages/kmdb --name "some pattern"
+cd packages/kmdb && dart test --name "some pattern"
 
 # Analyze/lint across all packages
 make analyze
@@ -94,8 +102,18 @@ make coverage
 make site
 
 # Run performance benchmarks (§18 P99 targets)
-dart run packages/kmdb/benchmark/main.dart
+cd packages/kmdb && dart run benchmark/main.dart
 ```
+
+> **Native-asset hooks.** Any package whose dependencies have native-asset
+> build hooks (currently `betto_zstd` via `package:betto_zstd`) must have
+> `dart test` invoked from **inside** the package directory — `dart test
+> <path>` from the workspace root resolves the root package
+> (`kmdb_workspace`, no hooks) and the hook silently isn't built, producing
+> *"No available native assets … ZSTD_minCLevel"* on a cold cache. All
+> `make` / `melos` targets use `melos exec`, which runs `dart test` in each
+> package dir, so prefer them over raw `dart test <path>`. The warm artifact
+> is `.dart_tool/native_assets.yaml`.
 
 ## Implementation Status
 
@@ -114,8 +132,8 @@ dart run packages/kmdb/benchmark/main.dart
 | 9c    | Hybrid search (Reciprocal Rank Fusion, `--mode` flag, unified SearchResult types)                | ✅ Complete |
 | 10    | Vault (content-addressable blob store, KVLT packaging, ref-counted GC, distributed sync)         | ✅ Complete |
 
-All 1162 kmdb + 454 kmdb_cli tests pass as of 2026-04-25 (E2E tests skipped by
-default).
+All tests pass on `main`. E2E tests are skipped by default — run them via
+`make e2e_test` (`melos e2e-test`).
 
 ## Architecture
 
