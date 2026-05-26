@@ -2,7 +2,7 @@
 
 **Status**: Complete
 
-**PR link**: {pending}
+**PR link**: https://github.com/bettongia/kmdb/pull/23
 
 **Implementation model:** Sonnet, with careful review of the all-or-nothing
 recovery decode and the meta-write fold (cache-generation visibility).
