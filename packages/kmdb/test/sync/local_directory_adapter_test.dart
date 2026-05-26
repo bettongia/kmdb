@@ -18,7 +18,44 @@ import 'dart:typed_data';
 import 'package:kmdb/src/sync/local/local_directory_adapter.dart';
 import 'package:test/test.dart';
 
+import '../support/sync_adapter_conformance.dart';
+
 void main() {
+  // Non-atomic mode (default): conformance suite runs with expectAtomicCas=false.
+  // The contention test verifies forward progress only — multiple winners are
+  // allowed, which is expected for this mode.
+  group('LocalDirectoryAdapter conformance (non-atomic mode)', () {
+    late Directory confTempDir;
+    setUp(() {
+      confTempDir = Directory.systemTemp.createTempSync('lda_conformance_');
+    });
+    tearDown(() {
+      if (confTempDir.existsSync()) confTempDir.deleteSync(recursive: true);
+    });
+    runSyncAdapterConformance(
+      factory: () => LocalDirectoryAdapter(confTempDir.path),
+      expectAtomicCas: false,
+    );
+  });
+
+  // Atomic mode (atomicCas: true): the full conformance suite including the
+  // H5 regression guard. The contention test asserts exactly one winner —
+  // proving File.create(exclusive: true) and the advisory-lock update path
+  // correctly serialise concurrent writers.
+  group('LocalDirectoryAdapter conformance (atomic mode)', () {
+    late Directory confTempDir;
+    setUp(() {
+      confTempDir = Directory.systemTemp.createTempSync('lda_atomic_');
+    });
+    tearDown(() {
+      if (confTempDir.existsSync()) confTempDir.deleteSync(recursive: true);
+    });
+    runSyncAdapterConformance(
+      factory: () => LocalDirectoryAdapter(confTempDir.path, atomicCas: true),
+      expectAtomicCas: true,
+    );
+  });
+
   late Directory tempDir;
   late LocalDirectoryAdapter adapter;
 

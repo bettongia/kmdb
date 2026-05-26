@@ -121,4 +121,7 @@ final class PartitionableAdapter implements SyncStorageAdapter {
     _checkPartition();
     return _delegate.getEtag(path);
   }
+
+  @override
+  bool get providesAtomicCas => _delegate.providesAtomicCas;
 }

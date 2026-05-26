@@ -128,4 +128,23 @@ abstract interface class SyncStorageAdapter {
   /// The ETag is an opaque string that changes whenever the file content
   /// changes. Callers should not attempt to interpret the format.
   Future<String?> getEtag(String path);
+
+  /// Whether [compareAndSwap] provides the atomicity guarantee documented above.
+  ///
+  /// The contract: for a given `(path, ifMatchEtag)` precondition, at most one
+  /// concurrent caller may observe `true`. Implementations that cannot honour
+  /// this — typically because the backend is an eventually-consistent replica
+  /// with no cross-device locking (e.g. a Dropbox or OneDrive folder seen as a
+  /// local filesystem) — must return `false`.
+  ///
+  /// `ConsolidationCoordinator` reads this getter and skips consolidation when
+  /// it is `false`: consolidation is a storage-shape optimisation, not a
+  /// correctness requirement, so a non-atomic backend simply accumulates more
+  /// un-consolidated SSTables rather than risking a split-lease data loss.
+  ///
+  /// This is declared on the interface — rather than as a marker interface —
+  /// because some adapters (notably [LocalDirectoryAdapter]) have an atomicity
+  /// claim that depends on the directory they were constructed against, not on
+  /// their type.
+  bool get providesAtomicCas;
 }

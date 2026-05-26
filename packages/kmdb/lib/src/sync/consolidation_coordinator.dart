@@ -31,6 +31,7 @@ import 'consolidation_config.dart';
 /// ```
 /// idle → leaseAcquired   (this device wins the CAS write)
 /// idle → idle            (threshold not met, or another device holds lease)
+/// idle → skippedNonAtomicCas (adapter cannot provide atomic CAS)
 /// leaseAcquired → consolidating
 /// consolidating → verifying  (N-way merge written to sync folder)
 /// consolidating → leaseExpired (lease TTL exceeded during merge)
@@ -55,6 +56,13 @@ enum ConsolidationState {
   /// Lease TTL expired before consolidation finished; state is reset to [idle]
   /// on the next [ConsolidationCoordinator.runIfNeeded] call.
   leaseExpired,
+
+  /// Consolidation was skipped because [SyncStorageAdapter.providesAtomicCas]
+  /// is `false`. The lease protocol depends on atomic CAS; running it against
+  /// a non-atomic backend could let two devices both believe they hold the
+  /// lease and delete each other's inputs. Skipping is loss-free — SSTables
+  /// simply accumulate un-consolidated.
+  skippedNonAtomicCas,
 }
 
 /// A parsed consolidation lease record.
@@ -204,6 +212,15 @@ final class ConsolidationCoordinator {
   /// Returns the current state.
   ConsolidationState get state => _state;
 
+  /// Human-readable explanation for the most recent skip, or `null` if the
+  /// coordinator did not skip on the last invocation.
+  ///
+  /// Currently populated only when the state is [ConsolidationState.skippedNonAtomicCas].
+  /// Threshold-not-met and lease-held-elsewhere skips leave this `null`
+  /// (the state itself — `idle` — is sufficient signal for those routine paths).
+  String? get skipReason => _skipReason;
+  String? _skipReason;
+
   /// Path to the lease file in the sync folder.
   ///
   /// When [syncRoot] is empty, the path is `'.consolidation-lease'` (no
@@ -232,6 +249,23 @@ final class ConsolidationCoordinator {
   /// not needed, or if another device holds the lease.
   Future<bool> runIfNeeded(List<String> remoteSstables) async {
     _state = ConsolidationState.idle;
+    _skipReason = null;
+
+    // Gate: the lease protocol relies on cloudAdapter.compareAndSwap being
+    // atomic across processes/devices. If the adapter cannot honour that
+    // contract — typically because it is pointed at an eventually-consistent
+    // cloud-synced folder — two devices could both win the CAS write and
+    // delete each other's inputs. Skipping is the safe, loss-free response:
+    // consolidation is a storage-shape optimisation, not a correctness
+    // requirement. SSTables continue to sync; they merely accumulate
+    // un-consolidated.
+    if (!cloudAdapter.providesAtomicCas) {
+      _state = ConsolidationState.skippedNonAtomicCas;
+      _skipReason =
+          'cloudAdapter does not provide atomic compareAndSwap; '
+          'consolidation skipped to avoid split-lease data loss';
+      return false;
+    }
 
     // Count cross-device SSTables (exclude our own files).
     final crossDeviceFiles = remoteSstables

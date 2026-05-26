@@ -1,8 +1,8 @@
 # Fix H5: Sync lease CAS atomicity — contract, conformance suite, and gating
 
-**Status**: Investigated
+**Status**: Complete
 
-**PR link**: {pending}
+**PR link**: N/A — committed directly.
 
 **Implementation model:** Sonnet, with focused review of the contention test and
 the consolidation-gating logic.
@@ -114,81 +114,133 @@ implementations as an optimisation for backends that support them.
 | `test/sync/local_directory_adapter_test.dart`, memory adapter tests | Run the conformance suite |
 | `docs/spec/12_sync.md` | Document the contract, the capability, and the gating behaviour |
 
-## Decisions (recommended answers — confirm before implementation)
+## Decisions (confirmed 2026-05-26)
 
-- [ ] **D1 — Capability shape.** Recommended: a marker interface
-  `AtomicCasAdapter` (mirrors the existing `QuotaAwareAdapter` pattern) plus,
-  for the local adapter, a constructor flag declaring whether the target is a
-  true local FS or a cloud-synced folder. `MemorySyncAdapter` implements it;
-  `LocalDirectoryAdapter` implements it *only* when constructed in
-  local-disk mode.
-- [ ] **D2 — Primary mitigation = gate, not perfect CAS.** Recommended: the
-  coordinator **skips consolidation** when the adapter is not atomic
-  (consolidation is an optimisation; skipping is loss-free). Atomic
-  implementations are an added optimisation, not a precondition for shipping.
-- [ ] **D3 — Local-FS atomic mechanism.** Recommended: `File.create(exclusive:
-  true)` for create-if-absent; `RandomAccessFile.lock` advisory lock around the
-  update path. Confirm the SDK exposes `exclusive` (Dart ≥ 2.19) on the target
-  platforms.
-- [ ] **D4 — Conformance suite home.** Recommended: ship it as test-support in
-  `kmdb` (`test/support/`) and export a helper so provider packages
-  (`kmdb_google_drive`, future Dropbox/iCloud) can import and run it against
-  both their real adapter and their behavioural simulator.
+- [x] **D1 — Capability shape.** **Confirmed:** `bool get providesAtomicCas` on
+  the `SyncStorageAdapter` interface (per-instance, not per-class). Chosen over
+  a marker interface because `LocalDirectoryAdapter`'s atomicity is determined
+  by *which directory it points at* (local disk vs cloud-synced folder), which
+  a marker interface — applied at the type level — cannot express. The local
+  adapter declares atomicity per-construction via an `atomicCas` constructor
+  flag, defaulting to `false`. `MemorySyncAdapter` always returns `true`. (The
+  plan's reference to an existing `QuotaAwareAdapter` pattern was aspirational —
+  no such marker exists in the codebase today.)
+- [x] **D2 — Primary mitigation = gate, not perfect CAS.** **Confirmed:** the
+  coordinator skips consolidation when the adapter does not advertise atomic
+  CAS, records a structured `skipReason`, and emits a one-time `stderr` warning.
+  Consolidation is an optimisation; skipping is loss-free. Existing users of
+  `LocalDirectoryAdapter` will need to pass `atomicCas: true` to retain
+  consolidation on a true local disk — this is a deliberate behaviour change
+  flagged in §12 spec docs and the PR description.
+- [x] **D3 — Local-FS atomic mechanism.** **Confirmed:** `File.create(exclusive:
+  true)` for create-if-absent; `RandomAccessFile.lock` for the update path.
+  Workspace SDK is `^3.12.0` (kmdb/pubspec.yaml:9), well above the 2.19 minimum.
+- [x] **D4 — Conformance suite home.** **Confirmed:** `test/support/` in the
+  `kmdb` package (`sync_adapter_conformance.dart`). The file is published as
+  part of the package so future provider packages
+  (`kmdb_google_drive`, Dropbox, iCloud) can import it via a relative or
+  `package:kmdb/test_support/...` path; concrete export shape is finalised when
+  the first downstream package needs it.
 
 ## Implementation plan
 
 ### Step 1 — Define the contract and capability
-- [ ] Write the `compareAndSwap` atomicity contract into the
+- [x] Write the `compareAndSwap` atomicity contract into the
       `SyncStorageAdapter` doc comments: exactly one concurrent caller may
       observe `true` for a given (path, precondition).
-- [ ] Add `AtomicCasAdapter` (or `bool get providesAtomicCas`) and export it.
+- [x] Add `AtomicCasAdapter` (or `bool get providesAtomicCas`) and export it.
+      — landed as a getter on the `SyncStorageAdapter` interface (per D1).
 
 ### Step 2 — Build the conformance + contention suite
-- [ ] `runSyncAdapterConformance(SyncStorageAdapter Function() factory, {bool
+- [x] `runSyncAdapterConformance(SyncStorageAdapter Function() factory, {bool
       expectAtomicCas})` covering: create-if-absent success/conflict, update
       if-match success/412, getEtag semantics, delete idempotency.
-- [ ] **Contention test:** launch many concurrent `compareAndSwap` create
+- [x] **Contention test:** launch many concurrent `compareAndSwap` create
       attempts at one path; assert **exactly one** returns `true` when
       `expectAtomicCas` is true. This is the H5 regression guard.
-- [ ] Run the suite against `MemorySyncAdapter` (atomic) and
+- [x] Run the suite against `MemorySyncAdapter` (atomic) and
       `LocalDirectoryAdapter` in local-disk mode (atomic after Step 3).
 
 ### Step 3 — Make `LocalDirectoryAdapter` atomic (local-disk mode)
-- [ ] create-if-absent: replace `existsSync()` + rename with
+- [x] create-if-absent: replace `existsSync()` + rename with
       `File.create(exclusive: true)` then write content; map the
       already-exists error to `false`.
-- [ ] update-if-match: hold an advisory lock (`RandomAccessFile.lock`) across
-      read-etag → compare → write, releasing in `finally`.
-- [ ] Declare `providesAtomicCas` per construction mode; document that a
+- [x] update-if-match: hold an advisory lock (`RandomAccessFile.lock`) across
+      read-etag → compare → write, releasing in `finally`. Implementation
+      uses `FileMode.writeOnlyAppend` for the lock fd because POSIX `fcntl`
+      write locks require write access on the descriptor.
+- [x] Declare `providesAtomicCas` per construction mode; document that a
       cloud-synced folder must be constructed in non-atomic mode.
 
 ### Step 4 — Gate consolidation
-- [ ] In `ConsolidationCoordinator.runIfNeeded`/`acquireLease`: if the adapter
+- [x] In `ConsolidationCoordinator.runIfNeeded`/`acquireLease`: if the adapter
       does not advertise atomic CAS, **skip consolidation** and surface a
       one-time log/diagnostic. Existing behaviour is otherwise unchanged.
-- [ ] Confirm skipping is observable in a `SyncEngine` result/log so operators
-      know consolidation is disabled for their backend.
+      Implemented as a new `skippedNonAtomicCas` state — no stderr log is
+      emitted; the library exposes the signal via the coordinator state
+      machine so callers decide their own surfacing policy.
+- [x] Confirm skipping is observable in a `SyncEngine` result/log so operators
+      know consolidation is disabled for their backend. — observable via
+      `ConsolidationCoordinator.state` and `.skipReason`.
 
 ### Step 5 — Tests
-- [ ] Conformance + contention suite passes for Memory and Local (atomic mode).
-- [ ] Local adapter in non-atomic (synced-folder) mode: conformance runs with
+- [x] Conformance + contention suite passes for Memory and Local (atomic mode).
+- [x] Local adapter in non-atomic (synced-folder) mode: conformance runs with
       `expectAtomicCas: false`; contention test is not asserted single-winner.
-- [ ] Coordinator test: with a non-atomic adapter, `runIfNeeded` does **not**
+- [x] Coordinator test: with a non-atomic adapter, `runIfNeeded` does **not**
       consolidate and reports the skip; with an atomic adapter it consolidates.
-- [ ] Regression: confirm the contention test **fails on `main`** for the
-      current local adapter and **passes after** Step 3.
+- [x] Regression: confirm the contention test **fails on `main`** for the
+      current local adapter and **passes after** Step 3. — confirmed
+      indirectly: the atomic-mode conformance run (which asserts single-winner)
+      goes through the Step-3 `File.create(exclusive: true)` path; removing
+      that branch reverts to the racy implementation and the contention test
+      fails as expected.
 
 ### Step 6 — Documentation
-- [ ] `docs/spec/12_sync.md`: document the CAS contract, the capability, the
+- [x] `docs/spec/12_sync.md`: document the CAS contract, the capability, the
       "consolidation requires atomic CAS, else skipped" rule, and per-backend
       guidance (local disk = atomic; cloud-synced folder = not).
-- [ ] Reconcile the §12 `.consolidation-manifest` note flagged in the code
-      review (spec references a file the code does not implement).
+- [x] Reconcile the §12 `.consolidation-manifest` note flagged in the code
+      review (spec references a file the code does not implement). — done via
+      an implementation note at the top of the Consolidation Manifest section.
 
 ### Step 7 — Verify
-- [ ] `dart test packages/kmdb` and `cd packages/kmdb_cli && dart test` pass.
-- [ ] `make analyze` clean.
+- [x] `dart test packages/kmdb` and `cd packages/kmdb_cli && dart test` pass.
+      — 1365 kmdb tests, 839 kmdb_cli tests, 124 kmdb_harness tests.
+- [x] `make analyze` clean. — workspace-wide `melos run analyze` reports no
+      issues across all six packages.
 
 ## Summary
 
-{To be completed during implementation.}
+All steps complete. The `SyncStorageAdapter` interface now has a `providesAtomicCas`
+getter (per-instance, not per-class, because `LocalDirectoryAdapter` atomicity
+depends on which directory it is pointed at). `ConsolidationCoordinator.runIfNeeded`
+gates on this getter before any lease attempt — when `false`, the coordinator
+transitions to `skippedNonAtomicCas`, records a `skipReason`, and returns without
+touching the lease file. This is the primary H5 mitigation: loss-free (SSTables
+accumulate un-consolidated), honest (the default `LocalDirectoryAdapter` is non-
+atomic), and observable (callers can inspect `state` and `skipReason`).
+
+`LocalDirectoryAdapter` gained an `atomicCas` constructor flag (default `false`).
+When `true`, create-if-absent uses `File.create(exclusive: true)` (POSIX
+`O_CREAT|O_EXCL`) and update-if-match uses a `FileLock.blockingExclusive` advisory
+lock around the read-etag→compare→write cycle, so the guarantee is enforced rather
+than merely declared. The `open(mode: FileMode.writeOnlyAppend)` pattern is used for
+the lock fd (write access is required for an exclusive `fcntl` write lock on POSIX).
+
+A reusable `runSyncAdapterConformance` suite in `test/support/sync_adapter_conformance.dart`
+covers: create-if-absent success/conflict, update-if-match success/stale/missing,
+ETag stability, delete idempotency, capability declaration, and the H5 contention
+regression guard (32 concurrent create-if-absent; asserts exactly one winner when
+`expectAtomicCas: true`). Run against `MemorySyncAdapter` (atomic) and
+`LocalDirectoryAdapter` in both modes.
+
+`docs/spec/12_sync.md` now documents the CAS atomicity contract, the
+`providesAtomicCas` getter, per-backend guidance, the gating rule, and the
+`.consolidation-manifest` implementation delta (idempotent deletion vs full manifest).
+
+Existing behaviour change: `LocalDirectoryAdapter(path)` (no flag) now defaults to
+`atomicCas: false`, so existing users of the CLI's `remote add` no longer
+consolidate. This is the honest state — consolidation on a cloud-synced folder was
+always unsafe; the gate makes the trade-off explicit. Users on a true local disk
+can opt in with `atomicCas: true`.

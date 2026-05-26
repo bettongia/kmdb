@@ -118,6 +118,9 @@ final class MemorySyncAdapter implements SyncStorageAdapter {
     return version.toString();
   }
 
+  @override
+  bool get providesAtomicCas => true;
+
   /// Removes all files and version counters.
   ///
   /// Useful in test tearDown to reset adapter state between tests.
