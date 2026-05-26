@@ -17,6 +17,7 @@ import 'dart:typed_data';
 import 'package:cbor/cbor.dart';
 
 import '../util/xxhash.dart';
+import 'kv_store.dart';
 import 'lsm_engine.dart';
 
 /// Access to the `$meta` system namespace.
@@ -69,10 +70,37 @@ final class MetaStore {
   ///
   /// Called by [KvStoreImpl] after each successful user write. Returns the
   /// new counter value.
+  ///
+  /// This path issues a standalone `_engine.put` and should only be used
+  /// where folding into a [WriteBatch] is not possible (e.g. the legacy
+  /// single-`put`/`delete` path). Prefer [appendGenerationCounterBump] when
+  /// building a [WriteBatch] so the counter increment is part of the same
+  /// atomic WAL frame as the document write.
   Future<int> incrementGenerationCounter(String userNamespace) async {
     final current = await getGenerationCounter(userNamespace);
     final next = current + 1;
     await _engine.put(kNamespace, _genKey(userNamespace), _encodeUint64(next));
+    return next;
+  }
+
+  /// Reads the current generation counter for [userNamespace] and appends
+  /// a put of the incremented value to [batch].
+  ///
+  /// This is the batch-aware variant of [incrementGenerationCounter]. Use this
+  /// when building a [WriteBatch] so the generation bump is written in the same
+  /// atomic WAL frame as the documents and index entries — ensuring that a crash
+  /// can never leave a document present without its corresponding generation
+  /// bump (review finding H2, decision D2).
+  ///
+  /// Returns the new counter value (the value that will be written when [batch]
+  /// is committed).
+  Future<int> appendGenerationCounterBump(
+    String userNamespace,
+    WriteBatch batch,
+  ) async {
+    final current = await getGenerationCounter(userNamespace);
+    final next = current + 1;
+    batch.put(kNamespace, _genKey(userNamespace), _encodeUint64(next));
     return next;
   }
 
@@ -151,6 +179,9 @@ final class MetaStore {
   /// This is called by [KvStoreImpl] after any successful user write. It is a
   /// no-op if the namespace is already registered, so the overhead is a single
   /// `get` + conditional `put` per write.
+  ///
+  /// Prefer [appendNamespaceRegistration] when building a [WriteBatch] so the
+  /// registration is part of the same atomic WAL frame as the document write.
   Future<void> registerNamespace(String userNamespace) async {
     final current = await getNamespaces();
     if (current.contains(userNamespace)) return;
@@ -161,6 +192,44 @@ final class MetaStore {
       _nameToKey(_kNamespacesKey),
       Uint8List.fromList(encoded),
     );
+  }
+
+  /// Appends a namespace registration for [userNamespace] to [batch], if the
+  /// namespace is not yet registered.
+  ///
+  /// This is the batch-aware variant of [registerNamespace]. Use this when
+  /// building a [WriteBatch] so the registration is part of the same atomic
+  /// WAL frame as the documents and index entries — ensuring that a crash can
+  /// never leave a document present without its namespace being registered
+  /// (review finding H2, decision D2).
+  ///
+  /// Returns `true` if a put was appended (the namespace was not already
+  /// registered), `false` if the namespace was already present (no-op).
+  Future<bool> appendNamespaceRegistration(
+    String userNamespace,
+    WriteBatch batch,
+  ) async {
+    final current = await getNamespaces();
+    if (current.contains(userNamespace)) return false;
+    final updated = [...current, userNamespace]..sort();
+    final encoded = cbor.encode(CborList(updated.map(CborString.new).toList()));
+    batch.put(
+      kNamespace,
+      _nameToKey(_kNamespacesKey),
+      Uint8List.fromList(encoded),
+    );
+    return true;
+  }
+
+  /// Appends the dirty-open flag write to [batch].
+  ///
+  /// This is the batch-aware variant of [setDirty]. Use this when building a
+  /// [WriteBatch] so the dirty flag is set atomically with the first document
+  /// write — ensuring that a crash during the very first write of a session
+  /// leaves the dirty flag set (so the next open detects the interrupted
+  /// session) rather than absent (which would hide the interrupted session).
+  void appendDirtyFlag(WriteBatch batch) {
+    batch.put(kNamespace, _nameToKey('dirty'), Uint8List.fromList([1]));
   }
 
   /// Removes [userNamespace] from the persisted set of known namespaces and

@@ -207,6 +207,7 @@ void main() {
       expect(WalRecordType.fromByte(0x01), equals(WalRecordType.put));
       expect(WalRecordType.fromByte(0x02), equals(WalRecordType.delete));
       expect(WalRecordType.fromByte(0x03), equals(WalRecordType.flushMarker));
+      expect(WalRecordType.fromByte(0x04), equals(WalRecordType.batch));
     });
 
     test('fromByte throws for unknown byte', () {
@@ -215,6 +216,142 @@ void main() {
         throwsA(isA<FormatException>()),
       );
     });
+  });
+
+  group('WalBatchFrame encoding', () {
+    WalRecord _put(Hlc seq, String ns, List<int> v) => WalRecord(
+      type: WalRecordType.put,
+      sequence: seq,
+      namespace: ns,
+      key: _key,
+      value: Uint8List.fromList(v),
+    );
+
+    WalRecord _del(Hlc seq, String ns) => WalRecord(
+      type: WalRecordType.delete,
+      sequence: seq,
+      namespace: ns,
+      key: _key,
+    );
+
+    test('round-trips a multi-entry frame (puts + delete)', () {
+      final frame = WalBatchFrame([
+        _put(const Hlc(1, 0), 'tasks', [0x10]),
+        _del(const Hlc(2, 0), 'tasks'),
+        _put(const Hlc(3, 0), r'$index:tasks:title', [0x20, 0x30]),
+      ]);
+      final bytes = frame.encode();
+
+      final result = WalBatchFrame.tryDecode(bytes, 0);
+      expect(result, isNotNull);
+      final (decoded, consumed) = result!;
+      expect(consumed, equals(bytes.length));
+      expect(decoded.records, hasLength(3));
+      expect(decoded.records[0].type, equals(WalRecordType.put));
+      expect(decoded.records[0].namespace, equals('tasks'));
+      expect(decoded.records[0].value, equals([0x10]));
+      expect(decoded.records[1].type, equals(WalRecordType.delete));
+      expect(decoded.records[2].namespace, equals(r'$index:tasks:title'));
+      expect(decoded.records[2].value, equals([0x20, 0x30]));
+    });
+
+    test('round-trips an empty frame', () {
+      final bytes = const WalBatchFrame([]).encode();
+      final result = WalBatchFrame.tryDecode(bytes, 0);
+      expect(result, isNotNull);
+      expect(result!.$1.records, isEmpty);
+    });
+
+    test('corrupted checksum returns null', () {
+      final bytes = WalBatchFrame([
+        _put(const Hlc(1, 0), 'ns', [0x01]),
+        _put(const Hlc(2, 0), 'ns', [0x02]),
+      ]).encode();
+      bytes[0] ^= 0xFF;
+      expect(WalBatchFrame.tryDecode(bytes, 0), isNull);
+    });
+
+    test(
+      'truncation at every byte boundary returns null (no partial decode)',
+      () {
+        // Two-entry frame; truncate progressively from the end.
+        final full = WalBatchFrame([
+          _put(const Hlc(1, 0), 'ns', [0x01, 0x02]),
+          _del(const Hlc(2, 0), 'ns'),
+        ]).encode();
+        // Truncating any byte breaks either the structural read or the checksum.
+        for (var cut = 1; cut < full.length; cut++) {
+          final truncated = Uint8List.sublistView(full, 0, cut);
+          expect(
+            WalBatchFrame.tryDecode(truncated, 0),
+            isNull,
+            reason: 'truncation at byte $cut must yield null',
+          );
+        }
+      },
+    );
+
+    test('payload bit-flip in any entry invalidates the whole frame', () {
+      // A bit-flip past the header — i.e. inside one of the entries — must
+      // still be caught by the frame-level checksum so the entire batch is
+      // discarded, not just one entry.
+      final bytes = WalBatchFrame([
+        _put(const Hlc(1, 0), 'ns', [0x11, 0x22, 0x33]),
+        _put(const Hlc(2, 0), 'ns', [0x44, 0x55, 0x66]),
+      ]).encode();
+      // Flip a bit deep in the second entry's value region.
+      bytes[bytes.length - 1] ^= 0x01;
+      expect(WalBatchFrame.tryDecode(bytes, 0), isNull);
+    });
+
+    test('wrong leading type byte returns null', () {
+      // Construct a buffer that is not a batch frame (e.g. a put record's bytes)
+      // and assert tryDecode rejects it without throwing.
+      final put = _put(const Hlc(1, 0), 'ns', [0x01]);
+      final bytes = put.encode();
+      expect(WalBatchFrame.tryDecode(bytes, 0), isNull);
+    });
+
+    test(
+      'appendBatch writes a single frame (one append, one frame on disk)',
+      () async {
+        // Verify the on-disk representation: an N-entry batch produces ONE
+        // batch-typed record, not N individual records. This is the wire-level
+        // contract that lets the writer collapse N fsyncs into one.
+        final adapter = MemoryStorageAdapter();
+        final writer = WalWriter(
+          dirPath: _dir,
+          adapter: adapter,
+          initialSequence: 1,
+          fsyncOnWrite: true,
+        );
+
+        await writer.appendBatch([
+          for (var i = 0; i < 5; i++)
+            WalRecord(
+              type: WalRecordType.put,
+              sequence: Hlc(i + 1, 0),
+              namespace: 'ns',
+              key: _key,
+              value: Uint8List.fromList([i]),
+            ),
+        ]);
+
+        final bytes = adapter.files[writer.activePath]!;
+        // Type byte is at offset 8 (immediately after the frame checksum).
+        expect(
+          bytes[8],
+          equals(WalRecordType.batch.byte),
+          reason:
+              'batch must be encoded as one batch-typed frame, not N records',
+        );
+        // The whole file should be consumed by exactly one frame.
+        final result = WalBatchFrame.tryDecode(bytes, 0);
+        expect(result, isNotNull);
+        expect(result!.$2, equals(bytes.length));
+        expect(result.$1.records, hasLength(5));
+      },
+    );
   });
 
   // ── CorruptedWalException / replayStrict ────────────────────────────────────

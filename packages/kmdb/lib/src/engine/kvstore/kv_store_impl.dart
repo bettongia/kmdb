@@ -88,7 +88,7 @@ final class KvStoreImpl implements KvStore {
   ///
   /// Set to true when:
   /// - [hadUnclosedSession] was true at open time (flag left by a crash), or
-  /// - [_maybeMarkDirty] writes the flag this session.
+  /// - [_appendMetaWrites] adds the flag to a batch this session.
   ///
   /// Only when this is true does [close] need to write a tombstone to clear the
   /// flag. Avoids an unnecessary memtable write (and flush + compaction) for
@@ -139,20 +139,24 @@ final class KvStoreImpl implements KvStore {
     _guardNamespace(namespace);
     _validateKey(key);
     _validateValueSize(value);
-    await _maybeMarkDirty();
-    await _engine.put(namespace, key, value);
-    await _meta.incrementGenerationCounter(namespace);
-    await _meta.registerNamespace(namespace);
+    // Build an engine WriteBatch that folds the document write and all meta
+    // writes (dirty flag, gen counter, namespace registry) into one atomic WAL
+    // frame. This ensures a crash can never leave the document without its
+    // corresponding metadata (or vice versa) — review finding H2, decision D2.
+    final batch = WriteBatch()..put(namespace, key, value);
+    await _appendMetaWrites(batch, {namespace});
+    await _engine.writeBatch(batch);
   }
 
   @override
   Future<void> delete(String namespace, String key) async {
     _guardNamespace(namespace);
     _validateKey(key);
-    await _maybeMarkDirty();
-    await _engine.delete(namespace, key);
-    await _meta.incrementGenerationCounter(namespace);
-    await _meta.registerNamespace(namespace);
+    // Same atomic-batch approach as put: fold the delete tombstone and all meta
+    // writes into one engine WriteBatch so they land in a single WAL frame.
+    final batch = WriteBatch()..delete(namespace, key);
+    await _appendMetaWrites(batch, {namespace});
+    await _engine.writeBatch(batch);
   }
 
   @override
@@ -162,14 +166,20 @@ final class KvStoreImpl implements KvStore {
       _validateKey(entry.key);
       if (entry.value != null) _validateValueSize(entry.value!);
     }
-    await _maybeMarkDirty();
-    await _engine.writeBatch(batch);
-    // Increment the generation counter for each affected namespace.
+    // Extend the user batch with meta writes so everything lands in one atomic
+    // WAL frame. We must not mutate the caller's WriteBatch, so we copy entries
+    // into a new internal batch first.
     final namespaces = batch.entries.map((e) => e.namespace).toSet();
-    for (final ns in namespaces) {
-      await _meta.incrementGenerationCounter(ns);
-      await _meta.registerNamespace(ns);
+    final extended = WriteBatch();
+    for (final e in batch.entries) {
+      if (e.isDelete) {
+        extended.delete(e.namespace, e.key);
+      } else {
+        extended.put(e.namespace, e.key, e.value!);
+      }
     }
+    await _appendMetaWrites(extended, namespaces);
+    await _engine.writeBatch(extended);
   }
 
   @override
@@ -304,8 +314,18 @@ final class KvStoreImpl implements KvStore {
     _guardNamespace(namespace);
     final existing = await _meta.getNamespaces();
     if (existing.contains(namespace)) return false;
-    await _maybeMarkDirty();
-    await _meta.registerNamespace(namespace);
+    // Fold the dirty-flag set and the namespace-registry update into one
+    // atomic batch frame. Unlike a document write we do **not** bump the
+    // generation counter here: creating an empty namespace doesn't invalidate
+    // any cached document state.
+    final batch = WriteBatch();
+    if (!_sessionDirtyMarked) {
+      _meta.appendDirtyFlag(batch);
+      _sessionDirtyMarked = true;
+      _dirtyFlagPresent = true;
+    }
+    await _meta.appendNamespaceRegistration(namespace, batch);
+    await _engine.writeBatch(batch);
     return true;
   }
 
@@ -361,30 +381,41 @@ final class KvStoreImpl implements KvStore {
   /// Unlike [writeBatch], this method does not reject entries whose namespace
   /// begins with `$`. It is used by the Query Layer to write secondary index
   /// entries (`$index:…`) atomically with the document they index, in a single
-  /// [WriteBatch] that cannot be observed in a partial state.
+  /// [WriteBatch] that cannot be observed in a partial state — either across a
+  /// crash (WAL frame atomicity, review finding H2) or in-process (synchronous
+  /// memtable application with no intervening awaits).
   ///
   /// Generation counters are incremented only for user (non-`$`) namespaces so
   /// that cache invalidation stays tied to document writes, not index writes.
+  /// Because the gen-counter bump is now folded into the same atomic WAL frame
+  /// as the document and index entries, cache subscribers always see the updated
+  /// generation when the write event fires — they observe the full batch or none.
+  ///
   /// The dirty-open flag is set on the first call, identical to [writeBatch].
   @internal
   Future<void> writeBatchInternal(WriteBatch batch) async {
     for (final entry in batch.entries) {
       if (entry.value != null) _validateValueSize(entry.value!);
     }
-    await _maybeMarkDirty();
-    // Increment generation counters BEFORE the engine write so that when the
-    // engine emits write events (synchronously during writeBatch), any
-    // subscribers that immediately re-read via the CacheLayer will see the
-    // updated generation and bypass the stale cache entry.
+    // Collect user namespaces (non-$ prefixed) for gen counter + registry.
     final namespaces = batch.entries
         .where((e) => !e.namespace.startsWith(r'$'))
         .map((e) => e.namespace)
         .toSet();
-    for (final ns in namespaces) {
-      await _meta.incrementGenerationCounter(ns);
-      await _meta.registerNamespace(ns);
+
+    // Copy the caller's entries into an extended batch so we do not mutate the
+    // original (the Query Layer may inspect its entries after committing).
+    final extended = WriteBatch();
+    for (final e in batch.entries) {
+      if (e.isDelete) {
+        extended.delete(e.namespace, e.key);
+      } else {
+        extended.put(e.namespace, e.key, e.value!);
+      }
     }
-    await _engine.writeBatch(batch);
+    // Fold dirty flag + gen counter + namespace registry into the same frame.
+    await _appendMetaWrites(extended, namespaces);
+    await _engine.writeBatch(extended);
   }
 
   /// Returns every distinct namespace string present in storage, including
@@ -398,12 +429,37 @@ final class KvStoreImpl implements KvStore {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
-  /// Writes the dirty-open flag on the first user write of the session.
-  Future<void> _maybeMarkDirty() async {
-    if (_sessionDirtyMarked) return;
-    await _meta.setDirty();
-    _sessionDirtyMarked = true;
-    _dirtyFlagPresent = true;
+  /// Appends the dirty-open flag, generation counter bumps, and namespace
+  /// registrations to [batch] so they are committed in the same atomic WAL
+  /// frame as the document writes.
+  ///
+  /// ## Ordering guarantee
+  ///
+  /// Because [LsmEngine.writeBatch] applies all memtable mutations synchronously
+  /// before emitting write events, cache subscribers always observe the updated
+  /// generation counter when they react to the event — the meta writes are
+  /// visible at the same instant as the documents.
+  ///
+  /// ## Dirty-open flag
+  ///
+  /// On the first call per session the dirty flag is appended to [batch]. On
+  /// subsequent calls the flag is already present and the append is skipped.
+  /// Folding it into the first document write ensures that a crash during the
+  /// very first write of a session sets the flag (so the next open detects the
+  /// interrupted session) rather than leaving it absent.
+  Future<void> _appendMetaWrites(
+    WriteBatch batch,
+    Set<String> userNamespaces,
+  ) async {
+    if (!_sessionDirtyMarked) {
+      _meta.appendDirtyFlag(batch);
+      _sessionDirtyMarked = true;
+      _dirtyFlagPresent = true;
+    }
+    for (final ns in userNamespaces) {
+      await _meta.appendGenerationCounterBump(ns, batch);
+      await _meta.appendNamespaceRegistration(ns, batch);
+    }
   }
 
   /// Throws [ArgumentError] if [value] exceeds [KvStoreConfig.maxValueBytes].

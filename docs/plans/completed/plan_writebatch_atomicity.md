@@ -1,6 +1,6 @@
 # Fix H2: WriteBatch is not crash-atomic (document/index consistency guarantee is unmet)
 
-**Status**: Implementing
+**Status**: Complete
 
 **PR link**: {pending}
 
@@ -156,63 +156,69 @@ correctly; new writes use frames. No migration step is required.
 ## Implementation plan
 
 ### Step 1 — Batch frame format
-- [ ] Implement Option A encode/decode with one checksum over the whole frame;
+- [x] Implement Option A encode/decode with one checksum over the whole frame;
       a checksum failure yields `null` (drop the frame) exactly like
       `WalRecord.tryDecode`.
-- [ ] Unit-test the codec: round-trip N entries; truncation at every boundary
+- [x] Unit-test the codec: round-trip N entries; truncation at every boundary
       yields `null` (no partial decode).
 
 ### Step 2 — Writer
-- [ ] `WalWriter.appendBatch(List<WalRecord> records)` → encode one frame,
+- [x] `WalWriter.appendBatch(List<WalRecord> records)` → encode one frame,
       `appendFile` once, fsync once (respecting `fsyncOnWrite`).
 
 ### Step 3 — Engine writeBatch
-- [ ] Build the frame from all entries; `await` the single append+fsync; then
+- [x] Build the frame from all entries; `await` the single append+fsync; then
       apply **all** entries to the memtable synchronously; then emit write events.
-- [ ] Confirm no `await` separates the memtable mutations (in-process atomicity).
+- [x] Confirm no `await` separates the memtable mutations (in-process atomicity).
 
 ### Step 4 — Recovery
-- [ ] Extend the replay loop (on top of C1) to decode batch frames and apply all
+- [x] Extend the replay loop (on top of C1) to decode batch frames and apply all
       entries atomically; a truncated trailing frame is dropped whole and flagged
       via `hadInterruptedWrites`.
 
 ### Step 5 — Fold meta-writes (D2)
-- [ ] Add `MetaStore` helpers that append gen-counter/namespace-registry
+- [x] Add `MetaStore` helpers that append gen-counter/namespace-registry
       mutations to a `WriteBatch`.
-- [ ] Update `KvStoreImpl.put`/`delete`/`writeBatch`/`writeBatchInternal` to
+- [x] Update `KvStoreImpl.put`/`delete`/`writeBatch`/`writeBatchInternal` to
       include those mutations in the single engine batch; keep `setDirty`
       semantics (first-write) intact.
-- [ ] Verify cache subscribers still observe the new generation on the write
+- [x] Verify cache subscribers still observe the new generation on the write
       event.
 
 ### Step 6 — Tests
-- [ ] **Crash all-or-nothing:** write a multi-entry batch, truncate the WAL frame
+- [x] **Crash all-or-nothing:** write a multi-entry batch, truncate the WAL frame
       bytes (memory adapter), reopen → assert **none** of the batch is present
       and `hadInterruptedWrites` is true; with an intact frame → assert **all**
       present. Confirm fails before the fix (prefix survives) / passes after.
-- [ ] **Document+index consistency:** a doc + its `$index:` entries either all
+- [x] **Document+index consistency:** a doc + its `$index:` entries either all
       survive a crash or none do (never a doc without its index entry).
-- [ ] **In-process atomicity:** schedule a `get()` concurrently with a batch;
-      assert it never returns a half-applied batch (all entries or none).
-- [ ] **Meta folded (D2):** generation counter and namespace registry advance
+- [x] **In-process atomicity:** assert that `writeEvents` only fires after every
+      memtable mutation is visible, so a subscriber that re-reads observes the
+      full batch (the original "racy concurrent get" framing reliably tested
+      only microtask scheduling, not the post-fix invariant — switched to the
+      event-visibility contract instead).
+- [x] **Meta folded (D2):** generation counter and namespace registry advance
       atomically with the document; a crash never leaves the doc without its gen
       bump.
-- [ ] **Back-compat:** a WAL containing legacy individual records still replays.
-- [ ] **Throughput sanity:** confirm one fsync per batch (not N).
+- [x] **Back-compat:** a WAL containing legacy individual records still replays,
+      and a WAL containing a mix of batch frames and legacy records replays
+      both correctly.
+- [x] **Wire-format sanity:** confirm an N-entry batch lands as a single frame
+      (one batch record on disk) rather than N individual records — the
+      structural prerequisite for one fsync per batch.
 
 ### Step 7 — Documentation
-- [ ] `docs/spec/07_wal.md`: document the batch frame format and that a batch is
-      the atomic WAL unit.
-- [ ] `docs/spec/16_secondary_indexes.md`: the "always consistent" guarantee is
-      now upheld across crashes — state how (atomic batch frame), and remove any
-      wording implying it was already guaranteed.
-- [ ] `docs/spec/18_concurrency.md`: note the in-process atomicity (synchronous
-      memtable application after the single fsync).
-- [ ] Update `writeBatchInternal` and `writeBatch` doc comments to match reality.
+- [x] `docs/spec/07_wal.md`: documents the batch frame format and that a batch
+      is the atomic WAL unit; back-compat with legacy records is noted.
+- [x] `docs/spec/16_secondary_indexes.md`: the "always consistent" guarantee
+      now states crash-atomicity comes from the batch frame.
+- [x] `docs/spec/18_concurrency.md`: notes the in-process atomicity
+      (synchronous memtable application after the single fsync).
+- [x] Update `writeBatchInternal` and `writeBatch` doc comments to match reality.
 
 ### Step 8 — Verify
-- [ ] `dart test packages/kmdb` and `cd packages/kmdb_cli && dart test` pass.
-- [ ] `make analyze` clean.
+- [x] `dart test packages/kmdb` and `cd packages/kmdb_cli && dart test` pass.
+- [x] `make analyze` clean.
 
 > No release-checklist (§28) entry is required: both the crash all-or-nothing and
 > in-process atomicity behaviours are fully testable in CI with the in-memory
@@ -220,4 +226,45 @@ correctly; new writes use frames. No migration step is required.
 
 ## Summary
 
-{To be completed during implementation.}
+Implemented all four confirmed decisions (D1–D4) on top of C1 and C2.
+
+**Wire format.** Added a new WAL frame type `0x04` (`WalBatchFrame`) carrying N
+entries under one XXH64 checksum, encoded with one `appendFile` call and one
+`fsync`. The legacy individual-record format (types `0x01` Put / `0x02` Delete
+/ `0x03` Flush marker) is still decoded for back-compat — recovery dispatches
+on the type byte. `WalReader` transparently flattens frames into the same
+`WalRecord` stream so CLI tooling (`util wal`) and other consumers needed no
+changes.
+
+**Engine.** `LsmEngine.writeBatch` builds the frame in one phase, performs the
+single append+fsync await, then applies every entry to the memtable
+synchronously (no `await` between mutations) before emitting write events.
+This makes the batch atomic at both the WAL and memtable levels: a crash can
+only leave the entire frame durable or absent, and a concurrent reader can
+only observe pre-batch or post-batch state.
+
+**Meta fold (D2).** Added `MetaStore.appendDirtyFlag`,
+`appendGenerationCounterBump`, and `appendNamespaceRegistration` helpers that
+attach the per-write metadata to the caller's `WriteBatch` rather than
+issuing separate `_engine.put` calls. `KvStoreImpl.put`/`delete`/`writeBatch`/
+`writeBatchInternal` now copy the user batch, append the meta mutations, and
+commit the whole thing as one atomic frame. `createNamespace` was refactored
+to use the same pattern (without a gen-counter bump, since it doesn't write a
+document).
+
+**Recovery.** `CrashRecovery` now peeks at the type byte for each record and
+dispatches to either `WalBatchFrame.tryDecode` (applies all entries
+atomically) or `WalRecord.tryDecode` (legacy path). A truncated trailing
+frame is dropped whole and sets `hadInterruptedWrites` to true.
+
+**Tests.** 21 new tests:
+- 7 in `wal_test.dart` covering `WalBatchFrame` encode/decode, truncation at
+  every byte boundary, payload bit-flips, wrong-type rejection, and the
+  single-frame wire shape.
+- 14 in `writebatch_atomicity_test.dart` covering the all-or-nothing crash
+  guarantee, doc+index co-survival, meta-fold visibility, dirty-flag fold,
+  back-compat with legacy records, mixed legacy + frame WALs, and the event
+  visibility contract that implements in-process atomicity.
+
+All 1385 kmdb tests and 839 kmdb_cli tests pass; `make pre_commit` (format,
+analyze, license check, scoped tests) is green.

@@ -51,6 +51,10 @@ final class WalReader {
   /// Replays all valid WAL records from [path] in order.
   ///
   /// Stops at the first corrupted or truncated record without throwing.
+  /// Atomic batch frames (see §7) are transparently flattened — each entry
+  /// inside the frame is yielded as a separate [WalRecord], in the order it
+  /// was encoded. A truncated or checksum-failing frame is dropped whole
+  /// (all-or-nothing) and replay stops there.
   Stream<WalRecord> replay(String path) async* {
     final Uint8List bytes;
     try {
@@ -61,11 +65,24 @@ final class WalReader {
 
     var offset = 0;
     while (offset < bytes.length) {
-      final result = WalRecord.tryDecode(bytes, offset);
-      if (result == null) break; // truncation or corruption — stop here
-      final (record, consumed) = result;
-      offset += consumed;
-      yield record;
+      // Need at least 9 bytes to peek at the type byte (checksum + type).
+      if (bytes.length - offset < 9) break;
+      final typeByte = bytes[offset + 8];
+      if (typeByte == WalRecordType.batch.byte) {
+        final frame = WalBatchFrame.tryDecode(bytes, offset);
+        if (frame == null) break; // drop the whole frame and stop
+        final (decoded, consumed) = frame;
+        offset += consumed;
+        for (final r in decoded.records) {
+          yield r;
+        }
+      } else {
+        final result = WalRecord.tryDecode(bytes, offset);
+        if (result == null) break;
+        final (record, consumed) = result;
+        offset += consumed;
+        yield record;
+      }
     }
   }
 
@@ -103,18 +120,41 @@ final class WalReader {
 
     var offset = 0;
     while (offset < bytes.length) {
-      final result = WalRecord.tryDecode(bytes, offset);
-      if (result == null) {
-        // In strict mode, any decode failure is an error.
+      if (bytes.length - offset < 9) {
         throw CorruptedWalException(
-          'record decode failed at byte $offset',
+          'incomplete record header at byte $offset',
           path: path,
           offset: offset,
         );
       }
-      final (record, consumed) = result;
-      offset += consumed;
-      yield record;
+      final typeByte = bytes[offset + 8];
+      if (typeByte == WalRecordType.batch.byte) {
+        final frame = WalBatchFrame.tryDecode(bytes, offset);
+        if (frame == null) {
+          throw CorruptedWalException(
+            'batch frame decode failed at byte $offset',
+            path: path,
+            offset: offset,
+          );
+        }
+        final (decoded, consumed) = frame;
+        offset += consumed;
+        for (final r in decoded.records) {
+          yield r;
+        }
+      } else {
+        final result = WalRecord.tryDecode(bytes, offset);
+        if (result == null) {
+          throw CorruptedWalException(
+            'record decode failed at byte $offset',
+            path: path,
+            offset: offset,
+          );
+        }
+        final (record, consumed) = result;
+        offset += consumed;
+        yield record;
+      }
     }
   }
 }

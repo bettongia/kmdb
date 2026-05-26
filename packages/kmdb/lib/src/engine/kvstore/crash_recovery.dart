@@ -176,29 +176,74 @@ final class CrashRecovery {
       final fileBytes = await adapter.readFile(path);
       var pos = 0;
       while (pos < fileBytes.length) {
-        final result = WalRecord.tryDecode(fileBytes, pos);
-        if (result == null) break; // truncation or corruption — stop here
-        final (record, size) = result;
-        pos += size;
+        // Peek at the type byte (offset 8 from the current position) to decide
+        // which decoder to invoke: legacy individual records use WalRecord, new
+        // atomic batch frames use WalBatchFrame. Both decoders return null on
+        // truncation or checksum failure — we stop replay on that signal.
+        //
+        // For the batch frame decoder specifically, a null result means the
+        // entire frame is dropped (all-or-nothing). This is correct: if the
+        // frame was not fully fsynced the database should not see any of its
+        // entries.
+        if (fileBytes.length - pos < 9) break; // need at least checksum + type
+        final typeByte = fileBytes[pos + 8];
 
-        // Skip any flush marker left by an older build. Markers are no longer
-        // written but remain decodable for backward compatibility.
-        if (record.type == WalRecordType.flushMarker) continue;
+        if (typeByte == WalRecordType.batch.byte) {
+          // ── New batch frame path (H2) ─────────────────────────────────────
+          final result = WalBatchFrame.tryDecode(fileBytes, pos);
+          if (result == null) break; // truncation or corruption — stop here
+          final (frame, size) = result;
+          pos += size;
 
-        final keyBytes = Uint8List.fromList(record.key);
-        if (keyBytes.length != 16) continue; // malformed — skip
+          // Apply every record in the frame atomically. Because we have already
+          // verified the checksum over the whole frame, we know every entry is
+          // intact — apply all of them, never a prefix.
+          for (final record in frame.records) {
+            final keyBytes = Uint8List.fromList(record.key);
+            if (keyBytes.length != 16) continue; // malformed — skip
 
-        final hlc = record.sequence;
-        if (hlc > replayedMaxHlc) replayedMaxHlc = hlc;
+            final hlc = record.sequence;
+            if (hlc > replayedMaxHlc) replayedMaxHlc = hlc;
 
-        final internalKey = KeyCodec.encodeInternalKey(
-          record.namespace,
-          keyBytes,
-          hlc,
-          record.type == WalRecordType.put ? RecordType.put : RecordType.delete,
-        );
-        restoredMemtable.put(internalKey, Uint8List.fromList(record.value));
-        affectedNamespaces.add(record.namespace);
+            final internalKey = KeyCodec.encodeInternalKey(
+              record.namespace,
+              keyBytes,
+              hlc,
+              record.type == WalRecordType.put
+                  ? RecordType.put
+                  : RecordType.delete,
+            );
+            restoredMemtable.put(internalKey, Uint8List.fromList(record.value));
+            affectedNamespaces.add(record.namespace);
+          }
+        } else {
+          // ── Legacy individual record path (back-compat) ───────────────────
+          final result = WalRecord.tryDecode(fileBytes, pos);
+          if (result == null) break; // truncation or corruption — stop here
+          final (record, size) = result;
+          pos += size;
+
+          // Skip any flush marker left by an older build. Markers are no longer
+          // written but remain decodable for backward compatibility.
+          if (record.type == WalRecordType.flushMarker) continue;
+
+          final keyBytes = Uint8List.fromList(record.key);
+          if (keyBytes.length != 16) continue; // malformed — skip
+
+          final hlc = record.sequence;
+          if (hlc > replayedMaxHlc) replayedMaxHlc = hlc;
+
+          final internalKey = KeyCodec.encodeInternalKey(
+            record.namespace,
+            keyBytes,
+            hlc,
+            record.type == WalRecordType.put
+                ? RecordType.put
+                : RecordType.delete,
+          );
+          restoredMemtable.put(internalKey, Uint8List.fromList(record.value));
+          affectedNamespaces.add(record.namespace);
+        }
       }
       if (pos < fileBytes.length) hadInterruptedWrites = true;
     }
