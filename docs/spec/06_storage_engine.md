@@ -59,13 +59,49 @@ The shortcut is evaluated after every flush and compaction and engages silently
 
 ## Compaction
 
-All compaction uses an N-way merge iterator that yields entries in
-(user key ASC, sequence DESC) order. For each unique user key only the
-highest-sequence entry is emitted; all older versions are dropped.
+All compaction uses an N-way merge iterator that yields entries in ascending
+internal-key order, where the internal key is
+`[nsLen][ns][userKey][hlc][type]`. Within a single `(namespace, userKey)`
+group the merge therefore emits versions **oldest-first** (HLC ascending,
+because HLC is big-endian and precedes the trailing record-type byte).
 
-Delete tombstones are dropped at L2 when every known peer device has processed
-past the tombstone's HLC timestamp (per the `.hwm` files — see §12). Until that
-condition is met, tombstones are preserved across compaction.
+### Reclamation: version collapse
+
+A streaming **reclamation transform** runs after the merge: per
+`(namespace, userKey)` group, it keeps **only the highest-HLC entry** (the
+last in the group's ascending iteration) and drops every superseded version.
+This is safe at any compaction level because reads re-merge all on-disk
+levels and apply Last-Write-Wins on HLC — a higher-HLC version that lives in
+a level *not* part of the current compaction still wins, and a lower-HLC
+version in such a level is correctly superseded by the surviving collapsed
+entry. The same argument extends across devices via HLC LWW.
+
+The transform consults a **per-namespace-class reclamation policy** for each
+group. The default policy collapses to the newest version (applied to every
+user namespace and to KMDB current-state system namespaces — `$meta`,
+`$cache`, `$index:`, `$fts:`, `$vec:`, `$sync`). A namespace whose policy
+returns `collapseVersions = false` is exempt and passes every version
+through unchanged. The default registry exempts `$ver:` (document-versioning
+history); future history-bearing namespace classes can be registered the
+same way without touching the compaction code.
+
+### Reclamation: tombstone GC
+
+A delete tombstone is the **surviving entry** of its group whenever no later
+write follows the delete. Dropping such a tombstone is safe only when:
+(a) the compaction covers every level that could hold an older version (in
+practice, the single-file `_compactAll` path — KMDB levels do **not** imply
+recency because sync ingest can place old-HLC data into L0), **and**
+(b) the tombstone's HLC is below a sync horizon past which every device has
+already observed the delete (`min(currentHlc)` across all `.hwm` files —
+see §12; for local-only databases, a wall-clock grace window).
+
+Until both conditions are wired up (H4 PR2), every surviving tombstone is
+**retained verbatim** across compaction. Reads continue to suppress older
+values through the merge — so live behaviour is unaffected — but
+delete-tombstone storage grows without GC until PR2 lands.
+
+### Triggers
 
 Compaction fires synchronously on the write path:
 - **L0→L1**: when L0 reaches 2 files

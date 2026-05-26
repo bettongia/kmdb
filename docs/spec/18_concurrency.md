@@ -36,6 +36,13 @@ This eliminates dual-memtable complexity, background isolate management, and the
 class of bug where a background compaction races with a foreground read during
 testing.
 
+Compaction also reclaims space: superseded versions of a key are collapsed
+to the highest-HLC entry during the streaming merge (H4 PR1), with
+`$ver:` (and any registered history-bearing namespace class) exempt.
+Delete-tombstone reclamation is gated by sync-horizon safety and ships
+separately as H4 PR2; until then, tombstones grow without GC even after
+compaction. See §6 for the full reclamation model.
+
 ## Why No Background Isolate
 
 The previous design considered a background isolate for compaction at the upper

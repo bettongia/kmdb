@@ -23,6 +23,7 @@ import '../sstable/sstable_writer.dart';
 import '../util/hlc.dart';
 import '../util/key_codec.dart';
 import 'merge_iterator.dart';
+import 'reclamation_policy.dart';
 
 /// The LSM compaction levels and their size thresholds.
 ///
@@ -65,7 +66,8 @@ final class CompactionJob {
     required this.manifestWriter,
     required this.logNumber,
     required this.nextSeq,
-  });
+    ReclamationPolicyRegistry? policyRegistry,
+  }) : _policyRegistry = policyRegistry ?? ReclamationPolicyRegistry();
 
   /// Directory containing all SSTable files.
   final String sstDir;
@@ -91,6 +93,13 @@ final class CompactionJob {
   /// Next HLC sequence number (written into the [VersionEdit]).
   final int nextSeq;
 
+  /// Resolves the [ReclamationPolicy] for each namespace encountered during
+  /// the compaction's streaming transform. PR1 of H4 uses this to gate
+  /// version collapse; `$ver:` (and any caller-registered history-bearing
+  /// class) passes every version through unchanged. PR2 of H4 will extend
+  /// the same hook with a tombstone-drop predicate.
+  final ReclamationPolicyRegistry _policyRegistry;
+
   // ── Run ───────────────────────────────────────────────────────────────────
 
   /// Executes the compaction and returns the [VersionEdit] that was written.
@@ -98,9 +107,12 @@ final class CompactionJob {
   /// Steps:
   /// 1. Open all input SSTables.
   /// 2. Merge their entries (oldest file first → newest wins on duplicate keys).
-  /// 3. Write merged output to a new SSTable.
-  /// 4. Fsync the output.
-  /// 5. Append a [VersionEdit] to the Manifest.
+  /// 3. Apply the reclamation transform (PR1 of H4: version collapse —
+  ///    collapse each `(namespace, userKey)` group to its highest-HLC entry,
+  ///    except in namespaces whose [ReclamationPolicy] retains all versions).
+  /// 4. Write merged output to a new SSTable.
+  /// 5. Fsync the output.
+  /// 6. Append a [VersionEdit] to the Manifest.
   ///
   /// The caller is responsible for deleting the input files after the
   /// [VersionEdit] is confirmed durable.
@@ -123,16 +135,62 @@ final class CompactionJob {
     Uint8List? minKeyBytes;
     Uint8List? maxKeyBytes;
 
-    await for (final entry in merge.entries) {
-      writer.add(entry.key, entry.value);
-      entryCount++;
+    // Streaming reclamation transform.
+    //
+    // The merge yields entries in ascending internal-key order, so all
+    // versions of a given `(namespace, userKey)` are contiguous and ordered
+    // ascending by HLC (HLC is big-endian and sits just before the trailing
+    // 1-byte record type). The user-key prefix length is therefore
+    // `key.length - 9` (HLC=8B + type=1B).
+    //
+    // For each contiguous group we resolve the namespace's
+    // [ReclamationPolicy] once:
+    //   - collapseVersions=true  → buffer the latest entry; on group change,
+    //                              emit the buffered entry. Drops every
+    //                              superseded version.
+    //   - collapseVersions=false → emit every entry verbatim. Reserved for
+    //                              `$ver:` and other history-bearing classes.
+    Uint8List? groupPrefix;
+    MergeEntry? pendingCollapsed;
+    ReclamationPolicy? policy;
 
-      // Track HLC range from the key's embedded HLC.
-      final hlc = KeyCodec.decodeHlc(entry.key);
-      if (minHlc == null || hlc < minHlc) minHlc = hlc;
-      if (maxHlc == null || hlc > maxHlc) maxHlc = hlc;
-      minKeyBytes ??= entry.key;
-      maxKeyBytes = entry.key;
+    void emit(Uint8List key, Uint8List value) {
+      writer.add(key, value);
+      entryCount++;
+      final hlc = KeyCodec.decodeHlc(key);
+      if (minHlc == null || hlc < minHlc!) minHlc = hlc;
+      if (maxHlc == null || hlc > maxHlc!) maxHlc = hlc;
+      minKeyBytes ??= key;
+      maxKeyBytes = key;
+    }
+
+    await for (final entry in merge.entries) {
+      final prefixLen = entry.key.length - 9;
+      final isNewGroup =
+          groupPrefix == null || !_keyMatchesPrefix(entry.key, groupPrefix);
+
+      if (isNewGroup) {
+        // Flush the previous collapse group (if any).
+        if (pendingCollapsed != null) {
+          emit(pendingCollapsed.key, pendingCollapsed.value);
+          pendingCollapsed = null;
+        }
+        // Resolve the policy for this new group's namespace.
+        final ns = KeyCodec.decodeNamespace(entry.key);
+        policy = _policyRegistry.resolve(ns);
+        groupPrefix = Uint8List.sublistView(entry.key, 0, prefixLen);
+      }
+
+      if (policy!.collapseVersions) {
+        // Buffer; the last (highest-HLC) entry in this group wins.
+        pendingCollapsed = entry;
+      } else {
+        // Retain-all class — pass through unchanged.
+        emit(entry.key, entry.value);
+      }
+    }
+    if (pendingCollapsed != null) {
+      emit(pendingCollapsed.key, pendingCollapsed.value);
     }
 
     if (entryCount == 0) {
@@ -167,8 +225,8 @@ final class CompactionJob {
     final meta = SstableMeta(
       level: outputLevel,
       filename: outputFilename,
-      minKey: minKeyBytes != null ? _toHex(minKeyBytes) : '',
-      maxKey: maxKeyBytes != null ? _toHex(maxKeyBytes) : '',
+      minKey: minKeyBytes != null ? _toHex(minKeyBytes!) : '',
+      maxKey: maxKeyBytes != null ? _toHex(maxKeyBytes!) : '',
       entryCount: entryCount,
     );
 
@@ -190,5 +248,16 @@ final class CompactionJob {
       buf.write(b.toRadixString(16).padLeft(2, '0'));
     }
     return buf.toString();
+  }
+
+  /// Returns `true` iff [key]'s `(nsLen + ns + userKey)` prefix matches
+  /// [prefix] byte-for-byte. The prefix excludes the trailing
+  /// `[hlc 8B][type 1B]` of the internal key encoding.
+  static bool _keyMatchesPrefix(Uint8List key, Uint8List prefix) {
+    if (key.length - 9 != prefix.length) return false;
+    for (var i = 0; i < prefix.length; i++) {
+      if (key[i] != prefix[i]) return false;
+    }
+    return true;
   }
 }
