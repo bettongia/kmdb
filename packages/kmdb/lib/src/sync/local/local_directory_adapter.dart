@@ -34,30 +34,56 @@ import '../sync_storage_adapter.dart';
 /// correctly detects changes even when two versions of a file are the same
 /// size.
 ///
-/// ## compareAndSwap limitations
+/// ## compareAndSwap atomicity
 ///
-/// On POSIX, [compareAndSwap] uses a write-to-temp-then-rename strategy. The
-/// rename is atomic, but the read-check-write sequence is not. This means
-/// two processes could both read the same ETag and both proceed to write,
-/// creating a race condition. For the consolidation coordinator lease protocol
-/// this is a best-effort implementation — tests use [MemorySyncAdapter] which
-/// provides true CAS semantics.
+/// Atomicity of [compareAndSwap] depends on the directory the adapter is
+/// pointed at:
+///
+/// * **True local filesystem (default mode, `atomicCas: false`):** the current
+///   implementation is a best-effort read-check-write; two processes can both
+///   pass the check and write — the second wins. Atomic-CAS is **not**
+///   advertised, so `ConsolidationCoordinator` will skip consolidation against
+///   this adapter (loss-free; SSTables simply accumulate un-consolidated).
+/// * **Cloud-synced folder (Dropbox / OneDrive / iCloud-as-local-FS):** the
+///   folder is an eventually-consistent replica and *cannot* honestly provide
+///   atomic CAS across devices. Always construct with `atomicCas: false` —
+///   the default.
+/// * **Opt-in atomic mode (`atomicCas: true`):** the create-if-absent path
+///   uses `File.create(exclusive: true)` (POSIX `O_CREAT|O_EXCL`), which is
+///   atomic on local POSIX filesystems and Windows. The update-if-match path
+///   acquires a `FileLock.blockingExclusive` advisory lock before reading the
+///   current ETag, ensuring the read-compare-write is serialised against other
+///   cooperative processes on the same host.
 ///
 /// ## Usage
 ///
 /// ```dart
-/// final adapter = LocalDirectoryAdapter('/mnt/nas/kmdb-sync');
-/// await adapter.upload('sstables/abc.sst', bytes);
+/// // Synced folder (the safe default): consolidation is skipped.
+/// final adapter = LocalDirectoryAdapter('/Users/me/Dropbox/kmdb-sync');
+///
+/// // True local disk shared between processes on the same host: opt in.
+/// final adapter = LocalDirectoryAdapter('/var/lib/kmdb-sync', atomicCas: true);
 /// ```
 final class LocalDirectoryAdapter implements SyncStorageAdapter {
   /// Creates a [LocalDirectoryAdapter] rooted at [rootPath].
   ///
   /// [rootPath] is the base directory for all remote paths. It is created if
   /// it does not exist.
-  LocalDirectoryAdapter(this.rootPath);
+  ///
+  /// [atomicCas] opts in to atomic CAS primitives: `File.create(exclusive: true)`
+  /// for create-if-absent and an advisory lock for update-if-match. Only set
+  /// this when the directory is on a true local filesystem (not a cloud-synced
+  /// replica). Defaults to `false`; see the class doc-comment for the trade-off.
+  LocalDirectoryAdapter(this.rootPath, {this.atomicCas = false});
 
   /// Base directory for all remote paths.
   final String rootPath;
+
+  /// Caller-declared atomic-CAS capability for this directory. See class doc.
+  final bool atomicCas;
+
+  @override
+  bool get providesAtomicCas => atomicCas;
 
   /// Resolves a remote path to a full filesystem path.
   String _resolve(String remotePath) => '$rootPath/$remotePath';
@@ -106,48 +132,88 @@ final class LocalDirectoryAdapter implements SyncStorageAdapter {
     final file = File(resolvedPath);
 
     if (ifMatchEtag == null) {
-      // if-none-match: * — succeed only if file does not currently exist.
-      // Write to a temp file then rename. On POSIX, rename is atomic but
-      // not conditional — if a concurrent writer also finds the file absent
-      // and renames simultaneously, one will overwrite the other. For Phase 5
-      // this is acceptable; the consolidation coordinator handles contention
-      // via re-reads after write.
-      if (file.existsSync()) return false;
-      final tmpPath =
-          '$resolvedPath.cas-tmp-${DateTime.now().microsecondsSinceEpoch}';
-      final tmp = File(tmpPath);
       await file.parent.create(recursive: true);
-      await tmp.writeAsBytes(newBytes, flush: true);
-      try {
-        await tmp.rename(resolvedPath);
-        return true;
-      } catch (_) {
-        // Rename failed — another writer won the race.
-        try {
-          await tmp.delete();
-        } catch (_) {}
-        return false;
+      if (atomicCas) {
+        return _createExclusive(file, newBytes);
       }
+      // Non-atomic fallback: best-effort read-check-write. The coordinator
+      // gates on [providesAtomicCas] so this path is only reached when the
+      // caller has acknowledged the racy semantics (atomicCas: false).
+      if (file.existsSync()) return false;
+      return _writeViaTempRename(file, newBytes);
     }
 
-    // ETag provided: read current ETag, check match, then overwrite.
-    // Note: this read-check-write is NOT atomic on POSIX. Tests should use
-    // MemorySyncAdapter for proper CAS guarantees.
+    // ETag provided — update only if the current ETag matches.
+    if (atomicCas) {
+      return _updateWithLock(file, resolvedPath, newBytes, ifMatchEtag);
+    }
+    // Non-atomic fallback: racy read-check-write.
     final currentEtag = await getEtag(path);
     if (currentEtag != ifMatchEtag) return false;
+    return _writeViaTempRename(file, newBytes);
+  }
 
-    final tmpPath =
-        '$resolvedPath.cas-tmp-${DateTime.now().microsecondsSinceEpoch}';
-    final tmp = File(tmpPath);
-    await tmp.writeAsBytes(newBytes, flush: true);
+  /// Atomically creates [file] with [bytes] using `File.create(exclusive: true)`
+  /// (POSIX `O_CREAT|O_EXCL`). Returns `false` if the file already exists.
+  Future<bool> _createExclusive(File file, Uint8List bytes) async {
     try {
-      await tmp.rename(resolvedPath);
+      await file.create(exclusive: true);
+    } on FileSystemException {
+      // File already exists — another writer won the race.
+      return false;
+    }
+    // File was exclusively created; write the content and fsync.
+    await file.writeAsBytes(bytes, flush: true);
+    return true;
+  }
+
+  /// Writes [bytes] to [file] via a temp-file rename. Returns `true` on
+  /// success; swallows rename errors (another concurrent writer won) and
+  /// returns `false`.
+  Future<bool> _writeViaTempRename(File file, Uint8List bytes) async {
+    final tmpPath =
+        '${file.path}.cas-tmp-${DateTime.now().microsecondsSinceEpoch}';
+    final tmp = File(tmpPath);
+    await tmp.writeAsBytes(bytes, flush: true);
+    try {
+      await tmp.rename(file.path);
       return true;
     } catch (_) {
       try {
         await tmp.delete();
       } catch (_) {}
       return false;
+    }
+  }
+
+  /// Updates [file] with [newBytes] if and only if the current content hash
+  /// matches [expectedEtag]. Uses an advisory lock to serialise concurrent
+  /// writers within the same process (and across processes on the same host
+  /// that cooperate via `fcntl` advisory locks).
+  Future<bool> _updateWithLock(
+    File file,
+    String resolvedPath,
+    Uint8List newBytes,
+    String expectedEtag,
+  ) async {
+    if (!file.existsSync()) return false;
+    // Open for append (write access required for an exclusive fcntl write lock
+    // on POSIX). We do not write via this fd — it is used only to hold the
+    // advisory lock while we read via a separate file reference.
+    final raf = await file.open(mode: FileMode.writeOnlyAppend);
+    try {
+      await raf.lock(FileLock.blockingExclusive);
+      // Re-read ETag inside the lock so any write that completed before we
+      // acquired the lock is visible.
+      final lockedBytes = await file.readAsBytes();
+      final lockedEtag = XxHash64.toHex(XxHash64.digest(lockedBytes));
+      if (lockedEtag != expectedEtag) return false;
+      return _writeViaTempRename(file, newBytes);
+    } finally {
+      try {
+        await raf.unlock();
+      } catch (_) {}
+      await raf.close();
     }
   }
 

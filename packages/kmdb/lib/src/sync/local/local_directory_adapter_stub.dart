@@ -28,12 +28,16 @@ import '../sync_storage_adapter.dart';
 /// or a cloud adapter (e.g. a future `GoogleDriveAdapter`) on web.
 final class LocalDirectoryAdapter implements SyncStorageAdapter {
   /// Always throws [UnsupportedError].
-  LocalDirectoryAdapter(String rootPath) {
+  LocalDirectoryAdapter(String rootPath, {bool atomicCas = false}) {
     throw UnsupportedError(
       'LocalDirectoryAdapter is not supported on web/WASM. '
       'Use a cloud-backed SyncStorageAdapter instead.',
     );
   }
+
+  @override
+  bool get providesAtomicCas =>
+      throw UnsupportedError('LocalDirectoryAdapter is not supported on web.');
 
   @override
   Future<List<String>> list(String remoteDir, {String? extension}) =>

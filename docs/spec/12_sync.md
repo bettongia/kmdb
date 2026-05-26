@@ -353,6 +353,18 @@ coordinator can detect and resolve without re-merging.
 
 ### Consolidation Manifest
 
+> **Implementation note:** the `.consolidation-manifest` file described in this
+> section is not written by the current `ConsolidationCoordinator`
+> implementation. Instead, `commit()` deletes input files idempotently
+> (non-fatal on missing files) and then releases the lease. This is safe because
+> the output SSTable is uploaded before any input is deleted, so a crash mid-
+> commit leaves the system with both old inputs and the new output; the next
+> coordinator re-runs the threshold check, observes the output is already
+> present (lower count), and skips consolidation. The full manifest protocol
+> below remains the intended target for implementations that need stronger
+> crash-recovery guarantees (e.g. when the input count is very high and re-
+> merging would be expensive).
+
 Before deleting any input file, the coordinator writes a consolidation manifest.
 This file records what was merged and what the output is, so that any client —
 including one that did not perform the merge — can validate and adopt the
@@ -449,17 +461,89 @@ because the on-disk fencing token does not match — the coordinator must stop
 writing output immediately, discard any partial output files it has written, and
 exit the CONSOLIDATING state. It must not delete any input files.
 
+### CAS Atomicity Contract and Capability
+
+The lease acquisition protocol calls `SyncStorageAdapter.compareAndSwap`.
+For the safety invariant to hold — at most one coordinator executes
+consolidation at any time — that method must satisfy the following contract:
+
+> **Contract:** for a given `(path, ifMatchEtag)` precondition, at most one
+> concurrent caller observes `true`. Any number of callers may observe `false`;
+> exactly zero or one observes `true`.
+
+Not all backends can honour this. A `LocalDirectoryAdapter` pointed at a
+cloud-synced folder (Dropbox, OneDrive, iCloud-as-local-FS) operates against
+an eventually-consistent replica: the `existsSync()` check and the subsequent
+rename are not atomic across devices, so two coordinators on different machines
+can both believe they won the lease race.
+
+#### `SyncStorageAdapter.providesAtomicCas`
+
+Every `SyncStorageAdapter` implementation exposes:
+
+```dart
+bool get providesAtomicCas;
+```
+
+This declares whether the adapter can satisfy the contract above for the
+backend it is connected to. It is a **per-instance** property, not a type-level
+property, because the same class (`LocalDirectoryAdapter`) can be atomic on a
+true local filesystem and non-atomic on a cloud-synced replica of that
+filesystem.
+
+| Adapter | `providesAtomicCas` |
+| :--- | :--- |
+| `MemorySyncAdapter` | `true` — CAS is synchronous and single-threaded within the process |
+| `LocalDirectoryAdapter` (default, `atomicCas: false`) | `false` — non-atomic read-check-write; use this for cloud-synced folders |
+| `LocalDirectoryAdapter(atomicCas: true)` | `true` — `File.create(exclusive: true)` + advisory lock; use on true local disks |
+
+#### Gating: consolidation requires atomic CAS
+
+`ConsolidationCoordinator.runIfNeeded` checks `providesAtomicCas` before
+attempting lease acquisition. If the adapter returns `false`:
+
+- Consolidation is **skipped entirely** — no lease file is touched.
+- The coordinator transitions to the `skippedNonAtomicCas` state and records a
+  human-readable `skipReason`.
+- The skip is **loss-free**: SSTables are still exchanged via normal push/pull;
+  they merely accumulate un-consolidated. Consolidation is a storage-shape
+  optimisation, not a correctness requirement.
+
+This gating prevents the H5 data-loss hazard: without it, two coordinators on
+different devices behind a non-atomic adapter can both believe they hold the
+lease and delete each other's input SSTables.
+
+#### `LocalDirectoryAdapter` atomic-CAS implementation
+
+When constructed with `atomicCas: true`, the adapter uses platform primitives
+to enforce the contract:
+
+- **Create-if-absent** (`ifMatchEtag == null`): `File.create(exclusive: true)`,
+  which maps to `open(O_CREAT | O_EXCL)` on POSIX and `CreateFile(CREATE_NEW)`
+  on Windows. This is an atomic kernel call — exactly one caller wins; all
+  others get an exception mapped to `false`.
+- **Update-if-match** (`ifMatchEtag != null`): an exclusive `fcntl` advisory
+  lock (`FileLock.blockingExclusive`) is acquired on the existing file before
+  re-reading its ETag, ensuring the read-compare-write sequence is serialised
+  against other cooperative processes on the same host.
+
+These primitives are effective for the intra-host, multi-process use case (e.g.
+two CLI processes or two app instances sharing a local sync directory). They do
+**not** protect against cross-device contention — that is inherently not
+achievable via filesystem operations on a locally-synced cloud folder.
+
 ### Platform Atomic Write Strategies
 
-The lease file write-then-rename sequence requires platform support to be safe.
-The behaviour differs across the deployment targets:
+The behaviour of `SyncStorageAdapter.compareAndSwap` differs across deployment
+targets:
 
 | Platform                                        | Atomic primitive                                         | Implementation                                                                                                                  |
 | :---------------------------------------------- | :------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------ |
-| POSIX local / network volume (desktop)          | rename(2) is atomic within a filesystem                  | `LocalDirectoryAdapter`: write to .tmp file on same volume, then `File.renameSync`. Covers local paths, NAS/SMB mounts, and locally-synced cloud folders (iCloud Drive, Dropbox). |
-| iOS / Android (local storage)                   | Same as POSIX — app sandbox is a single filesystem       | Identical to POSIX path. No special handling required.                                                                          |
-| Cloud object storage (GCS)                      | Conditional PUT with if-none-match / if-generation-match | Upload lease JSON with if-generation-match: \<expected-generation\>. HTTP 412 means another client won the race.                |
-| Cloud object storage (S3)                       | No native CAS. Use DynamoDB conditional writes as a lock | Acquire a DynamoDB item with a condition expression before writing to S3. Release on completion.                                |
+| True local filesystem (single host, multi-process) | `O_CREAT\|O_EXCL` + `fcntl` advisory lock | `LocalDirectoryAdapter(atomicCas: true)`. Use for local directories shared between processes on the same machine. |
+| Cloud-synced folder (Dropbox, OneDrive, iCloud Desktop) | None — eventually-consistent replica | `LocalDirectoryAdapter(atomicCas: false)` (default). `ConsolidationCoordinator` skips consolidation. SSTables accumulate un-consolidated; data is never lost. |
+| iOS / Android (local app sandbox)               | Same as true local filesystem                            | `LocalDirectoryAdapter(atomicCas: true)`. Single device, single process — only one coordinator possible. |
+| Cloud object storage (GCS)                      | Conditional PUT with if-none-match / if-generation-match | Upload lease JSON with if-generation-match: \<expected-generation\>. HTTP 412 means another client won the race. Adapter must return `providesAtomicCas = true`. |
+| Cloud object storage (S3)                       | No native CAS. Use DynamoDB conditional writes as a lock | Acquire a DynamoDB item with a condition expression before writing to S3. Release on completion. Adapter must return `providesAtomicCas = true`.                |
 | Web (OPFS)                                      | createSyncAccessHandle is exclusive per-file per-origin  | Acquire a sync access handle on .consolidation-lease. Only one handle can be open at once per origin — enforced by the browser. |
 
 #### OPFS limitation

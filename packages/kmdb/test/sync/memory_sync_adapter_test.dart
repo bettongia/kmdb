@@ -17,7 +17,16 @@ import 'dart:typed_data';
 import 'package:kmdb/src/sync/local/memory_sync_adapter.dart';
 import 'package:test/test.dart';
 
+import '../support/sync_adapter_conformance.dart';
+
 void main() {
+  group('MemorySyncAdapter conformance', () {
+    runSyncAdapterConformance(
+      factory: MemorySyncAdapter.new,
+      expectAtomicCas: true,
+    );
+  });
+
   group('MemorySyncAdapter', () {
     late MemorySyncAdapter adapter;
 

@@ -53,6 +53,9 @@ final class _QuotaAdapter implements SyncStorageAdapter, QuotaAwareAdapter {
 
   @override
   Future<String?> getEtag(String path) => _inner.getEtag(path);
+
+  @override
+  bool get providesAtomicCas => _inner.providesAtomicCas;
 }
 
 HarnessConfig _lowVelocityConfig({
