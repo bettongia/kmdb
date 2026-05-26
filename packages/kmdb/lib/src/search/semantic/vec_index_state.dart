@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/// @docImport '../../engine/kvstore/meta_store.dart';
+library;
+
 import 'dart:typed_data';
 
 import 'package:cbor/cbor.dart';

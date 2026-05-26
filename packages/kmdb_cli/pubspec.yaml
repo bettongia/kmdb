@@ -4,14 +4,14 @@ version: 0.1.0
 publish_to: none
 
 environment:
-  sdk: ^3.10.8
+  sdk: ^3.12.0
 
 resolution: workspace
 
 dependencies:
   kmdb:
   args: ^2.6.0
-  uuid: ^4.5.3
+  uuid:
 
 dev_dependencies:
   lints: ^6.1.0

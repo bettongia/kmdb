@@ -51,16 +51,14 @@ final class Device {
   ///
   /// [deviceIndex] is the 0-based index of this device in the harness.
   /// [syncAdapter] is the shared remote sync adapter.
-  /// [reconciler] receives all action results immediately after execution.
+  /// [_reconciler] receives all action results immediately after execution.
   Device({
     required this.deviceIndex,
     required SyncStorageAdapter syncAdapter,
-    required ReconciliationAgent reconciler,
-    required String dbPath,
+    required this._reconciler,
+    required this._dbPath,
     String? deviceId,
   }) : _syncAdapter = PartitionableAdapter(syncAdapter),
-       _reconciler = reconciler,
-       _dbPath = dbPath,
        deviceId = deviceId ?? _generateDeviceId(deviceIndex);
 
   /// The 0-based index of this device within the harness.

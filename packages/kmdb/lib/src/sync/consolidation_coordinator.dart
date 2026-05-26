@@ -179,10 +179,9 @@ final class ConsolidationCoordinator {
     required this.cloudAdapter,
     required this.localAdapter,
     required this.syncRoot,
-    ConsolidationConfig config = const ConsolidationConfig(),
+    this._config = const ConsolidationConfig(),
     int Function()? wallClock,
-  }) : _config = config,
-       _wallClock = wallClock ?? (() => DateTime.now().millisecondsSinceEpoch);
+  }) : _wallClock = wallClock ?? (() => DateTime.now().millisecondsSinceEpoch);
 
   /// The 8-character identifier for this device.
   final String deviceId;

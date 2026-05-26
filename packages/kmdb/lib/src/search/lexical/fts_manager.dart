@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/// @docImport '../../query/kmdb_collection.dart';
+library;
+
 import 'dart:convert' show utf8;
 import 'dart:math' show log;
 import 'dart:typed_data';

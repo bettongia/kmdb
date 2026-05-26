@@ -105,11 +105,10 @@ final class IndexState {
 /// pipeline in [KmdbCollection] without requiring special-casing.
 final class IndexManager implements WriteAugmentor {
   IndexManager({
-    required KvStoreImpl store,
+    required this._store,
     required List<IndexDefinition> definitions,
     this.onIndexReady,
-  }) : _store = store,
-       _definitions = List.unmodifiable(definitions);
+  }) : _definitions = List.unmodifiable(definitions);
 
   final KvStoreImpl _store;
   final List<IndexDefinition> _definitions;

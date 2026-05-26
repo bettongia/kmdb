@@ -50,10 +50,10 @@ import 'kmdb_config_store.dart';
 /// final config = await KmdbConfig.load(store);
 /// ```
 final class IoKmdbConfigStore implements KmdbConfigStore {
-  /// Creates an [IoKmdbConfigStore] for the given [dbDir].
+  /// Creates an [IoKmdbConfigStore] for the given [_dbDir].
   ///
   /// The config file path is `{dbDir}/local/config.json`.
-  IoKmdbConfigStore({required String dbDir}) : _dbDir = dbDir;
+  IoKmdbConfigStore({required this._dbDir});
 
   final String _dbDir;
 

@@ -6,12 +6,12 @@ publish_to: none
 resolution: workspace
 
 environment:
-  sdk: ^3.10.0
+  sdk: ^3.12.0
 
 dependencies:
-  archive: ^4.0.0
-  ffi: ^2.2.0
-  http: ^1.6.0
+  archive:
+  ffi:
+  http:
   kmdb:
   kmdb_lexical:
   path: ^1.9.1

@@ -93,20 +93,16 @@ typedef EmbeddingModelConfig = ({String type, String modelPath});
 /// await config.save();
 /// ```
 final class KmdbConfig {
-  /// Creates a [KmdbConfig] with an explicit [store] and the supplied field
+  /// Creates a [KmdbConfig] with an explicit [_store] and the supplied field
   /// values.
   KmdbConfig._({
-    required KmdbConfigStore store,
-    required Map<String, RemoteConfig> remotes,
-    required List<IndexRecord> indexes,
-    required List<FtsIndexRecord> ftsIndexes,
+    required this._store,
+    required this._remotes,
+    required this._indexes,
+    required this._ftsIndexes,
     required this.embeddingModel,
-    required Map<String, dynamic> extra,
-  }) : _store = store,
-       _remotes = remotes,
-       _indexes = indexes,
-       _ftsIndexes = ftsIndexes,
-       _extra = extra;
+    required this._extra,
+  });
 
   /// Creates an empty [KmdbConfig] with no backing store.
   ///
