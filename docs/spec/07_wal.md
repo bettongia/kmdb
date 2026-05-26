@@ -56,7 +56,7 @@ across files via the HLC.
 | Field        | Size | Description                                                                  |
 | :----------- | :--- | :--------------------------------------------------------------------------- |
 | Checksum     | 8B   | XXH64 of all subsequent fields. Truncation detected by checksum failure.     |
-| Record type  | 1B   | 0x01 \= Put, 0x02 \= Delete, 0x03 \= Flush marker (legacy; decoded but no longer written — see §17). |
+| Record type  | 1B   | 0x01 \= Put, 0x02 \= Delete, 0x03 \= Flush marker (legacy; decoded but no longer written — see §17), 0x04 \= Batch frame (see below). |
 | Sequence     | 8B   | HLC-encoded: upper 48 bits \= physical ms, lower 16 bits \= logical counter. |
 | NS length    | 1B   | Namespace name byte length (max 255).                                        |
 | Namespace    | NB   | UTF-8 namespace name.                                                        |
@@ -69,6 +69,52 @@ XXH64 provides 64-bit output (collision probability \~1 in 10¹⁹) and runs fas
 than CRC32 on ARM processors lacking CRC32C hardware acceleration. The
 additional 4 bytes per record is negligible overhead for dramatically improved
 integrity guarantees.
+
+## Batch Frame Format (atomic `WriteBatch`)
+
+Every `WriteBatch` — including the implicit one-entry batch produced by `put`
+and `delete` — is serialised as a single **batch frame** under one checksum,
+appended in one `appendFile` call, and fsynced once. This collapses an N-entry
+batch from N WAL records and N fsyncs into a single record and a single fsync,
+and is the basis for the **all-or-nothing** crash guarantee: a truncated or
+corrupt frame fails its checksum and is dropped *whole* on recovery — the
+database can never observe a partial batch.
+
+| Field            | Size | Description                                                                              |
+| :--------------- | :--- | :--------------------------------------------------------------------------------------- |
+| Frame checksum   | 8B   | XXH64 of every byte that follows. A failure discards the entire frame on recovery.       |
+| Frame type       | 1B   | `0x04` — batch.                                                                          |
+| Entry count      | 4B   | Big-endian uint32; number of inner entries in this frame.                                |
+| Entry …          | …    | Repeated `count` times. Each entry is encoded identically to the per-record layout above (`recType` 1B, `sequence` 8B, `nsLen`/`ns`, `keyLen`/`key`, `valLen`/`val`), but **without** its own checksum — the frame-level checksum covers all entries collectively. |
+
+Only `Put` (0x01) and `Delete` (0x02) record types may appear inside a frame.
+`Flush marker` (0x03) and `Batch` (0x04) record types are not permitted as inner
+entries and are rejected by the decoder.
+
+### Why a frame, not begin/commit markers
+
+A single-checksum frame is the simplest representation that gives atomic
+recovery: there is no buffered-but-uncommitted state to reason about, no
+intermediate marker types, and the wire-level cost is one checksum and one
+fsync regardless of batch size.
+
+### Meta-write folding
+
+The dirty-open flag, generation-counter bumps, and namespace-registry updates
+that a user write triggers are folded into the **same** frame as the document
+write. A single `KvStore.put`/`delete` therefore produces one atomic frame
+containing the document and all of its metadata — a crash either leaves the
+document with its bookkeeping intact, or leaves both absent.
+
+### Back-compatibility
+
+WAL files written by older builds contain individual `Put`/`Delete` records
+rather than batch frames. Recovery dispatches on the type byte and accepts
+both formats: legacy records apply as before; batch frames apply atomically.
+A database that survives a build upgrade is replayed correctly without any
+on-disk migration. Batches written by a pre-fix build are *not* retroactively
+atomic; only batches written by the new build benefit from the all-or-nothing
+guarantee.
 
 ## Sequence Number Layout (HLC)
 

@@ -28,6 +28,7 @@ import '../sstable/sstable_writer.dart';
 import '../sstable/sstable_info.dart';
 import '../util/hlc.dart';
 import '../util/key_codec.dart';
+import '../wal/wal_record.dart';
 import '../wal/wal_writer.dart';
 import '../../sync/hlc_clock.dart';
 import 'kv_store.dart';
@@ -196,13 +197,43 @@ final class LsmEngine {
     await _flushIfNeeded();
   }
 
-  /// Commits all entries in [batch] atomically (single WAL sequence per batch
-  /// entry, all to memtable before checking flush).
+  /// Commits all entries in [batch] as a single atomic unit.
+  ///
+  /// ## Crash atomicity (WAL level)
+  ///
+  /// All entries are encoded into one [WalBatchFrame] under a single XXH64
+  /// checksum, written with one `appendFile`, and fsynced once. A crash
+  /// mid-write either leaves the frame absent (OS never flushed the buffer) or
+  /// leaves a truncated frame whose checksum won't match — in either case
+  /// recovery drops the entire frame. The database can never observe a partial
+  /// batch across a crash (review finding H2).
+  ///
+  /// ## In-process atomicity (memtable level)
+  ///
+  /// After the single WAL append+fsync completes, every entry is applied to the
+  /// memtable in one synchronous block with **no `await` between mutations**.
+  /// Because Dart's event loop does not context-switch inside a synchronous
+  /// block, a concurrent `get()` either sees all entries or none — never a
+  /// half-applied batch.
+  ///
+  /// ## Event emission
+  ///
+  /// Write events are emitted after all memtable mutations so that any subscriber
+  /// that immediately re-reads (e.g. the Cache Layer) observes the complete batch.
   Future<void> writeBatch(WriteBatch batch) async {
+    // Phase 1: Assign HLC timestamps and build WAL records for every entry.
+    // We need the timestamps before encoding the frame so the WAL and the
+    // internal key share the same HLC value.
+    final walRecords = <WalRecord>[];
+    // Pair each WAL record with its encoded internal key and value bytes so
+    // Phase 3 can apply them without re-parsing.
+    final memtableOps = <({Uint8List internalKey, Uint8List value})>[];
     final namespaces = <String>{};
+
     for (final entry in batch.entries) {
       final keyBytes = KeyCodec.keyToBytes(entry.key);
       final hlc = _clock.now();
+
       if (entry.isDelete) {
         final internalKey = KeyCodec.encodeInternalKey(
           entry.namespace,
@@ -210,12 +241,15 @@ final class LsmEngine {
           hlc,
           RecordType.delete,
         );
-        await _walWriter.writeDelete(
-          sequence: hlc,
-          namespace: entry.namespace,
-          keyBytes: keyBytes,
+        walRecords.add(
+          WalRecord(
+            type: WalRecordType.delete,
+            sequence: hlc,
+            namespace: entry.namespace,
+            key: keyBytes,
+          ),
         );
-        _active.put(internalKey, Uint8List(0));
+        memtableOps.add((internalKey: internalKey, value: Uint8List(0)));
       } else {
         final value = entry.value!;
         final internalKey = KeyCodec.encodeInternalKey(
@@ -224,19 +258,39 @@ final class LsmEngine {
           hlc,
           RecordType.put,
         );
-        await _walWriter.writePut(
-          sequence: hlc,
-          namespace: entry.namespace,
-          keyBytes: keyBytes,
-          value: value,
+        walRecords.add(
+          WalRecord(
+            type: WalRecordType.put,
+            sequence: hlc,
+            namespace: entry.namespace,
+            key: keyBytes,
+            value: value,
+          ),
         );
-        _active.put(internalKey, value);
+        memtableOps.add((internalKey: internalKey, value: value));
       }
       namespaces.add(entry.namespace);
     }
+
+    // Phase 2: Write the batch frame to the WAL — one append, one fsync.
+    // After this await completes the frame is durable. Any crash before this
+    // point leaves the frame absent; after this point recovery can apply all
+    // entries atomically.
+    await _walWriter.appendBatch(walRecords);
+
+    // Phase 3: Apply all entries to the memtable synchronously.
+    // No `await` here — this is intentional. Dart's single-isolate event loop
+    // cannot context-switch inside a synchronous loop, so a concurrent `get()`
+    // will not observe a half-applied batch.
+    for (final op in memtableOps) {
+      _active.put(op.internalKey, op.value);
+    }
+
+    // Phase 4: Emit write events after all mutations are visible.
     for (final ns in namespaces) {
       _writeEventsController.add(ns);
     }
+
     await _flushIfNeeded();
   }
 

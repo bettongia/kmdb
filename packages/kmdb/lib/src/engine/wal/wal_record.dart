@@ -37,7 +37,15 @@ enum WalRecordType {
   /// -live records (review finding C1). The value remains decodable so that
   /// databases written by older builds still replay — recovery skips any marker
   /// it encounters as a no-op.
-  flushMarker(0x03);
+  flushMarker(0x03),
+
+  /// An atomic batch frame containing multiple entries under one checksum.
+  ///
+  /// A batch frame is written as a single append+fsync. Recovery either applies
+  /// all entries in the frame or none (all-or-nothing). A truncated or
+  /// checksum-failing frame is dropped whole, so the database is never left in
+  /// a partial-batch state across a crash (review finding H2).
+  batch(0x04);
 
   const WalRecordType(this.byte);
 
@@ -51,6 +59,7 @@ enum WalRecordType {
     0x01 => put,
     0x02 => delete,
     0x03 => flushMarker,
+    0x04 => batch,
     _ => throw FormatException(
       'Unknown WAL record type: 0x${byte.toRadixString(16)}',
     ),
@@ -59,7 +68,7 @@ enum WalRecordType {
   /// Returns a JSON-compatible representation of this record type.
   ///
   /// Returns the enum name as a string (e.g. `"put"`, `"delete"`,
-  /// `"flushMarker"`).
+  /// `"flushMarker"`, `"batch"`).
   Map<String, dynamic> toMap() => {'name': name, 'byte': byte};
 }
 
@@ -257,4 +266,198 @@ final class WalRecord {
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   static List<int> _toUtf8(String s) => s.codeUnits;
+}
+
+// ── WAL batch frame ───────────────────────────────────────────────────────────
+
+/// An atomic WAL batch frame that wraps multiple [WalRecord] entries under a
+/// single checksum, one append, and one fsync.
+///
+/// ## Wire format
+///
+/// ```
+/// [checksum 8B][type=batch 0x04 1B][count 4B][entry…]
+/// entry := [recType 1B][seq 8B][nsLen 1B][ns NB][keyLen 2B][key KB][valLen 4B][val VB]
+/// ```
+///
+/// The `checksum` covers all bytes from `type` through the last `val` byte.
+/// A checksum failure or truncation causes [tryDecode] to return `null`,
+/// discarding the entire frame — no partial batch is ever applied.
+///
+/// ## All-or-nothing guarantee
+///
+/// Recovery either applies every entry in a frame or none. Because the frame
+/// is written in a single `appendFile` + `fsync`, a crash mid-write either
+/// leaves the frame entirely absent (the OS never flushed the partial buffer)
+/// or leaves a truncated frame whose checksum will not match, causing it to be
+/// dropped. Either way the database cannot observe a partial batch (review
+/// finding H2).
+///
+/// ## Back-compatibility
+///
+/// This type byte (0x04) is new. Older builds wrote individual `put`/`delete`
+/// records for each batch entry. Recovery dispatches on the type byte and
+/// handles both formats: legacy individual records apply as before; batch frames
+/// apply atomically.
+final class WalBatchFrame {
+  /// Creates a batch frame from a list of [records].
+  ///
+  /// All records must have type [WalRecordType.put] or [WalRecordType.delete];
+  /// [WalRecordType.flushMarker] and [WalRecordType.batch] are not permitted
+  /// inside a frame.
+  const WalBatchFrame(this.records);
+
+  /// The individual records contained in this frame.
+  ///
+  /// Every entry is either a put or a delete; never a flush marker or another
+  /// batch frame.
+  final List<WalRecord> records;
+
+  // ── Encoding ──────────────────────────────────────────────────────────────
+
+  /// Serialises this batch frame to bytes.
+  ///
+  /// The layout is:
+  /// ```
+  /// [checksum 8B][type=0x04 1B][count 4B][entry…]
+  /// entry := [recType 1B][seq 8B][nsLen 1B][ns][keyLen 2B][key][valLen 4B][val]
+  /// ```
+  ///
+  /// The checksum covers every byte after the 8-byte checksum field.
+  Uint8List encode() {
+    // Pre-compute each entry's encoded size so we can allocate one buffer.
+    // entry layout: recType(1) + seq(8) + nsLen(1) + ns + keyLen(2) + key + valLen(4) + val
+    int payloadLen = 1 + 4; // type(1) + count(4)
+    final nsBytesPerEntry = <List<int>>[];
+    for (final r in records) {
+      final nsBytes = r.namespace.codeUnits;
+      nsBytesPerEntry.add(nsBytes);
+      payloadLen +=
+          1 + 8 + 1 + nsBytes.length + 2 + r.key.length + 4 + r.value.length;
+    }
+
+    final buf = Uint8List(8 + payloadLen);
+    final bd = ByteData.sublistView(buf);
+
+    var offset = 8; // reserve checksum slot
+
+    // Frame header: type byte + entry count (big-endian uint32).
+    buf[offset++] = WalRecordType.batch.byte;
+    bd.setUint32(offset, records.length, Endian.big);
+    offset += 4;
+
+    // Encode each entry.
+    for (var i = 0; i < records.length; i++) {
+      final r = records[i];
+      final nsBytes = nsBytesPerEntry[i];
+
+      buf[offset++] = r.type.byte; // recType
+      bd.setInt64(offset, r.sequence.encoded, Endian.big); // seq
+      offset += 8;
+      buf[offset++] = nsBytes.length; // nsLen
+      buf.setAll(offset, nsBytes); // ns
+      offset += nsBytes.length;
+      bd.setUint16(offset, r.key.length, Endian.big); // keyLen
+      offset += 2;
+      buf.setAll(offset, r.key); // key
+      offset += r.key.length;
+      bd.setUint32(offset, r.value.length, Endian.big); // valLen
+      offset += 4;
+      buf.setAll(offset, r.value); // val
+      offset += r.value.length;
+    }
+
+    // Compute checksum over [type..last val byte] and store it at offset 0.
+    final payload = Uint8List.sublistView(buf, 8);
+    final checksum = XxHash64.digest(payload);
+    bd.setInt64(0, checksum, Endian.big);
+
+    return buf;
+  }
+
+  // ── Decoding ──────────────────────────────────────────────────────────────
+
+  /// Attempts to decode a WAL batch frame from [buf] at [offset].
+  ///
+  /// Returns `(frame, bytesConsumed)` on success, or `null` if there are
+  /// insufficient bytes, the type byte is not [WalRecordType.batch], or the
+  /// checksum does not match (indicating truncation or corruption). The
+  /// all-or-nothing guarantee means a `null` result discards the entire frame.
+  ///
+  /// The caller is responsible for checking the type byte before deciding
+  /// whether to call this method or [WalRecord.tryDecode].
+  static (WalBatchFrame frame, int bytesConsumed)? tryDecode(
+    Uint8List buf,
+    int offset,
+  ) {
+    // Minimum: 8 (checksum) + 1 (type) + 4 (count) = 13 bytes.
+    if (buf.length - offset < 13) return null;
+
+    final bd = ByteData.sublistView(buf);
+    final storedChecksum = bd.getInt64(offset, Endian.big);
+
+    // Verify this is a batch frame.
+    if (buf[offset + 8] != WalRecordType.batch.byte) return null;
+
+    final count = bd.getUint32(offset + 9, Endian.big);
+    var pos = offset + 13; // past checksum + type + count
+
+    final records = <WalRecord>[];
+    for (var i = 0; i < count; i++) {
+      // Each entry: recType(1) + seq(8) + nsLen(1) + ns + keyLen(2) + key + valLen(4) + val
+      if (buf.length - pos < 12) return null; // minimum for one entry header
+      final recTypeByte = buf[pos++];
+      final WalRecordType recType;
+      try {
+        recType = WalRecordType.fromByte(recTypeByte);
+      } on FormatException {
+        return null;
+      }
+      // Only put and delete are valid inside a batch frame.
+      if (recType != WalRecordType.put && recType != WalRecordType.delete) {
+        return null;
+      }
+
+      final seqEncoded = bd.getInt64(pos, Endian.big);
+      pos += 8;
+      final sequence = Hlc.fromEncoded(seqEncoded);
+
+      if (buf.length - pos < 1) return null;
+      final nsLen = buf[pos++];
+      if (buf.length - pos < nsLen) return null;
+      final namespace = String.fromCharCodes(buf, pos, pos + nsLen);
+      pos += nsLen;
+
+      if (buf.length - pos < 2) return null;
+      final keyLen = bd.getUint16(pos, Endian.big);
+      pos += 2;
+      if (buf.length - pos < keyLen) return null;
+      final key = buf.sublist(pos, pos + keyLen);
+      pos += keyLen;
+
+      if (buf.length - pos < 4) return null;
+      final valLen = bd.getUint32(pos, Endian.big);
+      pos += 4;
+      if (buf.length - pos < valLen) return null;
+      final value = buf.sublist(pos, pos + valLen);
+      pos += valLen;
+
+      records.add(
+        WalRecord(
+          type: recType,
+          sequence: sequence,
+          namespace: namespace,
+          key: key,
+          value: value,
+        ),
+      );
+    }
+
+    // Verify checksum over [type..last val byte].
+    final payload = Uint8List.sublistView(buf, offset + 8, pos);
+    final expectedChecksum = XxHash64.digest(payload);
+    if (storedChecksum != expectedChecksum) return null;
+
+    return (WalBatchFrame(records), pos - offset);
+  }
 }

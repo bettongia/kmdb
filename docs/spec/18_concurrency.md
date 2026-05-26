@@ -5,6 +5,26 @@
 All operations run synchronously on the calling isolate. This is the only
 execution model — there is no background compaction scheduler.
 
+### `WriteBatch` atomicity (in-process)
+
+The engine commits a `WriteBatch` in three phases on the calling isolate:
+
+1. Build a single WAL batch frame from every entry (see §7).
+2. **One** `await` — the frame is appended and fsynced as one atomic unit.
+3. Apply every entry to the memtable in a synchronous block, with no `await`
+   between mutations.
+
+Because Dart's single-isolate event loop never context-switches inside a
+synchronous block, no concurrent `get()` can interleave with the memtable
+mutations: a reader scheduled during the batch either resumes before step 3
+(observes none of the batch) or after step 3 (observes the entire batch).
+Write events are emitted **after** step 3, so any subscriber that re-reads in
+response to the event observes the full batch.
+
+This is the in-process counterpart to the crash-side all-or-nothing guarantee
+provided by the batch frame format itself; together they ensure that a batch
+is genuinely atomic at both the WAL and memtable levels.
+
 At the target workload (200–2,000 typical documents, up to 100,000 upper bound):
 
 - **Flush** (64KB memtable → L0 SSTable): completes in < 5ms on any device
