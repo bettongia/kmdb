@@ -1,6 +1,6 @@
 # Fix H2: WriteBatch is not crash-atomic (document/index consistency guarantee is unmet)
 
-**Status**: Investigated
+**Status**: Implementing
 
 **PR link**: {pending}
 
@@ -135,23 +135,23 @@ correctly; new writes use frames. No migration step is required.
 | `lib/src/engine/kvstore/meta_store.dart` | (D2) add batch-aware mutation helpers that append to a `WriteBatch` instead of issuing their own `put` |
 | `docs/spec/07_wal.md`, `16_secondary_indexes.md`, `18_concurrency.md` | Document the frame format and the now-true atomicity guarantee |
 
-## Decisions (recommended answers — confirm before implementation)
+## Decisions (confirmed 2026-05-26)
 
-- [ ] **D1 — Frame vs markers.** Recommended: **Option A** (single frame, single
-  checksum, single fsync) — simplest atomicity and a throughput win.
-- [ ] **D2 — Fold meta-writes into the batch.** Recommended: **yes** — add the
+- [x] **D1 — Frame vs markers.** **Option A** (single frame, single checksum,
+  single fsync) — simplest atomicity and a throughput win.
+- [x] **D2 — Fold meta-writes into the batch.** **Yes** — add the
   generation-counter bump and namespace registration into the *same* engine
   batch as the document+index entries, so a single user write is one atomic unit.
   Preserve the existing invariant that subscribers see the bumped generation when
   the write event fires (events are emitted after the batch is applied to the
   memtable, so a folded gen counter is already visible). This is the part needing
   the most test care.
-- [ ] **D3 — Keep single `put`/`delete` unframed.** Recommended: **yes** — they
-  are already atomic; routing them through a 1-entry frame is optional and only
-  for code uniformity.
-- [ ] **D4 — Migration.** Recommended: decode both old individual records and new
-  frames; no on-disk migration. Confirm we accept that batches written by a
-  pre-fix build (already non-atomic) cannot be retroactively made atomic.
+- [x] **D3 — Keep single `put`/`delete` unframed.** **Yes** — they are already
+  atomic; routing them through a 1-entry frame is optional and only for code
+  uniformity.
+- [x] **D4 — Migration.** Decode both old individual records and new frames; no
+  on-disk migration. Accepted that batches written by a pre-fix build (already
+  non-atomic) cannot be retroactively made atomic.
 
 ## Implementation plan
 
