@@ -51,11 +51,9 @@ test.log: packages/**
 	set -o pipefail; melos test --no-select 2>&1 | tee test.log
 
 
-e2e_test: e2e_test.log packages/*/**
+e2e_test:
+	melos e2e-test 2>&1
 .PHONY: e2e_test
-
-e2e_test.log: packages/*/**
-	set -o pipefail; melos e2e-test 2>&1 | tee e2e_test.log
 
 license_check:
 	melos licenses
