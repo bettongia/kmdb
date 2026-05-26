@@ -97,6 +97,16 @@ Because all of steps 3–6 are in a single `WriteBatch`, index entries and the
 document they reference are always consistent — there is no window where a
 document exists without its index entries or vice versa.
 
+This guarantee holds **across a crash** as well as in-process. Under the hood
+the batch is serialised as a single WAL batch frame with one checksum and one
+fsync (see §7 — *Batch Frame Format*), so a power loss or process kill either
+leaves the entire frame durable on disk or leaves it absent: it is never
+possible to recover a document without its index entries (or the reverse), and
+the namespace generation counter and registry update are folded into the same
+frame for the same reason. The in-process side is guaranteed by applying every
+memtable mutation synchronously after the single fsync, with no `await` between
+mutations — a concurrent reader sees the full batch or none of it (see §18).
+
 ## Lazy Index Build
 
 Index definitions are registered at `KmdbDatabase.open()` time but no entries

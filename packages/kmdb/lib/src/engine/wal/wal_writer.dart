@@ -104,6 +104,20 @@ final class WalWriter {
     ),
   );
 
+  /// Writes a [WalBatchFrame] containing all [records] as a single atomic unit.
+  ///
+  /// All records are encoded under one checksum, appended in one `appendFile`
+  /// call, and fsynced once (if [fsyncOnWrite] is true). This collapses N
+  /// individual per-record fsyncs into one, which is both faster and the basis
+  /// for the all-or-nothing crash guarantee — a truncated or corrupt frame is
+  /// dropped whole during recovery, never partially applied (review finding H2).
+  Future<void> appendBatch(List<WalRecord> records) async {
+    final frame = WalBatchFrame(records);
+    final bytes = frame.encode();
+    await adapter.appendFile(activePath, bytes);
+    if (fsyncOnWrite) await adapter.syncFile(activePath);
+  }
+
   // ── Rotation ──────────────────────────────────────────────────────────────
 
   /// Closes the current WAL file and opens the next one, returning the path of
