@@ -2,7 +2,7 @@
 
 **Status**: Implementing
 
-**PR link**: {pending}
+**PR link**: https://github.com/bettongia/kmdb/pull/24
 
 **Scope of this plan (PR1).** Per D3, H4 ships in two PRs. **This plan covers
 PR1 only:** version collapse (safe at any compaction level) and the
