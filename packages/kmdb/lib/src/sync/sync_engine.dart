@@ -95,7 +95,22 @@ final class SyncEngine {
     required this._syncRoot,
     required this._syncNamespaces,
     this._consolidationConfig = const ConsolidationConfig(),
-  });
+  }) {
+    // Register the synced-database tombstone-GC horizon provider on the
+    // store (H4 PR2). The store uses this for the all-levels `_compactAll`
+    // path; partial compactions never drop tombstones regardless. When the
+    // HWM scan finds no `.hwm` files yet (sync not yet established), we
+    // return `Hlc(0, 0)` so no tombstones drop until at least one device
+    // has pushed an HWM — the safe behaviour for a freshly-configured
+    // sync folder.
+    _store.setTombstoneHorizonProvider(() async {
+      final min = await HighwaterMark.minCurrentHlcAcrossDevices(
+        _remoteHwmDir,
+        _cloudAdapter,
+      );
+      return min ?? const Hlc(0, 0);
+    });
+  }
 
   final KvStore _store;
   final SyncStorageAdapter _cloudAdapter;

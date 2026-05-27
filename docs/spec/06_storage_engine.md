@@ -88,18 +88,46 @@ same way without touching the compaction code.
 ### Reclamation: tombstone GC
 
 A delete tombstone is the **surviving entry** of its group whenever no later
-write follows the delete. Dropping such a tombstone is safe only when:
-(a) the compaction covers every level that could hold an older version (in
-practice, the single-file `_compactAll` path — KMDB levels do **not** imply
-recency because sync ingest can place old-HLC data into L0), **and**
-(b) the tombstone's HLC is below a sync horizon past which every device has
-already observed the delete (`min(currentHlc)` across all `.hwm` files —
-see §12; for local-only databases, a wall-clock grace window).
+write follows the delete. The compaction's streaming transform may drop such
+a tombstone — eliminating its on-disk footprint — only when **both** safety
+conditions hold simultaneously:
 
-Until both conditions are wired up (H4 PR2), every surviving tombstone is
-**retained verbatim** across compaction. Reads continue to suppress older
-values through the merge — so live behaviour is unaffected — but
-delete-tombstone storage grows without GC until PR2 lands.
+(a) **All-levels coverage.** The compaction covers every level that could
+    hold an older version of the key. In KMDB this is exclusively the
+    single-file `_compactAll` path: KMDB levels do *not* imply recency
+    (sync ingest places old-HLC data into L0), so partial compactions
+    (`_compactL0ToL1`, `_compactL1ToL2`) must always retain tombstones —
+    a lower-HLC value for the same key may live in an excluded level and
+    would resurrect.
+(b) **Past the sync horizon.** The tombstone's HLC is strictly below the
+    GC horizon, past which every device has already observed the delete.
+
+The horizon is computed per compaction:
+
+- **Synced database:** `min(currentHlc)` across every `.hwm` file in the
+  sync folder — see §12. `SyncEngine` registers this provider on the store
+  at construction time via `KvStore.setTombstoneHorizonProvider`.
+- **Local-only database:** `now - tombstoneGraceDuration` (wall-clock,
+  configurable via `KvStoreConfig.tombstoneGraceDuration`; default 7 days).
+  The grace window protects the local → synced transition: if sync is
+  enabled within the window, every tombstone written before the transition
+  is still present to suppress peer values on first sync. Setting the
+  grace too short risks resurrection on the first post-enable sync.
+
+The compaction itself does not read the sync folder; the horizon is
+*injected* into [`CompactionJob`](../../packages/kmdb/lib/src/engine/compaction/compaction_job.dart)
+by `LsmEngine._computeTombstoneHorizon`, which consults the registered
+provider (synced) or applies the wall-clock fallback (local-only).
+
+The drop decision is made by the active `ReclamationPolicy.dropTombstone`
+predicate — see `lib/src/engine/compaction/reclamation_policy.dart`.
+`CollapseToNewestPolicy` (the default) drops when `allLevels && hlc <
+horizon`; `RetainAllVersionsPolicy` (registered for `$ver:`) never drops.
+
+**Known limitation:** the strict `min(currentHlc)` is pegged by the slowest
+device. A dead or inactive peer blocks GC indefinitely. An eviction rule
+(max device staleness) is intentionally deferred — see
+`docs/plans/plan_tombstone_gc.md`.
 
 ### Triggers
 

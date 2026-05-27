@@ -17,6 +17,7 @@ import 'dart:typed_data';
 
 import '../engine/kvstore/kv_store.dart';
 import '../engine/kvstore/meta_store.dart';
+import '../engine/util/hlc.dart';
 import 'cache_tier.dart';
 import 'session_cache.dart';
 
@@ -143,6 +144,10 @@ final class CacheLayer implements KvStore {
 
   @override
   Future<void> compactAll() => _store.compactAll();
+
+  @override
+  void setTombstoneHorizonProvider(Future<Hlc> Function()? provider) =>
+      _store.setTombstoneHorizonProvider(provider);
 
   @override
   Future<void> ingestSstable(String filename, Uint8List bytes) =>

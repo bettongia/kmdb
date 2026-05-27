@@ -270,4 +270,98 @@ void main() {
       expect(hwm.toString(), contains('a1b2c3d4'));
     });
   });
+
+  // ── H4 PR2: minCurrentHlcAcrossDevices ───────────────────────────────────
+  //
+  // The principled tombstone-GC horizon for a synced database is
+  // `min(currentHlc)` across all `.hwm` files in the sync folder. Every
+  // device has synced past it, so a tombstone with HLC strictly below it
+  // has been observed by every device and may be dropped without risk of
+  // resurrection.
+
+  group('HighwaterMark.minCurrentHlcAcrossDevices', () {
+    late MemorySyncAdapter adapter;
+
+    setUp(() {
+      adapter = MemorySyncAdapter();
+    });
+
+    Future<void> writeHwm(String deviceId, Hlc currentHlc) async {
+      final hwm = HighwaterMark(
+        deviceId: deviceId,
+        currentHlc: currentHlc,
+        lastUpdated: DateTime.utc(2026, 1, 1),
+        peers: const {},
+      );
+      await hwm.save('highwater/$deviceId.hwm', adapter);
+    }
+
+    test('returns null when the hwm directory has no .hwm files', () async {
+      final result = await HighwaterMark.minCurrentHlcAcrossDevices(
+        'highwater',
+        adapter,
+      );
+      expect(result, isNull);
+    });
+
+    test(
+      'returns the only device\'s currentHlc when one HWM is present',
+      () async {
+        await writeHwm('dev1', const Hlc(500, 0));
+        final result = await HighwaterMark.minCurrentHlcAcrossDevices(
+          'highwater',
+          adapter,
+        );
+        expect(result, equals(const Hlc(500, 0)));
+      },
+    );
+
+    test('returns the minimum across multiple devices', () async {
+      // Three devices, mixed currentHlc values. Min should be 300.
+      await writeHwm('dev1', const Hlc(700, 0));
+      await writeHwm('dev2', const Hlc(300, 0));
+      await writeHwm('dev3', const Hlc(900, 0));
+      final result = await HighwaterMark.minCurrentHlcAcrossDevices(
+        'highwater',
+        adapter,
+      );
+      expect(result, equals(const Hlc(300, 0)));
+    });
+
+    test(
+      'the slowest device pegs the horizon (the documented PR2 limitation)',
+      () async {
+        // A "dead/inactive" peer pegs the strict-min horizon. The newer
+        // devices' high currentHlc does not advance the horizon past the
+        // slow one. PR2 ships this conservative behaviour; an eviction
+        // rule (max device staleness) is intentionally deferred per
+        // plan_tombstone_gc.md.
+        await writeHwm('newcomer', const Hlc(10000, 0));
+        await writeHwm('idle-peer', const Hlc(1, 0));
+        final result = await HighwaterMark.minCurrentHlcAcrossDevices(
+          'highwater',
+          adapter,
+        );
+        expect(result, equals(const Hlc(1, 0)));
+      },
+    );
+
+    test(
+      'serialisation normalises the logical component to 0 (HWM file format '
+      'stores physical-only), so the helper compares physical ms only',
+      () async {
+        // HighwaterMark serialises currentHlc as the 12-char physical-only
+        // hex (see [HighwaterMark.save] / [Hlc.toPhysicalHex]). The logical
+        // component is *not* round-tripped — both writes below collapse to
+        // `Hlc(100, 0)` on disk, and the helper returns that.
+        await writeHwm('dev1', const Hlc(100, 5));
+        await writeHwm('dev2', const Hlc(100, 2));
+        final result = await HighwaterMark.minCurrentHlcAcrossDevices(
+          'highwater',
+          adapter,
+        );
+        expect(result, equals(const Hlc(100, 0)));
+      },
+    );
+  });
 }

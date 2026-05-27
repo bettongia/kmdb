@@ -90,6 +90,42 @@ final class HighwaterMark {
     return _parse(bytes, path);
   }
 
+  /// Returns the minimum `currentHlc` across every `.hwm` file present in
+  /// [hwmDir], or `null` when none exist.
+  ///
+  /// This is the principled tombstone-GC horizon for a synced database
+  /// (H4 PR2 / `plan_tombstone_gc.md`): every device has synced past
+  /// `min(currentHlc)`, so a tombstone with a strictly smaller HLC has
+  /// been observed everywhere and may be dropped. Callers feed the result
+  /// to [KvStore.setTombstoneHorizonProvider]; on `null` they should fall
+  /// back to the local-only `now - tombstoneGraceDuration` rule by
+  /// clearing the provider (passing `null`) rather than registering a
+  /// zero horizon.
+  ///
+  /// HWM files that fail to parse are skipped with a thrown
+  /// [FormatException] — the horizon must reflect every visible device,
+  /// so a corrupt HWM is a hard error rather than a silent omission.
+  ///
+  /// **Known limitation:** the strict `min` is pegged by the slowest
+  /// device. A device that goes offline and never returns blocks GC
+  /// forever. An eviction rule (max device staleness) is intentionally
+  /// deferred from H4 PR2 — see `plan_tombstone_gc.md`.
+  static Future<Hlc?> minCurrentHlcAcrossDevices(
+    String hwmDir,
+    SyncStorageAdapter adapter,
+  ) async {
+    final files = await adapter.list(hwmDir, extension: '.hwm');
+    Hlc? minHlc;
+    for (final filename in files) {
+      final hwm = await HighwaterMark.load('$hwmDir/$filename', adapter);
+      if (hwm == null) continue;
+      if (minHlc == null || hwm.currentHlc.compareTo(minHlc) < 0) {
+        minHlc = hwm.currentHlc;
+      }
+    }
+    return minHlc;
+  }
+
   // ── Persistence ───────────────────────────────────────────────────────────
 
   /// Serialises this HWM to JSON and uploads it to [path] via [adapter].

@@ -97,6 +97,14 @@ final class LsmEngine {
 
   final StreamController<String> _writeEventsController;
 
+  /// Optional callback supplying the tombstone-GC horizon used by the
+  /// all-levels compaction path (H4 PR2). When `null` the engine falls
+  /// back to `now - KvStoreConfig.tombstoneGraceDuration` (local-only
+  /// safety window). Set by [setTombstoneHorizonProvider] — wired by
+  /// `SyncEngine` to `min(currentHlc)` across all peer HWM files in a
+  /// synced database.
+  Future<Hlc> Function()? _tombstoneHorizonProvider;
+
   /// Broadcast stream that emits a namespace string after each successful write.
   Stream<String> get writeEvents => _writeEventsController.stream;
 
@@ -140,6 +148,31 @@ final class LsmEngine {
     );
     engine._active = restoredMemtable;
     return engine;
+  }
+
+  // ── Tombstone GC horizon (H4 PR2) ─────────────────────────────────────────
+
+  /// Registers [provider] as the source of the all-levels tombstone-GC
+  /// horizon, overriding the local-only `now - tombstoneGraceDuration`
+  /// fallback. Pass `null` to revert. Called by [KvStoreImpl.setTombstoneHorizonProvider].
+  void setTombstoneHorizonProvider(Future<Hlc> Function()? provider) {
+    _tombstoneHorizonProvider = provider;
+  }
+
+  /// Computes the tombstone-GC horizon for the next all-levels compaction.
+  ///
+  /// Returns the registered provider's value when present (used by
+  /// `SyncEngine` to supply `min(currentHlc)` across all peer HWMs);
+  /// otherwise returns `now - tombstoneGraceDuration` from
+  /// [KvStoreConfig.tombstoneGraceDuration], clamped to `Hlc(0, 0)` if
+  /// the grace window pre-dates the epoch.
+  Future<Hlc> _computeTombstoneHorizon() async {
+    final provider = _tombstoneHorizonProvider;
+    if (provider != null) return provider();
+    final nowMs = _clock.now().physicalMs;
+    final graceMs = _config.tombstoneGraceDuration.inMilliseconds;
+    final horizonMs = nowMs - graceMs;
+    return horizonMs > 0 ? Hlc(horizonMs, 0) : const Hlc(0, 0);
   }
 
   // ── HLC clock ─────────────────────────────────────────────────────────────
@@ -729,6 +762,10 @@ final class LsmEngine {
   /// Collapses all files across all levels into a single L2 file.
   ///
   /// Used when total data fits within [KvStoreConfig.singleFileThresholdBytes].
+  /// This is the **only** compaction path that may drop tombstones: it
+  /// covers every level that could hold an older version (so the
+  /// `allLevels` safety condition is satisfied) and passes the computed
+  /// tombstone-GC horizon to [CompactionJob]. See `plan_tombstone_gc.md`.
   Future<void> _compactAll() async {
     final inputs = [
       ...(_levels[0] ?? []).map((f) => SstableRef(level: 0, filename: f)),
@@ -739,6 +776,7 @@ final class LsmEngine {
 
     // Run a single job treating all inputs as a single merge and outputting to L2.
     final hlc = _clock.now();
+    final horizon = await _computeTombstoneHorizon();
     final job = CompactionJob(
       sstDir: _sstDir,
       deviceId: _deviceId,
@@ -748,6 +786,8 @@ final class LsmEngine {
       manifestWriter: _manifestWriter,
       logNumber: _walWriter.activeSequence,
       nextSeq: hlc.encoded,
+      allLevels: true,
+      horizon: horizon,
     );
     final edit = await job.run();
 
