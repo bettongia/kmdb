@@ -17,6 +17,7 @@
 // LocalDirectoryVaultAdapter requires filesystem access and cannot be used
 // on these platforms.
 
+import '../engine/kvstore/kv_store.dart';
 import 'vault_storage_adapter.dart';
 import 'vault_store.dart';
 
@@ -29,6 +30,7 @@ final class LocalDirectoryVaultAdapter implements VaultStorageAdapter {
   LocalDirectoryVaultAdapter({
     required String syncRoot,
     required VaultStore localStore,
+    required KvStore kvStore,
   }) {
     throw UnsupportedError(
       'LocalDirectoryVaultAdapter is not supported on web/WASM. '

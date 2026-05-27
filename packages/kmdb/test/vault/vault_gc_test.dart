@@ -12,18 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:kmdb/src/engine/kvstore/kv_store.dart';
-import 'package:kmdb/src/engine/util/hlc.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
 import 'package:kmdb/src/vault/media_type_detector.dart';
 import 'package:kmdb/src/vault/vault_gc.dart';
 import 'package:kmdb/src/vault/vault_manifest.dart';
-import 'package:kmdb/src/vault/vault_recovery.dart' show kVaultNamespace;
 import 'package:kmdb/src/vault/vault_store.dart';
 import 'package:test/test.dart';
+
+import 'test_kv_store.dart';
 
 // ── Test doubles ──────────────────────────────────────────────────────────────
 
@@ -60,100 +58,6 @@ final class _NoOpDetector implements MediaTypeDetector {
   Iterable<String> detect(Uint8List bytes, {String? fileName}) => [];
 }
 
-class _FakeKvStore implements KvStore {
-  final Map<String, Map<String, Uint8List>> _data = {};
-
-  void setRefCount(String sha256, int count) {
-    _data[kVaultNamespace] ??= {};
-    final keyBytes = utf8.encode('refCount');
-    final builder = BytesBuilder();
-    builder.addByte(0x00); // ValueCodec raw flag
-    builder.addByte(0xA1); // CBOR map 1 pair
-    builder.addByte(0x60 | keyBytes.length);
-    builder.add(keyBytes);
-    if (count <= 23) {
-      builder.addByte(count);
-    } else if (count <= 255) {
-      builder.addByte(0x18);
-      builder.addByte(count);
-    } else {
-      builder.addByte(0x19);
-      builder.addByte((count >> 8) & 0xFF);
-      builder.addByte(count & 0xFF);
-    }
-    _data[kVaultNamespace]![sha256] = builder.toBytes();
-  }
-
-  /// Injects raw (possibly malformed) bytes for [sha256] under `$vault`.
-  ///
-  /// Used to simulate a corrupt/undecodable ref-count entry that the fail-safe
-  /// reader must refuse to interpret as zero references.
-  void setRawRefCount(String sha256, Uint8List bytes) {
-    _data[kVaultNamespace] ??= {};
-    _data[kVaultNamespace]![sha256] = bytes;
-  }
-
-  void clearRefCount(String sha256) {
-    _data[kVaultNamespace]?.remove(sha256);
-  }
-
-  @override
-  Future<Uint8List?> get(String ns, String key) async => _data[ns]?[key];
-
-  @override
-  Future<void> put(String ns, String key, Uint8List v) async {}
-
-  @override
-  Future<void> delete(String ns, String key) async {}
-
-  @override
-  Future<void> writeBatch(WriteBatch b) async {}
-
-  @override
-  Stream<KvEntry> scan(String ns, {String? startKey, String? endKey}) async* {}
-
-  @override
-  Future<void> close({bool flush = true}) async {}
-
-  @override
-  void setTombstoneHorizonProvider(Future<Hlc> Function()? provider) {}
-
-  @override
-  Future<void> compactAll() async {}
-
-  @override
-  Future<void> flush() async {}
-
-  @override
-  Future<StoreStats> stats() async => const StoreStats(
-    dbDir: '/test',
-    l0Count: 0,
-    l1Count: 0,
-    l2Count: 0,
-    totalSstBytes: 0,
-    totalDbBytes: 0,
-  );
-
-  @override
-  Future<StoreInfo> storeInfo() async =>
-      const StoreInfo(dbDir: '/test', deviceId: '00000000', currentHlc: '0');
-
-  @override
-  Future<void> reassignDeviceId(String id) async {}
-
-  @override
-  Stream<String> get writeEvents => const Stream.empty();
-
-  @override
-  Future<void> ingestSstable(String f, Uint8List b) async {}
-
-  @override
-  Future<List<String>> listNamespaces() async => [];
-
-  @override
-  Future<bool> createNamespace(String ns) async => false;
-}
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 Uint8List _bytes(String s) => Uint8List.fromList(s.codeUnits);
@@ -161,14 +65,14 @@ Uint8List _bytes(String s) => Uint8List.fromList(s.codeUnits);
 void main() {
   late MemoryStorageAdapter adapter;
   late TestVaultStore store;
-  late _FakeKvStore kvStore;
+  late TestKvStore kvStore;
   late VaultGc gc;
 
   setUp(() {
     TestVaultStore._seq = 0;
     adapter = MemoryStorageAdapter();
     store = TestVaultStore(adapter);
-    kvStore = _FakeKvStore();
+    kvStore = TestKvStore();
     gc = VaultGc(store: store, kvStore: kvStore);
   });
 
@@ -331,7 +235,11 @@ void main() {
           originalName: 'stub.bin',
           createdAt: 't1',
         );
-        await store.createStub(manifest);
+        // Producer-side contract: seed a positive ref before createStub,
+        // then drop it to simulate the lifetime "stub created → all refs
+        // released → tombstoned → swept".
+        kvStore.setRefCount(sha256, 1);
+        await store.createStub(manifest, kvStore: kvStore);
         kvStore.clearRefCount(sha256);
         await gc.onZeroRefs(sha256);
 

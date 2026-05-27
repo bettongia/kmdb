@@ -18,6 +18,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../engine/kvstore/kv_store.dart';
 import 'vault_manifest.dart';
 import 'vault_storage_adapter.dart';
 import 'vault_store.dart';
@@ -69,10 +70,13 @@ final class LocalDirectoryVaultAdapter implements VaultStorageAdapter {
   ///
   /// [_syncRoot] is the base directory for all remote vault paths.
   /// [_localStore] is the local [VaultStore] used for staging and path
-  /// resolution.
+  /// resolution. [_kvStore] is the local KV store, used by [syncVaultMetadata]
+  /// to verify that a positive `$vault` reference is present before creating
+  /// a stub (the producer-side contract enforced by [VaultStore.createStub]).
   LocalDirectoryVaultAdapter({
     required this._syncRoot,
     required this._localStore,
+    required this._kvStore,
   });
 
   /// The base directory for all remote vault paths.
@@ -80,6 +84,9 @@ final class LocalDirectoryVaultAdapter implements VaultStorageAdapter {
 
   /// The local vault store providing path helpers and staging.
   final VaultStore _localStore;
+
+  /// The local KV store, used to verify the `$vault` ref before stub creation.
+  final KvStore _kvStore;
 
   // ── Remote path helpers ───────────────────────────────────────────────────
 
@@ -150,6 +157,12 @@ final class LocalDirectoryVaultAdapter implements VaultStorageAdapter {
   Future<void> syncVaultMetadata(String sha256) async {
     // Download `manifest.json` (and `tombstone.json` if present) from the
     // sync vault to the local vault, creating a stub.
+    //
+    // Ordering requirement: the caller must have established a positive
+    // `$vault:{sha256}` reference on this device **before** invoking this
+    // method (typically via SSTable ingest, which carries `$vault` entries
+    // authored by the originating device). [VaultStore.createStub] enforces
+    // this contract and throws [StateError] if the ref is absent or zero.
     final remoteManifest = File(_remoteManifestPath(sha256));
     if (!remoteManifest.existsSync()) {
       throw StateError(
@@ -162,9 +175,9 @@ final class LocalDirectoryVaultAdapter implements VaultStorageAdapter {
     final manifestBytes = await remoteManifest.readAsBytes();
     final manifest = VaultManifest.fromJsonString(utf8.decode(manifestBytes));
 
-    // Delegate to VaultStore.createStub which creates the hash directory
-    // and writes manifest.json atomically.
-    await _localStore.createStub(manifest);
+    // Delegate to VaultStore.createStub which checks the producer-side
+    // contract (positive ref required) and writes manifest.json.
+    await _localStore.createStub(manifest, kvStore: _kvStore);
 
     // Sync tombstone.json if present on the remote.
     final remoteTombstone = File(_remoteTombstonePath(sha256));

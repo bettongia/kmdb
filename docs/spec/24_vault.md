@@ -130,10 +130,20 @@ A **tombstoned** object has `tombstone.json` alongside `manifest.json` (and
 optionally `blob`). The GC sweep deletes the entire hash directory on its next
 pass.
 
-A stub always has a KV reference (it was created by `syncVaultMetadata` — see
-§24.7). An incomplete local write that leaves `manifest.json` without `blob`
-with no KV reference is an error state and is deleted by crash recovery — it
-is never a valid stub.
+A stub always has a positive KV reference. `syncVaultMetadata` is the only
+intended producer of stubs (see §24.7) and `VaultStore.createStub` enforces
+the producer-side contract: it reads `$vault:{sha256}` via the same
+fail-safe `VaultRefCount.read` used by GC and recovery, and refuses to write
+`manifest.json` when the reference is absent or zero. An undecodable ref is
+treated as referenced for consistency with the fail-safe rule (see
+[Fail-safe ref-count rule](#fail-safe-ref-count-rule)).
+
+A `manifest.json` without `blob` and with no KV reference is therefore by
+definition an error state — never a valid stub — and crash recovery deletes
+it on the next unclean open. This producer-side invariant is what makes the
+recovery rule "manifest present, no ref → delete" safe: it cannot
+misfire on a legitimate synced stub, because no legitimate synced stub
+leaves that state to begin with.
 
 ## Write Path
 

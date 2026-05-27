@@ -15,14 +15,14 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:kmdb/src/engine/kvstore/kv_store.dart';
-import 'package:kmdb/src/engine/util/hlc.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
 import 'package:kmdb/src/vault/media_type_detector.dart';
 import 'package:kmdb/src/vault/vault_manifest.dart';
 import 'package:kmdb/src/vault/vault_recovery.dart';
 import 'package:kmdb/src/vault/vault_store.dart';
 import 'package:test/test.dart';
+
+import 'test_kv_store.dart';
 
 // ── Test doubles ──────────────────────────────────────────────────────────────
 
@@ -60,118 +60,18 @@ final class _NoOpDetector implements MediaTypeDetector {
   Iterable<String> detect(Uint8List bytes, {String? fileName}) => [];
 }
 
-/// A minimal in-memory [KvStore] for testing vault recovery.
-///
-/// Only implements [get] (for ref count lookups); all write methods are no-ops.
-class _FakeKvStore implements KvStore {
-  final Map<String, Map<String, Uint8List>> _data = {};
-
-  /// Stores a vault ref count for [sha256].
-  void setRefCount(String sha256, int count) {
-    _data[kVaultNamespace] ??= {};
-    // Encode as a minimal CBOR map: flag(0x00) + map{refCount: N}
-    final keyBytes = utf8.encode('refCount');
-    final builder = BytesBuilder();
-    builder.addByte(0x00); // ValueCodec raw flag
-    builder.addByte(0xA1); // CBOR map with 1 pair
-    builder.addByte(0x60 | keyBytes.length); // text string
-    builder.add(keyBytes);
-    if (count <= 23) {
-      builder.addByte(count); // inline uint
-    } else if (count <= 255) {
-      builder.addByte(0x18);
-      builder.addByte(count);
-    } else {
-      builder.addByte(0x19);
-      builder.addByte((count >> 8) & 0xFF);
-      builder.addByte(count & 0xFF);
-    }
-    _data[kVaultNamespace]![sha256] = builder.toBytes();
-  }
-
-  /// Injects raw (possibly malformed) bytes for [sha256] under `$vault`.
-  ///
-  /// Used to simulate a corrupt/undecodable ref-count entry that recovery must
-  /// treat as "referenced" (retain), never as "no reference" (delete).
-  void setRawRefCount(String sha256, Uint8List bytes) {
-    _data[kVaultNamespace] ??= {};
-    _data[kVaultNamespace]![sha256] = bytes;
-  }
-
-  @override
-  Future<Uint8List?> get(String namespace, String key) async =>
-      _data[namespace]?[key];
-
-  @override
-  Future<void> put(String namespace, String key, Uint8List value) async {}
-
-  @override
-  Future<void> delete(String namespace, String key) async {}
-
-  @override
-  Future<void> writeBatch(WriteBatch batch) async {}
-
-  @override
-  Stream<KvEntry> scan(
-    String namespace, {
-    String? startKey,
-    String? endKey,
-  }) async* {}
-
-  @override
-  Future<void> close({bool flush = true}) async {}
-
-  @override
-  void setTombstoneHorizonProvider(Future<Hlc> Function()? provider) {}
-
-  @override
-  Future<void> compactAll() async {}
-
-  @override
-  Future<void> flush() async {}
-
-  @override
-  Future<StoreStats> stats() async => const StoreStats(
-    dbDir: '/test',
-    l0Count: 0,
-    l1Count: 0,
-    l2Count: 0,
-    totalSstBytes: 0,
-    totalDbBytes: 0,
-  );
-
-  @override
-  Future<StoreInfo> storeInfo() async =>
-      const StoreInfo(dbDir: '/test', deviceId: '00000000', currentHlc: '0');
-
-  @override
-  Future<void> reassignDeviceId(String newDeviceId) async {}
-
-  @override
-  Stream<String> get writeEvents => const Stream.empty();
-
-  @override
-  Future<void> ingestSstable(String filename, Uint8List bytes) async {}
-
-  @override
-  Future<List<String>> listNamespaces() async => [];
-
-  @override
-  Future<bool> createNamespace(String namespace) async => false;
-}
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 void main() {
   late MemoryStorageAdapter adapter;
   late TestVaultStore store;
-  late _FakeKvStore kvStore;
+  late TestKvStore kvStore;
 
   setUp(() {
     TestVaultStore._seq = 0;
     adapter = MemoryStorageAdapter();
     store = TestVaultStore(adapter);
-    kvStore = _FakeKvStore();
+    kvStore = TestKvStore();
   });
 
   group('VaultRecovery', () {
@@ -244,7 +144,13 @@ void main() {
       });
 
       test('stub (manifest-only) with KV ref is preserved', () async {
+        // The producer-side contract on [VaultStore.createStub] requires the
+        // ref to be established *before* the manifest write, so the call
+        // order here matches what a correctly-implemented syncVaultMetadata
+        // would do (SSTable ingest establishes the ref, then the stub is
+        // materialised).
         final sha256 = 'dd' * 32;
+        kvStore.setRefCount(sha256, 1);
         final manifest = VaultManifest(
           sha256: sha256,
           size: 50,
@@ -253,8 +159,7 @@ void main() {
           originalName: 'remote.png',
           createdAt: 't1',
         );
-        await store.createStub(manifest);
-        kvStore.setRefCount(sha256, 1);
+        await store.createStub(manifest, kvStore: kvStore);
 
         final result = await makeRecovery().recover();
         expect(result.hashDirsDeleted, equals(0));
@@ -262,7 +167,13 @@ void main() {
         expect(await store.isHydrated(sha256), isFalse);
       });
 
-      test('stub (manifest-only) without KV ref is deleted', () async {
+      test('ref-less manifest (contract violation) is deleted', () async {
+        // Under the producer-side contract, [VaultStore.createStub] refuses
+        // to write a ref-less manifest. To exercise recovery's behaviour
+        // when the contract has been violated upstream (e.g. by a buggy
+        // adapter, a pre-contract on-disk state, or filesystem corruption),
+        // write the manifest directly via the storage adapter so the
+        // hash dir reaches the error state recovery is meant to reap.
         final sha256 = 'ee' * 32;
         final manifest = VaultManifest(
           sha256: sha256,
@@ -272,8 +183,12 @@ void main() {
           originalName: 'orphan.png',
           createdAt: 't1',
         );
-        await store.createStub(manifest);
-        // No KV ref.
+        await adapter.createDirectory(store.hashDir(sha256));
+        await adapter.writeFile(
+          store.manifestPath(sha256),
+          Uint8List.fromList(utf8.encode(manifest.toJsonString())),
+        );
+        // No KV ref — violates the spec invariant.
 
         final result = await makeRecovery().recover();
         expect(result.hashDirsDeleted, equals(1));
