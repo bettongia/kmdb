@@ -168,7 +168,7 @@ For each release:
 - **Expected result:** no device observes the resurrected value; all devices
   agree the key is absent.
 - **Related:** `docs/spec/06_storage_engine.md`, `docs/spec/12_sync.md`,
-  `docs/plans/plan_tombstone_gc.md`,
+  `docs/plans/completed/plan_tombstone_gc.md`,
   `docs/plans/plan_harness_mixed_storage.md`.
 
 ---
