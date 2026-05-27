@@ -42,13 +42,16 @@ Future<(KvStoreImpl, OpenResult)> _open(
 );
 
 /// Opens a [KvStoreImpl] with [clock] injected via [CrashRecovery] so that
-/// the wall clock seen by [LsmEngine] is fully deterministic.
+/// the wall clock seen by [LsmEngine] is fully deterministic. [config]
+/// overrides the default test config (useful for tuning
+/// `tombstoneGraceDuration`).
 Future<KvStoreImpl> openWithClock(
   MemoryStorageAdapter adapter,
-  HlcClock clock,
-) async {
-  final config = KvStoreConfig.forTesting();
-  final recovery = CrashRecovery(adapter: adapter, config: config);
+  HlcClock clock, {
+  KvStoreConfig? config,
+}) async {
+  final resolvedConfig = config ?? KvStoreConfig.forTesting();
+  final recovery = CrashRecovery(adapter: adapter, config: resolvedConfig);
   final (engine, recoveryResult) = await recovery.open(
     _dbDir,
     deviceId: 'testdev1',
@@ -59,7 +62,7 @@ Future<KvStoreImpl> openWithClock(
   return KvStoreImpl.forTesting(
     engine,
     meta,
-    config,
+    resolvedConfig,
     dirtyFlagPresent: hadUnclosedSession || recoveryResult.hadInterruptedWrites,
   );
 }
@@ -363,6 +366,160 @@ void main() {
         await store.close();
       },
     );
+
+    test(
+      'H4 PR2 (local-only): a tombstone older than tombstoneGraceDuration is '
+      'dropped by compactAll; a younger one is retained',
+      () async {
+        // Inject a mutable wall clock so we can deterministically position
+        // writes/deletes inside vs outside the grace window.
+        var wallMs = 1000;
+        final clock = HlcClock(wallClock: () => wallMs);
+
+        final adapter = _newAdapter();
+        // Short grace window so the test stays fast and exercises the
+        // wall-clock fallback path inside _computeTombstoneHorizon.
+        final config = KvStoreConfig.forTesting();
+        // forTesting() doesn't override tombstoneGraceDuration; rebuild with
+        // a short window so the test isn't tied to the 7-day default.
+        final shortGrace = KvStoreConfig(
+          memtableSizeBytes: config.memtableSizeBytes,
+          l0CompactionTrigger: config.l0CompactionTrigger,
+          l1MaxBytes: config.l1MaxBytes,
+          l2MaxBytes: config.l2MaxBytes,
+          singleFileThresholdBytes: config.singleFileThresholdBytes,
+          fsyncOnWrite: config.fsyncOnWrite,
+          tombstoneGraceDuration: const Duration(milliseconds: 100),
+        );
+        final store = await openWithClock(adapter, clock, config: shortGrace);
+
+        final oldKey = _key(0);
+        final newKey = _key(1);
+
+        // First batch — old data at wallMs=1000, then flush so the next
+        // round produces a second SSTable. Two SSTables satisfies the
+        // `totalFiles > 1` condition for the single-file collapse path,
+        // which is what fires `_compactAll` (the only path that may drop
+        // tombstones).
+        await store.put('ns', oldKey, _bytes('old-payload'));
+        await store.put('ns', newKey, _bytes('new-payload'));
+        await store.delete('ns', oldKey); // tombstone hlc ~ (1000, _)
+        await store.flush();
+
+        // Advance past the grace window only for oldKey's tombstone.
+        wallMs =
+            1300; // 1300 - 100 (grace) = 1200 horizon; oldKey delete < 1200.
+        await store.delete('ns', newKey); // tombstone hlc ~ (1300, _)
+        await store.flush();
+
+        // 2 small L0 files → totalFiles > 1, total bytes small → single-file
+        // collapse fires `_compactAll`, which is the only path that can drop
+        // tombstones (allLevels=true). horizon = now(1300) - grace(100) = 1200.
+        //   oldKey delete (HLC ~ 1000) < 1200 → eligible for drop.
+        //   newKey delete (HLC ~ 1300) >= 1200 → retained.
+        await store.compactAll();
+
+        // Reads return absent for both (both deleted).
+        expect(await store.get('ns', oldKey), isNull);
+        expect(await store.get('ns', newKey), isNull);
+
+        // Scan on-disk SSTables to verify physical reclamation. The oldKey's
+        // tombstone must be gone; the newKey's tombstone must remain.
+        final oldKeyBytes = KeyCodec.keyToBytes(oldKey);
+        final newKeyBytes = KeyCodec.keyToBytes(newKey);
+        var oldMatches = 0;
+        var newMatches = 0;
+        for (final path in adapter.files.keys.where(
+          (k) => k.endsWith('.sst'),
+        )) {
+          final reader = await SstableReader.open(path, adapter);
+          await for (final entry in reader.scan()) {
+            final entryKey = KeyCodec.decodeUserKey(entry.key);
+            if (_bytesEqual(entryKey, oldKeyBytes)) oldMatches++;
+            if (_bytesEqual(entryKey, newKeyBytes)) newMatches++;
+          }
+        }
+        expect(oldMatches, equals(0), reason: 'oldKey tombstone must be GC\'d');
+        expect(newMatches, equals(1), reason: 'newKey tombstone must remain');
+
+        await store.close();
+      },
+    );
+
+    test('H4 PR2: setTombstoneHorizonProvider overrides the local-only '
+        'wall-clock fallback (used by SyncEngine for min(currentHlc) across '
+        'HWMs)', () async {
+      // Wall clock far in the future; the local-only fallback would
+      // therefore drop any tombstone we can write here. But we install a
+      // provider that pegs the horizon at Hlc(0, 0) — simulating a synced
+      // database where peers have not yet pushed any HWMs — and assert
+      // that the override wins.
+      var wallMs = 100000;
+      final clock = HlcClock(wallClock: () => wallMs);
+      final adapter = _newAdapter();
+      final config = KvStoreConfig(
+        memtableSizeBytes: 4096,
+        l0CompactionTrigger: 2,
+        l1MaxBytes: 16 * 1024,
+        l2MaxBytes: 64 * 1024,
+        singleFileThresholdBytes: 8 * 1024,
+        fsyncOnWrite: false,
+        tombstoneGraceDuration: const Duration(milliseconds: 10),
+      );
+      final store = await openWithClock(adapter, clock, config: config);
+
+      // Override: provider always returns Hlc(0, 0) — no tombstone can
+      // ever satisfy `hlc < Hlc(0, 0)`, so none should ever drop.
+      store.setTombstoneHorizonProvider(() async => const Hlc(0, 0));
+
+      final key = _key(0);
+      await store.put('ns', key, _bytes('x'));
+      await store.flush();
+      await store.delete('ns', key);
+      await store.flush();
+      wallMs = 200000;
+      // 2 small L0 files → single-file collapse → `_compactAll` fires.
+      await store.compactAll();
+
+      // Tombstone must survive — the provider's Hlc(0, 0) horizon takes
+      // precedence over the wall-clock fallback that would have dropped it.
+      final keyBytes = KeyCodec.keyToBytes(key);
+      var matches = 0;
+      for (final path in adapter.files.keys.where((k) => k.endsWith('.sst'))) {
+        final reader = await SstableReader.open(path, adapter);
+        await for (final entry in reader.scan()) {
+          if (_bytesEqual(KeyCodec.decodeUserKey(entry.key), keyBytes)) {
+            matches++;
+          }
+        }
+      }
+      expect(matches, equals(1));
+
+      // Now clear the provider — wall-clock fallback should fire on the
+      // next compactAll, dropping the tombstone.
+      store.setTombstoneHorizonProvider(null);
+      // Need 2+ files for the single-file collapse path that triggers
+      // `_compactAll`. We have the one consolidated file from above; add
+      // a second flush so the trigger fires.
+      await store.put('ns', _key(1), _bytes('y'));
+      await store.flush();
+      await store.put('ns', _key(2), _bytes('z'));
+      await store.flush();
+      await store.compactAll();
+
+      matches = 0;
+      for (final path in adapter.files.keys.where((k) => k.endsWith('.sst'))) {
+        final reader = await SstableReader.open(path, adapter);
+        await for (final entry in reader.scan()) {
+          if (_bytesEqual(KeyCodec.decodeUserKey(entry.key), keyBytes)) {
+            matches++;
+          }
+        }
+      }
+      expect(matches, equals(0));
+
+      await store.close();
+    });
   });
 
   group('LsmEngine — writeEvents', () {

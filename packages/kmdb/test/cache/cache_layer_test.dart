@@ -20,6 +20,7 @@ import 'package:kmdb/src/cache/cache_tier.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store_impl.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
+import 'package:kmdb/src/engine/util/hlc.dart';
 import 'package:test/test.dart';
 
 // ── Counting KvStore wrapper ──────────────────────────────────────────────────
@@ -50,6 +51,9 @@ final class _CountingStore implements KvStore {
   Future<void> flush() => _inner.flush();
   @override
   Future<void> compactAll() => _inner.compactAll();
+  @override
+  void setTombstoneHorizonProvider(Future<Hlc> Function()? provider) =>
+      _inner.setTombstoneHorizonProvider(provider);
   @override
   Future<void> ingestSstable(String filename, Uint8List bytes) =>
       _inner.ingestSstable(filename, bytes);

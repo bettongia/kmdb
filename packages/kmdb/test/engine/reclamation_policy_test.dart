@@ -15,6 +15,7 @@
 import 'package:test/test.dart';
 
 import 'package:kmdb/src/engine/compaction/reclamation_policy.dart';
+import 'package:kmdb/src/engine/util/hlc.dart';
 
 void main() {
   group('ReclamationPolicyRegistry.resolve', () {
@@ -97,6 +98,125 @@ void main() {
 
     test('RetainAllVersionsPolicy retains', () {
       expect(const RetainAllVersionsPolicy().collapseVersions, isFalse);
+    });
+  });
+
+  // ── H4 PR2: tombstone-drop predicate ──────────────────────────────────────
+
+  group('CollapseToNewestPolicy.dropTombstone (H4 PR2)', () {
+    const policy = CollapseToNewestPolicy();
+
+    test('drops a tombstone strictly below horizon when allLevels is true', () {
+      expect(
+        policy.dropTombstone(
+          allLevels: true,
+          tombstoneHlc: const Hlc(100, 0),
+          horizon: const Hlc(200, 0),
+        ),
+        isTrue,
+      );
+    });
+
+    test('refuses to drop when allLevels is false (partial compaction)', () {
+      // The level-recency safety condition fails: an older version of the
+      // key may live in a level not covered by this compaction. Dropping
+      // would resurrect it.
+      expect(
+        policy.dropTombstone(
+          allLevels: false,
+          tombstoneHlc: const Hlc(100, 0),
+          horizon: const Hlc(200, 0),
+        ),
+        isFalse,
+      );
+    });
+
+    test(
+      'refuses to drop when tombstone HLC equals horizon (strictly-below)',
+      () {
+        // The horizon represents "every device has synced past this HLC".
+        // A tombstone *at* the horizon has been observed by every device,
+        // but the rule uses strict `<` to keep the comparison defensible
+        // against any future relaxation of the horizon definition.
+        expect(
+          policy.dropTombstone(
+            allLevels: true,
+            tombstoneHlc: const Hlc(200, 0),
+            horizon: const Hlc(200, 0),
+          ),
+          isFalse,
+        );
+      },
+    );
+
+    test('refuses to drop when tombstone HLC is above horizon', () {
+      // Some peer device has not yet synced past this tombstone and may
+      // still hold an older copy of the key. Dropping would risk
+      // resurrection.
+      expect(
+        policy.dropTombstone(
+          allLevels: true,
+          tombstoneHlc: const Hlc(300, 0),
+          horizon: const Hlc(200, 0),
+        ),
+        isFalse,
+      );
+    });
+
+    test(
+      'horizon of Hlc(0, 0) (the engine default fallback) blocks every drop',
+      () {
+        // No realistic tombstone has an HLC strictly below `Hlc(0, 0)`, so
+        // the default until the engine wires in a real horizon never drops.
+        expect(
+          policy.dropTombstone(
+            allLevels: true,
+            tombstoneHlc: const Hlc(1, 0),
+            horizon: const Hlc(0, 0),
+          ),
+          isFalse,
+        );
+      },
+    );
+
+    test('logical component participates in the < comparison', () {
+      // Same physical ms but different logical component — the logical
+      // component matters for tie-breaking and must be honoured.
+      expect(
+        policy.dropTombstone(
+          allLevels: true,
+          tombstoneHlc: const Hlc(100, 5),
+          horizon: const Hlc(100, 6),
+        ),
+        isTrue,
+      );
+      expect(
+        policy.dropTombstone(
+          allLevels: true,
+          tombstoneHlc: const Hlc(100, 7),
+          horizon: const Hlc(100, 6),
+        ),
+        isFalse,
+      );
+    });
+  });
+
+  group('RetainAllVersionsPolicy.dropTombstone (H4 PR2)', () {
+    const policy = RetainAllVersionsPolicy();
+
+    test('never drops a tombstone, regardless of allLevels/horizon', () {
+      // History-bearing namespaces (e.g. `$ver:`) keep every record.
+      for (final allLevels in [true, false]) {
+        expect(
+          policy.dropTombstone(
+            allLevels: allLevels,
+            tombstoneHlc: const Hlc(1, 0),
+            horizon: const Hlc(100000, 0),
+          ),
+          isFalse,
+          reason: 'allLevels=$allLevels should still retain tombstones',
+        );
+      }
     });
   });
 }

@@ -139,22 +139,47 @@ occurs during compaction merge:
 
 ## Tombstone Retention & Garbage Collection
 
-Tombstones cannot be dropped during compaction until every known device has
-processed past the tombstone's HLC timestamp. The protocol uses .hwm files to
-track this:
+Tombstones must be retained until every known device has processed past the
+tombstone's HLC timestamp; dropping them sooner allows a peer holding an
+older copy of the deleted key to resurrect it on next sync. The protocol
+uses `.hwm` files to compute a **GC horizon** that compaction consults
+before dropping a surviving tombstone.
 
-- **Safe to drop:** A tombstone with HLC T can be dropped when every device's
-  .hwm file shows a peer entry for this device ≥ T.
+- **GC horizon (synced).** `HighwaterMark.minCurrentHlcAcrossDevices` scans
+  every `{syncRoot}/highwater/*.hwm` file and returns
+  `min(currentHlc)` — every device has reported syncing past this point.
+  A tombstone with HLC strictly below the horizon has been observed
+  everywhere and is safe to drop. `SyncEngine`'s constructor registers
+  this computation as the store's horizon provider via
+  `KvStore.setTombstoneHorizonProvider`.
 
-- **Stale device policy:** If a device's .hwm file has not been updated for 90
-  days (configurable), it is considered stale. Tombstones are retained for stale
-  devices up to the policy limit, after which they are dropped. A stale device
-  returning online must perform a full re-sync rather than incremental catch-up.
+- **GC horizon (local-only).** When no `SyncEngine` is attached, the engine
+  falls back to `now - tombstoneGraceDuration` (default 7 days, see
+  `KvStoreConfig`). The grace window is a conservative bound that protects
+  the local → synced transition: if sync is enabled within the window,
+  every tombstone written before the transition is still present to
+  suppress peer values on first sync.
 
-- **SSTable garbage collection:** An SSTable can be deleted from the sync folder
-  when every device's .hwm file shows processing past that SSTable's maxHlc. The
-  device that produced the SSTable is responsible for deleting it, avoiding race
-  conditions on deletion.
+- **Safety conditions.** A surviving tombstone is dropped only when both:
+  (a) the compaction covers every level that could hold an older version
+  (in practice, the single-file `_compactAll` path — KMDB levels do *not*
+  imply recency because sync ingest places old-HLC data into L0; partial
+  compactions always retain tombstones); and (b) `tombstone.hlc < horizon`.
+  See `docs/spec/06_storage_engine.md#reclamation-tombstone-gc` for the
+  engine-side mechanism.
+
+- **Known limitation: slowest-device peg.** The strict `min(currentHlc)`
+  horizon is pegged by the slowest device. A peer that goes offline and
+  never returns blocks tombstone GC indefinitely. An eviction rule (max
+  device staleness) is intentionally deferred — see
+  `docs/plans/plan_tombstone_gc.md`. A stale-device policy similar to the
+  one historically described here (90-day timeout, requiring full re-sync)
+  is the expected follow-up.
+
+- **SSTable garbage collection:** An SSTable can be deleted from the sync
+  folder when every device's `.hwm` file shows processing past that
+  SSTable's maxHlc. The device that produced the SSTable is responsible
+  for deleting it, avoiding race conditions on deletion.
 
 ## `KmdbDatabase` Sync API
 

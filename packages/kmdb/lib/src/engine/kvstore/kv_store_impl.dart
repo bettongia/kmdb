@@ -17,6 +17,7 @@ import 'dart:typed_data';
 import 'package:meta/meta.dart' show internal;
 
 import '../platform/storage_adapter_interface.dart';
+import '../util/hlc.dart';
 import 'crash_recovery.dart';
 import 'device_id.dart';
 import 'kv_store.dart';
@@ -237,6 +238,11 @@ final class KvStoreImpl implements KvStore {
     );
     await _engine.adapter.syncFile(deviceIdPath);
     await _engine.adapter.syncDir(_engine.dbDir);
+  }
+
+  @override
+  void setTombstoneHorizonProvider(Future<Hlc> Function()? provider) {
+    _engine.setTombstoneHorizonProvider(provider);
   }
 
   @override

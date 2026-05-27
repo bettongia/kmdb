@@ -142,6 +142,35 @@ For each release:
   deadlocks, or data loss; any fork is resolved to the correct LWW winner.
 - **Related:** `docs/spec/27_test_harness.md`.
 
+### RC-6 — Multi-device tombstone non-resurrection
+- **Area:** sync + compaction (H4 PR2)
+- **Validates:** that the sync-horizon-gated tombstone GC in `_compactAll` does
+  not allow a deleted key to resurrect across devices. Device A writes a key,
+  deletes it, and runs `_compactAll` with a horizon below the tombstone HLC
+  so the tombstone is dropped. Device B (carrying an older copy of the key in
+  its synced SSTables) then converges with A. The key must remain deleted
+  globally.
+- **Why not automated (as a gate):** the cross-device assertion requires the
+  per-device adapter harness from `docs/plans/plan_harness_mixed_storage.md`,
+  which is not yet landed. The in-process invariant — that PR2 retains
+  tombstones whose HLC is at or above the horizon — *is* covered in CI by
+  the `compaction_test.dart` and `lsm_engine_test.dart` PR2 tests; RC-6
+  is the cross-device companion.
+- **Applies when:** changes to the tombstone-GC predicate, the horizon
+  computation, the HWM-min helper, or `SyncEngine`'s horizon-provider
+  registration.
+- **Prerequisites:** `plan_harness_mixed_storage.md` landed; multi-device
+  harness scenario from that plan's Step 5 wired up.
+- **Steps:** run the harness scenario that drives a fresh delete on device A,
+  forces `_compactAll` with horizon below the tombstone HLC, then drives
+  device B's sync. Assert `get` for the deleted key returns null on every
+  device after settle.
+- **Expected result:** no device observes the resurrected value; all devices
+  agree the key is absent.
+- **Related:** `docs/spec/06_storage_engine.md`, `docs/spec/12_sync.md`,
+  `docs/plans/plan_tombstone_gc.md`,
+  `docs/plans/plan_harness_mixed_storage.md`.
+
 ---
 
 ## Release log

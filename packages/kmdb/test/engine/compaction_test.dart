@@ -598,6 +598,236 @@ void main() {
       },
     );
   });
+
+  // ── H4 PR2: safe tombstone GC ─────────────────────────────────────────────
+  //
+  // Tombstone drop is gated by two safety conditions on [CompactionJob]:
+  //   * `allLevels: true` — this compaction covers every level that could
+  //     hold an older version of any key in its inputs. Only the engine's
+  //     `_compactAll` path sets this.
+  //   * `horizon` — the tombstone's HLC must be strictly below this point;
+  //     supplied by `LsmEngine` as `min(currentHlc)` across HWMs when
+  //     synced, or `now - tombstoneGraceDuration` when local-only.
+  // The streaming transform consults the active [ReclamationPolicy] via
+  // [ReclamationPolicy.dropTombstone] only when the group's surviving entry
+  // is itself a tombstone.
+
+  group('CompactionJob — safe tombstone GC (H4 PR2)', () {
+    test(
+      'drops a surviving tombstone when allLevels is true and hlc < horizon',
+      () async {
+        final adapter = MemoryStorageAdapter();
+        await adapter.createDirectory(_sstDir);
+
+        final put = _ikey('users', 'a', const Hlc(1, 0));
+        final tomb = _ikey(
+          'users',
+          'a',
+          const Hlc(2, 0),
+          type: RecordType.delete,
+        );
+        final f = await _writeSSTable(adapter, 'a.sst', [
+          (put, _val(1)),
+          (tomb, Uint8List(0)),
+        ]);
+
+        final job = CompactionJob(
+          sstDir: _sstDir,
+          deviceId: _deviceId,
+          outputLevel: 2,
+          inputs: [SstableRef(level: 0, filename: f)],
+          adapter: adapter,
+          manifestWriter: ManifestWriter(path: _manifestPath, adapter: adapter),
+          logNumber: 1,
+          nextSeq: 100,
+          allLevels: true,
+          horizon: const Hlc(10, 0),
+        );
+        final edit = await job.run();
+
+        // Output SSTable must be empty: tombstone dropped, put already
+        // dropped by collapse, no other live records.
+        expect(edit.added, isEmpty);
+      },
+    );
+
+    test('retains a surviving tombstone when allLevels is false (partial '
+        'compaction) even if hlc < horizon', () async {
+      final adapter = MemoryStorageAdapter();
+      await adapter.createDirectory(_sstDir);
+
+      final put = _ikey('users', 'a', const Hlc(1, 0));
+      final tomb = _ikey(
+        'users',
+        'a',
+        const Hlc(2, 0),
+        type: RecordType.delete,
+      );
+      final f = await _writeSSTable(adapter, 'a.sst', [
+        (put, _val(1)),
+        (tomb, Uint8List(0)),
+      ]);
+
+      // Default for [allLevels] is false — partial compaction.
+      final job = CompactionJob(
+        sstDir: _sstDir,
+        deviceId: _deviceId,
+        outputLevel: 1,
+        inputs: [SstableRef(level: 0, filename: f)],
+        adapter: adapter,
+        manifestWriter: ManifestWriter(path: _manifestPath, adapter: adapter),
+        logNumber: 1,
+        nextSeq: 100,
+        horizon: const Hlc(10, 0),
+      );
+      final edit = await job.run();
+
+      // Tombstone must survive (older version may live in an excluded
+      // level not included in this compaction).
+      final reader = await SstableReader.open(
+        '$_sstDir/${edit.added[0].filename}',
+        adapter,
+      );
+      final out = await reader.scan().toList();
+      expect(out.length, equals(1));
+      expect(KeyCodec.decodeRecordType(out[0].key), equals(RecordType.delete));
+    });
+
+    test('retains a surviving tombstone when allLevels is true but hlc >= '
+        'horizon (some peer has not yet observed the delete)', () async {
+      final adapter = MemoryStorageAdapter();
+      await adapter.createDirectory(_sstDir);
+
+      final tomb = _ikey(
+        'users',
+        'a',
+        const Hlc(200, 0),
+        type: RecordType.delete,
+      );
+      final f = await _writeSSTable(adapter, 'a.sst', [(tomb, Uint8List(0))]);
+
+      final job = CompactionJob(
+        sstDir: _sstDir,
+        deviceId: _deviceId,
+        outputLevel: 2,
+        inputs: [SstableRef(level: 0, filename: f)],
+        adapter: adapter,
+        manifestWriter: ManifestWriter(path: _manifestPath, adapter: adapter),
+        logNumber: 1,
+        nextSeq: 100,
+        allLevels: true,
+        // horizon at the tombstone's HLC — the rule is strictly-below.
+        horizon: const Hlc(200, 0),
+      );
+      final edit = await job.run();
+
+      final reader = await SstableReader.open(
+        '$_sstDir/${edit.added[0].filename}',
+        adapter,
+      );
+      final out = await reader.scan().toList();
+      expect(out.length, equals(1));
+      expect(KeyCodec.decodeRecordType(out[0].key), equals(RecordType.delete));
+    });
+
+    test('mixed group: write → tombstone → later write, the surviving '
+        'entry is the later put (PR1 collapse). PR2 must NOT touch the put '
+        "even though it sits 'after' a tombstone in the same group", () async {
+      final adapter = MemoryStorageAdapter();
+      await adapter.createDirectory(_sstDir);
+
+      // (HLC ascending — sort order in an SSTable input):
+      //   1. put v1
+      //   2. delete tombstone
+      //   3. put v3 (resurrects the key)
+      final v1 = _ikey('users', 'a', const Hlc(1, 0));
+      final tomb = _ikey(
+        'users',
+        'a',
+        const Hlc(2, 0),
+        type: RecordType.delete,
+      );
+      final v3 = _ikey('users', 'a', const Hlc(3, 0));
+      final f = await _writeSSTable(adapter, 'a.sst', [
+        (v1, _val(1)),
+        (tomb, Uint8List(0)),
+        (v3, _val(3)),
+      ]);
+
+      final job = CompactionJob(
+        sstDir: _sstDir,
+        deviceId: _deviceId,
+        outputLevel: 2,
+        inputs: [SstableRef(level: 0, filename: f)],
+        adapter: adapter,
+        manifestWriter: ManifestWriter(path: _manifestPath, adapter: adapter),
+        logNumber: 1,
+        nextSeq: 100,
+        allLevels: true,
+        horizon: const Hlc(100, 0),
+      );
+      final edit = await job.run();
+
+      // The surviving entry of the group is the later put; collapse
+      // dropped the tombstone (as a superseded *non-surviving* version,
+      // not as a PR2 GC). The put must NOT be dropped — only surviving
+      // tombstones are eligible for PR2 GC.
+      final reader = await SstableReader.open(
+        '$_sstDir/${edit.added[0].filename}',
+        adapter,
+      );
+      final out = await reader.scan().toList();
+      expect(out.length, equals(1));
+      expect(out[0].value, equals(_val(3)));
+      expect(KeyCodec.decodeRecordType(out[0].key), equals(RecordType.put));
+    });
+
+    test(
+      "RetainAllVersionsPolicy never drops tombstones — the \$ver: "
+      'namespace keeps a tombstone even when allLevels and hlc < horizon',
+      () async {
+        final adapter = MemoryStorageAdapter();
+        await adapter.createDirectory(_sstDir);
+
+        final tomb = _ikey(
+          r'$ver:users',
+          'a',
+          const Hlc(2, 0),
+          type: RecordType.delete,
+        );
+        final f = await _writeSSTable(adapter, 'a.sst', [(tomb, Uint8List(0))]);
+
+        final job = CompactionJob(
+          sstDir: _sstDir,
+          deviceId: _deviceId,
+          outputLevel: 2,
+          inputs: [SstableRef(level: 0, filename: f)],
+          adapter: adapter,
+          manifestWriter: ManifestWriter(path: _manifestPath, adapter: adapter),
+          logNumber: 1,
+          nextSeq: 100,
+          allLevels: true,
+          horizon: const Hlc(100, 0),
+        );
+        final edit = await job.run();
+
+        // \$ver: is retain-all and `RetainAllVersionsPolicy.dropTombstone`
+        // returns false unconditionally — but the retain-all path doesn't
+        // even consult dropTombstone (it emits every entry verbatim). The
+        // tombstone must survive either way.
+        final reader = await SstableReader.open(
+          '$_sstDir/${edit.added[0].filename}',
+          adapter,
+        );
+        final out = await reader.scan().toList();
+        expect(out.length, equals(1));
+        expect(
+          KeyCodec.decodeRecordType(out[0].key),
+          equals(RecordType.delete),
+        );
+      },
+    );
+  });
 }
 
 int _cmpKey(Uint8List a, Uint8List b) {

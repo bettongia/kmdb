@@ -14,6 +14,8 @@
 
 import 'dart:typed_data';
 
+import '../util/hlc.dart';
+
 // ── KvStore interface ─────────────────────────────────────────────────────────
 
 /// The primary key-value storage interface.
@@ -173,6 +175,23 @@ abstract interface class KvStore {
   /// After [close] returns the instance must not be used again. A new
   /// instance can be opened on the same path.
   Future<void> close({bool flush = true});
+
+  /// Registers a callback that computes the GC horizon used by the
+  /// all-levels compaction path to decide when a surviving delete
+  /// tombstone may be dropped.
+  ///
+  /// A tombstone is eligible for drop only when its HLC is strictly below
+  /// the returned horizon (see `plan_tombstone_gc.md`). The callback is
+  /// invoked before each `_compactAll` and must not throw.
+  ///
+  /// When no provider is set, the engine falls back to the local-only
+  /// computation `now - KvStoreConfig.tombstoneGraceDuration`. Pass `null`
+  /// to revert to that default — for example if the [SyncEngine] is being
+  /// detached or disabled.
+  ///
+  /// Used by [SyncEngine] to supply `min(currentHlc)` across all peer HWM
+  /// files in the sync folder; not part of the normal application API.
+  void setTombstoneHorizonProvider(Future<Hlc> Function()? provider);
 }
 
 // ── StoreStats ────────────────────────────────────────────────────────────────
@@ -340,6 +359,7 @@ final class KvStoreConfig {
     this.watchDebounce = const Duration(milliseconds: 50),
     this.maxClockSkew = const Duration(seconds: 60),
     this.maxValueBytes = 1024 * 1024,
+    this.tombstoneGraceDuration = const Duration(days: 7),
   });
 
   /// Memtable flush threshold in bytes.
@@ -393,6 +413,28 @@ final class KvStoreConfig {
 
   /// Sentinel value for [maxValueBytes] that disables the size check entirely.
   static const int maxValueBytesUnlimited = -1;
+
+  /// Wall-clock grace window before a delete tombstone is eligible for GC
+  /// on a **local-only** database (no sync configured). The horizon used by
+  /// the all-levels compaction path is `now - tombstoneGraceDuration`:
+  /// tombstones older than this can be dropped, younger ones are retained.
+  ///
+  /// The grace window protects the local → synced transition. If sync is
+  /// enabled within the window, every tombstone written before the
+  /// transition is still present to suppress peer values on first sync.
+  /// Setting this too short permits deleted data to resurrect on the first
+  /// post-enable sync if any peer ever held an older copy.
+  ///
+  /// On a synced database the engine uses `min(currentHlc)` across all
+  /// `.hwm` files instead and this value is ignored. See `plan_tombstone_gc.md`
+  /// (H4 PR2) for the safety analysis.
+  ///
+  /// Defaults to 7 days — comfortably greater than the expected maximum
+  /// time between sync attempts in any practical KMDB deployment, while
+  /// short enough that deleted data is reclaimed in a reasonable window.
+  /// Set to [Duration.zero] only when tombstones must drop on the next
+  /// compaction (e.g. tests).
+  final Duration tombstoneGraceDuration;
 
   /// Configuration for unit tests: tiny thresholds, no fsync, small cache.
   factory KvStoreConfig.forTesting() => const KvStoreConfig(
