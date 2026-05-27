@@ -2,7 +2,7 @@
 
 **Status**: Implementing
 
-**PR link**: {pending}
+**PR link**: https://github.com/bettongia/kmdb/pull/25
 
 **Depends on:** [plan_compaction_reclamation.md](completed/plan_compaction_reclamation.md)
 (PR1 — version collapse + reclamation policy hook, now merged). PR2 builds on the same
