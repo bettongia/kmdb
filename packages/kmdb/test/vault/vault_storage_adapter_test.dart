@@ -21,6 +21,8 @@ import 'package:kmdb/src/vault/local_directory_vault_adapter.dart';
 import 'package:kmdb/src/vault/vault_store.dart';
 import 'package:test/test.dart';
 
+import 'test_kv_store.dart';
+
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
 /// A [VaultStore] subclass that overrides [listFilesRecursive] for the
@@ -51,6 +53,7 @@ void main() {
     late Directory localDbDir;
     late VaultStore localStore;
     late LocalDirectoryVaultAdapter adapter;
+    late TestKvStore localKvStore;
 
     setUp(() async {
       // Create fresh temp directories for each test.
@@ -61,10 +64,12 @@ void main() {
       // for simplicity in tests.
       final memAdapter = MemoryStorageAdapter();
       localStore = _MemVaultStore(memAdapter, localDbDir.path);
+      localKvStore = TestKvStore();
 
       adapter = LocalDirectoryVaultAdapter(
         syncRoot: syncRoot.path,
         localStore: localStore,
+        kvStore: localKvStore,
       );
     });
 
@@ -176,9 +181,14 @@ void main() {
         // Create a fresh local store that simulates another device (no objects).
         final deviceBAdapter = MemoryStorageAdapter();
         final deviceBStore = _MemVaultStore(deviceBAdapter, '/device_b');
+        final deviceBKvStore = TestKvStore();
+        // Simulate the ref arriving via SSTable ingest before metadata sync —
+        // the ordering precondition documented on [syncVaultMetadata].
+        deviceBKvStore.setRefCount(ref.sha256, 1);
         final adapterB = LocalDirectoryVaultAdapter(
           syncRoot: syncRoot.path,
           localStore: deviceBStore,
+          kvStore: deviceBKvStore,
         );
 
         // Sync metadata to device B.
@@ -219,9 +229,11 @@ void main() {
           deviceBAdapter,
           '/device_b_hydrate',
         );
+        final deviceBKvStore = TestKvStore()..setRefCount(ref.sha256, 1);
         final adapterB = LocalDirectoryVaultAdapter(
           syncRoot: syncRoot.path,
           localStore: deviceBStore,
+          kvStore: deviceBKvStore,
         );
         await adapterB.syncVaultMetadata(ref.sha256);
         expect(await deviceBStore.isHydrated(ref.sha256), isFalse);
@@ -307,9 +319,11 @@ void main() {
         // Device B syncs metadata.
         final deviceBAdapter = MemoryStorageAdapter();
         final deviceBStore = _MemVaultStore(deviceBAdapter, '/device_b_tomb');
+        final deviceBKvStore = TestKvStore()..setRefCount(ref.sha256, 1);
         final adapterB = LocalDirectoryVaultAdapter(
           syncRoot: syncRoot.path,
           localStore: deviceBStore,
+          kvStore: deviceBKvStore,
         );
         await adapterB.syncVaultMetadata(ref.sha256);
 

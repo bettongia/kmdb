@@ -27,6 +27,8 @@ import 'package:kmdb/src/vault/local_directory_vault_adapter.dart';
 import 'package:kmdb/src/vault/vault_store.dart';
 import 'package:test/test.dart';
 
+import 'test_kv_store.dart';
+
 // ── Test doubles ──────────────────────────────────────────────────────────────
 
 import 'package:kmdb/src/vault/media_type_detector.dart';
@@ -62,10 +64,12 @@ void main() {
     late MemoryStorageAdapter deviceAAdapter;
     late _DeviceVaultStore deviceAStore;
     late LocalDirectoryVaultAdapter deviceAAdapter2;
+    late TestKvStore deviceAKvStore;
 
     late MemoryStorageAdapter deviceBMemAdapter;
     late _DeviceVaultStore deviceBStore;
     late LocalDirectoryVaultAdapter deviceBAdapter;
+    late TestKvStore deviceBKvStore;
 
     /// Small content bytes.
     final content = Uint8List.fromList(utf8.encode('sync-integration-test'));
@@ -76,17 +80,21 @@ void main() {
       // Device A: in-memory vault store + local directory sync adapter.
       deviceAAdapter = MemoryStorageAdapter();
       deviceAStore = _DeviceVaultStore(deviceAAdapter, '/device_a');
+      deviceAKvStore = TestKvStore();
       deviceAAdapter2 = LocalDirectoryVaultAdapter(
         syncRoot: syncRoot.path,
         localStore: deviceAStore,
+        kvStore: deviceAKvStore,
       );
 
       // Device B: separate in-memory vault store + local directory sync adapter.
       deviceBMemAdapter = MemoryStorageAdapter();
       deviceBStore = _DeviceVaultStore(deviceBMemAdapter, '/device_b');
+      deviceBKvStore = TestKvStore();
       deviceBAdapter = LocalDirectoryVaultAdapter(
         syncRoot: syncRoot.path,
         localStore: deviceBStore,
+        kvStore: deviceBKvStore,
       );
     });
 
@@ -117,6 +125,12 @@ void main() {
         expect(await deviceAAdapter2.vaultObjectExists(sha256), isTrue);
 
         // Step 3: Device B syncs metadata (creates a stub).
+        //
+        // The producer-side contract on [VaultStore.createStub] requires a
+        // positive `$vault` ref to exist before the stub manifest is
+        // written. In production this would arrive via SSTable ingest;
+        // here we simulate it directly.
+        deviceBKvStore.setRefCount(sha256, 1);
         await deviceBAdapter.syncVaultMetadata(sha256);
         expect(await deviceBStore.exists(sha256), isTrue);
         expect(await deviceBStore.isHydrated(sha256), isFalse, reason: 'stub');
@@ -141,7 +155,9 @@ void main() {
       );
       await deviceAAdapter2.uploadVaultObject(ref.sha256);
 
-      // Device B syncs metadata → stub.
+      // Device B syncs metadata → stub (ref must be present per the
+      // createStub producer-side contract).
+      deviceBKvStore.setRefCount(ref.sha256, 1);
       await deviceBAdapter.syncVaultMetadata(ref.sha256);
       expect(await deviceBStore.isHydrated(ref.sha256), isFalse);
 
@@ -165,6 +181,7 @@ void main() {
         await deviceAAdapter2.uploadVaultObject(ref.sha256);
 
         // Device B syncs metadata → stub (no syncAdapter wired).
+        deviceBKvStore.setRefCount(ref.sha256, 1);
         await deviceBAdapter.syncVaultMetadata(ref.sha256);
         expect(await deviceBStore.isHydrated(ref.sha256), isFalse);
         expect(deviceBStore.syncAdapter, isNull);
@@ -200,6 +217,7 @@ void main() {
       await deviceAAdapter2.uploadVaultObject(ref.sha256);
 
       // Two syncVaultMetadata calls should not throw.
+      deviceBKvStore.setRefCount(ref.sha256, 1);
       await deviceBAdapter.syncVaultMetadata(ref.sha256);
       await deviceBAdapter.syncVaultMetadata(ref.sha256);
 
@@ -221,6 +239,7 @@ void main() {
         await deviceAAdapter2.uploadVaultObject(ref.sha256);
 
         // Device B syncs metadata → should receive tombstone.
+        deviceBKvStore.setRefCount(ref.sha256, 1);
         await deviceBAdapter.syncVaultMetadata(ref.sha256);
         expect(await deviceBStore.isTombstoned(ref.sha256), isTrue);
       },

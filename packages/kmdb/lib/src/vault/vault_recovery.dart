@@ -151,16 +151,11 @@ final class VaultRecovery {
   ///   recovery if the manifest is still absent.
   /// - `manifest.json` present, no KV ref → [_RecoveryAction.delete] (orphaned
   ///   object — the `WriteBatch` that was supposed to create the ref never
-  ///   committed).
+  ///   committed). Per §24, a stub *always* has a positive `$vault` reference
+  ///   (the producer-side contract enforced by [VaultStore.createStub]), so a
+  ///   ref-less manifest is by definition an error state, not a synced stub.
   /// - `manifest.json` present, KV ref present → [_RecoveryAction.retain] (a
   ///   valid stub or fully hydrated object).
-  ///
-  // TODO(vault): The "manifest present, no KV ref → delete" rule also matches a
-  // freshly synced stub whose referencing document has not yet synced to this
-  // device. Deleting it loses a blob the about-to-arrive document needs. This
-  // sync-ordering ambiguity is a distinct fail-dangerous case tracked as a
-  // follow-up to H3 (see plan_vault_gc_failsafe.md, decision D3) — e.g. gating
-  // orphan deletion on an age/grace window or a "seen this session" marker.
   Future<_RecoveryAction> _classify(String sha256) async {
     final refResult = await VaultRefCount.read(kvStore, sha256);
 

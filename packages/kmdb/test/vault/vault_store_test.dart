@@ -21,6 +21,8 @@ import 'package:kmdb/src/vault/vault_ref.dart';
 import 'package:kmdb/src/vault/vault_store.dart';
 import 'package:test/test.dart';
 
+import 'test_kv_store.dart';
+
 // ── Test doubles ──────────────────────────────────────────────────────────────
 
 /// A [VaultStore] subclass that overrides [listFilesRecursive] to enumerate
@@ -73,11 +75,13 @@ String _crc32cOf(Uint8List data) => VaultStore.computeCrc32cForTest(data);
 void main() {
   late MemoryStorageAdapter adapter;
   late TestVaultStore store;
+  late TestKvStore kvStore;
 
   setUp(() {
     TestVaultStore._seq = 0;
     adapter = MemoryStorageAdapter();
     store = TestVaultStore(adapter);
+    kvStore = TestKvStore();
   });
 
   group('VaultStore', () {
@@ -351,8 +355,11 @@ void main() {
       });
 
       test('throws StateError for stub without sync adapter', () async {
-        // Create a stub manually (manifest without blob).
+        // Create a stub manually (manifest without blob). The
+        // producer-side contract requires a positive ref to be seeded
+        // before createStub is called.
         final sha256 = 'a' * 64;
+        kvStore.setRefCount(sha256, 1);
         await store.createStub(
           VaultManifest(
             sha256: sha256,
@@ -362,6 +369,7 @@ void main() {
             originalName: 'stub.bin',
             createdAt: 't1',
           ),
+          kvStore: kvStore,
         );
         expect(() => store.getBytes(sha256), throwsA(isA<StateError>()));
       });
@@ -442,18 +450,62 @@ void main() {
     });
 
     group('createStub', () {
-      test('creates manifest without blob', () async {
-        final sha256 = 'c' * 64;
-        final manifest = VaultManifest(
-          sha256: sha256,
-          size: 100,
-          crc32c: '12345678',
-          mediaType: 'image/png',
-          originalName: 'stub.png',
-          createdAt: 't1',
-        );
-        await store.createStub(manifest);
+      VaultManifest manifestFor(String sha256) => VaultManifest(
+        sha256: sha256,
+        size: 100,
+        crc32c: '12345678',
+        mediaType: 'image/png',
+        originalName: 'stub.png',
+        createdAt: 't1',
+      );
 
+      test('creates manifest without blob (positive ref present)', () async {
+        final sha256 = 'c' * 64;
+        kvStore.setRefCount(sha256, 1);
+        await store.createStub(manifestFor(sha256), kvStore: kvStore);
+
+        expect(await store.exists(sha256), isTrue);
+        expect(await store.isHydrated(sha256), isFalse);
+      });
+
+      test('throws StateError when no \$vault ref entry exists', () async {
+        // Producer-side contract: a stub may only be created when a
+        // positive `$vault` reference has already been established. With
+        // no entry present, createStub must refuse to write the manifest
+        // (and recovery must not see a ref-less hash dir as a result).
+        final sha256 = 'd' * 64;
+        // No setRefCount call.
+        await expectLater(
+          () => store.createStub(manifestFor(sha256), kvStore: kvStore),
+          throwsA(isA<StateError>()),
+        );
+        // Manifest must not have been written.
+        expect(await store.exists(sha256), isFalse);
+      });
+
+      test('throws StateError when \$vault ref count is zero', () async {
+        // A zero-ref entry is logically equivalent to no entry (the
+        // protocol deletes the entry on transition to zero); both are
+        // "positive determination of zero references". A zero-ref stub is
+        // an error state per §24.
+        final sha256 = 'e' * 64;
+        kvStore.setRefCount(sha256, 0);
+        await expectLater(
+          () => store.createStub(manifestFor(sha256), kvStore: kvStore),
+          throwsA(isA<StateError>()),
+        );
+        expect(await store.exists(sha256), isFalse);
+      });
+
+      test('accepts an undecodable \$vault ref (fail-safe rule)', () async {
+        // Consistency with H3: an undecodable ref entry is treated as
+        // "referenced" everywhere (GC, recovery, createStub). A stub must
+        // be permitted in this state — otherwise a single malformed entry
+        // would simultaneously cause recovery to retain the existing dir
+        // and prevent re-creation of the stub on next sync.
+        final sha256 = 'f' * 64;
+        kvStore.setRawRefCount(sha256, Uint8List.fromList([0x00, 0x01]));
+        await store.createStub(manifestFor(sha256), kvStore: kvStore);
         expect(await store.exists(sha256), isTrue);
         expect(await store.isHydrated(sha256), isFalse);
       });

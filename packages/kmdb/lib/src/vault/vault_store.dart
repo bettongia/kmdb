@@ -18,10 +18,12 @@ library;
 import 'dart:convert';
 import 'dart:typed_data';
 
+import '../engine/kvstore/kv_store.dart';
 import '../engine/platform/storage_adapter_interface.dart';
 import 'media_type_detector.dart';
 import 'vault_manifest.dart';
 import 'vault_ref.dart';
+import 'vault_ref_count.dart';
 import 'vault_storage_adapter.dart';
 
 /// Manages the local vault storage: ingestion, retrieval, and path resolution.
@@ -337,14 +339,60 @@ class VaultStore {
 
   /// Creates a stub for [manifest] without downloading the blob.
   ///
-  /// Stubs are created by [VaultStorageAdapter.syncVaultMetadata] to record that
-  /// a vault object exists on the remote but has not been downloaded yet.
+  /// A stub is a hash directory containing `manifest.json` but no `blob`.
+  /// Stubs are created during distributed sync to record that a vault object
+  /// exists on the remote but has not been downloaded to this device yet.
   ///
-  /// A stub is simply a `manifest.json` with no `blob` file.
-  Future<void> createStub(VaultManifest manifest) async {
-    final dir = hashDir(manifest.sha256);
+  /// ## Producer-side contract
+  ///
+  /// Per §24 of the vault spec, **a stub always has a positive `$vault`
+  /// reference**. A `manifest.json` without a positive ref is an error state
+  /// that crash recovery reaps (see [VaultRecovery]). This method enforces
+  /// the contract by reading the ref via the shared, fail-safe
+  /// [VaultRefCount.read] and refusing to write the manifest unless the ref
+  /// is positive (or undecodable — treated as referenced for fail-safe
+  /// consistency with the H3 rule).
+  ///
+  /// Callers must therefore establish a positive `$vault:{sha256}` reference
+  /// on [kvStore] **before** invoking this method. In peer-side sync this
+  /// is naturally satisfied because the `$vault` entries authored on the
+  /// originating device travel inside the same SSTables that carry the
+  /// referencing documents, and ingest installs them at L0 before any
+  /// caller decides to materialise the stub manifest.
+  ///
+  /// Throws [StateError] if no `$vault` entry exists for [VaultManifest.sha256]
+  /// or if the entry decodes to a zero ref count. Throws no exception when
+  /// the entry is positive or undecodable (the latter consistent with the
+  /// H3 fail-safe rule).
+  Future<void> createStub(
+    VaultManifest manifest, {
+    required KvStore kvStore,
+  }) async {
+    final sha256 = manifest.sha256;
+    final refResult = await VaultRefCount.read(kvStore, sha256);
+    switch (refResult) {
+      case RefCountAbsent():
+        throw StateError(
+          'VaultStore.createStub(${sha256.substring(0, 8)}…): no '
+          r'$vault entry exists for the hash. A stub may only be created '
+          'when a positive reference is already established on this device '
+          '(see §24: a stub always has a KV reference).',
+        );
+      case RefCountValue(:final count) when count <= 0:
+        throw StateError(
+          'VaultStore.createStub(${sha256.substring(0, 8)}…): '
+          r'$vault ref count is 0. A stub may only be created when the '
+          'ref count is positive (see §24).',
+        );
+      case RefCountValue():
+      // count > 0 → positive reference, proceed.
+      case RefCountUndecodable():
+      // Treated as referenced for fail-safe consistency with H3.
+    }
+
+    final dir = hashDir(sha256);
     await _adapter.createDirectory(dir);
-    await _writeManifest(manifest.sha256, manifest);
+    await _writeManifest(sha256, manifest);
   }
 
   // ── Subdirectory enumeration ───────────────────────────────────────────────
