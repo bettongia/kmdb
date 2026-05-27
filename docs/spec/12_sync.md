@@ -172,7 +172,7 @@ before dropping a surviving tombstone.
   horizon is pegged by the slowest device. A peer that goes offline and
   never returns blocks tombstone GC indefinitely. An eviction rule (max
   device staleness) is intentionally deferred — see
-  `docs/plans/plan_tombstone_gc.md`. A stale-device policy similar to the
+  `docs/plans/completed/plan_tombstone_gc.md`. A stale-device policy similar to the
   one historically described here (90-day timeout, requiring full re-sync)
   is the expected follow-up.
 

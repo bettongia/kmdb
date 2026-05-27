@@ -1,11 +1,11 @@
 # Fix H4 PR2: Safe tombstone GC (sync-horizon-gated, no resurrection)
 
-**Status**: Implementing
+**Status**: Complete
 
-**PR link**: https://github.com/bettongia/kmdb/pull/25
+**PR link**: https://github.com/bettongia/kmdb/pull/25 (merged)
 
-**Depends on:** [plan_compaction_reclamation.md](completed/plan_compaction_reclamation.md)
-(PR1 — version collapse + reclamation policy hook, now merged). PR2 builds on the same
+**Depends on:** [plan_compaction_reclamation.md](plan_compaction_reclamation.md)
+(PR1 — version collapse + reclamation policy hook, also merged). PR2 builds on the same
 streaming transform and the same policy hook; it does not duplicate the
 investigation and refers back to PR1 for context.
 
@@ -30,7 +30,7 @@ data loss).
 ## Investigation
 
 The full safety analysis is in
-[plan_compaction_reclamation.md → Investigation](completed/plan_compaction_reclamation.md#investigation);
+[plan_compaction_reclamation.md → Investigation](plan_compaction_reclamation.md#investigation);
 the summary that PR2 acts on:
 
 ### The two safety conditions
@@ -41,7 +41,7 @@ the summary that PR2 acts on:
    places old-HLC data into L0 — so "bottom level" alone is insufficient. The
    safe rule is "this compaction covers all on-disk data for the key," which
    in practice is the `_compactAll` / single-file collapse path
-   ([lsm_engine.dart:678](../packages/kmdb/lib/src/engine/kvstore/lsm_engine.dart#L678)).
+   ([lsm_engine.dart:678](../../../packages/kmdb/lib/src/engine/kvstore/lsm_engine.dart#L678)).
    Partial compactions (`_compactL0ToL1`, `_compactL1ToL2`) must **always**
    keep tombstones.
 2. **Past the sync horizon (cross-device safety).** Every device must have
@@ -143,7 +143,7 @@ reference.
       assertion can only hold with an ingest-side floor (e.g. reject
       SSTables whose maxHlc is below the latest GC horizon) that PR2 does
       **not** implement. The cross-device version of the same scenario is
-      [RC-6](../spec/28_release_checklist.md#rc-6--multi-device-tombstone-non-resurrection)
+      [RC-6](../../spec/28_release_checklist.md#rc-6--multi-device-tombstone-non-resurrection)
       and the harness scenario in
       [plan_harness_mixed_storage.md](plan_harness_mixed_storage.md) Step 5;
       both rely on the principled distributed invariant
@@ -183,8 +183,8 @@ reference.
       above covers the core case in CI without it.
 
 ### Step 8 — PR
-- [ ] Open PR2 against `main` after PR1 has merged; update **PR link** above;
-      on merge move this plan to `docs/plans/completed/`.
+- [x] Open PR2 against `main` after PR1 has merged; update **PR link** above;
+      on merge move this plan to `docs/plans/completed/`. (PR #25 merged.)
 
 ## Summary
 

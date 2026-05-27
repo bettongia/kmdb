@@ -8,7 +8,7 @@
 PR1 only:** version collapse (safe at any compaction level) and the
 per-namespace-class reclamation policy hook (including `$ver:` exemption). The
 **tombstone-GC** half (which is the risky distributed part) is split into a
-separate follow-up plan, [plan_tombstone_gc.md](../plan_tombstone_gc.md), and ships
+separate follow-up plan, [plan_tombstone_gc.md](plan_tombstone_gc.md), and ships
 as PR2. The Problem statement and Investigation below cover the **full H4
 picture** because PR2 depends on this context — the implementation checklist at
 the bottom is PR1-only.
@@ -27,10 +27,10 @@ rather than building trim from scratch (see "Link to document versioning").
 
 KMDB compaction never reclaims space. `MergeIterator` de-duplicates only on the
 **full internal key**, which embeds the HLC
-([merge_iterator.dart:115](../../packages/kmdb/lib/src/engine/compaction/merge_iterator.dart#L115)),
+([merge_iterator.dart:115](../../../packages/kmdb/lib/src/engine/compaction/merge_iterator.dart#L115)),
 so different versions of the same user key are distinct and **all kept forever**,
 and `CompactionJob.run` writes every entry it sees
-([compaction_job.dart:126](../../packages/kmdb/lib/src/engine/compaction/compaction_job.dart#L126))
+([compaction_job.dart:126](../../../packages/kmdb/lib/src/engine/compaction/compaction_job.dart#L126))
 — including delete tombstones, which are **never dropped**, even at the bottom
 level. Reads stay correct (the read path collapses versions at query time), but:
 
@@ -51,7 +51,7 @@ data.
 The merge yields entries in ascending internal-key order, so all versions of a
 given `(namespace, userKey)` are **contiguous, oldest→newest** (HLC ascending),
 because the internal key is `…[userKey][hlc][type]` and HLC is big-endian
-([key_codec.dart:152](../../packages/kmdb/lib/src/engine/util/key_codec.dart#L152)).
+([key_codec.dart:152](../../../packages/kmdb/lib/src/engine/util/key_codec.dart#L152)).
 `_sameKey` compares the whole internal key, so only *byte-identical* records
 (same key, HLC, and type) are ever collapsed. Nothing drops superseded versions
 or tombstones.
@@ -71,7 +71,7 @@ older versions of its key. Dropping it is safe **only if**:
 - (a) **No older version of that key can exist in any level not included in this
   compaction.** In KMDB's scheme that effectively means the *all-levels*
   compaction (`_compactAll` / the single-file collapse,
-  [lsm_engine.dart:678](../../packages/kmdb/lib/src/engine/kvstore/lsm_engine.dart#L678)).
+  [lsm_engine.dart:678](../../../packages/kmdb/lib/src/engine/kvstore/lsm_engine.dart#L678)).
   A partial compaction (`_compactL0ToL1`, `_compactL1ToL2`) must **not** drop
   tombstones — a lower-HLC value for the key may live in an excluded level and
   would resurrect. Note KMDB levels do **not** imply recency (sync ingest adds
@@ -90,7 +90,7 @@ work.
 ### The sync horizon for safe tombstone GC
 
 KMDB already tracks, per device, a high-water mark
-([highwater.dart](../../packages/kmdb/lib/src/sync/highwater.dart)): each `.hwm`
+([highwater.dart](../../../packages/kmdb/lib/src/sync/highwater.dart)): each `.hwm`
 file records the device's `currentHlc` and the highest HLC it has processed per
 peer. The principled GC horizon is **`min` of all devices' `currentHlc`** — every
 device has synced past it, so a tombstone with `hlc < horizon` can be dropped
@@ -153,7 +153,7 @@ This is the key cross-plan dependency the user flagged:
   - Horizon is *injected* into `CompactionJob` so compaction stays decoupled
     from the sync folder.
   - **All of D1 is PR2 scope** — recorded here for context. The wiring lives
-    in [plan_tombstone_gc.md](../plan_tombstone_gc.md).
+    in [plan_tombstone_gc.md](plan_tombstone_gc.md).
 - [x] **D2 — Where reclamation lives.** _Confirmed as recommended:_ a streaming
   transform in `CompactionJob.run` wrapping `merge.entries` (the merge already
   delivers sorted, grouped versions). Keeps `MergeIterator` general. PR1
@@ -162,7 +162,7 @@ This is the key cross-plan dependency the user flagged:
 - [x] **D3 — Version collapse first, tombstone GC second.** _Confirmed as
   recommended:_ collapse + policy hook + `$ver:` exemption ship as **PR1
   (this plan)**; tombstone GC + horizon wiring + sync-resurrection tests ship
-  as **PR2 ([plan_tombstone_gc.md](../plan_tombstone_gc.md))**. Each PR is
+  as **PR2 ([plan_tombstone_gc.md](plan_tombstone_gc.md))**. Each PR is
   independently reviewable; the risky distributed part is isolated.
 - [x] **D4 — `$ver:` exemption.** _Confirmed as recommended:_ PR1 introduces a
   per-namespace-class reclamation policy interface and registers a default
@@ -173,7 +173,7 @@ This is the key cross-plan dependency the user flagged:
 ## Implementation plan (PR1 — version collapse + policy hook)
 
 > Steps 3 and 4 of the original H4 plan (safe tombstone GC, horizon wiring) and
-> their associated tests/docs are **deferred to [plan_tombstone_gc.md](../plan_tombstone_gc.md)
+> their associated tests/docs are **deferred to [plan_tombstone_gc.md](plan_tombstone_gc.md)
 > (PR2)**. The checklist below is PR1-only.
 
 ### Step 1 — Version collapse (safe at any level)
@@ -254,7 +254,7 @@ This is the key cross-plan dependency the user flagged:
   `KvStoreConfig` changes needed for PR1.
 - Tombstones are explicitly preserved verbatim. Conditional tombstone GC
   (gated by `allLevels` coverage and a sync horizon) ships as PR2 in
-  [plan_tombstone_gc.md](../plan_tombstone_gc.md).
+  [plan_tombstone_gc.md](plan_tombstone_gc.md).
 - Tests added: 9 unit tests for the registry resolver, 6 `CompactionJob`
   tests (collapse, partial-compaction safety, tombstone retention, `$ver:`
   exemption, registry override, mixed-namespace pass), and 1 end-to-end

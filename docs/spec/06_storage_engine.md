@@ -127,7 +127,7 @@ horizon`; `RetainAllVersionsPolicy` (registered for `$ver:`) never drops.
 **Known limitation:** the strict `min(currentHlc)` is pegged by the slowest
 device. A dead or inactive peer blocks GC indefinitely. An eviction rule
 (max device staleness) is intentionally deferred — see
-`docs/plans/plan_tombstone_gc.md`.
+`docs/plans/completed/plan_tombstone_gc.md`.
 
 ### Triggers
 
