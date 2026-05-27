@@ -4,8 +4,8 @@
 
 **PR link**: {pending}
 
-**Depends on:** [plan_compaction_reclamation.md](plan_compaction_reclamation.md)
-(PR1 — version collapse + reclamation policy hook). PR2 builds on the same
+**Depends on:** [plan_compaction_reclamation.md](completed/plan_compaction_reclamation.md)
+(PR1 — version collapse + reclamation policy hook, now merged). PR2 builds on the same
 streaming transform and the same policy hook; it does not duplicate the
 investigation and refers back to PR1 for context.
 
@@ -30,7 +30,7 @@ data loss).
 ## Investigation
 
 The full safety analysis is in
-[plan_compaction_reclamation.md → Investigation](plan_compaction_reclamation.md#investigation);
+[plan_compaction_reclamation.md → Investigation](completed/plan_compaction_reclamation.md#investigation);
 the summary that PR2 acts on:
 
 ### The two safety conditions
