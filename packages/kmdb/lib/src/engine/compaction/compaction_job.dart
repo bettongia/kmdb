@@ -66,6 +66,8 @@ final class CompactionJob {
     required this.manifestWriter,
     required this.logNumber,
     required this.nextSeq,
+    this.allLevels = false,
+    this.horizon = const Hlc(0, 0),
     ReclamationPolicyRegistry? policyRegistry,
   }) : _policyRegistry = policyRegistry ?? ReclamationPolicyRegistry();
 
@@ -93,11 +95,31 @@ final class CompactionJob {
   /// Next HLC sequence number (written into the [VersionEdit]).
   final int nextSeq;
 
+  /// Whether this compaction covers **every level** that could hold an
+  /// older version of any key in [inputs]. True only for the single-file
+  /// `_compactAll` path; partial compactions (L0→L1, L1→L2) set this
+  /// `false`. A surviving tombstone can be dropped only when this is `true`
+  /// **and** its HLC is below [horizon] — see [ReclamationPolicy.dropTombstone].
+  ///
+  /// Defaults to `false` so callers that haven't been updated for H4 PR2
+  /// continue to retain tombstones (the existing safe behaviour).
+  final bool allLevels;
+
+  /// The sync horizon below which a delete tombstone is safe to drop —
+  /// `min(currentHlc)` across all devices on a synced database, or
+  /// `now - tombstoneGraceDuration` on a local-only database. The
+  /// `LsmEngine` computes this per compaction and passes it in; compaction
+  /// itself does not read the sync folder.
+  ///
+  /// Defaults to `Hlc(0, 0)` so callers that haven't been updated for H4
+  /// PR2 never drop tombstones (no realistic tombstone HLC is below zero).
+  final Hlc horizon;
+
   /// Resolves the [ReclamationPolicy] for each namespace encountered during
   /// the compaction's streaming transform. PR1 of H4 uses this to gate
-  /// version collapse; `$ver:` (and any caller-registered history-bearing
-  /// class) passes every version through unchanged. PR2 of H4 will extend
-  /// the same hook with a tombstone-drop predicate.
+  /// version collapse; PR2 of H4 also uses it to gate tombstone drops.
+  /// `$ver:` (and any caller-registered history-bearing class) passes
+  /// every version through unchanged and never drops tombstones.
   final ReclamationPolicyRegistry _policyRegistry;
 
   // ── Run ───────────────────────────────────────────────────────────────────
@@ -107,9 +129,12 @@ final class CompactionJob {
   /// Steps:
   /// 1. Open all input SSTables.
   /// 2. Merge their entries (oldest file first → newest wins on duplicate keys).
-  /// 3. Apply the reclamation transform (PR1 of H4: version collapse —
-  ///    collapse each `(namespace, userKey)` group to its highest-HLC entry,
-  ///    except in namespaces whose [ReclamationPolicy] retains all versions).
+  /// 3. Apply the reclamation transform: version collapse (H4 PR1 — keep
+  ///    only the highest-HLC entry per `(namespace, userKey)` group, except
+  ///    in namespaces whose [ReclamationPolicy] retains all versions) and,
+  ///    when the group's surviving entry is a delete tombstone, optionally
+  ///    drop it (H4 PR2 — only when [allLevels] is `true` and the
+  ///    tombstone's HLC is strictly below [horizon]).
   /// 4. Write merged output to a new SSTable.
   /// 5. Fsync the output.
   /// 6. Append a [VersionEdit] to the Manifest.
@@ -146,8 +171,12 @@ final class CompactionJob {
     // For each contiguous group we resolve the namespace's
     // [ReclamationPolicy] once:
     //   - collapseVersions=true  → buffer the latest entry; on group change,
-    //                              emit the buffered entry. Drops every
-    //                              superseded version.
+    //                              emit the buffered entry — unless that
+    //                              entry is a delete tombstone whose
+    //                              [ReclamationPolicy.dropTombstone] returns
+    //                              true (H4 PR2: gated by [allLevels] +
+    //                              [horizon]), in which case the group is
+    //                              elided entirely.
     //   - collapseVersions=false → emit every entry verbatim. Reserved for
     //                              `$ver:` and other history-bearing classes.
     Uint8List? groupPrefix;
@@ -164,15 +193,31 @@ final class CompactionJob {
       maxKeyBytes = key;
     }
 
+    /// Emits [entry] unless it is a tombstone the active [policy] is
+    /// willing to drop given this compaction's [allLevels] and [horizon].
+    /// Used to finalise a collapsed group.
+    void flushCollapsed(MergeEntry entry, ReclamationPolicy activePolicy) {
+      if (KeyCodec.decodeRecordType(entry.key) == RecordType.delete) {
+        final canDrop = activePolicy.dropTombstone(
+          allLevels: allLevels,
+          tombstoneHlc: KeyCodec.decodeHlc(entry.key),
+          horizon: horizon,
+        );
+        if (canDrop) return;
+      }
+      emit(entry.key, entry.value);
+    }
+
     await for (final entry in merge.entries) {
       final prefixLen = entry.key.length - 9;
       final isNewGroup =
           groupPrefix == null || !_keyMatchesPrefix(entry.key, groupPrefix);
 
       if (isNewGroup) {
-        // Flush the previous collapse group (if any).
+        // Flush the previous collapse group (if any) through the
+        // tombstone-drop check.
         if (pendingCollapsed != null) {
-          emit(pendingCollapsed.key, pendingCollapsed.value);
+          flushCollapsed(pendingCollapsed, policy!);
           pendingCollapsed = null;
         }
         // Resolve the policy for this new group's namespace.
@@ -185,12 +230,12 @@ final class CompactionJob {
         // Buffer; the last (highest-HLC) entry in this group wins.
         pendingCollapsed = entry;
       } else {
-        // Retain-all class — pass through unchanged.
+        // Retain-all class — pass through unchanged (tombstones included).
         emit(entry.key, entry.value);
       }
     }
     if (pendingCollapsed != null) {
-      emit(pendingCollapsed.key, pendingCollapsed.value);
+      flushCollapsed(pendingCollapsed, policy!);
     }
 
     if (entryCount == 0) {

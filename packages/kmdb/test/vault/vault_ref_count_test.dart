@@ -16,6 +16,7 @@ import 'dart:typed_data';
 
 import 'package:kmdb/src/encoding/value_codec.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
+import 'package:kmdb/src/engine/util/hlc.dart';
 import 'package:kmdb/src/vault/vault_recovery.dart' show kVaultNamespace;
 import 'package:kmdb/src/vault/vault_ref_count.dart';
 import 'package:test/test.dart';
@@ -53,6 +54,9 @@ class _FakeKvStore implements KvStore {
 
   @override
   Future<void> close({bool flush = true}) async {}
+
+  @override
+  void setTombstoneHorizonProvider(Future<Hlc> Function()? provider) {}
 
   @override
   Future<void> compactAll() async {}

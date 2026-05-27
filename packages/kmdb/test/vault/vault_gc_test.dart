@@ -16,6 +16,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
+import 'package:kmdb/src/engine/util/hlc.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
 import 'package:kmdb/src/vault/media_type_detector.dart';
 import 'package:kmdb/src/vault/vault_gc.dart';
@@ -113,6 +114,9 @@ class _FakeKvStore implements KvStore {
 
   @override
   Future<void> close({bool flush = true}) async {}
+
+  @override
+  void setTombstoneHorizonProvider(Future<Hlc> Function()? provider) {}
 
   @override
   Future<void> compactAll() async {}

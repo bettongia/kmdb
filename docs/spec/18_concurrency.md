@@ -37,11 +37,14 @@ class of bug where a background compaction races with a foreground read during
 testing.
 
 Compaction also reclaims space: superseded versions of a key are collapsed
-to the highest-HLC entry during the streaming merge (H4 PR1), with
-`$ver:` (and any registered history-bearing namespace class) exempt.
-Delete-tombstone reclamation is gated by sync-horizon safety and ships
-separately as H4 PR2; until then, tombstones grow without GC even after
-compaction. See §6 for the full reclamation model.
+to the highest-HLC entry during the streaming merge (H4 PR1), and surviving
+delete tombstones are dropped on the all-levels `_compactAll` path when
+their HLC sits strictly below the GC horizon (H4 PR2). `$ver:` (and any
+registered history-bearing namespace class) is exempt from both operations.
+The horizon is `min(currentHlc)` across HWMs on a synced database and
+`now - tombstoneGraceDuration` (default 7 days) on a local-only one. See
+§6 for the full reclamation model and §12 for the sync-side horizon
+computation.
 
 ## Why No Background Isolate
 
