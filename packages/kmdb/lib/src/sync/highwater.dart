@@ -91,10 +91,10 @@ final class HighwaterMark {
   }
 
   /// Returns the minimum `currentHlc` across every `.hwm` file present in
-  /// [hwmDir], or `null` when none exist.
+  /// [hwmDir], excluding stale devices, or `null` when no live devices exist.
   ///
   /// This is the principled tombstone-GC horizon for a synced database
-  /// (H4 PR2 / `plan_tombstone_gc.md`): every device has synced past
+  /// (H4 PR2 / `plan_tombstone_gc.md`): every live device has synced past
   /// `min(currentHlc)`, so a tombstone with a strictly smaller HLC has
   /// been observed everywhere and may be dropped. Callers feed the result
   /// to [KvStore.setTombstoneHorizonProvider]; on `null` they should fall
@@ -102,23 +102,59 @@ final class HighwaterMark {
   /// clearing the provider (passing `null`) rather than registering a
   /// zero horizon.
   ///
-  /// HWM files that fail to parse are skipped with a thrown
-  /// [FormatException] — the horizon must reflect every visible device,
-  /// so a corrupt HWM is a hard error rather than a silent omission.
+  /// ## Stale-device eviction (H4-FU2)
   ///
-  /// **Known limitation:** the strict `min` is pegged by the slowest
-  /// device. A device that goes offline and never returns blocks GC
-  /// forever. An eviction rule (max device staleness) is intentionally
-  /// deferred from H4 PR2 — see `plan_tombstone_gc.md`.
+  /// When [evictAfter] is non-null, any `.hwm` file whose [lastUpdated] is
+  /// older than `now - evictAfter` is excluded from the minimum — *except*
+  /// the local device's own HWM, which is always included regardless of
+  /// its [lastUpdated] (identified by [localDeviceId]). This allows the
+  /// horizon to advance past devices that have gone permanently offline.
+  ///
+  /// When all non-local HWMs are stale (or no HWMs exist at all), the
+  /// method returns `null` so that the caller maps it to `Hlc(0, 0)` and
+  /// blocks all tombstone drops — the safe conservative behaviour when
+  /// there is no current ground truth from any peer.
+  ///
+  /// ## Clock trust
+  ///
+  /// Staleness is evaluated against the [now] parameter (default:
+  /// `DateTime.now()`), which is the *evaluating* device's wall clock.
+  /// The [lastUpdated] field in the HWM file is the uploading device's
+  /// self-reported wall clock, which is unsigned. The damage from a
+  /// misbehaving uploader is bounded:
+  /// - A future-dated file delays GC (conservative error, not a safety
+  ///   violation).
+  /// - A past-dated file only affects that peer's own contribution.
+  ///
+  /// HWM files that fail to parse throw [FormatException] — the horizon
+  /// must reflect every visible live device, so a corrupt HWM is a hard
+  /// error rather than a silent omission.
   static Future<Hlc?> minCurrentHlcAcrossDevices(
     String hwmDir,
-    SyncStorageAdapter adapter,
-  ) async {
+    SyncStorageAdapter adapter, {
+    String? localDeviceId,
+    Duration? evictAfter,
+    DateTime? now,
+  }) async {
     final files = await adapter.list(hwmDir, extension: '.hwm');
+    final effectiveNow = (now ?? DateTime.now()).toUtc();
     Hlc? minHlc;
     for (final filename in files) {
       final hwm = await HighwaterMark.load('$hwmDir/$filename', adapter);
       if (hwm == null) continue;
+
+      // Apply stale-device eviction: skip HWMs whose lastUpdated is older
+      // than now - evictAfter, but never skip the local device's own HWM
+      // (the local device is always online by definition — it just triggered
+      // this call via a compaction, so its HWM has already been updated).
+      // When localDeviceId is null no peer is self-exempted; this is the
+      // shape callers that don't know their own id use it as a pure filter.
+      if (evictAfter != null &&
+          (localDeviceId == null || hwm.deviceId != localDeviceId)) {
+        final age = effectiveNow.difference(hwm.lastUpdated);
+        if (age > evictAfter) continue; // exclude stale peer
+      }
+
       if (minHlc == null || hwm.currentHlc.compareTo(minHlc) < 0) {
         minHlc = hwm.currentHlc;
       }
@@ -179,21 +215,33 @@ final class HighwaterMark {
 
   // ── Staleness check ───────────────────────────────────────────────────────
 
-  /// Returns `true` if [peerId] is considered stale.
+  /// Returns `true` if [peerId] is considered stale based on the [peers] map
+  /// within this HWM.
   ///
-  /// For Phase 5 this is a simplified check:
-  /// - If [peerId] is not in [peers], returns `true` (never seen this peer).
-  /// - Otherwise, returns `false` (full stale detection via peer HWM file
-  ///   timestamps is implemented in Phase 8).
+  /// **Current implementation:** a simplified liveness check.
+  /// - Returns `true` if [peerId] has never been recorded in [peers] (no HLC
+  ///   from that device has been processed by the local device).
+  /// - Returns `false` if [peerId] is present in [peers].
   ///
-  /// The [staleness] duration parameter is reserved for future use.
+  /// **What this method does NOT do:** it does not perform the distributed
+  /// stale-device eviction introduced in H4-FU2. That eviction operates on
+  /// the `lastUpdated` timestamp of HWM *files* across the sync folder and
+  /// lives in [minCurrentHlcAcrossDevices] (via its `evictAfter` and
+  /// `localDeviceId` parameters). The [peers] map records "highest HLC I
+  /// processed from X," which is a different lifecycle from "X's last
+  /// self-reported wall-clock update."
+  ///
+  /// Wire-up or deprecation of this method is tracked as a separate micro-plan.
+  ///
+  /// The [staleness] duration parameter is accepted but unused; it is
+  /// retained for API compatibility.
   bool isPeerStale(
     String peerId, {
     Duration staleness = const Duration(days: 90),
   }) {
-    // Phase 5: consider a peer stale only if we have never recorded its HWM.
-    // Full staleness detection (comparing lastUpdated across HWM files) is
-    // deferred to Phase 8 when the full sync manager is implemented.
+    // Simplified: a peer is stale only if it has never been recorded in the
+    // peers map. Distributed eviction (via HWM file lastUpdated) is handled
+    // separately by minCurrentHlcAcrossDevices.
     return !peers.containsKey(peerId);
   }
 

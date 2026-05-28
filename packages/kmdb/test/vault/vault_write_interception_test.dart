@@ -132,6 +132,9 @@ class _TrackingKvStore implements KvStore {
   Future<void> ingestSstable(String f, Uint8List b) async {}
 
   @override
+  Future<void> dropAllSstables() async {}
+
+  @override
   Future<List<String>> listNamespaces() async => [];
 
   @override

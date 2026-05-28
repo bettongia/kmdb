@@ -168,13 +168,34 @@ before dropping a surviving tombstone.
   See `docs/spec/06_storage_engine.md#reclamation-tombstone-gc` for the
   engine-side mechanism.
 
-- **Known limitation: slowest-device peg.** The strict `min(currentHlc)`
-  horizon is pegged by the slowest device. A peer that goes offline and
-  never returns blocks tombstone GC indefinitely. An eviction rule (max
-  device staleness) is intentionally deferred — see
-  `docs/plans/completed/plan_tombstone_gc.md`. A stale-device policy similar to the
-  one historically described here (90-day timeout, requiring full re-sync)
-  is the expected follow-up.
+- **Stale-device eviction.** A peer whose `.hwm` file has a `lastUpdated`
+  timestamp older than `now - KvStoreConfig.staleDeviceEvictionAfter` is
+  excluded from the `min(currentHlc)` horizon computation, so the horizon
+  advances past a permanently absent device instead of being pegged by it.
+  The evaluating device's own `.hwm` is never self-evicted, so the local
+  device always contributes to the min regardless of when it last updated
+  its own file. The default eviction window is 90 days; it must be set
+  greater than or equal to `tombstoneGraceDuration` (which guards the
+  local-only grace window for the same delete).
+
+- **Re-admission of an evicted device.** Eviction without a return path is
+  unsafe: a device that was excluded from the horizon and then comes back
+  holds pre-eviction SSTables whose `maxHlc` is below the now-advanced
+  horizon. Pushing those SSTables incrementally would resurrect deletes
+  that the rest of the topology has already GC'd. To prevent this, a
+  returning device performs a **full re-sync** on detecting both of:
+  (a) `localCurrentHlc < min(livePeers.currentHlc)` — behind every live
+  peer; and (b) `localHwm.lastUpdated < now - staleDeviceEvictionAfter` —
+  its own HWM is past the eviction threshold. The full re-sync discards
+  local SSTables (via a manifest-aware drop, so the manifest and on-disk
+  files stay consistent), redownloads the current consolidated set, and
+  resets the local HWM. Condition (a) alone means "merely behind" and is
+  handled by the normal incremental path; condition (b) alone means
+  "recently offline" and is also safe incrementally. Only both together
+  indicate the device was actually excluded from the horizon. Two
+  simultaneously-evicted devices that return at the same time will each
+  see the other as a non-live peer and both perform a full re-sync —
+  safe but expensive.
 
 - **SSTable garbage collection:** An SSTable can be deleted from the sync
   folder when every device's `.hwm` file shows processing past that

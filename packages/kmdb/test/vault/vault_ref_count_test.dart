@@ -88,6 +88,9 @@ class _FakeKvStore implements KvStore {
   Future<void> ingestSstable(String filename, Uint8List bytes) async {}
 
   @override
+  Future<void> dropAllSstables() async {}
+
+  @override
   Future<List<String>> listNamespaces() async => [];
 
   @override

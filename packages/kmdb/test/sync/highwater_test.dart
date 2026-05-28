@@ -364,4 +364,283 @@ void main() {
       },
     );
   });
+
+  // ── H4-FU2: stale-device eviction in minCurrentHlcAcrossDevices ──────────
+  //
+  // When evictAfter is supplied, HWM files whose lastUpdated is older than
+  // now - evictAfter are excluded from the min computation — except the
+  // local device's own HWM, which is always included.
+
+  group('HighwaterMark.minCurrentHlcAcrossDevices (eviction)', () {
+    late MemorySyncAdapter adapter;
+
+    /// Reference "now" used as the test clock.
+    final testNow = DateTime.utc(2026, 6, 1, 0, 0, 0);
+
+    /// Duration used as the eviction threshold in all tests below.
+    const evictAfter = Duration(days: 90);
+
+    setUp(() {
+      adapter = MemorySyncAdapter();
+    });
+
+    /// Writes a HWM file whose lastUpdated is [ageFromNow] before [testNow].
+    Future<void> writeHwmWithAge(
+      String deviceId,
+      Hlc currentHlc,
+      Duration ageFromNow,
+    ) async {
+      final lastUpdated = testNow.subtract(ageFromNow);
+      final hwm = HighwaterMark(
+        deviceId: deviceId,
+        currentHlc: currentHlc,
+        lastUpdated: lastUpdated,
+        peers: const {},
+      );
+      await hwm.save('highwater/$deviceId.hwm', adapter);
+    }
+
+    // ── Basic eviction ──────────────────────────────────────────────────────
+
+    test('eviction admits the horizon to advance: stale peer is excluded, '
+        'fresh peer determines the min', () async {
+      // Fresh peer: lastUpdated 1 day ago — within the 90-day window.
+      await writeHwmWithAge(
+        'freshpeer',
+        const Hlc(9000, 0),
+        const Duration(days: 1),
+      );
+      // Stale peer: lastUpdated 100 days ago — outside the 90-day window.
+      // Its HLC (1) would normally peg the minimum.
+      await writeHwmWithAge(
+        'staleper',
+        const Hlc(1, 0),
+        const Duration(days: 100),
+      );
+
+      final result = await HighwaterMark.minCurrentHlcAcrossDevices(
+        'highwater',
+        adapter,
+        localDeviceId: 'localdev',
+        evictAfter: evictAfter,
+        now: testNow,
+      );
+
+      // The stale peer is excluded; only the fresh peer contributes.
+      expect(result, equals(const Hlc(9000, 0)));
+    });
+
+    test(
+      'without eviction filter the stale peer still pegs the horizon',
+      () async {
+        // Same setup as above, but no evictAfter — stale peer is honoured.
+        await writeHwmWithAge(
+          'freshpeer',
+          const Hlc(9000, 0),
+          const Duration(days: 1),
+        );
+        await writeHwmWithAge(
+          'staleper',
+          const Hlc(1, 0),
+          const Duration(days: 100),
+        );
+
+        final result = await HighwaterMark.minCurrentHlcAcrossDevices(
+          'highwater',
+          adapter,
+        );
+
+        // Without eviction, the strict min includes the stale peer's HLC.
+        expect(result, equals(const Hlc(1, 0)));
+      },
+    );
+
+    test('peer with lastUpdated exactly at the boundary (age == evictAfter) '
+        'is NOT evicted — boundary is inclusive', () async {
+      // age == evictAfter exactly: the check is `age > evictAfter`, so
+      // this peer should still be included.
+      await writeHwmWithAge('boundary', const Hlc(500, 0), evictAfter);
+      await writeHwmWithAge(
+        'freshpeer',
+        const Hlc(9000, 0),
+        const Duration(days: 1),
+      );
+
+      final result = await HighwaterMark.minCurrentHlcAcrossDevices(
+        'highwater',
+        adapter,
+        localDeviceId: 'localdev',
+        evictAfter: evictAfter,
+        now: testNow,
+      );
+
+      // Boundary peer is included; its HLC (500) is the min.
+      expect(result, equals(const Hlc(500, 0)));
+    });
+
+    // ── Self-exclusion guard ────────────────────────────────────────────────
+
+    test('local device is never self-evicted: stale localDeviceId HWM is '
+        'always included in the min', () async {
+      // The local device's own HWM is 200 days old — way past the 90-day
+      // eviction window. But since it IS the local device, it must still
+      // contribute to the min.
+      const localId = 'localdev';
+      await writeHwmWithAge(
+        localId,
+        const Hlc(100, 0),
+        const Duration(days: 200),
+      );
+      await writeHwmWithAge(
+        'freshpeer',
+        const Hlc(9000, 0),
+        const Duration(days: 1),
+      );
+
+      final result = await HighwaterMark.minCurrentHlcAcrossDevices(
+        'highwater',
+        adapter,
+        localDeviceId: localId,
+        evictAfter: evictAfter,
+        now: testNow,
+      );
+
+      // The local HWM (HLC=100) must be included despite being stale.
+      expect(result, equals(const Hlc(100, 0)));
+    });
+
+    test('eviction filter without localDeviceId treats all stale peers equally '
+        '(no self-exemption)', () async {
+      // When localDeviceId is null, no device is exempted.
+      await writeHwmWithAge(
+        'dev1',
+        const Hlc(100, 0),
+        const Duration(days: 200),
+      );
+      await writeHwmWithAge(
+        'dev2',
+        const Hlc(9000, 0),
+        const Duration(days: 1),
+      );
+
+      final result = await HighwaterMark.minCurrentHlcAcrossDevices(
+        'highwater',
+        adapter,
+        // No localDeviceId supplied — no self-exemption.
+        evictAfter: evictAfter,
+        now: testNow,
+      );
+
+      // dev1 is evicted (no self-exemption), only dev2 contributes.
+      expect(result, equals(const Hlc(9000, 0)));
+    });
+
+    // ── All-evicted collapse ────────────────────────────────────────────────
+
+    test('all-evicted → null: when all non-local HWMs are stale the result is '
+        'null so SyncEngine maps it to Hlc(0,0) and blocks GC', () async {
+      // All devices stale — a dormant project where no device synced within
+      // the eviction window. There is no live ground truth.
+      await writeHwmWithAge(
+        'stale1',
+        const Hlc(5000, 0),
+        const Duration(days: 200),
+      );
+      await writeHwmWithAge(
+        'stale2',
+        const Hlc(3000, 0),
+        const Duration(days: 150),
+      );
+      // The local device (localdev) has no HWM in the adapter — it has never
+      // pushed. So nothing contributes and the result is null.
+
+      final result = await HighwaterMark.minCurrentHlcAcrossDevices(
+        'highwater',
+        adapter,
+        localDeviceId: 'localdev',
+        evictAfter: evictAfter,
+        now: testNow,
+      );
+
+      expect(result, isNull);
+    });
+
+    test('all-evicted with local HWM present returns local HLC '
+        '(local device is never evicted)', () async {
+      // The local device has a stale HWM, but it's exempt from eviction.
+      // All remote peers are also stale. Result is the local device's HLC.
+      const localId = 'localdev';
+      await writeHwmWithAge(
+        localId,
+        const Hlc(7777, 0),
+        const Duration(days: 200),
+      );
+      await writeHwmWithAge(
+        'stale1',
+        const Hlc(100, 0),
+        const Duration(days: 200),
+      );
+
+      final result = await HighwaterMark.minCurrentHlcAcrossDevices(
+        'highwater',
+        adapter,
+        localDeviceId: localId,
+        evictAfter: evictAfter,
+        now: testNow,
+      );
+
+      // Only the local HWM contributes; result is local currentHlc.
+      expect(result, equals(const Hlc(7777, 0)));
+    });
+
+    test(
+      'empty HWM directory → null regardless of eviction parameters',
+      () async {
+        final result = await HighwaterMark.minCurrentHlcAcrossDevices(
+          'highwater',
+          adapter,
+          localDeviceId: 'localdev',
+          evictAfter: evictAfter,
+          now: testNow,
+        );
+        expect(result, isNull);
+      },
+    );
+
+    // ── Multiple live peers ─────────────────────────────────────────────────
+
+    test(
+      'min is computed over live peers only when some are evicted',
+      () async {
+        // Three peers: one fresh at HLC=9000, one fresh at HLC=3000, one stale.
+        // The stale peer would have been the min without eviction.
+        await writeHwmWithAge(
+          'fresh1',
+          const Hlc(9000, 0),
+          const Duration(days: 10),
+        );
+        await writeHwmWithAge(
+          'fresh2',
+          const Hlc(3000, 0),
+          const Duration(days: 30),
+        );
+        await writeHwmWithAge(
+          'stale1',
+          const Hlc(1, 0),
+          const Duration(days: 200),
+        );
+
+        final result = await HighwaterMark.minCurrentHlcAcrossDevices(
+          'highwater',
+          adapter,
+          localDeviceId: 'localdev',
+          evictAfter: evictAfter,
+          now: testNow,
+        );
+
+        // Stale peer excluded; min of live peers is 3000.
+        expect(result, equals(const Hlc(3000, 0)));
+      },
+    );
+  });
 }

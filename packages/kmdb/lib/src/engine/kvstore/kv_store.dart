@@ -108,6 +108,22 @@ abstract interface class KvStore {
   /// generated timestamps remain causally after ingested ones.
   Future<void> ingestSstable(String filename, Uint8List bytes);
 
+  /// Drops every SSTable currently tracked in the manifest and deletes the
+  /// underlying files.
+  ///
+  /// Used by [SyncEngine] when stale-device eviction triggers a full re-sync.
+  /// After this returns, no SSTables are registered in any level; the next
+  /// [ingestSstable] call rebuilds the store from a peer-provided SSTable.
+  ///
+  /// The manifest update precedes file deletion, so a crash mid-call leaves
+  /// the manifest referencing a strictly smaller (and consistent) set of
+  /// files. The memtable, WAL, and HLC clock are not touched.
+  ///
+  /// **Caller responsibility:** any data not already replicated to the sync
+  /// folder is lost. Callers must only invoke this in the eviction-recovery
+  /// path or equivalent "discard local state and rebuild" scenarios.
+  Future<void> dropAllSstables();
+
   /// Returns a sorted list of user-visible namespace names that have had at
   /// least one document written to them.
   ///
@@ -360,6 +376,7 @@ final class KvStoreConfig {
     this.maxClockSkew = const Duration(seconds: 60),
     this.maxValueBytes = 1024 * 1024,
     this.tombstoneGraceDuration = const Duration(days: 7),
+    this.staleDeviceEvictionAfter = const Duration(days: 90),
   });
 
   /// Memtable flush threshold in bytes.
@@ -434,9 +451,63 @@ final class KvStoreConfig {
   /// short enough that deleted data is reclaimed in a reasonable window.
   /// Set to [Duration.zero] only when tombstones must drop on the next
   /// compaction (e.g. tests).
+  ///
+  /// ## Relationship with [staleDeviceEvictionAfter]
+  ///
+  /// [tombstoneGraceDuration] is the *local-only* grace window; it answers
+  /// "how long must a tombstone survive on a single device before it is safe
+  /// to drop?" [staleDeviceEvictionAfter] is the *distributed* eviction
+  /// window; it answers "how long can a peer be absent before we exclude it
+  /// from the GC horizon?" Together they are the two halves of "how long
+  /// until a delete is considered globally observed." Setting
+  /// [staleDeviceEvictionAfter] shorter than [tombstoneGraceDuration] is
+  /// meaningless: a device can be evicted before the local grace window has
+  /// elapsed, which offers no additional safety and may cause unnecessary
+  /// full re-syncs.
   final Duration tombstoneGraceDuration;
 
+  /// Maximum time a peer device may be absent from the sync folder before its
+  /// `.hwm` file is excluded from the `min(currentHlc)` horizon computation.
+  ///
+  /// ## Safety trade-off
+  ///
+  /// A longer threshold is safer (the horizon advances more conservatively)
+  /// but defers tombstone GC for longer when a device goes offline. A shorter
+  /// threshold allows GC to proceed sooner but increases the likelihood that a
+  /// legitimately-active device (phone in a drawer, laptop in storage) is
+  /// evicted and forced into a full re-sync on return.
+  ///
+  /// ## Re-admission requirement — read before shortening this value
+  ///
+  /// A device whose `.hwm` has been excluded from the horizon may have its
+  /// data become inconsistent with the advanced horizon: tombstones that were
+  /// GC'd while it was absent may no longer exist, so if the device pushes its
+  /// pre-eviction SSTables, deleted keys can be resurrected. To prevent this,
+  /// the [SyncEngine] detects the evicted state on the next push and
+  /// **performs a full re-sync** (discards local SSTables for synced
+  /// namespaces and re-downloads the current consolidated set). Incremental
+  /// catch-up is *unsafe* for an evicted device.
+  ///
+  /// ## Pairing with [tombstoneGraceDuration]
+  ///
+  /// [tombstoneGraceDuration] is the local-only grace window;
+  /// [staleDeviceEvictionAfter] is the distributed eviction window. They are
+  /// the two halves of "how long until a delete is considered globally
+  /// observed." Setting [staleDeviceEvictionAfter] shorter than
+  /// [tombstoneGraceDuration] is meaningless (see [tombstoneGraceDuration]
+  /// doc comment for details).
+  ///
+  /// Defaults to 90 days — a conservative value that accommodates phones in
+  /// drawers, laptops in storage, and devices that sync only over a specific
+  /// Wi-Fi network.
+  final Duration staleDeviceEvictionAfter;
+
   /// Configuration for unit tests: tiny thresholds, no fsync, small cache.
+  ///
+  /// [staleDeviceEvictionAfter] is intentionally left at the default 90 days
+  /// so tests that exercise sync-horizon behaviour must supply their own
+  /// short threshold via the named parameter. Tests that do not exercise
+  /// eviction are unaffected by the default.
   factory KvStoreConfig.forTesting() => const KvStoreConfig(
     memtableSizeBytes: 4096,
     l0CompactionTrigger: 2,
