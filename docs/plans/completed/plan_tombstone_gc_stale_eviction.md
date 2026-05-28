@@ -279,7 +279,7 @@ _Questions resolved — implementation plan is locked. See Q1–Q7 decisions in
 the Open questions section above and Review 1 for the full safety argument._
 
 ### Step 1 — Configuration
-- [ ] Add `KvStoreConfig.staleDeviceEvictionAfter: Duration` (default 90
+- [x] Add `KvStoreConfig.staleDeviceEvictionAfter: Duration` (default 90
       days), positioned adjacent to `tombstoneGraceDuration` in the class.
       Doc comment must state: (a) the safety trade-off (longer is safer but
       defers GC); (b) that a device idle longer than this threshold **must
@@ -291,32 +291,32 @@ the Open questions section above and Review 1 for the full safety argument._
       observed."
 
 ### Step 2 — Eviction-aware horizon
-- [ ] Extend `HighwaterMark.minCurrentHlcAcrossDevices` (or add a sibling
+- [x] Extend `HighwaterMark.minCurrentHlcAcrossDevices` (or add a sibling
       `minCurrentHlcExcludingStale`) to accept an `evictAfter: Duration?`,
       a `now: DateTime` (test seam, default `DateTime.now()`), and a
       required `localDeviceId: String` that is **never** excluded regardless
       of staleness.
-- [ ] Skip HWM files where
+- [x] Skip HWM files where
       `now.difference(hwm.lastUpdated) > evictAfter`
       *and* `hwm.deviceId != localDeviceId`.
-- [ ] Preserve the "no HWM files yet" / "all non-local HWMs evicted" → `null`
+- [x] Preserve the "no HWM files yet" / "all non-local HWMs evicted" → `null`
       contract so `SyncEngine` continues to map it to `Hlc(0, 0)` — the
       blocking horizon that prevents any drop when the sync topology has no
       current ground truth.
 
 ### Step 3 — Wire through `SyncEngine`
-- [ ] Pass `_config.staleDeviceEvictionAfter` and `_deviceId` into the
+- [x] Pass `_config.staleDeviceEvictionAfter` and `_deviceId` into the
       provider registered in the `SyncEngine` constructor, replacing the
       current no-argument call to `minCurrentHlcAcrossDevices`.
 
 ### Step 4 — Safe re-admission
-- [ ] At the start of each push cycle, after reading peer HWMs but before
+- [x] At the start of each push cycle, after reading peer HWMs but before
       uploading any local SSTables, apply the two-condition eviction check:
       `localCurrentHlc < min(livePeers.currentHlc)`
       AND `localHwm.lastUpdated < now - staleDeviceEvictionAfter`
       where `livePeers` is the eviction-filtered peer list (stale peers
       excluded, local device excluded).
-- [ ] When **both** conditions hold: the device has been excluded from the
+- [x] When **both** conditions hold: the device has been excluded from the
       GC horizon by every live peer. Perform a full re-sync:
         1. Delete all local SSTables for synced namespaces.
         2. Re-download the current consolidated SSTable set from the sync
@@ -327,54 +327,119 @@ the Open questions section above and Review 1 for the full safety argument._
       resurrection. If implementation scope grows unexpectedly, split this
       step into `plan_sync_full_resync_after_eviction.md` and track it as a
       blocker; do **not** ship eviction without re-admission.
-- [ ] When false (normal path): proceed with the existing incremental push.
+- [x] When false (normal path): proceed with the existing incremental push.
 
 ### Step 5 — Tests
-- [ ] **Eviction admits the horizon to advance:** two HWMs, one with
+- [x] **Eviction admits the horizon to advance:** two HWMs, one with
       `lastUpdated > evictAfter` ago, one fresh; `min` returns the fresh
       device's HLC, not the strict minimum.
-- [ ] **Local device never self-evicts:** a stale `lastUpdated` on the
+- [x] **Local device never self-evicts:** a stale `lastUpdated` on the
       local HWM is ignored when the helper is called with that device's
       ID; the strict minimum still includes self.
-- [ ] **All-evicted → null/block:** every HWM stale (e.g. dormant project)
+- [x] **All-evicted → null/block:** every HWM stale (e.g. dormant project)
       collapses to `null`, which `SyncEngine` maps to `Hlc(0, 0)` so no
       tombstones drop.
-- [ ] **Returning-device resurrection guard (CI):** simulate eviction +
+- [x] **Returning-device resurrection guard (CI):** simulate eviction +
       drop a tombstone past the advanced horizon + simulate the device's
       return *with* the re-admission check enabled — assert the device
       performs a full re-sync (no resurrection). Then disable the check —
       assert the resurrection occurs (proves the test is wired right).
-- [ ] **Multi-device end-to-end:** in-process two-device test, then add a
+- [x] **Multi-device end-to-end:** in-process two-device test, then add a
       release-checklist entry for the cross-process variant under
       `kmdb_harness` once `plan_harness_mixed_storage.md` lands.
 
 ### Step 6 — Documentation
-- [ ] `docs/spec/12_sync.md`: replace the "Known limitation: slowest-device
+- [x] `docs/spec/12_sync.md`: replace the "Known limitation: slowest-device
       peg" bullet with the eviction rule, threshold, and re-admission
       protocol. Restore the historical 90-day text adjusted for the
       current model.
-- [ ] `docs/spec/06_storage_engine.md`: cross-reference the eviction rule
+- [x] `docs/spec/06_storage_engine.md`: cross-reference the eviction rule
       from the tombstone-GC paragraph.
-- [ ] Update the H4-FU2 roadmap entry status when complete.
-- [ ] Update doc comments on `KvStoreConfig`, `HighwaterMark`, and
+- [x] Update the H4-FU2 roadmap entry status when complete.
+- [x] Update doc comments on `KvStoreConfig`, `HighwaterMark`, and
       `SyncEngine` to mention the new pairing.
 
 ### Step 7 — Verify
-- [ ] `make pre_commit` clean.
-- [ ] `dart test` passes in `packages/kmdb` and `packages/kmdb_cli`.
-- [ ] Coverage ≥ 90% as per `CLAUDE.md`.
-- [ ] Release-checklist entry added to
+- [x] `make pre_commit` clean.
+- [x] `dart test` passes in `packages/kmdb` and `packages/kmdb_cli`.
+- [x] Coverage ≥ 90% as per `CLAUDE.md`.
+- [x] Release-checklist entry added to
       `docs/spec/28_release_checklist.md` for the cross-device returning-
       stale-device scenario (companion to RC-6 from H4 PR2).
 
 ### Step 8 — PR
-- [ ] Branch + worktree per `docs/plans/README.md`. Open PR against `main`,
+- [x] Branch + worktree per `docs/plans/README.md`. Open PR against `main`,
       update **PR link** above, and on merge move this plan to
       `docs/plans/completed/`.
 
 ## Summary
 
-{To be completed during implementation.}
+H4-FU2 closes the "slowest-device peg" hazard left open by H4 PR2 with two
+complementary mechanisms.
+
+**Eviction.** `HighwaterMark.minCurrentHlcAcrossDevices` now accepts an
+`evictAfter` duration and an optional `localDeviceId`; HWM files whose
+`lastUpdated` is older than `now - evictAfter` are excluded from the
+horizon, with the local device exempted from the staleness filter when its
+ID is supplied. `SyncEngine` wires `KvStoreConfig.staleDeviceEvictionAfter`
+(new field, default 90 days) and `_deviceId` into the registered horizon
+provider. A device that has been offline longer than the eviction window
+no longer pegs `min(currentHlc)` for the rest of the topology.
+
+**Re-admission.** `SyncEngine.push` now begins each cycle with
+`_checkAndHandleEviction`, which detects the two-condition rule
+(`localCurrentHlc < min(livePeers.currentHlc)` AND `localHwm.lastUpdated
+< now - staleDeviceEvictionAfter`). When both hold, the device performs a
+full re-sync: it discards every local SSTable via the new
+`KvStore.dropAllSstables` (implemented as a manifest-aware drop — a
+single `VersionEdit` removing every level entry is appended *before* the
+`.sst` files are unlinked, so a crash mid-call leaves the manifest
+referencing a strictly smaller and still-consistent set), re-downloads
+whatever SSTables are present in the cloud `sstables/` folder (handling
+both 4-segment consolidation outputs and 3-segment per-device flushes),
+ingests them, and resets the local HWM to `Hlc(0, 0)`. Condition (a)
+alone is "merely behind" (incremental catch-up); condition (b) alone is
+"recently offline" (also safe incrementally). Only both together
+indicate the device was excluded from the horizon.
+
+**Tests.** `highwater_test.dart` covers the eviction filter in
+isolation: peer eviction, local exemption, all-evicted → null collapse,
+self-exemption only when `localDeviceId` is supplied. `sync_engine_test.dart`
+adds the H4-FU2 group: provider plumbing, the four "not-evicted" cases
+(merely behind, recently online, brand-new device, no prior HWM), the
+core resurrection-guard test (full re-sync prevents resurrection on a
+returning device), the **negative-control** test (disabling the guard via
+a 100-year eviction window does cause resurrection — proving the guard
+test is wired correctly), and the multi-device sync continuity test (an
+active pair keeps converging when a stale third peer is evicted). The
+negative-control test requires two advance-pushes after the delete to
+actually drop the tombstone from A's local store before B returns; the
+drop predicate is *strict* less-than, and each flush-triggered compaction
+runs before its matching push has updated the cloud HWM, so a single
+delete-push leaves the tombstone in place.
+
+**Docs.** `docs/spec/12_sync.md` replaces the "Known limitation:
+slowest-device peg" paragraph with the eviction rule, the
+`staleDeviceEvictionAfter` field and 90-day default, and the
+re-admission protocol (including the two-condition rule and the
+simultaneous-return edge case). `docs/spec/06_storage_engine.md`
+cross-references the new behaviour from the tombstone-GC paragraph. The
+H4-FU2 roadmap entry in `docs/roadmap/0_02_01.md` is marked Done.
+`docs/spec/28_release_checklist.md` gains RC-7, the cross-device
+companion to RC-6, naming the harness scenario for the returning-stale-
+device guarantee once `plan_harness_mixed_storage.md` lands.
+
+**Q7 dangling-reference cleanup.** `HighwaterMark.isPeerStale`'s doc
+comment previously named a "Phase 8" hookup site that no longer exists;
+this PR redirects the doc to point at `minCurrentHlcAcrossDevices`
+without otherwise touching the method (out of scope per Q7).
+
+**Deferred.** H4-FU3 (ingest-side horizon floor — recipient-side reject
+of SSTables with `maxHlc < horizon` from known-stale peers) remains its
+own follow-up; H4-FU2 closes the *producer-side* invariant by ensuring
+the horizon can advance past dead peers. Garbage-collecting the
+`.hwm` file of a permanently-dead device is left for a separate
+consolidation-coordinator concern per Q6.
 
 ## Reviews
 

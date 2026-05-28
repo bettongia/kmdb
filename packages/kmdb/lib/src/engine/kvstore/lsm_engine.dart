@@ -935,6 +935,61 @@ final class LsmEngine {
     await _compactIfNeeded();
   }
 
+  // ── Full-resync support ───────────────────────────────────────────────────
+
+  /// Removes every SSTable currently tracked in the manifest and deletes
+  /// each file from disk.
+  ///
+  /// Used by [SyncEngine] when stale-device eviction triggers a full re-sync:
+  /// the local SSTables are no longer trustworthy relative to the advanced
+  /// horizon, so they are discarded and the engine is left ready to receive
+  /// the consolidated set from the sync folder via [ingestAt0].
+  ///
+  /// Manifest consistency is the load-bearing invariant: a single
+  /// [VersionEdit] with every current file in `removed` is appended *before*
+  /// the `.sst` files are unlinked, so a crash mid-call leaves the manifest
+  /// pointing at a strictly smaller set of files (the leftover orphans are
+  /// reclaimed by crash recovery on the next open). Removing files first
+  /// would create the inverse hazard — manifest entries referencing files
+  /// that no longer exist.
+  ///
+  /// The memtable, WAL, and HLC clock are intentionally **not** touched.
+  /// Callers that need a fully empty state must arrange that themselves; the
+  /// SyncEngine eviction path treats the in-memory state as either already
+  /// flushed (the common case — push() drains it) or recoverable from the
+  /// WAL on the next open.
+  Future<void> dropAllSstables() async {
+    final removed = <SstableRef>[];
+    for (final lvlEntry in _levels.entries) {
+      for (final filename in lvlEntry.value) {
+        removed.add(SstableRef(level: lvlEntry.key, filename: filename));
+      }
+    }
+    if (removed.isEmpty) return;
+
+    final hlc = _clock.now();
+    await _manifestWriter.append(
+      VersionEdit(
+        logNumber: _walWriter.activeSequence,
+        nextSeq: hlc.encoded,
+        removed: removed,
+      ),
+    );
+
+    _levels.clear();
+
+    for (final ref in removed) {
+      final path = '$_sstDir/${ref.filename}';
+      try {
+        await _adapter.deleteFile(path);
+      } on Object {
+        // File already absent; the manifest is the authority and is now
+        // consistent. A returning device that finds an orphan SSTable will
+        // also reclaim it via crash recovery on the next open.
+      }
+    }
+  }
+
   // ── Device ID reassignment ────────────────────────────────────────────────
 
   /// Assigns a new device identity to this engine instance.

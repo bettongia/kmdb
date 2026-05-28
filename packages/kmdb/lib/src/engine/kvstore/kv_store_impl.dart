@@ -212,6 +212,9 @@ final class KvStoreImpl implements KvStore {
   }
 
   @override
+  Future<void> dropAllSstables() => _engine.dropAllSstables();
+
+  @override
   Stream<String> get writeEvents => _engine.writeEvents;
 
   @override

@@ -171,6 +171,46 @@ For each release:
   `docs/plans/completed/plan_tombstone_gc.md`,
   `docs/plans/plan_harness_mixed_storage.md`.
 
+### RC-7 — Returning stale device does not resurrect deleted data
+- **Area:** sync re-admission (H4-FU2)
+- **Validates:** that a device evicted from the sync horizon performs a
+  full re-sync on return and does not deliver pre-eviction SSTables to its
+  peers. Device A writes a key, deletes it, advances its HWM past the
+  tombstone, and a separate flush-compaction drops the tombstone while
+  device B is excluded from the horizon (B's HWM `lastUpdated` exceeds
+  `staleDeviceEvictionAfter`). Device B then returns. With the
+  re-admission check enabled, B detects both `localCurrentHlc <
+  min(livePeers.currentHlc)` and `localHwm.lastUpdated < now -
+  staleDeviceEvictionAfter`, discards its local SSTables (via
+  `KvStore.dropAllSstables`), and re-downloads the current consolidated
+  set; the deleted key stays absent on every device.
+- **Why not automated (as a gate):** the cross-device verification (B
+  pushing a *real* pre-eviction SSTable and being rejected) is the same
+  per-device adapter shape that gates RC-6. The in-process invariant —
+  that `_checkAndHandleEviction` triggers `_fullResync` on the two-
+  condition rule and that `_fullResync` keeps the manifest consistent
+  during the SSTable drop — *is* covered in CI by the
+  `sync_engine_test.dart` H4-FU2 tests, including the negative-control
+  test that proves resurrection occurs without the guard.
+- **Applies when:** changes to `SyncEngine._checkAndHandleEviction`,
+  `SyncEngine._fullResync`, `KvStore.dropAllSstables`, the
+  `KvStoreConfig.staleDeviceEvictionAfter` semantics, or the eviction
+  filter in `HighwaterMark.minCurrentHlcAcrossDevices`.
+- **Prerequisites:** `plan_harness_mixed_storage.md` landed; multi-device
+  harness scenario with adjustable HWM `lastUpdated`.
+- **Steps:** drive A through delete + two advance-pushes so its local
+  store has GC'd the tombstone. Configure B's `staleDeviceEvictionAfter`
+  short enough that B's injected stale HWM evicts B from A's horizon, but
+  use a separate eviction setting on B to control re-admission detection.
+  Have B return and call `push()`. Assert that B performs a full re-sync
+  (local SSTables replaced) and that `get` for the deleted key returns
+  null on every device.
+- **Expected result:** the returning device does not resurrect the
+  deleted key; A's local state stays consistent with the cloud.
+- **Related:** `docs/spec/06_storage_engine.md`, `docs/spec/12_sync.md`,
+  `docs/plans/completed/plan_tombstone_gc_stale_eviction.md`,
+  `docs/plans/plan_harness_mixed_storage.md`.
+
 ---
 
 ## Release log

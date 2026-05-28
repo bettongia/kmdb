@@ -85,7 +85,9 @@ final class SyncEngine {
   /// the local database root directory (contains the `sst/` subdirectory).
   /// [_syncRoot] is the root path in the cloud adapter. [_syncNamespaces] is the
   /// set of user namespaces to include in sync (system `$` namespaces are
-  /// always excluded).
+  /// always excluded). [config] supplies the [KvStoreConfig.staleDeviceEvictionAfter]
+  /// threshold used for the tombstone-GC horizon computation — if omitted,
+  /// [KvStoreConfig] defaults are used (90 days).
   SyncEngine({
     required this._store,
     required this._cloudAdapter,
@@ -95,18 +97,22 @@ final class SyncEngine {
     required this._syncRoot,
     required this._syncNamespaces,
     this._consolidationConfig = const ConsolidationConfig(),
-  }) {
+    KvStoreConfig? config,
+  }) : _config = config ?? const KvStoreConfig() {
     // Register the synced-database tombstone-GC horizon provider on the
-    // store (H4 PR2). The store uses this for the all-levels `_compactAll`
-    // path; partial compactions never drop tombstones regardless. When the
-    // HWM scan finds no `.hwm` files yet (sync not yet established), we
-    // return `Hlc(0, 0)` so no tombstones drop until at least one device
-    // has pushed an HWM — the safe behaviour for a freshly-configured
-    // sync folder.
+    // store (H4 PR2 / H4-FU2). The store uses this for the all-levels
+    // `_compactAll` path; partial compactions never drop tombstones regardless.
+    // When the HWM scan finds no live `.hwm` files (sync not yet established,
+    // or all non-local HWMs are stale), we return `Hlc(0, 0)` so no
+    // tombstones drop until at least one device has pushed an HWM — the safe
+    // behaviour for a freshly-configured sync folder or a temporarily
+    // quiescent topology.
     _store.setTombstoneHorizonProvider(() async {
       final min = await HighwaterMark.minCurrentHlcAcrossDevices(
         _remoteHwmDir,
         _cloudAdapter,
+        localDeviceId: _deviceId,
+        evictAfter: _config.staleDeviceEvictionAfter,
       );
       return min ?? const Hlc(0, 0);
     });
@@ -120,6 +126,10 @@ final class SyncEngine {
   final String _syncRoot;
   final Set<String> _syncNamespaces;
   final ConsolidationConfig _consolidationConfig;
+
+  /// The store configuration, used for the eviction threshold and other
+  /// sync-related parameters.
+  final KvStoreConfig _config;
 
   /// The set of user namespaces included in sync.
   ///
@@ -156,17 +166,45 @@ final class SyncEngine {
   ///
   /// Steps:
   /// 1. Flush the local memtable to ensure all data is in SSTables.
-  /// 2. List local SSTables from `{dbDir}/sst/`.
-  /// 3. List remote SSTables already in `{syncRoot}/sstables/`.
-  /// 4. Upload SSTables from local that are absent from remote.
-  /// 5. Read (or create) the local HWM.
-  /// 6. Compute the max HLC across uploaded SSTables.
-  /// 7. Update and upload the HWM with the new currentHlc.
+  /// 2. Read peer HWMs and detect whether this device has been evicted
+  ///    from the GC horizon (H4-FU2 re-admission check).
+  ///    If evicted: perform a full re-sync (see [_fullResync]) and return.
+  /// 3. List local SSTables from `{dbDir}/sst/`.
+  /// 4. List remote SSTables already in `{syncRoot}/sstables/`.
+  /// 5. Upload SSTables from local that are absent from remote.
+  /// 6. Read (or create) the local HWM.
+  /// 7. Compute the max HLC across uploaded SSTables.
+  /// 8. Update and upload the HWM with the new currentHlc.
   Future<void> push() async {
     // 1. Flush to materialise all memtable data as SSTables.
     await _store.flush();
 
-    // 2. List local SSTables — only include files belonging to this device
+    // 2. Re-admission check (H4-FU2).
+    //
+    // Peer HWMs are already needed at this point (to detect eviction), and
+    // they are used again below for the incremental upload path. We read them
+    // once here. This does NOT add a round-trip; peer HWMs are always read
+    // before uploading to avoid shipping SSTables that have already been
+    // superseded by a consolidation.
+    //
+    // The two-condition eviction test:
+    //   (a) localCurrentHlc < min(livePeers.currentHlc)
+    //   (b) localHwm.lastUpdated < now - staleDeviceEvictionAfter
+    //
+    // Only BOTH conditions together indicate the device has been excluded from
+    // the GC horizon. Condition (a) alone means "merely behind" — a normal
+    // catch-up sync; condition (b) alone means "clock-skew or recently offline"
+    // — also safe incrementally. Both together mean "I was evicted and the
+    // horizon has advanced past my data."
+    final evictionTriggered = await _checkAndHandleEviction();
+    if (evictionTriggered) {
+      // Full re-sync was performed; local state is now consistent with the
+      // current sync folder. Skip the incremental push for this cycle —
+      // the next push will upload any newly-ingest-derived SSTables.
+      return;
+    }
+
+    // 3. List local SSTables — only include files belonging to this device
     //    (named with our deviceId prefix) to avoid re-uploading peer files
     //    that were ingested during pull.
     final localFiles = await _localAdapter.listFiles(
@@ -177,22 +215,20 @@ final class SyncEngine {
         .where((f) => _safeDeviceId(f) == _deviceId)
         .toSet();
 
-    // 3. List remote SSTables.
+    // 4. List remote SSTables.
     final remoteFiles = (await _cloudAdapter.list(
       _remoteSstDir,
       extension: '.sst',
     )).toSet();
 
-    // 4. Upload new SSTables.
-    final uploaded = <String>[];
+    // 5. Upload new SSTables.
     for (final filename in ownLocalFiles) {
       if (remoteFiles.contains(filename)) continue; // already uploaded
       final bytes = await _localAdapter.readFile('$_sstDir/$filename');
       await _cloudAdapter.upload('$_remoteSstDir/$filename', bytes);
-      uploaded.add(filename);
     }
 
-    // 5. Load or create the local HWM.
+    // 6. Load or create the local HWM.
     var hwm =
         await HighwaterMark.load(_remoteHwmPath, _cloudAdapter) ??
         HighwaterMark(
@@ -202,7 +238,7 @@ final class SyncEngine {
           peers: const {},
         );
 
-    // 6. Compute the max HLC from all uploaded (and previously uploaded) SSTables.
+    // 7. Compute the max HLC from all uploaded (and previously uploaded) SSTables.
     Hlc maxHlc = hwm.currentHlc;
     for (final filename in ownLocalFiles) {
       try {
@@ -213,9 +249,175 @@ final class SyncEngine {
       }
     }
 
-    // 7. Update and upload HWM.
+    // 8. Update and upload HWM.
     hwm = hwm.withCurrentHlc(maxHlc);
     await hwm.save(_remoteHwmPath, _cloudAdapter);
+  }
+
+  /// Checks whether this device has been excluded from the GC horizon by all
+  /// live peers (H4-FU2 re-admission check).
+  ///
+  /// Returns `true` if both eviction conditions hold AND a full re-sync was
+  /// performed; returns `false` if the incremental push may proceed normally.
+  ///
+  /// ## Two-condition detection rule
+  ///
+  /// A device is considered evicted (and therefore requires a full re-sync)
+  /// only when **both** of the following hold simultaneously:
+  ///
+  /// 1. `localCurrentHlc < min(livePeers.currentHlc)` — the local device's
+  ///    HLC is behind all current live peers, indicating it has been bypassed.
+  /// 2. `localHwm.lastUpdated < now - staleDeviceEvictionAfter` — the local
+  ///    HWM file is older than the eviction window, meaning the device has not
+  ///    updated it within the threshold period.
+  ///
+  /// Condition 1 alone is "merely behind" (normal incremental catch-up).
+  /// Condition 2 alone is "recently offline or clock-skewed" (also safe
+  /// incrementally). Only both together indicate the device was excluded from
+  /// the horizon and that its local SSTables may contain data the topology has
+  /// already moved past via tombstone GC.
+  ///
+  /// ## Consolidated-set handling
+  ///
+  /// When performing a full re-sync, the method downloads whatever SSTables
+  /// are present in the remote `sstables/` folder. If a consolidated set
+  /// exists (4-segment filenames), those are included. If no consolidation
+  /// has run (e.g. a single-device sync folder after the other device
+  /// vanished), all individual SSTables are downloaded. Both cases are handled
+  /// uniformly — the method downloads all remote SSTables regardless of format.
+  ///
+  /// ## Simultaneous returning devices
+  ///
+  /// If two devices were both evicted and both return at the same time, each
+  /// will see the other as a live peer with a stale HLC; the two-condition
+  /// detection may fire for both. Both re-sync from the cloud state, which
+  /// converges — this is safe. The comment below documents this edge case.
+  Future<bool> _checkAndHandleEviction() async {
+    // Read the local HWM (if any). A brand-new device has no HWM yet;
+    // it cannot have been evicted (it was never in the horizon to begin with).
+    final localHwm = await HighwaterMark.load(_remoteHwmPath, _cloudAdapter);
+    if (localHwm == null) return false;
+
+    final now = DateTime.now().toUtc();
+
+    // Condition (b): is the local HWM file older than the eviction threshold?
+    final localAge = now.difference(localHwm.lastUpdated);
+    if (localAge <= _config.staleDeviceEvictionAfter) {
+      // Within the window — definitely not evicted, no need to read peers.
+      return false;
+    }
+
+    // Condition (b) holds — the local HWM is stale by wall-clock age.
+    // Now check condition (a): is our HLC behind all live peers?
+    //
+    // We read all peer HWMs from the sync folder, using the eviction filter
+    // to identify which peers are currently "live." The local device is
+    // excluded from the peer min (we want to compare against others, not self).
+    final allHwmFiles = await _cloudAdapter.list(
+      _remoteHwmDir,
+      extension: '.hwm',
+    );
+
+    // Compute min(livePeers.currentHlc) — excluding self and stale peers.
+    Hlc? livePeerMin;
+    for (final filename in allHwmFiles) {
+      final hwm = await HighwaterMark.load(
+        '$_remoteHwmDir/$filename',
+        _cloudAdapter,
+      );
+      if (hwm == null) continue;
+      if (hwm.deviceId == _deviceId) continue; // exclude self
+
+      // Apply the same eviction filter: only count live peers.
+      final peerAge = now.difference(hwm.lastUpdated);
+      if (peerAge > _config.staleDeviceEvictionAfter) continue; // stale, skip
+
+      if (livePeerMin == null || hwm.currentHlc.compareTo(livePeerMin) < 0) {
+        livePeerMin = hwm.currentHlc;
+      }
+    }
+
+    // If there are no live peers (all peers are also stale, or this is the
+    // only device), then there is no one to have evicted us — safe to proceed
+    // incrementally. Edge case: two simultaneously-returning devices will each
+    // see the other as stale; neither triggers a full re-sync. That is the
+    // correct behaviour: neither was actually excluded while the other was
+    // also absent.
+    if (livePeerMin == null) return false;
+
+    // Condition (a): is our HLC behind the live-peer minimum?
+    if (localHwm.currentHlc.compareTo(livePeerMin) >= 0) {
+      // We are at or ahead of the live-peer minimum — not evicted.
+      return false;
+    }
+
+    // Both conditions hold: perform a full re-sync.
+    await _fullResync();
+    return true;
+  }
+
+  /// Performs a full re-sync for a device that has been excluded from the GC
+  /// horizon (H4-FU2 re-admission).
+  ///
+  /// ## Steps
+  ///
+  /// 1. Delete all local SSTables that originated from this device (the ones
+  ///    with our `_deviceId` prefix). Peer SSTables that were previously
+  ///    ingested are also removed since the incoming consolidated/individual
+  ///    SSTables from the sync folder will replace them.
+  /// 2. Re-download all SSTables currently in the remote `sstables/` folder.
+  ///    This includes consolidated (4-segment) files if the consolidation
+  ///    coordinator has run, or individual flush files otherwise.
+  /// 3. Ingest each downloaded SSTable into the local store. Invalid or
+  ///    corrupted files are skipped (defensive; should not occur in a
+  ///    healthy sync folder).
+  /// 4. Reset and re-upload the local HWM with `currentHlc = Hlc(0, 0)` and
+  ///    an updated `lastUpdated` timestamp, signalling to peers that this
+  ///    device has re-joined with a clean state.
+  ///
+  /// After this method returns, the local store reflects the current
+  /// consolidated state of the sync folder. The next pull cycle will then
+  /// bring in any peer SSTables that were missed.
+  Future<void> _fullResync() async {
+    // 1. Discard all local SSTables (own + previously-ingested peer) via the
+    //    engine so the manifest is updated atomically before files vanish.
+    //    Removing files behind the manifest's back would cause the next
+    //    compaction triggered by ingestAt0 (step 3 below) to open a now-
+    //    nonexistent file and fail with StorageException(File not found).
+    await _store.dropAllSstables();
+
+    // 2. Download all SSTables from the remote folder.
+    final remoteFiles = await _cloudAdapter.list(
+      _remoteSstDir,
+      extension: '.sst',
+    );
+
+    // 3. Ingest each downloaded SSTable. Handles both:
+    //    - Consolidated set (4-segment filenames, if coordinator ran).
+    //    - Individual flush SSTables (3-segment filenames, if no consolidation).
+    for (final filename in remoteFiles) {
+      final bytes = await _cloudAdapter.download('$_remoteSstDir/$filename');
+      if (bytes == null) continue; // file removed between list and download
+
+      try {
+        await _store.ingestSstable(filename, bytes);
+      } on CorruptedSstableException {
+        continue; // Defensive: skip corrupted remote files.
+      } on FormatException {
+        continue; // Defensive: skip files with invalid names.
+      }
+    }
+
+    // 4. Reset the local HWM to signal re-admission.
+    //    currentHlc of Hlc(0, 0) will be updated on the next push cycle once
+    //    the store reflects the full re-synced state.
+    final resetHwm = HighwaterMark(
+      deviceId: _deviceId,
+      currentHlc: const Hlc(0, 0),
+      lastUpdated: DateTime.now().toUtc(),
+      peers: const {},
+    );
+    await resetHwm.save(_remoteHwmPath, _cloudAdapter);
   }
 
   /// Downloads new SSTables from the sync folder and ingests them locally.
