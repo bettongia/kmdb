@@ -1,14 +1,14 @@
 # Tombstone GC: stale-device eviction from the sync horizon
 
-**Status**: Implementing
+**Status**: Done
 
-**PR link**: {pending}
+**PR link**: https://github.com/bettongia/kmdb/pull/26
 
 **Origin**: H4-FU2 — explicitly deferred from H4-FU during PR2 sign-off. Roadmap
-entry: [docs/roadmap/0_02_01.md → H4-FU2](../roadmap/0_02_01.md). Documented as
+entry: [docs/roadmap/0_02_01.md → H4-FU2](../../roadmap/0_02_01.md). Documented as
 a known limitation in
-[plans/completed/plan_tombstone_gc.md](completed/plan_tombstone_gc.md#the-inactive-device-wrinkle)
-and [docs/spec/12_sync.md](../spec/12_sync.md#tombstone-retention--garbage-collection).
+[plans/completed/plan_tombstone_gc.md](plan_tombstone_gc.md#the-inactive-device-wrinkle)
+and [docs/spec/12_sync.md](../../spec/12_sync.md#tombstone-retention--garbage-collection).
 
 **Sequencing**: Sibling to **H4-FU3** (ingest-side horizon floor) — together
 they close the "tombstone GC robustness" follow-up cluster opened by H4 PR2.
@@ -20,7 +20,7 @@ the test plumbing.
 
 ## Problem statement
 
-[`HighwaterMark.minCurrentHlcAcrossDevices`](../../packages/kmdb/lib/src/sync/highwater.dart#L113)
+[`HighwaterMark.minCurrentHlcAcrossDevices`](../../../packages/kmdb/lib/src/sync/highwater.dart#L113)
 (the synced GC horizon registered by `SyncEngine`) returns the strict
 `min(currentHlc)` across every `.hwm` file in `{syncRoot}/highwater/`. The
 horizon is therefore pegged by the slowest reporter — a device that uploads
@@ -155,7 +155,7 @@ others are mostly tuning and surfacing decisions.
   beneficial: it can be updated in place on re-admission rather than
   requiring a fresh file create. Defer HWM file GC to a consolidation-
   coordinator follow-up._
-- [x] **Q7 — Interaction with [`HighwaterMark.isPeerStale`](../../packages/kmdb/lib/src/sync/highwater.dart#L190).**
+- [x] **Q7 — Interaction with [`HighwaterMark.isPeerStale`](../../../packages/kmdb/lib/src/sync/highwater.dart#L190).**
   This method exists, takes a `staleness: Duration = 90 days` parameter,
   and is unused outside its own tests (grep'd: only `highwater_test.dart`).
   Its current implementation only checks "have I ever seen this peer" — it
@@ -181,29 +181,29 @@ others are mostly tuning and surfacing decisions.
 ### Current behaviour and the exact peg
 
 `minCurrentHlcAcrossDevices`
-([highwater.dart:113](../../packages/kmdb/lib/src/sync/highwater.dart#L113))
+([highwater.dart:113](../../../packages/kmdb/lib/src/sync/highwater.dart#L113))
 lists every `*.hwm` in the HWM directory, loads each, and tracks the strict
 minimum `currentHlc`. There is no filter — corrupt files throw, but a
 syntactically valid but ancient `lastUpdated` is honoured at full weight. The
 result feeds the provider registered by `SyncEngine`
-([sync_engine.dart:106](../../packages/kmdb/lib/src/sync/sync_engine.dart#L106));
+([sync_engine.dart:106](../../../packages/kmdb/lib/src/sync/sync_engine.dart#L106));
 when the provider returns a value, `LsmEngine._computeTombstoneHorizon`
-([lsm_engine.dart:169](../../packages/kmdb/lib/src/engine/kvstore/lsm_engine.dart#L169))
+([lsm_engine.dart:169](../../../packages/kmdb/lib/src/engine/kvstore/lsm_engine.dart#L169))
 uses it verbatim (no further bounds check). So the peg flows directly from
 the dead `.hwm` through to `CompactionJob`'s `dropTombstone` predicate.
 
 ### What `lastUpdated` already provides
 
-[`HighwaterMark.lastUpdated`](../../packages/kmdb/lib/src/sync/highwater.dart#L73)
+[`HighwaterMark.lastUpdated`](../../../packages/kmdb/lib/src/sync/highwater.dart#L73)
 is set inside `withCurrentHlc` and persisted on every push — so for a live
 peer it is at most one sync cycle behind real wall-clock time. The
-[parser](../../packages/kmdb/lib/src/sync/highwater.dart#L240) normalises to
+[parser](../../../packages/kmdb/lib/src/sync/highwater.dart#L240) normalises to
 UTC. This field is exactly the eviction signal we need; nothing about the
 HWM format changes for H4-FU2.
 
 ### What `isPeerStale` does and does not do today
 
-[`HighwaterMark.isPeerStale`](../../packages/kmdb/lib/src/sync/highwater.dart#L190)
+[`HighwaterMark.isPeerStale`](../../../packages/kmdb/lib/src/sync/highwater.dart#L190)
 operates on the `peers` map *within a single HWM file* and answers "have I
 ever recorded a peer's HLC?" The `staleness` duration parameter is
 **unused** (documented "reserved for future use"). Grep confirms zero
@@ -238,7 +238,7 @@ moved past.
 ### The "freshly-configured sync folder" interaction
 
 `SyncEngine`'s provider returns `Hlc(0, 0)` when no `.hwm` files exist
-([sync_engine.dart:111](../../packages/kmdb/lib/src/sync/sync_engine.dart#L111)),
+([sync_engine.dart:111](../../../packages/kmdb/lib/src/sync/sync_engine.dart#L111)),
 which blocks every drop until at least one device has pushed. After
 eviction, if *every* HWM is excluded (e.g. a long-quiescent project where
 no device pushed within the eviction window), we land back at this case.
