@@ -154,6 +154,9 @@ final class CacheLayer implements KvStore {
       _store.ingestSstable(filename, bytes);
 
   @override
+  Future<void> dropAllSstables() => _store.dropAllSstables();
+
+  @override
   Future<List<String>> listNamespaces() => _store.listNamespaces();
 
   @override

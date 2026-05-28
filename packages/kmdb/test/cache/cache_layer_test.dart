@@ -58,6 +58,8 @@ final class _CountingStore implements KvStore {
   Future<void> ingestSstable(String filename, Uint8List bytes) =>
       _inner.ingestSstable(filename, bytes);
   @override
+  Future<void> dropAllSstables() => _inner.dropAllSstables();
+  @override
   Future<List<String>> listNamespaces() => _inner.listNamespaces();
   @override
   Future<bool> createNamespace(String namespace) =>

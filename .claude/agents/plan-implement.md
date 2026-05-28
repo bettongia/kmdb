@@ -26,7 +26,7 @@ description:
   'Investigated' status, providing appropriate
   feedback.\\n</commentary>\\n</example>"
 model: sonnet
-color: green
+color: pink
 memory: project
 ---
 

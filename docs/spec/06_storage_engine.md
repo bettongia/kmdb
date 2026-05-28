@@ -124,10 +124,14 @@ predicate — see `lib/src/engine/compaction/reclamation_policy.dart`.
 `CollapseToNewestPolicy` (the default) drops when `allLevels && hlc <
 horizon`; `RetainAllVersionsPolicy` (registered for `$ver:`) never drops.
 
-**Known limitation:** the strict `min(currentHlc)` is pegged by the slowest
-device. A dead or inactive peer blocks GC indefinitely. An eviction rule
-(max device staleness) is intentionally deferred — see
-`docs/plans/completed/plan_tombstone_gc.md`.
+**Stale-device eviction.** A peer whose `.hwm` `lastUpdated` is older than
+`KvStoreConfig.staleDeviceEvictionAfter` (default 90 days) is excluded
+from the `min(currentHlc)` computation, so the horizon advances past a
+permanently absent device. The evaluating device's own `.hwm` is never
+self-evicted. A returning evicted device must perform a full re-sync via
+`KvStore.dropAllSstables` + redownload before pushing — see §12
+"Stale-device eviction" and "Re-admission of an evicted device" for the
+distributed safety argument.
 
 ### Triggers
 
