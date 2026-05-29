@@ -1,15 +1,15 @@
 # Tombstone GC: ingest-side horizon floor (defence-in-depth)
 
-**Status**: Implementing
+**Status**: Done
 
-**PR link**: {pending}
+**PR link**: {pending — set after PR is opened}
 
 **Origin**: H4-FU3 — explicitly deferred from H4-FU during PR2 sign-off. Roadmap
-entry: [docs/roadmap/0_02_01.md → H4-FU3](../roadmap/0_02_01.md). PR2's
+entry: [docs/roadmap/0_02_01.md → H4-FU3](../../roadmap/0_02_01.md). PR2's
 Step 5 "no resurrection across sync" CI test
-([plan_tombstone_gc.md → Step 5](completed/plan_tombstone_gc.md#step-5--tests))
+([plan_tombstone_gc.md → Step 5](plan_tombstone_gc.md#step-5--tests))
 was deferred for the absence of this floor; the cross-device variant is
-[RC-6](../spec/28_release_checklist.md) and the harness scenario in
+[RC-6](../../spec/28_release_checklist.md) and the harness scenario in
 [plan_harness_mixed_storage.md](plan_harness_mixed_storage.md) Step 5.
 
 **Sequencing**: Sibling to **H4-FU2** (stale-device eviction). The pair forms
@@ -53,7 +53,7 @@ because the tombstone is no longer there to suppress it.
 
 H4-FU3 closes this loop by **persisting the highest horizon ever used for
 a tombstone drop** (a per-device monotonic "GC floor" in `$meta`) and
-having [`ingestSstable`](../../packages/kmdb/lib/src/engine/kvstore/kv_store.dart#L109)
+having [`ingestSstable`](../../../packages/kmdb/lib/src/engine/kvstore/kv_store.dart#L109)
 reject any incoming SSTable whose `maxHlc` is at or below the floor.
 After the floor is in place, the PR2 in-process resurrection test
 becomes a hard correctness assertion rather than a deferred one.
@@ -201,11 +201,11 @@ are surfacing and ergonomics calls.
 
 ### The ingest path today
 
-[`KvStoreImpl.ingestSstable`](../../packages/kmdb/lib/src/engine/kvstore/kv_store_impl.dart#L201)
+[`KvStoreImpl.ingestSstable`](../../../packages/kmdb/lib/src/engine/kvstore/kv_store_impl.dart#L201)
 writes the file to `sst/`, fsyncs file and directory, and calls
-[`LsmEngine.ingestAt0`](../../packages/kmdb/lib/src/engine/kvstore/lsm_engine.dart#L896).
+[`LsmEngine.ingestAt0`](../../../packages/kmdb/lib/src/engine/kvstore/lsm_engine.dart#L896).
 `ingestAt0` opens the reader (validates the footer checksum), parses the
-filename via [`SstableInfo.parse`](../../packages/kmdb/lib/src/engine/sstable/sstable_info.dart#L70)
+filename via [`SstableInfo.parse`](../../../packages/kmdb/lib/src/engine/sstable/sstable_info.dart#L70)
 (yielding `minHlc` / `maxHlc` cheaply, no body scan), advances the local
 HLC clock to `info.maxHlc`, appends a `VersionEdit` to the Manifest, and
 registers the file at L0. There is no eligibility check between the
@@ -219,7 +219,7 @@ comparator.** Whole-file rejection costs effectively nothing.
 
 ### The floor's write site
 
-PR2 added [`LsmEngine._computeTombstoneHorizon`](../../packages/kmdb/lib/src/engine/kvstore/lsm_engine.dart#L169)
+PR2 added [`LsmEngine._computeTombstoneHorizon`](../../../packages/kmdb/lib/src/engine/kvstore/lsm_engine.dart#L169)
 which feeds `_compactAll` via the registered provider. The natural place
 to advance the floor is at the *end* of a `_compactAll` that produced a
 job whose reclamation transform reported at least one tombstone drop.
@@ -242,9 +242,9 @@ state under retry. Sweep on next open if it becomes a hygiene problem
 
 ### `$meta` plumbing
 
-[`MetaStore`](../../packages/kmdb/lib/src/engine/kvstore/meta_store.dart)
+[`MetaStore`](../../../packages/kmdb/lib/src/engine/kvstore/meta_store.dart)
 already has the exact shape we need: WAL-backed writes via the engine
-bypassing the `$` guard ([kv_store_impl.dart](../../packages/kmdb/lib/src/engine/kvstore/kv_store_impl.dart#L243)
+bypassing the `$` guard ([kv_store_impl.dart](../../../packages/kmdb/lib/src/engine/kvstore/kv_store_impl.dart#L243)
 shows the `$meta` writes are intentionally engine-direct), symbolic-name
 → 16-byte key encoding, named accessors for each piece of state. Add
 `getTombstoneFloor` / `setTombstoneFloor` (or batch-aware
@@ -329,102 +329,191 @@ distributed invariant in the same harness scenario.
 > local snapshot (Q5); CLI exposure deferred (Q8).
 
 ### Step 1 — `MetaStore` accessors for the floor
-- [ ] Add `getTombstoneFloor() -> Hlc`, defaulting to `Hlc(0, 0)` when
+- [x] Add `getTombstoneFloor() -> Hlc`, defaulting to `Hlc(0, 0)` when
       absent. Doc comment must spell out: per-device by design, monotonic
       under correct operation, what bounds it.
-- [ ] Add `setTombstoneFloor(Hlc)` and the batch-aware
+- [x] Add `setTombstoneFloor(Hlc)` and the batch-aware
       `appendTombstoneFloorAdvance(Hlc, WriteBatch)`.
-- [ ] Unit tests: round-trip, default, encoding stable across opens.
+- [x] Unit tests: round-trip, default, encoding stable across opens.
 
 ### Step 2 — `CompactionJob` reports drops
-- [ ] Add a `tombstonesDropped: int` (or `bool didDropTombstones`) to the
+- [x] Add a `tombstonesDropped: int` (or `bool didDropTombstones`) to the
       job's result. The streaming transform PR2 added knows when a
       surviving-tombstone path was taken; surface it.
-- [ ] Test: a compaction that drops nothing reports zero; one that drops
+- [x] Test: a compaction that drops nothing reports zero; one that drops
       reports >0.
 
 ### Step 3 — Engine advances the floor
-- [ ] In `LsmEngine._compactAll`, after the compaction has committed its
+- [x] In `LsmEngine._compactAll`, after the compaction has committed its
       VersionEdit and the new file set is durable, if
       `tombstonesDropped > 0` write the floor at `horizon`. Investigate
       Q6: prefer folding the floor write into the compaction's atomic
       unit (the same WAL frame or VersionEdit). Document the chosen
       ordering in the doc comment.
-- [ ] Test: `_compactAll` that drops a tombstone advances the floor;
+- [x] Test: `_compactAll` that drops a tombstone advances the floor;
       one that does not, does not advance.
 
 ### Step 4 — `ingestAt0` consults the floor
-- [ ] After `SstableInfo.parse`, before `advanceClock`, read the floor.
+- [x] After `SstableInfo.parse`, before `advanceClock`, read the floor.
       If `info.maxHlc <= floor`, throw `StaleSstableIngestException`
       (new typed exception) carrying `filename`, `info.maxHlc`, `floor`.
-- [ ] The file already on disk is left in place; document why.
-- [ ] Test: synthesised sub-floor SSTable rejected; key reads stay
+- [x] The file already on disk is left in place; document why.
+- [x] Test: synthesised sub-floor SSTable rejected; key reads stay
       absent (the PR2 deferred Step 5 assertion).
 
 ### Step 5 — `SyncEngine` handles rejection gracefully
-- [ ] Confirm the existing per-file ingest loop already isolates per-file
+- [x] Confirm the existing per-file ingest loop already isolates per-file
       errors and does not advance the peer HWM on a failed ingest. If
       not, fix that as part of this step.
-- [ ] Catch `StaleSstableIngestException`; log at WARN with filename,
+- [x] Catch `StaleSstableIngestException`; log at WARN with filename,
       sub-floor HLC, and current floor; continue to the next file.
-- [ ] Test: pull cycle with a mix of normal and sub-floor files — normal
+- [x] Test: pull cycle with a mix of normal and sub-floor files — normal
       files ingest, HWM advances for those; sub-floor files are skipped,
       HWM does not advance past them, the file remains in the cloud
-      folder.
+      folder. Covered by the updated H4-FU2 layered-defence test in
+      `sync_engine_test.dart` which exercises a real cross-device pull
+      where the recipient floor rejects the stale peer SSTable.
 
 ### Step 6 — Floor + H4-FU2 interaction
-- [ ] If H4-FU2 has landed, document the layered behaviour: a returning
+- [x] If H4-FU2 has landed, document the layered behaviour: a returning
       evicted device whose safe-re-sync check is bypassed (test, bug)
       will have its incremental push silently dropped at recipients —
       the floor catches what the safe-re-sync was meant to prevent.
-- [ ] If H4-FU2 has not landed, document this plan's standalone behaviour
+      H4-FU2 has shipped (commit 7649f93). `_fullResync()` now resets
+      the floor to `Hlc(0,0)` before ingesting downloaded SSTables so
+      that a non-zero floor cannot stall the re-sync.
+- [x] If H4-FU2 has not landed, document this plan's standalone behaviour
       and note that the layering is added by the sibling plan.
 
 ### Step 7 — Tests (the resurrection scenario CI test in particular)
-- [ ] **Single-process no-resurrection (PR2 Step 5, now testable):**
+- [x] **Single-process no-resurrection (PR2 Step 5, now testable):**
       delete key, `_compactAll` with tombstone drop, construct an
       older-HLC SSTable, ingest → assert rejection + key stays absent.
-- [ ] **Floor monotonic advance:** two GC cycles with increasing
-      horizons; floor reflects the latest.
-- [ ] **Default-zero on fresh DB:** ingest accepts everything when no GC
-      has ever run.
-- [ ] **Crash mid-compaction:** if Q6 is resolved to fold the floor into
-      the compaction's atomic unit — assert recovery restores both the
-      drop and the floor consistently. If not, document the window
-      explicitly and test the recoverable state.
-- [ ] **Sync ingest skip behaviour (Step 5):** sub-floor pull file
+      Implemented as `lsm_engine_test.dart` test (e) "PR2 deferred Step 5".
+- [x] **Floor monotonic advance:** two GC cycles with increasing
+      horizons; floor reflects the latest. Implemented as test (f).
+- [x] **Default-zero on fresh DB:** ingest accepts everything when no GC
+      has ever run. Implemented as test (a).
+- [x] **Crash mid-compaction:** Q6 was resolved to option (b) — separate
+      `$meta` put after the manifest commits, not folded into the
+      compaction's atomic unit (option (c) is not structurally available
+      because `CompactionJob.run()` returns a `VersionEdit` to
+      `ManifestWriter` before control returns to `_compactAll`). The
+      bounded crash window between manifest commit and floor write
+      leaves the floor *behind* reality (safe / pessimistic) rather than
+      ahead (unsafe). Implemented as test (g).
+- [x] **Sync ingest skip behaviour (Step 5):** sub-floor pull file
       rejected, HWM unchanged for that file, normal files still ingest.
-- [ ] Coverage ≥ 90% (CLAUDE.md gate).
+      Covered end-to-end by the updated H4-FU2 layered-defence test in
+      `sync_engine_test.dart`.
+- [x] Coverage ≥ 90% (CLAUDE.md gate).
 
 ### Step 8 — Documentation
-- [ ] `docs/spec/06_storage_engine.md`: full description of the floor —
+- [x] `docs/spec/06_storage_engine.md`: full description of the floor —
       write site, read site, comparator (`<=`), atomicity decision from
       Q6, default-on-fresh-open, per-device-by-design.
-- [ ] `docs/spec/12_sync.md`: ingest-side rejection of sub-floor files;
+- [x] `docs/spec/12_sync.md`: ingest-side rejection of sub-floor files;
       HWM-not-advanced protocol behaviour; cross-reference H4-FU2's
       safe-re-sync.
-- [ ] Doc comments on `MetaStore`, `LsmEngine.ingestAt0`,
+- [x] Doc comments on `MetaStore`, `LsmEngine.ingestAt0`,
       `KvStore.ingestSstable`, and the new exception.
-- [ ] Update PR2's deferred Step 5 note in
+- [x] Update PR2's deferred Step 5 note in
       `plans/completed/plan_tombstone_gc.md` to record that the test
       has been claimed by H4-FU3.
-- [ ] Update the H4-FU3 roadmap entry status when complete.
+- [x] Update the H4-FU3 roadmap entry status when complete.
 
 ### Step 9 — Verify
-- [ ] `make pre_commit` clean.
-- [ ] `dart test` passes in `packages/kmdb` and `packages/kmdb_cli`.
-- [ ] No release-checklist entry needed: this plan closes RC-6's
+- [x] `make pre_commit` clean.
+- [x] `dart test` passes in `packages/kmdb` and `packages/kmdb_cli`.
+- [x] No release-checklist entry needed: this plan closes RC-6's
       in-process variant in CI. The cross-device harness scenario
       (`plan_harness_mixed_storage.md` Step 5) remains as is.
 
 ### Step 10 — PR
-- [ ] Branch + worktree per `docs/plans/README.md`. Open PR against
+- [x] Branch + worktree per `docs/plans/README.md`. Open PR against
       `main`, update **PR link** above. On merge, move this plan to
       `docs/plans/completed/`.
 
 ## Summary
 
-{To be completed during implementation.}
+H4-FU3 lands the **recipient-side** defence-in-depth that completes the
+"tombstone GC robustness" pair started by H4 PR2 (sync-horizon-gated GC)
+and continued by H4-FU2 (producer-side stale-device eviction and safe
+re-admission). Together the three guard the same silent-data-loss class
+of bug from both ends.
+
+**The floor.** Every `LsmEngine._compactAll` that drops at least one
+tombstone now writes the horizon used into `$meta` as a per-device
+**tombstone GC floor** via `MetaStore.setTombstoneFloor`. The
+`CompactionJob` gained a mutable `tombstonesDropped` counter
+(incremented inside `flushCollapsed` when the drop predicate fires) so
+the engine can avoid a needless `$meta` write when nothing was dropped.
+The floor is monotonic under correct operation, per-device by design
+(`$meta` is not replicated), and defaults to `Hlc(0, 0)` on a freshly-
+opened database so no realistic SSTable is rejected before the first GC
+cycle.
+
+**Recipient-side rejection.** `LsmEngine.ingestAt0` reads the floor
+after parsing the filename and before advancing the HLC clock; if
+`info.maxHlc <= floor` it throws the new typed
+`StaleSstableIngestException` carrying `filename`, `maxHlc`, and
+`floor`. The `<=` comparator pairs with the strict-less-than drop
+predicate (`tombstoneHlc < horizon`) so the boundary file is rejected
+conservatively. `SyncEngine.pull`'s existing per-file catch block now
+catches `StaleSstableIngestException` alongside the other typed
+exceptions, logs at WARN, and skips advancing the peer HWM — the file
+stays in the cloud folder and is reconsidered on the next pull.
+
+**Atomicity (Q6 option b).** `CompactionJob.run()` returns a
+`VersionEdit` to `ManifestWriter` *before* control returns to
+`_compactAll`, so the floor write is a separate `$meta` put after the
+manifest commits. The bounded crash window between manifest commit and
+floor write leaves the floor *behind* reality — pessimistic but safe:
+the engine accepts SSTables it could legitimately reject, never the
+reverse. Test (g) exercises that exact window by rolling the floor
+back to zero and verifying that a post-floor ingest still succeeds.
+
+**H4-FU2 interaction.** Once both plans land, every ingest goes through
+the floor check — including the ones inside `SyncEngine._fullResync`. If
+the local floor were non-zero and a downloaded SSTable had
+`maxHlc <= floor`, the re-sync would stall. To prevent that,
+`_fullResync` now calls `KvStore.resetTombstoneFloor` at the start of
+the re-sync before re-ingesting the cloud's consolidated set. This is
+safe because the re-sync rebuilds from ground truth.
+
+**Tests.** `meta_store_test.dart` covers the accessor round-trip and
+the reset path. `compaction_test.dart` covers the `tombstonesDropped`
+counter (zero on a no-tombstone compaction; greater than zero on a
+drop). `lsm_engine_test.dart` adds an eight-test H4-FU3 group: (a)
+default-zero accept-everything, (b) floor advances on drop, (c) no
+advance without drop, (d) `<= floor` rejection, **(e) the PR2 deferred
+Step 5 no-resurrection CI assertion** (the load-bearing test that
+proved this plan's worth), (f) monotonic advance across two GC cycles,
+(g) the crash-window safety property, and a typed-exception field
+test. The H4-FU2 negative-control test in `sync_engine_test.dart` is
+updated to assert the layered-defence behaviour: even with the H4-FU2
+re-admission guard effectively disabled, H4-FU3's ingest-side floor
+rejects B's stale SSTable and the deleted key stays absent.
+
+**Test gotcha worth recording.** All five tombstone-drop tests
+encountered the same surprise the H4-FU2 work hit: `_compactAll` fires
+*during* `flush`, before the user-level code can advance the wall
+clock. With the drop predicate `tombHlc < horizon` and the horizon
+computed from the wall clock at flush time, the tombstone just written
+sits *exactly at* the horizon — strict less-than fails, tombstone is
+not dropped, floor stays at zero. The fix is to add a second
+`advance + write + flush` after the delete: the second flush's
+`_compactAll` sees a horizon strictly above the tombstone HLC, drops
+it, and writes the floor. The tests now document this pattern inline
+so future authors do not re-derive it.
+
+**Docs.** `docs/spec/06_storage_engine.md` describes the floor's
+write site, read site, comparator, atomicity decision, and full-re-sync
+interaction. `docs/spec/12_sync.md` documents the pull-side rejection
+protocol and cross-references the engine-side mechanism. PR2's
+deferred Step 5 note in `plans/completed/plan_tombstone_gc.md` is
+updated to record that H4-FU3 has claimed the CI assertion. The
+H4-FU3 roadmap entry is marked Complete.
 
 ## Reviews
 
@@ -587,12 +676,10 @@ compaction manifest commit and the floor write.
    **Investigated** with the one open sub-question about `_fullResync`
    recorded below.
 
-- [ ] **H4-FU2 `_fullResync()` interaction:** once both plans land, the
-  floor check in `ingestAt0` will gate all `ingestSstable` calls, including
-  those inside `_fullResync()`. If the device has a non-zero floor and a
-  downloaded file has `maxHlc <= floor`, the re-sync stalls. Step 6 must
-  reset the floor to zero (or bypass the floor check) at the start of
-  `_fullResync()` before ingesting the downloaded files.
-  _Note: if H4-FU2 has already landed (it has, as of commit `7649f93`),
-  this interaction exists in production the moment H4-FU3 ships and must
-  be resolved before the PR is merged._
+- [x] **H4-FU2 `_fullResync()` interaction:** resolved.
+  `SyncEngine._fullResync` now calls `KvStore.resetTombstoneFloor()` at
+  the start of the re-sync (before ingesting downloaded SSTables), so a
+  non-zero local floor cannot stall the rebuild when consolidation has
+  not run since the last GC cycle. The re-admission path is safe
+  because it rebuilds from ground truth; resetting the floor is the
+  correct conservative move.

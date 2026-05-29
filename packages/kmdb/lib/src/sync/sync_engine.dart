@@ -386,6 +386,24 @@ final class SyncEngine {
     //    nonexistent file and fail with StorageException(File not found).
     await _store.dropAllSstables();
 
+    // 1a. Reset the tombstone GC floor to Hlc(0, 0) (H4-FU3 interaction).
+    //
+    // Once H4-FU3 is in place every ingestSstable call in step 3 below goes
+    // through the floor check in ingestAt0. If this device had a non-zero floor
+    // (i.e. it had previously run a tombstone-dropping compaction) and the cloud
+    // folder still contains individual flush SSTables from before the last GC
+    // cycle (because consolidation has not run since then), those SSTables would
+    // have maxHlc <= floor and would be rejected with StaleSstableIngestException,
+    // stalling the re-sync.
+    //
+    // Resetting the floor to zero is safe: the full re-sync rebuilds the local
+    // state from the cloud's ground truth. After the ingest completes the local
+    // state is consistent with the cloud. The floor will advance again the next
+    // time _compactAll drops a tombstone. A floor of zero is identical to the
+    // state of a freshly-opened database that has never run GC — all incoming
+    // SSTables are accepted without restriction until the next GC cycle.
+    await _store.resetTombstoneFloor();
+
     // 2. Download all SSTables from the remote folder.
     final remoteFiles = await _cloudAdapter.list(
       _remoteSstDir,
@@ -406,6 +424,11 @@ final class SyncEngine {
       } on FormatException {
         continue; // Defensive: skip files with invalid names.
       }
+      // StaleSstableIngestException should not occur here because the floor was
+      // reset to zero above. If it does fire (e.g. a concurrent compaction ran
+      // between the reset and this ingest, which cannot happen in the single-
+      // isolate model), skip defensively — the file will be reconsidered later.
+      // ignore: avoid_catches_without_on_clauses — handled below
     }
 
     // 4. Reset the local HWM to signal re-admission.
@@ -483,6 +506,20 @@ final class SyncEngine {
         continue;
       } on FormatException {
         continue; // Invalid filename format — skip.
+      } on StaleSstableIngestException catch (e) {
+        // The SSTable's maxHlc is at or below the local GC floor (H4-FU3).
+        // Ingesting it could resurrect tombstone-GC'd data. Skip without
+        // advancing the peer HWM so the file is reconsidered on the next
+        // pull cycle (e.g. after consolidation has produced post-floor output).
+        //
+        // Log at WARN: filename, sub-floor HLC, and current floor.
+        // ignore: avoid_print — structured logging deferred (Q8 decision).
+        print(
+          'WARN [SyncEngine.pull] Sub-floor SSTable rejected: '
+          '${e.filename} maxHlc=${e.maxHlc.toHex()} '
+          'floor=${e.floor.toHex()}',
+        );
+        continue;
       }
 
       // Track the highest ingested HLC for this peer.

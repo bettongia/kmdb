@@ -135,6 +135,9 @@ class _TrackingKvStore implements KvStore {
   Future<void> dropAllSstables() async {}
 
   @override
+  Future<void> resetTombstoneFloor() async {}
+
+  @override
   Future<List<String>> listNamespaces() async => [];
 
   @override

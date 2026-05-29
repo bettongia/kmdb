@@ -933,11 +933,24 @@ void main() {
       },
     );
 
-    test('WITHOUT re-admission check, evicted device resurrects deleted data '
-        '(proves the resurrection guard test is correctly wired)', () async {
-      // Same scenario as above, but device B uses an eviction threshold so
-      // large it effectively disables the check — so device B proceeds
-      // incrementally and resurrects the deleted key.
+    test('WITHOUT re-admission check, H4-FU3 ingest-side floor still '
+        'prevents resurrection (layered defence)', () async {
+      // Same scenario as the resurrection-guard test, but device B uses an
+      // eviction threshold so large that the H4-FU2 re-admission check
+      // effectively never fires — so device B does NOT perform a full
+      // re-sync and pushes its stale pre-delete SSTable to the cloud as-is.
+      //
+      // Before H4-FU3 landed this test asserted the resurrection actually
+      // occurred (as a negative control proving the H4-FU2 guard test was
+      // not trivially passing). With H4-FU3 active, device A's tombstone-GC
+      // pass writes a $meta floor and `ingestSstable` rejects any incoming
+      // SSTable whose `maxHlc <= floor`. So even though B's stale SSTable
+      // reaches the cloud, A rejects it at ingest with
+      // `StaleSstableIngestException` (caught and skipped by
+      // `SyncEngine.pull`'s per-file catch block) and the deleted key
+      // stays absent. This test now documents the layered protection:
+      // H4-FU2 guards the producer side, H4-FU3 guards the recipient side,
+      // and resurrection is blocked even when only one layer fires.
       MemoryStorageAdapter.releaseAllLocks();
       final adapterA = MemoryStorageAdapter();
       final (storeA, _) = await KvStoreImpl.open(
@@ -1041,14 +1054,16 @@ void main() {
         // Pull on A to demonstrate resurrection.
         await engineA.pull();
 
-        // WITHOUT the re-admission guard, the deleted key is resurrected
-        // because B's old SSTable (containing the put) was ingested.
+        // Even with the H4-FU2 re-admission guard effectively disabled, the
+        // H4-FU3 ingest-side floor rejects B's sub-floor SSTable, so the
+        // deleted key stays absent. This is the layered-defence assertion:
+        // either guard is enough to prevent resurrection on its own.
         expect(
           await storeA.get('ns', resurrectionKey),
-          isNotNull,
+          isNull,
           reason:
-              'Resurrection MUST occur without the re-admission guard — '
-              'this proves the guard test above is correctly wired',
+              'H4-FU3 ingest-side floor must reject B\'s stale SSTable at '
+              'pull time, leaving the deleted key absent on device A',
         );
 
         await storeB.close();

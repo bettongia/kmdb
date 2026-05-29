@@ -137,18 +137,15 @@ reference.
 - [x] **Tombstone NOT dropped above horizon:** `_compactAll` where
       `tombstone.hlc >= horizon` must retain the tombstone, even though
       `allLevels == true`.
-- [ ] **No resurrection across sync (CI-testable):** _deferred — the plan's
-      original intent was to construct an older-HLC SSTable, ingest it after
-      the tombstone was dropped, and assert the key stayed absent. That
-      assertion can only hold with an ingest-side floor (e.g. reject
-      SSTables whose maxHlc is below the latest GC horizon) that PR2 does
-      **not** implement. The cross-device version of the same scenario is
+- [x] **No resurrection across sync (CI-testable):** _claimed by H4-FU3
+      ([plans/completed/plan_tombstone_gc_ingest_floor.md](plan_tombstone_gc_ingest_floor.md))._
+      The ingest-side horizon floor recommended here was implemented in
+      H4-FU3, and the deferred CI assertion now lives as
+      `lsm_engine_test.dart` H4-FU3 test (e) "PR2 deferred Step 5 — no
+      resurrection". The cross-device version of the scenario remains
       [RC-6](../../spec/28_release_checklist.md#rc-6--multi-device-tombstone-non-resurrection)
-      and the harness scenario in
-      [plan_harness_mixed_storage.md](plan_harness_mixed_storage.md) Step 5;
-      both rely on the principled distributed invariant
-      (`min(currentHlc)`) rather than a local filter. Adding an ingest
-      floor is recommended as a separate follow-up._
+      via [plan_harness_mixed_storage.md](../plan_harness_mixed_storage.md)
+      Step 5._
 - [x] **Local-only grace:** with no sync configured, a tombstone older than
       `tombstoneGraceDuration` is dropped on the next `_compactAll`; one
       younger is retained.
