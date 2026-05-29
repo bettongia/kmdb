@@ -1,6 +1,6 @@
 # Tombstone GC: ingest-side horizon floor (defence-in-depth)
 
-**Status**: Open
+**Status**: Implementing
 
 **PR link**: {pending}
 
@@ -63,7 +63,7 @@ becomes a hard correctness assertion rather than a deferred one.
 These gate the implementation. Q1 and Q2 carry the most weight — the rest
 are surfacing and ergonomics calls.
 
-- [ ] **Q1 — Whole-file rejection or per-record filter?** Whole-file is
+- [x] **Q1 — Whole-file rejection or per-record filter?** Whole-file is
   cheap (filename parse only — `maxHlc` is in the name, no body scan) and
   matches how the engine already treats SSTables as the unit of sync.
   Per-record requires scanning the file, partitioning entries by HLC, and
@@ -76,7 +76,12 @@ are surfacing and ergonomics calls.
   H4-FU2 not yet landed) and a noisy rejection is more useful than
   silent partial ingest. Per-record filtering can be added later if the
   rejection rate becomes operationally painful.)*
-- [ ] **Q2 — Error or silent skip on rejection?** A loud error stalls the
+  _Decision: accepted. Whole-file rejection on `info.maxHlc <= floor` at
+  `ingestAt0`, after `SstableInfo.parse`. The floor-vs-horizon distinction
+  is preserved: the floor is the highest `horizon` ever used for a drop (a
+  per-device monotonic value), not the current sync horizon. See Review 1
+  for the rationale on using the floor rather than the live horizon._
+- [x] **Q2 — Error or silent skip on rejection?** A loud error stalls the
   sync cycle on the first sub-floor file; a silent skip continues but
   hides the failure. *(Recommended: **typed exception** thrown from
   `ingestAt0`. `SyncEngine` catches per-file (the existing per-file ingest
@@ -85,19 +90,35 @@ are surfacing and ergonomics calls.
   next cycle. The HWM stays one step behind that file's HLC, which is
   exactly the "I have not processed this" semantic the protocol already
   models.)*
-- [ ] **Q3 — When is the floor written?** Per drop, per compaction job,
+  _Decision: accepted. `SyncEngine.pull` already has a per-file catch
+  block for `CorruptedSstableException` and `FormatException` that skips
+  without updating `peerMaxHlc`. `StaleSstableIngestException` is caught
+  in the same block: log at WARN (filename + floor + sub-floor HLC), skip
+  the `peerMaxHlc` update, continue. HWM is not advanced for that file._
+- [x] **Q3 — When is the floor written?** Per drop, per compaction job,
   or per `_compactAll` only? *(Recommended: the floor is updated *exactly
   once per* `_compactAll` *that drops one or more tombstones*, to the
   `horizon` value passed into that job. Pure version-collapse compactions
   do not advance it. Partial compactions never advance it (they cannot
   drop tombstones anyway per PR2). One write per all-levels compaction
   is negligible.)*
-- [ ] **Q4 — Where is the floor stored?** *(Recommended: `$meta` under
+  _Decision: accepted. The signal is conveyed by extending `CompactionJob`
+  to expose a `tombstonesDropped: int` count (Step 2). `_compactAll` reads
+  this after `job.run()` and conditionally writes the floor. This is the
+  minimal mechanical change: `run()` currently returns `VersionEdit` with
+  no drop signal, so a new field on `CompactionJob` post-`run()` (or a
+  small result wrapper) is required._
+- [x] **Q4 — Where is the floor stored?** *(Recommended: `$meta` under
   the symbolic name `gc:tombstoneFloor`, encoded as a `uint64` HLC.
   Reuses the established `MetaStore` pattern (`gen:*`, `dirty`,
   `device_id`) including the WAL-backed write path and the existing
   `_nameToKey` XXH64 keying. No format change, no new namespace.)*
-- [ ] **Q5 — Replication / restore semantics.** `$meta` is excluded from
+  _Decision: accepted. `MetaStore` gains `getTombstoneFloor()` and
+  `setTombstoneFloor(Hlc)`. Encoding is 8-byte big-endian uint64 matching
+  the generation-counter helper. Default-on-read is `Hlc(0, 0)` (no GC
+  has ever run). The batch-aware `appendTombstoneFloorAdvance` variant
+  is added for Q6 option (c)._
+- [x] **Q5 — Replication / restore semantics.** `$meta` is excluded from
   sync, so the floor is per-device. If a device's local state is wiped
   and rebuilt from the cloud, the floor reverts to zero — but so does
   its set of *already-GC'd tombstones*, so there is nothing for the
@@ -109,7 +130,12 @@ are surfacing and ergonomics calls.
   resurrected by the rollback, *and* the floor reverts — which is again
   consistent. The floor is correct against any consistent local
   state.)*
-- [ ] **Q6 — Atomicity with the GC drop.** If a compaction successfully
+  _Decision: accepted. No replication. The floor is valid against any
+  consistent local state. The rollback sub-case is safe because rollback
+  restores both the dropped tombstones and the pre-GC floor, leaving the
+  engine in a coherent (if older) state. Document the invariant in the
+  `getTombstoneFloor` doc comment._
+- [x] **Q6 — Atomicity with the GC drop.** If a compaction successfully
   drops tombstones, persists the new manifest, but crashes before the
   floor is written, the next session has GC'd state without a floor —
   potentially exploitable by an immediately-ingested sub-floor file.
@@ -125,7 +151,21 @@ are surfacing and ergonomics calls.
   cleanly — if not, fall back to (b) and document that the worst-case
   post-crash window admits sub-floor ingest until the next
   `_compactAll` raises the floor again.)*
-- [ ] **Q7 — Comparator: `<` or `≤`?** PR2 drops a tombstone when
+  _Decision: option (c) is not structurally available. `CompactionJob`
+  writes its `VersionEdit` directly to the `ManifestWriter` and has no
+  channel for a side `$meta` WAL write. The engine-level `_compactAll`
+  method runs after `job.run()` returns, so the manifest is already
+  durable before the floor can be written — they are necessarily in
+  separate WAL frames. Fall back to option (b): write the floor in a
+  separate `$meta` put immediately after `_compactAll` commits. The
+  crash window (compaction committed, floor not yet written) leaves the
+  engine in a state where the next ingest of a sub-floor SSTable
+  succeeds instead of being rejected. This is a pessimistic outcome
+  (the data might be benign) but not a safety violation beyond the
+  window that existed before this plan was applied. The window closes
+  the next time any all-levels compaction runs. Document this
+  explicitly in the `_compactAll` doc comment and in the spec._
+- [x] **Q7 — Comparator: `<` or `≤`?** PR2 drops a tombstone when
   `tombstone.hlc < horizon`. Symmetrically, the floor should reject
   SSTables when `sstable.maxHlc <= floor` — equality means at least one
   record sits at the boundary and could be a pre-drop version of the
@@ -134,11 +174,28 @@ are surfacing and ergonomics calls.
   at `floor` and must be retained until something strictly newer
   observes it); the ingest comparator must be the dual, rejecting at
   the boundary too.)*
-- [ ] **Q8 — Surface for operators.** The CLI already exposes
+  _Decision: accepted. The floor is set to the `horizon` that was passed
+  to the compaction job. `dropTombstone` accepts a tombstone when
+  `tombstoneHlc < horizon` (strict less-than). This means the tombstone
+  at exactly `horizon - 1` (the highest dropped HLC) would have
+  `tombstoneHlc = horizon - 1 < horizon`. The floor is then `horizon`.
+  An ingest with `maxHlc = horizon - 1` satisfies `maxHlc < floor`
+  (equivalently `maxHlc <= floor - 1`), so `maxHlc <= floor` correctly
+  rejects it. An ingest with `maxHlc = horizon` is NOT rejected (`horizon
+  <= horizon` is true, but such an SSTable has a record at the exact
+  horizon — which was not eligible for GC since `horizon < horizon` is
+  false). Wait: `maxHlc = horizon` gives `maxHlc <= floor = horizon` →
+  true → rejected. That is the correct outcome: the floor is the horizon
+  used for the drop, and a record AT the horizon was never eligible for GC
+  but we are being maximally conservative — if `maxHlc = floor`, reject.
+  The `<=` predicate is correct and matches the recommended direction._
+- [x] **Q8 — Surface for operators.** The CLI already exposes
   `kmdb info` / `kmdb stats` style commands; should the floor and the
   count of rejected ingests be visible there? *(Recommended: defer.
   Reject events should log structurally; CLI exposure can land later
   once the operational pattern is known.)*
+  _Decision: accepted. Deferred. Structured log on rejection (filename,
+  sub-floor HLC, current floor) is sufficient for now._
 
 ## Investigation
 
@@ -263,8 +320,13 @@ distributed invariant in the same harness scenario.
 
 ## Implementation plan
 
-> Provisional. Lock down after open questions are answered, particularly
-> Q1 (rejection mechanism), Q6 (atomicity), and Q7 (comparator).
+> Locked. Q1–Q8 resolved in Review 1 (2026-05-29). Key decisions:
+> whole-file rejection on `maxHlc <= floor` (Q1, Q7); typed exception +
+> per-file catch in `pull()` without HWM advance (Q2); floor advanced in
+> `_compactAll` when `tombstonesDropped > 0`, written as a separate `$meta`
+> put after the manifest commit (Q3, Q6 option b); stored in `$meta` as
+> `gc:tombstoneFloor` uint64 HLC (Q4); not replicated, consistent with any
+> local snapshot (Q5); CLI exposure deferred (Q8).
 
 ### Step 1 — `MetaStore` accessors for the floor
 - [ ] Add `getTombstoneFloor() -> Hlc`, defaulting to `Hlc(0, 0)` when
@@ -363,3 +425,174 @@ distributed invariant in the same harness scenario.
 ## Summary
 
 {To be completed during implementation.}
+
+## Reviews
+
+### Review 1: 2026-05-29
+
+#### Problem Statement Assessment
+
+The problem is real, correctly scoped, and the threat model is better
+articulated than most defensive plans at this stage. The four bypass
+scenarios (cross-device resurrection, returning-evicted-device push before
+re-sync detection, crafted SSTable, operator drag-and-drop) are distinct and
+all correctly map to the same root cause: the engine has no persistent record
+of which HLC range was GC-eligible, so it has no basis to reject anything
+at ingest time.
+
+The claim that H4-FU2 and H4-FU3 are "independent" is largely correct but
+deserves one qualification: H4-FU2's full-re-sync path calls
+`dropAllSstables` followed by `ingestSstable` for each downloaded file. Once
+H4-FU3 is in place, those ingested files will be checked against the floor.
+If the device being re-synced had previously run GC (floor > 0), and the
+cloud folder contains a file with `maxHlc <= floor` (which should not happen
+in normal operation — consolidated SSTables reflect the post-GC state — but
+could happen if consolidation has not run since the GC cycle), the ingest
+would be rejected and the re-sync would stall. The plan does not address this
+interaction. It is not a blocker for `Investigated` status, but it must be
+handled in Step 5 or Step 6 of the implementation: either the H4-FU2
+full-re-sync path bypasses the floor check (passing the floor reset to before
+the re-sync), or the spec documents that full re-sync is only attempted when
+the sync folder has been consolidated and its SSTables are post-floor. See
+the open question below.
+
+The scope exclusions in "What this plan deliberately does not do" are all
+correct. In particular, not deleting rejected files on disk is the right
+call — rejection is a diagnostic signal, not a tombstone for the file.
+
+#### Proposed Solution Assessment
+
+**Floor vs. live horizon:** the plan correctly keeps the floor as a
+per-device monotonic record of the highest `horizon` ever used for a drop,
+distinct from the current sync horizon. Using the floor (not the live
+horizon) at ingest time is the right choice. If the live horizon were used
+instead, `ingestAt0` would need to call `_computeTombstoneHorizon()` — which
+is async and involves reading peer HWMs or a wall-clock calculation — on
+every ingest, and the ingest predicate would not be stable between compaction
+cycles. The floor is computed once at compaction time and read cheaply at
+ingest time. This is the correct architecture.
+
+**Q6 atomicity (option b vs. option c):** the review agrees that option (c)
+is not structurally available. `CompactionJob.run()` has no channel for a
+side `$meta` write; its `VersionEdit` is appended directly to the
+`ManifestWriter` before `run()` returns to `_compactAll`. The floor write
+must therefore be a separate `$meta` put after `job.run()`. The crash window
+is real but bounded: it exists only when a `_compactAll` has dropped
+tombstones and the process crashes before the subsequent `$meta` put. On the
+next open, the engine will have GC'd state (manifest reflects post-compaction
+files) with a stale floor (reading the pre-compaction value). A sub-floor
+ingest could succeed during that window. This is documented and manageable —
+the window was always present before this plan and the floor closes it
+permanently after the next compaction. The Step 7 crash test must exercise
+this specific failure mode (compaction manifest committed, floor write
+pending, crash) and verify that recovery leaves the engine in a consistent
+state where the floor is at worst pessimistically low (not ahead of actual
+GC).
+
+**Q7 comparator:** `<=` is correct. The floor is set to the `horizon` value
+passed into the compaction job. The drop predicate is `tombstoneHlc <
+horizon` (strict). The highest HLC that was dropped therefore satisfies
+`droppedHlc < horizon`, i.e. `droppedHlc <= horizon - 1`. An SSTable with
+`maxHlc = horizon - 1` carries a record at the highest dropped HLC and must
+be rejected: `maxHlc <= floor` → `horizon - 1 <= horizon` → true. An
+SSTable with `maxHlc = horizon` carries a record that was NOT eligible for
+GC (since `horizon < horizon` is false), but `<=` rejects it anyway. This
+is conservative — such an SSTable is not dangerous — but it is the correct
+posture for a defence-in-depth layer. The spec doc comment should note the
+conservatism explicitly.
+
+**`CompactionJob.run()` returns `VersionEdit`:** the plan's Step 2 correctly
+identifies that `run()` has no drop-count signal today. The current return
+type is a bare `VersionEdit`. Adding a `tombstonesDropped: int` counter
+inside `CompactionJob` (incremented in `flushCollapsed` when `canDrop` is
+true) and exposing it as a field after `run()` completes is the minimal
+change. Alternatively a small result record wrapping the `VersionEdit` and
+the count would avoid mutable state on the job object. Either approach works;
+the mutable-field approach is simpler given `CompactionJob` is already a
+single-use object (`run()` is called once and not again).
+
+**`SyncEngine.pull()` error handling:** the existing code already has the
+correct structure. The catch block at line 479–486 handles
+`CorruptedSstableException` and `FormatException` with a `continue` that
+skips the `peerMaxHlc` update for that file. `StaleSstableIngestException`
+is added to this block. The HWM-not-advanced semantic is already implemented
+by the structure of the loop — `peerMaxHlc[peerDeviceId]` is only set on the
+successful path below the catch. No change to the HWM-update logic is needed;
+the catch-and-continue is the entire fix.
+
+#### Architecture Fit
+
+The change is contained within the engine and sync layers. `MetaStore`,
+`CompactionJob`, `LsmEngine`, `KvStore`/`KvStoreImpl`, and `SyncEngine` —
+all core (pure Dart). No Flutter imports; the library-architecture layer
+separation is not affected. The `design` and `inclusivity` skills do not
+apply.
+
+The spec updates are correctly identified: `06_storage_engine.md` and
+`12_sync.md`. No new spec section is needed; the floor is a sub-feature of
+the existing tombstone-GC section.
+
+#### Risk & Edge Cases
+
+**H4-FU2 full-re-sync / floor interaction (unaddressed):** `_fullResync()`
+in `sync_engine.dart` calls `dropAllSstables()` then ingests each downloaded
+file via `ingestSstable`. Once the floor is in place, these ingests go
+through `ingestAt0`'s floor check. If the device's floor is non-zero and a
+downloaded file has `maxHlc <= floor`, the ingest will throw
+`StaleSstableIngestException` and the re-sync will stall. In normal
+operation this should not occur — a consolidated SSTable reflects post-GC
+data so its HLCs should be above the floor. But it is possible if:
+(a) consolidation has not run since the GC cycle, leaving individual
+per-device pre-consolidation SSTables in the cloud folder; or (b) the
+floor was advanced more aggressively than the consolidated state reflects.
+The plan must either: (i) reset the floor to zero at the start of
+`_fullResync()` (safe — the re-sync rebuilds from ground truth), or (ii)
+document and rely on the invariant that downloaded SSTables are always
+post-floor. Option (i) is safer. This must be addressed in Step 6.
+
+**Test: the PR2 deferred Step 5 assertion (now claimed):** the CI test in
+the Investigation is correct and deterministic. One note: the test must
+construct the sub-floor SSTable *using the same storage adapter* as the
+engine to land it on disk before calling `ingestSstable`. The plan's test
+outline is sufficient but the implementer should confirm the file-creation
+path in the test helper mirrors what a real peer would produce (correct
+filename format: `{deviceId}-{minHlc}-{maxHlc}.sst`).
+
+**Floor encoding collisions:** the `_nameToKey` XXH64 hash is deterministic
+but the plan should note that `gc:tombstoneFloor` is a new symbolic name.
+No collision check is needed (the collision probability across ~100 names is
+negligible as the `MetaStore` doc says), but the new name should be added to
+any developer-visible list of reserved `$meta` keys.
+
+**`$meta` write concurrency:** `_compactAll` is synchronous on the write
+path (no background isolate per the architecture) and Dart is single-
+threaded, so there is no concurrent `$meta` write hazard between the
+compaction manifest commit and the floor write.
+
+#### Recommendations
+
+1. **Add a Step 6 task** to address the H4-FU2 `_fullResync()` / floor
+   interaction: reset the floor to zero (or bypass the check) at the start
+   of `_fullResync()`. This is correctness-critical for the combined
+   H4-FU2 + H4-FU3 state and must not be deferred to a follow-up.
+2. **Q7 annotation:** add a doc comment in `ingestAt0` (and in the spec)
+   noting that `maxHlc = floor` is rejected conservatively — such an
+   SSTable is not dangerous, but the `<=` posture avoids a subtle off-by-one
+   argument at review time.
+3. **Q6 atomicity test:** the crash-between-compaction-and-floor-write case
+   must be a named test scenario in Step 7. The test should confirm the
+   floor is pessimistically low (not ahead) after recovery, and that the
+   engine functions correctly in that state.
+4. All eight questions resolve cleanly; the plan is promoted to
+   **Investigated** with the one open sub-question about `_fullResync`
+   recorded below.
+
+- [ ] **H4-FU2 `_fullResync()` interaction:** once both plans land, the
+  floor check in `ingestAt0` will gate all `ingestSstable` calls, including
+  those inside `_fullResync()`. If the device has a non-zero floor and a
+  downloaded file has `maxHlc <= floor`, the re-sync stalls. Step 6 must
+  reset the floor to zero (or bypass the floor check) at the start of
+  `_fullResync()` before ingesting the downloaded files.
+  _Note: if H4-FU2 has already landed (it has, as of commit `7649f93`),
+  this interaction exists in production the moment H4-FU3 ships and must
+  be resolved before the PR is merged._
