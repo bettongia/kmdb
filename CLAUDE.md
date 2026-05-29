@@ -9,9 +9,14 @@ Work is planned using specifications in the `docs/plans` directory. When working
 plans make sure you review `docs/plans/README.md` file for guidance. When asked to
 plan something do not commence implementation until explicitly told to do so.
 
-The `docs/roadmap.md` is used to track future work items and their priority.
+The `docs/roadmap/` directory is used to track future work items and their priority.
 This is informational only but worth reviewing when working on the codebase as
 current work may intersect with the roadmap.
+
+Larger ideas often start as a proposal in `docs/proposals/` (pre-planning
+exploration of an approach and its alternatives — e.g. `vault_search.md`) before
+becoming a concrete plan. Consult these for intent and considered alternatives
+when planning related work.
 
 We'll create plans for our work and place them in the `docs/plans/` directory. When
 the planned work has been completed we'll move them to `docs/plans/completed`.
@@ -21,7 +26,19 @@ of 90% test coverage at all times. You must also run all tests successfully
 before considering a task to be complete.
 
 Consider edge-cases and failure scenarios when preparing tests - it is critical
-not just to focus on easy, "golden-path" tests.
+not just to focus on easy, "golden-path" tests. Durability and crash-safety in
+particular must be exercised with fault injection, not just the golden path —
+the 2026-05-22 code review (`docs/reviews/code-review-2026-05-22.md`) found that
+in-memory test adapters hide an entire class of data-loss bugs. Beyond unit
+tests, work that touches the storage/sync paths should be checked against the
+§18 performance benchmarks (`packages/kmdb/benchmark/main.dart`) and the
+multi-device `kmdb_harness` package.
+
+Keep the codebase clean as you go: prefer existing primitives over re-rolling
+them (e.g. use `ValueCodec`/CBOR rather than hand-written parsers), and do not
+leave dead or unreachable code behind. The same review had to clean up
+hand-rolled CBOR parsers and never-called code paths — avoid reintroducing that
+class of problem.
 
 All public classes, methods and properties must have appropriate doc comments.
 You may include examples in dec comments if you believe it will help another
@@ -32,7 +49,48 @@ and rationale for the approach.
 
 All code files must have a license at the top. The template file is
 @header_template.txt. You must add the comment syntax appropriate to the
-programming language. Also replace `{{.Year}}` to match the current year.
+programming language. Also replace `{{.Year}}` to match the current year. The
+`kmdb-pre-commit` agent enforces this via `license_check`.
+
+## Workflow & Agents
+
+This project runs a plan-driven workflow backed by specialised subagents. The
+main session (Opus) owns conversation and planning; specialised and mechanical
+work is delegated to agents so each stays focused and the architecture, tests,
+and docs stay healthy. Prefer delegating to these agents over doing their work
+inline.
+
+**The pipeline:**
+
+1. **Plan (Opus, main session).** Author the plan in `docs/plans/` per
+   `docs/plans/README.md`. Consult the **`kmdb-architect`** agent up front to
+   ground the plan in the existing spec and surface affected subsystems, prior
+   art, gaps, and invariants. Do not start implementation until told to.
+2. **Review — `kmdb-plan-reviewer`.** Drives the plan to `Investigated` status.
+   The bar: an implementer could execute it with no significant design decisions
+   left. Do not implement a plan that is not `Investigated`.
+3. **Implement — `kmdb-plan-implement`.** Executes an `Investigated` plan on a
+   dated branch + worktree under `.worktrees/`, keeps the plan file/checklists
+   current, writes tests + docs, and opens a PR.
+4. **QA — `kmdb-qa`.** Quality sign-off before commit: spec alignment, doc
+   comments, test adequacy/coverage, benchmark/harness impact, and code health.
+   Also runs full-codebase audits on request (e.g. before a release).
+5. **Pre-commit — `kmdb-pre-commit`.** Mechanical gate: runs `make pre_commit`
+   (format_check, analyze, license_check, scoped tests) and reports.
+
+**When to reach for an agent:**
+
+- Architecture questions, spec lookups, doc/spec/roadmap maintenance, or
+  proposal review → **`kmdb-architect`** (authoritative on `docs/spec/`,
+  `docs/plans/`, `docs/proposals/`, `docs/roadmap/`). Prefer it over
+  re-deriving architecture from the code.
+- A plan needs critical review before implementation → **`kmdb-plan-reviewer`**.
+- An `Investigated` plan needs building → **`kmdb-plan-implement`**.
+- Verify work before a commit/PR → **`kmdb-qa`** (correctness, completeness vs.
+  the plan) then **`kmdb-pre-commit`** (mechanical gate).
+
+The agents own the operational detail; the sections below are a quick reference
+for the main session.
 
 ## Repository Layout
 
@@ -69,6 +127,7 @@ skips installing the dev tools.
 ```bash
 # Pre-commit gate (format_check, analyze, license_check, then the scoped
 # `pre_commit_test` melos script — runs `kmdb` tests). Run this before committing.
+# The `kmdb-pre-commit` agent runs and diagnoses this gate for you.
 make pre_commit
 
 # Run all tests in every package
@@ -135,7 +194,20 @@ cd packages/kmdb && dart run benchmark/main.dart
 All tests pass on `main`. E2E tests are skipped by default — run them via
 `make e2e_test` (`melos e2e-test`).
 
+> **Durability hardening (post-review).** Phases 1–10 are feature-complete, but
+> the 2026-05-22 code review (`docs/reviews/code-review-2026-05-22.md`) found a
+> cluster of crash-safety / data-loss issues (WAL replay, manifest fsync
+> ordering, vault GC, WriteBatch atomicity, compaction reclamation). These are
+> tracked as plans in `docs/plans/` and are being implemented in priority order —
+> do **not** treat KMDB as crash-safe for valuable data until that track is
+> complete. Consult the `kmdb-architect` agent for current status.
+
 ## Architecture
+
+> The summary below is a fast orientation. For authoritative answers, deep
+> subsystem questions, design validation, or doc maintenance, consult the
+> **`kmdb-architect`** agent — it grounds answers in `docs/spec/` and tracks the
+> implemented-vs-planned-vs-proposed distinction.
 
 KMDB is a local-first document database for Dart/Flutter with a 6-layer stack:
 
@@ -311,3 +383,7 @@ HTML lives in [site/](site/) and is generated via `make docs`. Key spec files:
 - `24_vault.md` — content-addressable blob store and KVLT packaging
 - `25_collection_schemas.md` — JSON Schema admission gate for collection writes
 - `99_glossary.md` — terminology reference
+
+Full-codebase reviews live in [docs/reviews/](docs/reviews/) — start with
+`code-review-2026-05-22.md`, which drives the current durability-hardening track
+(see the Implementation Status note above).
