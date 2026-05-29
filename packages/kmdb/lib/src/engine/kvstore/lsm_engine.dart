@@ -32,6 +32,7 @@ import '../wal/wal_record.dart';
 import '../wal/wal_writer.dart';
 import '../../sync/hlc_clock.dart';
 import 'kv_store.dart';
+import 'meta_store.dart';
 
 /// The core LSM engine.
 ///
@@ -105,6 +106,14 @@ final class LsmEngine {
   /// synced database.
   Future<Hlc> Function()? _tombstoneHorizonProvider;
 
+  /// The [MetaStore] used to persist the tombstone GC floor (H4-FU3).
+  ///
+  /// Injected by [KvStoreImpl] after construction via [setMetaStore].
+  /// When `null`, [_compactAll] cannot advance the floor — the engine still
+  /// runs compaction correctly, but the floor is not updated. This only occurs
+  /// in low-level tests that bypass [KvStoreImpl].
+  MetaStore? _metaStore;
+
   /// Broadcast stream that emits a namespace string after each successful write.
   Stream<String> get writeEvents => _writeEventsController.stream;
 
@@ -157,6 +166,15 @@ final class LsmEngine {
   /// fallback. Pass `null` to revert. Called by [KvStoreImpl.setTombstoneHorizonProvider].
   void setTombstoneHorizonProvider(Future<Hlc> Function()? provider) {
     _tombstoneHorizonProvider = provider;
+  }
+
+  /// Injects the [MetaStore] used to persist the tombstone GC floor (H4-FU3).
+  ///
+  /// Called once by [KvStoreImpl] immediately after the engine is constructed.
+  /// After this is set, [_compactAll] will advance the floor in `$meta`
+  /// whenever it drops at least one tombstone.
+  void setMetaStore(MetaStore metaStore) {
+    _metaStore = metaStore;
   }
 
   /// Computes the tombstone-GC horizon for the next all-levels compaction.
@@ -766,6 +784,30 @@ final class LsmEngine {
   /// covers every level that could hold an older version (so the
   /// `allLevels` safety condition is satisfied) and passes the computed
   /// tombstone-GC horizon to [CompactionJob]. See `plan_tombstone_gc.md`.
+  ///
+  /// ## GC floor advance (H4-FU3)
+  ///
+  /// After the [VersionEdit] is persisted to the manifest (durable), if the
+  /// [CompactionJob] dropped at least one tombstone, the tombstone GC floor
+  /// in `$meta` is advanced to [horizon] via a separate `$meta` put.
+  ///
+  /// ### Atomicity note (Q6 option b)
+  ///
+  /// The floor write is a *separate* WAL frame from the compaction's manifest
+  /// commit. There is a small crash window between "manifest committed" and
+  /// "floor written": if the process crashes here the engine will have GC'd
+  /// state (manifest reflects the post-compaction files) with a stale floor
+  /// (still the pre-compaction value). In that window, a subsequent ingest of
+  /// a sub-floor SSTable would succeed instead of being rejected. This is a
+  /// pessimistic outcome — the data may be benign — but it is not a permanent
+  /// safety violation: the floor is advanced the next time any all-levels
+  /// compaction drops a tombstone. The window is identical to the window that
+  /// existed before H4-FU3 was applied (i.e. no floor at all), and closes
+  /// permanently once the floor is written. Option (c) — folding the floor
+  /// into the compaction's atomic unit — is not structurally available because
+  /// [CompactionJob.run] writes its [VersionEdit] directly to the
+  /// [ManifestWriter] and returns to this method only after the manifest is
+  /// already durable.
   Future<void> _compactAll() async {
     final inputs = [
       ...(_levels[0] ?? []).map((f) => SstableRef(level: 0, filename: f)),
@@ -806,6 +848,13 @@ final class LsmEngine {
     _levels[2] = [];
     for (final added in edit.added) {
       (_levels[added.level] ??= []).add(added.filename);
+    }
+
+    // Advance the GC floor if this compaction dropped at least one tombstone.
+    // The floor write is a separate $meta put *after* the manifest is durable
+    // (Q6 option b — see doc comment above for the atomicity analysis).
+    if (job.tombstonesDropped > 0) {
+      await _metaStore?.setTombstoneFloor(horizon);
     }
   }
 
@@ -886,22 +935,52 @@ final class LsmEngine {
   ///
   /// 1. Opens the SSTable reader to validate the footer checksum and read
   ///    entry metadata.
-  /// 2. Advances the local HLC clock to be at least as recent as the
-  ///    SSTable's max HLC (causal consistency).
-  /// 3. Appends a [VersionEdit] to the Manifest.
-  /// 4. Adds the file to the L0 level list.
-  /// 5. Runs compaction if triggered.
+  /// 2. Parses the filename to extract the HLC range.
+  /// 3. **Checks the GC floor (H4-FU3).** If `info.maxHlc <= floor` the file
+  ///    is rejected with [StaleSstableIngestException]. The floor is the
+  ///    highest `horizon` ever used by a tombstone-dropping [CompactionJob] on
+  ///    this device. Ingesting a file below the floor could resurrect deleted
+  ///    data whose tombstone no longer exists. The check uses `<=` (not `<`)
+  ///    because a record at exactly the floor HLC was not itself GC-eligible,
+  ///    but the conservative `<=` posture avoids an off-by-one argument at
+  ///    review time (see Q7 in the plan).
+  ///
+  ///    **The file is left on disk after rejection** — it was written before
+  ///    this method was called and removing it here would risk a partial-state
+  ///    hazard under retry. The next open's orphan-sweep reclaims it if needed.
+  /// 4. Advances the local HLC clock to `info.maxHlc` (causal consistency).
+  /// 5. Appends a [VersionEdit] to the Manifest.
+  /// 6. Adds the file to the L0 level list.
+  /// 7. Runs compaction if triggered.
   ///
   /// Throws [CorruptedSstableException] if the footer checksum is invalid.
+  /// Throws [StaleSstableIngestException] if `info.maxHlc <= gcFloor`.
   Future<void> ingestAt0(String filename) async {
     final path = '$_sstDir/$filename';
     // Open the reader — validates footer checksum and loads index/filter.
     final reader = await SstableReader.open(path, _adapter);
     final entryCount = reader.entryCount;
 
-    // Determine HLC range from the filename, then advance the local clock.
-    // This ensures subsequent local writes are causally after the ingested data.
+    // Parse the filename to obtain minHlc / maxHlc cheaply (no body scan).
     final info = SstableInfo.parse(filename);
+
+    // GC floor check (H4-FU3): reject SSTables whose maxHlc is at or below
+    // the highest horizon ever used for a tombstone drop on this device.
+    // Using <= is correct and conservative — see the doc comment above.
+    final metaStore = _metaStore;
+    if (metaStore != null) {
+      final floor = await metaStore.getTombstoneFloor();
+      if (floor.encoded != 0 && info.maxHlc <= floor) {
+        throw StaleSstableIngestException(
+          filename: filename,
+          maxHlc: info.maxHlc,
+          floor: floor,
+        );
+      }
+    }
+
+    // Advance the local clock to ensure subsequent local writes are causally
+    // after the ingested data.
     advanceClock(info.maxHlc);
 
     final hlc = _clock.now();

@@ -58,6 +58,8 @@ Future<KvStoreImpl> openWithClock(
     clock: clock,
   );
   final meta = MetaStore(engine);
+  // Inject the MetaStore so the engine can advance the GC floor (H4-FU3).
+  engine.setMetaStore(meta);
   final hadUnclosedSession = await meta.getDirtyFlag();
   return KvStoreImpl.forTesting(
     engine,
@@ -696,6 +698,460 @@ void main() {
           equals(frozenMs),
           reason: 'SSTable minHlc physical must match injected wall clock',
         );
+
+        await store.close();
+      },
+    );
+  });
+
+  // ── H4-FU3: tombstone GC floor — ingest-side horizon floor ────────────────
+  //
+  // H4-FU3 adds a per-device "GC floor" in $meta that records the highest
+  // horizon ever used by a tombstone-dropping compaction. LsmEngine.ingestAt0
+  // rejects SSTables whose maxHlc <= floor with StaleSstableIngestException.
+  //
+  // This group covers:
+  //   (a) Fresh DB has floor zero and accepts everything.
+  //   (b) _compactAll advances the floor when it drops tombstones.
+  //   (c) _compactAll does NOT advance the floor when no tombstones drop.
+  //   (d) Ingest of a sub-floor SSTable throws StaleSstableIngestException.
+  //   (e) PR2 deferred Step 5: delete + compact + ingest old SSTable → key
+  //       stays absent (the "no resurrection" CI assertion).
+  //   (f) Floor is monotonic across two GC cycles.
+  //   (g) Crash window (Q6 option b): compaction committed, floor not yet
+  //       written → floor is pessimistically low, not ahead.
+
+  group('H4-FU3: tombstone GC floor', () {
+    test(
+      '(a) fresh database: floor is Hlc(0,0) and ingest accepts every SSTable',
+      () async {
+        var wallMs = 5000;
+        final clock = HlcClock(wallClock: () => wallMs);
+        final adapter = _newAdapter();
+        final store = await openWithClock(adapter, clock);
+
+        // Floor starts at zero — confirmed via meta.
+        expect(await store.meta.getTombstoneFloor(), equals(const Hlc(0, 0)));
+
+        // Ingest an SSTable with a modest maxHlc — should succeed with zero floor.
+        final filename = SstableInfo.flushName(
+          'peer0001',
+          const Hlc(1, 0),
+          const Hlc(2, 0),
+        );
+        final bytes = buildSst(count: 2, basePhysical: 1);
+        await expectLater(
+          store.ingestSstable(filename, bytes),
+          completes,
+          reason: 'zero floor must accept any SSTable',
+        );
+
+        await store.close();
+      },
+    );
+
+    test(
+      '(b) _compactAll advances floor to horizon when tombstones are dropped',
+      () async {
+        var wallMs = 1000;
+        final clock = HlcClock(wallClock: () => wallMs);
+        final adapter = _newAdapter();
+        final config = KvStoreConfig(
+          memtableSizeBytes: 4096,
+          l0CompactionTrigger: 2,
+          l1MaxBytes: 16 * 1024,
+          l2MaxBytes: 64 * 1024,
+          singleFileThresholdBytes: 8 * 1024,
+          fsyncOnWrite: false,
+          // Short grace so the tombstone becomes eligible quickly.
+          tombstoneGraceDuration: const Duration(milliseconds: 100),
+        );
+        final store = await openWithClock(adapter, clock, config: config);
+
+        // Write and delete a key at wallMs=1000.
+        final key = _key(0);
+        await store.put('ns', key, _bytes('data'));
+        await store.flush();
+
+        // Advance wall clock so the tombstone HLC will be 1300.
+        wallMs = 1300;
+        await store.delete('ns', key);
+        // Flush triggers a _compactAll DURING flush. The horizon at that point
+        // is wallMs(=1300) - grace(=100) = 1200, which is NOT strictly above
+        // the tombstone HLC of 1300 — so the tombstone survives this pass.
+        await store.flush();
+
+        // Advance the wall clock further, then issue an extra write + flush.
+        // The next flush-triggered _compactAll reads the now-higher horizon
+        // (1500 - 100 = 1400 > tombstone HLC 1300), so the tombstone is
+        // dropped and the floor is written. The user-level compactAll() loop
+        // alone would NOT have re-fired _compactAll because the prior pass
+        // collapsed everything to a single file.
+        wallMs = 1500;
+        await store.put('ns', _key(1), _bytes('horizon-raiser'));
+        await store.flush();
+
+        // Floor must now equal the horizon used in the second compaction:
+        // 1500 - 100 = 1400.
+        final floor = await store.meta.getTombstoneFloor();
+        expect(
+          floor.physicalMs,
+          equals(1400),
+          reason: '_compactAll must advance floor to the horizon used',
+        );
+        expect(floor.logical, equals(0));
+
+        await store.close();
+      },
+    );
+
+    test(
+      '(c) _compactAll does NOT advance floor when no tombstones are dropped',
+      () async {
+        var wallMs = 1000;
+        final clock = HlcClock(wallClock: () => wallMs);
+        final adapter = _newAdapter();
+        final config = KvStoreConfig(
+          memtableSizeBytes: 4096,
+          l0CompactionTrigger: 2,
+          l1MaxBytes: 16 * 1024,
+          l2MaxBytes: 64 * 1024,
+          singleFileThresholdBytes: 8 * 1024,
+          fsyncOnWrite: false,
+          tombstoneGraceDuration: const Duration(days: 365), // never eligible
+        );
+        final store = await openWithClock(adapter, clock, config: config);
+
+        await store.put('ns', _key(0), _bytes('a'));
+        await store.flush();
+        await store.put('ns', _key(1), _bytes('b'));
+        await store.flush();
+        await store.compactAll();
+
+        // No tombstones exist — floor must stay at Hlc(0,0).
+        expect(
+          await store.meta.getTombstoneFloor(),
+          equals(const Hlc(0, 0)),
+          reason: 'floor must not advance when no tombstones were dropped',
+        );
+
+        await store.close();
+      },
+    );
+
+    test(
+      '(d) ingestAt0 throws StaleSstableIngestException when maxHlc <= floor',
+      () async {
+        var wallMs = 1000;
+        final clock = HlcClock(wallClock: () => wallMs);
+        final adapter = _newAdapter();
+        final config = KvStoreConfig(
+          memtableSizeBytes: 4096,
+          l0CompactionTrigger: 2,
+          l1MaxBytes: 16 * 1024,
+          l2MaxBytes: 64 * 1024,
+          singleFileThresholdBytes: 8 * 1024,
+          fsyncOnWrite: false,
+          tombstoneGraceDuration: const Duration(milliseconds: 100),
+        );
+        final store = await openWithClock(adapter, clock, config: config);
+
+        // Write + delete + advance + extra flush → flush-triggered _compactAll
+        // sees horizon > tombstone HLC and drops it, advancing the floor.
+        // See test (b) for the rationale behind the extra advance-write step.
+        await store.put('ns', _key(0), _bytes('v'));
+        await store.flush();
+        wallMs = 1300;
+        await store.delete('ns', _key(0));
+        await store.flush();
+        wallMs = 1500;
+        await store.put('ns', _key(2), _bytes('horizon-raiser'));
+        await store.flush();
+
+        final floor = await store.meta.getTombstoneFloor();
+        expect(floor.physicalMs, greaterThan(0));
+
+        // Build an SSTable whose maxHlc equals the floor — should be rejected.
+        final subFloorFilename = SstableInfo.flushName(
+          'peer0001',
+          Hlc(floor.physicalMs - 1, 0),
+          floor, // maxHlc == floor → rejected by <= predicate
+        );
+        final bytes = buildSst(count: 1, basePhysical: floor.physicalMs - 1);
+        expect(
+          () => store.ingestSstable(subFloorFilename, bytes),
+          throwsA(
+            isA<StaleSstableIngestException>()
+                .having((e) => e.filename, 'filename', equals(subFloorFilename))
+                .having((e) => e.maxHlc, 'maxHlc', equals(floor))
+                .having((e) => e.floor, 'floor', equals(floor)),
+          ),
+          reason: 'SSTable with maxHlc == floor must be rejected',
+        );
+
+        await store.close();
+      },
+    );
+
+    test('(e) PR2 deferred Step 5 — no resurrection: delete + GC + ingest older '
+        'SSTable → key stays absent (CI assertion)', () async {
+      // This is the deterministic CI test that was deferred from H4 PR2
+      // because it required the ingest-side floor to be testable.
+      //
+      // Scenario:
+      //   T1: write put(k, v_old) at wallMs=1000.
+      //   T2: write delete(k) at wallMs=1000 (higher logical counter).
+      //   Compact with horizon > T2 → tombstone dropped, floor advances.
+      //   T3: construct a sub-floor SSTable carrying put(k, v_old) at T1.
+      //   Ingest it → must throw StaleSstableIngestException.
+      //   Final read of k → must return null (never resurrected).
+
+      var wallMs = 1000;
+      final clock = HlcClock(wallClock: () => wallMs);
+      final adapter = _newAdapter();
+      final config = KvStoreConfig(
+        memtableSizeBytes: 4096,
+        l0CompactionTrigger: 2,
+        l1MaxBytes: 16 * 1024,
+        l2MaxBytes: 64 * 1024,
+        singleFileThresholdBytes: 8 * 1024,
+        fsyncOnWrite: false,
+        tombstoneGraceDuration: const Duration(milliseconds: 50),
+      );
+      final store = await openWithClock(adapter, clock, config: config);
+
+      final key = _key(0);
+
+      // Step 1: write the value to be "deleted later".
+      await store.put('ns', key, _bytes('v_old'));
+      await store.flush();
+
+      // Step 2: delete it (tombstone HLC ≈ 1100).
+      wallMs = 1100;
+      await store.delete('ns', key);
+      await store.flush();
+
+      // Step 3: advance wall past grace window AND issue an extra write to
+      // re-trigger _compactAll with a horizon above the tombstone HLC.
+      // The flush-triggered compaction in step 2 saw horizon=1100-50=1050,
+      // which did not exceed the tombstone HLC of 1100; the user-level
+      // compactAll() loop will not re-fire _compactAll because the prior
+      // pass collapsed to a single file. The extra put+flush below puts a
+      // second file at L0 and the resulting _compactAll uses
+      // horizon = 1300 - 50 = 1250 > tombstone HLC 1100, so the tombstone
+      // drops and the floor is set. See test (b) for the same pattern.
+      wallMs = 1300;
+      await store.put('ns', _key(1), _bytes('horizon-raiser'));
+      await store.flush();
+
+      final floor = await store.meta.getTombstoneFloor();
+      expect(floor.physicalMs, greaterThan(0), reason: 'floor must advance');
+
+      // Verify key is absent after GC.
+      expect(await store.get('ns', key), isNull);
+
+      // Step 4: construct a peer SSTable carrying put(k, v_old) at an HLC
+      // below the floor. This simulates a returning device that had written
+      // the key before it was deleted on this device.
+      final subFloorPhysical = floor.physicalMs - 100;
+      final subFloorFilename = SstableInfo.flushName(
+        'peer0001',
+        Hlc(subFloorPhysical, 0),
+        Hlc(subFloorPhysical + 1, 0),
+      );
+      // Build the SSTable with a put for the same key at the sub-floor HLC.
+      final writer = SstableWriter();
+      final keyBytes = KeyCodec.keyToBytes(key);
+      final putIkey = KeyCodec.encodeInternalKey(
+        'ns',
+        keyBytes,
+        Hlc(subFloorPhysical, 0),
+        RecordType.put,
+      );
+      writer.add(putIkey, _bytes('v_old'));
+      final subFloorBytes = writer.finish();
+
+      // Step 5: ingest must throw StaleSstableIngestException.
+      expect(
+        () => store.ingestSstable(subFloorFilename, subFloorBytes),
+        throwsA(isA<StaleSstableIngestException>()),
+        reason:
+            'sub-floor SSTable ingest must be rejected to prevent resurrection',
+      );
+
+      // Step 6: key must still read as absent — no resurrection.
+      expect(
+        await store.get('ns', key),
+        isNull,
+        reason: 'key must remain absent after sub-floor ingest rejection',
+      );
+
+      await store.close();
+    });
+
+    test(
+      '(f) floor is monotonic: two GC cycles each advance the floor',
+      () async {
+        var wallMs = 1000;
+        final clock = HlcClock(wallClock: () => wallMs);
+        final adapter = _newAdapter();
+        final config = KvStoreConfig(
+          memtableSizeBytes: 4096,
+          l0CompactionTrigger: 2,
+          l1MaxBytes: 16 * 1024,
+          l2MaxBytes: 64 * 1024,
+          singleFileThresholdBytes: 8 * 1024,
+          fsyncOnWrite: false,
+          tombstoneGraceDuration: const Duration(milliseconds: 50),
+        );
+        final store = await openWithClock(adapter, clock, config: config);
+
+        // First GC cycle. See test (b) for why an extra advance-write is
+        // required to coax _compactAll into firing with a horizon above
+        // the tombstone HLC.
+        await store.put('ns', _key(0), _bytes('a'));
+        await store.flush();
+        wallMs = 1200;
+        await store.delete('ns', _key(0));
+        await store.flush();
+        wallMs = 1400;
+        await store.put('ns', _key(2), _bytes('raiser1'));
+        await store.flush();
+        final floor1 = await store.meta.getTombstoneFloor();
+        expect(
+          floor1.physicalMs,
+          greaterThan(0),
+          reason: 'first GC must set floor',
+        );
+
+        // Second GC cycle at a later time.
+        wallMs = 2000;
+        await store.put('ns', _key(1), _bytes('b'));
+        await store.flush();
+        wallMs = 2200;
+        await store.delete('ns', _key(1));
+        await store.flush();
+        wallMs = 2400;
+        await store.put('ns', _key(3), _bytes('raiser2'));
+        await store.flush();
+        final floor2 = await store.meta.getTombstoneFloor();
+
+        expect(
+          floor2.physicalMs,
+          greaterThan(floor1.physicalMs),
+          reason: 'floor must advance with each GC cycle',
+        );
+
+        await store.close();
+      },
+    );
+
+    test(
+      '(g) Q6 crash window: floor is pessimistically low after crash between '
+      'manifest commit and floor write (floor behind reality, not ahead)',
+      () async {
+        // The Q6 atomicity decision chose option (b): the floor write is a
+        // separate $meta put after the manifest commits. If the process
+        // crashes between these two steps the floor is stale (pre-compaction
+        // value), which is pessimistic (safe) — sub-floor files are still
+        // accepted, not incorrectly rejected.
+        //
+        // We simulate this by: (1) running the compaction normally to confirm
+        // the floor advances, (2) manually rolling the floor back to the
+        // pre-compaction value (simulating a crash before the floor write),
+        // and (3) verifying the engine is still consistent — reads work,
+        // and a well-HLC'd ingest succeeds (sub-floor check does not
+        // over-reject).
+
+        var wallMs = 1000;
+        final clock = HlcClock(wallClock: () => wallMs);
+        final adapter = _newAdapter();
+        final config = KvStoreConfig(
+          memtableSizeBytes: 4096,
+          l0CompactionTrigger: 2,
+          l1MaxBytes: 16 * 1024,
+          l2MaxBytes: 64 * 1024,
+          singleFileThresholdBytes: 8 * 1024,
+          fsyncOnWrite: false,
+          tombstoneGraceDuration: const Duration(milliseconds: 100),
+        );
+        final store = await openWithClock(adapter, clock, config: config);
+
+        await store.put('ns', _key(0), _bytes('v'));
+        await store.flush();
+        wallMs = 1300;
+        await store.delete('ns', _key(0));
+        await store.flush();
+        // Extra advance-write to force _compactAll with horizon > tombstone HLC.
+        // See test (b) for the rationale.
+        wallMs = 1500;
+        await store.put('ns', _key(1), _bytes('horizon-raiser'));
+        await store.flush();
+
+        final actualFloor = await store.meta.getTombstoneFloor();
+        expect(actualFloor.physicalMs, greaterThan(0));
+
+        // Simulate the crash by rolling the floor back to zero (i.e. the
+        // floor write never happened). The manifest already reflects the
+        // post-compaction state (tombstone dropped).
+        await store.resetTombstoneFloor();
+        expect(
+          await store.meta.getTombstoneFloor(),
+          equals(const Hlc(0, 0)),
+          reason: 'floor rolled back to simulate crash before floor write',
+        );
+
+        // With a zeroed floor, a post-floor SSTable is accepted (no false
+        // rejection). This is the "pessimistic" outcome: we are slightly more
+        // permissive than we should be, but we do not reject valid data.
+        wallMs = 2000;
+        final postFloorFilename = SstableInfo.flushName(
+          'peer0001',
+          Hlc(actualFloor.physicalMs + 1, 0),
+          Hlc(actualFloor.physicalMs + 2, 0),
+        );
+        final postFloorBytes = buildSst(
+          basePhysical: actualFloor.physicalMs + 1,
+        );
+        await expectLater(
+          store.ingestSstable(postFloorFilename, postFloorBytes),
+          completes,
+          reason:
+              'with zeroed floor, post-actual-floor SSTable must still be accepted',
+        );
+
+        await store.close();
+      },
+    );
+
+    test(
+      'StaleSstableIngestException carries correct filename, maxHlc, and floor',
+      () async {
+        final adapter = _newAdapter();
+        // Manually set the floor without running GC.
+        final (store, _) = await _open(adapter);
+        await store.meta.setTombstoneFloor(const Hlc(500, 0));
+
+        // Build SSTable with maxHlc == floor.
+        final filename = SstableInfo.flushName(
+          'peer0001',
+          const Hlc(499, 0),
+          const Hlc(500, 0),
+        );
+        final bytes = buildSst(count: 1, basePhysical: 499);
+
+        StaleSstableIngestException? caught;
+        try {
+          await store.ingestSstable(filename, bytes);
+        } on StaleSstableIngestException catch (e) {
+          caught = e;
+        }
+
+        expect(caught, isNotNull, reason: 'exception must be thrown');
+        expect(caught!.filename, equals(filename));
+        expect(caught.maxHlc, equals(const Hlc(500, 0)));
+        expect(caught.floor, equals(const Hlc(500, 0)));
+        expect(caught.toString(), contains('GC floor'));
 
         await store.close();
       },

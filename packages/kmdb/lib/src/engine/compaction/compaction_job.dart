@@ -122,6 +122,23 @@ final class CompactionJob {
   /// every version through unchanged and never drops tombstones.
   final ReclamationPolicyRegistry _policyRegistry;
 
+  /// The number of delete tombstones dropped during [run].
+  ///
+  /// Incremented inside `flushCollapsed` each time a surviving tombstone
+  /// is eligible for GC (its [ReclamationPolicy.dropTombstone] returns
+  /// `true`). This requires [allLevels] to be `true` and the tombstone's
+  /// HLC to be strictly below [horizon].
+  ///
+  /// Readable after [run] returns. [CompactionJob] is a single-use object;
+  /// the count is reset to zero before each [run] call to allow safe re-use
+  /// in tests, though production code constructs a fresh job per compaction.
+  ///
+  /// [LsmEngine._compactAll] reads this value to decide whether to advance
+  /// the tombstone GC floor in `$meta` (H4-FU3). A non-zero count means
+  /// the all-levels compaction dropped at least one tombstone, so the floor
+  /// must be advanced to [horizon].
+  int tombstonesDropped = 0;
+
   // ── Run ───────────────────────────────────────────────────────────────────
 
   /// Executes the compaction and returns the [VersionEdit] that was written.
@@ -142,6 +159,9 @@ final class CompactionJob {
   /// The caller is responsible for deleting the input files after the
   /// [VersionEdit] is confirmed durable.
   Future<VersionEdit> run() async {
+    // Reset the drop counter so run() is safe to call again (e.g. in tests).
+    tombstonesDropped = 0;
+
     // Open all input readers (ordered newest-first: index 0 = highest priority).
     final readers = <SstableReader>[];
     for (final ref in inputs.reversed) {
@@ -196,6 +216,10 @@ final class CompactionJob {
     /// Emits [entry] unless it is a tombstone the active [policy] is
     /// willing to drop given this compaction's [allLevels] and [horizon].
     /// Used to finalise a collapsed group.
+    ///
+    /// When a tombstone is dropped, [tombstonesDropped] is incremented so
+    /// [LsmEngine._compactAll] can advance the GC floor after the manifest
+    /// commits (H4-FU3).
     void flushCollapsed(MergeEntry entry, ReclamationPolicy activePolicy) {
       if (KeyCodec.decodeRecordType(entry.key) == RecordType.delete) {
         final canDrop = activePolicy.dropTombstone(
@@ -203,7 +227,10 @@ final class CompactionJob {
           tombstoneHlc: KeyCodec.decodeHlc(entry.key),
           horizon: horizon,
         );
-        if (canDrop) return;
+        if (canDrop) {
+          tombstonesDropped++;
+          return;
+        }
       }
       emit(entry.key, entry.value);
     }

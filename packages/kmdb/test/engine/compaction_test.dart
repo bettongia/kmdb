@@ -828,6 +828,175 @@ void main() {
       },
     );
   });
+
+  // ── H4-FU3: tombstonesDropped counter ────────────────────────────────────
+
+  group('CompactionJob — tombstonesDropped (H4-FU3)', () {
+    test('tombstonesDropped is 0 on fresh job before run()', () async {
+      final adapter = MemoryStorageAdapter();
+      await adapter.createDirectory(_sstDir);
+      final k = _ikey('ns', 'a', const Hlc(1, 0));
+      final f = await _writeSSTable(adapter, 'a.sst', [(k, _val(1))]);
+
+      final job = CompactionJob(
+        sstDir: _sstDir,
+        deviceId: _deviceId,
+        outputLevel: 2,
+        inputs: [SstableRef(level: 0, filename: f)],
+        adapter: adapter,
+        manifestWriter: ManifestWriter(path: _manifestPath, adapter: adapter),
+        logNumber: 1,
+        nextSeq: 100,
+        allLevels: true,
+        horizon: const Hlc(100, 0),
+      );
+      expect(job.tombstonesDropped, equals(0));
+      await job.run();
+    });
+
+    test('tombstonesDropped is 0 when no tombstones are dropped', () async {
+      // A put-only compaction: no tombstones at all.
+      final adapter = MemoryStorageAdapter();
+      await adapter.createDirectory(_sstDir);
+      final k = _ikey('ns', 'a', const Hlc(1, 0));
+      final f = await _writeSSTable(adapter, 'a.sst', [(k, _val(42))]);
+
+      final job = CompactionJob(
+        sstDir: _sstDir,
+        deviceId: _deviceId,
+        outputLevel: 2,
+        inputs: [SstableRef(level: 0, filename: f)],
+        adapter: adapter,
+        manifestWriter: ManifestWriter(path: _manifestPath, adapter: adapter),
+        logNumber: 1,
+        nextSeq: 100,
+        allLevels: true,
+        horizon: const Hlc(100, 0),
+      );
+      await job.run();
+      expect(job.tombstonesDropped, equals(0));
+    });
+
+    test('tombstonesDropped is 0 when tombstone is retained '
+        '(hlc >= horizon)', () async {
+      final adapter = MemoryStorageAdapter();
+      await adapter.createDirectory(_sstDir);
+      // Tombstone HLC is at the horizon — not eligible (strict less-than).
+      final tomb = _ikey('ns', 'a', const Hlc(10, 0), type: RecordType.delete);
+      final f = await _writeSSTable(adapter, 'a.sst', [(tomb, Uint8List(0))]);
+
+      final job = CompactionJob(
+        sstDir: _sstDir,
+        deviceId: _deviceId,
+        outputLevel: 2,
+        inputs: [SstableRef(level: 0, filename: f)],
+        adapter: adapter,
+        manifestWriter: ManifestWriter(path: _manifestPath, adapter: adapter),
+        logNumber: 1,
+        nextSeq: 100,
+        allLevels: true,
+        horizon: const Hlc(10, 0), // equal to tombstone HLC — retained
+      );
+      await job.run();
+      expect(job.tombstonesDropped, equals(0));
+    });
+
+    test('tombstonesDropped increments for each dropped tombstone', () async {
+      // Three keys deleted, all below horizon — all three tombstones dropped.
+      final adapter = MemoryStorageAdapter();
+      await adapter.createDirectory(_sstDir);
+
+      final entries = <(Uint8List, Uint8List)>[];
+      for (final suffix in ['1', '2', '3']) {
+        entries.add((
+          _ikey('ns', suffix, const Hlc(1, 0), type: RecordType.delete),
+          Uint8List(0),
+        ));
+      }
+      _sortEntries(entries);
+      final f = await _writeSSTable(adapter, 'a.sst', entries);
+
+      final job = CompactionJob(
+        sstDir: _sstDir,
+        deviceId: _deviceId,
+        outputLevel: 2,
+        inputs: [SstableRef(level: 0, filename: f)],
+        adapter: adapter,
+        manifestWriter: ManifestWriter(path: _manifestPath, adapter: adapter),
+        logNumber: 1,
+        nextSeq: 100,
+        allLevels: true,
+        horizon: const Hlc(100, 0),
+      );
+      await job.run();
+      expect(job.tombstonesDropped, equals(3));
+    });
+
+    test('tombstonesDropped is 0 when allLevels is false '
+        '(partial compaction never drops)', () async {
+      // Tombstone below horizon, but allLevels=false — must be retained.
+      final adapter = MemoryStorageAdapter();
+      await adapter.createDirectory(_sstDir);
+      final tomb = _ikey('ns', 'a', const Hlc(1, 0), type: RecordType.delete);
+      final f = await _writeSSTable(adapter, 'a.sst', [(tomb, Uint8List(0))]);
+
+      final job = CompactionJob(
+        sstDir: _sstDir,
+        deviceId: _deviceId,
+        outputLevel: 1,
+        inputs: [SstableRef(level: 0, filename: f)],
+        adapter: adapter,
+        manifestWriter: ManifestWriter(path: _manifestPath, adapter: adapter),
+        logNumber: 1,
+        nextSeq: 100,
+        // allLevels defaults to false
+        horizon: const Hlc(100, 0),
+      );
+      await job.run();
+      expect(job.tombstonesDropped, equals(0));
+    });
+
+    test('tombstonesDropped resets to 0 on a second run() call', () async {
+      // Verify the counter resets at the start of run() for safe re-use.
+      final adapter = MemoryStorageAdapter();
+      await adapter.createDirectory(_sstDir);
+
+      final tomb = _ikey('ns', 'a', const Hlc(1, 0), type: RecordType.delete);
+      final f = await _writeSSTable(adapter, 'a.sst', [(tomb, Uint8List(0))]);
+
+      final job = CompactionJob(
+        sstDir: _sstDir,
+        deviceId: _deviceId,
+        outputLevel: 2,
+        inputs: [SstableRef(level: 0, filename: f)],
+        adapter: adapter,
+        manifestWriter: ManifestWriter(path: _manifestPath, adapter: adapter),
+        logNumber: 1,
+        nextSeq: 100,
+        allLevels: true,
+        horizon: const Hlc(100, 0),
+      );
+
+      await job.run();
+      expect(job.tombstonesDropped, equals(1));
+
+      // Second run (empty inputs list — run() resets the counter first).
+      final job2 = CompactionJob(
+        sstDir: _sstDir,
+        deviceId: _deviceId,
+        outputLevel: 2,
+        inputs: const [],
+        adapter: adapter,
+        manifestWriter: ManifestWriter(path: _manifestPath, adapter: adapter),
+        logNumber: 1,
+        nextSeq: 200,
+        allLevels: true,
+        horizon: const Hlc(100, 0),
+      );
+      await job2.run();
+      expect(job2.tombstonesDropped, equals(0));
+    });
+  });
 }
 
 int _cmpKey(Uint8List a, Uint8List b) {

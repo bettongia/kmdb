@@ -133,6 +133,42 @@ self-evicted. A returning evicted device must perform a full re-sync via
 "Stale-device eviction" and "Re-admission of an evicted device" for the
 distributed safety argument.
 
+**Ingest-side horizon floor.** When `_compactAll` drops at least one
+tombstone, it writes the horizon used into `$meta` as the per-device
+**tombstone GC floor**. Subsequent calls to
+[`KvStore.ingestSstable`](../../packages/kmdb/lib/src/engine/kvstore/kv_store.dart)
+read the floor and reject any SSTable whose `maxHlc <= floor` with a
+typed `StaleSstableIngestException`. This is the recipient-side guard
+against resurrection: a peer that has been excluded from the horizon
+and pushes its pre-eviction SSTables (whether through a missing
+re-admission check, a bug, or a test) cannot deliver records older
+than the GC decision the local device has already made.
+
+- **Comparator is `<=`, not `<`.** The drop predicate is strict
+  `tombstoneHlc < horizon`, so the floor equals `horizon`. An SSTable
+  with `maxHlc = horizon - 1` carries a record at the highest just-
+  dropped HLC and must be rejected; the `<=` predicate is conservative
+  at the boundary (an SSTable with `maxHlc == horizon` is rejected even
+  though no record inside it was eligible for GC — safer than over-
+  accepting).
+- **Default on a fresh database is `Hlc(0, 0)`.** No realistic SSTable
+  has `maxHlc <= Hlc(0, 0)`, so a never-GC'd database accepts every
+  incoming SSTable.
+- **Per-device, not synced.** The floor lives in `$meta`, which is not
+  replicated. Each device's floor reflects its own GC history.
+- **Atomicity (Q6 option b).** `CompactionJob.run()` returns a
+  `VersionEdit` to `ManifestWriter` *before* control returns to
+  `_compactAll`, so the floor write is a separate `$meta` put after the
+  manifest commits. A crash between the manifest commit and the floor
+  write leaves the floor *behind* reality — pessimistic but safe: the
+  engine accepts SSTables it could legitimately reject, never the
+  reverse. Folding the floor write into the compaction's atomic unit
+  (option c) was considered and rejected on structural grounds.
+- **Full re-sync interaction.** `SyncEngine._fullResync` resets the
+  floor to `Hlc(0, 0)` before re-ingesting the cloud's consolidated
+  set, so a non-zero floor cannot stall the rebuild when consolidation
+  has not run since the last GC cycle.
+
 ### Triggers
 
 Compaction fires synchronously on the write path:

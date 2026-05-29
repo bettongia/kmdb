@@ -16,6 +16,7 @@ import 'dart:typed_data';
 
 import 'package:cbor/cbor.dart';
 
+import '../util/hlc.dart';
 import '../util/xxhash.dart';
 import 'kv_store.dart';
 import 'lsm_engine.dart';
@@ -255,6 +256,86 @@ final class MetaStore {
 
     // Remove the generation counter for this namespace.
     await _engine.delete(kNamespace, _genKey(userNamespace));
+  }
+
+  // ── Tombstone GC floor (H4-FU3) ───────────────────────────────────────────
+
+  /// Returns the persisted tombstone GC floor HLC, or `Hlc(0, 0)` if no
+  /// compaction has ever dropped tombstones on this device.
+  ///
+  /// ## Semantics
+  ///
+  /// The floor is the highest `horizon` value that was passed to a
+  /// [CompactionJob] that dropped at least one tombstone. It is a per-device
+  /// monotonic value: it can only increase. The [LsmEngine] reads this value
+  /// in [LsmEngine.ingestAt0] and rejects any incoming SSTable whose `maxHlc`
+  /// satisfies `maxHlc <= floor`.
+  ///
+  /// ## Per-device by design
+  ///
+  /// The floor is stored in `$meta`, which is excluded from sync. Every device
+  /// maintains its own floor independently. This is correct: the floor tracks
+  /// the HLC range each device has GC'd locally, and that history is not
+  /// transferable — another device may not have GC'd the same range and must
+  /// not inherit a floor that overstates its own history.
+  ///
+  /// ## Consistency with local state
+  ///
+  /// The floor is valid against any consistent local state, including after a
+  /// filesystem snapshot rollback: a rollback restores both the dropped
+  /// tombstones (from the pre-GC SSTables) *and* the pre-GC floor (from the
+  /// pre-GC `$meta`), leaving the engine in a coherent older state. The floor
+  /// is never ahead of actual GC history.
+  ///
+  /// ## Default on fresh DB
+  ///
+  /// A freshly-opened database that has never run a tombstone-dropping
+  /// compaction has no floor entry. This method returns `Hlc(0, 0)` in that
+  /// case, which causes [LsmEngine.ingestAt0] to accept every incoming SSTable
+  /// (no realistic SSTable has `maxHlc <= Hlc(0, 0)`).
+  Future<Hlc> getTombstoneFloor() async {
+    final bytes = await _engine.get(
+      kNamespace,
+      _nameToKey('gc:tombstoneFloor'),
+    );
+    if (bytes == null || bytes.length < 8) return const Hlc(0, 0);
+    final encoded = ByteData.sublistView(bytes).getUint64(0, Endian.big);
+    return Hlc.fromEncoded(encoded);
+  }
+
+  /// Persists [floor] as the new tombstone GC floor in `$meta`.
+  ///
+  /// The floor is monotonic under correct operation: callers must only call
+  /// this with a value greater than or equal to the current floor. A value
+  /// equal to the current floor is a no-op in effect but still issues a write
+  /// (idempotent under the WAL last-write-wins ordering).
+  ///
+  /// This is the standalone variant — issues a direct [LsmEngine.put]. Use
+  /// [appendTombstoneFloorAdvance] when the write must be part of a
+  /// [WriteBatch] for atomicity.
+  Future<void> setTombstoneFloor(Hlc floor) => _engine.put(
+    kNamespace,
+    _nameToKey('gc:tombstoneFloor'),
+    _encodeUint64(floor.encoded),
+  );
+
+  /// Appends a tombstone floor advance write for [floor] to [batch].
+  ///
+  /// This is the batch-aware variant of [setTombstoneFloor]. Use this when
+  /// building a [WriteBatch] so the floor advance is part of the same atomic
+  /// WAL frame as other writes — useful for callers that want to fold the
+  /// floor update into an existing batch for atomicity.
+  ///
+  /// Note that the Q6 atomicity decision for H4-FU3 chose option (b) — the
+  /// floor write is a *separate* `$meta` put after the compaction manifest
+  /// commits. This method is provided for completeness and future use; the
+  /// [LsmEngine._compactAll] path calls [setTombstoneFloor] directly.
+  void appendTombstoneFloorAdvance(Hlc floor, WriteBatch batch) {
+    batch.put(
+      kNamespace,
+      _nameToKey('gc:tombstoneFloor'),
+      _encodeUint64(floor.encoded),
+    );
   }
 
   // ── Index state ────────────────────────────────────────────────────────────

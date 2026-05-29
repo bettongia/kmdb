@@ -60,6 +60,8 @@ final class _CountingStore implements KvStore {
   @override
   Future<void> dropAllSstables() => _inner.dropAllSstables();
   @override
+  Future<void> resetTombstoneFloor() => _inner.resetTombstoneFloor();
+  @override
   Future<List<String>> listNamespaces() => _inner.listNamespaces();
   @override
   Future<bool> createNamespace(String namespace) =>
