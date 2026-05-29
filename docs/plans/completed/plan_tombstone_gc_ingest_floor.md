@@ -2,7 +2,7 @@
 
 **Status**: Done
 
-**PR link**: {pending — set after PR is opened}
+**PR link**: https://github.com/bettongia/kmdb/pull/27
 
 **Origin**: H4-FU3 — explicitly deferred from H4-FU during PR2 sign-off. Roadmap
 entry: [docs/roadmap/0_02_01.md → H4-FU3](../../roadmap/0_02_01.md). PR2's
