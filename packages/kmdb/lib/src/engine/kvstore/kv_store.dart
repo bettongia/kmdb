@@ -208,6 +208,29 @@ abstract interface class KvStore {
   /// Used by [SyncEngine] to supply `min(currentHlc)` across all peer HWM
   /// files in the sync folder; not part of the normal application API.
   void setTombstoneHorizonProvider(Future<Hlc> Function()? provider);
+
+  /// Resets the tombstone GC floor to `Hlc(0, 0)` in `$meta`.
+  ///
+  /// Used by [SyncEngine._fullResync] before re-ingesting downloaded SSTables
+  /// from the cloud folder. When a device performs a full re-sync it discards
+  /// its local SSTables and rebuilds from the cloud's current state. The cloud
+  /// folder may contain SSTables whose `maxHlc` is at or below the device's
+  /// current GC floor — for example if consolidation has not yet run after the
+  /// last GC cycle and individual per-device flush SSTables from before the
+  /// consolidation are still present.
+  ///
+  /// Resetting the floor to zero before re-ingesting is safe because the
+  /// re-sync rebuilds from the cloud's ground truth: all data the cloud has is
+  /// ingested, including any SSTables that would otherwise be rejected. The
+  /// floor will advance again the next time `_compactAll` drops a tombstone.
+  ///
+  /// ## Safety invariant
+  ///
+  /// After `resetTombstoneFloor` + re-ingest, the local state is consistent
+  /// with the cloud's current view. The floor is zero, which means every
+  /// incoming SSTable is accepted until the next tombstone-dropping compaction.
+  /// This is the same state as a freshly-opened database that has never run GC.
+  Future<void> resetTombstoneFloor();
 }
 
 // ── StoreStats ────────────────────────────────────────────────────────────────
@@ -516,4 +539,65 @@ final class KvStoreConfig {
     singleFileThresholdBytes: 8 * 1024,
     fsyncOnWrite: false,
   );
+}
+
+// ── StaleSstableIngestException ───────────────────────────────────────────────
+
+/// Exception thrown by [KvStore.ingestSstable] when the incoming SSTable's
+/// `maxHlc` is at or below the local tombstone GC floor (H4-FU3).
+///
+/// ## What this means
+///
+/// The GC floor records the highest `horizon` value ever used by a tombstone-
+/// dropping compaction on this device. An SSTable with `maxHlc <= floor`
+/// contains only records at HLCs that were GC-eligible during that compaction
+/// — ingesting it could resurrect deleted data whose tombstone has already been
+/// dropped locally.
+///
+/// The check is conservative: an SSTable with `maxHlc` exactly equal to the
+/// floor carries a record at the exact horizon used for the last drop. That
+/// record was not itself eligible for GC (the drop predicate is strict less-
+/// than: `tombstoneHlc < horizon`), but the `<=` posture avoids a subtle off-
+/// by-one argument and is the correct defence-in-depth choice.
+///
+/// ## Protocol behaviour
+///
+/// [SyncEngine.pull] catches this exception per-file, logs at WARN, and
+/// continues to the next file **without** advancing the peer high-water mark.
+/// The file is left in the cloud folder and will be reconsidered on the next
+/// pull cycle (e.g. after a consolidation has run and replaced the sub-floor
+/// files with post-floor consolidated output).
+///
+/// ## File on disk
+///
+/// [KvStoreImpl.ingestSstable] writes the file to the local `sst/` directory
+/// before calling [LsmEngine.ingestAt0], so the file already exists on disk
+/// when this exception is thrown. It is intentionally left in place: the
+/// rejection is a diagnostic signal, not a tombstone for the file. A future
+/// open's orphan-sweep will reclaim it if needed.
+final class StaleSstableIngestException implements Exception {
+  /// Creates a [StaleSstableIngestException].
+  ///
+  /// [filename] is the bare SSTable filename. [maxHlc] is the SSTable's
+  /// `maxHlc` from its filename. [floor] is the current local GC floor.
+  const StaleSstableIngestException({
+    required this.filename,
+    required this.maxHlc,
+    required this.floor,
+  });
+
+  /// The bare SSTable filename that was rejected.
+  final String filename;
+
+  /// The SSTable's `maxHlc` as parsed from the filename.
+  final Hlc maxHlc;
+
+  /// The local tombstone GC floor at the time of the check.
+  final Hlc floor;
+
+  @override
+  String toString() =>
+      'StaleSstableIngestException: $filename — maxHlc=${maxHlc.toHex()} '
+      'is at or below GC floor=${floor.toHex()}. '
+      'Ingesting this file could resurrect tombstone-GC\'d data.';
 }

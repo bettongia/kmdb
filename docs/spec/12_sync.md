@@ -197,6 +197,25 @@ before dropping a surviving tombstone.
   see the other as a non-live peer and both perform a full re-sync —
   safe but expensive.
 
+- **Ingest-side horizon floor (recipient guard).** As a defence-in-depth
+  backstop, every device records the horizon used by each tombstone-
+  dropping `_compactAll` into `$meta` as a per-device **tombstone GC
+  floor**. `SyncEngine.pull` invokes `KvStore.ingestSstable` per file,
+  and that path rejects any SSTable whose `maxHlc <= floor` with a typed
+  `StaleSstableIngestException`. The catch block in `pull` logs at WARN
+  and continues to the next file — the rejected file stays in the cloud
+  folder (it may still be valid for peers with a lower floor) and the
+  recipient does not advance its peer-HWM for that filename, so the same
+  file is reconsidered on the next pull. The floor is the local
+  recipient's view of "the highest HLC at which I have already dropped a
+  tombstone", and the comparator is `<=` (not `<`) so the file at the
+  boundary HLC is rejected conservatively. The full-re-sync path in
+  H4-FU2 resets the floor to `Hlc(0, 0)` before re-ingesting downloaded
+  SSTables, so a non-zero floor cannot stall the rebuild when
+  consolidation has not run since the last GC cycle. See §6
+  "Ingest-side horizon floor" for the engine-side mechanism and the
+  Q6 atomicity decision.
+
 - **SSTable garbage collection:** An SSTable can be deleted from the sync
   folder when every device's `.hwm` file shows processing past that
   SSTable's maxHlc. The device that produced the SSTable is responsible

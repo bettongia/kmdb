@@ -150,6 +150,9 @@ final class CacheLayer implements KvStore {
       _store.setTombstoneHorizonProvider(provider);
 
   @override
+  Future<void> resetTombstoneFloor() => _store.resetTombstoneFloor();
+
+  @override
   Future<void> ingestSstable(String filename, Uint8List bytes) =>
       _store.ingestSstable(filename, bytes);
 

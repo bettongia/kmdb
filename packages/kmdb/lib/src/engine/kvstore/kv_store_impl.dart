@@ -118,6 +118,10 @@ final class KvStoreImpl implements KvStore {
     );
     final meta = MetaStore(engine);
 
+    // Inject the MetaStore into the engine so _compactAll can advance the
+    // tombstone GC floor after dropping tombstones (H4-FU3).
+    engine.setMetaStore(meta);
+
     // Check for the dirty-open flag written by the previous session.
     final hadUnclosedSession = await meta.getDirtyFlag();
 
@@ -247,6 +251,10 @@ final class KvStoreImpl implements KvStore {
   void setTombstoneHorizonProvider(Future<Hlc> Function()? provider) {
     _engine.setTombstoneHorizonProvider(provider);
   }
+
+  @override
+  Future<void> resetTombstoneFloor() =>
+      _meta.setTombstoneFloor(const Hlc(0, 0));
 
   @override
   Future<void> close({bool flush = true}) async {
