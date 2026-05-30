@@ -41,6 +41,12 @@ SstableMeta _meta(String filename, {int level = 0}) => SstableMeta(
   entryCount: 10,
 );
 
+/// Extracts bare filenames from a [ManifestState] level list for use in
+/// assertions. The state now carries full [SstableMeta]; callers that only
+/// care about filename membership use this helper.
+List<String> _levelFiles(ManifestState state, int level) =>
+    (state.levels[level] ?? []).map((m) => m.filename).toList();
+
 void main() {
   group('VersionEdit CBOR round-trip', () {
     test('empty edit round-trips', () {
@@ -91,7 +97,12 @@ void main() {
 
       final reader = ManifestReader(adapter: adapter);
       final state = await reader.replay(_manifestPath);
-      expect(state.levels[0], contains('a1b2c3d4-000001-000002.sst'));
+      expect(_levelFiles(state, 0), contains('a1b2c3d4-000001-000002.sst'));
+      // Verify metadata is carried through replay (not just the filename).
+      final meta = state.levels[0]!.first;
+      expect(meta.minKey, equals('0' * 32));
+      expect(meta.maxKey, equals('f' * 32));
+      expect(meta.entryCount, equals(10));
       expect(state.maxLogNumber, equals(1));
       expect(state.maxNextSeq, equals(200));
     });
@@ -116,8 +127,8 @@ void main() {
       final state = await ManifestReader(
         adapter: adapter,
       ).replay(_manifestPath);
-      expect(state.levels[0], equals(['file2.sst']));
-      expect(state.levels[1], contains('file3.sst'));
+      expect(_levelFiles(state, 0), equals(['file2.sst']));
+      expect(_levelFiles(state, 1), contains('file3.sst'));
       expect(state.maxLogNumber, equals(3));
       expect(state.maxNextSeq, equals(300));
     });
@@ -138,7 +149,7 @@ void main() {
         adapter: adapter,
       ).replay(_manifestPath);
       // Only the first record should be visible.
-      expect(state.levels[0], equals(['file1.sst']));
+      expect(_levelFiles(state, 0), equals(['file1.sst']));
     });
 
     test('returns empty state when file does not exist', () async {
@@ -205,7 +216,7 @@ void main() {
           adapter: adapter,
         ).replay(_manifestPath);
         // Only the valid first record should contribute.
-        expect(state.levels[0], contains('good.sst'));
+        expect(_levelFiles(state, 0), contains('good.sst'));
         expect(state.maxLogNumber, equals(1));
       },
     );

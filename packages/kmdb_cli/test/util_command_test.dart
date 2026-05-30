@@ -714,25 +714,49 @@ void main() {
       },
     );
 
-    test('after flush summary lists SSTable filenames in levels', () async {
-      await db.store.put('ns', _keygen.next(), ValueCodec.encode({'id': 'a'}));
-      await db.store.flush();
+    test(
+      'after flush summary lists SSTable metadata (with filename) in levels',
+      () async {
+        await db.store.put(
+          'ns',
+          _keygen.next(),
+          ValueCodec.encode({'id': 'a'}),
+        );
+        await db.store.flush();
 
-      final out = StringBuffer();
-      final ctx = _ctx(db, out: out);
-      final ok = await const UtilCommand().execute(ctx, ['manifest'], {});
-      expect(ok, isTrue);
-      final result = json.decode(out.toString()) as Map<String, dynamic>;
-      final levels = result['levels'] as Map<String, dynamic>;
-      final allFiles = levels.values
-          .expand((v) => (v as List).cast<String>())
-          .toList();
-      expect(allFiles, isNotEmpty);
-      // All filenames should end with .sst.
-      for (final f in allFiles) {
-        expect(f, endsWith('.sst'));
-      }
-    });
+        final out = StringBuffer();
+        final ctx = _ctx(db, out: out);
+        final ok = await const UtilCommand().execute(ctx, ['manifest'], {});
+        expect(ok, isTrue);
+        final result = json.decode(out.toString()) as Map<String, dynamic>;
+        final levels = result['levels'] as Map<String, dynamic>;
+
+        // Each level value is now a List of SstableMeta maps (not bare strings).
+        // Extract filenames from each map entry.
+        final allFiles = levels.values
+            .expand(
+              (v) => (v as List).cast<Map<String, dynamic>>().map(
+                (m) => m['filename'] as String,
+              ),
+            )
+            .toList();
+        expect(allFiles, isNotEmpty);
+        // All filenames should end with .sst.
+        for (final f in allFiles) {
+          expect(f, endsWith('.sst'));
+        }
+        // Verify the metadata fields are present in each entry.
+        for (final levelList in levels.values) {
+          for (final entry
+              in (levelList as List).cast<Map<String, dynamic>>()) {
+            expect(entry.containsKey('filename'), isTrue);
+            expect(entry.containsKey('minKey'), isTrue);
+            expect(entry.containsKey('maxKey'), isTrue);
+            expect(entry.containsKey('entryCount'), isTrue);
+          }
+        }
+      },
+    );
 
     test(
       'after flush --full lists VersionEdits with expected fields',

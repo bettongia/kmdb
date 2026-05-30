@@ -118,7 +118,17 @@ See §17 for the full recovery sequence. The Manifest's role:
   WAL) are replayed in full (§17, review finding C1).
 
 - **Level reconstruction:** Replaying all VersionEdits in order reconstructs the
-  full `levels` map (L0 array + L1/L2 sorted by key range) in memory.
+  full `levels` map (L0 array + L1/L2 sorted by filename) in memory.
+  Each live SSTable is represented by its full `SstableMeta` record (filename,
+  minKey, maxKey, entryCount, walSequence) as-recorded in the last `add` edit
+  for that file. The diagnostic fields (minKey, maxKey, entryCount) are
+  available directly from replay without any extra SSTable I/O.
+
+  Pre-fix databases (written before `plan_sstable_meta_tracking` was
+  implemented) may have rotation-snapshot edits with empty minKey/maxKey and
+  zero entryCount for some files; these stale zeros are carried verbatim and
+  are self-healing: the next flush, compaction, ingest, or reassign edit for
+  those files will record real metadata.
 
 - **HLC recovery:** The highest `nextSeq` across all records is loaded into the
   HLC clock so it resumes above any previously-assigned sequence number.

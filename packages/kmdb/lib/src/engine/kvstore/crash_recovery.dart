@@ -113,10 +113,16 @@ final class CrashRecovery {
     final reader = ManifestReader(adapter: adapter);
     final state = await reader.replay(manifestPath);
 
-    // Reconstruct the level map as mutable lists.
-    final levels = <int, List<String>>{};
+    // Reconstruct the level map as mutable lists, preserving the full
+    // SstableMeta objects (including minKey/maxKey/entryCount) from replay.
+    // The metadata flows from the manifest's on-disk VersionEdit records into
+    // ManifestState.levels and from there into the engine's _levels map without
+    // any loss. Files last seen by a pre-fix rotation-snapshot edit will carry
+    // empty strings and zero counts — those values are transient and self-heal
+    // on the next write that touches those files (D2 rationale).
+    final levels = <int, List<SstableMeta>>{};
     for (final entry in state.levels.entries) {
-      levels[entry.key] = List<String>.from(entry.value);
+      levels[entry.key] = List<SstableMeta>.from(entry.value);
     }
 
     // ── Step 4: Delete orphan SSTables ───────────────────────────────────────

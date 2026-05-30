@@ -222,7 +222,7 @@ void main() {
       final state = await ManifestReader(
         adapter: adapter,
       ).replay(_manifestPath);
-      expect(state.levels[1], contains(outFilename));
+      expect(state.levels[1]!.map((m) => m.filename), contains(outFilename));
       expect(state.levels[0], isEmpty);
     });
 
