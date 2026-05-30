@@ -193,6 +193,13 @@ final class KvStoreConfig {
   // Bloom filter
   final int bloomBitsPerKey;          // default: 10     (~0.8% FPR)
 
+  // Table cache — see §8 (M1)
+  final int tableCacheSize;           // default: 256 desktop, 64 mobile/web
+                                      // Maximum open SstableReader instances
+                                      // held in the LRU table cache. Each
+                                      // entry ≈ 2–5 KiB (footer + index +
+                                      // Bloom filter).
+
   // Cache — see §15
   final int sessionCacheMaxObjects;   // default: 2000 desktop, 256 mobile/web
   final CacheTier cacheTier;          // default: auto-detected from platform

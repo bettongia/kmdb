@@ -26,6 +26,7 @@ import '../platform/storage_adapter_interface.dart';
 import '../sstable/sstable_reader.dart';
 import '../sstable/sstable_writer.dart';
 import '../sstable/sstable_info.dart';
+import '../sstable/table_cache.dart';
 import '../util/hlc.dart';
 import '../util/key_codec.dart';
 import '../wal/wal_record.dart';
@@ -64,6 +65,9 @@ final class LsmEngine {
     required this._walWriter,
     required this._clock,
   }) : _active = Memtable(),
+       // TableCache capacity comes from config. The this.field constructor
+       // parameter makes _config accessible in the initializer list.
+       _tableCache = TableCache(capacity: _config.tableCacheSize),
        // sync: true delivers events synchronously to subscribers — correct for
        // KMDB's single-isolate model where listeners are set up before writes.
        _writeEventsController = StreamController<String>.broadcast(sync: true);
@@ -72,6 +76,15 @@ final class LsmEngine {
   final String _sstDir;
   final StorageAdapter _adapter;
   final KvStoreConfig _config;
+
+  /// LRU cache of open [SstableReader]s, keyed by absolute file path.
+  ///
+  /// Caching avoids the O(file-size) whole-file XXH64 hash on every read.
+  /// The first open for a given path validates and caches the reader;
+  /// subsequent calls reuse the cached object. Entries are explicitly evicted
+  /// whenever a file is removed, replaced, or renamed (flush, compaction,
+  /// ingest, manifest rotation, device-ID rename, and close).
+  final TableCache _tableCache;
 
   /// The 8-character device identifier used for new SSTable filenames.
   ///
@@ -731,9 +744,23 @@ final class LsmEngine {
     // Build a set of output filenames so we never delete a file that was
     // written as the compaction output. This guards against the edge case
     // where the output HLC range exactly matches an input (same filename).
+    // Evict ALL removed-file cache entries regardless of whether the filename
+    // matches a compaction output. When an output filename equals an input
+    // filename (the HLC range did not change), the compaction job overwrites
+    // the file in place — so the cached reader for that path is stale and
+    // must not be served. The file itself must not be deleted in that case
+    // (it now holds the compaction output), so the eviction and deletion
+    // steps are separated.
     final outputNames = edit.added.map((a) => a.filename).toSet();
     for (final ref in edit.removed) {
-      if (outputNames.contains(ref.filename)) continue;
+      // Evict always: the file was an input and is now either deleted or
+      // overwritten by the compaction output.
+      _tableCache.evict('$_sstDir/${ref.filename}');
+      if (outputNames.contains(ref.filename)) {
+        // Same filename reused as output — the compaction wrote the new
+        // content in place. Do not delete it.
+        continue;
+      }
       await _adapter.deleteFile('$_sstDir/${ref.filename}');
     }
 
@@ -765,8 +792,11 @@ final class LsmEngine {
     );
     final edit = await job.run();
 
+    // Evict all removed-file cache entries. Skip file deletion for any input
+    // whose filename was reused as the output (in-place overwrite).
     final outputNames = edit.added.map((a) => a.filename).toSet();
     for (final ref in edit.removed) {
+      _tableCache.evict('$_sstDir/${ref.filename}');
       if (outputNames.contains(ref.filename)) continue;
       await _adapter.deleteFile('$_sstDir/${ref.filename}');
     }
@@ -833,11 +863,14 @@ final class LsmEngine {
     );
     final edit = await job.run();
 
-    // Delete input files, but skip any whose filename matches the output.
-    // When the merged HLC range equals an input's range the output is written
-    // to the same path as that input; deleting it would erase the new file.
+    // Evict all removed-file cache entries, then delete files whose name is
+    // not reused by the compaction output. When the merged HLC range equals an
+    // input's range the output is written to the same path; deleting it would
+    // erase the new content. Eviction is always required — even for files whose
+    // name is reused, because the compaction overwrites the content in place.
     final outputNames = edit.added.map((a) => a.filename).toSet();
     for (final ref in edit.removed) {
+      _tableCache.evict('$_sstDir/${ref.filename}');
       if (outputNames.contains(ref.filename)) continue;
       await _adapter.deleteFile('$_sstDir/${ref.filename}');
     }
@@ -958,7 +991,9 @@ final class LsmEngine {
   Future<void> ingestAt0(String filename) async {
     final path = '$_sstDir/$filename';
     // Open the reader — validates footer checksum and loads index/filter.
-    final reader = await SstableReader.open(path, _adapter);
+    // Route through _tableCache so the validated reader is available for
+    // the compaction that may immediately follow.
+    final reader = await _tableCache.open(path, _adapter);
     final entryCount = reader.entryCount;
 
     // Parse the filename to obtain minHlc / maxHlc cheaply (no body scan).
@@ -1055,6 +1090,10 @@ final class LsmEngine {
       ),
     );
 
+    // Clear the table cache — all files being removed from the manifest are no
+    // longer valid reads. Evict before deleting so a concurrent _openReader call
+    // (in theory) cannot be handed a reader for a file that no longer exists.
+    _tableCache.clear();
     _levels.clear();
 
     for (final ref in removed) {
@@ -1133,6 +1172,12 @@ final class LsmEngine {
           // (HLC timestamps and extension) is unchanged.
           final newFilename = newDeviceId + oldFilename.substring(8);
 
+          // Evict the old-path reader from the cache before the rename: after
+          // the rename the old path no longer exists, so any cached reader for
+          // it would be stale. The new path will be populated lazily on the
+          // first _openReader call after the rename.
+          _tableCache.evict('$_sstDir/$oldFilename');
+
           // Rename on disk.
           await _adapter.renameFile(
             '$_sstDir/$oldFilename',
@@ -1193,6 +1238,9 @@ final class LsmEngine {
   /// Flushes the active memtable (if [flush] is true) and releases the LOCK file.
   Future<void> close({bool flush = true}) async {
     if (flush && _active.length > 0) await this.flush();
+    // Release cached readers before releasing the LOCK — all in-memory
+    // SSTable state is discarded with the engine instance.
+    _tableCache.clear();
     await _adapter.releaseLock('$_dbDir/LOCK');
     await _writeEventsController.close();
   }
@@ -1204,10 +1252,21 @@ final class LsmEngine {
   String _levelsSummary() =>
       '${(_levels[0] ?? []).length}/${(_levels[1] ?? []).length}/${(_levels[2] ?? []).length}';
 
-  /// Attempts to open an SSTable at [path], returning `null` on I/O error.
+  /// Opens the SSTable at [path] via the [TableCache], returning `null` on
+  /// I/O or corruption error.
+  ///
+  /// On the first call for a given [path] the file is read, its whole-file
+  /// XXH64 checksum validated, and the resulting reader cached. Subsequent
+  /// calls return the cached reader without any file I/O. The cache is
+  /// LRU-bounded by [KvStoreConfig.tableCacheSize].
+  ///
+  /// Returns `null` (rather than throwing) so callers can skip missing files
+  /// without disrupting the read/scan loop — a file may be absent because it
+  /// was deleted by a concurrent compaction in a future multi-isolate model, or
+  /// because the recovery path found an orphan.
   Future<SstableReader?> _openReader(String path) async {
     try {
-      return await SstableReader.open(path, _adapter);
+      return await _tableCache.open(path, _adapter);
     } on StorageException {
       return null;
     }

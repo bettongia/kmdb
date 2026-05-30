@@ -64,6 +64,23 @@ bound. This was removed for the following reasons:
    This was a meaningful source of implementation risk for marginal gain at
    this scale.
 
+## Read Cost Bound (M1 — TableCache)
+
+Before M1, every `get()` or `scan()` call on an SSTable re-opened the file from
+scratch, including re-reading and re-hashing the entire file to validate the
+whole-file XXH64 checksum. This made per-read cost O(database size) — a 20 MB
+L2 SSTable cost ~20 MB of I/O on every read.
+
+The `TableCache` (see §8 — Table Cache) reduces this to a **one-time** O(file
+size) cost per file per process. After the first open the footer, index block,
+and Bloom filter are cached in memory; subsequent reads pay only the cost of
+a data-block read (~4 KB per block). Per-read cost is now O(block), bounded and
+independent of the total database size.
+
+The P99 targets in the table below assume the `TableCache` is warm (the common
+steady-state case after the first read of each file). The first read of any
+SSTable after process start or after eviction from the cache will be higher.
+
 ## Performance Targets
 
 | Operation | Target | Notes |
@@ -72,7 +89,8 @@ bound. This was removed for the following reasons:
 | Put (triggers flush + compact) | P99 < 200ms | Reads 128KB + writes 128KB. Every ~30 writes. |
 | Get (in memtable) | P99 < 1ms | In-memory skip list. No I/O. |
 | Get (single-file mode) | P99 < 2ms | 1 Bloom check + 1 block read. Common case. |
-| Get (multi-level, present) | P99 < 5ms | 1–3 Bloom checks + 1 block read. |
+| Get (multi-level, present) | P99 < 5ms | 1–3 Bloom checks + 1 block read. Warm cache. |
+| Get (warm cache, multi-file) | P99 < 5ms | TableCache hit: O(block), not O(database). |
 | Get (absent key) | P99 < 3ms | Bloom filters eliminate file reads (~0.8% FPR). |
 | Scan (namespace, 100 results) | P99 < 10ms | Sequential block reads across 1–3 files. |
 | Database open | P99 < 100ms | Manifest replay + WAL replay (max 64KB). |

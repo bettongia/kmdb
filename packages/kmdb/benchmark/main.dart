@@ -28,6 +28,7 @@ import 'dart:io';
 import 'benchmark_runner.dart';
 import 'benchmarks/database_open_bench.dart';
 import 'benchmarks/get_absent_key_bench.dart';
+import 'benchmarks/get_cached_reader_bench.dart';
 import 'benchmarks/get_memtable_bench.dart';
 import 'benchmarks/get_multi_level_bench.dart';
 import 'benchmarks/get_single_file_bench.dart';
@@ -43,6 +44,7 @@ Future<void> main() async {
     await getMemtableBenchmark(),
     await getSingleFileBenchmark(),
     await getMultiLevelBenchmark(),
+    await getCachedReaderBenchmark(),
     await getAbsentKeyBenchmark(),
     await scan100ResultsBenchmark(),
     await databaseOpenBenchmark(),
