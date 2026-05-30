@@ -1,8 +1,8 @@
 # §6 Code and documentation tidy-up
 
-**Status**: Implementing
+**Status**: Complete
 
-**PR link**: {pending}
+**PR link**: https://github.com/bettongia/kmdb/pull/30
 
 **Implementation model:** Sonnet — cosmetic, except keep the `get()` three-state
 semantics (don't collapse tombstone vs absent). Light review.
@@ -153,4 +153,25 @@ strictly cosmetic.
 
 ## Summary
 
-{To be completed during implementation.}
+- **`_getFromSstable` 3-state return (A/D1):** Replaced the `(Uint8List?, bool)?`
+  positional tuple with the named record `({Uint8List? value})?`. Outer `null` =
+  absent (continue); `({value: null})` = tombstone (stop); `({value: bytes})` =
+  hit. Removed the dead unreachable second `if` in both L0 and L1/L2 loops. Added
+  a tombstone-suppression regression test that exercises the correctness-critical
+  cross-SSTable scenario before the refactor.
+- **`encodeInternalKey` ordering comment fixed (B):** The comment said `hlc`
+  descending; it is actually big-endian ascending (oldest first, newest last). The
+  read path takes the last entry. The code was always correct; only the comment
+  was wrong.
+- **`SyncEngine.sync()` doc fixed (D2):** Doc previously claimed pull is attempted
+  even when push fails. Corrected to match the code: push failure propagates and
+  pull is skipped.
+- **No-op line removed (C):** Deleted `hwm = hwm.withCurrentHlc(hwm.currentHlc)`
+  in `SyncEngine.pull` — a self-assignment leftover with no effect.
+- **Rotation metadata doc added (E/D3):** `_doManifestRotation` now has a doc
+  comment noting that `minKey`/`maxKey`/`entryCount` are diagnostic-only and
+  reset to empty/0 on each rotation (because `_levels` tracks filenames only).
+  References the proper-fix follow-up plan `plan_sstable_meta_tracking.md`.
+- **Sweep (F):** Updated the stale "Phase 6+" doc on `syncNamespaces`. Fixed
+  pre-existing `no_leading_underscores_for_local_identifiers` lint in
+  `wal_test.dart` (`_put`/`_del` → `makePut`/`makeDel`).
