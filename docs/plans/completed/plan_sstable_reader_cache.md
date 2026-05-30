@@ -1,8 +1,8 @@
 # Fix M1: SSTable reads are O(database size) — add a reader cache (and cheap open)
 
-**Status**: Implementing
+**Status**: Complete
 
-**PR link**: {pending}
+**PR link**: https://github.com/bettongia/kmdb/pull/28
 
 **Implementation model:** Sonnet — mechanical; Phase 1 (reader cache) needs no
 format change. Light review.
@@ -168,4 +168,16 @@ changed to the compaction output.
 
 ## Summary
 
-{To be completed during implementation.}
+- Added `TableCache` (`lib/src/engine/sstable/table_cache.dart`) — a bounded LRU cache of open `SstableReader` objects, keyed by absolute file path. Eliminates the per-read O(file-size) whole-file XXH64 checksum cost; the hash is now paid once per file per process, after which subsequent reads reuse the cached reader (footer + index + Bloom filter held in memory).
+
+- Routed `LsmEngine._openReader` and `ingestAt0` through `_tableCache.open()`. Added explicit cache eviction at every level-map mutation point: `_compactL0ToL1`, `_compactL1ToL2`, `_compactAll` (evict all removed files), `dropAllSstables` (clear), `reassignDeviceId` (evict old path before rename), `close` (clear).
+
+- Added `KvStoreConfig.tableCacheSize` (default 256 desktop, 64 mobile/web, 16 in `forTesting()`). Documented in `docs/spec/08_sstable.md`, `18_concurrency.md`, and `11_kv_store.md`.
+
+- Added `benchmark/benchmarks/get_cached_reader_bench.dart` — a `Get (warm cache, multi-file)` P99 < 5 ms benchmark confirming per-read cost is O(block) with the cache warm.
+
+- **Critical invariant discovered:** when a compaction output reuses the same filename as an input (in-place overwrite — happens when the HLC range is unchanged), the stale cached reader must still be evicted before the compaction output is served. Failing to do so caused `CorruptedSstableException: Data block checksum mismatch` because the old reader's index block pointed to block offsets from the old file layout while the on-disk content had been overwritten. Fixed by separating the eviction step from the `deleteFile` step in all three compaction methods; the `if (outputNames.contains(ref.filename)) continue` guard now only skips `deleteFile`, not eviction.
+
+- Added 14 unit tests (`test/engine/table_cache_test.dart`) covering reader reuse, invalidation, LRU promotion, prefix eviction, error propagation, and capacity. Added 9 integration tests (`test/engine/table_cache_integration_test.dart`) including a regression test for the same-filename-reuse eviction invariant. All 1486 tests pass.
+
+- Branch: `20260530_plan_sstable_reader_cache` | Worktree: `.worktrees/20260530_plan_sstable_reader_cache`
