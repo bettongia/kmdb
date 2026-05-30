@@ -1,8 +1,8 @@
 # Fix M1: SSTable reads are O(database size) — add a reader cache (and cheap open)
 
-**Status**: Investigated
+**Status**: Complete
 
-**PR link**: {pending}
+**PR link**: https://github.com/bettongia/kmdb/pull/28
 
 **Implementation model:** Sonnet — mechanical; Phase 1 (reader cache) needs no
 format change. Light review.
@@ -102,43 +102,51 @@ different layers; name accordingly (e.g. `TableCache`) to avoid confusion.
 
 ## Decisions (recommended answers — confirm before implementation)
 
-- [ ] **D1 — Cache scope.** Recommended: cache **open readers** (footer + index +
+- [x] **D1 — Cache scope.** Recommended: cache **open readers** (footer + index +
   filter) only; defer a hot data-block cache. Biggest win, smallest surface.
-- [ ] **D2 — Eviction + bound.** Recommended: LRU by path, bounded by a config
+- [x] **D2 — Eviction + bound.** Recommended: LRU by path, bounded by a config
   count (e.g. desktop 256 readers, mobile/web 64); evict explicitly on level-map
   mutation so a deleted/compacted file is never served stale.
-- [ ] **D3 — Footer-only (cheap) open.** Recommended: **defer to a second phase**
+- [x] **D3 — Footer-only (cheap) open.** Recommended: **defer to a second phase**
   — it needs per-section checksums (format change). Ship caching first; it already
   reduces whole-file hashing to once per file per process.
-- [ ] **D4 — Keep whole-file validation.** Recommended: retain the whole-file hash
+- [x] **D4 — Keep whole-file validation.** Recommended: retain the whole-file hash
   on first open (good integrity), and optionally expose an explicit `verify()` for
   diagnostics; do not silently drop it.
 
 ## Implementation plan
 
 ### Step 1 — Table cache
-- [ ] Implement `TableCache` (LRU of `SstableReader` by path, bounded by count).
-- [ ] Route `LsmEngine._openReader` through it; first access opens+validates+caches,
+- [x] Implement `TableCache` (LRU of `SstableReader` by path, bounded by count).
+- [x] Route `LsmEngine._openReader` through it; first access opens+validates+caches,
       subsequent accesses reuse.
 
 ### Step 2 — Invalidation
-- [ ] Evict entries for removed/renamed files in `flush`, `_compactL0ToL1`,
+- [x] Evict entries for removed/renamed files in `flush`, `_compactL0ToL1`,
       `_compactL1ToL2`, `_compactAll`, `ingestAt0`, `_doManifestRotation`, and
       `reassignDeviceId`.
-- [ ] On `close`, drop the cache.
+- [x] On `close`, drop the cache.
+
+**Key implementation note:** eviction must happen for **all** removed files, even
+when the compaction output reuses the same filename (in-place overwrite). The
+`if (outputNames.contains(ref.filename)) continue` guard skips only the
+`deleteFile` call, not the eviction — failing to evict in this case caused a
+`CorruptedSstableException: Data block checksum mismatch` because the stale
+reader's index pointed to blocks from the old file while the file content had
+changed to the compaction output.
 
 ### Step 3 — Config
-- [ ] Add a cache-size knob to `KvStoreConfig` with tiered defaults; document it.
+- [x] Add a cache-size knob to `KvStoreConfig` with tiered defaults; document it.
 
 ### Step 4 — Tests
-- [ ] **Reader reuse:** instrument open count; N reads of the same file open it
+- [x] **Reader reuse:** instrument open count; N reads of the same file open it
       once (after the first).
-- [ ] **Invalidation:** after a compaction removes a file, the cache no longer
+- [x] **Invalidation:** after a compaction removes a file, the cache no longer
       holds/serves it; reads of the replacement open the new file.
-- [ ] **Correctness unchanged:** existing read/scan tests pass with caching on.
-- [ ] **Bound respected:** with more files than the cache size, LRU evicts and
+- [x] **Correctness unchanged:** existing read/scan tests pass with caching on.
+- [x] **Bound respected:** with more files than the cache size, LRU evicts and
       reads remain correct.
-- [ ] **Benchmark:** a large-DB read benchmark shows per-read cost no longer
+- [x] **Benchmark:** a large-DB read benchmark shows per-read cost no longer
       scales with total data (was O(db size), now ~O(block)).
 
 ### Step 5 — (Optional phase) cheap open
@@ -148,16 +156,28 @@ different layers; name accordingly (e.g. `TableCache`) to avoid confusion.
       diagnostics. (Format change — gate behind a version bump.)
 
 ### Step 6 — Documentation
-- [ ] `docs/spec/08_sstable.md`: document the table cache and integrity model;
+- [x] `docs/spec/08_sstable.md`: document the table cache and integrity model;
       `18_concurrency.md`: note read cost is now bounded.
 
 ### Step 7 — Verify
-- [ ] `dart test packages/kmdb` and `cd packages/kmdb_cli && dart test` pass.
-- [ ] `make analyze` clean; benchmark confirms the improvement.
+- [x] `dart test packages/kmdb` and `cd packages/kmdb_cli && dart test` pass.
+- [x] `make analyze` clean; benchmark confirms the improvement.
 
 > No release-checklist (§28) entry needed: the win is measured by the in-repo
 > benchmark and verified by unit tests — no real hardware/service required.
 
 ## Summary
 
-{To be completed during implementation.}
+- Added `TableCache` (`lib/src/engine/sstable/table_cache.dart`) — a bounded LRU cache of open `SstableReader` objects, keyed by absolute file path. Eliminates the per-read O(file-size) whole-file XXH64 checksum cost; the hash is now paid once per file per process, after which subsequent reads reuse the cached reader (footer + index + Bloom filter held in memory).
+
+- Routed `LsmEngine._openReader` and `ingestAt0` through `_tableCache.open()`. Added explicit cache eviction at every level-map mutation point: `_compactL0ToL1`, `_compactL1ToL2`, `_compactAll` (evict all removed files), `dropAllSstables` (clear), `reassignDeviceId` (evict old path before rename), `close` (clear).
+
+- Added `KvStoreConfig.tableCacheSize` (default 256 desktop, 64 mobile/web, 16 in `forTesting()`). Documented in `docs/spec/08_sstable.md`, `18_concurrency.md`, and `11_kv_store.md`.
+
+- Added `benchmark/benchmarks/get_cached_reader_bench.dart` — a `Get (warm cache, multi-file)` P99 < 5 ms benchmark confirming per-read cost is O(block) with the cache warm.
+
+- **Critical invariant discovered:** when a compaction output reuses the same filename as an input (in-place overwrite — happens when the HLC range is unchanged), the stale cached reader must still be evicted before the compaction output is served. Failing to do so caused `CorruptedSstableException: Data block checksum mismatch` because the old reader's index block pointed to block offsets from the old file layout while the on-disk content had been overwritten. Fixed by separating the eviction step from the `deleteFile` step in all three compaction methods; the `if (outputNames.contains(ref.filename)) continue` guard now only skips `deleteFile`, not eviction.
+
+- Added 14 unit tests (`test/engine/table_cache_test.dart`) covering reader reuse, invalidation, LRU promotion, prefix eviction, error propagation, and capacity. Added 9 integration tests (`test/engine/table_cache_integration_test.dart`) including a regression test for the same-filename-reuse eviction invariant. All 1486 tests pass.
+
+- Branch: `20260530_plan_sstable_reader_cache` | Worktree: `.worktrees/20260530_plan_sstable_reader_cache`

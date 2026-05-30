@@ -400,6 +400,7 @@ final class KvStoreConfig {
     this.maxValueBytes = 1024 * 1024,
     this.tombstoneGraceDuration = const Duration(days: 7),
     this.staleDeviceEvictionAfter = const Duration(days: 90),
+    this.tableCacheSize = 256,
   });
 
   /// Memtable flush threshold in bytes.
@@ -525,6 +526,35 @@ final class KvStoreConfig {
   /// Wi-Fi network.
   final Duration staleDeviceEvictionAfter;
 
+  /// Maximum number of open [SstableReader]s held in the [TableCache].
+  ///
+  /// The table cache amortises the cost of opening an SSTable file: the first
+  /// open validates the whole-file XXH64 checksum and loads the footer, index,
+  /// and Bloom filter into memory; subsequent reads of the same file reuse the
+  /// cached reader without any file I/O or hashing.
+  ///
+  /// ## Sizing
+  ///
+  /// Each cached reader holds the footer (48 bytes), Bloom filter (~1 KB for a
+  /// typical 100-entry block), and index (a few hundred bytes per file) — on
+  /// the order of **2–5 KiB per entry**. At the default of 256 entries that is
+  /// roughly 0.5–1.3 MiB of overhead, which is appropriate for desktop and
+  /// server deployments. For memory-constrained environments (mobile, web) set
+  /// this to 64 or lower.
+  ///
+  /// The cache is LRU-evicting: when full, the least-recently-used reader is
+  /// dropped. Reads still succeed after eviction — they just re-open the file.
+  ///
+  /// ## Platform tier defaults
+  ///
+  /// | Platform | Recommended value |
+  /// |----------|------------------|
+  /// | Desktop / server | 256 (default) |
+  /// | Mobile / embedded | 64 |
+  ///
+  /// Defaults to 256. Must be > 0.
+  final int tableCacheSize;
+
   /// Configuration for unit tests: tiny thresholds, no fsync, small cache.
   ///
   /// [staleDeviceEvictionAfter] is intentionally left at the default 90 days
@@ -538,6 +568,7 @@ final class KvStoreConfig {
     l2MaxBytes: 64 * 1024,
     singleFileThresholdBytes: 8 * 1024,
     fsyncOnWrite: false,
+    tableCacheSize: 16,
   );
 }
 
