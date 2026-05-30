@@ -22,6 +22,14 @@ is prepended to the binary key in the SSTable, so entries from different
 namespaces interleave in key order within a file. Scan always filters to a
 single namespace.
 
+**Namespace encoding.** Namespaces are stored as UTF-8 bytes (not UTF-16 code
+units). `KvStoreImpl` NFC-normalises every user-supplied namespace string at
+the public boundary before any storage operation, so callers supplying the same
+logical name in different Unicode normalisation forms (NFC vs NFD) always access
+the same namespace. Namespaces are limited to 255 UTF-8 bytes; exceeding this
+limit throws a descriptive `ArgumentError`. See §4 (Keys) for the full
+encoding spec.
+
 **`orderBy` is not a KvStore concern.** Field-level ordering is applied in the
 Query Layer after scan. The one exception is key-order (`orderBy('id')`) —
 `scan` supports ascending and descending key traversal natively without an

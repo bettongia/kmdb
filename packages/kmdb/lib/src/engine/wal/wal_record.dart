@@ -15,6 +15,7 @@
 import 'dart:typed_data';
 
 import '../util/hlc.dart';
+import '../util/namespace_codec.dart';
 import '../util/xxhash.dart';
 
 // ── Record type ──────────────────────────────────────────────────────────────
@@ -142,7 +143,10 @@ final class WalRecord {
   ///
   /// The checksum covers all bytes after itself (type through value).
   Uint8List encode() {
-    final nsBytes = _toUtf8(namespace);
+    // namespaceToBytes uses UTF-8 encoding (not codeUnits) and enforces the
+    // 255-byte limit. The namespace must already be NFC-normalised (the public
+    // boundary in KvStoreImpl guarantees this).
+    final nsBytes = namespaceToBytes(namespace);
 
     // Flush markers only carry type + seq; other record types carry full fields.
     // Payload = type(1) + seq(8) [ + nsLen(1) + ns + keyLen(2) + key + valLen(4) + val ]
@@ -228,7 +232,9 @@ final class WalRecord {
       if (buf.length - pos < 1) return null;
       final nsLen = buf[pos++];
       if (buf.length - pos < nsLen) return null;
-      namespace = String.fromCharCodes(buf, pos, pos + nsLen);
+      // bytesToNamespace uses UTF-8 decode (not String.fromCharCodes, which
+      // would misinterpret multi-byte sequences as individual code points).
+      namespace = bytesToNamespace(buf.sublist(pos, pos + nsLen));
       pos += nsLen;
 
       // keyLen + key
@@ -262,10 +268,6 @@ final class WalRecord {
     );
     return (record, pos - offset);
   }
-
-  // ── Helpers ───────────────────────────────────────────────────────────────
-
-  static List<int> _toUtf8(String s) => s.codeUnits;
 }
 
 // ── WAL batch frame ───────────────────────────────────────────────────────────
@@ -330,7 +332,10 @@ final class WalBatchFrame {
     int payloadLen = 1 + 4; // type(1) + count(4)
     final nsBytesPerEntry = <List<int>>[];
     for (final r in records) {
-      final nsBytes = r.namespace.codeUnits;
+      // namespaceToBytes uses real UTF-8 encoding and enforces the 255-byte
+      // limit. The namespace must already be NFC-normalised (the public
+      // boundary in KvStoreImpl guarantees this).
+      final nsBytes = namespaceToBytes(r.namespace);
       nsBytesPerEntry.add(nsBytes);
       payloadLen +=
           1 + 8 + 1 + nsBytes.length + 2 + r.key.length + 4 + r.value.length;
@@ -425,7 +430,9 @@ final class WalBatchFrame {
       if (buf.length - pos < 1) return null;
       final nsLen = buf[pos++];
       if (buf.length - pos < nsLen) return null;
-      final namespace = String.fromCharCodes(buf, pos, pos + nsLen);
+      // bytesToNamespace uses UTF-8 decode to correctly reconstruct non-ASCII
+      // namespace strings.
+      final namespace = bytesToNamespace(buf.sublist(pos, pos + nsLen));
       pos += nsLen;
 
       if (buf.length - pos < 2) return null;
