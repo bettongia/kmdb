@@ -12,7 +12,7 @@ of both crash safety and sync safety.
 | Data blocks  | Sorted key-value entries with prefix compression and restart points. Block size: 4KB.        |
 | Filter block | Bloom filter (current) or Xor filter (planned migration) for all keys in the file.           |
 | Index block  | One entry per data block: (last key, block offset, block size).                              |
-| Footer (48B) | Filter block offset/size, index block offset/size, entry count, min/max key, XXH64 checksum. |
+| Footer (48B) | Filter block offset/size, index block offset/size, entry count, XXH64 checksum. Note: min/max key are **not** stored in the footer — `maxKey` is available as `index.last.lastKey` (the last key of the last data block), and `minKey` requires reading the first data block's first entry. Both are recorded in the Manifest's `SstableMeta` for each file (see §10). |
 
 ## SSTable Naming Convention
 

@@ -372,9 +372,12 @@ final class UtilCommand extends CliCommand {
       });
     } else {
       final state = await manifestReader.replay(manifestPath);
-      // Convert int keys to string keys for JSON serialisation.
+      // Convert int keys to string keys for JSON serialisation. Each level's
+      // SstableMeta list is rendered via toMap() so all diagnostic fields
+      // (minKey, maxKey, entryCount, walSequence) appear in the output.
       final levelsMap = {
-        for (final entry in state.levels.entries) '${entry.key}': entry.value,
+        for (final entry in state.levels.entries)
+          '${entry.key}': entry.value.map((m) => m.toMap()).toList(),
       };
       ctx.writeValue({
         'manifestFile': manifestName,
