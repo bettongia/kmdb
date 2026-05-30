@@ -156,8 +156,12 @@ final class ManifestState {
   );
 
   factory ManifestState._fromEdits(List<VersionEdit> edits) {
-    // levels[n] holds the set of live SSTable filenames at level n.
-    final Map<int, Set<String>> liveSets = {0: {}, 1: {}, 2: {}};
+    // liveMeta[level][filename] holds the most recent SstableMeta seen for
+    // each live file. An 'add' replaces (or inserts) the entry; a 'remove'
+    // deletes it. Using filename as the inner key means a later add
+    // (e.g. from a compaction or reassignment) properly supersedes an earlier
+    // add for the same file, preserving whatever metadata that edit carried.
+    final Map<int, Map<String, SstableMeta>> liveMeta = {0: {}, 1: {}, 2: {}};
     var maxLogNumber = 0;
     var maxNextSeq = 0;
 
@@ -166,17 +170,21 @@ final class ManifestState {
       if (edit.nextSeq > maxNextSeq) maxNextSeq = edit.nextSeq;
 
       for (final added in edit.added) {
-        liveSets.putIfAbsent(added.level, () => {}).add(added.filename);
+        // putIfAbsent initialises the inner map for levels beyond 0-2 if they
+        // ever appear (forward-compatibility). The last add wins for a filename.
+        liveMeta.putIfAbsent(added.level, () => {})[added.filename] = added;
       }
       for (final removed in edit.removed) {
-        liveSets[removed.level]?.remove(removed.filename);
+        liveMeta[removed.level]?.remove(removed.filename);
       }
     }
 
-    // Convert to sorted lists (L1/L2 sorted by filename for deterministic order).
-    final levels = <int, List<String>>{};
-    for (final entry in liveSets.entries) {
-      final sorted = entry.value.toList()..sort();
+    // Convert to sorted SstableMeta lists. Sort by filename so L1/L2 ordering
+    // is deterministic and matches the previous filename-sorted behaviour.
+    final levels = <int, List<SstableMeta>>{};
+    for (final entry in liveMeta.entries) {
+      final sorted = entry.value.values.toList()
+        ..sort((a, b) => a.filename.compareTo(b.filename));
       levels[entry.key] = sorted;
     }
 
@@ -187,10 +195,23 @@ final class ManifestState {
     );
   }
 
-  /// Live SSTable filenames grouped by level.
+  /// Live SSTable metadata grouped by level.
   ///
-  /// Keys are 0, 1, 2. Values are sorted lists of bare filenames.
-  final Map<int, List<String>> levels;
+  /// Keys are 0, 1, 2 (and any additional levels written by future versions).
+  /// Values are sorted lists of [SstableMeta], ordered by filename for
+  /// deterministic L1/L2 ordering. L0 ordering is also by filename; callers
+  /// that need L0 newest-first must reverse the list themselves (the
+  /// [LsmEngine] does this in its read path).
+  ///
+  /// The metadata fields ([SstableMeta.minKey], [SstableMeta.maxKey],
+  /// [SstableMeta.entryCount]) reflect whatever the manifest recorded verbatim.
+  /// Pre-fix manifests (written before this plan was implemented) will surface
+  /// empty strings for keys and zero for entry counts for files that were last
+  /// recorded by a rotation-snapshot edit. These values are self-healing: the
+  /// next flush/compaction/ingest/reassign edit for those files will carry real
+  /// metadata, and the next rotation will snapshot the now-accurate in-memory
+  /// level map.
+  final Map<int, List<SstableMeta>> levels;
 
   /// Highest `logNumber` seen across all replayed edits.
   ///
@@ -204,5 +225,10 @@ final class ManifestState {
   final int maxNextSeq;
 
   /// All live SSTable filenames across all levels.
-  Iterable<String> get allFiles => levels.values.expand((files) => files);
+  ///
+  /// Returns bare filenames (no directory path). Used by the orphan-sweep in
+  /// crash recovery to determine which `.sst` files on disk are referenced by
+  /// the manifest.
+  Iterable<String> get allFiles =>
+      levels.values.expand((metas) => metas.map((m) => m.filename));
 }

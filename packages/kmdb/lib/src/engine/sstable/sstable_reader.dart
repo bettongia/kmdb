@@ -101,6 +101,24 @@ final class SstableReader {
   /// Total number of entries in this SSTable (from footer).
   int get entryCount => _footer.entryCount;
 
+  /// Returns the first (smallest) key in this SSTable, or `null` if empty.
+  ///
+  /// Reads the first data block and returns its first entry's key. The index
+  /// already carries [BlockRef.lastKey] for each block, but the minimum key
+  /// of the file is only obtainable by decoding the first block itself — the
+  /// index does not store the block's *first* key.
+  ///
+  /// This method is used solely for **diagnostic metadata derivation** (e.g.
+  /// populating [SstableMeta.minKey] during peer-SSTable ingest). It must
+  /// never be called on the hot read path. The caller is responsible for
+  /// catching any [Exception] and falling back to an empty string if the
+  /// derivation fails.
+  Future<Uint8List?> firstKey() async {
+    if (_index.isEmpty) return null;
+    final entries = await _readBlock(_index.first);
+    return entries.isEmpty ? null : entries.first.key;
+  }
+
   /// The parsed SSTable footer containing block offsets, sizes, and checksum.
   ///
   /// Exposed for diagnostic tooling; prefer [entryCount] for normal use.

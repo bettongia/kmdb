@@ -50,10 +50,12 @@ import 'meta_store.dart';
 ///
 /// ## Level layout
 ///
-/// `_levels[n]` is a [List] of bare SSTable filenames at level `n`.
-/// The list for L0 is ordered from oldest (index 0) to newest (last index);
-/// point lookups search L0 in reverse (newest-first = highest priority).
-/// L1 and L2 files are assumed non-overlapping after compaction.
+/// `_levels[n]` is a [List] of [SstableMeta] entries at level `n`, each
+/// carrying the full diagnostic metadata (filename, minKey, maxKey, entryCount,
+/// walSequence) for that SSTable. The list for L0 is ordered from oldest
+/// (index 0) to newest (last index); point lookups search L0 in reverse
+/// (newest-first = highest priority). L1 and L2 files are assumed
+/// non-overlapping after compaction.
 final class LsmEngine {
   LsmEngine._({
     required this._dbDir,
@@ -94,8 +96,19 @@ final class LsmEngine {
   /// at the time of flush/compaction.
   String _deviceId;
 
-  /// Live SSTable filenames grouped by level (0, 1, 2).
-  final Map<int, List<String>> _levels;
+  /// Live SSTable metadata grouped by level (0, 1, 2).
+  ///
+  /// Each [SstableMeta] carries the full diagnostic metadata for one SSTable
+  /// file: filename, minKey, maxKey, entryCount, and walSequence. The fields
+  /// are populated with real values at every flush, compaction, ingest, and
+  /// reassignment site. Rotation snapshots carry the metadata directly from
+  /// this map, so post-fix rotations always record real values.
+  ///
+  /// Files last seen by a pre-fix rotation-snapshot edit (written before this
+  /// plan was implemented) will surface with empty minKey/maxKey and zero
+  /// entryCount until the next write that touches those files re-records real
+  /// metadata. This is self-healing for any actively written database.
+  final Map<int, List<SstableMeta>> _levels;
 
   ManifestWriter _manifestWriter;
   final WalWriter _walWriter;
@@ -152,7 +165,7 @@ final class LsmEngine {
     required StorageAdapter adapter,
     required KvStoreConfig config,
     required String deviceId,
-    required Map<int, List<String>> levels,
+    required Map<int, List<SstableMeta>> levels,
     required ManifestWriter manifestWriter,
     required WalWriter walWriter,
     required HlcClock clock,
@@ -392,7 +405,7 @@ final class LsmEngine {
     final l0 = _levels[0] ?? [];
     for (var i = l0.length - 1; i >= 0; i--) {
       final result = await _getFromSstable(
-        '$_sstDir/${l0[i]}',
+        '$_sstDir/${l0[i].filename}',
         prefix,
         prefixEnd,
       );
@@ -404,9 +417,9 @@ final class LsmEngine {
 
     // 4. L1, then L2.
     for (final level in [1, 2]) {
-      for (final filename in (_levels[level] ?? [])) {
+      for (final entry in (_levels[level] ?? [])) {
         final result = await _getFromSstable(
-          '$_sstDir/$filename',
+          '$_sstDir/${entry.filename}',
           prefix,
           prefixEnd,
         );
@@ -447,14 +460,14 @@ final class LsmEngine {
     // SSTable sources — L0 newest-first, then L1, L2.
     final l0 = _levels[0] ?? [];
     for (var i = l0.length - 1; i >= 0; i--) {
-      final reader = await _openReader('$_sstDir/${l0[i]}');
+      final reader = await _openReader('$_sstDir/${l0[i].filename}');
       if (reader != null) {
         streams.add(reader.scan(start: scanStart, end: scanEnd));
       }
     }
     for (final level in [1, 2]) {
-      for (final filename in (_levels[level] ?? [])) {
-        final reader = await _openReader('$_sstDir/$filename');
+      for (final entry in (_levels[level] ?? [])) {
+        final reader = await _openReader('$_sstDir/${entry.filename}');
         if (reader != null) {
           streams.add(reader.scan(start: scanStart, end: scanEnd));
         }
@@ -525,14 +538,14 @@ final class LsmEngine {
     // Collect entries from all SSTable levels.
     final l0 = _levels[0] ?? [];
     for (var i = l0.length - 1; i >= 0; i--) {
-      final reader = await _openReader('$_sstDir/${l0[i]}');
+      final reader = await _openReader('$_sstDir/${l0[i].filename}');
       if (reader != null) {
         streams.add(reader.scan(start: unbounded, end: null));
       }
     }
     for (final level in [1, 2]) {
-      for (final filename in (_levels[level] ?? [])) {
-        final reader = await _openReader('$_sstDir/$filename');
+      for (final entry in (_levels[level] ?? [])) {
+        final reader = await _openReader('$_sstDir/${entry.filename}');
         if (reader != null) {
           streams.add(reader.scan(start: unbounded, end: null));
         }
@@ -663,8 +676,8 @@ final class LsmEngine {
       ),
     );
 
-    // Update level 0 list.
-    (_levels[0] ??= []).add(filename);
+    // Update level 0 list with the full SstableMeta (already constructed above).
+    (_levels[0] ??= []).add(meta);
 
     // 5. Discard frozen memtable.
     _frozen = null;
@@ -723,10 +736,10 @@ final class LsmEngine {
   /// a single job for both input levels avoids double-counting issues.
   Future<void> _compactL0ToL1() async {
     final l0 = (_levels[0] ?? [])
-        .map((f) => SstableRef(level: 0, filename: f))
+        .map((e) => SstableRef(level: 0, filename: e.filename))
         .toList();
     final l1 = (_levels[1] ?? [])
-        .map((f) => SstableRef(level: 1, filename: f))
+        .map((e) => SstableRef(level: 1, filename: e.filename))
         .toList();
     final inputs = [...l0, ...l1];
     if (inputs.isEmpty) return;
@@ -767,18 +780,20 @@ final class LsmEngine {
       await _adapter.deleteFile('$_sstDir/${ref.filename}');
     }
 
-    // Clear both input levels and populate with the job's output.
+    // Clear both input levels and populate with the job's output SstableMeta
+    // objects — they already carry real minKey/maxKey/entryCount from the
+    // CompactionJob, so no re-derivation is needed.
     _levels[0] = [];
     _levels[1] = [];
     for (final added in edit.added) {
-      (_levels[added.level] ??= []).add(added.filename);
+      (_levels[added.level] ??= []).add(added);
     }
   }
 
   /// Compacts all L1 files into L2.
   Future<void> _compactL1ToL2() async {
     final inputs = (_levels[1] ?? [])
-        .map((f) => SstableRef(level: 1, filename: f))
+        .map((e) => SstableRef(level: 1, filename: e.filename))
         .toList();
     if (inputs.isEmpty) return;
 
@@ -804,9 +819,10 @@ final class LsmEngine {
       await _adapter.deleteFile('$_sstDir/${ref.filename}');
     }
 
+    // Populate from the job's output SstableMeta (real minKey/maxKey/entryCount).
     _levels[1] = [];
     for (final added in edit.added) {
-      (_levels[added.level] ??= []).add(added.filename);
+      (_levels[added.level] ??= []).add(added);
     }
   }
 
@@ -843,9 +859,15 @@ final class LsmEngine {
   /// already durable.
   Future<void> _compactAll() async {
     final inputs = [
-      ...(_levels[0] ?? []).map((f) => SstableRef(level: 0, filename: f)),
-      ...(_levels[1] ?? []).map((f) => SstableRef(level: 1, filename: f)),
-      ...(_levels[2] ?? []).map((f) => SstableRef(level: 2, filename: f)),
+      ...(_levels[0] ?? []).map(
+        (e) => SstableRef(level: 0, filename: e.filename),
+      ),
+      ...(_levels[1] ?? []).map(
+        (e) => SstableRef(level: 1, filename: e.filename),
+      ),
+      ...(_levels[2] ?? []).map(
+        (e) => SstableRef(level: 2, filename: e.filename),
+      ),
     ];
     if (inputs.isEmpty) return;
 
@@ -878,12 +900,13 @@ final class LsmEngine {
       await _adapter.deleteFile('$_sstDir/${ref.filename}');
     }
 
-    // Update levels from VersionEdit outputs.
+    // Update levels from VersionEdit outputs. The job's SstableMeta objects
+    // already carry real minKey/maxKey/entryCount — store them directly.
     _levels[0] = [];
     _levels[1] = [];
     _levels[2] = [];
     for (final added in edit.added) {
-      (_levels[added.level] ??= []).add(added.filename);
+      (_levels[added.level] ??= []).add(added);
     }
 
     // Advance the GC floor if this compaction dropped at least one tombstone.
@@ -922,16 +945,21 @@ final class LsmEngine {
   /// all live files to a new manifest, atomically updates `CURRENT`, and
   /// deletes the old manifest.
   ///
-  /// **Diagnostic metadata limitation.** The in-memory [_levels] map tracks
-  /// filenames only — it does not carry [SstableMeta] (minKey, maxKey,
-  /// entryCount). The snapshot edit therefore writes empty strings for
-  /// `minKey`/`maxKey` and 0 for `entryCount` for every file. These fields are
-  /// diagnostic-only and are not used for correctness, but after a rotation the
-  /// real per-file values are permanently lost from the manifest.
+  /// The snapshot edit is built directly from the [SstableMeta] values in
+  /// [_levels], so all diagnostic fields (minKey, maxKey, entryCount) are
+  /// preserved verbatim from the in-memory level map. Because every flush,
+  /// compaction, ingest, and reassignment site now populates real metadata into
+  /// [_levels], rotation snapshots will carry real values for all live files.
   ///
-  /// Tracking `SstableMeta` through the level map (or re-reading SSTable
-  /// footers at rotation time) is the proper fix, scoped to a separate plan:
-  /// `docs/plans/plan_sstable_meta_tracking.md`.
+  /// **Pre-fix manifests:** files last seen by a pre-fix rotation-snapshot edit
+  /// (written before `plan_sstable_meta_tracking.md` was implemented) will
+  /// surface with empty minKey/maxKey and zero entryCount in [_levels] and
+  /// therefore in the rotated snapshot too. These stale zeros are self-healing:
+  /// the next flush/compaction/ingest/reassignment edit for those files will
+  /// carry real metadata, and subsequent rotations will snapshot the corrected
+  /// level map. No retroactive file re-reading is performed at rotation time
+  /// (D2 rationale: startup I/O proportional to file count for a diagnostic-only
+  /// field).
   Future<void> _doManifestRotation() async {
     // Derive the new manifest name from the current one.
     final currentFile = CurrentFile(dbDir: _dbDir, adapter: _adapter);
@@ -939,21 +967,13 @@ final class LsmEngine {
     final newName = CurrentFile.nextManifestName(currentName);
     final newPath = '$_dbDir/$newName';
 
-    // Build snapshot edit.
+    // Build snapshot edit from the metadata-bearing level map. Each SstableMeta
+    // in _levels already carries the correct level, filename, minKey, maxKey,
+    // entryCount, and walSequence — use them directly without reconstruction.
     final hlc = _clock.now();
     final allFiles = <SstableMeta>[];
     for (final lvlEntry in _levels.entries) {
-      for (final filename in lvlEntry.value) {
-        allFiles.add(
-          SstableMeta(
-            level: lvlEntry.key,
-            filename: filename,
-            minKey: '',
-            maxKey: '',
-            entryCount: 0,
-          ),
-        );
-      }
+      allFiles.addAll(lvlEntry.value);
     }
     final snapshotEdit = VersionEdit(
       logNumber: _walWriter.activeSequence,
@@ -1037,13 +1057,35 @@ final class LsmEngine {
 
     final hlc = _clock.now();
 
+    // Derive diagnostic metadata from the already-opened reader.
+    //
+    // maxKey: reader.index.last.lastKey is available without any extra I/O —
+    // the index block was loaded during reader.open() above.
+    //
+    // minKey: requires reading the first data block to obtain the first key;
+    // this is one readFileRange of ≤4 KiB. Wrapped in try/catch because minKey
+    // is a diagnostic-only field — a failure must never abort an ingest that has
+    // already passed its correctness checks (D4 rationale).
+    String maxKey = '';
+    String minKey = '';
+    if (reader.index.isNotEmpty) {
+      maxKey = _bytesToHex(reader.index.last.lastKey);
+      try {
+        final firstKeyBytes = await reader.firstKey();
+        if (firstKeyBytes != null) {
+          minKey = _bytesToHex(firstKeyBytes);
+        }
+      } on Exception {
+        // First-block read failed — fall back to empty string. The ingest
+        // itself is unaffected; only the diagnostic minKey field is missing.
+      }
+    }
+
     final meta = SstableMeta(
       level: 0,
       filename: filename,
-      // minKey/maxKey are not available without a full scan; use empty strings.
-      // The Manifest uses these only for diagnostics, not for correctness.
-      minKey: '',
-      maxKey: '',
+      minKey: minKey,
+      maxKey: maxKey,
       entryCount: entryCount,
       // walSequence is null for peer-ingested files (they don't retire a WAL).
     );
@@ -1056,7 +1098,7 @@ final class LsmEngine {
       ),
     );
 
-    (_levels[0] ??= []).add(filename);
+    (_levels[0] ??= []).add(meta);
 
     // Notify listeners that new data is available (use '$sync' namespace to
     // signal sync-sourced data without targeting a specific user namespace).
@@ -1092,8 +1134,8 @@ final class LsmEngine {
   Future<void> dropAllSstables() async {
     final removed = <SstableRef>[];
     for (final lvlEntry in _levels.entries) {
-      for (final filename in lvlEntry.value) {
-        removed.add(SstableRef(level: lvlEntry.key, filename: filename));
+      for (final entry in lvlEntry.value) {
+        removed.add(SstableRef(level: lvlEntry.key, filename: entry.filename));
       }
     }
     if (removed.isEmpty) return;
@@ -1178,53 +1220,50 @@ final class LsmEngine {
     final removed = <SstableRef>[];
     final added = <SstableMeta>[];
 
-    // Build the list of renames across all levels.
-    final newLevels = <int, List<String>>{};
+    // Build the list of renames across all levels, carrying metadata forward.
+    final newLevels = <int, List<SstableMeta>>{};
     for (final lvlEntry in _levels.entries) {
       final level = lvlEntry.key;
-      final newFilenames = <String>[];
-      for (final oldFilename in lvlEntry.value) {
-        if (oldFilename.startsWith(oldPrefix)) {
+      final newMetas = <SstableMeta>[];
+      for (final oldMeta in lvlEntry.value) {
+        if (oldMeta.filename.startsWith(oldPrefix)) {
           // Replace only the device ID prefix — the rest of the filename
           // (HLC timestamps and extension) is unchanged.
-          final newFilename = newDeviceId + oldFilename.substring(8);
+          final newFilename = newDeviceId + oldMeta.filename.substring(8);
 
           // Evict the old-path reader from the cache before the rename: after
           // the rename the old path no longer exists, so any cached reader for
           // it would be stale. The new path will be populated lazily on the
           // first _openReader call after the rename.
-          _tableCache.evict('$_sstDir/$oldFilename');
+          _tableCache.evict('$_sstDir/${oldMeta.filename}');
 
           // Rename on disk.
           await _adapter.renameFile(
-            '$_sstDir/$oldFilename',
+            '$_sstDir/${oldMeta.filename}',
             '$_sstDir/$newFilename',
           );
 
-          // Record the rename for the VersionEdit.
-          removed.add(SstableRef(level: level, filename: oldFilename));
-
-          // We need the minKey/maxKey/entryCount from the manifest to
-          // reconstruct the SstableMeta for the new filename. Since we don't
-          // have easy access to that metadata here, we use empty strings for
-          // minKey/maxKey (the manifest uses these only for diagnostics, not
-          // correctness — identical to how ingestAt0 operates).
-          added.add(
-            SstableMeta(
-              level: level,
-              filename: newFilename,
-              minKey: '',
-              maxKey: '',
-              entryCount: 0,
-            ),
+          // Record the rename for the VersionEdit. The new SstableMeta copies
+          // all diagnostic fields from the source — the renamed file is
+          // byte-identical, so minKey/maxKey/entryCount/walSequence are
+          // unchanged. Only the filename is updated.
+          removed.add(SstableRef(level: level, filename: oldMeta.filename));
+          final newMeta = SstableMeta(
+            level: level,
+            filename: newFilename,
+            minKey: oldMeta.minKey,
+            maxKey: oldMeta.maxKey,
+            entryCount: oldMeta.entryCount,
+            walSequence: oldMeta.walSequence,
           );
-          newFilenames.add(newFilename);
+          added.add(newMeta);
+          newMetas.add(newMeta);
         } else {
-          // Peer-owned SSTable — do not rename.
-          newFilenames.add(oldFilename);
+          // Peer-owned SSTable — do not rename; preserve metadata as-is.
+          newMetas.add(oldMeta);
         }
       }
-      newLevels[level] = newFilenames;
+      newLevels[level] = newMetas;
     }
 
     // Append a single VersionEdit to the Manifest recording all renames.
@@ -1420,9 +1459,9 @@ final class LsmEngine {
   Future<int> _totalSstBytes() async {
     var total = 0;
     for (final level in _levels.values) {
-      for (final filename in level) {
+      for (final entry in level) {
         try {
-          total += await _adapter.fileSize('$_sstDir/$filename');
+          total += await _adapter.fileSize('$_sstDir/${entry.filename}');
         } on StorageException {
           // File may have been deleted by a concurrent compaction.
         }
@@ -1434,9 +1473,9 @@ final class LsmEngine {
   /// Total bytes at a specific level.
   Future<int> _levelBytes(int level) async {
     var total = 0;
-    for (final filename in (_levels[level] ?? [])) {
+    for (final entry in (_levels[level] ?? [])) {
       try {
-        total += await _adapter.fileSize('$_sstDir/$filename');
+        total += await _adapter.fileSize('$_sstDir/${entry.filename}');
       } on StorageException {
         /* skip */
       }
