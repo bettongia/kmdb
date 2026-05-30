@@ -194,13 +194,28 @@ cd packages/kmdb && dart run benchmark/main.dart
 All tests pass on `main`. E2E tests are skipped by default — run them via
 `make e2e_test` (`melos e2e-test`).
 
-> **Durability hardening (post-review).** Phases 1–10 are feature-complete, but
-> the 2026-05-22 code review (`docs/reviews/code-review-2026-05-22.md`) found a
-> cluster of crash-safety / data-loss issues (WAL replay, manifest fsync
-> ordering, vault GC, WriteBatch atomicity, compaction reclamation). These are
-> tracked as plans in `docs/plans/` and are being implemented in priority order —
-> do **not** treat KMDB as crash-safe for valuable data until that track is
-> complete. Consult the `kmdb-architect` agent for current status.
+> **Durability hardening (v0.02.01 — post-review).** The 2026-05-22 code review
+> (`docs/reviews/code-review-2026-05-22.md`) found a cluster of crash-safety /
+> data-loss issues. The hardening track is tracked in
+> [docs/roadmap/0_02_01.md](docs/roadmap/0_02_01.md), which is the authoritative
+> status board — consult it (or the `kmdb-architect` agent) for live status.
+>
+> As of 2026-05-30 **all critical and high-severity crash-safety items are
+> complete**: C1 (crash-recovery WAL replay), C2+H1+M3 (manifest fsync &
+> durability ordering, incl. `syncDir` and the `CURRENT` swap), H3 + H3-FU (vault
+> GC fail-safe ref counts + stub-orphan producer fix), H5 (sync lease CAS
+> atomicity), H2 (atomic `WriteBatch` WAL frame), and H4 + H4-FU/-FU2/-FU3
+> (compaction version collapse + sync-horizon-gated tombstone GC with
+> stale-device eviction and an ingest-side horizon floor). Per the review's §8
+> recommendation, these were gated on a `FaultyStorageAdapter` fault-injection
+> harness rather than the durability-blind in-memory adapter.
+>
+> Remaining items are **not** crash-safety blockers and are still `Investigated`
+> (not yet implemented): **M1** (SSTable reader caching — perf), **M2** (real
+> UTF-8 namespace encoding — i18n), and the **§6** code/doc tidy-up. Two checks
+> that cannot run in CI stay as release-time verifications in
+> `docs/spec/28_release_checklist.md`: **RC-4** (Linux real-OS power-loss) and
+> **RC-6** (multi-device tombstone non-resurrection).
 
 ## Architecture
 
