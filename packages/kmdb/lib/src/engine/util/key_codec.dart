@@ -17,6 +17,7 @@ import 'dart:typed_data';
 import 'package:uuid/uuid.dart';
 
 import 'hlc.dart';
+import 'namespace_codec.dart';
 
 // ── Record type byte ───────────────────────────────────────────────────────
 
@@ -129,13 +130,13 @@ final class KeyCodec {
 
   /// Encodes the namespace as a length-prefixed byte sequence.
   ///
-  /// Format: `[nsLen 1B][ns UTF-8 bytes]`. The namespace length is limited
-  /// to 255 bytes (enforced by the 1-byte length prefix).
+  /// Format: `[nsLen 1B][ns UTF-8 bytes]`. The namespace must not exceed
+  /// [kMaxNamespaceBytes] UTF-8 bytes (enforced by the 1-byte length prefix).
+  ///
+  /// See [namespaceToBytes] for the encoding contract (UTF-8 + NFC
+  /// normalisation + 255-byte limit).
   static Uint8List encodeNamespace(String namespace) {
-    final nsBytes = _toUtf8(namespace);
-    if (nsBytes.length > 255) {
-      throw ArgumentError('Namespace exceeds 255 bytes: $namespace');
-    }
+    final nsBytes = namespaceToBytes(namespace);
     final out = Uint8List(1 + nsBytes.length);
     out[0] = nsBytes.length;
     out.setAll(1, nsBytes);
@@ -155,10 +156,8 @@ final class KeyCodec {
     Hlc hlc,
     RecordType type,
   ) {
-    final nsBytes = _toUtf8(namespace);
-    if (nsBytes.length > 255) {
-      throw ArgumentError('Namespace exceeds 255 bytes: $namespace');
-    }
+    // namespaceToBytes enforces UTF-8 encoding and the 255-byte limit.
+    final nsBytes = namespaceToBytes(namespace);
     if (userKeyBytes.length != 16) {
       throw ArgumentError('userKeyBytes must be 16 bytes');
     }
@@ -183,9 +182,12 @@ final class KeyCodec {
   }
 
   /// Decodes the namespace from an internal key produced by [encodeInternalKey].
+  ///
+  /// Uses [bytesToNamespace] (UTF-8 decode) to correctly reconstruct strings
+  /// that contain non-ASCII characters.
   static String decodeNamespace(Uint8List internalKey) {
     final nsLen = internalKey[0];
-    return String.fromCharCodes(internalKey.sublist(1, 1 + nsLen));
+    return bytesToNamespace(internalKey.sublist(1, 1 + nsLen));
   }
 
   /// Decodes the user key bytes from an internal key.
@@ -207,11 +209,6 @@ final class KeyCodec {
   static RecordType decodeRecordType(Uint8List internalKey) {
     return RecordType.fromByte(internalKey.last);
   }
-
-  // ── Helpers ──────────────────────────────────────────────────────────────
-
-  static Uint8List _toUtf8(String s) =>
-      Uint8List.fromList(s.codeUnits); // ASCII-safe; full UTF-8 for Phase 8
 }
 
 // ── KeyGenerator interface ────────────────────────────────────────────────

@@ -29,6 +29,7 @@ import '../sstable/sstable_info.dart';
 import '../sstable/table_cache.dart';
 import '../util/hlc.dart';
 import '../util/key_codec.dart';
+import '../util/namespace_codec.dart';
 import '../wal/wal_record.dart';
 import '../wal/wal_writer.dart';
 import '../../sync/hlc_clock.dart';
@@ -1329,8 +1330,11 @@ final class LsmEngine {
   }
 
   /// Builds the `[nsLen][ns][userKey16]` prefix used for range lookups.
+  ///
+  /// Uses [namespaceToBytes] to produce the same UTF-8 encoding as the write
+  /// path, so scan prefixes always match the keys on disk.
   static Uint8List _buildKeyPrefix(String namespace, Uint8List userKeyBytes) {
-    final nsBytes = namespace.codeUnits;
+    final nsBytes = namespaceToBytes(namespace);
     final out = Uint8List(1 + nsBytes.length + 16);
     out[0] = nsBytes.length;
     out.setAll(1, nsBytes);
@@ -1339,8 +1343,11 @@ final class LsmEngine {
   }
 
   /// Builds the `[nsLen][ns]` prefix used for scanning an entire namespace.
+  ///
+  /// Uses [namespaceToBytes] to produce the same UTF-8 encoding as the write
+  /// path, so scan prefixes always match the keys on disk.
   static Uint8List _buildNamespacePrefix(String namespace) {
-    final nsBytes = namespace.codeUnits;
+    final nsBytes = namespaceToBytes(namespace);
     final out = Uint8List(1 + nsBytes.length);
     out[0] = nsBytes.length;
     out.setAll(1, nsBytes);

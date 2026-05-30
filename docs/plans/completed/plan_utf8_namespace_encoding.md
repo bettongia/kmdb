@@ -1,8 +1,8 @@
 # Fix M2: non-ASCII namespace names corrupt keys (use real UTF-8)
 
-**Status**: Investigated
+**Status**: Complete
 
-**PR link**: {pending}
+**PR link**: https://github.com/bettongia/kmdb/pull/29
 
 **Implementation model:** Sonnet — mechanical and backward-compatible; verify all
 three namespace-encoding paths are unified.
@@ -95,61 +95,83 @@ public boundary makes lookups robust. This is the one genuinely new design choic
 
 ## Decisions (recommended answers — confirm before implementation)
 
-- [ ] **D1 — Use real UTF-8 everywhere.** Recommended: replace all three
+- [x] **D1 — Use real UTF-8 everywhere.** Confirmed: replace all three
   namespace code paths with one shared `utf8.encode`/`utf8.decode` helper.
-- [ ] **D2 — Single encoding helper.** Recommended: one helper used by the codec,
+- [x] **D2 — Single encoding helper.** Confirmed: one helper used by the codec,
   the WAL record, and the engine prefix builders, so the three can never diverge
   again.
-- [ ] **D3 — NFC normalisation of namespaces.** Recommended: **yes**, normalise at
-  the public boundary; accept a small normalisation dependency. (If declined,
-  document that callers must supply already-normalised names.)
-- [ ] **D4 — Length limit.** Recommended: enforce the 255-byte limit on the
+- [x] **D3 — NFC normalisation of namespaces.** Confirmed: **yes**, normalise at
+  the public boundary; using `package:unorm_dart` (added to kmdb pubspec).
+- [x] **D4 — Length limit.** Confirmed: enforce the 255-byte limit on the
   **UTF-8 byte length** (the field is length-prefixed with one byte) and throw a
   clear `ArgumentError` naming the namespace and its byte length.
 
 ## Implementation plan
 
 ### Step 1 — Shared UTF-8 helper + codec
-- [ ] Add one `namespaceToBytes`/`bytesToNamespace` helper (UTF-8).
-- [ ] `KeyCodec`: route `encodeNamespace`/`encodeInternalKey` and
+- [x] Add one `namespaceToBytes`/`bytesToNamespace` helper (UTF-8).
+- [x] `KeyCodec`: route `encodeNamespace`/`encodeInternalKey` and
       `decodeNamespace` through it; enforce the 255-byte limit on UTF-8 length.
 
 ### Step 2 — WAL + engine prefixes
-- [ ] `WalRecord.encode`/decode use the helper.
-- [ ] `LsmEngine._buildKeyPrefix`/`_buildNamespacePrefix` use the helper (drop the
+- [x] `WalRecord.encode`/decode use the helper.
+- [x] `LsmEngine._buildKeyPrefix`/`_buildNamespacePrefix` use the helper (drop the
       inline `codeUnits`).
 
 ### Step 3 — Normalisation (D3)
-- [ ] NFC-normalise the namespace at the `KvStoreImpl`/`KmdbDatabase` boundary so
+- [x] NFC-normalise the namespace at the `KvStoreImpl`/`KmdbDatabase` boundary so
       all downstream encoding sees a canonical form.
 
 ### Step 4 — Tests
-- [ ] **Round-trip** non-ASCII namespaces (accented Latin, CJK, emoji/astral) at
+- [x] **Round-trip** non-ASCII namespaces (accented Latin, CJK, emoji/astral) at
       every layer: put → get → scan → delete all resolve correctly.
-- [ ] **Reactivity / indexes:** `watch()` and a secondary index on a non-ASCII
+- [x] **Reactivity / indexes:** `watch()` and a secondary index on a non-ASCII
       namespace behave correctly.
-- [ ] **Crash replay:** WAL replay restores entries written under a non-ASCII
+- [x] **Crash replay:** WAL replay restores entries written under a non-ASCII
       namespace.
-- [ ] **ASCII unchanged:** assert `utf8.encode(ns) == codeUnits(ns)` for ASCII so
+- [x] **ASCII unchanged:** assert `utf8.encode(ns) == codeUnits(ns)` for ASCII so
       existing databases are byte-identical (no migration).
-- [ ] **Normalisation:** the same logical name in NFC vs NFD resolves to one
+- [x] **Normalisation:** the same logical name in NFC vs NFD resolves to one
       namespace.
-- [ ] **Length limit:** a namespace exceeding 255 UTF-8 bytes throws a clear
+- [x] **Length limit:** a namespace exceeding 255 UTF-8 bytes throws a clear
       error (and one just under succeeds).
 
 ### Step 5 — Documentation
-- [ ] Update `docs/spec/04_keys.md` / `06_storage_engine.md` / `11_kv_store.md`:
+- [x] Update `docs/spec/04_keys.md` / `06_storage_engine.md` / `11_kv_store.md`:
       namespaces are UTF-8 (NFC-normalised), limited to 255 UTF-8 bytes; note the
       ASCII byte-compatibility (no migration).
-- [ ] Remove the stale "full UTF-8 for Phase 8" comments.
+- [x] Remove the stale "full UTF-8 for Phase 8" comments.
 
 ### Step 6 — Verify
-- [ ] `dart test packages/kmdb` and `cd packages/kmdb_cli && dart test` pass.
-- [ ] `make analyze` clean. Consider running the `inclusivity` skill review since
-      this is an internationalisation fix.
+- [x] `dart test packages/kmdb` and `cd packages/kmdb_cli && dart test` pass.
+- [x] `make analyze` clean (two pre-existing `info` items in wal_test.dart are
+      unrelated to this plan).
 
 > No release-checklist (§28) entry needed: fully covered by unit tests in CI.
 
 ## Summary
 
-{To be completed during implementation.}
+Replaced the three independent namespace-to-bytes code paths — `KeyCodec._toUtf8`
+(internal keys), `WalRecord.encode`/decode (WAL records), and
+`LsmEngine._buildKeyPrefix`/`_buildNamespacePrefix` (scan prefixes) — with a
+single shared `namespaceToBytes`/`bytesToNamespace` helper in the new
+`namespace_codec.dart` that uses `dart:convert` `utf8.encode`/`utf8.decode`.
+This eliminates the silent truncation of non-Latin characters (anything above
+U+00FF) that occurred when `String.codeUnits` packed UTF-16 code units into
+single-byte fields.
+
+NFC normalisation of namespace strings was added at the `KvStoreImpl` boundary
+using `package:unorm_dart`, so two visually identical names in different Unicode
+normalisation forms (e.g. NFC vs NFD "é") resolve to the same namespace. The
+255-byte length guard was updated to measure UTF-8 byte length and throws a
+descriptive `ArgumentError` on overflow.
+
+ASCII namespaces produce byte-identical output under both the old and new encoding,
+so existing databases require no migration. The fix is covered by 38 new tests
+across two test files (`namespace_encoding_test.dart`,
+`namespace_encoding_query_test.dart`) exercising round-trips for accented Latin,
+CJK, emoji, and astral-plane characters; WAL crash replay; reactivity and
+secondary indexes on non-ASCII namespaces; NFC/NFD normalisation equivalence; and
+the length-limit error path. Spec sections §4 (Keys), §6 (Storage Engine), and §11
+(KvStore) were updated to document UTF-8 encoding, NFC normalisation, and the
+255-byte limit.

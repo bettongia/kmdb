@@ -61,9 +61,11 @@ The shortcut is evaluated after every flush and compaction and engages silently
 
 All compaction uses an N-way merge iterator that yields entries in ascending
 internal-key order, where the internal key is
-`[nsLen][ns][userKey][hlc][type]`. Within a single `(namespace, userKey)`
-group the merge therefore emits versions **oldest-first** (HLC ascending,
-because HLC is big-endian and precedes the trailing record-type byte).
+`[nsLen][ns UTF-8][userKey][hlc][type]`. The namespace bytes are UTF-8 (NFC-
+normalised at the public boundary); `nsLen` is the UTF-8 byte count (1–255).
+Within a single `(namespace, userKey)` group the merge emits versions
+**oldest-first** (HLC ascending, because HLC is big-endian and precedes the
+trailing record-type byte).
 
 ### Reclamation: version collapse
 
