@@ -2,7 +2,7 @@
 
 **Status**: Complete
 
-**PR link**: {pending}
+**PR link**: https://github.com/bettongia/kmdb/pull/29
 
 **Implementation model:** Sonnet — mechanical and backward-compatible; verify all
 three namespace-encoding paths are unified.
