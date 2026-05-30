@@ -34,6 +34,69 @@ contract. "Global insertion order across devices" would require a coordination
 mechanism. Make orderBy('id') the explicit way to get time-order; do not
 guarantee ordering from all() with no orderBy.
 
+## Namespace Encoding
+
+### Wire Format
+
+Namespaces are user-supplied collection names that appear in every internal key,
+WAL record, and SSTable scan prefix. The on-disk format stores them as a
+length-prefixed byte sequence:
+
+```
+[nsLen 1B][ns UTF-8 bytes]
+```
+
+Because `nsLen` is a single unsigned byte, the namespace is limited to **255
+UTF-8 bytes**. `KvStoreImpl` enforces this limit at the public boundary and
+throws a descriptive `ArgumentError` if the limit is exceeded.
+
+### UTF-8 Encoding
+
+Namespace bytes are produced by `utf8.encode` (Dart's `dart:convert`). This
+correctly encodes every Unicode scalar value. Earlier builds used
+`String.codeUnits` (UTF-16 code units), which silently truncated characters
+above U+00FF — corrupting any non-ASCII namespace name. The fix is backward-
+compatible for ASCII namespaces: for any pure-ASCII string,
+`utf8.encode(s) == s.codeUnits`, so existing databases require no migration.
+
+### NFC Normalisation
+
+Two visually identical namespace strings can differ in Unicode normalisation
+form. For example, the French "café" can be represented as:
+
+- **NFC** (precomposed): `U+0063 U+0061 U+0066 U+00E9` — 4 code points, 5
+  UTF-8 bytes.
+- **NFD** (decomposed): `U+0063 U+0061 U+0066 U+0065 U+0301` — 5 code points,
+  6 UTF-8 bytes.
+
+Without normalisation, these would encode to different byte sequences and
+resolve to different namespaces, causing a "my collection disappeared" bug.
+
+`KvStoreImpl` applies **Unicode NFC normalisation** to every user-supplied
+namespace at the public boundary (before the `$`-prefix guard and before any
+storage operation). All downstream encoding sees the canonical NFC form, so
+callers supplying the same logical name in different normalisation forms always
+access the same namespace.
+
+### Single Shared Helper
+
+All three encoding sites (internal keys in `KeyCodec`, WAL records in
+`WalRecord`/`WalBatchFrame`, and scan prefix builders in `LsmEngine`) route
+through the `namespaceToBytes`/`bytesToNamespace` helpers in
+`lib/src/engine/util/namespace_codec.dart`. This ensures the three paths can
+never diverge.
+
+### Length Limit Enforcement
+
+The 255-byte limit is enforced on the **UTF-8 byte length** (not the Dart
+`String.length` or code-unit count), because the byte count is what lands on
+disk. A namespace just at the limit (255 UTF-8 bytes) is accepted; 256 bytes
+throws:
+
+```
+ArgumentError: Namespace exceeds 255 UTF-8 bytes (got 256): <name>
+```
+
 ## Device Identity
 
 Each device installation generates a stable UUID on first launch. This ID is

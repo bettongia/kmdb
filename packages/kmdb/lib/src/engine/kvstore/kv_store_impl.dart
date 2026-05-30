@@ -18,6 +18,7 @@ import 'package:meta/meta.dart' show internal;
 
 import '../platform/storage_adapter_interface.dart';
 import '../util/hlc.dart';
+import '../util/namespace_codec.dart';
 import 'crash_recovery.dart';
 import 'device_id.dart';
 import 'kv_store.dart';
@@ -141,59 +142,65 @@ final class KvStoreImpl implements KvStore {
 
   @override
   Future<void> put(String namespace, String key, Uint8List value) async {
-    _guardNamespace(namespace);
+    final ns = _normaliseAndGuardNamespace(namespace);
     _validateKey(key);
     _validateValueSize(value);
     // Build an engine WriteBatch that folds the document write and all meta
     // writes (dirty flag, gen counter, namespace registry) into one atomic WAL
     // frame. This ensures a crash can never leave the document without its
     // corresponding metadata (or vice versa) — review finding H2, decision D2.
-    final batch = WriteBatch()..put(namespace, key, value);
-    await _appendMetaWrites(batch, {namespace});
+    final batch = WriteBatch()..put(ns, key, value);
+    await _appendMetaWrites(batch, {ns});
     await _engine.writeBatch(batch);
   }
 
   @override
   Future<void> delete(String namespace, String key) async {
-    _guardNamespace(namespace);
+    final ns = _normaliseAndGuardNamespace(namespace);
     _validateKey(key);
     // Same atomic-batch approach as put: fold the delete tombstone and all meta
     // writes into one engine WriteBatch so they land in a single WAL frame.
-    final batch = WriteBatch()..delete(namespace, key);
-    await _appendMetaWrites(batch, {namespace});
+    final batch = WriteBatch()..delete(ns, key);
+    await _appendMetaWrites(batch, {ns});
     await _engine.writeBatch(batch);
   }
 
   @override
   Future<void> writeBatch(WriteBatch batch) async {
-    for (final entry in batch.entries) {
-      _guardNamespace(entry.namespace);
-      _validateKey(entry.key);
-      if (entry.value != null) _validateValueSize(entry.value!);
-    }
-    // Extend the user batch with meta writes so everything lands in one atomic
-    // WAL frame. We must not mutate the caller's WriteBatch, so we copy entries
-    // into a new internal batch first.
-    final namespaces = batch.entries.map((e) => e.namespace).toSet();
+    // Normalise every user-supplied namespace to NFC before validation.
+    // We copy entries into an internal batch so we do not mutate the caller's
+    // WriteBatch (the Query Layer may inspect its entries after committing).
     final extended = WriteBatch();
     for (final e in batch.entries) {
-      if (e.isDelete) {
-        extended.delete(e.namespace, e.key);
+      final ns = _normaliseAndGuardNamespace(e.namespace);
+      _validateKey(e.key);
+      if (e.value != null) {
+        _validateValueSize(e.value!);
+        extended.put(ns, e.key, e.value!);
       } else {
-        extended.put(e.namespace, e.key, e.value!);
+        extended.delete(ns, e.key);
       }
     }
+    // Extend the normalised batch with meta writes so everything lands in one
+    // atomic WAL frame.
+    final namespaces = extended.entries.map((e) => e.namespace).toSet();
     await _appendMetaWrites(extended, namespaces);
     await _engine.writeBatch(extended);
   }
 
   @override
   Future<Uint8List?> get(String namespace, String key) =>
-      _engine.get(namespace, key);
+      // NFC-normalise so that lookups match the canonical key stored on write.
+      _engine.get(normaliseNamespace(namespace), key);
 
   @override
   Stream<KvEntry> scan(String namespace, {String? startKey, String? endKey}) =>
-      _engine.scan(namespace, startKey: startKey, endKey: endKey);
+      // NFC-normalise so that scan prefixes match the canonical key bytes.
+      _engine.scan(
+        normaliseNamespace(namespace),
+        startKey: startKey,
+        endKey: endKey,
+      );
 
   @override
   Future<void> flush() => _engine.flush();
@@ -328,9 +335,9 @@ final class KvStoreImpl implements KvStore {
 
   @override
   Future<bool> createNamespace(String namespace) async {
-    _guardNamespace(namespace);
+    final ns = _normaliseAndGuardNamespace(namespace);
     final existing = await _meta.getNamespaces();
-    if (existing.contains(namespace)) return false;
+    if (existing.contains(ns)) return false;
     // Fold the dirty-flag set and the namespace-registry update into one
     // atomic batch frame. Unlike a document write we do **not** bump the
     // generation counter here: creating an empty namespace doesn't invalidate
@@ -341,7 +348,7 @@ final class KvStoreImpl implements KvStore {
       _sessionDirtyMarked = true;
       _dirtyFlagPresent = true;
     }
-    await _meta.appendNamespaceRegistration(namespace, batch);
+    await _meta.appendNamespaceRegistration(ns, batch);
     await _engine.writeBatch(batch);
     return true;
   }
@@ -358,8 +365,8 @@ final class KvStoreImpl implements KvStore {
   /// [namespace] must not start with `$` (system namespaces are reserved).
   /// Throws [ArgumentError] if that constraint is violated.
   Future<void> unregisterNamespace(String namespace) async {
-    _guardNamespace(namespace);
-    await _meta.unregisterNamespace(namespace);
+    final ns = _normaliseAndGuardNamespace(namespace);
+    await _meta.unregisterNamespace(ns);
   }
 
   @override
@@ -414,22 +421,28 @@ final class KvStoreImpl implements KvStore {
     for (final entry in batch.entries) {
       if (entry.value != null) _validateValueSize(entry.value!);
     }
+    // Copy the caller's entries into an extended batch so we do not mutate the
+    // original (the Query Layer may inspect its entries after committing).
+    // NFC-normalise every user namespace (non-$ prefixed) so all paths through
+    // the storage engine see a canonical form.
+    final extended = WriteBatch();
+    for (final e in batch.entries) {
+      // System namespaces ($index:…, $fts:…, etc.) are ASCII by construction
+      // and do not need normalisation. User namespaces are normalised.
+      final ns = e.namespace.startsWith(r'$')
+          ? e.namespace
+          : normaliseNamespace(e.namespace);
+      if (e.isDelete) {
+        extended.delete(ns, e.key);
+      } else {
+        extended.put(ns, e.key, e.value!);
+      }
+    }
     // Collect user namespaces (non-$ prefixed) for gen counter + registry.
-    final namespaces = batch.entries
+    final namespaces = extended.entries
         .where((e) => !e.namespace.startsWith(r'$'))
         .map((e) => e.namespace)
         .toSet();
-
-    // Copy the caller's entries into an extended batch so we do not mutate the
-    // original (the Query Layer may inspect its entries after committing).
-    final extended = WriteBatch();
-    for (final e in batch.entries) {
-      if (e.isDelete) {
-        extended.delete(e.namespace, e.key);
-      } else {
-        extended.put(e.namespace, e.key, e.value!);
-      }
-    }
     // Fold dirty flag + gen counter + namespace registry into the same frame.
     await _appendMetaWrites(extended, namespaces);
     await _engine.writeBatch(extended);
@@ -492,15 +505,25 @@ final class KvStoreImpl implements KvStore {
     }
   }
 
-  /// Throws [ArgumentError] when [namespace] begins with `$`.
-  static void _guardNamespace(String namespace) {
-    if (namespace.startsWith(r'$')) {
+  /// NFC-normalises [namespace] and throws [ArgumentError] if the result starts
+  /// with `$` (system namespaces are reserved for internal use).
+  ///
+  /// Returns the NFC-normalised namespace string so the caller can use the
+  /// canonical form for all subsequent storage operations.
+  ///
+  /// By normalising before the guard check, callers that supply the same logical
+  /// name in different Unicode normalisation forms (NFC vs NFD) all receive the
+  /// same canonical string and thus write to the same namespace.
+  static String _normaliseAndGuardNamespace(String namespace) {
+    final ns = normaliseNamespace(namespace);
+    if (ns.startsWith(r'$')) {
       throw ArgumentError.value(
         namespace,
         'namespace',
         'System namespaces (starting with \$) are reserved',
       );
     }
+    return ns;
   }
 
   /// Throws [ArgumentError] if [key] is not a valid UUIDv7 hex string.
