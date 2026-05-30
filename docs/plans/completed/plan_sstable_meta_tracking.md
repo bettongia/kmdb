@@ -1,8 +1,8 @@
 # SSTable metadata tracking through the level map
 
-**Status**: Implementing
+**Status**: Complete
 
-**PR link**: {pending}
+**PR link**: https://github.com/bettongia/kmdb/pull/31
 
 **Implementation model:** Sonnet — mechanical threading of an existing type
 plus one new derivation helper. Medium review.
