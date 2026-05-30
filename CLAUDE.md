@@ -210,10 +210,9 @@ All tests pass on `main`. E2E tests are skipped by default — run them via
 > recommendation, these were gated on a `FaultyStorageAdapter` fault-injection
 > harness rather than the durability-blind in-memory adapter.
 >
-> Remaining items are **not** crash-safety blockers and are still `Investigated`
-> (not yet implemented): **M1** (SSTable reader caching — perf), **M2** (real
-> UTF-8 namespace encoding — i18n), and the **§6** code/doc tidy-up. Two checks
-> that cannot run in CI stay as release-time verifications in
+> All items are now complete: **M1** (SSTable reader caching), **M2** (real
+> UTF-8 namespace encoding with NFC normalisation), and the **§6** code/doc
+> tidy-up. Two checks that cannot run in CI stay as release-time verifications in
 > `docs/spec/28_release_checklist.md`: **RC-4** (Linux real-OS power-loss) and
 > **RC-6** (multi-device tombstone non-resurrection).
 
