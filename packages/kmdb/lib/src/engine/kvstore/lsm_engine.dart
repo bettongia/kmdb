@@ -396,8 +396,10 @@ final class LsmEngine {
         prefix,
         prefixEnd,
       );
-      if (result != null) return result.$1;
-      if (result != null && result.$2) return result.$1;
+      // Non-null result means this file had the key (hit or tombstone); stop.
+      // Tombstone: result.value == null → return null (deleted).
+      // Hit: result.value != null → return the value.
+      if (result != null) return result.value;
     }
 
     // 4. L1, then L2.
@@ -408,8 +410,8 @@ final class LsmEngine {
           prefix,
           prefixEnd,
         );
-        if (result != null) return result.$1;
-        if (result != null && result.$2) return result.$1;
+        // Same three-state semantics: non-null result stops the search.
+        if (result != null) return result.value;
       }
     }
 
@@ -916,6 +918,20 @@ final class LsmEngine {
     await _doManifestRotation();
   }
 
+  /// Performs the manifest rotation: writes a snapshot [VersionEdit] listing
+  /// all live files to a new manifest, atomically updates `CURRENT`, and
+  /// deletes the old manifest.
+  ///
+  /// **Diagnostic metadata limitation.** The in-memory [_levels] map tracks
+  /// filenames only — it does not carry [SstableMeta] (minKey, maxKey,
+  /// entryCount). The snapshot edit therefore writes empty strings for
+  /// `minKey`/`maxKey` and 0 for `entryCount` for every file. These fields are
+  /// diagnostic-only and are not used for correctness, but after a rotation the
+  /// real per-file values are permanently lost from the manifest.
+  ///
+  /// Tracking `SstableMeta` through the level map (or re-reading SSTable
+  /// footers at rotation time) is the proper fix, scoped to a separate plan:
+  /// `docs/plans/plan_sstable_meta_tracking.md`.
   Future<void> _doManifestRotation() async {
     // Derive the new manifest name from the current one.
     final currentFile = CurrentFile(dbDir: _dbDir, adapter: _adapter);
@@ -1276,9 +1292,18 @@ final class LsmEngine {
   /// Gets the latest value for the user key identified by [prefix]/[prefixEnd]
   /// from an SSTable at [path].
   ///
-  /// Returns `(value, found)` where `found` is true if any version exists
-  /// (even if it is a tombstone). Returns `null` if the file is unreadable.
-  Future<(Uint8List?, bool)?> _getFromSstable(
+  /// Returns a named record with three distinct states:
+  /// - `null` (outer) — the key is absent in this file; the caller should
+  ///   continue searching older files.
+  /// - `({value: null})` — the key's newest version in this file is a
+  ///   tombstone; the caller must **stop** and treat the key as deleted,
+  ///   i.e. return `null` to the reader without consulting older files.
+  ///   Collapsing this state into plain `null` would cause the loop to skip
+  ///   past the tombstone and resurrect the deleted value from an older file.
+  /// - `({value: bytes})` — a live value was found; return it.
+  ///
+  /// Returns `null` (outer) also when the file is unreadable.
+  Future<({Uint8List? value})?> _getFromSstable(
     String path,
     Uint8List prefix,
     Uint8List? prefixEnd,
@@ -1298,10 +1323,11 @@ final class LsmEngine {
       lastValue = entry.value;
     }
 
-    if (lastKey == null) return null; // key not in this SSTable
+    if (lastKey == null) return null; // key not in this SSTable — try next file
     final type = KeyCodec.decodeRecordType(lastKey);
-    if (type == RecordType.delete) return (null, true); // tombstone
-    return (lastValue, true);
+    // Tombstone: stop the search — do not fall through to older files.
+    if (type == RecordType.delete) return (value: null);
+    return (value: lastValue);
   }
 
   /// Returns the last entry from an iterable of [SkipListEntry]s (highest

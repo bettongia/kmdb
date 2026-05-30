@@ -1,6 +1,6 @@
 # §6 Code and documentation tidy-up
 
-**Status**: Investigated
+**Status**: Implementing
 
 **PR link**: {pending}
 
@@ -112,39 +112,42 @@ strictly cosmetic.
 ## Implementation plan
 
 ### Step 1 — `get()` dead code (A)
-- [ ] Change `_getFromSstable` to the 3-state return (D1); update both call sites
+- [x] Change `_getFromSstable` to the 3-state return (D1); update both call sites
       to a single `if (result != null) return result.value;`; remove the dead
       second `if` in both loops.
 
 ### Step 2 — Doc fixes (B, plus D2 doc option)
-- [ ] Correct the `encodeInternalKey` ordering comment (ascending; newest last;
+- [x] Correct the `encodeInternalKey` ordering comment (ascending; newest last;
       read takes the last entry).
-- [ ] Reconcile the `SyncEngine.sync()` doc with the code per D2.
+- [x] Reconcile the `SyncEngine.sync()` doc with the code per D2.
 
 ### Step 3 — No-op removal (C)
-- [ ] Delete the self-assigning `withCurrentHlc(hwm.currentHlc)` line in `pull`.
+- [x] Delete the self-assigning `withCurrentHlc(hwm.currentHlc)` line in `pull`.
 
 ### Step 4 — Rotation metadata (E, per D3)
-- [ ] Add a doc comment at `_doManifestRotation` stating the snapshot's
+- [x] Add a doc comment at `_doManifestRotation` stating the snapshot's
       `minKey`/`maxKey`/`entryCount` are diagnostic and reset on rotation; record
       the proper-fix follow-up.
 
 ### Step 5 — Sweep (F)
-- [ ] Grep the touched files for stale `Phase N` comments / TODOs; run the
+- [x] Grep the touched files for stale `Phase N` comments / TODOs; run the
       analyzer for unused elements; clean only cosmetic findings, deferring any
       owned by another plan.
+  - Updated the stale "Phase 6+" comment on `syncNamespaces` in sync_engine.dart.
+  - Fixed two pre-existing `no_leading_underscores_for_local_identifiers` lint
+    issues in wal_test.dart (`_put`/`_del` → `makePut`/`makeDel`).
 
 ### Step 6 — Tests
-- [ ] **Tombstone-suppression regression (guards A):** put a value, flush; delete
+- [x] **Tombstone-suppression regression (guards A):** put a value, flush; delete
       the key (tombstone in a newer file), flush; `get` returns `null` — the
       tombstone must suppress the older value and not resurrect it. (This is the
       behaviour the redundant flag protected; the test makes the invariant
       explicit before the refactor.)
-- [ ] All existing tests pass unchanged (the rest are doc/no-op edits).
+- [x] All existing tests pass unchanged (the rest are doc/no-op edits).
 
 ### Step 7 — Verify
-- [ ] `dart test packages/kmdb` and `cd packages/kmdb_cli && dart test` pass.
-- [ ] `make analyze` clean.
+- [x] `dart test packages/kmdb` (1525 pass, 9 E2E skips) and `cd packages/kmdb_cli && dart test` (839 pass, 1 E2E skip) pass.
+- [x] `make analyze` clean.
 
 > No release-checklist (§28) entry needed — all changes are CI-covered.
 
