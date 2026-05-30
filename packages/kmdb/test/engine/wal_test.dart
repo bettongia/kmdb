@@ -219,7 +219,7 @@ void main() {
   });
 
   group('WalBatchFrame encoding', () {
-    WalRecord _put(Hlc seq, String ns, List<int> v) => WalRecord(
+    WalRecord makePut(Hlc seq, String ns, List<int> v) => WalRecord(
       type: WalRecordType.put,
       sequence: seq,
       namespace: ns,
@@ -227,7 +227,7 @@ void main() {
       value: Uint8List.fromList(v),
     );
 
-    WalRecord _del(Hlc seq, String ns) => WalRecord(
+    WalRecord makeDel(Hlc seq, String ns) => WalRecord(
       type: WalRecordType.delete,
       sequence: seq,
       namespace: ns,
@@ -236,9 +236,9 @@ void main() {
 
     test('round-trips a multi-entry frame (puts + delete)', () {
       final frame = WalBatchFrame([
-        _put(const Hlc(1, 0), 'tasks', [0x10]),
-        _del(const Hlc(2, 0), 'tasks'),
-        _put(const Hlc(3, 0), r'$index:tasks:title', [0x20, 0x30]),
+        makePut(const Hlc(1, 0), 'tasks', [0x10]),
+        makeDel(const Hlc(2, 0), 'tasks'),
+        makePut(const Hlc(3, 0), r'$index:tasks:title', [0x20, 0x30]),
       ]);
       final bytes = frame.encode();
 
@@ -264,8 +264,8 @@ void main() {
 
     test('corrupted checksum returns null', () {
       final bytes = WalBatchFrame([
-        _put(const Hlc(1, 0), 'ns', [0x01]),
-        _put(const Hlc(2, 0), 'ns', [0x02]),
+        makePut(const Hlc(1, 0), 'ns', [0x01]),
+        makePut(const Hlc(2, 0), 'ns', [0x02]),
       ]).encode();
       bytes[0] ^= 0xFF;
       expect(WalBatchFrame.tryDecode(bytes, 0), isNull);
@@ -276,8 +276,8 @@ void main() {
       () {
         // Two-entry frame; truncate progressively from the end.
         final full = WalBatchFrame([
-          _put(const Hlc(1, 0), 'ns', [0x01, 0x02]),
-          _del(const Hlc(2, 0), 'ns'),
+          makePut(const Hlc(1, 0), 'ns', [0x01, 0x02]),
+          makeDel(const Hlc(2, 0), 'ns'),
         ]).encode();
         // Truncating any byte breaks either the structural read or the checksum.
         for (var cut = 1; cut < full.length; cut++) {
@@ -296,8 +296,8 @@ void main() {
       // still be caught by the frame-level checksum so the entire batch is
       // discarded, not just one entry.
       final bytes = WalBatchFrame([
-        _put(const Hlc(1, 0), 'ns', [0x11, 0x22, 0x33]),
-        _put(const Hlc(2, 0), 'ns', [0x44, 0x55, 0x66]),
+        makePut(const Hlc(1, 0), 'ns', [0x11, 0x22, 0x33]),
+        makePut(const Hlc(2, 0), 'ns', [0x44, 0x55, 0x66]),
       ]).encode();
       // Flip a bit deep in the second entry's value region.
       bytes[bytes.length - 1] ^= 0x01;
@@ -307,7 +307,7 @@ void main() {
     test('wrong leading type byte returns null', () {
       // Construct a buffer that is not a batch frame (e.g. a put record's bytes)
       // and assert tryDecode rejects it without throwing.
-      final put = _put(const Hlc(1, 0), 'ns', [0x01]);
+      final put = makePut(const Hlc(1, 0), 'ns', [0x01]);
       final bytes = put.encode();
       expect(WalBatchFrame.tryDecode(bytes, 0), isNull);
     });

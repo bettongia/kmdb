@@ -149,7 +149,10 @@ final class KeyCodec {
   ///
   /// The internal key ordering drives the merge iterator's sort order:
   /// primary on `(nsLen + ns + userKey)` ascending, secondary on `hlc`
-  /// descending (higher sequence = newer, emitted first during merge).
+  /// **ascending** (big-endian, so byte-order comparison is correct). Within
+  /// a user key the oldest version sorts first and the newest sorts last.
+  /// The read path therefore takes the **last** entry in a prefix scan to
+  /// obtain the most-recent version.
   static Uint8List encodeInternalKey(
     String namespace,
     Uint8List userKeyBytes,

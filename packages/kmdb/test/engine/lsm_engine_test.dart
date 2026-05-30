@@ -260,6 +260,42 @@ void main() {
       await store.close();
     });
 
+    // Regression guard for _getFromSstable's 3-state return semantics:
+    // outer-null = absent (continue), inner-null = tombstone (stop, deleted),
+    // inner-non-null = hit. If the tombstone state is collapsed into plain
+    // null the loop would skip past it to the older SSTable and resurrect
+    // the value. This test makes that invariant explicit before the refactor.
+    test('tombstone in newer SSTable suppresses value in older SSTable — '
+        'no resurrection across flush boundaries', () async {
+      final adapter = _newAdapter();
+      final (store, _) = await _open(adapter);
+      final key = _key(1);
+
+      // Step 1: write a value and flush so it lands in SSTable A.
+      await store.put('ns', key, _bytes('original-value'));
+      await store.flush();
+
+      // Step 2: delete the key and flush so the tombstone lands in SSTable B
+      // (newer than A). Both SSTables are now in L0.
+      await store.delete('ns', key);
+      await store.flush();
+
+      // Step 3: get() must return null. The tombstone in SSTable B (newer,
+      // higher HLC) must stop the L0 scan and not let the loop fall through
+      // to SSTable A's older put entry.
+      final result = await store.get('ns', key);
+      expect(
+        result,
+        isNull,
+        reason:
+            'tombstone in newer L0 file must suppress the older put — '
+            'collapsing absent/tombstone to the same null would resurrect '
+            'the deleted value',
+      );
+
+      await store.close();
+    });
+
     test('automatic flush fires when memtable exceeds threshold', () async {
       final adapter = _newAdapter();
       // forTesting() has a 4KB threshold.

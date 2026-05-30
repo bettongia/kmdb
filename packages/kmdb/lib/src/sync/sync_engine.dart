@@ -133,9 +133,9 @@ final class SyncEngine {
 
   /// The set of user namespaces included in sync.
   ///
-  /// Used in Phase 6+ to filter which SSTables are downloaded and ingested.
-  /// Exposed as a getter to prevent the "unused field" warning while the
-  /// field is reserved for future use.
+  /// Governs which user collections are uploaded and downloaded. System `$`
+  /// namespaces are never synced regardless of this set. Exposed as a getter
+  /// for use by [KmdbDatabase] and the CLI sync commands.
   Set<String> get syncNamespaces => _syncNamespaces;
 
   /// Local SSTable directory.
@@ -534,7 +534,6 @@ final class SyncEngine {
       hwm = hwm.withPeer(entry.key, entry.value);
     }
     if (peerMaxHlc.isNotEmpty) {
-      hwm = hwm.withCurrentHlc(hwm.currentHlc);
       await hwm.save(_remoteHwmPath, _cloudAdapter);
     }
 
@@ -544,8 +543,10 @@ final class SyncEngine {
 
   /// Convenience method that calls [push] then [pull].
   ///
-  /// On failure in [push], [pull] is still attempted so the local database
-  /// receives incoming changes even if the upload fails.
+  /// A failure in [push] propagates immediately — [pull] is **not** attempted
+  /// in that case. Callers that want fire-and-forget pull semantics (receive
+  /// incoming changes even when the upload fails) must call [push] and [pull]
+  /// separately and handle the push exception themselves.
   Future<void> sync() async {
     await push();
     await pull();
