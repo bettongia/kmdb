@@ -20,7 +20,14 @@
     "filesystem": {
       "allowWrite": ["./"],
       "denyRead": ["~/"],
-      "allowRead": ["./", "~/.gitconfig", "~/flutter", "~/.pub-cache"]
+      "allowRead": [
+        "./",
+        "~/.gitconfig",
+        "~/flutter",
+        "~/.pub-cache",
+        "~/.ssh/known_hosts",
+        "~/.gitignore_global"
+      ]
     }
   }
 }
