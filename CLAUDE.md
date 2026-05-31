@@ -211,8 +211,10 @@ All tests pass on `main`. E2E tests are skipped by default — run them via
 > harness rather than the durability-blind in-memory adapter.
 >
 > All items are now complete: **M1** (SSTable reader caching), **M2** (real
-> UTF-8 namespace encoding with NFC normalisation), and the **§6** code/doc
-> tidy-up. Two checks that cannot run in CI stay as release-time verifications in
+> UTF-8 namespace encoding with NFC normalisation), the **§6** code/doc tidy-up,
+> and **§5 trailing** (consolidation epoch monotonicity — `max(previousEpoch + 1,
+> nowMs)`, PR #32). The v0.02.01 track is fully closed as of 2026-06-01. Two
+> checks that cannot run in CI stay as release-time verifications in
 > `docs/spec/28_release_checklist.md`: **RC-4** (Linux real-OS power-loss) and
 > **RC-6** (multi-device tombstone non-resurrection).
 
