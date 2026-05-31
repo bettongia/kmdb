@@ -254,6 +254,115 @@ void main() {
       expect(lease, isNotNull);
     });
 
+    // ── epoch monotonicity ────────────────────────────────────────────────────
+    //
+    // Regression tests for the monotonic-epoch fix. The wallClock is injectable
+    // so the tests can simulate an NTP clock jump backwards.
+
+    test(
+      'epoch is monotonically greater after clock-backwards acquisition',
+      () async {
+        // Clock starts at a high value. Device A acquires a lease with this
+        // epoch and lets it expire (TTL=0 by setting expiresAt in the past).
+        const clockHigh = 1_000_000;
+        final clockLow = 900_000; // simulates NTP correction backwards
+
+        // Step 1: write an expired lease directly to simulate a prior acquisition
+        // by any device (could be us, could be a peer).
+        final expiredLease = ConsolidationLease(
+          holder: 'otherdev',
+          acquiredAt: clockHigh,
+          expiresAt: 1, // already expired at any nowMs > 1
+          epoch: clockHigh,
+          inputFiles: ['a.sst'],
+        );
+        await cloudAdapter.upload(
+          '$syncRoot/.consolidation-lease',
+          expiredLease.toBytes(),
+        );
+
+        // Step 2: Device B's clock has jumped backwards to clockLow. It acquires
+        // the lease. Without the fix, epoch = clockLow = 900_000 < 1_000_000.
+        // With the fix, epoch = max(clockHigh + 1, clockLow) = 1_000_001.
+        final clockBackwards = _FixedClock(clockLow);
+        final coordinatorB = ConsolidationCoordinator(
+          deviceId: deviceId,
+          cloudAdapter: cloudAdapter,
+          localAdapter: localAdapter,
+          syncRoot: syncRoot,
+          config: ConsolidationConfig.forTesting(),
+          wallClock: clockBackwards.call,
+        );
+
+        final newLease = await coordinatorB.acquireLease(['b.sst']);
+        expect(newLease, isNotNull, reason: 'should succeed — expired lease');
+        // The new epoch must exceed the prior epoch regardless of clock direction.
+        expect(
+          newLease!.epoch,
+          greaterThan(clockHigh),
+          reason:
+              'epoch must be monotonically greater than prior epoch '
+              '(was $clockHigh), got ${newLease.epoch}',
+        );
+        // Specifically: max(1_000_000 + 1, 900_000) = 1_000_001.
+        expect(newLease.epoch, equals(clockHigh + 1));
+      },
+    );
+
+    test('epoch equals nowMs when no prior lease exists', () async {
+      // No lease file present — first-ever acquisition. Epoch should be nowMs.
+      const nowMs = 42_000;
+      final fixedClock = _FixedClock(nowMs);
+      final freshCoordinator = ConsolidationCoordinator(
+        deviceId: deviceId,
+        cloudAdapter: cloudAdapter,
+        localAdapter: localAdapter,
+        syncRoot: syncRoot,
+        config: ConsolidationConfig.forTesting(),
+        wallClock: fixedClock.call,
+      );
+
+      final lease = await freshCoordinator.acquireLease(['a.sst']);
+      expect(lease, isNotNull);
+      expect(
+        lease!.epoch,
+        equals(nowMs),
+        reason: 'epoch must equal nowMs when no prior lease exists',
+      );
+    });
+
+    test('epoch falls back to nowMs when prior lease is corrupt', () async {
+      // Write corrupt bytes into the lease slot. acquireLease must not throw
+      // and must produce an epoch equal to nowMs (no usable previousEpoch).
+      await cloudAdapter.upload(
+        '$syncRoot/.consolidation-lease',
+        Uint8List.fromList([1, 2, 3]), // malformed JSON
+      );
+
+      const nowMs = 77_000;
+      final fixedClock = _FixedClock(nowMs);
+      final corruptCoordinator = ConsolidationCoordinator(
+        deviceId: deviceId,
+        cloudAdapter: cloudAdapter,
+        localAdapter: localAdapter,
+        syncRoot: syncRoot,
+        config: ConsolidationConfig.forTesting(),
+        wallClock: fixedClock.call,
+      );
+
+      final lease = await corruptCoordinator.acquireLease(['x.sst']);
+      expect(
+        lease,
+        isNotNull,
+        reason: 'corrupt lease should not block acquisition',
+      );
+      expect(
+        lease!.epoch,
+        equals(nowMs),
+        reason: 'epoch must fall back to nowMs when prior lease is corrupt',
+      );
+    });
+
     // ── consolidate ───────────────────────────────────────────────────────────
 
     test('consolidate merges input SSTables into output', () async {
@@ -551,6 +660,20 @@ void main() {
       expect(coordinator.state, equals(ConsolidationState.skippedNonAtomicCas));
     });
   });
+}
+
+/// A fixed-value wall clock for injecting deterministic time into tests.
+///
+/// Every call to [call] returns the same [value] supplied at construction,
+/// making epoch calculations fully deterministic regardless of real wall time.
+final class _FixedClock {
+  const _FixedClock(this.value);
+
+  /// The fixed millisecond timestamp returned by every invocation.
+  final int value;
+
+  /// Returns [value] unconditionally.
+  int call() => value;
 }
 
 /// Minimal non-atomic [SyncStorageAdapter] for the gating regression test.

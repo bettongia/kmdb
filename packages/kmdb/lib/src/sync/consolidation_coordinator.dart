@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import 'dart:convert';
+import 'dart:math' show max;
 import 'dart:typed_data';
 
 import '../engine/compaction/merge_iterator.dart';
@@ -165,8 +166,13 @@ final class ConsolidationLease {
 /// ## Fencing
 ///
 /// The epoch field in the lease (and the output filename) is a monotonically-
-/// increasing token derived from the current wall clock. It prevents a
-/// previously-timed-out device from overwriting the output of a newer round.
+/// increasing fencing token over the single lease-file slot. Each new epoch
+/// satisfies: `epoch = max(previousEpoch + 1, nowMs)` where `previousEpoch`
+/// is the epoch of whatever lease was last written to the slot (by any device).
+/// When no prior lease exists the epoch equals `nowMs`. This guarantees the
+/// token never regresses even across NTP corrections or clock adjustments,
+/// which prevents a previously-timed-out device from presenting a stale epoch
+/// as the largest known.
 ///
 /// ## Usage
 ///
@@ -312,10 +318,20 @@ final class ConsolidationCoordinator {
   Future<ConsolidationLease?> acquireLease(List<String> inputFiles) async {
     final nowMs = _wallClock();
 
+    // Hoisted before the existingBytes branch so that existingEpoch is visible
+    // to both the "overwrite expired" path and the "file disappeared, fall
+    // through to create" path. A corrupt lease (fromBytes returns null) leaves
+    // existingEpoch as null, which _buildLease handles by falling back to nowMs.
+    int? existingEpoch;
+
     // Read existing lease if any.
     final existingBytes = await cloudAdapter.download(_leasePath);
     if (existingBytes != null) {
       final existing = ConsolidationLease.fromBytes(existingBytes);
+      // Capture the prior epoch regardless of whether the lease is expired, so
+      // the new lease's epoch is always strictly greater (global monotonicity).
+      existingEpoch = existing?.epoch;
+
       if (existing != null && !existing.isExpired(nowMs)) {
         // A valid, unexpired lease exists — do not compete.
         return null;
@@ -324,7 +340,11 @@ final class ConsolidationCoordinator {
       // the current ETag so that only one device wins the race to replace it.
       final currentEtag = await cloudAdapter.getEtag(_leasePath);
       if (currentEtag != null) {
-        final candidate = _buildLease(inputFiles, nowMs);
+        final candidate = _buildLease(
+          inputFiles,
+          nowMs,
+          previousEpoch: existingEpoch,
+        );
         final won = await cloudAdapter.compareAndSwap(
           _leasePath,
           candidate.toBytes(),
@@ -334,11 +354,16 @@ final class ConsolidationCoordinator {
         // Fencing: re-read and verify we are the holder.
         return await _verifyLeaseHolder(candidate.epoch);
       }
-      // File disappeared between read and getEtag — fall through to create.
+      // File disappeared between read and getEtag — fall through to create,
+      // keeping existingEpoch so the new epoch is still monotonically greater.
     }
 
-    // No lease file exists — attempt if-none-match: * write.
-    final candidate = _buildLease(inputFiles, nowMs);
+    // No lease file exists (or file disappeared) — attempt if-none-match: * write.
+    final candidate = _buildLease(
+      inputFiles,
+      nowMs,
+      previousEpoch: existingEpoch,
+    );
     final won = await cloudAdapter.compareAndSwap(
       _leasePath,
       candidate.toBytes(),
@@ -498,8 +523,27 @@ final class ConsolidationCoordinator {
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   /// Builds a candidate lease for this device.
-  ConsolidationLease _buildLease(List<String> inputFiles, int nowMs) {
-    final epoch = nowMs; // use wall clock as fencing token
+  ///
+  /// [previousEpoch] is the epoch of the lease currently (or most recently)
+  /// stored in the lease-file slot, as decoded by [ConsolidationLease.fromBytes].
+  /// Pass `null` when no prior lease exists or the prior lease was corrupt.
+  ///
+  /// The new epoch is `max(previousEpoch + 1, nowMs)` when [previousEpoch] is
+  /// non-null, or simply `nowMs` when it is null. The `max` ensures the epoch
+  /// is strictly greater than any prior value even if the wall clock has moved
+  /// backwards (NTP correction, daylight-saving transition, manual adjustment).
+  /// This gives a global total order over all epochs written to the single
+  /// `.consolidation-lease` slot, regardless of which device wrote each one.
+  ConsolidationLease _buildLease(
+    List<String> inputFiles,
+    int nowMs, {
+    int? previousEpoch,
+  }) {
+    // If a previous epoch is known, the new epoch must exceed it (monotonic
+    // fencing token). Taking max with nowMs means the epoch still advances with
+    // the wall clock in the normal case; the +1 only kicks in when the clock
+    // moved backwards.
+    final epoch = previousEpoch != null ? max(previousEpoch + 1, nowMs) : nowMs;
     return ConsolidationLease(
       holder: deviceId,
       acquiredAt: nowMs,

@@ -335,7 +335,7 @@ its absence means no client holds the lock. The lease file is never appended to
 {
   "version": 1,
   "coordinatorId": "a3f2b1c9", // deviceId of the claiming client
-  "epoch": 7, // monotonically increasing per coordinatorId
+  "epoch": 7, // monotonically increasing per lease file (global); see note below
   "acquiredAtMs": 1743724800000, // wall-clock ms at acquisition (HLC physical)
   "ttlMs": 120000, // lease duration; coordinator must renew before expiry
   "inputFiles": [
@@ -349,11 +349,18 @@ its absence means no client holds the lock. The lease file is never appended to
 
 _Why epoch rather than a UUID?_
 
-An ever-increasing epoch per device gives the fencing token a total order for
-the same coordinator. If device "a3f2b1c9" crashes and re-acquires, its epoch
-increments and any output files from the previous attempt carry a stale token
-that is trivially detectable. A random UUID would require a separate registry to
-establish ordering.
+An ever-increasing epoch over the single lease-file slot gives the fencing token
+a global total order. When any device acquires the lease it reads the prior
+epoch (regardless of which device wrote it) and sets its own epoch to
+`max(priorEpoch + 1, nowMs)`. If a device crashes and a second device acquires
+the lease with a higher epoch, any output files from the first device carry a
+stale token that is trivially detectable by comparing epoch values. A random UUID
+would require a separate registry to establish ordering.
+
+Note: the ordering guarantee is _global across the single lease-file slot_, not
+per-device. Because there is exactly one `.consolidation-lease` file, every
+epoch strictly exceeds the epoch written by the previous holder, whoever that
+was.
 
 ### Acquiring the Lease
 
@@ -373,7 +380,11 @@ point.
 
 3. **Write a candidate lease to a temp file.** Name it
    .consolidation-lease.\<deviceId\>.tmp. Populate all fields. Set epoch \=
-   (previous epoch for this deviceId) \+ 1, or 0 if first acquisition.
+   `max((epoch of the lease being replaced) + 1, nowMs)`, or `nowMs` if no
+   prior lease exists. Drop "for this deviceId" — the prior lease may have been
+   written by a different device. Using `max` ensures the epoch never regresses
+   even if the local wall clock has moved backwards since the prior lease was
+   written.
 
 4. **Rename the temp file to .consolidation-lease.** On POSIX filesystems and
    cloud object stores that support atomic conditional-PUT (GCS, S3 via
