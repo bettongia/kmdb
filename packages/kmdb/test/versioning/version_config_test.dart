@@ -101,5 +101,21 @@ void main() {
       expect(a.hashCode, equals(b.hashCode));
       expect(a, isNot(equals(c)));
     });
+
+    // ── toString ─────────────────────────────────────────────────────────────
+
+    test('toString includes maxVersions and retentionDays', () {
+      const cfg = VersionConfig(maxVersions: 5, retentionDays: 30);
+      final s = cfg.toString();
+      expect(s, contains('maxVersions: 5'));
+      expect(s, contains('retentionDays: 30'));
+    });
+
+    test('toString with null fields shows null', () {
+      const cfg = VersionConfig(maxVersions: null, retentionDays: null);
+      final s = cfg.toString();
+      expect(s, contains('maxVersions: null'));
+      expect(s, contains('retentionDays: null'));
+    });
   });
 }

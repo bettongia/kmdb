@@ -516,5 +516,96 @@ void main() {
         expect(await vaultStore.isTombstoned(ref.sha256), isFalse);
       });
     });
+
+    // ── decrementVersionRefs (RQ5 vault-ref-release path) ────────────────────
+
+    group('decrementVersionRefs', () {
+      test('decrements ref count for vault URI in encodedValue', () async {
+        final ref = await vaultStore.ingest(
+          bytes: _bytes('blob-data'),
+          hlcTimestamp: 't1',
+        );
+
+        // Bring ref count to 1 via interceptWrite.
+        final incBatch = WriteBatch();
+        await interceptor.interceptWrite(
+          batch: incBatch,
+          namespace: 'test',
+          docKey: 'k1',
+          oldDoc: null,
+          newDoc: {'file': ref.uri},
+        );
+        await kvStore.writeBatch(incBatch);
+        expect(kvStore.readRefCount(ref.sha256), equals(1));
+
+        // Decrement via decrementVersionRefs (the $ver: trim path).
+        final encodedValue = ValueCodec.encode({'file': ref.uri});
+        final decBatch = WriteBatch();
+        await interceptor.decrementVersionRefs(encodedValue, decBatch);
+        await kvStore.writeBatch(decBatch);
+
+        expect(kvStore.readRefCount(ref.sha256), equals(0));
+      });
+
+      test('does nothing when encodedValue contains no vault URIs', () async {
+        final encodedValue = ValueCodec.encode({'title': 'no vault ref here'});
+        final batch = WriteBatch();
+        await interceptor.decrementVersionRefs(encodedValue, batch);
+        expect(batch.isEmpty, isTrue);
+      });
+
+      test(
+        'skips gracefully for undecodable bytes (fail-safe posture)',
+        () async {
+          final batch = WriteBatch();
+          // Should not throw; undecodable bytes leave refs over-counted (safe).
+          await expectLater(
+            interceptor.decrementVersionRefs(
+              Uint8List.fromList([0xFF, 0x00, 0xAB]),
+              batch,
+            ),
+            completes,
+          );
+          expect(batch.isEmpty, isTrue);
+        },
+      );
+
+      test(
+        'decrements multiple vault URIs from a single encodedValue',
+        () async {
+          final ref1 = await vaultStore.ingest(
+            bytes: _bytes('blob-1'),
+            hlcTimestamp: 't1',
+          );
+          final ref2 = await vaultStore.ingest(
+            bytes: _bytes('blob-2'),
+            hlcTimestamp: 't2',
+          );
+
+          // Increment both.
+          final incBatch = WriteBatch();
+          await interceptor.interceptWrite(
+            batch: incBatch,
+            namespace: 'test',
+            docKey: 'k1',
+            oldDoc: null,
+            newDoc: {'a': ref1.uri, 'b': ref2.uri},
+          );
+          await kvStore.writeBatch(incBatch);
+
+          // Decrement both in one call.
+          final encodedValue = ValueCodec.encode({
+            'a': ref1.uri,
+            'b': ref2.uri,
+          });
+          final decBatch = WriteBatch();
+          await interceptor.decrementVersionRefs(encodedValue, decBatch);
+          await kvStore.writeBatch(decBatch);
+
+          expect(kvStore.readRefCount(ref1.sha256), equals(0));
+          expect(kvStore.readRefCount(ref2.sha256), equals(0));
+        },
+      );
+    });
   });
 }

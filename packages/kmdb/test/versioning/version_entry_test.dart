@@ -119,5 +119,46 @@ void main() {
       expect(map['promotedFrom'], equals(const Hlc(1, 0).encoded));
       expect(map['isDelete'], isTrue);
     });
+
+    test('fromMap throws FormatException for non-List encodedValue', () {
+      expect(
+        () => VersionEntry.fromMap({'hlc': 0, 'encodedValue': 'not_a_list'}),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('fromMap throws FormatException for bad promotedFrom type', () {
+      expect(
+        () => VersionEntry.fromMap({'hlc': 0, 'promotedFrom': 'not_an_int'}),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('toString includes hlc hex and isDelete', () {
+      final entry = VersionEntry(
+        hlc: const Hlc(1, 0),
+        encodedValue: null,
+        isDelete: true,
+      );
+      final s = entry.toString();
+      expect(s, contains('isDelete: true'));
+      expect(s, contains('VersionEntry'));
+    });
+  });
+
+  group('DocumentVersion', () {
+    test('toString includes id, hlc, and isDelete', () {
+      final v = DocumentVersion(
+        id: 'mykey',
+        hlc: const Hlc(1, 0),
+        timestamp: DateTime.fromMillisecondsSinceEpoch(0),
+        value: null,
+        isDelete: true,
+      );
+      final s = v.toString();
+      expect(s, contains('mykey'));
+      expect(s, contains('isDelete: true'));
+      expect(s, contains('DocumentVersion'));
+    });
   });
 }
