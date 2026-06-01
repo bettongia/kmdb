@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import 'package:kmdb/kmdb.dart';
+import 'package:kmdb/kmdb_test_cloud_support.dart' show CloudSemanticsAdapter;
 
 import 'actions.dart';
 import 'partitionable_adapter.dart';
@@ -257,6 +258,13 @@ final class Device {
         syncAdapter: _syncAdapter,
         localAdapter: _localStorageAdapter,
       );
+      // Read the visibility cursor after sync completes.
+      // For strongly-consistent adapters (MemorySyncAdapter, SharedBackendAdapter)
+      // this equals the backend's global max — all writes visible.
+      // For CloudSemanticsAdapter it returns the propagation cursor, which may
+      // lag. The ReconciliationAgent uses this to merge only the visible subset
+      // of peer writes into the device's expected state.
+      final visSeq = _syncAdapter.visibleWriteSeq;
       return ActionResult(
         actionId: action.id,
         deviceId: action.deviceId,
@@ -264,6 +272,7 @@ final class Device {
         isNoOp: false,
         syncCompleted: true,
         syncDirection: 'both',
+        visibleWriteSeqHigh: visSeq,
       );
     } on NetworkPartitionException {
       // Partition was active during sync — record as incomplete.
@@ -331,6 +340,28 @@ final class Device {
   }
 
   // ── Verification helpers ──────────────────────────────────────────────────
+
+  /// Advances the propagation clock on this device's sync adapter, if the
+  /// underlying adapter is a [CloudSemanticsAdapter].
+  ///
+  /// Under an eventually-consistent profile, a [CloudSemanticsAdapter]'s
+  /// visibility cursor lags behind the backend's maximum write-sequence. This
+  /// method makes all writes committed so far immediately visible to this
+  /// device's adapter — equivalent to simulating the passage of the backend's
+  /// maximum propagation delay.
+  ///
+  /// No-op when the underlying adapter is not a [CloudSemanticsAdapter]
+  /// (e.g. [MemorySyncAdapter], [SharedBackendAdapter]).
+  ///
+  /// Called by [TestManager._settleAndVerifyConvergence] before the final
+  /// sync pass to ensure all writes are visible before asserting global
+  /// convergence.
+  void advancePropagationClock() {
+    final delegate = _syncAdapter.delegate;
+    if (delegate is CloudSemanticsAdapter) {
+      delegate.advancePropagationClock();
+    }
+  }
 
   /// Forces a sync without recording the result in the [ReconciliationAgent].
   ///

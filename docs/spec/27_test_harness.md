@@ -143,10 +143,16 @@ Fork events appear in the `HarnessReport` regardless of pass/fail status.
 | `simultaneousDevices`  | `int?`                | from preset | Devices active concurrently                      |
 | `syncIntervalSeconds`  | `int?`                | from preset | Time-driven sync trigger                         |
 | `syncAfterWrites`      | `int?`                | from preset | Write-count-driven sync trigger                  |
-| `syncAdapter`          | `SyncStorageAdapter`  | required   | Adapter instance for the shared remote sync store |
-| `prngseed`             | `int?`                | `null`     | Fixed seed for seeded mode; `null` = fuzz mode    |
-| `keyPoolRatios`        | `KeyPoolRatios`       | 50/40/10   | Shared / device-local / hot key mix              |
-| `docSizeDistribution`  | `DocSizeDistribution` | 60/30/10   | Small / medium / large document mix              |
+| `syncAdapter`          | `SyncStorageAdapter?`                   | —          | Single shared adapter for all devices (convenience form). Mutually exclusive with `syncAdapterFactory`. |
+| `syncAdapterFactory`   | `SyncStorageAdapter Function(int)?`     | —          | Per-device adapter factory. Called once per device with the 0-based device index. Mutually exclusive with `syncAdapter`. |
+| `prngseed`             | `int?`                                  | `null`     | Fixed seed for seeded mode; `null` = fuzz mode |
+| `keyPoolRatios`        | `KeyPoolRatios`                         | 50/40/10   | Shared / device-local / hot key mix |
+| `docSizeDistribution`  | `DocSizeDistribution`                   | 60/30/10   | Small / medium / large document mix |
+
+Exactly one of `syncAdapter` or `syncAdapterFactory` must be set; providing
+both or neither raises `ArgumentError`. The convenience helper
+`resolveAdapter(deviceId)` returns the adapter for a given device index,
+handling both forms transparently.
 
 At least one of `syncIntervalSeconds` or `syncAfterWrites` must be set (either
 directly or via a `velocityPreset`). A `velocityPreset` of `null` with no sync
@@ -251,17 +257,136 @@ regardless of PRNG seed.
 
 ---
 
+## Per-device adapters and cloud-backend simulation
+
+### Why per-device adapters?
+
+Real devices each instantiate their own adapter — their own auth context,
+folder-ID metadata cache, and session state — against the same remote. The
+original `syncAdapter` field shared a single instance across all simulated
+devices, hiding an entire class of bugs (e.g. a stale per-device cache shared
+across "devices" that masks bugs that only occur per-device).
+
+The `syncAdapterFactory: SyncStorageAdapter Function(int deviceId)` parameter
+allows each simulated device to receive its own adapter instance. All instances
+should front the same `SharedCloudBackend` to ensure they share a logical remote.
+
+### `SharedCloudBackend` and front-end adapters
+
+`SharedCloudBackend` (`package:kmdb/kmdb_test_cloud_support.dart`) is the
+canonical in-memory backing store for multi-device tests. It owns a file map
+where every write is stamped with a monotonically-increasing global
+`writeSeq`. All per-device adapters reference the same backend object.
+
+Two front-end adapter types are provided:
+
+| Front-end | Type | Consistency | `providesAtomicCas` |
+|---|---|---|---|
+| `SharedBackendAdapter` | Strongly-consistent direct view | All writes immediately visible | `true` |
+| `CloudSemanticsAdapter` | Eventual-consistency decorator | Writes visible after `advancePropagationClock()` | per `CloudProfile.atomicConditionalCreate` |
+
+### `CloudProfile`
+
+Each cloud provider package ships a `CloudProfile` instance describing its
+observable behaviour. The profile drives:
+
+- The `CloudSemanticsAdapter`'s propagation delay and CAS-atomicity simulation.
+- The reconciliation oracle's visibility model (via `visibleWriteSeqHigh`).
+- The simulator's 429/503 rate-limit injection (descriptive only — no
+  `kmdb`-side `QuotaAwareAdapter` is introduced).
+
+Two built-in profiles ship with the framework:
+
+| Profile | Consistency | `providesAtomicCas` | Use case |
+|---|---|---|---|
+| `CloudProfile.strong()` | Strong | `true` | Baseline (existing behaviour) |
+| `CloudProfile.eventual(maxPropagationDelayMs: N)` | Eventual | `false` | Delayed-visibility scenarios |
+
+Provider-specific profiles (e.g. a Drive profile with `allowsDuplicateNames: true`)
+ship in their respective provider packages.
+
+### Mixed-mode: one remote, two views
+
+"Mixed-mode" means one shared `SharedCloudBackend` accessed by two different
+adapter front-ends — for example, device 0 reaches it via a `CloudSemanticsAdapter`
+(simulating REST access) while device 1 reaches it via a `SharedBackendAdapter`
+(simulating FS-like access). This tests that a file written via REST is correctly
+seen by the FS-view device and vice versa.
+
+**True FS-and-REST-bridged-to-different-stores is not a real deployment** — a user
+picks one remote — so the harness never synthesises a bridge between distinct stores.
+
+```dart
+final backend = SharedCloudBackend();
+final config = HarnessConfig(
+  syncAdapterFactory: (deviceId) {
+    if (deviceId == 0) {
+      return CloudSemanticsAdapter(
+        backend: SharedBackendAdapter(backend, deviceId: 'rest'),
+        profile: CloudProfile.eventual(maxPropagationDelayMs: 200),
+      );
+    }
+    return SharedBackendAdapter(backend, deviceId: 'fs-$deviceId');
+  },
+  ...
+);
+```
+
+### Eventual-consistency visibility model
+
+When a `CloudSemanticsAdapter` is used, a completed sync may observe only a
+subset of prior peer pushes (those whose `writeSeq` is at or below the
+adapter's visibility cursor). The `ReconciliationAgent` tracks a
+`visibleWriteSeqHigh` field on each completed `ActionResult` and uses
+`visibleExpectedStateFor(deviceId, seqHigh)` to merge only the visible
+subset — not the full global state. This prevents false failures from
+delayed-visibility runs.
+
+After the run loop, `TestManager._settleAndVerifyConvergence()`:
+1. Advances the propagation clock on all `CloudSemanticsAdapter` fronts
+   (making all writes visible).
+2. Forces a final `syncForVerification()` on all devices.
+
+Global convergence is then asserted implicitly by the verdict comparison.
+
+**Fork detection is unchanged.** `_detectFork` keys on write *ordering*, not
+propagation. Delayed visibility does not affect fork detection and must not be
+used to modify `_detectFork`.
+
+### Simulated vs real service
+
+Running the harness against a real cloud service (e.g. real Google Drive) is
+slow, credential-gated, rate-limited, and non-deterministic — suitable only as
+an opt-in, pre-release soak (see RC-2 and RC-9 in §28). Deterministic CI value
+comes from the **behavioural simulator**. The framework supports both with the
+same harness scenarios by switching the per-device adapter factory.
+
+Every cloud provider package must ship:
+- Its real adapter.
+- A behavioural API simulator (fake `http.Client` implementing provider
+  REST endpoints with realistic semantics).
+- A `CloudProfile` instance for that provider.
+
+Real-service soak runs are reserved for pre-release (see §28 RC-2, RC-9).
+
+---
+
 ## Cloud quota protection
 
-If the configured adapter implements `QuotaAwareAdapter`, the `TestManager`
+If the configured adapter (resolved via `resolveAdapter(0)` as the
+representative device) implements `QuotaAwareAdapter`, the `TestManager`
 estimates the total sync operation count for the configured duration, device
 count, velocity, and document size distribution. If the estimate exceeds
 `safeOperationThreshold`, the run is rejected with `HarnessConfigException`
 identifying the configuration as too aggressive. A hard per-minute sync cap (60
 syncs/device/minute) is also enforced at runtime.
 
+When `syncAdapterFactory` is used and adapters are heterogeneous, device 0 is
+used as the representative device for the quota check.
+
 Adapters that do not implement `QuotaAwareAdapter` are assumed to have no quota
-constraint. This covers `MemorySyncAdapter` and `LocalDirectoryAdapter`.
+constraint. This covers `MemorySyncAdapter`, `LocalDirectoryAdapter`, and
+`SharedBackendAdapter`.
 
 ---
 

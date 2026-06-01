@@ -150,17 +150,18 @@ For each release:
   so the tombstone is dropped. Device B (carrying an older copy of the key in
   its synced SSTables) then converges with A. The key must remain deleted
   globally.
-- **Why not automated (as a gate):** the cross-device assertion requires the
-  per-device adapter harness from `docs/plans/plan_harness_mixed_storage.md`,
-  which is not yet landed. The in-process invariant — that PR2 retains
-  tombstones whose HLC is at or above the horizon — *is* covered in CI by
-  the `compaction_test.dart` and `lsm_engine_test.dart` PR2 tests; RC-6
-  is the cross-device companion.
+- **Why not automated (as a gate):** the in-harness scenario covers the
+  cross-device convergence invariant (tombstone non-resurrection) via
+  `packages/kmdb_harness/test/cloud_semantics_test.dart`
+  ("Tombstone non-resurrection — deleted key stays absent after peer syncs").
+  The compaction-side in-process invariant is covered by `compaction_test.dart`
+  and `lsm_engine_test.dart`. The remaining gap is exercising compaction with a
+  *real* elapsed HLC horizon (not a test clock) across separate processes —
+  that requires a real-OS multi-process run.
 - **Applies when:** changes to the tombstone-GC predicate, the horizon
   computation, the HWM-min helper, or `SyncEngine`'s horizon-provider
   registration.
-- **Prerequisites:** `plan_harness_mixed_storage.md` landed; multi-device
-  harness scenario from that plan's Step 5 wired up.
+- **Prerequisites:** native build; two separate database directories.
 - **Steps:** run the harness scenario that drives a fresh delete on device A,
   forces `_compactAll` with horizon below the tombstone HLC, then drives
   device B's sync. Assert `get` for the deleted key returns null on every
@@ -169,7 +170,8 @@ For each release:
   agree the key is absent.
 - **Related:** `docs/spec/06_storage_engine.md`, `docs/spec/12_sync.md`,
   `docs/plans/completed/plan_tombstone_gc.md`,
-  `docs/plans/plan_harness_mixed_storage.md`.
+  `docs/plans/completed/plan_harness_mixed_storage.md` (automated coverage),
+  `packages/kmdb_harness/test/cloud_semantics_test.dart`.
 
 ### RC-7 — Returning stale device does not resurrect deleted data
 - **Area:** sync re-admission (H4-FU2)
@@ -245,6 +247,34 @@ For each release:
   covers the mixed SSTable case.
 - **Related:** `docs/spec/26_document_versioning.md` (§ RQ3 analysis),
   `docs/spec/12_sync.md`, `docs/plans/plan_document_versioning.md`.
+
+### RC-9 — Real-service cloud-soak via the harness framework
+- **Area:** cloud sync
+- **Validates:** that a full multi-device `SyncEngine` push/pull cycle converges
+  correctly against a *real* cloud service (e.g. Google Drive, Dropbox), using
+  the same harness scenarios that run in CI against the behavioural simulator.
+  This confirms the simulator's fidelity and catches provider behaviour that the
+  simulator does not model exactly (rate limits, real propagation timing, service
+  outages).
+- **Why not automated:** requires real credentials and service access, consumes
+  quota, is non-deterministic, and is slow. Runs in-sandbox are unsuitable.
+- **Applies when:** before any release that ships or changes a cloud adapter;
+  after any change to `SyncEngine` push/pull logic or `ConsolidationCoordinator`.
+- **Prerequisites:** provider credentials configured (e.g.
+  `GOOGLE_DRIVE_TEST_CREDENTIALS`); a shared folder/bucket; the provider's
+  `QuotaAwareAdapter` configured with a safe threshold.
+- **Steps:**
+  1. Configure `HarnessConfig.syncAdapterFactory` to return a real provider
+     adapter (e.g. `GoogleDriveAdapter`) for each device.
+  2. Run the harness at preset 1 or 2 velocity for a short duration (e.g. 2
+     minutes).
+  3. Assert `report.passed == true` and no fork records indicate data loss.
+- **Expected result:** all devices converge to the global LWW state; no data
+  loss; consolidation behaves per the declared `CloudProfile` (single
+  consolidator if atomic, gated/skipped if not).
+- **Related:** `docs/spec/27_test_harness.md` (§ Simulated vs real service),
+  `docs/plans/completed/plan_harness_mixed_storage.md`,
+  RC-2 (Drive-specific soak).
 
 ---
 
