@@ -148,6 +148,7 @@ final class TestManager {
       await _setup();
       await _preSeed();
       await _runLoop();
+      await _settleAndVerifyConvergence();
       await _verifyVersionForks();
     } finally {
       await _teardown();
@@ -164,8 +165,16 @@ final class TestManager {
   // ── Stages ────────────────────────────────────────────────────────────────
 
   /// Estimates sync operations and rejects the run if quota would be exceeded.
+  ///
+  /// When a [HarnessConfig.syncAdapterFactory] is used, device 0's adapter is
+  /// used as the representative device for the quota check. This is appropriate
+  /// when all factory-produced adapters share the same quota constraint (e.g.
+  /// all front a single [SharedCloudBackend]). Adapters without a quota
+  /// constraint (not implementing [QuotaAwareAdapter]) are assumed unlimited.
   void _validateQuota() {
-    final adapter = config.syncAdapter;
+    // Use resolveAdapter(0) so the factory form is handled consistently.
+    // Device 0 is the representative device when adapters are heterogeneous.
+    final adapter = config.resolveAdapter(0);
     if (adapter is! QuotaAwareAdapter) return;
 
     // Rough estimate: ops ≈ devCount × syncsPerDevice × 4 (list+get+put+hwm).
@@ -173,11 +182,12 @@ final class TestManager {
     final syncsPerDevice = _estimateSyncs(durationMinutes);
     final estimatedOps = config.deviceCount * syncsPerDevice * 4;
 
-    if (estimatedOps > (adapter as QuotaAwareAdapter).safeOperationThreshold) {
+    final quotaAdapter = adapter as QuotaAwareAdapter;
+    if (estimatedOps > quotaAdapter.safeOperationThreshold) {
       throw HarnessConfigException(
         'Estimated sync operation count ($estimatedOps) exceeds the adapter '
         'safe threshold '
-        '(${(adapter as QuotaAwareAdapter).safeOperationThreshold}). '
+        '(${quotaAdapter.safeOperationThreshold}). '
         'Reduce deviceCount, duration, or velocity.',
       );
     }
@@ -198,11 +208,17 @@ final class TestManager {
   }
 
   /// Creates and opens all device databases.
+  ///
+  /// Each device receives its own adapter from [HarnessConfig.resolveAdapter].
+  /// When [HarnessConfig.syncAdapter] is used (the single-instance convenience
+  /// form), every device gets the same shared instance — identical to the
+  /// previous behaviour. When [HarnessConfig.syncAdapterFactory] is used, each
+  /// device gets a fresh, per-device adapter from the factory.
   Future<void> _setup() async {
     for (var i = 0; i < config.deviceCount; i++) {
       final device = Device(
         deviceIndex: i,
-        syncAdapter: config.syncAdapter,
+        syncAdapter: config.resolveAdapter(i),
         reconciler: _reconciler,
         // Use a unique in-memory path per device.
         dbPath: 'harness_device_$i',
@@ -446,6 +462,43 @@ final class TestManager {
       versionForksPassed: _versionForksPassed,
       versionForksChecked: _versionForksChecked,
     );
+  }
+
+  // ── Settle and convergence verification ──────────────────────────────────
+
+  /// Advances the propagation clock on all devices and performs a final
+  /// sync pass to verify global convergence.
+  ///
+  /// This is the "settle" step for eventually-consistent profiles (modelled
+  /// on [_verifyVersionForks]):
+  ///
+  /// 1. Advance each device's propagation clock past the maximum propagation
+  ///    delay so every committed write becomes visible to all adapters.
+  /// 2. Unpartition all devices.
+  /// 3. Perform a final `syncForVerification()` on all devices so that all
+  ///    now-visible writes are pulled.
+  /// 4. For each device, record a synthetic "settle sync" in the
+  ///    [ReconciliationAgent] so its expected state reflects full convergence.
+  ///
+  /// Under strongly-consistent profiles (or with legacy [MemorySyncAdapter]),
+  /// advancing the clock is a no-op and the behaviour is identical to the
+  /// previous post-run-loop state — this method does not break backward
+  /// compatibility.
+  ///
+  /// Global convergence is not asserted here directly: the [ReconciliationAgent]
+  /// updates each device's expected state during the final sync pass, so the
+  /// verdict produced by [_buildReport] implicitly reflects the settled state.
+  Future<void> _settleAndVerifyConvergence() async {
+    // Step 1: advance propagation clocks so all writes become visible.
+    for (final device in _devices) {
+      device.advancePropagationClock();
+    }
+
+    // Step 2 + 3: unpartition and do a final sync on every device.
+    // syncForVerification already unpartitions, so we just call it.
+    for (final device in _devices) {
+      await device.syncForVerification();
+    }
   }
 
   // ── Version fork verification ─────────────────────────────────────────────

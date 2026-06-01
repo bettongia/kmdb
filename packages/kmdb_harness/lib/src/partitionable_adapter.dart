@@ -15,6 +15,7 @@
 import 'dart:typed_data';
 
 import 'package:kmdb/kmdb.dart';
+import 'package:kmdb/kmdb_test_cloud_support.dart' show VisibilityCursorAdapter;
 
 /// Exception thrown by [PartitionableAdapter] when a network partition is
 /// active and a sync operation is attempted.
@@ -64,6 +65,13 @@ final class PartitionableAdapter implements SyncStorageAdapter {
   PartitionableAdapter(this._delegate);
 
   final SyncStorageAdapter _delegate;
+
+  /// The underlying delegate adapter.
+  ///
+  /// Exposed so callers can reach decorator-specific APIs (e.g.
+  /// [CloudSemanticsAdapter.advancePropagationClock]) without requiring
+  /// [PartitionableAdapter] to know about every concrete delegate type.
+  SyncStorageAdapter get delegate => _delegate;
 
   bool _partitioned = false;
 
@@ -124,4 +132,18 @@ final class PartitionableAdapter implements SyncStorageAdapter {
 
   @override
   bool get providesAtomicCas => _delegate.providesAtomicCas;
+
+  /// The visible write-sequence high-water mark for this adapter's delegate,
+  /// or `null` if the delegate does not implement [VisibilityCursorAdapter].
+  ///
+  /// Used by [Device._sync] to populate [ActionResult.visibleWriteSeqHigh].
+  /// When `null`, the [ReconciliationAgent] falls back to the legacy full
+  /// global-merge path (backward compatible with [MemorySyncAdapter]).
+  int? get visibleWriteSeq {
+    final delegate = _delegate;
+    if (delegate is VisibilityCursorAdapter) {
+      return (delegate as VisibilityCursorAdapter).visibleWriteSeq;
+    }
+    return null;
+  }
 }

@@ -145,6 +145,81 @@ void main() {
       });
     });
 
+    group('syncAdapterFactory', () {
+      test('factory is called with the correct device index', () {
+        final seen = <int>[];
+        final config = HarnessConfig(
+          syncAdapterFactory: (i) {
+            seen.add(i);
+            return MemorySyncAdapter();
+          },
+          velocityPreset: VelocityPreset.one,
+          deviceCount: 3,
+        );
+        for (var i = 0; i < 3; i++) {
+          config.resolveAdapter(i);
+        }
+        expect(seen, equals([0, 1, 2]));
+      });
+
+      test('resolveAdapter returns distinct instances from factory', () {
+        final config = HarnessConfig(
+          syncAdapterFactory: (_) => MemorySyncAdapter(),
+          velocityPreset: VelocityPreset.one,
+        );
+        // Each call produces a fresh instance.
+        final a = config.resolveAdapter(0);
+        final b = config.resolveAdapter(0);
+        expect(a, isNot(same(b)));
+      });
+
+      test('resolveAdapter returns same instance from syncAdapter field', () {
+        final adapter = MemorySyncAdapter();
+        final config = HarnessConfig(
+          syncAdapter: adapter,
+          velocityPreset: VelocityPreset.one,
+        );
+        expect(config.resolveAdapter(0), same(adapter));
+        expect(config.resolveAdapter(1), same(adapter));
+      });
+
+      test('rejects both syncAdapter and syncAdapterFactory', () {
+        expect(
+          () => HarnessConfig(
+            syncAdapter: MemorySyncAdapter(),
+            syncAdapterFactory: (_) => MemorySyncAdapter(),
+            velocityPreset: VelocityPreset.one,
+          ),
+          throwsArgumentError,
+        );
+      });
+
+      test('rejects neither syncAdapter nor syncAdapterFactory', () {
+        expect(
+          () => HarnessConfig(velocityPreset: VelocityPreset.one),
+          throwsArgumentError,
+        );
+      });
+
+      test('syncAdapter getter returns null when factory was used', () {
+        final config = HarnessConfig(
+          syncAdapterFactory: (_) => MemorySyncAdapter(),
+          velocityPreset: VelocityPreset.one,
+        );
+        expect(config.syncAdapter, isNull);
+        expect(config.syncAdapterFactory, isNotNull);
+      });
+
+      test('syncAdapterFactory getter returns null when field was used', () {
+        final config = HarnessConfig(
+          syncAdapter: MemorySyncAdapter(),
+          velocityPreset: VelocityPreset.one,
+        );
+        expect(config.syncAdapterFactory, isNull);
+        expect(config.syncAdapter, isNotNull);
+      });
+    });
+
     group('validation', () {
       test('rejects when no sync trigger is configured', () {
         expect(
