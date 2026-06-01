@@ -1,6 +1,6 @@
 # Document Versioning
 
-**Status**: Implemented
+**Status**: Complete
 
 **PR link**: _pending_
 
