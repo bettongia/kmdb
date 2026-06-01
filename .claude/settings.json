@@ -18,7 +18,7 @@
   "sandbox": {
     "enabled": true,
     "filesystem": {
-      "allowWrite": ["./"],
+      "allowWrite": ["./", ".worktrees/"],
       "denyRead": ["~/"],
       "allowRead": [
         "./",
