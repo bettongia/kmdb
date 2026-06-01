@@ -2,16 +2,17 @@
 
 **Status**: Complete
 
-**PR link**: _pending_
+**PR link**: https://github.com/bettongia/kmdb/pull/33
 
 **Implementation model:** Sonnet, moderate review of the soft-delete,
 full-drain, and compaction-trimming semantics.
 
-**Proposal**: [docs/proposals/test_harness.md](../docs/proposals/test_harness.md) (sync testing
-context that informed the priority of this work)
+**Proposal**:
+[docs/proposals/test_harness.md](../docs/proposals/test_harness.md) (sync
+testing context that informed the priority of this work)
 
-**Spec**: `docs/spec/26_document_versioning.md` (created during Phase 1 — section
-26 was the next available number when the file was created).
+**Spec**: `docs/spec/26_document_versioning.md` (created during Phase 1 —
+section 26 was the next available number when the file was created).
 
 **Dependencies** (fixes from the 2026-05-22 code review this plan builds on —
 **all three have landed as of v0.02.01, 2026-06-01**):
@@ -27,8 +28,8 @@ context that informed the priority of this work)
   `dropTombstone(int horizonHlcMs)`. `$ver:` defaults to
   `RetainAllVersionsPolicy`. This plan **extends** the framework by adding a
   `filterGroup` method (see RQ1).
-- `plan_vault_gc_failsafe.md` (H3) — **COMPLETE (PR #22).** The single
-  fail-safe reader is `VaultRefCount.read(KvStore, sha256)`.
+- `plan_vault_gc_failsafe.md` (H3) — **COMPLETE (PR #22).** The single fail-safe
+  reader is `VaultRefCount.read(KvStore, sha256)`.
 
 ## Problem statement
 
@@ -48,60 +49,69 @@ respects version refs, no data is silently discarded on any device.
 
 ## Open questions (all resolved)
 
-- [x] **Max version count semantics** — defaults `maxVersions: 4, retentionDays: 90`.
-  Constructor accepts `null` for either field (no constraint). `VersionConfig.defaults`
-  provides the recommended production values.
+- [x] **Max version count semantics** — defaults
+      `maxVersions: 4, retentionDays: 90`. Constructor accepts `null` for either
+      field (no constraint). `VersionConfig.defaults` provides the recommended
+      production values.
 
 - [x] **Delete is a soft delete (Option B)** — a delete records a `$ver:`
-  delete-version (a tombstone version) in addition to the main-namespace tombstone.
+      delete-version (a tombstone version) in addition to the main-namespace
+      tombstone.
 
-- [x] **Deleted documents are fully reclaimed** — the `maxVersions` keep-N count is a
-  floor for **live** documents only. Once deleted, the chain purges once the
-  delete-version ages past `retentionDays`.
+- [x] **Deleted documents are fully reclaimed** — the `maxVersions` keep-N count
+      is a floor for **live** documents only. Once deleted, the chain purges
+      once the delete-version ages past `retentionDays`.
 
-- [x] **RQ1–RQ6** resolved: see the original `Investigated` plan in the main repo.
+- [x] **RQ1–RQ6** resolved: see the original `Investigated` plan in the main
+      repo.
 
 ## Implementation plan
 
 ### Phase 1 — Core types and storage
 
 - [x] Write spec `docs/spec/26_document_versioning.md`
-- [x] Implement `VersionEntry` (`hlc`, `encodedValue`, `promotedFrom?`) with CBOR
-  round-trip; handles BigInt decode from cbor library for large HLC values
-- [x] Implement `VersionConfig` (`maxVersions`, `retentionDays`, both optional/nullable;
-  `maxVersions: 0` + no `retentionDays` = versioning disabled). Constructor defaults to
-  `null`; `VersionConfig.defaults` provides `maxVersions: 4, retentionDays: 90`
+- [x] Implement `VersionEntry` (`hlc`, `encodedValue`, `promotedFrom?`) with
+      CBOR round-trip; handles BigInt decode from cbor library for large HLC
+      values
+- [x] Implement `VersionConfig` (`maxVersions`, `retentionDays`, both
+      optional/nullable; `maxVersions: 0` + no `retentionDays` = versioning
+      disabled). Constructor defaults to `null`; `VersionConfig.defaults`
+      provides `maxVersions: 4, retentionDays: 90`
 - [x] Implement `VersionManager` — `VersionWriteAugmentor`, `readVersions`,
-  `readVersionAt`, `VersionConfigStore`; `versionNamespace()` helper
+      `readVersionAt`, `VersionConfigStore`; `versionNamespace()` helper
 
 ### Phase 2 — Write path and query API
 
-- [x] Extend `KmdbCollection` write interception via `VersionWriteAugmentor` to emit
-  a `$ver:` entry in the **same** `WriteBatch` as every document write and every delete
+- [x] Extend `KmdbCollection` write interception via `VersionWriteAugmentor` to
+      emit a `$ver:` entry in the **same** `WriteBatch` as every document write
+      and every delete
 - [x] Add `KmdbCollection.getVersions(String docKey)` → `List<DocumentVersion>`
-- [x] Add `KmdbCollection.promoteVersion(String docKey, Hlc version)` → `Future<void>`
-  (errors with `VersionNotFoundError`); handles both put-version promotion (un-delete)
-  and delete-version promotion (re-delete)
-- [x] Extend `KmdbDatabase.open()` to accept `versionConfigs` per collection (stored
-  in `$meta` via `VersionConfigStore` so it syncs)
+- [x] Add `KmdbCollection.promoteVersion(String docKey, Hlc version)` →
+      `Future<void>` (errors with `VersionNotFoundError`); handles both
+      put-version promotion (un-delete) and delete-version promotion (re-delete)
+- [x] Extend `KmdbDatabase.open()` to accept `versionConfigs` per collection
+      (stored in `$meta` via `VersionConfigStore` so it syncs)
 - [x] Export `DocumentVersion`, `VersionConfig`, `VersionNotFoundError` from
-  `lib/kmdb.dart`
+      `lib/kmdb.dart`
 
 ### Phase 3 — Compaction trimming
 
 - [x] Add `filterGroup` method to `ReclamationPolicy` with default no-op; update
-  `RetainAllVersionsPolicy` to inherit the default
-- [x] Implement `VersionRetentionPolicy` with keep-N / retentionDays trim, post-delete
-  full purge, correct `null` vs zero semantics for each constraint
-- [x] Add `nowMs` to `CompactionJob` constructor; add `droppedVersionValues` field
+      `RetainAllVersionsPolicy` to inherit the default
+- [x] Implement `VersionRetentionPolicy` with keep-N / retentionDays trim,
+      post-delete full purge, correct `null` vs zero semantics for each
+      constraint
+- [x] Add `nowMs` to `CompactionJob` constructor; add `droppedVersionValues`
+      field
 - [x] Modify `CompactionJob.run()` to buffer `collapseVersions=false` groups,
-  call `filterGroup` at group-end, emit survivors, append dropped values
+      call `filterGroup` at group-end, emit survivors, append dropped values
 - [x] In `LsmEngine._compactAll()`: read `VersionConfig` per collection from
-  `_metaStore` via `versionRegistryProvider`; pass `nowMs` to job
-- [x] Add `setVersionDropCallback` to `LsmEngine` (mirrors `setMetaStore` pattern);
-  invoke callback with `droppedVersionValues` after compaction commits
-- [x] Add public `VaultRefInterceptor.decrementVersionRefs` method; wire callback in
-  `KvStoreImpl`/`KmdbDatabase` for vault ref release
+      `_metaStore` via `versionRegistryProvider`; pass `nowMs` to job
+- [x] Add `setVersionDropCallback` to `LsmEngine` (mirrors `setMetaStore`
+      pattern); invoke callback with `droppedVersionValues` after compaction
+      commits
+- [x] Add public `VaultRefInterceptor.decrementVersionRefs` method; wire
+      callback in `KvStoreImpl`/`KmdbDatabase` for vault ref release
 
 ### Phase 4 — CLI
 
@@ -111,31 +121,34 @@ respects version refs, no data is silently discarded on any device.
 
 ### Phase 5 — Tests and docs
 
-- [x] Unit tests: `VersionEntry` serialisation (incl. BigInt decode for large HLCs),
-  `VersionConfig` constructor/fromMap/disabled semantics, `VersionRetentionPolicy.filterGroup`
-  (keep-N boundary, retentionDays boundary, combined, post-delete purge, null constraints)
+- [x] Unit tests: `VersionEntry` serialisation (incl. BigInt decode for large
+      HLCs), `VersionConfig` constructor/fromMap/disabled semantics,
+      `VersionRetentionPolicy.filterGroup` (keep-N boundary, retentionDays
+      boundary, combined, post-delete purge, null constraints)
 - [x] Integration tests: write → list versions; promote → new version appears,
-  old value retrievable; promote creates new version with `promotedFrom`;
-  promote deleted document un-deletes it; promote delete-version re-deletes;
-  promote trimmed/unknown → `VersionNotFoundError`; disabled versioning no-op
-- [x] Delete records a `$ver:` delete-version; document is absent but versions remain
-- [x] Compaction trimming: maxVersions trim, retentionDays window, deleted-document
-  post-delete purge, live document floor preserved
+      old value retrievable; promote creates new version with `promotedFrom`;
+      promote deleted document un-deletes it; promote delete-version re-deletes;
+      promote trimmed/unknown → `VersionNotFoundError`; disabled versioning
+      no-op
+- [x] Delete records a `$ver:` delete-version; document is absent but versions
+      remain
+- [x] Compaction trimming: maxVersions trim, retentionDays window,
+      deleted-document post-delete purge, live document floor preserved
 - [x] RQ4 crash atomicity: truncated WAL batch drops document AND version entry
 - [x] CLI tests: `versions`, `promote` commands
 - [x] Spec created at `docs/spec/26_document_versioning.md`
 - [x] Update `CLAUDE.md` implementation status table (Phase 11 added)
 - [x] Phase 6 (harness): `getVersions` assertions for fork-record losers in
-  `kmdb_harness`
+      `kmdb_harness`
 
 ### Phase 6 — Harness update
 
 - [x] Add `getVersions` assertions to `kmdb_harness` for every recorded
-  fork-record loser: `Device.getVersions` + `Device.syncForVerification`;
-  `TestManager._verifyVersionForks` forces a final sync then checks both
-  participating devices have the loser's value in their `$ver:` history
+      fork-record loser: `Device.getVersions` + `Device.syncForVerification`;
+      `TestManager._verifyVersionForks` forces a final sync then checks both
+      participating devices have the loser's value in their `$ver:` history
 - [x] Update `HarnessReport` to include `versionForksPassed` and
-  `versionForksChecked` counts; updated `diffReports` and tests
+      `versionForksChecked` counts; updated `diffReports` and tests
 
 ## Implementation notes
 
@@ -152,12 +165,13 @@ both `int` and `BigInt` to handle this correctly. Similarly for the `hlc` field.
 The `VersionConfig()` constructor has both fields defaulting to `null` (no
 constraint). `VersionConfig.defaults` is a named constant with
 `maxVersions: 4, retentionDays: 90`. `VersionConfig.fromMap` uses `containsKey`
-to avoid applying default values when a key is absent, enabling correct round-trip
-of disabled configs (where `retentionDays` is intentionally `null`).
+to avoid applying default values when a key is absent, enabling correct
+round-trip of disabled configs (where `retentionDays` is intentionally `null`).
 
 ### VersionRetentionPolicy.filterGroup semantics
 
-- `null maxVersions` means "no count ceiling" — only the window constraint applies.
+- `null maxVersions` means "no count ceiling" — only the window constraint
+  applies.
 - `null retentionDays` means "no window" — only the count constraint applies.
 - Both `null` means "no constraints" — all entries retained.
 - The newest entry (rank 1) is always retained regardless.
