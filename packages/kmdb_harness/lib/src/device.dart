@@ -330,6 +330,44 @@ final class Device {
     MemoryStorageAdapter.releaseAllLocks();
   }
 
+  // ── Verification helpers ──────────────────────────────────────────────────
+
+  /// Forces a sync without recording the result in the [ReconciliationAgent].
+  ///
+  /// Unpartitions the adapter first so any partition active at the end of the
+  /// run loop does not block the verification step. Used by [TestManager]
+  /// before calling [getVersions] to ensure `$ver:` entries from all devices
+  /// have propagated.
+  Future<void> syncForVerification() async {
+    if (_state == DeviceState.uninitialised) return;
+    final db = _db;
+    if (db == null) return;
+    _syncAdapter.setPartitioned(false);
+    try {
+      await db.sync(
+        syncAdapter: _syncAdapter,
+        localAdapter: _localStorageAdapter,
+      );
+    } catch (_) {
+      // Best-effort; don't fail verification if the sync itself fails.
+    }
+  }
+
+  /// Returns all version history entries for [docKey] in [collectionName].
+  ///
+  /// Returns an empty list when the device is not ready, the collection does
+  /// not exist, or no version entries exist for the key. Used by [TestManager]
+  /// to assert that fork-loser values are preserved in the version history
+  /// after sync.
+  Future<List<DocumentVersion>> getVersions(
+    String collectionName,
+    String docKey,
+  ) async {
+    if (_state != DeviceState.ready) return const [];
+    final col = _getOrCreateCollection(collectionName);
+    return col.getVersions(docKey);
+  }
+
   // ── Helpers ──────────────────────────────────────────────────────────────
 
   /// Generates a deterministic 8-character hex device ID from the device index.

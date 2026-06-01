@@ -68,6 +68,7 @@ final class CompactionJob {
     required this.nextSeq,
     this.allLevels = false,
     this.horizon = const Hlc(0, 0),
+    this.nowMs = 0,
     ReclamationPolicyRegistry? policyRegistry,
   }) : _policyRegistry = policyRegistry ?? ReclamationPolicyRegistry();
 
@@ -115,6 +116,18 @@ final class CompactionJob {
   /// PR2 never drop tombstones (no realistic tombstone HLC is below zero).
   final Hlc horizon;
 
+  /// Wall-clock time at job-construction time, in milliseconds since Unix
+  /// epoch. Injected by [LsmEngine._compactAll] as
+  /// `DateTime.now().millisecondsSinceEpoch` (RQ6 clock-injection pattern).
+  ///
+  /// Passed to [ReclamationPolicy.filterGroup] so the retention-window check
+  /// does not call `DateTime.now()` internally. Tests supply a fixed value
+  /// to obtain deterministic behaviour.
+  ///
+  /// Defaults to `0` (epoch) so callers that don't supply a value never
+  /// incorrectly age out entries (all entries would appear to be in the future).
+  final int nowMs;
+
   /// Resolves the [ReclamationPolicy] for each namespace encountered during
   /// the compaction's streaming transform. PR1 of H4 uses this to gate
   /// version collapse; PR2 of H4 also uses it to gate tombstone drops.
@@ -139,6 +152,18 @@ final class CompactionJob {
   /// must be advanced to [horizon].
   int tombstonesDropped = 0;
 
+  /// Raw value bytes of every `$ver:` version entry trimmed by
+  /// [ReclamationPolicy.filterGroup] during [run].
+  ///
+  /// Populated by the retain-all path when `collapseVersions=false` and
+  /// `filterGroup` returns a subset of the group's entries. [LsmEngine] reads
+  /// this field after [run] returns and, if non-empty, invokes the registered
+  /// version-drop callback to release vault ref counts (RQ5).
+  ///
+  /// Reset to `[]` at the start of each [run] call so the object is safe to
+  /// reuse in tests (parallel to [tombstonesDropped]).
+  List<Uint8List> droppedVersionValues = [];
+
   // ── Run ───────────────────────────────────────────────────────────────────
 
   /// Executes the compaction and returns the [VersionEdit] that was written.
@@ -159,8 +184,9 @@ final class CompactionJob {
   /// The caller is responsible for deleting the input files after the
   /// [VersionEdit] is confirmed durable.
   Future<VersionEdit> run() async {
-    // Reset the drop counter so run() is safe to call again (e.g. in tests).
+    // Reset drop counters so run() is safe to call again (e.g. in tests).
     tombstonesDropped = 0;
+    droppedVersionValues = [];
 
     // Open all input readers (ordered newest-first: index 0 = highest priority).
     final readers = <SstableReader>[];
@@ -197,10 +223,16 @@ final class CompactionJob {
     //                              true (H4 PR2: gated by [allLevels] +
     //                              [horizon]), in which case the group is
     //                              elided entirely.
-    //   - collapseVersions=false → emit every entry verbatim. Reserved for
-    //                              `$ver:` and other history-bearing classes.
+    //   - collapseVersions=false → buffer the entire group; at group-end call
+    //                              policy.filterGroup() to obtain the retained
+    //                              subset. Drop entries not in the survivor set
+    //                              and append their values to
+    //                              [droppedVersionValues] for the post-compaction
+    //                              vault ref-decrement callback (RQ5).
     Uint8List? groupPrefix;
     MergeEntry? pendingCollapsed;
+    // Buffer for collapseVersions=false groups (e.g. $ver: entries).
+    List<MergeEntry>? groupBuffer;
     ReclamationPolicy? policy;
 
     void emit(Uint8List key, Uint8List value) {
@@ -235,17 +267,45 @@ final class CompactionJob {
       emit(entry.key, entry.value);
     }
 
+    /// Flushes the current [groupBuffer] through [policy.filterGroup], emits
+    /// survivors, and records dropped entries' values in [droppedVersionValues].
+    void flushGroupBuffer(ReclamationPolicy activePolicy) {
+      final buf = groupBuffer;
+      if (buf == null || buf.isEmpty) return;
+      groupBuffer = null;
+
+      final survivors = activePolicy.filterGroup(buf, nowMs: nowMs);
+      // Emit every survivor.
+      for (final s in survivors) {
+        emit(s.key, s.value);
+      }
+      // Record dropped entries' values for the post-compaction vault
+      // ref-decrement callback (RQ5). Build a set of survivor keys for O(1)
+      // membership check.
+      if (survivors.length < buf.length) {
+        final survivorKeys = survivors.map((s) => s.key).toSet();
+        for (final dropped in buf) {
+          if (!survivorKeys.contains(dropped.key)) {
+            droppedVersionValues.add(dropped.value);
+          }
+        }
+      }
+    }
+
     await for (final entry in merge.entries) {
       final prefixLen = entry.key.length - 9;
       final isNewGroup =
           groupPrefix == null || !_keyMatchesPrefix(entry.key, groupPrefix);
 
       if (isNewGroup) {
-        // Flush the previous collapse group (if any) through the
-        // tombstone-drop check.
+        // Flush the previous group (collapsed or buffered) before starting a
+        // new one.
         if (pendingCollapsed != null) {
           flushCollapsed(pendingCollapsed, policy!);
           pendingCollapsed = null;
+        }
+        if (groupBuffer != null) {
+          flushGroupBuffer(policy!);
         }
         // Resolve the policy for this new group's namespace.
         final ns = KeyCodec.decodeNamespace(entry.key);
@@ -257,12 +317,16 @@ final class CompactionJob {
         // Buffer; the last (highest-HLC) entry in this group wins.
         pendingCollapsed = entry;
       } else {
-        // Retain-all class — pass through unchanged (tombstones included).
-        emit(entry.key, entry.value);
+        // History-bearing class — buffer the entire group for filterGroup.
+        (groupBuffer ??= []).add(entry);
       }
     }
+    // Flush any remaining group.
     if (pendingCollapsed != null) {
       flushCollapsed(pendingCollapsed, policy!);
+    }
+    if (groupBuffer != null) {
+      flushGroupBuffer(policy!);
     }
 
     if (entryCount == 0) {
