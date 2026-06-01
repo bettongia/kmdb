@@ -109,12 +109,16 @@ final class StorageException implements Exception {
 /// Thrown when an exclusive database lock cannot be acquired because another
 /// process already holds it.
 final class LockException implements Exception {
-  const LockException(this.lockPath);
+  const LockException(this.lockPath, {this.message});
 
   final String lockPath;
 
+  /// Optional human-readable reason (e.g. "database is already open in another tab").
+  final String? message;
+
   @override
-  String toString() =>
-      'LockException: cannot acquire exclusive lock on $lockPath — '
-      'another process may have the database open';
+  String toString() {
+    final detail = message ?? 'another process may have the database open';
+    return 'LockException: cannot acquire exclusive lock on $lockPath — $detail';
+  }
 }
