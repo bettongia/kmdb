@@ -31,10 +31,15 @@ hlc:       write HLC               (unique per version — differentiates entrie
 value:     VersionEntry { hlc, encodedValue, promotedFrom? }
 ```
 
-This is a **history-bearing** namespace: the `ReclamationPolicyRegistry`
-assigns `RetainAllVersionsPolicy` (now extended with a `filterGroup` method) to
-all `$ver:` namespaces, so multiple versions of the same key are never collapsed
-by ordinary compaction.
+This is a **history-bearing** namespace. The `ReclamationPolicyRegistry`
+assigns a `ReclamationPolicy` per namespace whose `collapseVersions` is `false`
+for `$ver:` namespaces, so multiple versions of the same key are never collapsed
+by ordinary compaction. For a configured `$ver:{collection}` namespace the
+registry selects a `VersionRetentionPolicy` (which performs the keep-N /
+retentionDays trim); any other `$ver:` namespace falls through to
+`RetainAllVersionsPolicy`, which retains every version (its `filterGroup` is a
+no-op). See [Compaction trimming](#compaction-trimming) for how the registry is
+built at compaction time.
 
 ### Key grouping in compaction
 
@@ -202,8 +207,9 @@ List<MergeEntry> filterGroup(
 ```
 
 The default implementation returns all entries unchanged (backward compatible).
-`RetainAllVersionsPolicy` inherits the default; `VersionRetentionPolicy`
-overrides it with the keep-N / retentionDays logic.
+Both `CollapseToNewestPolicy` and `RetainAllVersionsPolicy` inherit this no-op
+default — neither trims `$ver:` history. Only `VersionRetentionPolicy` overrides
+`filterGroup` with the keep-N / retentionDays logic.
 
 ### `VersionRetentionPolicy`
 
@@ -232,11 +238,29 @@ for `$ver:` namespaces:
   `policy.filterGroup(buffer, nowMs: nowMs)`, emits survivors, and appends
   dropped entries' values to `droppedVersionValues`.
 
+### `ReclamationPolicyRegistry` selection
+
+`ReclamationPolicyRegistry` resolves the `ReclamationPolicy` for each namespace
+by, in order:
+
+1. **Exact match** against a map of per-namespace version policies (populated via
+   `ReclamationPolicyRegistry.withVersionPolicies`). A configured
+   `$ver:{collection}` namespace maps to its `VersionRetentionPolicy`.
+2. **Prefix match** against the retain-all prefixes (`$ver:` by default) →
+   `RetainAllVersionsPolicy` (retain every version, no-op `filterGroup`).
+3. **Default** → `CollapseToNewestPolicy`.
+
+So a `$ver:{collection}` with a configured `VersionConfig` is trimmed by its
+`VersionRetentionPolicy`; any other `$ver:` namespace retains all versions via
+`RetainAllVersionsPolicy`.
+
 ### `LsmEngine` changes
 
-- Reads `VersionConfig` entries from `_metaStore` in `_compactAll()`, builds a
-  `VersionRetentionPolicy` per `$ver:{collection}` prefix, and constructs a
-  `ReclamationPolicyRegistry` before passing it to the `CompactionJob`.
+- Reads each collection's `VersionConfig` from `_metaStore` in `_compactAll()`,
+  builds a `VersionRetentionPolicy` keyed by exact `$ver:{collection}` namespace,
+  and constructs the `ReclamationPolicyRegistry` (via
+  `ReclamationPolicyRegistry.withVersionPolicies`) before passing it to the
+  `CompactionJob`.
 - Adds a `setVersionDropCallback(Future<void> Function(List<Uint8List>)?)` injection
   point (same pattern as `setMetaStore`). After `_compactAll` commits and the
   level maps are updated, if `job.droppedVersionValues.isNotEmpty`, the callback
