@@ -125,7 +125,7 @@ respects version refs, no data is silently discarded on any device.
 - [x] CLI tests: `versions`, `promote` commands
 - [x] Spec created at `docs/spec/26_document_versioning.md`
 - [x] Update `CLAUDE.md` implementation status table (Phase 11 added)
-- [ ] Phase 6 (harness): `getVersions` assertions for fork-record losers in
+- [x] Phase 6 (harness): `getVersions` assertions for fork-record losers in
   `kmdb_harness`
 
 ### Phase 6 — Harness update
