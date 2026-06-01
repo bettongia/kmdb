@@ -16,12 +16,15 @@ import 'dart:async';
 
 import '../encoding/value_codec.dart';
 import '../engine/kvstore/kv_store.dart';
+import '../engine/util/hlc.dart';
 import '../engine/util/key_codec.dart';
 import '../search/hybrid/hybrid_manager.dart';
 import '../search/search_mode.dart';
 import '../search/search_result.dart';
 import '../vault/vault_ref.dart';
 import '../vault/vault_store.dart';
+import '../versioning/version_entry.dart';
+import '../versioning/version_manager.dart';
 import 'exceptions.dart';
 import 'filter/filter.dart';
 import 'kmdb_codec.dart';
@@ -250,6 +253,126 @@ final class KmdbCollection<T> {
     final updated = updater(current);
     await put(updated);
     return updated;
+  }
+
+  // ── Version history ────────────────────────────────────────────────────────
+
+  /// Returns all historical version entries for the document with [key],
+  /// sorted by HLC **descending** (newest first).
+  ///
+  /// Includes the delete-version entry if the document was deleted. Returns an
+  /// empty list if the document has never been written to a versioned
+  /// collection, or if versioning was disabled when the document was created.
+  ///
+  /// Each [DocumentVersion] carries the HLC timestamp, decoded document value
+  /// (or `null` for a delete-version), and an [DocumentVersion.isDelete] flag.
+  /// The [DocumentVersion.hlc] can be passed to [promoteVersion] to restore
+  /// that version.
+  ///
+  /// ## Example
+  ///
+  /// ```dart
+  /// final versions = await tasks.getVersions(docKey);
+  /// for (final v in versions) {
+  ///   final label = v.isDelete ? '(deleted)' : v.value?['title'];
+  ///   print('${v.timestamp}: $label');
+  /// }
+  /// ```
+  Future<List<DocumentVersion>> getVersions(String key) =>
+      readVersions(_db.store, namespace, key);
+
+  /// Promotes a prior version of [docKey] to become the current latest write.
+  ///
+  /// Reads the `$ver:` entry for [fromVersion]. Writes the stored
+  /// `encodedValue` as a new put with a fresh HLC — from the perspective of
+  /// other devices this is a normal LWW-eligible update. The new write
+  /// produces its own `$ver:` entry with `promotedFrom` set to [fromVersion],
+  /// providing a clear audit trail.
+  ///
+  /// ## Un-deleting
+  ///
+  /// Promoting a put-version of a deleted document effectively un-deletes it:
+  /// the promoted put gets a new HLC that is higher than the tombstone, so it
+  /// wins LWW. Vault blobs referenced by the promoted version are re-acquired
+  /// via `VaultRefInterceptor`.
+  ///
+  /// ## Promoting a delete-version
+  ///
+  /// If [fromVersion] is the HLC of a delete-version entry, the promotion
+  /// re-issues a tombstone (re-deletes the document). The tombstone gets a
+  /// fresh HLC and wins LWW against any prior put.
+  ///
+  /// ## Errors
+  ///
+  /// Throws [VersionNotFoundError] if the entry for [fromVersion] no longer
+  /// exists (e.g. trimmed by compaction, or versioning was disabled for this
+  /// collection when the document was written).
+  ///
+  /// ## Example
+  ///
+  /// ```dart
+  /// // Roll back to the previous version.
+  /// final versions = await tasks.getVersions(docKey);
+  /// if (versions.length >= 2) {
+  ///   await tasks.promoteVersion(docKey, versions[1].hlc);
+  /// }
+  /// ```
+  Future<void> promoteVersion(String docKey, Hlc fromVersion) async {
+    final sourceEntry = await readVersionAt(
+      _db.store,
+      namespace,
+      docKey,
+      fromVersion,
+    );
+    if (sourceEntry == null) {
+      throw VersionNotFoundError(
+        docKey: docKey,
+        namespace: namespace,
+        requestedHlc: fromVersion,
+      );
+    }
+
+    if (sourceEntry.isDelete) {
+      // Promoting a delete-version re-issues the deletion.
+      // Read the current document (if any) to pass to augmentors as oldDoc.
+      final existingBytes = await _db.cache.get(namespace, docKey);
+      final oldDoc = existingBytes != null
+          ? ValueCodec.decode(existingBytes)
+          : null;
+      if (oldDoc == null) return; // already deleted — no-op
+      await _writePromotedDelete(
+        key: docKey,
+        oldDoc: oldDoc,
+        promotedFrom: fromVersion,
+      );
+      return;
+    }
+
+    // Decode the stored document value for the promoted write.
+    final encodedValue = sourceEntry.encodedValue;
+    if (encodedValue == null) {
+      throw VersionNotFoundError(
+        docKey: docKey,
+        namespace: namespace,
+        requestedHlc: fromVersion,
+      );
+    }
+    final newDoc = ValueCodec.decode(encodedValue);
+
+    // Read the current document to pass to augmentors as oldDoc.
+    final existingBytes = await _db.cache.get(namespace, docKey);
+    final oldDoc = existingBytes != null
+        ? ValueCodec.decode(existingBytes)
+        : null;
+
+    // Write the promoted document as a new put, bypassing the version
+    // augmentor so we can inject the correct promotedFrom HLC directly.
+    await _writeDocumentWithPromotion(
+      key: docKey,
+      newDoc: newDoc,
+      oldDoc: oldDoc,
+      promotedFrom: fromVersion,
+    );
   }
 
   // ── Query builder ──────────────────────────────────────────────────────────
@@ -581,6 +704,91 @@ final class KmdbCollection<T> {
         _wireVaultRefsInList(value, store);
       }
     }
+  }
+
+  /// Encodes and writes [newDoc] as a **promotion** of [promotedFrom].
+  ///
+  /// Identical to [_writeDocument] except that:
+  /// - The [VersionWriteAugmentor] is skipped (it would write a version entry
+  ///   without `promotedFrom` set, creating a duplicate).
+  /// - A `$ver:` entry with `promotedFrom` set to [promotedFrom] is appended
+  ///   directly to the [WriteBatch].
+  ///
+  /// All other augmentors (index, vault, schema) still run, so index entries
+  /// and vault ref counts are updated correctly.
+  Future<void> _writeDocumentWithPromotion({
+    required String key,
+    required Map<String, dynamic> newDoc,
+    required Map<String, dynamic>? oldDoc,
+    required Hlc promotedFrom,
+  }) async {
+    for (final validator in _db.validators) {
+      validator.validate(namespace, newDoc);
+    }
+
+    final encodedValue = ValueCodec.encode(newDoc);
+    final batch = WriteBatch()..put(namespace, key, encodedValue);
+
+    // Run all augmentors EXCEPT the VersionWriteAugmentor.
+    for (final augmentor in _db.augmentors) {
+      if (augmentor is VersionWriteAugmentor) continue;
+      await augmentor.interceptWrite(
+        batch: batch,
+        namespace: namespace,
+        docKey: key,
+        newDoc: newDoc,
+        oldDoc: oldDoc,
+      );
+    }
+
+    // Write the $ver: entry directly with promotedFrom set.
+    // The stored hlc is Hlc(0,0) as a placeholder — the authoritative HLC is
+    // the internal key's HLC (assigned by the engine at commit time).
+    final verEntry = VersionEntry(
+      hlc: const Hlc(0, 0),
+      encodedValue: encodedValue,
+      promotedFrom: promotedFrom,
+      isDelete: false,
+    );
+    batch.put(versionNamespace(namespace), key, verEntry.encode());
+
+    await _db.store.writeBatchInternal(batch);
+  }
+
+  /// Issues a tombstone for [key] as a **promotion** of a delete-version at
+  /// [promotedFrom].
+  ///
+  /// Used by [promoteVersion] when the source version is a delete-version.
+  /// Records the deletion in the `$ver:` chain with `promotedFrom` set.
+  Future<void> _writePromotedDelete({
+    required String key,
+    required Map<String, dynamic> oldDoc,
+    required Hlc promotedFrom,
+  }) async {
+    final batch = WriteBatch()..delete(namespace, key);
+
+    // Run all augmentors EXCEPT the VersionWriteAugmentor.
+    for (final augmentor in _db.augmentors) {
+      if (augmentor is VersionWriteAugmentor) continue;
+      await augmentor.interceptWrite(
+        batch: batch,
+        namespace: namespace,
+        docKey: key,
+        newDoc: null,
+        oldDoc: oldDoc,
+      );
+    }
+
+    // Write the $ver: delete-version entry with promotedFrom set.
+    final verEntry = VersionEntry(
+      hlc: const Hlc(0, 0),
+      encodedValue: null,
+      promotedFrom: promotedFrom,
+      isDelete: true,
+    );
+    batch.put(versionNamespace(namespace), key, verEntry.encode());
+
+    await _db.store.writeBatchInternal(batch);
   }
 
   /// Encodes and writes [newDoc], updating index entries for [oldDoc].

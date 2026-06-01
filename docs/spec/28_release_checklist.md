@@ -211,6 +211,41 @@ For each release:
   `docs/plans/completed/plan_tombstone_gc_stale_eviction.md`,
   `docs/plans/plan_harness_mixed_storage.md`.
 
+### RC-8 — Cross-device `$ver:` purge / ingest-floor interaction
+
+- **Area:** document versioning (§26), tombstone GC ingest floor (H4-FU3)
+- **Validates:** that purging `$ver:` history on one device cannot cause a
+  resurrection on another device, and that an old peer SSTable carrying
+  both below-floor main-namespace entries and old `$ver:` history is rejected
+  wholesale by the ingest-floor guard without causing incorrect trim or
+  resurrection.
+- **Why not automated:** requires two independent device databases (different
+  paths/adapters), real HLC progression across sessions to age entries past the
+  retention window, and coordination with the H4-FU3 tombstone floor. An
+  in-process harness cannot reproduce the timing of compaction, clock advance,
+  and SSTable ingest from a peer.
+- **Applies when:** changes to `VersionRetentionPolicy.filterGroup`,
+  `KvStoreImpl.ingestSstable`, `LsmEngine._computeTombstoneHorizon`,
+  or `VersionConfig` defaults.
+- **Steps:**
+  1. Device A writes a doc, then deletes it. Device B pulls the SSTable.
+  2. Advance both devices' clocks by more than `retentionDays` (default 90 days
+     — use a test `VersionConfig` with a very short `retentionDays` value, e.g.
+     0, and advance `nowMs` accordingly).
+  3. Run compaction on device A; verify `$ver:` chain is fully purged (zero
+     entries). Verify the main-namespace tombstone is also GC'd (via H4).
+  4. Device B, which still has the old SSTables (below the current floor), runs
+     `ingestSstable`. Verify that device B's ingest is rejected with
+     `StaleSstableIngestException` (or the SSTable is silently skipped), and
+     that neither the deleted document nor any `$ver:` entries resurface on
+     device A after the next sync.
+  5. Verify the main-namespace tombstone wins LWW against any re-ingested put.
+- **Expected result:** no resurrection on any device; old `$ver:` history for
+  the deleted document is also not resurrected; the floor-rejection correctly
+  covers the mixed SSTable case.
+- **Related:** `docs/spec/26_document_versioning.md` (§ RQ3 analysis),
+  `docs/spec/12_sync.md`, `docs/plans/plan_document_versioning.md`.
+
 ---
 
 ## Release log

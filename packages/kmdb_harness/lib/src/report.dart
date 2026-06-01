@@ -187,8 +187,9 @@ final class NoOpCount {
 /// The output of a completed harness run.
 ///
 /// [HarnessReport] captures the overall pass/fail verdict, the fork event log,
-/// the no-op log, and the PRNG seed used for the run. It is JSON-serialisable
-/// so that runs can be saved and compared for regression and flakiness detection.
+/// the no-op log, the PRNG seed used for the run, and versioning fork
+/// verification results. It is JSON-serialisable so that runs can be saved and
+/// compared for regression and flakiness detection.
 ///
 /// ## Example — serialise a report
 ///
@@ -211,6 +212,8 @@ final class HarnessReport {
     required this.noOpCounts,
     required this.totalActions,
     required this.durationMs,
+    this.versionForksPassed = 0,
+    this.versionForksChecked = 0,
   });
 
   /// The PRNG seed used for this run. Enables exact replay in seeded mode.
@@ -231,6 +234,21 @@ final class HarnessReport {
   /// Elapsed time in milliseconds for the run.
   final int durationMs;
 
+  /// Number of fork losers whose document value was found in the `$ver:`
+  /// history on both participating devices after the final sync.
+  ///
+  /// A fork check passes when both the winner and loser device can call
+  /// `getVersions(docKey)` and find the loser write's value in the result.
+  /// This validates that `$ver:` entries propagate through sync correctly.
+  final int versionForksPassed;
+
+  /// Total number of fork losers that were checked for version history.
+  ///
+  /// Equal to the number of [forkRecords]. A value less than
+  /// [versionForksPassed] indicates one or more version history mismatches —
+  /// use this to detect versioning regressions across runs.
+  final int versionForksChecked;
+
   /// Whether every device passed.
   bool get passed => deviceVerdicts.every((v) => v.passed);
 
@@ -242,6 +260,8 @@ final class HarnessReport {
     'noOpCounts': noOpCounts.map((n) => n.toJson()).toList(),
     'totalActions': totalActions,
     'durationMs': durationMs,
+    'versionForksPassed': versionForksPassed,
+    'versionForksChecked': versionForksChecked,
   };
 
   /// Restores a [HarnessReport] from [json].
@@ -258,6 +278,9 @@ final class HarnessReport {
         .toList(),
     totalActions: json['totalActions'] as int,
     durationMs: json['durationMs'] as int,
+    // Default to 0 for reports produced before versioning was added.
+    versionForksPassed: (json['versionForksPassed'] as int?) ?? 0,
+    versionForksChecked: (json['versionForksChecked'] as int?) ?? 0,
   );
 
   /// Serialises this report to a JSON string.
@@ -371,6 +394,26 @@ List<ReportDiff> diffReports(HarnessReport a, HarnessReport b) {
         );
       }
     }
+  }
+
+  // Version fork pass count comparison.
+  if (a.versionForksPassed != b.versionForksPassed) {
+    diffs.add(
+      ReportDiff(
+        description:
+            'versionForksPassed differs: '
+            '${a.versionForksPassed} vs ${b.versionForksPassed}',
+      ),
+    );
+  }
+  if (a.versionForksChecked != b.versionForksChecked) {
+    diffs.add(
+      ReportDiff(
+        description:
+            'versionForksChecked differs: '
+            '${a.versionForksChecked} vs ${b.versionForksChecked}',
+      ),
+    );
   }
 
   return diffs;

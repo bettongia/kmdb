@@ -15,6 +15,8 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import '../engine/compaction/reclamation_policy.dart'
+    show ReclamationPolicyRegistry;
 import '../engine/kvstore/kv_store.dart';
 import '../engine/kvstore/meta_store.dart';
 import '../engine/util/hlc.dart';
@@ -148,6 +150,22 @@ final class CacheLayer implements KvStore {
   @override
   void setTombstoneHorizonProvider(Future<Hlc> Function()? provider) =>
       _store.setTombstoneHorizonProvider(provider);
+
+  @override
+  void setVersionDropCallback(
+    Future<void> Function(List<Uint8List> droppedValues)? callback,
+  ) => _store.setVersionDropCallback(callback);
+
+  @override
+  void setVersionRegistryProvider(
+    Future<ReclamationPolicyRegistry> Function()? provider,
+  ) => _store.setVersionRegistryProvider(provider);
+
+  @override
+  Stream<VersionHistoryEntry> scanVersionHistory(
+    String namespace,
+    String docKey,
+  ) => _store.scanVersionHistory(namespace, docKey);
 
   @override
   Future<void> resetTombstoneFloor() => _store.resetTombstoneFloor();

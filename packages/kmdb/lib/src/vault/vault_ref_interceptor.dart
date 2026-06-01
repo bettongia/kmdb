@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'dart:typed_data';
+
 import '../encoding/value_codec.dart';
 import '../engine/kvstore/kv_store.dart';
 import '../query/write_augmentor.dart';
@@ -90,6 +92,38 @@ final class VaultRefInterceptor implements WriteAugmentor {
       await _increment(sha256, batch);
     }
     for (final sha256 in removed) {
+      await _decrement(sha256, batch);
+    }
+  }
+
+  // ── Public helpers ─────────────────────────────────────────────────────────
+
+  /// Decrements vault ref counts for every vault URI found in [encodedValue].
+  ///
+  /// Decodes [encodedValue] via [ValueCodec] to obtain a document map, then
+  /// extracts all vault URIs from the map and appends decrement operations to
+  /// [batch]. Used by the compaction version-drop callback (RQ5) to release
+  /// vault ref counts for `$ver:` entries trimmed at compaction time.
+  ///
+  /// ## Crash posture
+  ///
+  /// The caller ([KmdbDatabase]) issues [batch] as a post-compaction write.
+  /// If the process crashes before this batch commits, the ref count is
+  /// over-counted (blob retained). This is the fail-safe posture from H3.
+  Future<void> decrementVersionRefs(
+    Uint8List encodedValue,
+    WriteBatch batch,
+  ) async {
+    final Map<String, dynamic> doc;
+    try {
+      doc = ValueCodec.decode(encodedValue);
+    } catch (_) {
+      // Cannot decode — skip. The fail-safe posture means undecodable entries
+      // leave the ref count over-counted (blob retained), never under-counted.
+      return;
+    }
+    final uris = _extractVaultUris(doc);
+    for (final sha256 in uris) {
       await _decrement(sha256, batch);
     }
   }

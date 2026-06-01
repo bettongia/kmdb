@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import '../util/hlc.dart';
+import 'merge_iterator.dart' show MergeEntry;
 
 /// Per-namespace-class reclamation policy applied by compaction's streaming
 /// transform.
@@ -68,6 +69,31 @@ abstract interface class ReclamationPolicy {
     required Hlc tombstoneHlc,
     required Hlc horizon,
   });
+
+  /// Called with the full version list for one `(namespace, userKey)` group,
+  /// sorted HLC ascending (oldest first), when [collapseVersions] is `false`.
+  ///
+  /// Returns the entries to retain (a subset of [entries], in the same
+  /// ascending-HLC order). The compaction job appends the dropped entries'
+  /// raw value bytes to [CompactionJob.droppedVersionValues] so the engine
+  /// can release vault ref counts after committing.
+  ///
+  /// [nowMs] is the wall-clock time at job-construction time
+  /// (`DateTime.now().millisecondsSinceEpoch`), injected by [LsmEngine]
+  /// rather than read inside this method — this matches the RQ6 clock-
+  /// injection pattern so tests can supply a fixed clock.
+  ///
+  /// ## Default implementations
+  ///
+  /// [CollapseToNewestPolicy] and [RetainAllVersionsPolicy] both return
+  /// [entries] unchanged — all versions are retained. This is
+  /// backward-compatible.
+  ///
+  /// ## Override
+  ///
+  /// [VersionRetentionPolicy] overrides this to apply the keep-N /
+  /// retentionDays trim rules for `$ver:` namespaces.
+  List<MergeEntry> filterGroup(List<MergeEntry> entries, {required int nowMs});
 }
 
 /// Default policy: collapse every `(namespace, userKey)` group to the
@@ -92,6 +118,14 @@ final class CollapseToNewestPolicy implements ReclamationPolicy {
     if (!allLevels) return false;
     return tombstoneHlc.compareTo(horizon) < 0;
   }
+
+  /// Not called for `collapseVersions=true` namespaces — returns entries
+  /// unchanged for completeness.
+  @override
+  List<MergeEntry> filterGroup(
+    List<MergeEntry> entries, {
+    required int nowMs,
+  }) => entries;
 }
 
 /// Retain every version of every key. Used for history-bearing namespace
@@ -112,6 +146,15 @@ final class RetainAllVersionsPolicy implements ReclamationPolicy {
     required Hlc tombstoneHlc,
     required Hlc horizon,
   }) => false;
+
+  /// Returns all entries unchanged — [RetainAllVersionsPolicy] does not trim
+  /// any versions. This is the backward-compatible default for `$ver:`
+  /// namespaces that do not have an explicit [VersionRetentionPolicy].
+  @override
+  List<MergeEntry> filterGroup(
+    List<MergeEntry> entries, {
+    required int nowMs,
+  }) => entries;
 }
 
 /// Resolves a [ReclamationPolicy] for a namespace by longest-prefix match.
@@ -121,6 +164,10 @@ final class RetainAllVersionsPolicy implements ReclamationPolicy {
 /// prefix is registered so the policy hook is exercised end-to-end before
 /// the document-versioning feature lands; that feature can supply its own
 /// registry (with a richer keep-N policy) when it does.
+///
+/// When versioning is configured, the registry maps each `$ver:{collection}`
+/// namespace to a [VersionRetentionPolicy] via [_versionPolicies]. Other
+/// `$ver:` prefixes fall through to [RetainAllVersionsPolicy].
 ///
 /// ## Usage
 ///
@@ -136,6 +183,22 @@ final class ReclamationPolicyRegistry {
   ReclamationPolicyRegistry({Iterable<String>? retainAllPrefixes})
     : _retainAllPrefixes = List<String>.unmodifiable(
         retainAllPrefixes ?? defaultRetainAllPrefixes,
+      ),
+      _versionPolicies = const {};
+
+  /// Creates a registry with per-namespace version policies.
+  ///
+  /// [versionPolicies] maps exact `$ver:{collection}` namespace names to
+  /// their [ReclamationPolicy] (typically a `VersionRetentionPolicy`). Other
+  /// `$ver:` prefixes fall through to [RetainAllVersionsPolicy].
+  ///
+  /// This constructor is called by [KmdbDatabase] at open time after reading
+  /// per-collection [VersionConfig] entries from `$meta`.
+  ReclamationPolicyRegistry.withVersionPolicies(
+    Map<String, ReclamationPolicy> versionPolicies,
+  ) : _retainAllPrefixes = List<String>.unmodifiable(defaultRetainAllPrefixes),
+      _versionPolicies = Map<String, ReclamationPolicy>.unmodifiable(
+        versionPolicies,
       );
 
   /// Namespace prefixes that retain all versions by default. Currently
@@ -144,11 +207,26 @@ final class ReclamationPolicyRegistry {
 
   final List<String> _retainAllPrefixes;
 
+  /// Per-namespace version retention policies, keyed by exact namespace name.
+  /// Set via [ReclamationPolicyRegistry.withVersionPolicies].
+  final Map<String, ReclamationPolicy> _versionPolicies;
+
   /// Returns the policy that applies to writes in [namespace].
+  ///
+  /// Resolution order:
+  /// 1. Exact match in [_versionPolicies] (per-namespace version policies,
+  ///    set when versioning is configured).
+  /// 2. Prefix match in [_retainAllPrefixes] → [RetainAllVersionsPolicy].
+  /// 3. Default → [CollapseToNewestPolicy].
   ReclamationPolicy resolve(String namespace) {
+    // 1. Exact match for versioned namespaces.
+    final exact = _versionPolicies[namespace];
+    if (exact != null) return exact;
+    // 2. Prefix match.
     for (final prefix in _retainAllPrefixes) {
       if (namespace.startsWith(prefix)) return const RetainAllVersionsPolicy();
     }
+    // 3. Default.
     return const CollapseToNewestPolicy();
   }
 }

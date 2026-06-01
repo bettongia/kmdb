@@ -17,6 +17,8 @@ import 'dart:typed_data';
 
 import 'package:kmdb/src/cache/cache_layer.dart';
 import 'package:kmdb/src/cache/cache_tier.dart';
+import 'package:kmdb/src/engine/compaction/reclamation_policy.dart'
+    show ReclamationPolicyRegistry;
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store_impl.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
@@ -54,6 +56,17 @@ final class _CountingStore implements KvStore {
   @override
   void setTombstoneHorizonProvider(Future<Hlc> Function()? provider) =>
       _inner.setTombstoneHorizonProvider(provider);
+  @override
+  void setVersionDropCallback(
+    Future<void> Function(List<Uint8List>)? callback,
+  ) => _inner.setVersionDropCallback(callback);
+  @override
+  void setVersionRegistryProvider(
+    Future<ReclamationPolicyRegistry> Function()? provider,
+  ) => _inner.setVersionRegistryProvider(provider);
+  @override
+  Stream<VersionHistoryEntry> scanVersionHistory(String ns, String key) =>
+      _inner.scanVersionHistory(ns, key);
   @override
   Future<void> ingestSstable(String filename, Uint8List bytes) =>
       _inner.ingestSstable(filename, bytes);

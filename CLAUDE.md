@@ -190,6 +190,7 @@ cd packages/kmdb && dart run benchmark/main.dart
 | 9b    | Semantic search (BGE Small En v1.5, SQ8 vector index, VecManager, ONNX inference)                | ✅ Complete |
 | 9c    | Hybrid search (Reciprocal Rank Fusion, `--mode` flag, unified SearchResult types)                | ✅ Complete |
 | 10    | Vault (content-addressable blob store, KVLT packaging, ref-counted GC, distributed sync)         | ✅ Complete |
+| 11    | Document versioning (`$ver:` history, keep-N / retention window, promote, CLI commands)           | ✅ Complete |
 
 All tests pass on `main`. E2E tests are skipped by default — run them via
 `make e2e_test` (`melos e2e-test`).

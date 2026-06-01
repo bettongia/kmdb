@@ -14,6 +14,7 @@
 
 import 'dart:typed_data';
 
+import '../compaction/reclamation_policy.dart' show ReclamationPolicyRegistry;
 import '../util/hlc.dart';
 
 // ── KvStore interface ─────────────────────────────────────────────────────────
@@ -67,6 +68,36 @@ abstract interface class KvStore {
   /// [startKey] is inclusive; [endKey] is exclusive. Pass `null` for an
   /// unbounded scan.
   Stream<KvEntry> scan(String namespace, {String? startKey, String? endKey});
+
+  /// Returns a stream of **all** historical version entries for [docKey] in
+  /// [namespace], in ascending HLC order (oldest first).
+  ///
+  /// Unlike [scan], which collapses multiple versions of the same user key to
+  /// the latest (Last-Write-Wins), this method returns every version entry
+  /// for the given [docKey], including superseded versions. It is intended
+  /// exclusively for history-bearing namespaces such as `\$ver:{collection}`.
+  ///
+  /// Each yielded entry includes:
+  /// - [VersionHistoryEntry.value] — the raw bytes stored for this version.
+  /// - [VersionHistoryEntry.hlc] — the HLC extracted from the internal key,
+  ///   which is the authoritative version timestamp.
+  /// - [VersionHistoryEntry.isDelete] — whether this entry is a tombstone.
+  ///
+  /// Tombstones **are** included in the output (unlike [scan], which
+  /// suppresses them). A tombstone in `\$ver:` is a delete-version entry
+  /// recording that the document was deleted at this HLC.
+  ///
+  /// ## Usage
+  ///
+  /// ```dart
+  /// await for (final v in store.scanVersionHistory(r'$ver:tasks', docKey)) {
+  ///   print('${v.hlc.toHex()} isDelete=${v.isDelete}');
+  /// }
+  /// ```
+  Stream<VersionHistoryEntry> scanVersionHistory(
+    String namespace,
+    String docKey,
+  );
 
   /// Explicitly flushes the active memtable to an SSTable on disk.
   ///
@@ -192,6 +223,19 @@ abstract interface class KvStore {
   /// instance can be opened on the same path.
   Future<void> close({bool flush = true});
 
+  /// Registers a callback that provides the [ReclamationPolicyRegistry] for
+  /// all-levels compaction, with per-collection [VersionRetentionPolicy]
+  /// entries built from the current [VersionConfig] values in `$meta`.
+  ///
+  /// Called by [KvStoreImpl] after versioning is configured at [open] time.
+  /// Pass `null` to revert to the default registry (no per-collection
+  /// trimming).
+  ///
+  /// See [LsmEngine.setVersionRegistryProvider] for the implementation.
+  void setVersionRegistryProvider(
+    Future<ReclamationPolicyRegistry> Function()? provider,
+  );
+
   /// Registers a callback that computes the GC horizon used by the
   /// all-levels compaction path to decide when a surviving delete
   /// tombstone may be dropped.
@@ -208,6 +252,28 @@ abstract interface class KvStore {
   /// Used by [SyncEngine] to supply `min(currentHlc)` across all peer HWM
   /// files in the sync folder; not part of the normal application API.
   void setTombstoneHorizonProvider(Future<Hlc> Function()? provider);
+
+  /// Registers a callback invoked after an all-levels compaction trims one or
+  /// more `$ver:` version entries via [ReclamationPolicy.filterGroup].
+  ///
+  /// The callback receives the raw value bytes (`List<Uint8List>`) of every
+  /// trimmed [VersionEntry]. Each entry may contain vault URIs; the callback is
+  /// responsible for decrementing the vault ref counts for those URIs.
+  ///
+  /// ## Crash posture (RQ5)
+  ///
+  /// The callback is invoked after `_compactAll` commits its [VersionEdit] to
+  /// the Manifest (durable). If the process crashes before the callback
+  /// completes, the ref counts are over-counted — the vault blobs are retained.
+  /// This is the fail-safe: blobs are never deleted while possibly referenced.
+  /// The count self-corrects on the next write that touches the same blob via
+  /// the normal `VaultRefInterceptor.interceptWrite` diff.
+  ///
+  /// Pass `null` to unregister the callback (e.g. when vault is disabled).
+  /// Mirrors the pattern of [setTombstoneHorizonProvider].
+  void setVersionDropCallback(
+    Future<void> Function(List<Uint8List> droppedValues)? callback,
+  );
 
   /// Resets the tombstone GC floor to `Hlc(0, 0)` in `$meta`.
   ///
@@ -296,6 +362,12 @@ final class StoreInfo {
 
 /// A raw key-value entry returned by [KvStore.scan].
 typedef KvEntry = ({String key, Uint8List value});
+
+/// A single version history entry returned by [KvStore.scanVersionHistory].
+///
+/// Carries the raw [value] bytes, the authoritative [hlc] extracted from the
+/// internal key, and a flag indicating whether the entry is a tombstone.
+typedef VersionHistoryEntry = ({Uint8List value, Hlc hlc, bool isDelete});
 
 /// Describes what happened during KvStoreImpl.open crash recovery.
 ///

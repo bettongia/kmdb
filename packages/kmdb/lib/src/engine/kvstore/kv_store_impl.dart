@@ -16,6 +16,7 @@ import 'dart:typed_data';
 
 import 'package:meta/meta.dart' show internal;
 
+import '../compaction/reclamation_policy.dart' show ReclamationPolicyRegistry;
 import '../platform/storage_adapter_interface.dart';
 import '../util/hlc.dart';
 import '../util/namespace_codec.dart';
@@ -203,6 +204,15 @@ final class KvStoreImpl implements KvStore {
       );
 
   @override
+  Stream<VersionHistoryEntry> scanVersionHistory(
+    String namespace,
+    String docKey,
+  ) =>
+      // System namespaces ($ver:…) are ASCII by construction; no normalisation
+      // is needed. User-provided docKey is a 32-char hex UUIDv7 — no normalisation.
+      _engine.scanVersionHistory(namespace, docKey);
+
+  @override
   Future<void> flush() => _engine.flush();
 
   @override
@@ -257,6 +267,20 @@ final class KvStoreImpl implements KvStore {
   @override
   void setTombstoneHorizonProvider(Future<Hlc> Function()? provider) {
     _engine.setTombstoneHorizonProvider(provider);
+  }
+
+  @override
+  void setVersionDropCallback(
+    Future<void> Function(List<Uint8List> droppedValues)? callback,
+  ) {
+    _engine.setVersionDropCallback(callback);
+  }
+
+  @override
+  void setVersionRegistryProvider(
+    Future<ReclamationPolicyRegistry> Function()? provider,
+  ) {
+    _engine.setVersionRegistryProvider(provider);
   }
 
   @override

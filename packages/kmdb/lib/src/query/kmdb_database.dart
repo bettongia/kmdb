@@ -29,6 +29,12 @@ import '../vault/vault_gc.dart';
 import '../vault/vault_recovery.dart';
 import '../vault/vault_ref_interceptor.dart';
 import '../vault/vault_store.dart';
+import '../engine/compaction/reclamation_policy.dart'
+    show ReclamationPolicy, ReclamationPolicyRegistry;
+import '../versioning/version_config.dart';
+import '../versioning/version_entry.dart';
+import '../versioning/version_manager.dart';
+import '../versioning/version_retention_policy.dart';
 import 'collection_schema.dart';
 import 'exceptions.dart';
 import 'index/index_definition.dart';
@@ -131,13 +137,17 @@ final class KmdbDatabase {
     required this._embeddingModel,
     VaultStore? vaultStore,
     VaultGc? vaultGc,
+    Map<String, VersionConfig>? versionConfigs,
   }) : _store = store,
        _vaultStore = vaultStore,
        // Build the interceptor only when both a VaultStore and VaultGc are
        // present; if either is absent, vault reference counting is disabled.
        _vaultRefInterceptor = (vaultStore != null && vaultGc != null)
            ? VaultRefInterceptor(kvStore: store, gc: vaultGc)
-           : null {
+           : null,
+       _versionAugmentor = VersionWriteAugmentor(
+         configs: versionConfigs ?? const {},
+       ) {
     // ── Layer 1: validators (run before any I/O) ─────────────────────────────
     // Always register the reserved-key validator first so that user fields
     // starting with '_' are rejected before schema validation runs.
@@ -160,8 +170,14 @@ final class KmdbDatabase {
     if (vec != null) _augmentors.add(vec);
 
     // VaultRefInterceptor augmentor — null when vault is disabled.
+    // Must run BEFORE VersionWriteAugmentor so vault refs are counted
+    // before the version entry is written (the version entry references
+    // the same vault URIs as the document).
     final vri = _vaultRefInterceptor;
     if (vri != null) _augmentors.add(vri);
+
+    // VersionWriteAugmentor — always present; respects isDisabled per-collection.
+    _augmentors.add(_versionAugmentor);
   }
 
   final CacheLayer _cache;
@@ -175,6 +191,10 @@ final class KmdbDatabase {
   final EmbeddingModel? _embeddingModel;
   final VaultStore? _vaultStore;
   final VaultRefInterceptor? _vaultRefInterceptor;
+
+  /// The version write augmentor, always registered. Emits `$ver:` entries for
+  /// every document write in collections where versioning is enabled.
+  final VersionWriteAugmentor _versionAugmentor;
 
   /// Layer 1 validators. Iterated in registration order; first failure aborts
   /// the write before any I/O is performed.
@@ -227,6 +247,14 @@ final class KmdbDatabase {
   /// call [ensureDeviceId] after opening the database (or use `DatabaseOpener`
   /// in the CLI, which handles this automatically).
   ///
+  /// [versionConfigs] declares per-collection versioning configuration. Each
+  /// entry maps a collection name to its [VersionConfig] (max versions,
+  /// retention window). Configs are persisted to `$meta` and propagate via
+  /// sync so all devices use the same policy. Omitting a collection from the
+  /// map applies [VersionConfig.defaults] (`maxVersions: 4`,
+  /// `retentionDays: 90`). Pass `VersionConfig.disabled` to disable versioning
+  /// for a collection entirely.
+  ///
   /// Throws [LockException] if another process holds the database lock.
   static Future<KmdbDatabase> open({
     required String path,
@@ -245,6 +273,7 @@ final class KmdbDatabase {
     List<CollectionSchema> schemas = const [],
     void Function(String collection, int storedVersion, int supportedVersion)?
     onSchemaVersionMismatch,
+    Map<String, VersionConfig> versionConfigs = const {},
   }) async {
     // Validate that an embedding model is provided when vector indexes are
     // requested. We check this before any I/O so the error is immediate.
@@ -318,6 +347,77 @@ final class KmdbDatabase {
     }
     await schemaManager.load(metaStore);
 
+    // Persist versioning configs to $meta so they propagate via sync.
+    // Load the merged config set: caller-supplied configs override any
+    // previously persisted configs from other devices.
+    final configStore = VersionConfigStore(metaStore);
+    final mergedVersionConfigs = <String, VersionConfig>{};
+    // Load any configs persisted from prior opens (including those synced from
+    // other devices). We use the registered user namespaces as the scan set.
+    final knownNamespaces = await store.listNamespaces();
+    for (final ns in knownNamespaces) {
+      final persisted = await configStore.get(ns);
+      // Only include explicitly-set configs (skip defaults — they are implicit).
+      if (persisted != VersionConfig.defaults) {
+        mergedVersionConfigs[ns] = persisted;
+      }
+    }
+    // Caller-supplied configs take precedence and are persisted.
+    for (final entry in versionConfigs.entries) {
+      await configStore.put(entry.key, entry.value);
+      mergedVersionConfigs[entry.key] = entry.value;
+    }
+
+    // Wire the version registry provider into the engine so _compactAll builds
+    // a VersionRetentionPolicy per $ver: prefix (Phase 3, RQ2).
+    store.setVersionRegistryProvider(() async {
+      // Re-read configs at compaction time: they may have changed via sync
+      // since the database was opened. Build a map from $ver:{ns} →
+      // VersionRetentionPolicy for all non-disabled collections.
+      final versionPolicies = <String, ReclamationPolicy>{};
+      for (final ns in await store.listNamespaces()) {
+        final cfg = await configStore.get(ns);
+        if (!cfg.isDisabled) {
+          versionPolicies[versionNamespace(ns)] = VersionRetentionPolicy(cfg);
+        }
+      }
+      return ReclamationPolicyRegistry.withVersionPolicies(versionPolicies);
+    });
+
+    // Wire the version drop callback into the engine so compaction-time $ver:
+    // trims can decrement vault ref counts (RQ5).
+    final vaultRefInterceptor = (vaultStore != null && vaultGc != null)
+        ? VaultRefInterceptor(kvStore: store, gc: vaultGc)
+        : null;
+    store.setVersionDropCallback(
+      vaultRefInterceptor != null
+          ? (droppedValues) async {
+              // Decode each dropped VersionEntry and release vault refs for
+              // any vault URIs contained in the stored encodedValue.
+              // This mirrors the H4-FU3 tombstonesDropped callback pattern.
+              final batch = WriteBatch();
+              for (final bytes in droppedValues) {
+                try {
+                  final entry = VersionEntry.decode(bytes);
+                  if (entry.encodedValue != null) {
+                    await vaultRefInterceptor.decrementVersionRefs(
+                      entry.encodedValue!,
+                      batch,
+                    );
+                  }
+                } catch (_) {
+                  // Skip undecodable entries; the fail-safe posture (retain on
+                  // uncertainty) means a missed decrement over-counts — safe.
+                  continue;
+                }
+              }
+              if (!batch.isEmpty) {
+                await store.writeBatch(batch);
+              }
+            }
+          : null,
+    );
+
     return KmdbDatabase._(
       cache: cache,
       store: store,
@@ -330,6 +430,7 @@ final class KmdbDatabase {
       embeddingModel: embeddingModel,
       vaultStore: vaultStore,
       vaultGc: vaultGc,
+      versionConfigs: mergedVersionConfigs,
     );
   }
 
