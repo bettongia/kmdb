@@ -122,11 +122,21 @@ enum VelocityPreset {
 /// At least one of [syncIntervalSeconds] or [syncAfterWrites] must be set
 /// (either directly or via [velocityPreset]).
 ///
-/// ## Example — preset 1 configuration
+/// ## Example — preset 1 configuration (single shared adapter)
 ///
 /// ```dart
 /// final config = HarnessConfig(
 ///   syncAdapter: MemorySyncAdapter(),
+///   velocityPreset: VelocityPreset.one,
+/// );
+/// ```
+///
+/// ## Example — per-device adapters via factory
+///
+/// ```dart
+/// final backend = SharedCloudBackend();
+/// final config = HarnessConfig(
+///   syncAdapterFactory: (deviceId) => SharedBackendAdapter(backend),
 ///   velocityPreset: VelocityPreset.one,
 /// );
 /// ```
@@ -152,10 +162,19 @@ final class HarnessConfig {
   /// preset values. When [velocityPreset] is `null`, all knobs must be provided
   /// manually.
   ///
-  /// Throws [ArgumentError] if neither a sync interval nor a sync-after-writes
-  /// value can be resolved from the preset and overrides.
+  /// Exactly one of [syncAdapter] or [syncAdapterFactory] must be provided.
+  /// [syncAdapter] is a convenience shorthand: it wraps the single instance in
+  /// a factory that ignores the device index. [syncAdapterFactory] receives the
+  /// 0-based device index on each call, allowing per-device adapters that all
+  /// front a single shared backend (e.g. [SharedCloudBackend]).
+  ///
+  /// Throws [ArgumentError] if:
+  /// - neither a sync interval nor a sync-after-writes value can be resolved
+  ///   from the preset and overrides.
+  /// - both [syncAdapter] and [syncAdapterFactory] are provided, or neither.
   HarnessConfig({
-    required this.syncAdapter,
+    SyncStorageAdapter? syncAdapter,
+    SyncStorageAdapter Function(int deviceId)? syncAdapterFactory,
     this.deviceCount = 3,
     this.preSeededDeviceCount = 1,
     this.collectionCount = 10,
@@ -168,7 +187,21 @@ final class HarnessConfig {
     this.prngseed,
     this.keyPoolRatios = const KeyPoolRatios.defaults(),
     this.docSizeDistribution = const DocSizeDistribution.defaults(),
-  }) {
+  }) : _syncAdapter = syncAdapter,
+       _syncAdapterFactory = syncAdapterFactory {
+    // Exactly one of syncAdapter or syncAdapterFactory must be set.
+    if (syncAdapter == null && syncAdapterFactory == null) {
+      throw ArgumentError(
+        'Exactly one of syncAdapter or syncAdapterFactory must be provided.',
+      );
+    }
+    if (syncAdapter != null && syncAdapterFactory != null) {
+      throw ArgumentError(
+        'syncAdapter and syncAdapterFactory are mutually exclusive. '
+        'Provide exactly one.',
+      );
+    }
+
     // Expand the velocity preset first, then apply any direct overrides.
     final expanded = _expandPreset(velocityPreset, deviceCount);
     _actionsPerMinute =
@@ -218,11 +251,40 @@ final class HarnessConfig {
     }
   }
 
-  /// The remote sync storage adapter used by all devices in the harness.
+  // Backing storage: exactly one of these is non-null (enforced in constructor).
+  final SyncStorageAdapter? _syncAdapter;
+  final SyncStorageAdapter Function(int deviceId)? _syncAdapterFactory;
+
+  /// The single shared sync adapter, if set via [syncAdapter].
   ///
-  /// All device instances share a single adapter reference (single-isolate
-  /// design). Use [MemorySyncAdapter] for in-process tests.
-  final SyncStorageAdapter syncAdapter;
+  /// For code that still reads `config.syncAdapter` directly (e.g. in tests
+  /// that use the original single-adapter API), this returns the adapter
+  /// instance. Returns `null` when [syncAdapterFactory] was used instead.
+  ///
+  /// Prefer [resolveAdapter] for internal use — it handles both forms.
+  SyncStorageAdapter? get syncAdapter => _syncAdapter;
+
+  /// The per-device adapter factory, if set.
+  ///
+  /// Returns `null` when the single-instance [syncAdapter] form was used.
+  /// Prefer [resolveAdapter] for internal use — it handles both forms.
+  SyncStorageAdapter Function(int deviceId)? get syncAdapterFactory =>
+      _syncAdapterFactory;
+
+  /// Returns the sync adapter for [deviceId].
+  ///
+  /// When [syncAdapter] was supplied (single-instance convenience form),
+  /// returns that single instance for every device index. When
+  /// [syncAdapterFactory] was supplied, calls `syncAdapterFactory(deviceId)`.
+  ///
+  /// When adapters are heterogeneous (i.e. a factory was supplied), the quota
+  /// estimate uses device 0 as the representative device — it only needs the
+  /// `is QuotaAwareAdapter` check to apply consistently across the run.
+  SyncStorageAdapter resolveAdapter(int deviceId) {
+    final adapter = _syncAdapter;
+    if (adapter != null) return adapter;
+    return _syncAdapterFactory!(deviceId);
+  }
 
   /// Total number of simulated devices. Defaults to 3.
   final int deviceCount;

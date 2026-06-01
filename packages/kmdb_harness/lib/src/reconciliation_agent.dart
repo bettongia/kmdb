@@ -20,7 +20,7 @@ import 'actions.dart';
 /// that the agent can reconstruct expected per-device and global state.
 final class WriteLogEntry {
   /// Creates a [WriteLogEntry].
-  const WriteLogEntry({
+  WriteLogEntry({
     required this.actionId,
     required this.deviceId,
     required this.collectionName,
@@ -54,10 +54,24 @@ final class WriteLogEntry {
   /// the same key between sync points. A higher value wins.
   final int? hlcEncoded;
 
+  /// The backend write-sequence number assigned when this write was pushed
+  /// to the shared remote as part of an SSTable upload.
+  ///
+  /// `null` until the originating device completes a successful sync. Once
+  /// set, this value is the highest [StoredFile.writeSeq] visible at the
+  /// time the push completed — i.e. the write's SSTable was committed to the
+  /// backend at or before this sequence.
+  ///
+  /// Used by [ReconciliationAgent.visibleExpectedStateFor]: a write is
+  /// included in the visible state for a pulling device only if
+  /// `pushWriteSeq != null && pushWriteSeq! <= seqHigh`.
+  int? pushWriteSeq;
+
   @override
   String toString() =>
       'WriteLogEntry(actionId=$actionId, device=$deviceId, '
-      'col=$collectionName, key=$key, delete=$isDelete)';
+      'col=$collectionName, key=$key, delete=$isDelete, '
+      'pushWriteSeq=$pushWriteSeq)';
 }
 
 /// An entry in the sync log maintained by the [ReconciliationAgent].
@@ -74,6 +88,7 @@ final class SyncLogEntry {
     required this.direction,
     required this.completed,
     this.sstablesTransferred,
+    this.visibleWriteSeqHigh,
   });
 
   /// The action ID that triggered this sync.
@@ -94,10 +109,19 @@ final class SyncLogEntry {
   /// Number of SSTables transferred, if reported.
   final int? sstablesTransferred;
 
+  /// The highest write-sequence visible to this device's adapter at the
+  /// point the sync completed.
+  ///
+  /// `null` when the adapter does not implement [VisibilityCursorAdapter]
+  /// (e.g. [MemorySyncAdapter]) — the agent falls back to the full global
+  /// merge in that case.
+  final int? visibleWriteSeqHigh;
+
   @override
   String toString() =>
       'SyncLogEntry(actionId=$actionId, device=$deviceId, '
-      'dir=$direction, completed=$completed)';
+      'dir=$direction, completed=$completed, '
+      'visSeqHigh=$visibleWriteSeqHigh)';
 }
 
 /// A detected fork: two devices wrote to the same key between their last
@@ -166,12 +190,26 @@ final class _DeviceState {
 /// - **Global expected state**: LWW winner across all writes on all devices —
 ///   the state every device converges to once fully synced.
 ///
+/// ## Visibility model
+///
+/// When an [ActionResult] for a completed sync carries a non-null
+/// [ActionResult.visibleWriteSeqHigh], the agent uses
+/// [visibleExpectedStateFor] to merge only the subset of peer writes whose
+/// SSTables have been committed to the backend at or before that sequence.
+/// This supports eventual-consistency profiles where a completed pull may
+/// legitimately observe only a subset of prior pushes.
+///
+/// Under strong consistency (or with legacy [MemorySyncAdapter]), every sync
+/// carries `null` and the agent falls back to merging the full
+/// [globalExpectedState], preserving previous behaviour exactly.
+///
+/// ## Fork detection
+///
 /// The agent also performs **fork detection**: when two devices write to the
 /// same key between their last common sync point, a [ForkEvent] is recorded.
-///
-/// All [Device] actors call [record] immediately after each action. The agent
-/// processes the result synchronously, keeping both logs and computed state
-/// consistent without any async concurrency.
+/// Fork detection keys on write *ordering*, not propagation, so it is
+/// unaffected by delayed visibility. Do NOT change [_detectFork] to account
+/// for visibility — it is intentionally propagation-agnostic.
 final class ReconciliationAgent {
   /// Creates a [ReconciliationAgent] for [deviceCount] devices.
   ReconciliationAgent({required this.deviceCount}) {
@@ -256,6 +294,51 @@ final class ReconciliationAgent {
     return Map.unmodifiable(result);
   }
 
+  /// Returns the expected state visible to [deviceId] after a pull that saw
+  /// backend writes up to and including [seqHigh].
+  ///
+  /// Runs the same LWW fold as [globalExpectedState] but restricted to:
+  /// - Writes by [deviceId] itself (a device always sees its own writes).
+  /// - Writes by other devices that have been pushed to the backend at
+  ///   or before [seqHigh] (i.e. [WriteLogEntry.pushWriteSeq] is non-null
+  ///   and `<= seqHigh`).
+  ///
+  /// Under a strongly-consistent profile, [seqHigh] equals the backend's
+  /// global maximum so all pushed writes are included — identical to
+  /// [globalExpectedState] restricted to pushed writes.
+  ///
+  /// Used by [_mergeVisibleIntoDevice] to implement the eventual-consistency
+  /// visibility model without breaking backward compatibility.
+  Map<String, Map<String, dynamic>?> visibleExpectedStateFor(
+    int deviceId,
+    int seqHigh,
+  ) {
+    final result = <String, Map<String, dynamic>?>{};
+    final winners = <String, WriteLogEntry>{};
+
+    for (final entry in writeLog) {
+      // Own writes are always visible (regardless of push status).
+      final isOwnWrite = entry.deviceId == deviceId;
+      // Peer writes are visible only if they have been pushed at or before
+      // seqHigh.
+      final isPeerVisible =
+          !isOwnWrite &&
+          entry.pushWriteSeq != null &&
+          entry.pushWriteSeq! <= seqHigh;
+
+      if (!isOwnWrite && !isPeerVisible) continue;
+
+      final ck = _DeviceState.compoundKey(entry.collectionName, entry.key);
+      final current = winners[ck];
+      if (current == null || _lwwWins(entry, current)) {
+        winners[ck] = entry;
+        result[ck] = entry.isDelete ? null : entry.document;
+      }
+    }
+
+    return Map.unmodifiable(result);
+  }
+
   /// Reports all currently detected [ForkEvent]s.
   List<ForkEvent> get detectedForks => List.unmodifiable(forkEvents);
 
@@ -274,6 +357,7 @@ final class ReconciliationAgent {
       document: isDelete ? null : result.document,
       isDelete: isDelete,
       hlcEncoded: result.hlcEncoded,
+      // pushWriteSeq stays null until this device completes a sync.
     );
     writeLog.add(entry);
 
@@ -295,46 +379,75 @@ final class ReconciliationAgent {
   }
 
   void _recordSync(ActionResult result) {
+    final seqHigh = result.visibleWriteSeqHigh;
     final entry = SyncLogEntry(
       actionId: result.actionId,
       deviceId: result.deviceId,
       direction: result.syncDirection ?? 'both',
       completed: result.syncCompleted ?? false,
       sstablesTransferred: result.sstablesTransferred,
+      visibleWriteSeqHigh: seqHigh,
     );
     syncLog.add(entry);
 
     if (!entry.completed) return;
 
-    // A completed sync means this device has pulled all peer writes. Merge
-    // the global expected state into the device's expected state using LWW.
-    _mergeGlobalIntoDevice(result.deviceId);
+    // A completed push stamps all pending (unpushed) writes by this device
+    // with seqHigh, recording that those writes have been committed to the
+    // backend at or before this sequence. Under strong consistency seqHigh
+    // is the global max; under eventual consistency it is the propagation
+    // cursor at the time of sync.
+    if (seqHigh != null) {
+      _stampPushedWrites(result.deviceId, seqHigh);
+    }
+
+    // A completed sync means this device has pulled all visible peer writes.
+    // Merge the visible expected state into the device's expected state
+    // using LWW.
+    _mergeVisibleIntoDevice(result.deviceId, seqHigh);
 
     // Update the last sync action ID for this device.
     _deviceStates[result.deviceId]!.lastSyncActionId = result.actionId;
   }
 
-  /// Merges the global LWW state into [deviceId]'s expected state.
+  /// Stamps all unpushed [WriteLogEntry] entries for [deviceId] with
+  /// [seqHigh], marking them as committed to the backend.
   ///
-  /// After a successful sync, a device should have all writes from all
-  /// peers. We compute the global LWW state and merge it into the device's
-  /// view, applying LWW at each key.
-  void _mergeGlobalIntoDevice(int deviceId) {
-    final ds = _deviceStates[deviceId]!;
-    final global = globalExpectedState();
+  /// This is called when [deviceId] completes a sync push. The sequence
+  /// number [seqHigh] is the highest write-seq visible to the device's
+  /// adapter at that point — the device's local writes are included in
+  /// the SSTables that were uploaded during this sync.
+  void _stampPushedWrites(int deviceId, int seqHigh) {
+    for (final entry in writeLog) {
+      if (entry.deviceId != deviceId) continue;
+      // Only stamp entries that have not yet been pushed.
+      if (entry.pushWriteSeq != null) continue;
+      entry.pushWriteSeq = seqHigh;
+    }
+  }
 
-    for (final entry in global.entries) {
-      // Only advance the device's state if the global entry is newer (LWW).
-      // Since we don't always have HLC data, we use a presence check:
-      // if the global state has a key the device doesn't, add it.
-      // If both have it, the global value (LWW winner) takes precedence.
+  /// Merges the visible LWW state into [deviceId]'s expected state.
+  ///
+  /// When [seqHigh] is non-null, uses [visibleExpectedStateFor] to restrict
+  /// the merge to writes visible at that sequence (eventual-consistency path).
+  /// When [seqHigh] is `null` (legacy [MemorySyncAdapter] path), falls back
+  /// to [globalExpectedState] — identical to the previous behaviour.
+  void _mergeVisibleIntoDevice(int deviceId, int? seqHigh) {
+    final ds = _deviceStates[deviceId]!;
+    final visible = seqHigh != null
+        ? visibleExpectedStateFor(deviceId, seqHigh)
+        : globalExpectedState();
+
+    for (final entry in visible.entries) {
+      // Merge visible state into the device view. The visible state already
+      // applies LWW, so we unconditionally overwrite.
       ds.documents[entry.key] = entry.value;
     }
 
-    // Also ensure deletes from global state propagate.
-    for (final ck in global.keys) {
+    // Also ensure deletes from visible state propagate.
+    for (final ck in visible.keys) {
       if (!ds.documents.containsKey(ck)) {
-        ds.documents[ck] = global[ck];
+        ds.documents[ck] = visible[ck];
       }
     }
   }
@@ -347,6 +460,11 @@ final class ReconciliationAgent {
 
     // Check if any OTHER device has written this key since the last time
     // both devices synced (simplified: since any write from another device).
+    //
+    // IMPORTANT: fork detection is based on write *ordering*, not propagation
+    // delay. Delayed visibility does not affect fork detection — a fork is
+    // about concurrent writes, not about when they become visible. Do NOT
+    // change this logic to gate on pushWriteSeq or visibility cursors.
     for (final existingEntry in writersForKey.values) {
       if (existingEntry.deviceId == newEntry.deviceId) continue;
 

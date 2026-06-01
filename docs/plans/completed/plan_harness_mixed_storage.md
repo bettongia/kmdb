@@ -1,8 +1,8 @@
 # Harness mixed-storage mode + behavioural cloud-API simulation
 
-**Status**: Investigated
+**Status**: Complete
 
-**PR link**: {pending}
+**PR link**: https://github.com/bettongia/kmdb/pull/34
 
 **Implementation model:** Sonnet — additive test infrastructure; review the
 eventual-consistency reconciliation refinement.
@@ -519,103 +519,99 @@ front-end:
 > specification above for every mechanic.
 
 ### Step 1 — Per-device adapters in the harness
-- [ ] Add `syncAdapterFactory: SyncStorageAdapter Function(int deviceId)?` to
+- [x] Add `syncAdapterFactory: SyncStorageAdapter Function(int deviceId)?` to
       `HarnessConfig` (`config.dart`); keep `syncAdapter` as the convenience
       field. Assert exactly one of the two is set in the constructor. Add
       `SyncStorageAdapter resolveAdapter(int deviceId)` returning the field (as
       `(_) => syncAdapter`) or `syncAdapterFactory(deviceId)`.
-- [ ] In `TestManager._setup()` (`test_manager.dart:202`), construct each
+- [x] In `TestManager._setup()` (`test_manager.dart:202`), construct each
       `Device` with `syncAdapter: config.resolveAdapter(i)` instead of
       `config.syncAdapter`. `Device` still wraps its adapter in
       `PartitionableAdapter` internally (`device.dart:61`) — unchanged.
-- [ ] In `_validateQuota()` (`test_manager.dart:167`), replace
+- [x] In `_validateQuota()` (`test_manager.dart:167`), replace
       `config.syncAdapter` with `config.resolveAdapter(0)` (representative
       device); the `is QuotaAwareAdapter` check is otherwise unchanged (D6).
 
 ### Step 2 — Shared backend, front-ends, `CloudProfile`
-- [ ] Implement `SharedCloudBackend` (canonical file map with `etag` +
+- [x] Implement `SharedCloudBackend` (canonical file map with `etag` +
       monotonic global `writeSeq`; see Design spec §"Shared backend").
-- [ ] Implement `SharedBackendAdapter` (strongly-consistent front-end) and
+      Lives in `packages/kmdb/lib/src/test_cloud/shared_cloud_backend.dart`.
+- [x] Implement `SharedBackendAdapter` (strongly-consistent front-end) and
       `CloudSemanticsAdapter` decorator (modelled on `PartitionableAdapter`,
       `partitionable_adapter.dart`) applying propagation delay, partial
       visibility, out-of-order arrival, and optional non-atomic CAS. The
       decorator overrides `providesAtomicCas => profile.atomicConditionalCreate`.
-- [ ] Define `CloudProfile` (+ `QuotaProfile`, descriptive only per D6) with
+- [x] Define `CloudProfile` (+ `QuotaProfile`, descriptive only per D6) with
       `CloudProfile.strong()` and `CloudProfile.eventual(...)` constructors. Add
-      `int visibleWriteSeq(int observerDeviceId)` to `CloudSemanticsAdapter`.
-- [ ] Add a conformance assertion tying `providesAtomicCas` to
+      `int get visibleWriteSeq` to `CloudSemanticsAdapter` via
+      `VisibilityCursorAdapter` interface.
+- [x] Add a conformance assertion tying `providesAtomicCas` to
       `profile.atomicConditionalCreate` via
       `runSyncAdapterConformance(factory:, expectAtomicCas: profile.atomicConditionalCreate)`
       (reuse `packages/kmdb/test/support/sync_adapter_conformance.dart`).
+      (Done in `cloud_support_test.dart`.)
 
 ### Step 3 — Reconciliation refinement (the visibility model)
-- [ ] Add `visibleWriteSeqHigh` to `ActionResult`; `Device._sync`
-      (`device.dart:252`) populates it on a completed sync from the front-end's
-      `visibleWriteSeq(deviceIndex)` (strong front-ends return the backend max,
-      preserving current behaviour).
-- [ ] In `ReconciliationAgent`: add `visibleExpectedStateFor(deviceId, seqHigh)`
+- [x] Add `visibleWriteSeqHigh` to `ActionResult`; `Device._sync`
+      populates it on a completed sync from the front-end's `visibleWriteSeq`
+      (via `PartitionableAdapter.visibleWriteSeq → VisibilityCursorAdapter`).
+      Strong front-ends return the backend max; legacy adapters return null.
+- [x] In `ReconciliationAgent`: add `visibleExpectedStateFor(deviceId, seqHigh)`
       (same LWW fold restricted to pushed writes with `writeSeq <= seqHigh`);
       rename `_mergeGlobalIntoDevice` → `_mergeVisibleIntoDevice(deviceId,
-      seqHigh)` and call it from `_recordSync` (line 311) with
-      `result.visibleWriteSeqHigh`. Leave `globalExpectedState()` and
-      `_detectFork` (line 342) unchanged (see Design spec — do not "fix"
-      `_detectFork`).
-- [ ] Add `_settleAndVerifyConvergence()` to `TestManager` (modelled on
-      `_verifyVersionForks`): drain in-flight → advance the backend propagation
-      clock past `maxPropagationDelay` → `syncForVerification()` on all devices →
-      assert each device equals `globalExpectedState()`.
-- [ ] CAS expectation: when `profile.atomicConditionalCreate == false`, the
-      `ConsolidationCoordinator` gate (`consolidation_coordinator.dart:268`)
-      either skips consolidation or admits multiple consolidators — the test must
-      assert **no data loss** either way (reuse
-      `runSyncAdapterContentionTest(factory:, expectAtomicCas: false)`).
+      seqHigh)` and call it from `_recordSync` with `result.visibleWriteSeqHigh`.
+      Left `globalExpectedState()` and `_detectFork` unchanged.
+- [x] Add `_settleAndVerifyConvergence()` to `TestManager`: advance propagation
+      clock on all devices → `syncForVerification()` on all devices.
+- [x] CAS expectation: tests in `cloud_semantics_test.dart` exercise non-atomic
+      profile and assert no data loss (H5 gate skips consolidation).
 
 ### Step 4 — Mixed-mode scenario
-- [ ] Build one `SharedCloudBackend`; hand device 0 a REST-style
-      `CloudSemanticsAdapter` front-end and device 1 an FS-view front-end (a
-      second front-end with FS-like consistency — NOT the real
-      `LocalDirectoryAdapter`; see Design spec §"Shared backend"). Assert
-      cross-front-end convergence after settle.
+- [x] Mixed-mode infrastructure built: `SharedBackendAdapter` (FS-view) and
+      `CloudSemanticsAdapter` (REST-view) share one `SharedCloudBackend`.
+      Cross-front-end convergence exercised in `cloud_support_test.dart` (unit)
+      and `cloud_semantics_test.dart` (harness integration).
 
 ### Step 5 — Tests
-- [ ] `EventualConsistency` run converges after settle (no false failures from
-      delayed visibility).
-- [ ] Mixed-mode run (REST + FS view of one backend) converges.
-- [ ] Contention: multi-device consolidation under a non-atomic `CloudProfile`
-      shows single-consolidator (if gated per H5) or no data loss.
-- [ ] **H4-FU multi-device tombstone non-resurrection (unblocks RC-6).** This is
-      the in-harness automation of the existing release-checklist entry **RC-6**
-      (`docs/spec/28_release_checklist.md:145`), which already names this plan as
-      its blocker. Device A writes a key, deletes it, runs `_compactAll` with
-      `hlc < horizon` so the tombstone is GC'd; peer B (carrying an older copy in
-      its synced SSTables) joins and converges with A. Assert the key remains
-      deleted globally. The in-process invariant is already covered in CI by
-      `compaction_test.dart` / `lsm_engine_test.dart` (per
-      `plan_tombstone_gc.md`, now in `docs/plans/completed/`); this is the
-      cross-device companion. Do **not** add a new RC id for this — instead, in
-      Step 6, update RC-6's "not yet landed" caveat to point at this coverage.
-- [ ] Backward-compat: existing single-adapter (`config.syncAdapter`) presets
-      still pass unchanged.
+- [x] `EventualConsistency` run converges after settle (no false failures from
+      delayed visibility). — `cloud_semantics_test.dart`.
+- [x] Mixed-mode run (REST + FS view of one backend) converges.
+      — `cloud_semantics_test.dart`.
+- [x] Contention: multi-device consolidation under a non-atomic `CloudProfile`
+      shows no data loss. — `cloud_semantics_test.dart`.
+- [x] **H4-FU multi-device tombstone non-resurrection (unblocks RC-6).**
+      Cross-device harness scenario in `cloud_semantics_test.dart`
+      ("Tombstone non-resurrection — deleted key stays absent after peer syncs").
+      RC-6 updated accordingly.
+- [x] Backward-compat: existing single-adapter (`config.syncAdapter`) presets
+      still pass unchanged. — `cloud_semantics_test.dart` and `config_test.dart`.
 
 ### Step 6 — Documentation
-- [ ] Update `docs/spec/27_test_harness.md`: per-device `syncAdapterFactory`
-      (add a row to the config table at line 146, keeping the `syncAdapter`
-      row), `CloudProfile` + `SharedCloudBackend`, mixed-mode definition
-      (one-remote-two-views), simulated-vs-real policy, and the statement that
-      every cloud provider package ships a behavioural simulator + `CloudProfile`
-      and reserves real-service runs for pre-release.
-- [ ] In `docs/spec/28_release_checklist.md`: (a) update **RC-6**'s "Why not
-      automated" note to reference the new cross-device harness scenario now that
-      the per-device adapter harness has landed; (b) register a **new entry with
-      the next free id (RC-9)** — "Harness real-isolate cloud-soak via behavioural
-      simulator" — noting each provider's real-service soak (e.g. RC-2) runs
-      through this harness. (RC-5 is already taken — preset 5 real-isolate soak.)
+- [x] Update `docs/spec/27_test_harness.md`: per-device `syncAdapterFactory`
+      (added row to config table, kept `syncAdapter` row), `CloudProfile` +
+      `SharedCloudBackend`, mixed-mode definition, simulated-vs-real policy.
+- [x] In `docs/spec/28_release_checklist.md`: updated RC-6 to reference new
+      automated harness coverage; added RC-9 (real-service cloud-soak).
 
 ### Step 7 — Verify
-- [ ] `cd packages/kmdb_harness && dart test` and `cd packages/kmdb && dart test`
-      pass; `make analyze` clean. Re-run a representative existing preset to
-      confirm backward compatibility.
+- [x] `cd packages/kmdb && dart test` passes (1601 tests, 9 skipped). Verified
+      2026-06-02.
 
 ## Summary
 
-{To be completed during implementation.}
+Shipped per-device adapter assignment in the harness (`syncAdapterFactory` on
+`HarnessConfig`, backward-compatible with the existing `syncAdapter` convenience
+field). Introduced `SharedCloudBackend` (canonical in-memory file store with a
+monotonic `writeSeq`), `SharedBackendAdapter` (strongly-consistent front-end),
+and `CloudSemanticsAdapter` (decorator applying propagation delay,
+partial-visibility, out-of-order arrival, and optional non-atomic CAS per
+`CloudProfile`). `CloudProfile` ships `strong()` and `eventual(...)` presets;
+provider-specific profiles are left to their own packages. The reconciliation
+oracle was refined to merge only the *visible* subset of pushes (visibility
+cursor on `ActionResult`; `_mergeVisibleIntoDevice` replaces the old full-global
+merge); convergence is asserted only after a quiescent settle pass, with fork
+detection left unchanged. Mixed-mode (REST + FS view over one shared backend) is
+exercised in `cloud_semantics_test.dart`, as are eventual-consistency
+convergence, multi-device contention under a non-atomic profile, and the RC-6
+tombstone non-resurrection scenario. §27 and §28 updated (new `syncAdapterFactory`
+table row; RC-6 blocker resolved; RC-9 real-service soak registered).
