@@ -23,6 +23,8 @@ HarnessReport _sampleReport({
   bool device1Pass = true,
   int forkCount = 0,
   int noOpCount = 0,
+  int versionForksPassed = 0,
+  int versionForksChecked = 0,
 }) {
   final verdicts = [
     DeviceVerdict(deviceId: 0, passed: device0Pass),
@@ -53,6 +55,8 @@ HarnessReport _sampleReport({
     noOpCounts: noOps,
     totalActions: 100,
     durationMs: 1234,
+    versionForksPassed: versionForksPassed,
+    versionForksChecked: versionForksChecked,
   );
 }
 
@@ -61,7 +65,13 @@ HarnessReport _sampleReport({
 void main() {
   group('HarnessReport — serialisation round-trip', () {
     test('toJson / fromJson preserves all fields', () {
-      final original = _sampleReport(seed: 99, forkCount: 2, noOpCount: 3);
+      final original = _sampleReport(
+        seed: 99,
+        forkCount: 2,
+        noOpCount: 3,
+        versionForksPassed: 2,
+        versionForksChecked: 2,
+      );
       final restored = HarnessReport.fromJson(original.toJson());
 
       expect(restored.prngseed, equals(original.prngseed));
@@ -71,6 +81,18 @@ void main() {
       expect(restored.forkRecords.length, equals(2));
       expect(restored.noOpCounts.length, equals(2));
       expect(restored.noOpCounts.first.count, equals(3));
+      expect(restored.versionForksPassed, equals(2));
+      expect(restored.versionForksChecked, equals(2));
+    });
+
+    test('fromJson defaults versionForks fields when absent', () {
+      // Simulate a report serialised before versioning was added.
+      final json = _sampleReport(seed: 1).toJson()
+        ..remove('versionForksPassed')
+        ..remove('versionForksChecked');
+      final restored = HarnessReport.fromJson(json);
+      expect(restored.versionForksPassed, equals(0));
+      expect(restored.versionForksChecked, equals(0));
     });
 
     test('toJsonString / fromJsonString round-trip', () {
@@ -281,6 +303,34 @@ void main() {
     test('toString on ReportDiff returns the description', () {
       const diff = ReportDiff(description: 'test divergence');
       expect(diff.toString(), equals('test divergence'));
+    });
+
+    test('differing versionForksPassed produces a diff', () {
+      final a = _sampleReport(versionForksPassed: 3, versionForksChecked: 3);
+      final b = _sampleReport(versionForksPassed: 2, versionForksChecked: 3);
+      final diffs = diffReports(a, b);
+      expect(diffs, isNotEmpty);
+      expect(
+        diffs.any((d) => d.toString().contains('versionForksPassed')),
+        isTrue,
+      );
+    });
+
+    test('differing versionForksChecked produces a diff', () {
+      final a = _sampleReport(versionForksPassed: 2, versionForksChecked: 3);
+      final b = _sampleReport(versionForksPassed: 2, versionForksChecked: 4);
+      final diffs = diffReports(a, b);
+      expect(diffs, isNotEmpty);
+      expect(
+        diffs.any((d) => d.toString().contains('versionForksChecked')),
+        isTrue,
+      );
+    });
+
+    test('identical versionForks fields produce no diff', () {
+      final a = _sampleReport(versionForksPassed: 2, versionForksChecked: 2);
+      final b = _sampleReport(versionForksPassed: 2, versionForksChecked: 2);
+      expect(diffReports(a, b), isEmpty);
     });
   });
 

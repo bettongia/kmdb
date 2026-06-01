@@ -74,7 +74,8 @@ export 'src/query/exceptions.dart'
         ReservedFieldException,
         ReservedIndexPathException,
         SchemaValidationException,
-        StaleIndexException;
+        StaleIndexException,
+        VersionNotFoundError;
 export 'src/query/collection_schema.dart' show CollectionSchema;
 export 'src/query/schema/schema_manager.dart' show SchemaManager;
 export 'src/query/filter/filter.dart' show Filter;
@@ -108,6 +109,13 @@ export 'src/search/semantic/vec_manager.dart' show VecManager;
 
 // ── Text search — hybrid (RRF) ────────────────────────────────────────────────
 export 'src/search/hybrid/hybrid_manager.dart' show rrfScore, mergeWithRrf;
+
+// ── Document versioning ───────────────────────────────────────────────────────
+export 'src/versioning/version_config.dart' show VersionConfig;
+export 'src/versioning/version_entry.dart' show DocumentVersion, VersionEntry;
+export 'src/versioning/version_manager.dart'
+    show kVersionNamespacePrefix, versionNamespace;
+export 'src/engine/util/hlc.dart' show Hlc;
 
 // ── Vault — content-addressable binary object store ───────────────────────────
 export 'src/vault/vault_ref.dart' show VaultRef;

@@ -17,6 +17,7 @@ import 'dart:typed_data';
 
 import '../compaction/compaction_job.dart';
 import '../compaction/merge_iterator.dart';
+import '../compaction/reclamation_policy.dart' show ReclamationPolicyRegistry;
 import '../manifest/current_file.dart';
 import '../manifest/manifest_writer.dart';
 import '../manifest/version_edit.dart';
@@ -133,6 +134,33 @@ final class LsmEngine {
   /// synced database.
   Future<Hlc> Function()? _tombstoneHorizonProvider;
 
+  /// Optional callback invoked after an all-levels compaction trims `$ver:`
+  /// version entries via [ReclamationPolicy.filterGroup]. The callback receives
+  /// the raw value bytes of every trimmed entry and is responsible for
+  /// decrementing vault ref counts for any vault URIs in those entries.
+  ///
+  /// Injected by [KvStoreImpl.setVersionDropCallback], wired by [KmdbDatabase]
+  /// to the vault ref decrement path (RQ5). `null` when vault is disabled.
+  ///
+  /// **Crash posture:** if the process crashes after `_compactAll` commits but
+  /// before this callback completes, vault refs are over-counted (blobs
+  /// retained). This is the fail-safe: blobs are never deleted while possibly
+  /// referenced (H3 posture, RQ5).
+  Future<void> Function(List<Uint8List>)? _versionDropCallback;
+
+  /// Optional callback that provides a [ReclamationPolicyRegistry] with
+  /// per-collection [VersionRetentionPolicy] instances for `_compactAll`.
+  ///
+  /// Called at the start of `_compactAll()` to obtain the registry. The
+  /// callback reads current [VersionConfig] entries from `$meta` and builds
+  /// one `VersionRetentionPolicy` per `$ver:{collection}` prefix.
+  ///
+  /// Injected by [KvStoreImpl] after versioning is configured. `null` means
+  /// [_compactAll] uses the default registry ([ReclamationPolicyRegistry()],
+  /// which assigns [RetainAllVersionsPolicy] to all `$ver:` prefixes — no
+  /// per-collection trimming).
+  Future<ReclamationPolicyRegistry> Function()? _versionRegistryProvider;
+
   /// The [MetaStore] used to persist the tombstone GC floor (H4-FU3).
   ///
   /// Injected by [KvStoreImpl] after construction via [setMetaStore].
@@ -202,6 +230,29 @@ final class LsmEngine {
   /// whenever it drops at least one tombstone.
   void setMetaStore(MetaStore metaStore) {
     _metaStore = metaStore;
+  }
+
+  /// Registers [callback] as the post-compaction vault ref-decrement handler
+  /// for trimmed `$ver:` version entries (RQ5). Pass `null` to unregister.
+  ///
+  /// Called by [KvStoreImpl.setVersionDropCallback], wired by [KmdbDatabase]
+  /// to the vault ref decrement path. Mirrors the pattern of [setMetaStore].
+  void setVersionDropCallback(
+    Future<void> Function(List<Uint8List>)? callback,
+  ) {
+    _versionDropCallback = callback;
+  }
+
+  /// Registers a [provider] that builds a [ReclamationPolicyRegistry] with
+  /// per-collection [VersionRetentionPolicy] entries for `_compactAll`.
+  ///
+  /// Called by [KvStoreImpl] after versioning is configured. Pass `null` to
+  /// revert to the default registry (all `$ver:` prefixes get
+  /// [RetainAllVersionsPolicy] — no per-collection trimming).
+  void setVersionRegistryProvider(
+    Future<ReclamationPolicyRegistry> Function()? provider,
+  ) {
+    _versionRegistryProvider = provider;
   }
 
   /// Computes the tombstone-GC horizon for the next all-levels compaction.
@@ -511,6 +562,70 @@ final class LsmEngine {
     // Emit the last buffered entry if not a tombstone.
     if (bufferedKey != null && !bufferedIsDelete) {
       yield (key: bufferedKey, value: bufferedValue!);
+    }
+  }
+
+  /// Returns a stream of **all** historical entries for [docKey] in [namespace],
+  /// in ascending HLC order (oldest first).
+  ///
+  /// Unlike [scan], which collapses multiple versions of the same user key to
+  /// the latest (Last-Write-Wins), this method returns every entry including
+  /// superseded versions and tombstones. It is intended for history-bearing
+  /// namespaces such as `$ver:{collection}`.
+  ///
+  /// Each yielded [VersionHistoryEntry] carries the raw value bytes, the HLC
+  /// extracted from the internal key (the authoritative version timestamp), and
+  /// a flag indicating whether the entry is a tombstone (delete-version).
+  ///
+  /// ## Implementation
+  ///
+  /// Mirrors [scan]'s stream construction but does not buffer and collapse by
+  /// user key — every entry in the merge output for the given
+  /// `[nsLen][ns][userKey]` prefix is yielded.
+  Stream<VersionHistoryEntry> scanVersionHistory(
+    String namespace,
+    String docKey,
+  ) async* {
+    final keyBytes = KeyCodec.keyToBytes(docKey);
+    // The prefix covers exactly the [nsLen][ns][16B userKey] portion; the HLC
+    // and record-type bytes are not part of the prefix. All versions of this
+    // docKey in this namespace form a contiguous block in the merge output.
+    final prefix = _buildKeyPrefix(namespace, keyBytes);
+    final prefixEnd = _nextPrefix(prefix);
+
+    // Build source streams from all storage levels.
+    final streams = <Stream<SstEntry>>[];
+    streams.add(_skipListRangeToStream(_active, prefix, prefixEnd));
+    if (_frozen != null) {
+      streams.add(_skipListRangeToStream(_frozen!, prefix, prefixEnd));
+    }
+    final l0 = _levels[0] ?? [];
+    for (var i = l0.length - 1; i >= 0; i--) {
+      final reader = await _openReader('$_sstDir/${l0[i].filename}');
+      if (reader != null) {
+        streams.add(reader.scan(start: prefix, end: prefixEnd));
+      }
+    }
+    for (final level in [1, 2]) {
+      for (final entry in (_levels[level] ?? [])) {
+        final reader = await _openReader('$_sstDir/${entry.filename}');
+        if (reader != null) {
+          streams.add(reader.scan(start: prefix, end: prefixEnd));
+        }
+      }
+    }
+
+    // Yield every entry from the merge without any LWW collapsing. The merge
+    // iterator emits in ascending internal-key order, which for a fixed
+    // [nsLen][ns][userKey] prefix means ascending HLC order.
+    final merge = MergeIterator(streams);
+    await for (final entry in merge.entries) {
+      // Verify the entry belongs to our namespace+docKey (safety guard).
+      if (!_hasPrefix(entry.key, prefix)) break;
+      final hlc = KeyCodec.decodeHlc(entry.key);
+      final isDelete =
+          KeyCodec.decodeRecordType(entry.key) == RecordType.delete;
+      yield (value: entry.value, hlc: hlc, isDelete: isDelete);
     }
   }
 
@@ -874,6 +989,16 @@ final class LsmEngine {
     // Run a single job treating all inputs as a single merge and outputting to L2.
     final hlc = _clock.now();
     final horizon = await _computeTombstoneHorizon();
+    // Build the policy registry: use the version-registry provider if available,
+    // otherwise fall back to the default registry (RetainAllVersionsPolicy for
+    // all $ver: prefixes — no per-collection trimming).
+    final policyRegistry = _versionRegistryProvider != null
+        ? await _versionRegistryProvider!()
+        : ReclamationPolicyRegistry();
+    // Clock injection (RQ6): wall-clock ms is captured here at job-construction
+    // time so the compaction's filterGroup calls use a consistent snapshot of
+    // "now" regardless of how long the compaction takes.
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
     final job = CompactionJob(
       sstDir: _sstDir,
       deviceId: _deviceId,
@@ -885,6 +1010,8 @@ final class LsmEngine {
       nextSeq: hlc.encoded,
       allLevels: true,
       horizon: horizon,
+      nowMs: nowMs,
+      policyRegistry: policyRegistry,
     );
     final edit = await job.run();
 
@@ -914,6 +1041,15 @@ final class LsmEngine {
     // (Q6 option b — see doc comment above for the atomicity analysis).
     if (job.tombstonesDropped > 0) {
       await _metaStore?.setTombstoneFloor(horizon);
+    }
+
+    // Invoke the version-drop callback if any $ver: entries were trimmed by
+    // filterGroup. This releases vault ref counts for vault URIs in those
+    // entries (RQ5). The callback runs AFTER the manifest is durable so a
+    // crash here leaves refs over-counted (fail-safe: retain, never delete).
+    final droppedValues = job.droppedVersionValues;
+    if (droppedValues.isNotEmpty) {
+      await _versionDropCallback?.call(droppedValues);
     }
   }
 

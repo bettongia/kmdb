@@ -14,6 +14,8 @@
 
 import 'package:betto_schema/schema.dart' show SchemaViolation;
 
+import '../engine/util/hlc.dart';
+
 /// Thrown by [KmdbCollection] write methods when a document fails validation
 /// against the collection's registered [CollectionSchema].
 ///
@@ -197,6 +199,49 @@ final class ReservedIndexPathException implements Exception {
       'ReservedIndexPathException: index path "$path" in namespace '
       '"$namespace" starts with "_", which is reserved for system fields. '
       'Only user-owned field paths may be indexed.';
+}
+
+/// Thrown by [KmdbCollection.promoteVersion] when the specified version entry
+/// no longer exists in the `$ver:` namespace.
+///
+/// This occurs when:
+/// - The version was trimmed by compaction (beyond the collection's
+///   `maxVersions` count or `retentionDays` window).
+/// - The [hlc] was not produced by a write to this collection (e.g. it is
+///   a typo or belongs to a different collection).
+/// - Versioning was disabled for this collection when the document was written.
+///
+/// Example:
+/// ```dart
+/// try {
+///   await tasks.promoteVersion(docKey, hlc);
+/// } on VersionNotFoundError catch (e) {
+///   print('Version ${e.requestedHlc.toHex()} has been trimmed');
+/// }
+/// ```
+final class VersionNotFoundError implements Exception {
+  /// Creates a [VersionNotFoundError].
+  const VersionNotFoundError({
+    required this.docKey,
+    required this.namespace,
+    required this.requestedHlc,
+  });
+
+  /// The document key whose version was requested.
+  final String docKey;
+
+  /// The collection namespace.
+  final String namespace;
+
+  /// The HLC that was not found in the `$ver:` namespace.
+  final Hlc requestedHlc;
+
+  @override
+  String toString() =>
+      'VersionNotFoundError: version "$requestedHlc" for document '
+      '"$docKey" in namespace "$namespace" not found. '
+      'It may have been trimmed by compaction or versioning was disabled '
+      'for this collection.';
 }
 
 /// Describes an index whose build was interrupted by an unclean shutdown.

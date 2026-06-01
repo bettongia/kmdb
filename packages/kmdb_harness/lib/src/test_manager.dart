@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:kmdb/kmdb.dart';
@@ -103,6 +104,10 @@ final class TestManager {
   // No-op counts per device (deviceIndex → count).
   final Map<int, int> _noOpCounts = {};
 
+  // Version fork verification counters.
+  int _versionForksPassed = 0;
+  int _versionForksChecked = 0;
+
   // Sync-per-minute rate limiter.
   int _syncCountThisMinute = 0;
   DateTime _currentMinuteStart = DateTime.now();
@@ -143,6 +148,7 @@ final class TestManager {
       await _setup();
       await _preSeed();
       await _runLoop();
+      await _verifyVersionForks();
     } finally {
       await _teardown();
     }
@@ -437,6 +443,75 @@ final class TestManager {
       noOpCounts: noOpCounts,
       totalActions: _reconciler.writeLog.length + _reconciler.syncLog.length,
       durationMs: durationMs,
+      versionForksPassed: _versionForksPassed,
+      versionForksChecked: _versionForksChecked,
     );
+  }
+
+  // ── Version fork verification ─────────────────────────────────────────────
+
+  /// Verifies that the losing write of every detected fork is present in the
+  /// `$ver:` history on both participating devices.
+  ///
+  /// Forces a final sync for all devices (unpartitioning first) so that
+  /// `$ver:` entries from every device have propagated. Then for each
+  /// [ForkEvent] recorded by the [ReconciliationAgent], checks that
+  /// `getVersions(docKey)` on both devices contains the loser write's value.
+  ///
+  /// Results are accumulated in [_versionForksPassed] and
+  /// [_versionForksChecked] and included in the [HarnessReport].
+  Future<void> _verifyVersionForks() async {
+    _versionForksPassed = 0;
+    _versionForksChecked = 0;
+
+    if (_reconciler.forkEvents.isEmpty) return;
+
+    // Final sync: unpartition each device and push/pull all pending SSTables
+    // so $ver: entries from all devices are present before we read them.
+    for (final device in _devices) {
+      await device.syncForVerification();
+    }
+
+    for (final event in _reconciler.forkEvents) {
+      _versionForksChecked++;
+
+      // Determine the loser (the non-LWW-winner write).
+      final loser = event.lwwWinner == event.writeA
+          ? event.writeB
+          : event.writeA;
+
+      // Both devices that participated in the fork must have the loser's value
+      // in their $ver: history after sync.
+      var bothPass = true;
+      for (final deviceIdx in {event.writeA.deviceId, event.writeB.deviceId}) {
+        if (deviceIdx < 0 || deviceIdx >= _devices.length) {
+          bothPass = false;
+          break;
+        }
+        final device = _devices[deviceIdx];
+        final versions = await device.getVersions(
+          event.collectionName,
+          event.key,
+        );
+        final found = loser.isDelete
+            ? versions.any((v) => v.isDelete)
+            : versions.any(
+                (v) => !v.isDelete && _mapsEqual(v.value, loser.document),
+              );
+        if (!found) {
+          bothPass = false;
+          break;
+        }
+      }
+
+      if (bothPass) _versionForksPassed++;
+    }
+  }
+
+  /// Deep-equality comparison for JSON-like maps using JSON encoding.
+  static bool _mapsEqual(Map<String, dynamic>? a, Map<String, dynamic>? b) {
+    if (a == null && b == null) return true;
+    if (a == null || b == null) return false;
+    return jsonEncode(a) == jsonEncode(b);
   }
 }

@@ -152,6 +152,24 @@ void main() {
       },
       timeout: const Timeout(Duration(seconds: 30)),
     );
+
+    test(
+      'report includes versionForksChecked matching forkRecords count',
+      () async {
+        final manager = TestManager(
+          config: _lowVelocityConfig(durationSeconds: 2),
+          seed: 42,
+        );
+        final report = await manager.run();
+
+        // The number of forks checked must equal the number of fork records
+        // detected by the reconciler.
+        expect(report.versionForksChecked, equals(report.forkRecords.length));
+        // All checked forks should pass (version history propagates correctly).
+        expect(report.versionForksPassed, equals(report.versionForksChecked));
+      },
+      timeout: const Timeout(Duration(seconds: 60)),
+    );
   });
 
   group('TestManager — quota check', () {

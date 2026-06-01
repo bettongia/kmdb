@@ -15,6 +15,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:kmdb/src/engine/compaction/reclamation_policy.dart'
+    show ReclamationPolicyRegistry;
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/util/hlc.dart';
 import 'package:kmdb/src/vault/vault_recovery.dart';
@@ -93,6 +95,22 @@ class TestKvStore implements KvStore {
 
   @override
   void setTombstoneHorizonProvider(Future<Hlc> Function()? provider) {}
+
+  @override
+  void setVersionDropCallback(
+    Future<void> Function(List<Uint8List>)? callback,
+  ) {}
+
+  @override
+  void setVersionRegistryProvider(
+    Future<ReclamationPolicyRegistry> Function()? provider,
+  ) {}
+
+  @override
+  Stream<VersionHistoryEntry> scanVersionHistory(
+    String namespace,
+    String docKey,
+  ) async* {}
 
   @override
   Future<void> compactAll() async {}
