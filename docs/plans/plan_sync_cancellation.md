@@ -1,6 +1,6 @@
 # Sync cancellation and timeout support
 
-**Status**: Investigated
+**Status**: Implementing
 
 **PR link**: {A link to the PR submitted for this plan}
 
@@ -255,68 +255,68 @@ Future<String?> getEtag(String path, {SyncContext? ctx});
 ## Implementation plan
 
 ### Step 1 — Core types
-- [ ] Add `CancellationToken`, `SyncContext`, `SyncCancelledException` to
+- [x] Add `CancellationToken`, `SyncContext`, `SyncCancelledException` to
       `packages/kmdb/lib/src/sync/sync_context.dart`.
-- [ ] Export from `packages/kmdb/lib/kmdb.dart` alongside `SyncStorageAdapter`.
-- [ ] Unit tests: `CancellationToken` cancel/isCancelled/whenCancelled;
+- [x] Export from `packages/kmdb/lib/kmdb.dart` alongside `SyncStorageAdapter`.
+- [x] Unit tests: `CancellationToken` cancel/isCancelled/whenCancelled;
       `SyncContext.throwIfExpired` with cancelled token and with expired deadline;
       already-cancelled token at construction; nil ctx is a no-op.
 
 ### Step 2 — `SyncStorageAdapter` interface
-- [ ] Add `{SyncContext? ctx}` to all six method signatures in
+- [x] Add `{SyncContext? ctx}` to all six method signatures in
       `packages/kmdb/lib/src/sync/sync_storage_adapter.dart`.
-- [ ] Update the interface doc comment to describe the cancellation contract
+- [x] Update the interface doc comment to describe the cancellation contract
       (should-honour / permitted-to-ignore language from the Investigation).
 
 ### Step 3 — Concrete adapter updates
-- [ ] **`LocalDirectoryAdapter`** — add `ctx` param to all six methods; call
+- [x] **`LocalDirectoryAdapter`** — add `ctx` param to all six methods; call
       `ctx?.throwIfExpired()` before each file system operation.
-- [ ] **Web stub** (`local_directory_adapter_stub.dart`) — match signatures only.
-- [ ] **`MemorySyncAdapter`** — add `ctx` param; ignore it.
-- [ ] **`SharedBackendAdapter`** — add `ctx` param; ignore it.
-- [ ] **`CloudSemanticsAdapter`** — add `ctx` param to all six methods; call
+- [x] **Web stub** (`local_directory_adapter_stub.dart`) — match signatures only.
+- [x] **`MemorySyncAdapter`** — add `ctx` param; ignore it.
+- [x] **`SharedBackendAdapter`** — add `ctx` param; ignore it.
+- [x] **`CloudSemanticsAdapter`** — add `ctx` param to all six methods; call
       `ctx?.throwIfExpired()` at the start of each. Do **not** wrap the line-233
       `Duration.zero` yield (it is the CAS race-window yield, not a propagation
       delay — see D4 / Investigation correction).
-- [ ] Add `GatedSyncAdapter` test decorator under
+- [x] Add `GatedSyncAdapter` test decorator under
       `packages/kmdb/test/support/` with a per-method awaitable `Completer`
       barrier the test controls, so an in-flight call can be blocked and then
       cancelled mid-wait.
-- [ ] **`PartitionableAdapter`** — forward `ctx` opaquely on all six methods.
+- [x] **`PartitionableAdapter`** — forward `ctx` opaquely on all six methods.
       (Mirrors the `ifMatchEtag` forwarding pattern at line 124.)
 
 ### Step 4 — Engine layer threading
-- [ ] **`SyncEngine`** — add `SyncContext? ctx` constructor param; store as
+- [x] **`SyncEngine`** — add `SyncContext? ctx` constructor param; store as
       `_ctx`; pass `ctx: _ctx` to all adapter call sites. **7 sites** (`list` at
       219, 316, 408, 467; `upload` at 228; `download` at 417, 497) — the "14"
       figure conflated engine and coordinator; the engine has 7, the coordinator
       9, totalling 16. Verify by grepping `_cloudAdapter.` before claiming
       completeness.
-- [ ] **`KmdbDatabase.sync/push/pull`** — add `{CancellationToken? cancel,
+- [x] **`KmdbDatabase.sync/push/pull`** — add `{CancellationToken? cancel,
       Duration? timeout}` named params; build `SyncContext` from them; pass to
       `_buildSyncEngine`.
-- [ ] **`ConsolidationCoordinator`** — add `SyncContext? ctx` to constructor or
+- [x] **`ConsolidationCoordinator`** — add `SyncContext? ctx` to constructor or
       `consolidate()` (whichever minimises passing cost given the fresh
       construction at `sync_engine.dart:559`); pass `ctx` to all adapter call
       sites (9 sites).
 
 ### Step 5 — Conformance suite
-- [ ] Add `expectsCancellation: bool = false` to `runSyncAdapterConformance`.
-- [ ] When `true`: (a) pre-cancel a `CancellationToken`, wrap in a
+- [x] Add `expectsCancellation: bool = false` to `runSyncAdapterConformance`.
+- [x] When `true`: (a) pre-cancel a `CancellationToken`, wrap in a
       `SyncContext`, call each method — assert `SyncCancelledException` is thrown
       (entry check); (b) assert an in-flight call blocked on the
       `GatedSyncAdapter` barrier throws when cancelled mid-wait. Define
       "promptly" concretely: the method must throw without completing the
       underlying operation (assert via the gate / a spy), not merely "soon".
-- [ ] Existing call sites require no change (default `false`).
-- [ ] `GoogleDriveAdapter` test suite passes `expectsCancellation: true`.
+- [x] Existing call sites require no change (default `false`).
+- [x] `GoogleDriveAdapter` test suite passes `expectsCancellation: true`.
 
 ### Step 6 — `GoogleDriveAdapter` (on the Google Drive branch)
-- [ ] Replace off-interface `cancellationToken`/`deadline` params on `upload` and
+- [x] Replace off-interface `cancellationToken`/`deadline` params on `upload` and
       `compareAndSwap` with canonical `{SyncContext? ctx}`.
-- [ ] Add `{SyncContext? ctx}` to `list`, `download`, `delete`, `getEtag` (all
+- [x] Add `{SyncContext? ctx}` to `list`, `download`, `delete`, `getEtag` (all
       four were missing in the branch).
-- [ ] Wire `ctx?.cancel` and `ctx?.deadline` into `retryWithBackoff`; replace
+- [x] Wire `ctx?.cancel` and `ctx?.deadline` into `retryWithBackoff`; replace
       the helper's current `{CancellationToken? cancellationToken, DateTime?
       deadline}` params with `{SyncContext? ctx}`. The current helper polls
       `isCancelled` synchronously at back-off boundaries and sleeps with
@@ -329,47 +329,47 @@ Future<String?> getEtag(String path, {SyncContext? ctx});
       cancellation/deadline checks apply to the back-off path, not to a single
       non-retried call; the `throwIfExpired()` at adapter-method entry covers the
       first attempt.
-- [ ] Make `DriveOperationCancelledException extends SyncCancelledException`.
-- [ ] Export `SyncCancelledException` (from core) from `kmdb_google_drive.dart` if
+- [x] Make `DriveOperationCancelledException extends SyncCancelledException`.
+- [x] Export `SyncCancelledException` (from core) from `kmdb_google_drive.dart` if
       callers of the Drive adapter need to catch it directly.
-- [ ] Update Drive adapter tests: pass `expectsCancellation: true` to
+- [x] Update Drive adapter tests: pass `expectsCancellation: true` to
       `runSyncAdapterConformance`; add back-off/cancel behaviour tests (these were
       blocked by the dead-code issue and must now pass).
 
 ### Step 7 — Spec and docs
-- [ ] **`docs/spec/12_sync.md`** — add a subsection defining `SyncContext` /
+- [x] **`docs/spec/12_sync.md`** — add a subsection defining `SyncContext` /
       `CancellationToken` semantics, the adapter contract (should-honour /
       permitted-to-ignore), and the deadline-vs-cancel distinction. Check whether
       the existing "backoff" references (lines 650–730, consolidation retry) need
       clarifying notes.
-- [ ] **`docs/spec/99_glossary.md`** — add `CancellationToken`, `SyncContext`,
+- [x] **`docs/spec/99_glossary.md`** — add `CancellationToken`, `SyncContext`,
       `SyncCancelledException`.
-- [ ] **`docs/spec/13_query_api.md`** — update `KmdbDatabase.sync/push/pull`
+- [x] **`docs/spec/13_query_api.md`** — update `KmdbDatabase.sync/push/pull`
       signatures if documented there (check at implementation time).
-- [ ] Update `packages/kmdb/lib/src/sync/sync_storage_adapter.dart` doc comments
+- [x] Update `packages/kmdb/lib/src/sync/sync_storage_adapter.dart` doc comments
       with cancellation contract language.
 
 ### Step 8 — Integration tests
 > **Rewritten per D4** — the original "`CloudSemanticsAdapter` with a long
 > propagation delay" vehicle does not exist.
-- [ ] **Mid-flight cancellation:** wrap a `MemorySyncAdapter` in
+- [x] **Mid-flight cancellation:** wrap a `MemorySyncAdapter` in
       `GatedSyncAdapter`; start a `KmdbDatabase.push/pull` so a call blocks on
       the barrier; call `cancel()`; assert `SyncCancelledException` propagates
       out of `push/pull` and the underlying op did not complete.
-- [ ] **Entry cancellation:** pre-cancelled token → `push/pull` throws
+- [x] **Entry cancellation:** pre-cancelled token → `push/pull` throws
       `SyncCancelledException` before any adapter work occurs.
-- [ ] **Deadline integration:** pass an already-past/zero `timeout: Duration` to
+- [x] **Deadline integration:** pass an already-past/zero `timeout: Duration` to
       `KmdbDatabase.push`; confirm `SyncCancelledException` is thrown at the first
       `throwIfExpired()` boundary.
-- [ ] `PartitionableAdapter` forwarding: assert `ctx` reaches the inner adapter
+- [x] `PartitionableAdapter` forwarding: assert `ctx` reaches the inner adapter
       (spy adapter records the received `ctx` identity on each method).
 
 ### Step 9 — Verify
-- [ ] `cd packages/kmdb && dart test` passes.
-- [ ] `cd packages/kmdb_harness && dart test` passes.
-- [ ] On the Google Drive branch: `cd packages/kmdb_google_drive && dart test`
+- [x] `cd packages/kmdb && dart test` passes.
+- [x] `cd packages/kmdb_harness && dart test` passes.
+- [x] On the Google Drive branch: `cd packages/kmdb_google_drive && dart test`
       passes with ≥90% coverage (back-off/cancel tests are now reachable).
-- [ ] `make pre_commit` passes across all affected packages.
+- [x] `make pre_commit` passes across all affected packages.
 
 ## Reviewer notes (2026-06-02)
 

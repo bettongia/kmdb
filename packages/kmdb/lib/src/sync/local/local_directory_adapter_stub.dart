@@ -19,6 +19,7 @@
 
 import 'dart:typed_data';
 
+import '../sync_context.dart';
 import '../sync_storage_adapter.dart';
 
 /// Unsupported stub of [LocalDirectoryAdapter] for web/WASM platforms.
@@ -40,19 +41,23 @@ final class LocalDirectoryAdapter implements SyncStorageAdapter {
       throw UnsupportedError('LocalDirectoryAdapter is not supported on web.');
 
   @override
-  Future<List<String>> list(String remoteDir, {String? extension}) =>
+  Future<List<String>> list(
+    String remoteDir, {
+    String? extension,
+    SyncContext? ctx,
+  }) =>
       throw UnsupportedError('LocalDirectoryAdapter is not supported on web.');
 
   @override
-  Future<Uint8List?> download(String remotePath) =>
+  Future<Uint8List?> download(String remotePath, {SyncContext? ctx}) =>
       throw UnsupportedError('LocalDirectoryAdapter is not supported on web.');
 
   @override
-  Future<void> upload(String remotePath, Uint8List bytes) =>
+  Future<void> upload(String remotePath, Uint8List bytes, {SyncContext? ctx}) =>
       throw UnsupportedError('LocalDirectoryAdapter is not supported on web.');
 
   @override
-  Future<void> delete(String remotePath) =>
+  Future<void> delete(String remotePath, {SyncContext? ctx}) =>
       throw UnsupportedError('LocalDirectoryAdapter is not supported on web.');
 
   @override
@@ -60,10 +65,11 @@ final class LocalDirectoryAdapter implements SyncStorageAdapter {
     String path,
     Uint8List newBytes, {
     String? ifMatchEtag,
+    SyncContext? ctx,
   }) =>
       throw UnsupportedError('LocalDirectoryAdapter is not supported on web.');
 
   @override
-  Future<String?> getEtag(String path) =>
+  Future<String?> getEtag(String path, {SyncContext? ctx}) =>
       throw UnsupportedError('LocalDirectoryAdapter is not supported on web.');
 }

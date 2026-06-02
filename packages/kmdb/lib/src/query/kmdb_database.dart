@@ -23,6 +23,7 @@ import '../search/lexical/fts_manager.dart';
 import '../search/semantic/vec_manager.dart';
 import '../search/vec_index_definition.dart';
 import '../sync/consolidation_config.dart';
+import '../sync/sync_context.dart';
 import '../sync/sync_engine.dart';
 import '../sync/sync_storage_adapter.dart';
 import '../vault/vault_gc.dart';
@@ -468,7 +469,10 @@ final class KmdbDatabase {
   /// the local [StorageAdapter] used to read local SSTables; when `null`, a
   /// [StorageAdapterNative] is constructed automatically. [consolidationConfig]
   /// controls the peer-file consolidation threshold and lease parameters;
-  /// defaults to production values.
+  /// defaults to production values. [cancel] is an optional imperative
+  /// cancellation signal; [timeout] is an optional maximum duration for the
+  /// entire sync run (converted to an absolute deadline inside the engine so
+  /// that back-off comparisons are consistent across the full run).
   ///
   /// Equivalent to calling [push] then [pull] in sequence.
   ///
@@ -482,6 +486,14 @@ final class KmdbDatabase {
   /// await db.sync(
   ///   syncAdapter: LocalDirectoryAdapter('/path/to/sync-folder'),
   /// );
+  ///
+  /// // With cancellation and a 30-second timeout:
+  /// final token = CancellationToken();
+  /// await db.sync(
+  ///   syncAdapter: adapter,
+  ///   cancel: token,
+  ///   timeout: const Duration(seconds: 30),
+  /// );
   /// ```
   Future<void> sync({
     required SyncStorageAdapter syncAdapter,
@@ -489,6 +501,8 @@ final class KmdbDatabase {
     Set<String>? syncNamespaces,
     StorageAdapter? localAdapter,
     ConsolidationConfig consolidationConfig = const ConsolidationConfig(),
+    CancellationToken? cancel,
+    Duration? timeout,
   }) async {
     final engine = await _buildSyncEngine(
       syncAdapter: syncAdapter,
@@ -496,13 +510,16 @@ final class KmdbDatabase {
       syncNamespaces: syncNamespaces,
       localAdapter: localAdapter,
       consolidationConfig: consolidationConfig,
+      cancel: cancel,
+      timeout: timeout,
     );
     await engine.sync();
   }
 
   /// Flushes and uploads local SSTables to [syncAdapter].
   ///
-  /// See [sync] for full parameter documentation.
+  /// See [sync] for full parameter documentation (including [cancel] and
+  /// [timeout]).
   ///
   /// **Native-only.** See [sync] for web behaviour.
   Future<void> push({
@@ -511,6 +528,8 @@ final class KmdbDatabase {
     Set<String>? syncNamespaces,
     StorageAdapter? localAdapter,
     ConsolidationConfig consolidationConfig = const ConsolidationConfig(),
+    CancellationToken? cancel,
+    Duration? timeout,
   }) async {
     final engine = await _buildSyncEngine(
       syncAdapter: syncAdapter,
@@ -518,13 +537,16 @@ final class KmdbDatabase {
       syncNamespaces: syncNamespaces,
       localAdapter: localAdapter,
       consolidationConfig: consolidationConfig,
+      cancel: cancel,
+      timeout: timeout,
     );
     await engine.push();
   }
 
   /// Downloads peer SSTables from [syncAdapter] and ingests them locally.
   ///
-  /// See [sync] for full parameter documentation.
+  /// See [sync] for full parameter documentation (including [cancel] and
+  /// [timeout]).
   ///
   /// **Native-only.** See [sync] for web behaviour.
   Future<void> pull({
@@ -533,6 +555,8 @@ final class KmdbDatabase {
     Set<String>? syncNamespaces,
     StorageAdapter? localAdapter,
     ConsolidationConfig consolidationConfig = const ConsolidationConfig(),
+    CancellationToken? cancel,
+    Duration? timeout,
   }) async {
     final engine = await _buildSyncEngine(
       syncAdapter: syncAdapter,
@@ -540,6 +564,8 @@ final class KmdbDatabase {
       syncNamespaces: syncNamespaces,
       localAdapter: localAdapter,
       consolidationConfig: consolidationConfig,
+      cancel: cancel,
+      timeout: timeout,
     );
     await engine.pull();
   }
@@ -554,12 +580,20 @@ final class KmdbDatabase {
   /// This construction throws [UnsupportedError] on web, which propagates to
   /// the caller as-is — making [sync], [push], and [pull] effectively
   /// native-only in the same way that [SyncEngine] itself is native-only.
+  ///
+  /// The [cancel] and [timeout] parameters are combined into a single
+  /// [SyncContext] and passed to the engine constructor so every adapter call
+  /// site has access to the cancellation signal. [timeout] is converted to an
+  /// absolute deadline at this point so back-off comparisons are consistent
+  /// across the full sync run.
   Future<SyncEngine> _buildSyncEngine({
     required SyncStorageAdapter syncAdapter,
     required String syncRoot,
     required Set<String>? syncNamespaces,
     required StorageAdapter? localAdapter,
     required ConsolidationConfig consolidationConfig,
+    CancellationToken? cancel,
+    Duration? timeout,
   }) async {
     // Resolve namespaces: use caller-supplied set or list all user namespaces.
     final resolvedNamespaces =
@@ -576,6 +610,15 @@ final class KmdbDatabase {
     // to the caller of sync/push/pull — the intended behaviour.
     final resolvedLocalAdapter = localAdapter ?? StorageAdapterNative();
 
+    // Build the per-sync-run context. Convert timeout to an absolute deadline
+    // once here so all subsequent comparisons use the same reference point.
+    final SyncContext? ctx = (cancel != null || timeout != null)
+        ? SyncContext(
+            cancel: cancel,
+            deadline: timeout != null ? DateTime.now().add(timeout) : null,
+          )
+        : null;
+
     return SyncEngine(
       store: _store,
       cloudAdapter: syncAdapter,
@@ -585,6 +628,7 @@ final class KmdbDatabase {
       syncRoot: syncRoot,
       syncNamespaces: resolvedNamespaces,
       consolidationConfig: consolidationConfig,
+      ctx: ctx,
     );
   }
 

@@ -246,16 +246,148 @@ await db.pull(
 
 All three methods accept the same named parameters:
 
-| Parameter             | Type                  | Default                      | Description |
-| --------------------- | --------------------- | ---------------------------- | ----------- |
-| `syncAdapter`         | `SyncStorageAdapter`  | required                     | Remote adapter (cloud folder, NAS, etc.) |
-| `syncRoot`            | `String`              | `''`                         | Path prefix within the adapter root |
-| `syncNamespaces`      | `Set<String>?`        | all user (non-`$`) namespaces | Restrict sync to a subset of collections |
-| `localAdapter`        | `StorageAdapter?`     | `StorageAdapterNative()`     | Local file I/O adapter; override in tests |
-| `consolidationConfig` | `ConsolidationConfig` | `ConsolidationConfig()`      | Controls the consolidation threshold and lease TTL |
+| Parameter             | Type                   | Default                      | Description |
+| --------------------- | ---------------------- | ---------------------------- | ----------- |
+| `syncAdapter`         | `SyncStorageAdapter`   | required                     | Remote adapter (cloud folder, NAS, etc.) |
+| `syncRoot`            | `String`               | `''`                         | Path prefix within the adapter root |
+| `syncNamespaces`      | `Set<String>?`         | all user (non-`$`) namespaces | Restrict sync to a subset of collections |
+| `localAdapter`        | `StorageAdapter?`      | `StorageAdapterNative()`     | Local file I/O adapter; override in tests |
+| `consolidationConfig` | `ConsolidationConfig`  | `ConsolidationConfig()`      | Controls the consolidation threshold and lease TTL |
+| `cancel`              | `CancellationToken?`   | `null`                       | Imperative cancellation signal; any code path may call `cancel()` |
+| `timeout`             | `Duration?`            | `null`                       | Maximum duration for the entire sync run |
 
 **Native-only.** These methods use `dart:io` for local SSTable I/O and throw
 `UnsupportedError` on web.
+
+### Cancellation and Timeout
+
+Sync operations can be interrupted via the `cancel` and `timeout` parameters.
+These are combined into a single `SyncContext` at the point `sync`/`push`/`pull`
+is called and threaded through every `SyncStorageAdapter` method for the
+duration of that sync run.
+
+```dart
+final token = CancellationToken();
+
+// Start a push with a 30-second timeout.
+final pushFuture = db.push(
+  syncAdapter: adapter,
+  cancel: token,
+  timeout: const Duration(seconds: 30),
+);
+
+// Cancel mid-flight (e.g. the user tapped Cancel, or the app is shutting down).
+token.cancel();
+
+try {
+  await pushFuture;
+} on SyncCancelledException catch (e) {
+  // Expected — the push was cancelled.
+  print('Sync cancelled: $e');
+}
+```
+
+#### Core Types
+
+**`CancellationToken`** — an imperative cancellation signal.
+
+```dart
+final token = CancellationToken();
+token.cancel();          // signal cancellation
+token.isCancelled;       // poll: true after cancel()
+token.whenCancelled;     // Future<void> — completes when cancel() is called
+```
+
+The token is backed by a `Completer<void>.sync()`. Adapters that perform
+back-off sleeps can use `token.whenCancelled` in a `Future.any()` to wake
+immediately when cancellation is signalled, rather than waiting for the next
+polling boundary:
+
+```dart
+await Future.any([
+  Future.delayed(backoffDuration),
+  ctx.cancel?.whenCancelled ?? Completer<void>().future,
+]);
+ctx.throwIfExpired(); // throws SyncCancelledException if cancelled or timed-out
+```
+
+**`SyncContext`** — an immutable per-sync-run carrier object.
+
+```dart
+final ctx = SyncContext(
+  cancel: token,
+  deadline: DateTime.now().add(const Duration(seconds: 30)),
+);
+```
+
+`SyncContext` carries two orthogonal signals:
+
+- `cancel`: an imperative signal that any code path may fire at any time.
+- `deadline`: an absolute wall-clock expiry computed once from the caller's
+  `timeout: Duration`. Using an absolute deadline (rather than a per-call
+  `Duration`) ensures back-off comparisons against `DateTime.now()` are
+  consistent across the entire sync run.
+
+`SyncContext.throwIfExpired()` checks both signals: it throws
+`SyncCancelledException('Sync cancelled')` if `cancel` has fired, or
+`SyncCancelledException('Sync deadline exceeded')` if the deadline has passed.
+The cancel check takes priority so the thrown message correctly identifies a
+user-initiated cancel versus a timeout.
+
+**`SyncCancelledException`** — thrown when a sync run is cancelled or times out.
+
+`SyncCancelledException implements Exception`. It propagates out of
+`KmdbDatabase.sync`, `push`, and `pull` to the caller. Callers that need to
+distinguish a user cancel from a timeout may inspect `e.message`:
+
+```dart
+try {
+  await db.sync(syncAdapter: adapter, timeout: const Duration(seconds: 30));
+} on SyncCancelledException catch (e) {
+  if (e.message.contains('deadline')) {
+    // Timed out.
+  } else {
+    // Cancelled by the application.
+  }
+}
+```
+
+Note: `SyncCancelledException` is unrelated to `LockConflictException`.
+Lock conflicts are internal coordinator races that the coordinator handles
+itself; they must not be confused with or absorbed as cancellation signals.
+
+#### Adapter Contract
+
+Every `SyncStorageAdapter` method accepts an optional `{SyncContext? ctx}`:
+
+```dart
+Future<List<String>> list(String remoteDir, {String? extension, SyncContext? ctx});
+Future<Uint8List?> download(String remotePath, {SyncContext? ctx});
+Future<void> upload(String remotePath, Uint8List bytes, {SyncContext? ctx});
+Future<void> delete(String remotePath, {SyncContext? ctx});
+Future<bool> compareAndSwap(String path, Uint8List newBytes,
+    {String? ifMatchEtag, SyncContext? ctx});
+Future<String?> getEtag(String path, {SyncContext? ctx});
+```
+
+Adapter obligations:
+
+- Adapters **should** call `ctx?.throwIfExpired()` before each I/O call or
+  back-off sleep.
+- Adapters with no long-running waits (e.g. `MemorySyncAdapter`) are
+  **permitted to ignore** `ctx` — all operations complete in the same
+  microtask, so there are no meaningful cancellation boundaries.
+- Ignoring `ctx` does **not** cause a conformance-suite failure unless the
+  adapter opts in to the cancellation group via `expectsCancellation: true` in
+  `runSyncAdapterConformance`.
+- Adapters that use back-off sleeps (e.g. the Google Drive adapter) **must**
+  use `Future.any([Future.delayed(d), ctx.cancel?.whenCancelled ?? ...])` so a
+  sleep wakes immediately on cancellation rather than waiting for the next
+  boundary.
+
+The existing consolidation back-off retry (§12.6 — Consolidation Retry) is
+separate from the cancellation mechanism and uses lease expiry rather than
+`SyncContext`.
 
 ### `ensureDeviceId()`
 

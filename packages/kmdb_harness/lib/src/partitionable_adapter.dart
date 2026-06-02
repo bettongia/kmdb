@@ -45,6 +45,12 @@ final class NetworkPartitionException implements Exception {
 /// expected-state computation is not incorrectly advanced for the affected
 /// device.
 ///
+/// ## Cancellation
+///
+/// [PartitionableAdapter] forwards the `ctx` parameter opaquely to its
+/// [delegate] on all six methods. The delegate is responsible for honouring
+/// (or ignoring) the [SyncContext].
+///
 /// ## Example
 ///
 /// ```dart
@@ -91,27 +97,31 @@ final class PartitionableAdapter implements SyncStorageAdapter {
   }
 
   @override
-  Future<List<String>> list(String remoteDir, {String? extension}) {
+  Future<List<String>> list(
+    String remoteDir, {
+    String? extension,
+    SyncContext? ctx,
+  }) {
     _checkPartition();
-    return _delegate.list(remoteDir, extension: extension);
+    return _delegate.list(remoteDir, extension: extension, ctx: ctx);
   }
 
   @override
-  Future<Uint8List?> download(String remotePath) {
+  Future<Uint8List?> download(String remotePath, {SyncContext? ctx}) {
     _checkPartition();
-    return _delegate.download(remotePath);
+    return _delegate.download(remotePath, ctx: ctx);
   }
 
   @override
-  Future<void> upload(String remotePath, Uint8List bytes) {
+  Future<void> upload(String remotePath, Uint8List bytes, {SyncContext? ctx}) {
     _checkPartition();
-    return _delegate.upload(remotePath, bytes);
+    return _delegate.upload(remotePath, bytes, ctx: ctx);
   }
 
   @override
-  Future<void> delete(String remotePath) {
+  Future<void> delete(String remotePath, {SyncContext? ctx}) {
     _checkPartition();
-    return _delegate.delete(remotePath);
+    return _delegate.delete(remotePath, ctx: ctx);
   }
 
   @override
@@ -119,15 +129,21 @@ final class PartitionableAdapter implements SyncStorageAdapter {
     String path,
     Uint8List newBytes, {
     String? ifMatchEtag,
+    SyncContext? ctx,
   }) {
     _checkPartition();
-    return _delegate.compareAndSwap(path, newBytes, ifMatchEtag: ifMatchEtag);
+    return _delegate.compareAndSwap(
+      path,
+      newBytes,
+      ifMatchEtag: ifMatchEtag,
+      ctx: ctx,
+    );
   }
 
   @override
-  Future<String?> getEtag(String path) {
+  Future<String?> getEtag(String path, {SyncContext? ctx}) {
     _checkPartition();
-    return _delegate.getEtag(path);
+    return _delegate.getEtag(path, ctx: ctx);
   }
 
   @override
