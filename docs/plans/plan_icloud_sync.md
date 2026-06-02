@@ -1,6 +1,6 @@
 # Apple iCloud sync adapter (CloudKit)
 
-**Status**: Open
+**Status**: Investigated
 
 **PR link**: {A link to the PR submitted for this plan}
 
@@ -70,23 +70,50 @@ evaluated and excluded — see the API decision in the Investigation.
       is a Dart binary (no Flutter runtime, no method channels); `kmdb_ui`
       integration is also deferred. This plan delivers the `kmdb_icloud` package
       (adapter + platform channel plugin + tests) only.
-- [ ] **Q-A3 — `ICloudSyncChannel` as the test seam.** The plan proposes an
-      `abstract interface class ICloudSyncChannel` in Dart, with a production
-      implementation using `MethodChannel` and a test-only in-memory
-      implementation over `SharedCloudBackend`. Confirm this is the right
-      abstraction boundary (vs mocking directly at the `MethodChannel`
-      dispatcher level).
-- [ ] **Q-A4 — CloudKit container identifier.** CloudKit containers are
-      identified by a bundle-prefix string (e.g.
-      `iCloud.au.com.bettongia.kmdb`). This value must be provisioned in the
-      Apple Developer account and embedded in the app. Confirm whether the
-      container ID is hardcoded in the package or supplied at construction
-      time (latter is more testable).
-- [ ] **Q-A5 — Phase 4a probe operationally.** Phase 4a requires an iOS/macOS
-      app target with a configured CloudKit container and iCloud-enabled
-      device. Confirm that the project has or can obtain an Apple developer
-      account with a test CloudKit container for this probe, and that a
-      dedicated probe target (separate from the main app) is acceptable.
+- [x] **Q-A3 — `ICloudSyncChannel` as the test seam.** RESOLVED (reviewer
+      default, 2026-06-03): an `abstract interface class ICloudSyncChannel` is
+      the correct boundary. It mirrors the Drive precedent, where the seam sits
+      *below the adapter* (Drive fakes the `http.Client` under `DriveApi` so the
+      real `GoogleDriveAdapter` code runs in tests). Mocking at the
+      `MethodChannel` dispatcher level (`TestDefaultBinaryMessengerBinding`)
+      would require a `TestWidgetsFlutterBinding` and exercise the channel
+      serialisation rather than the adapter logic — worse fidelity, more
+      ceremony. The Dart/Swift boundary is the right cut. See review note R-1.
+- [x] **Q-A4 — CloudKit container identifier.** RESOLVED (reviewer default,
+      2026-06-03): supplied at construction time, not hardcoded. The container
+      ID is a constructor parameter on `PlatformICloudSyncChannel` (threaded
+      into the `MethodChannel` `initialize` call and on to
+      `CKContainer(identifier:)` in Swift). `FakeICloudSyncChannel` ignores it.
+      This keeps the package free of a hardcoded Bettongia-specific container
+      and matches the Drive precedent of injecting provider credentials/config
+      at construction. The default `example/` app and (deferred)
+      `ICloudRemoteConfig` carry the concrete `iCloud.<bundle-prefix>` value.
+      See review note R-2.
+- [x] **Q-A5 — Phase 4a probe operationally.** RESOLVED (user, 2026-06-03): the
+      project can obtain an Apple developer account with a test CloudKit
+      container for the Phase 4a probe, and a dedicated probe target (separate
+      from the main app) is acceptable. The Phase 4a empirical probe is
+      therefore unblocked on the logistics side; it remains a human-run step
+      (it is not work the Sonnet implementer performs), and Phases 1–3 proceed
+      independently of it. See review note R-3.
+- [x] **R-4 — `FakeICloudSyncChannel` consistency/atomicity fidelity.** RESOLVED
+      (user, 2026-06-03 — **Option C**): `FakeICloudSyncChannel` is an
+      **immediately-consistent, atomic functional fake**, exactly like the landed
+      `DriveSimulator`. It does **not** model the non-atomic create-if-absent race
+      window or any propagation delay. Non-atomic / eventual-consistency fidelity
+      lives only in the `kICloudProfile`-parameterised `kmdb_harness` scenario
+      (via `CloudSemanticsAdapter`) and the deferred real-service soak (RC-Y).
+      Rationale (confirmed by code inspection of
+      `packages/kmdb/lib/src/sync/consolidation_coordinator.dart`):
+      `ConsolidationCoordinator` early-returns
+      `ConsolidationState.skippedNonAtomicCas` at line 284 **before** any
+      `compareAndSwap` call whenever `providesAtomicCas == false`. With
+      `kICloudProfile.atomicConditionalCreate == false` (the safe default and
+      likely outcome), there is therefore **no split-lease race for the fake to
+      model** — consolidation is gated off entirely, not racing. The non-atomic
+      CAS race is a property of `CloudSemanticsAdapter` in the harness, not of any
+      adapter-specific simulator. This matches the Drive precedent exactly. See
+      review note R-4.
 
 ## Investigation
 
@@ -112,14 +139,26 @@ All ETags are implementation-specific opaque strings. The lease protocol in
 `ConsolidationCoordinator` depends entirely on `compareAndSwap` behaving
 atomically from the server's perspective.
 
-> **`SyncContext? ctx` — open design point (not resolved here).** PR #37 added
-> an optional `SyncContext? ctx` to every adapter method. The `ICloudAdapter`
-> must accept and forward `ctx`, but how cancellation/timeout crosses the
-> method-channel boundary into a live CloudKit operation (e.g. cancelling a
-> `CKOperation` / `CKAsset` transfer mid-flight, vs. checking `ctx` only at Dart
-> entry/exit) is an iCloud-specific decision left for the user/implementer to
-> settle. Other in-tree adapters can be consulted for the prevailing
-> `ctx`-handling pattern when this is taken up.
+> **`SyncContext? ctx` — RESOLVED (reviewer default, 2026-06-03).** PR #37 added
+> an optional `SyncContext? ctx` to every adapter method, and the landed
+> `GoogleDriveAdapter` (PR #36) already establishes the prevailing pattern, so
+> this is **not** an open design point: every `ICloudAdapter` method calls
+> `ctx?.throwIfExpired()` at entry, and any back-off sleep uses the
+> `Future.any([Future.delayed(d), <cancellation future>])` form the
+> `SyncStorageAdapter` doc comment prescribes (see
+> `packages/kmdb/lib/src/sync/sync_storage_adapter.dart` lines 78–101 and the
+> Drive adapter's per-method `ctx?.throwIfExpired()` calls). This is sufficient
+> to pass the conformance suite with `expectsCancellation: true`, which is the
+> bar.
+>
+> Mid-flight CloudKit cancellation (cancelling a live `CKOperation` /
+> `CKAsset` transfer across the method-channel boundary) is an **optional
+> enhancement, not a requirement**: the entry-check pattern already satisfies
+> cooperative cancellation between operations. If the implementer chooses to
+> wire `CKOperation.cancel()` through the channel they may, but the plan does
+> not require it and the conformance suite does not test it (no in-suite adapter
+> exposes a long-running interruptible I/O wait). The Swift `cancel` plumbing,
+> if added, is verified only in the deferred real-service soak (RC-Y).
 
 ### API choice: CloudKit vs iCloud Drive
 
@@ -338,8 +377,14 @@ atomicConditionalCreate, bool allowsDuplicateNames = false, QuotaProfile quota =
 const QuotaProfile.unlimited()})`, and it offers `CloudProfile.strong()` /
 `CloudProfile.eventual({maxPropagationDelayMs, jitterMs})` shorthands. CloudKit
 needs the general constructor (eventual consistency, but `allowsDuplicateNames:
-false`), so the iCloud `CloudProfile` instance ships with the simulator
-(Phase 4):
+false`). **Location (matches the Drive precedent):** `kICloudProfile` ships in
+`lib/src/icloud_profile.dart` and is exported publicly from
+`lib/kmdb_icloud.dart` — exactly as `kGoogleDriveProfile` lives in
+`packages/kmdb_google_drive/lib/src/google_drive_profile.dart` and is exported
+from `kmdb_google_drive.dart`. It is **not** a test-only constant. (The
+`maxPropagationDelayMs`/`jitterMs`/`quota`/`atomicConditionalCreate` values are
+filled in from the Phase 4a probe, but the file and its export are created in
+Phase 3, not Phase 4.) The preliminary shape:
 
 ```dart
 // CloudKit CloudProfile — preliminary; atomicConditionalCreate and
@@ -419,11 +464,21 @@ constant the simulator and the conformance/quota tests share.
 - [ ] `compareAndSwap(path, bytes, {ifMatchEtag})` — delegate to channel;
       return `true`/`false` per the CAS semantics above.
 - [ ] `getEtag(path)` — delegate to channel; return `null` if absent.
-- [ ] `bool get providesAtomicCas` — defaults to `false` until Phase 4a
-      empirically confirms atomic create. Updated to `true` if Phase 4a
-      confirms it.
-- [ ] Expose `ICloudAdapter` as the package's public API via
-      `lib/kmdb_icloud.dart`
+- [ ] `bool get providesAtomicCas` — a hardcoded getter (per-instance is not
+      needed; mirrors `GoogleDriveAdapter`'s `bool get providesAtomicCas =>
+      false`). Ships as `=> false` in Phase 3 (loss-free default). Phase 4a may
+      flip it to `=> true` if the probe confirms atomic create-if-absent. The
+      value must equal `kICloudProfile.atomicConditionalCreate` — the Phase 4
+      drift test (last checklist item) asserts this. Note: even when this is
+      `false`, conditional *update* by record ID is still atomic on CloudKit;
+      `false` only disables the create-if-absent contention guarantee that
+      `ConsolidationCoordinator` relies on.
+- [ ] Add `kICloudProfile` in `lib/src/icloud_profile.dart` with the
+      preliminary values (Phase 4a fills in the real numbers). Mirrors
+      `packages/kmdb_google_drive/lib/src/google_drive_profile.dart`.
+- [ ] Expose `ICloudAdapter` **and** `kICloudProfile` as the package's public
+      API via `lib/kmdb_icloud.dart` (mirrors `kmdb_google_drive.dart` exporting
+      both `GoogleDriveAdapter` and `kGoogleDriveProfile`).
 
 ### Phase 4 — Behavioural CloudKit simulator + tests
 
@@ -468,9 +523,27 @@ configured CloudKit container) that records what real CloudKit actually does:
 
 - [ ] Implement `FakeICloudSyncChannel` in `test/` over `SharedCloudBackend`
       (from `package:kmdb/kmdb_test_cloud_support.dart`):
-  - Implements `ICloudSyncChannel`; models the CloudKit semantics verified in
-    Phase 4a (zone-level sequencing for CAS, eventual consistency delay,
-    `CKError.serverRecordChanged` on CAS failure, no duplicate record IDs).
+  - Implements `ICloudSyncChannel` as an **immediately-consistent, atomic
+    functional fake** — it delegates CAS straight to
+    `SharedCloudBackend.compareAndSwap` (which is truly atomic) and applies no
+    propagation delay. This matches the landed `DriveSimulator` exactly (see
+    `packages/kmdb_google_drive/test/support/drive_simulator.dart`).
+  - It maps the CloudKit-shaped error contract onto the backend:
+    `CKError.unknownItem` → file-not-found (`download`/`getEtag` return `null`,
+    `delete` is a no-op), `CKError.serverRecordChanged` → CAS failure
+    (`compareAndSwap` returns `false`), and one record per deterministic record
+    ID (no duplicate names).
+  - **R-4 (Option C) — explicit non-goal:** the fake does **NOT** model the
+    non-atomic create-if-absent race window or any eventual-consistency delay.
+    Do **not** inject a yield between the existence check and the write, and do
+    **not** wrap the backend in `CloudSemanticsAdapter`. The non-atomic /
+    eventual-consistency fidelity is modelled only in the
+    `kICloudProfile`-parameterised `kmdb_harness` scenario (below, via
+    `CloudSemanticsAdapter`) and the deferred real-service soak (RC-Y). This is
+    safe because `ConsolidationCoordinator` gates consolidation off entirely
+    when `providesAtomicCas == false` (it never reaches a `compareAndSwap`
+    call), so there is no split-lease race for an adapter-specific fake to
+    reproduce.
 - [ ] For the `kmdb_harness` mixed-mode scenario, follow the Drive precedent:
       add a **test-side** `SimulatorICloudQuotaAdapter` in `test/` that
       `implements SyncStorageAdapter, QuotaAwareAdapter` (wrapping an
@@ -481,15 +554,22 @@ configured CloudKit container) that records what real CloudKit actually does:
       dependency (mirrors `SimulatorQuotaAdapter` in
       `packages/kmdb_google_drive/test/support/drive_simulator.dart`, which
       imports `QuotaAwareAdapter` from `package:kmdb_harness/kmdb_harness.dart`).
-- [ ] Publish the CloudKit `CloudProfile` instance (`kICloudProfile`, per the
-      `kGoogleDriveProfile` precedent) using the Phase 4a probe results. Set
-      `ICloudAdapter.providesAtomicCas` from the Phase 4a finding.
-      If zone-level CAS is not confirmed atomic, the adapter returns `false`
-      so `ConsolidationCoordinator` gates consolidation off (loss-free).
-- [ ] Run the H5 adapter conformance suite
-      (`runSyncAdapterConformance({required factory, required expectAtomicCas})`
-      from `package:kmdb/test_support.dart`) against the real adapter over
-      `FakeICloudSyncChannel`.
+- [ ] Fill in `kICloudProfile`'s values (the file/export already exist from
+      Phase 3) from the Phase 4a probe results:
+      `maxPropagationDelayMs`, `jitterMs`, `quota.maxOpsPerMinute`,
+      `atomicConditionalCreate`. Set `ICloudAdapter.providesAtomicCas` from the
+      same Phase 4a finding (it should equal `kICloudProfile.atomicConditionalCreate`).
+      If zone-level CAS is not confirmed atomic, both are `false` so
+      `ConsolidationCoordinator` gates consolidation off (loss-free).
+- [ ] Run the H5 adapter conformance suite from
+      `package:kmdb/test_support.dart` against the real adapter over
+      `FakeICloudSyncChannel`. Signature (verified 2026-06-03):
+      `runSyncAdapterConformance({required SyncStorageAdapter Function() factory,
+      required bool expectAtomicCas, bool expectsCancellation = false})`. Pass
+      `expectAtomicCas: kICloudProfile.atomicConditionalCreate` and
+      `expectsCancellation: true` (the adapter honours `ctx?.throwIfExpired()`
+      at entry — same as the Drive adapter's invocation in
+      `packages/kmdb_google_drive/test/google_drive_adapter_test.dart`).
 - [ ] Unit tests for all six `SyncStorageAdapter` methods and zone-bootstrap
       behaviour, driven through `FakeICloudSyncChannel`.
 - [ ] Wire real-adapter-over-`FakeICloudSyncChannel` into a `kmdb_harness`
@@ -549,6 +629,204 @@ configured CloudKit container) that records what real CloudKit actually does:
       This is the primary manual integration test vehicle given that `kmdb_ui`
       integration is deferred — it lets a developer exercise the full stack
       (Dart → method channel → Swift → CloudKit) without a production app.
+
+## Review (2026-06-03, kmdb-plan-reviewer)
+
+**Status set to `Questions`.** This is a strong, well-researched plan — the
+CloudKit-vs-iCloud-Drive analysis is genuinely good, the storage model is
+concrete, the CAS semantics are correctly reasoned, and the loss-free default
+(`providesAtomicCas = false` until Phase 4a) is the right posture. It mirrors
+the landed Drive precedent faithfully. Most of what I flagged on this pass I
+resolved inline with reviewer defaults (Q-A3, Q-A4, the `ctx` design point, the
+profile location, the `providesAtomicCas` mechanics). **Two things keep it off
+`Investigated`:** one genuine human gate (Q-A5) and one design gap a mechanical
+implementer would otherwise have to invent (R-4, the non-atomic CAS modelling in
+the fake). Resolve those two and this is ready.
+
+### Problem statement assessment
+
+Real and worth solving. The spec (`docs/spec/01_overview.md`) explicitly
+endorses a CloudKit adapter, and the roadmap (`docs/roadmap/0_03.md`) lists it as
+the next cloud adapter after Drive. Scope is well-bounded: CloudKit only (iCloud
+Drive correctly excluded with a documented rationale), CLI and `kmdb_ui`
+deferred. No concerns.
+
+### Proposed solution assessment
+
+Sound. The `CKRecord` + `CKAsset` storage model maps cleanly onto the
+`SyncStorageAdapter` six-method contract, the deterministic record ID gives the
+key uniqueness the lease protocol needs, and `recordChangeTag` is a clean ETag.
+The decision to gate `providesAtomicCas` on an empirical probe rather than
+assuming CloudKit's documented behaviour is exactly the durability-first posture
+this codebase demands (cf. the 2026-05-22 review's "don't trust the golden
+path"). Strong.
+
+### Architecture fit
+
+Confirmed against the landed code:
+
+- The conformance export (`package:kmdb/test_support.dart`) and cloud-sim export
+  (`package:kmdb/kmdb_test_cloud_support.dart`) exist and export exactly what the
+  plan claims. Conformance signature verified:
+  `runSyncAdapterConformance({required factory, required expectAtomicCas, bool
+  expectsCancellation = false})`.
+- `CloudProfile` / `QuotaProfile` / `EventualConsistency` constructor shapes
+  match the plan's preliminary `kICloudProfile`.
+- The Drive precedent is accurately characterised, with one correction (R-5,
+  profile location — fixed inline).
+- RC-id ledger: verified `docs/spec/28_release_checklist.md` holds RC-1..RC-11;
+  **RC-12 is the next free id**, as the plan states. Good.
+
+### Resolved on this pass (reviewer defaults — see inline edits)
+
+- **R-1 (Q-A3):** `ICloudSyncChannel` is the right seam — it puts the cut at the
+  Dart/Swift boundary so the real adapter runs in tests, mirroring how Drive
+  fakes `http.Client` under `DriveApi`. Resolved.
+- **R-2 (Q-A4):** Container ID supplied at construction, not hardcoded. Resolved.
+- **R-6 (`ctx`):** Not an open design point. The landed `GoogleDriveAdapter`
+  already prescribes the pattern — `ctx?.throwIfExpired()` at each method entry,
+  cancellable back-off sleeps — which passes the suite with
+  `expectsCancellation: true`. Mid-flight `CKOperation` cancellation is an
+  optional enhancement, not a requirement. Resolved inline.
+- **R-5 (profile location):** The plan said `kICloudProfile` "ships with the
+  simulator (Phase 4)". Wrong: `kGoogleDriveProfile` lives in `lib/` and is
+  publicly exported. Moved `kICloudProfile` to `lib/src/icloud_profile.dart`
+  (created in Phase 3, exported from `lib/kmdb_icloud.dart`); Phase 4a only fills
+  in the numeric values. Resolved inline.
+- **R-7 (`providesAtomicCas` mechanics):** Clarified it is a hardcoded getter
+  (not a runtime flag), must equal `kICloudProfile.atomicConditionalCreate`, and
+  ships `=> false` in Phase 3. Resolved inline.
+
+### Resolved follow-up (2026-06-03)
+
+- **R-3 (Q-A5) — Phase 4a logistics gate. RESOLVED (user, 2026-06-03).** The user
+  confirms the project can obtain an Apple developer account with a test CloudKit
+  container, and that a dedicated probe target (separate from the main app) is
+  acceptable. The Phase 4a empirical probe is unblocked. It remains a human-run
+  step that gates the Phase 4 simulator/test track; the Sonnet implementer can
+  execute Phases 1–3 (scaffold, platform channel, core adapter) without it, then
+  the probe is run by a human before the Phase 4 numbers (`kICloudProfile`
+  values, `providesAtomicCas`) are finalised.
+
+### Resolved follow-up (2026-06-03, second pass) — promoted to `Investigated`
+
+- **R-4 — `FakeICloudSyncChannel` consistency/atomicity fidelity. RESOLVED
+  (user, 2026-06-03 — Option C).** The fake is an immediately-consistent, atomic
+  functional stand-in (matching `DriveSimulator`); it does not model the
+  non-atomic create-if-absent race window or any propagation delay. Non-atomic /
+  eventual-consistency fidelity lives only in the `kICloudProfile`-parameterised
+  harness scenario (via `CloudSemanticsAdapter`) and the deferred real-service
+  soak (RC-Y). Confirmed by code inspection: `ConsolidationCoordinator`
+  early-returns `ConsolidationState.skippedNonAtomicCas`
+  (`packages/kmdb/lib/src/sync/consolidation_coordinator.dart` line 284) **before
+  any `compareAndSwap`** when `providesAtomicCas == false`, so with
+  `atomicConditionalCreate == false` there is no split-lease race for an
+  adapter-specific fake to reproduce — consolidation is gated off, not racing.
+  This is the cleanest of the three options I offered and removes the design
+  decision from the implementer's plate. Written into the Open questions block
+  (R-4) and the Phase 4 checklist (the `FakeICloudSyncChannel` item now states
+  the immediately-consistent posture and the explicit "do not inject a race
+  window / do not wrap in `CloudSemanticsAdapter`" non-goal).
+
+<details>
+<summary>Original R-4 design gap (now resolved by Option C)</summary>
+
+- **R-4 — How does `FakeICloudSyncChannel` model the NON-atomic create-if-absent
+  case? (genuine design gap, blocks mechanical implementation).** The plan says
+  the fake sits "over `SharedCloudBackend`" and "models the CloudKit semantics
+  verified in Phase 4a (... consistency delay ...)". But the landed building
+  blocks do not give this for free, and the Drive precedent does *not* actually
+  exercise eventual consistency in its simulator:
+  - `SharedCloudBackend.compareAndSwap` is **truly atomic** (no `await` between
+    check and write); `SharedBackendAdapter.providesAtomicCas => true`.
+  - The `DriveSimulator` is a single immediately-consistent in-memory
+    `http.Client` fake — it does **not** use `CloudSemanticsAdapter` or a
+    visibility cursor. Eventual-consistency modelling is a *harness*-side concern
+    layered on via `CloudSemanticsAdapter`, advanced by an explicit synchronous
+    `advancePropagationClock()` (there is no awaitable propagation delay — see
+    `cloud_semantics_adapter.dart`).
+
+  So if Phase 4a returns `atomicConditionalCreate: false` (the default and, by
+  the Drive analogy, the likely outcome), `FakeICloudSyncChannel` cannot simply
+  delegate create-if-absent to `SharedCloudBackend.compareAndSwap` — that path is
+  atomic and would make the fake *more* consistent than the real service, hiding
+  exactly the split-lease class of bug. The plan must specify **one** of:
+    1. The fake delegates CAS to `SharedCloudBackend` but injects a race-window
+       (a `Future<void>.delayed(Duration.zero)` yield between the existence
+       check and the write on the create-if-absent path) when
+       `kICloudProfile.atomicConditionalCreate == false` — the same technique
+       `CloudSemanticsAdapter` uses at its non-atomic CAS path; **or**
+    2. The fake wraps the backend in a `CloudSemanticsAdapter` configured from
+       `kICloudProfile`, and the tests drive `advancePropagationClock()`
+       explicitly to settle visibility (note: this requires the harness
+       convergence test to advance the clock, which the Drive convergence test
+       does not need to do — call this out so the implementer doesn't assume
+       auto-settling); **or**
+    3. The plan accepts (and states) that the in-suite fake is
+       immediately-consistent and atomic like `DriveSimulator`, and that the
+       non-atomic / eventual-consistency fidelity is verified only by the
+       `kICloudProfile`-parameterised harness scenario and the deferred
+       real-service soak (RC-Y) — i.e. the fake is a functional stand-in, not a
+       semantic one.
+
+  Any of these is defensible, but the plan currently implies semantic fidelity
+  ("models ... consistency delay") that the chosen substrate does not
+  automatically provide. **Pick one and write it into the Phase 4 checklist**,
+  including who advances the propagation clock if option 2. Without this, the
+  implementer is left to invent the most subtle and safety-critical part of the
+  test harness on the fly — precisely the kind of decision an `Investigated`
+  plan must not defer.
+
+</details>
+
+### Minor notes (non-blocking, address during implementation)
+
+- **N-1:** The `upload` mapping is described two ways — the SyncStorageAdapter
+  mapping table says the adapter "checks existence first (or tries create then
+  falls back to update on conflict)", while the Phase 3 checklist says Swift uses
+  `savePolicy: .changedKeys` which "creates if record is new, updates if
+  existing". These should be reconciled to one approach; the single-`savePolicy`
+  form is simpler and avoids a redundant round-trip. Pin it down so the Swift and
+  Dart sides agree, but it is not architecturally load-bearing.
+- **N-2:** `list` via `CKQuery` with an `NSPredicate` `BEGINSWITH` on `path`
+  requires the `path` field to be queryable, which in CloudKit means it must be
+  added to the zone's index (a schema/console concern in the CloudKit Dashboard,
+  or `recordType` index config). Phase 4a should confirm string-field
+  queryability and the plan/spec should note the index requirement, since a
+  missing queryable index is a classic CloudKit "works in dev, empty results in
+  prod" trap.
+- **N-3:** Swift source "shared via symlink or conditional" (Phase 2) — pick one
+  at implementation time; a shared source set referenced by both the `ios/` and
+  `macos/` podspecs is the conventional federated-plugin approach and avoids
+  symlink portability issues in git.
+
+### Verdict
+
+Status set to **`Investigated`** (2026-06-03, second pass). All open questions
+are resolved: Q-A1–Q-A5 and both review blockers (R-3 logistics gate, R-4 fake
+fidelity) are closed. R-4 was settled on **Option C** — `FakeICloudSyncChannel`
+is an immediately-consistent atomic functional fake matching the Drive
+precedent, with non-atomic/eventual-consistency fidelity confined to the
+`kICloudProfile`-parameterised harness scenario and the deferred RC-Y soak.
+Verified by code inspection that `ConsolidationCoordinator` gates consolidation
+off before any `compareAndSwap` when `providesAtomicCas == false`, so there is
+no split-lease race for the adapter fake to reproduce.
+
+The plan clears the implementation-readiness bar: named files/classes/methods,
+concrete CloudKit storage model and CAS semantics, an ordered phase checklist, a
+testing strategy (conformance suite, unit tests, harness convergence,
+release-checklist RC-X/RC-Y entries), and the loss-free `providesAtomicCas =>
+false` default. The three minor notes (N-1 upload mapping reconciliation, N-2
+`path` field queryability/index, N-3 Swift shared-source mechanism) are
+non-blocking and flagged for the implementer to settle in place.
+
+**One sequencing reminder for the implementer (not a blocker):** Phases 1–3
+(scaffold, platform channel, core adapter shipping `providesAtomicCas => false`
+and preliminary `kICloudProfile`) are fully mechanical and proceed now. The
+Phase 4 numeric finalisation (`kICloudProfile` values, flipping
+`providesAtomicCas`) is gated on the **human-run Phase 4a probe** — that is an
+external dependency, not an unresolved design decision, so it does not hold the
+plan off `Investigated`.
 
 ## Summary
 
