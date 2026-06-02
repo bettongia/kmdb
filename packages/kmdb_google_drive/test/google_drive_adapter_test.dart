@@ -418,6 +418,426 @@ void main() {
         expect(countAfterSecond, equals(countAfterFirst + 1));
       });
     });
+
+    // ── Folder resolution on fresh adapter (cached-folder paths) ─────────────
+    //
+    // These tests exercise the code paths in _ensureFolderExists and
+    // _resolveFolderIdOrNull where the folder already exists in Drive but the
+    // fresh adapter instance has no ID in its cache.
+
+    group('fresh adapter sees existing Drive folders', () {
+      test(
+        '_ensureFolderExists finds existing root without creating a new one',
+        () async {
+          // adapter creates the sync root + subfolder.
+          await adapter.upload('sstables/a.sst', Uint8List.fromList([1]));
+
+          // adapter2 has no cache, so _ensureFolderExists('') will list roots
+          // and enter the `if (roots.isNotEmpty)` branch (line 673-676).
+          final adapter2 = adapterOverSimulator(simulator);
+          await adapter2.upload('sstables/b.sst', Uint8List.fromList([2]));
+
+          // Only one sync-root folder should exist (adapter2 reused the
+          // existing one rather than creating a duplicate).
+          final roots = simulator.allFiles.where(
+            (f) => f.name == '__sim_test__' && f.isFolder,
+          );
+          expect(roots, hasLength(1));
+        },
+      );
+
+      test(
+        '_ensureFolderExists walks segments and finds existing subfolders',
+        () async {
+          // adapter creates the root + sstables folder.
+          await adapter.upload('sstables/a.sst', Uint8List.fromList([1]));
+
+          // adapter2 has no cache; uploading to the same subfolder exercises
+          // the `if (folders.isNotEmpty)` branch in _ensureFolderExists
+          // (lines 705-710) for the 'sstables' segment.
+          final adapter2 = adapterOverSimulator(simulator);
+          await adapter2.upload('sstables/c.sst', Uint8List.fromList([3]));
+
+          // Only one sstables folder should exist.
+          final sstFolders = simulator.allFiles.where(
+            (f) => f.name == 'sstables' && f.isFolder,
+          );
+          expect(sstFolders, hasLength(1));
+        },
+      );
+    });
+
+    // ── Deterministic duplicate-file resolution ───────────────────────────────
+    //
+    // Drive allows two files with the same name to co-exist.  The adapter's
+    // _deterministic() rule always picks the oldest createdTime, tie-breaking
+    // by lowest file ID.  This exercises the _deterministic() code (lines 776-783).
+
+    group('_deterministic: duplicate name resolution', () {
+      test(
+        'fresh adapter resolves two same-named files via _deterministic',
+        () async {
+          // Create the sstables folder by uploading one file.
+          await adapter.upload('sstables/first.sst', Uint8List.fromList([10]));
+
+          // Find the sstables folder ID so we can inject a duplicate file.
+          final sstFolderId = simulator.allFiles
+              .firstWhere((f) => f.name == 'sstables' && f.isFolder)
+              .id;
+
+          // Use the simulator's helper to force-insert duplicates.  Assign the
+          // same createdTime to both so _deterministic() reaches the tie-break
+          // branch (line 782: lowest file ID), exercising that code path.
+          final sameTime = DateTime(2026, 1, 1, 12, 0, 0).toUtc();
+          simulator.insertDuplicateFile(
+            'dup.sst',
+            parentId: sstFolderId,
+            content: Uint8List.fromList([1]),
+            createdTime: sameTime,
+          );
+          simulator.insertDuplicateFile(
+            'dup.sst',
+            parentId: sstFolderId,
+            content: Uint8List.fromList([2]),
+            createdTime: sameTime, // same time → tie-break by file ID
+          );
+
+          // Verify two duplicates exist in the simulator.
+          final dupes = simulator.allFiles
+              .where((f) => f.name == 'dup.sst')
+              .toList();
+          expect(dupes, hasLength(2));
+
+          // A fresh adapter (no cache) calls _deterministic() when resolving
+          // the path for the first time, and must return a non-null result.
+          final freshAdapter = adapterOverSimulator(simulator);
+          final bytes = await freshAdapter.download('sstables/dup.sst');
+          expect(bytes, isNotNull);
+
+          // A second fresh adapter must return the same content (deterministic).
+          final freshAdapter2 = adapterOverSimulator(simulator);
+          final bytes2 = await freshAdapter2.download('sstables/dup.sst');
+          expect(bytes2, equals(bytes));
+        },
+      );
+    });
+
+    // ── Error paths via simulator fault injection ─────────────────────────────
+    //
+    // Tests that exercise the adapter's error-handling branches by using
+    // DriveSimulator's error-injection API.  Each test targets a specific
+    // error path in the production adapter code.
+
+    group('error path coverage', () {
+      // ── download: 404 after cached ID ─────────────────────────────────────
+      //
+      // Adapter has cached the file ID; Drive returns 404 for the actual
+      // content download (file deleted between cache-population and download).
+      // Expected: adapter evicts the cache entry and returns null (line 279).
+      test(
+        'download returns null when Drive returns 404 for a cached file',
+        () async {
+          const path = 'sstables/cached-then-gone.sst';
+          await adapter.upload(path, Uint8List.fromList([1, 2, 3]));
+
+          // First download populates the file-ID cache in the adapter.
+          final first = await adapter.download(path);
+          expect(first, isNotNull);
+
+          // Now inject a 404 for the next raw GET (alt=media download).
+          // The adapter has the file ID cached, so it will attempt the GET.
+          simulator.injectNextStatus(404, forMethod: 'GET');
+
+          // Second download: adapter gets 404, should evict cache and return null.
+          final second = await adapter.download(path);
+          expect(second, isNull);
+        },
+      );
+
+      // ── download: non-2xx non-404 ──────────────────────────────────────────
+      //
+      // Drive returns a 500 for the content download.
+      // Expected: StateError is thrown (lines 283-284).
+      test('download throws StateError on non-2xx non-404 response', () async {
+        const path = 'sstables/error.sst';
+        await adapter.upload(path, Uint8List.fromList([1]));
+        // Ensure file ID is cached.
+        await adapter.download(path);
+
+        // Inject a 500 for the next GET.
+        simulator.injectNextStatus(500, forMethod: 'GET');
+
+        await expectLater(adapter.download(path), throwsA(isA<StateError>()));
+      });
+
+      // ── getEtag: 404 after cached ID ──────────────────────────────────────
+      //
+      // Adapter has the file ID cached; the metadata GET returns 404.
+      // Expected: adapter evicts the cache entry and returns null (line 457).
+      test(
+        'getEtag returns null when Drive returns 404 for a cached file',
+        () async {
+          const path = 'sstables/etag-then-gone.sst';
+          await adapter.upload(path, Uint8List.fromList([1]));
+          // Ensure ID is cached.
+          await adapter.getEtag(path);
+
+          simulator.injectNextStatus(404, forMethod: 'GET');
+          final etag = await adapter.getEtag(path);
+          expect(etag, isNull);
+        },
+      );
+
+      // ── getEtag: non-2xx non-404 ───────────────────────────────────────────
+      //
+      // Drive returns 500 for the metadata GET.
+      // Expected: StateError is thrown (lines 461-462).
+      test('getEtag throws StateError on non-2xx non-404 response', () async {
+        const path = 'sstables/etag-error.sst';
+        await adapter.upload(path, Uint8List.fromList([1]));
+        await adapter.getEtag(path);
+
+        simulator.injectNextStatus(500, forMethod: 'GET');
+        await expectLater(adapter.getEtag(path), throwsA(isA<StateError>()));
+      });
+
+      // ── upload: resumable create: non-2xx initiation ──────────────────────
+      //
+      // Drive returns 500 for the POST resumable initiation.
+      // Expected: StateError is thrown (lines 501-503).
+      //
+      // The sync root and sstables folder must already exist so that the
+      // next POST goes to the resumable upload initiation endpoint
+      // (uploadType=resumable) rather than to the DriveApi folder-creation
+      // endpoint.  The DriveApi-generated client wraps non-2xx from
+      // Files.create in DetailedApiRequestError, not StateError.
+      test(
+        'upload throws StateError when resumable create initiation fails',
+        () async {
+          // Pre-create folders by uploading a dummy file so the cache is warm.
+          await adapter.upload('sstables/_dummy.sst', Uint8List.fromList([0]));
+          await adapter.delete('sstables/_dummy.sst');
+
+          // Now inject 500 for the next POST (resumable initiation).
+          simulator.injectNextStatus(500, forMethod: 'POST');
+          await expectLater(
+            adapter.upload('sstables/new.sst', Uint8List.fromList([1])),
+            throwsA(isA<StateError>()),
+          );
+        },
+      );
+
+      // ── upload: resumable create: missing Location header ─────────────────
+      //
+      // Drive returns 200 for the POST initiation but omits Location.
+      // Expected: StateError is thrown (line 509).
+      test(
+        'upload throws StateError when resumable create initiation has no Location',
+        () async {
+          // Pre-warm the folder cache so the next request is the resumable POST.
+          await adapter.upload('sstables/_dummy2.sst', Uint8List.fromList([0]));
+          await adapter.delete('sstables/_dummy2.sst');
+
+          simulator.injectMissingLocationOnNextInitiate();
+          await expectLater(
+            adapter.upload('sstables/no-location.sst', Uint8List.fromList([1])),
+            throwsA(isA<StateError>()),
+          );
+        },
+      );
+
+      // ── upload: resumable update: non-2xx initiation ──────────────────────
+      //
+      // Updating an existing file; Drive returns 500 for the PATCH resumable
+      // update initiation.  Expected: StateError (lines 538-540).
+      test(
+        'upload (overwrite) throws StateError when resumable update initiation fails',
+        () async {
+          // First upload to create the file.
+          await adapter.upload('sstables/upd.sst', Uint8List.fromList([1]));
+          // Inject 500 for the PATCH uploadType=resumable initiation.
+          simulator.injectNextStatus(500, forMethod: 'PATCH');
+          await expectLater(
+            adapter.upload('sstables/upd.sst', Uint8List.fromList([2])),
+            throwsA(isA<StateError>()),
+          );
+        },
+      );
+
+      // ── upload: resumable update: missing Location header ─────────────────
+      //
+      // Updating an existing file; PATCH initiation returns 200 but no Location.
+      // Expected: StateError (line 546).
+      test(
+        'upload (overwrite) throws StateError when resumable update has no Location',
+        () async {
+          await adapter.upload('sstables/upd2.sst', Uint8List.fromList([1]));
+          simulator.injectMissingLocationOnNextInitiate();
+          await expectLater(
+            adapter.upload('sstables/upd2.sst', Uint8List.fromList([2])),
+            throwsA(isA<StateError>()),
+          );
+        },
+      );
+
+      // ── upload: resumable session: missing `id` in response ───────────────
+      //
+      // PUT to the session URI returns 200 but no `id` in the JSON.
+      // Expected: StateError (lines 577-578).
+      test(
+        'upload throws StateError when PUT to session returns no file ID',
+        () async {
+          simulator.injectMissingIdOnNextUpload();
+          await expectLater(
+            adapter.upload('sstables/no-id.sst', Uint8List.fromList([1])),
+            throwsA(isA<StateError>()),
+          );
+        },
+      );
+
+      // ── compareAndSwap (update-if-match): 404 during CAS initiation ───────
+      //
+      // File was deleted between getting its ETag and the CAS update.
+      // Expected: returns false (line 367).
+      test(
+        'compareAndSwap returns false when file deleted during CAS initiation',
+        () async {
+          const path = '.consolidation-lease';
+          await adapter.upload(path, Uint8List.fromList([1]));
+          final etag = await adapter.getEtag(path);
+
+          // Inject a 404 for the PATCH resumable initiation (CAS update).
+          simulator.injectNextStatus(404, forMethod: 'PATCH');
+
+          final result = await adapter.compareAndSwap(
+            path,
+            Uint8List.fromList([2]),
+            ifMatchEtag: etag,
+          );
+          expect(result, isFalse);
+        },
+      );
+
+      // ── compareAndSwap (update-if-match): non-2xx during CAS initiation ───
+      //
+      // Drive returns 500 for the PATCH resumable initiation.
+      // Expected: StateError (lines 372-374).
+      test(
+        'compareAndSwap throws StateError on non-2xx during CAS initiation',
+        () async {
+          const path = '.consolidation-lease';
+          await adapter.upload(path, Uint8List.fromList([1]));
+          final etag = await adapter.getEtag(path);
+
+          simulator.injectNextStatus(500, forMethod: 'PATCH');
+
+          await expectLater(
+            adapter.compareAndSwap(
+              path,
+              Uint8List.fromList([2]),
+              ifMatchEtag: etag,
+            ),
+            throwsA(isA<StateError>()),
+          );
+        },
+      );
+
+      // ── compareAndSwap (update-if-match): missing Location header ─────────
+      //
+      // PATCH initiation returns 200 but no Location header.
+      // Expected: StateError (lines 381-382).
+      test(
+        'compareAndSwap throws StateError when CAS initiation returns no Location',
+        () async {
+          const path = '.consolidation-lease';
+          await adapter.upload(path, Uint8List.fromList([1]));
+          final etag = await adapter.getEtag(path);
+
+          simulator.injectMissingLocationOnNextInitiate();
+
+          await expectLater(
+            adapter.compareAndSwap(
+              path,
+              Uint8List.fromList([2]),
+              ifMatchEtag: etag,
+            ),
+            throwsA(isA<StateError>()),
+          );
+        },
+      );
+
+      // ── compareAndSwap (update-if-match): 412 during CAS upload phase ─────
+      //
+      // The CAS session is initiated (PATCH returns 200 + Location), but the
+      // actual PUT returns 412 (concurrent write).
+      // Expected: returns false (line 409).
+      test(
+        'compareAndSwap returns false when PUT to session returns 412',
+        () async {
+          const path = '.consolidation-lease';
+          await adapter.upload(path, Uint8List.fromList([1]));
+          final etag = await adapter.getEtag(path);
+
+          // Inject 412 for the PUT to the session URI.
+          simulator.injectNextStatus(412, forMethod: 'PUT');
+
+          final result = await adapter.compareAndSwap(
+            path,
+            Uint8List.fromList([2]),
+            ifMatchEtag: etag,
+          );
+          expect(result, isFalse);
+        },
+      );
+
+      // ── compareAndSwap (update-if-match): non-2xx during CAS upload ───────
+      //
+      // PUT to the session URI returns 500.
+      // Expected: StateError (lines 411-413).
+      test(
+        'compareAndSwap throws StateError when PUT to session fails',
+        () async {
+          const path = '.consolidation-lease';
+          await adapter.upload(path, Uint8List.fromList([1]));
+          final etag = await adapter.getEtag(path);
+
+          simulator.injectNextStatus(500, forMethod: 'PUT');
+
+          await expectLater(
+            adapter.compareAndSwap(
+              path,
+              Uint8List.fromList([2]),
+              ifMatchEtag: etag,
+            ),
+            throwsA(isA<StateError>()),
+          );
+        },
+      );
+
+      // ── delete: concurrent 404 from DriveApi ──────────────────────────────
+      //
+      // The adapter has a cached file ID.  When it calls DriveApi.files.delete,
+      // Drive returns 404 (concurrent deletion by another device).
+      // Expected: the adapter treats 404 as idempotent and returns without error
+      // (lines 321-322).
+      test(
+        'delete is idempotent when DriveApi.files.delete returns 404 (concurrent)',
+        () async {
+          const path = 'sstables/concurrent-deleted.sst';
+          await adapter.upload(path, Uint8List.fromList([1]));
+
+          // Verify the file ID is cached by downloading once.
+          await adapter.download(path);
+
+          // Inject 404 for the DriveApi DELETE call.
+          simulator.injectNextStatus(404, forMethod: 'DELETE');
+
+          // The adapter should catch the DetailedApiRequestError(404) and
+          // return without throwing (idempotent delete).
+          await expectLater(adapter.delete(path), completes);
+        },
+      );
+    });
   });
 
   // ── Pre-release integration test (credential-gated) ──────────────────────

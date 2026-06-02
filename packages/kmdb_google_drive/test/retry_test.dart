@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'dart:async';
+
 import 'package:googleapis/drive/v3.dart' show DetailedApiRequestError;
 import 'package:kmdb/kmdb.dart'
     show CancellationToken, SyncCancelledException, SyncContext;
@@ -280,6 +282,78 @@ void main() {
       );
       expect(result, equals('done'));
       expect(calls, equals(3));
+    });
+
+    // ── Future deadline that has not yet expired ───────────────────────────
+    //
+    // SyncContext with a deadline far in the future: throwIfExpired() passes
+    // (deadline not yet reached), then the deadline check at lines 117-118 in
+    // retry.dart evaluates to false (not yet expired), and the sleep proceeds.
+    // This exercises the `final deadline = ctx?.deadline` / `isAfter` check
+    // when the deadline is still in the future.
+    test(
+      'future deadline: deadline check evaluates to false, retry proceeds',
+      () async {
+        // Deadline one hour from now — will never expire during the test.
+        final futureDeadline = DateTime.now().add(const Duration(hours: 1));
+        final ctx = SyncContext(deadline: futureDeadline);
+
+        var calls = 0;
+        final result = await retryWithBackoff(
+          () async {
+            calls++;
+            if (calls < 3) throw _apiError(429);
+            return 'future-deadline-ok';
+          },
+          config: _fastConfig, // 0 ms delays — fast
+          ctx: ctx,
+        );
+        expect(result, equals('future-deadline-ok'));
+        expect(calls, equals(3));
+      },
+    );
+
+    // ── Cancel via token during back-off sleep (async cancel) ─────────────
+    //
+    // The token is NOT cancelled when throwIfExpired() runs before the sleep,
+    // but IS cancelled during the sleep via Future.delayed(Duration.zero).
+    // This exercises the Future.any([sleep, cancelFuture]) branch (lines 138-143)
+    // and the post-sleep throwIfExpired() check (line 149).
+    test('cancel token fires during back-off sleep via async cancel', () async {
+      // Use a medium delay so the sleep outlasts the scheduled cancel.
+      const medConfig = RetryConfig(
+        maxAttempts: 5,
+        initialDelayMs: 500, // long enough for the cancel to fire first
+        maxDelayMs: 5000,
+        jitterMs: 0,
+      );
+
+      final token = CancellationToken();
+      final ctx = SyncContext(cancel: token);
+
+      var calls = 0;
+      final future = retryWithBackoff(
+        () async {
+          calls++;
+          throw _apiError(429); // always fails → retries
+        },
+        config: medConfig,
+        ctx: ctx,
+      );
+
+      // Schedule the cancel on the next event-loop tick.  By that point,
+      // retryWithBackoff has already passed throwIfExpired() (line 114) but
+      // is suspended in Future.any([sleep, whenCancelled]) (line 140).
+      // The cancel wakes the sleep; post-sleep throwIfExpired() (line 149)
+      // then throws SyncCancelledException.
+      //
+      // Use unawaited so that we do not await the cancel future itself —
+      // just schedule it to fire on the next event loop tick while we
+      // await the retry future directly.
+      unawaited(Future<void>.delayed(Duration.zero, token.cancel));
+
+      await expectLater(future, throwsA(isA<SyncCancelledException>()));
+      expect(calls, greaterThanOrEqualTo(1));
     });
   });
 

@@ -94,6 +94,9 @@ final class SimFile {
 ///   `atomicConditionalCreate == false`.
 /// - **Atomic update-if-match** — `If-Match` on a known file ID; 412 on mismatch.
 /// - **Rate limiting** — optional 429 injection controlled by [QuotaProfile].
+/// - **Error injection** — one-shot fault injection for specific request types
+///   via [injectNextStatus], [injectMissingLocationOnNextInitiate], and
+///   [injectMissingIdOnNextUpload].
 final class DriveSimulator extends http.BaseClient {
   /// Creates a [DriveSimulator].
   ///
@@ -120,6 +123,108 @@ final class DriveSimulator extends http.BaseClient {
   // Active resumable sessions: sessionToken → session state.
   final Map<String, _ResumableSession> _sessions = {};
 
+  // ── Error injection state ───────────────────────────────────────────────
+
+  /// One-shot override: returns this status code (and clears itself) for the
+  /// next request matching [_injectForMethod] (if set) or any method (if null).
+  ///
+  /// Call [injectNextStatus] to arm the injector.
+  int? _injectStatus;
+
+  /// HTTP method to match for one-shot status injection; `null` means any.
+  String? _injectForMethod;
+
+  /// When true, the next resumable-upload initiation returns 200 with NO
+  /// `Location` header (simulates a malformed server response).
+  bool _missingLocationOnNextInitiate = false;
+
+  /// When true, the next PUT to a resumable session returns 200 with no `id`
+  /// field in the JSON body (simulates a malformed upload response).
+  bool _missingIdOnNextUpload = false;
+
+  // ── Error injection public API ──────────────────────────────────────────
+
+  /// Arms the one-shot status injector.
+  ///
+  /// The next request whose method matches [forMethod] (case-insensitive, or
+  /// any method if [forMethod] is `null`) will receive [status] instead of the
+  /// normal response.  The injector clears itself after firing once.
+  void injectNextStatus(int status, {String? forMethod}) {
+    _injectStatus = status;
+    _injectForMethod = forMethod?.toUpperCase();
+  }
+
+  /// Arms the missing-Location injector.
+  ///
+  /// The next resumable-upload initiation response (200 OK) will omit the
+  /// `Location` header.  Clears after firing once.
+  void injectMissingLocationOnNextInitiate() {
+    _missingLocationOnNextInitiate = true;
+  }
+
+  /// Arms the missing-id injector.
+  ///
+  /// The next PUT to a resumable session will return `{"etag": "abc"}` (no
+  /// `id` field).  Clears after firing once.
+  void injectMissingIdOnNextUpload() {
+    _missingIdOnNextUpload = true;
+  }
+
+  /// Directly marks the Drive file with [fileId] as deleted.
+  ///
+  /// Use in tests to simulate a file disappearing from Drive without going
+  /// through the adapter's `delete()` method (so that the adapter's ID cache
+  /// still holds the stale file ID, allowing 404-after-cached-ID scenarios to
+  /// be exercised).
+  void deleteFileById(String fileId) {
+    _files[fileId]?.markDeleted();
+  }
+
+  /// Returns the Drive file ID for the file with [name] inside [parentId]
+  /// (or at root if [parentId] is `null`), or `null` if not found.
+  ///
+  /// Useful in tests to obtain the simulator-internal file ID for
+  /// [deleteFileById] without going through the adapter.
+  String? findFileId(String name, {String? parentId}) {
+    for (final f in _files.values) {
+      if (!f.isDeleted && f.name == name && f.parentId == parentId) {
+        return f.id;
+      }
+    }
+    return null;
+  }
+
+  /// Forcibly inserts a duplicate file entry with [name] in [parentId].
+  ///
+  /// Drive allows multiple files with the same name to co-exist; this helper
+  /// simulates that condition directly so that `_deterministic()` is exercised
+  /// without requiring a real race condition.
+  ///
+  /// Pass [createdTime] to control the file's creation timestamp.  When two
+  /// files with the same [createdTime] are inserted, `_deterministic()` falls
+  /// through to the tie-break (lowest file ID) branch.
+  ///
+  /// Returns the new file's ID.
+  String insertDuplicateFile(
+    String name, {
+    required String parentId,
+    required Uint8List content,
+    DateTime? createdTime,
+  }) {
+    final id = _newId();
+    final etag = _computeEtag(id, content);
+    _files[id] = SimFile(
+      id: id,
+      name: name,
+      parentId: parentId,
+      content: content,
+      mimeType: 'application/octet-stream',
+      createdTime: createdTime ?? DateTime.now(),
+      etag: etag,
+    );
+    return id;
+  }
+
   // ── Public introspection ───────────────────────────────────────────────
 
   /// Number of non-deleted files in the simulator.
@@ -133,6 +238,24 @@ final class DriveSimulator extends http.BaseClient {
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     _opCount++;
+
+    // One-shot status injection: return the injected status for the matching
+    // request and then clear the injection.
+    final injectStatus = _injectStatus;
+    final injectForMethod = _injectForMethod;
+    if (injectStatus != null) {
+      final methodMatches =
+          injectForMethod == null ||
+          injectForMethod == request.method.toUpperCase();
+      if (methodMatches) {
+        _injectStatus = null;
+        _injectForMethod = null;
+        return _textResponse(
+          injectStatus,
+          '{"error":{"code":$injectStatus,"message":"Injected error"}}',
+        );
+      }
+    }
 
     // Rate limit injection.
     if (_enableRateLimiting) {
@@ -311,6 +434,17 @@ final class DriveSimulator extends http.BaseClient {
     );
 
     final sessionUri = 'https://www.googleapis.com/sim-resumable/$token';
+
+    // Missing-Location injection: return 200 with no Location header.
+    if (_missingLocationOnNextInitiate) {
+      _missingLocationOnNextInitiate = false;
+      return http.StreamedResponse(
+        Stream.value(const <int>[]),
+        200,
+        headers: {}, // no 'location' header
+      );
+    }
+
     return http.StreamedResponse(
       Stream.value(const <int>[]),
       200,
@@ -359,6 +493,12 @@ final class DriveSimulator extends http.BaseClient {
         createdTime: DateTime.now(),
         etag: etag,
       );
+    }
+
+    // Missing-id injection: return 200 with no `id` field in the response.
+    if (_missingIdOnNextUpload) {
+      _missingIdOnNextUpload = false;
+      return _jsonResponse({'etag': '"$etag"'}); // no 'id'
     }
 
     return _jsonResponse({'id': fileId, 'etag': '"$etag"'});
