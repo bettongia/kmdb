@@ -49,4 +49,5 @@ export 'src/config/io_kmdb_config_store.dart' show IoKmdbConfigStore;
 export 'src/config/kmdb_config.dart'
     show EmbeddingModelConfig, FtsIndexRecord, IndexRecord, KmdbConfig;
 export 'src/config/kmdb_config_store.dart' show KmdbConfigStore;
-export 'src/config/remote_config.dart' show LocalRemoteConfig, RemoteConfig;
+export 'src/config/remote_config.dart'
+    show GoogleDriveRemoteConfig, LocalRemoteConfig, RemoteConfig;

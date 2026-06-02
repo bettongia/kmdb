@@ -98,7 +98,7 @@ final class PushCommand extends CliCommand {
       return true;
     }
 
-    final syncAdapter = adapterFor(remote);
+    final syncAdapter = await adapterFor(remote, dbDir: dbDir);
 
     try {
       await ctx.db.push(syncAdapter: syncAdapter, syncNamespaces: collections);

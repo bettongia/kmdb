@@ -316,11 +316,11 @@ void main() {
   });
 
   group('adapterFor', () {
-    test('returns LocalDirectoryAdapter for LocalRemoteConfig', () {
-      // We just verify it does not throw — the adapter type is not exported.
-      expect(
-        () => adapterFor(LocalRemoteConfig(path: '/tmp/sync')),
-        returnsNormally,
+    test('returns LocalDirectoryAdapter for LocalRemoteConfig', () async {
+      // We just verify it completes normally — the adapter type is not exported.
+      await expectLater(
+        adapterFor(LocalRemoteConfig(path: '/tmp/sync'), dbDir: '/tmp'),
+        completes,
       );
     });
   });

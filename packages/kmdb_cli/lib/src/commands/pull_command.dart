@@ -93,7 +93,7 @@ final class PullCommand extends CliCommand {
       return false;
     }
 
-    final syncAdapter = adapterFor(remote);
+    final syncAdapter = await adapterFor(remote, dbDir: dbDir);
 
     try {
       await ctx.db.pull(syncAdapter: syncAdapter, syncNamespaces: collections);

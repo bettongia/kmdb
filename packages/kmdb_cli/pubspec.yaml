@@ -10,6 +10,9 @@ resolution: workspace
 
 dependencies:
   kmdb:
+  kmdb_google_drive:
+  googleapis_auth: ^2.0.0
+  http: ^1.0.0
   args: ^2.6.0
   uuid:
 

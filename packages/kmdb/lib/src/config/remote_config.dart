@@ -22,8 +22,18 @@
 ///
 /// 1. Add a new `final class` extending [RemoteConfig].
 /// 2. Handle the new `type` string in [RemoteConfig.fromJson].
-/// 3. In `kmdb_cli`, add the corresponding adapter construction to
+/// 3. Update the error message in the `default` branch of [RemoteConfig.fromJson]
+///    to list the new type.
+/// 4. In `kmdb_cli`, add the corresponding adapter construction to
 ///    `adapterFor` in `remote_config.dart`.
+///
+/// ## Note on package dependencies
+///
+/// [RemoteConfig] subtypes are **config-only** — they carry the data needed to
+/// describe a remote but do NOT construct the adapter.  Adapter construction
+/// lives in `kmdb_cli` (the only package that depends on both `kmdb` and the
+/// provider packages such as `kmdb_google_drive`).  This keeps heavy OAuth
+/// and provider dependencies out of core `kmdb`.
 sealed class RemoteConfig {
   /// The type discriminator stored in `config.json`.
   ///
@@ -54,9 +64,11 @@ sealed class RemoteConfig {
     switch (type) {
       case 'local':
         return LocalRemoteConfig.fromJson(json);
+      case 'google-drive':
+        return GoogleDriveRemoteConfig.fromJson(json);
       default:
         throw FormatException(
-          "Unknown remote type '$type'.  Supported types: local.",
+          "Unknown remote type '$type'.  Supported types: local, google-drive.",
         );
     }
   }
@@ -120,4 +132,108 @@ final class LocalRemoteConfig extends RemoteConfig {
 
   @override
   int get hashCode => path.hashCode;
+}
+
+// ── Google Drive remote ───────────────────────────────────────────────────────
+
+/// A sync remote backed by Google Drive.
+///
+/// The adapter constructs a Drive folder hierarchy under [syncRoot] in the
+/// user's My Drive.  Auth credentials are loaded from [credentialsPath]
+/// (relative to `{dbDir}/local/`).  The CLI's `adapterFor` function loads and
+/// refreshes the credentials and constructs the adapter.
+///
+/// **Note:** This class is **config-only** — it carries the data needed to
+/// describe the remote but does NOT construct the adapter.  Construction
+/// happens in `kmdb_cli`'s `adapterFor`, which is the only layer that depends
+/// on both `kmdb` and `kmdb_google_drive`.
+///
+/// ## Example config entry
+///
+/// ```json
+/// {
+///   "type": "google-drive",
+///   "syncRoot": "kmdb-sync",
+///   "credentialsPath": "google_credentials.json"
+/// }
+/// ```
+final class GoogleDriveRemoteConfig extends RemoteConfig {
+  /// Creates a [GoogleDriveRemoteConfig].
+  ///
+  /// [syncRoot] — the name of the top-level Drive folder used for sync.
+  /// [credentialsPath] — relative path under `{dbDir}/local/` where the
+  /// OAuth credentials are cached.  Defaults to `google_credentials.json`.
+  GoogleDriveRemoteConfig({
+    required this.syncRoot,
+    this.credentialsPath = 'google_credentials.json',
+  });
+
+  /// The name of the Drive folder that acts as the sync root.
+  ///
+  /// The folder is created lazily on first sync if it does not exist.
+  final String syncRoot;
+
+  /// Path to the cached OAuth credentials file, relative to `{dbDir}/local/`.
+  ///
+  /// The file is created by `kmdb remote add --type google-drive` after a
+  /// successful OAuth consent flow.  It is never synced to the cloud.
+  final String credentialsPath;
+
+  @override
+  String get type => 'google-drive';
+
+  @override
+  Map<String, dynamic> toJson() => {
+    'type': 'google-drive',
+    'syncRoot': syncRoot,
+    'credentialsPath': credentialsPath,
+  };
+
+  /// Deserialises a [GoogleDriveRemoteConfig] from [json].
+  ///
+  /// Throws [FormatException] if required fields are missing or invalid.
+  static GoogleDriveRemoteConfig fromJson(Map<String, dynamic> json) {
+    final syncRoot = json['syncRoot'];
+    if (syncRoot == null) {
+      throw const FormatException(
+        "Google Drive remote config is missing required field 'syncRoot'.",
+      );
+    }
+    if (syncRoot is! String) {
+      throw FormatException(
+        "Google Drive remote config field 'syncRoot' must be a string, "
+        'got: $syncRoot',
+      );
+    }
+
+    final credentialsPath = json['credentialsPath'];
+    if (credentialsPath != null && credentialsPath is! String) {
+      throw FormatException(
+        "Google Drive remote config field 'credentialsPath' must be a string, "
+        'got: $credentialsPath',
+      );
+    }
+
+    return GoogleDriveRemoteConfig(
+      syncRoot: syncRoot,
+      credentialsPath:
+          (credentialsPath as String?) ?? 'google_credentials.json',
+    );
+  }
+
+  @override
+  String toString() =>
+      'GoogleDriveRemoteConfig(syncRoot: $syncRoot, '
+      'credentialsPath: $credentialsPath)';
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is GoogleDriveRemoteConfig &&
+          runtimeType == other.runtimeType &&
+          syncRoot == other.syncRoot &&
+          credentialsPath == other.credentialsPath;
+
+  @override
+  int get hashCode => Object.hash(syncRoot, credentialsPath);
 }
