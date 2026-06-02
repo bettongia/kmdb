@@ -65,6 +65,15 @@ void main() {
       expect(config, isA<LocalRemoteConfig>());
       expect((config as LocalRemoteConfig).path, '/mnt/sync');
     });
+
+    test('returns GoogleDriveRemoteConfig for type=google-drive', () {
+      final config = RemoteConfig.fromJson({
+        'type': 'google-drive',
+        'syncRoot': 'kmdb-sync',
+      });
+      expect(config, isA<GoogleDriveRemoteConfig>());
+      expect((config as GoogleDriveRemoteConfig).syncRoot, 'kmdb-sync');
+    });
   });
 
   group('LocalRemoteConfig.fromJson', () {
@@ -122,11 +131,77 @@ void main() {
     });
   });
 
+  group('GoogleDriveRemoteConfig.fromJson', () {
+    test('throws FormatException when syncRoot is missing', () {
+      expect(
+        () => GoogleDriveRemoteConfig.fromJson({'type': 'google-drive'}),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains("'syncRoot'"),
+          ),
+        ),
+      );
+    });
+
+    test(
+      'round-trips through fromJson and toJson (default credentialsPath)',
+      () {
+        final original = GoogleDriveRemoteConfig(syncRoot: 'my-kmdb-sync');
+        final rt = GoogleDriveRemoteConfig.fromJson(original.toJson());
+        expect(rt.syncRoot, 'my-kmdb-sync');
+        expect(rt.credentialsPath, 'google_credentials.json');
+        expect(rt.type, 'google-drive');
+      },
+    );
+
+    test(
+      'round-trips through fromJson and toJson (custom credentialsPath)',
+      () {
+        final original = GoogleDriveRemoteConfig(
+          syncRoot: 'sync-folder',
+          credentialsPath: 'creds.json',
+        );
+        final rt = GoogleDriveRemoteConfig.fromJson(original.toJson());
+        expect(rt.credentialsPath, 'creds.json');
+      },
+    );
+  });
+
+  group('GoogleDriveRemoteConfig equality and hashCode', () {
+    test('equal when syncRoot and credentialsPath match', () {
+      final a = GoogleDriveRemoteConfig(syncRoot: 'sync');
+      final b = GoogleDriveRemoteConfig(syncRoot: 'sync');
+      expect(a, equals(b));
+      expect(a.hashCode, equals(b.hashCode));
+    });
+
+    test('not equal when syncRoot differs', () {
+      final a = GoogleDriveRemoteConfig(syncRoot: 'sync-a');
+      final b = GoogleDriveRemoteConfig(syncRoot: 'sync-b');
+      expect(a, isNot(equals(b)));
+    });
+  });
+
   group('adapterFor', () {
-    test('returns LocalDirectoryAdapter for LocalRemoteConfig', () {
+    test('returns LocalDirectoryAdapter for LocalRemoteConfig', () async {
       final config = LocalRemoteConfig(path: '/mnt/sync');
-      final adapter = adapterFor(config);
+      final adapter = await adapterFor(config, dbDir: '/tmp/test-db');
       expect(adapter, isA<LocalDirectoryAdapter>());
     });
+
+    test(
+      'throws StateError for GoogleDriveRemoteConfig without credentials',
+      () async {
+        final config = GoogleDriveRemoteConfig(syncRoot: 'kmdb-sync');
+        // No credentials file exists under /tmp/nonexistent-db/local/ so a
+        // StateError is expected.
+        await expectLater(
+          adapterFor(config, dbDir: '/tmp/nonexistent-db'),
+          throwsStateError,
+        );
+      },
+    );
   });
 }

@@ -18,7 +18,7 @@ import 'dart:typed_data';
 import 'package:kmdb/src/sync/local/local_directory_adapter.dart';
 import 'package:test/test.dart';
 
-import '../support/sync_adapter_conformance.dart';
+import 'package:kmdb/test_support.dart';
 
 void main() {
   // Non-atomic mode (default): conformance suite runs with expectAtomicCas=false.

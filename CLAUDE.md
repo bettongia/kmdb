@@ -105,6 +105,7 @@ packages/
   kmdb_tokenizer_icu/  — ICU FFI word tokenizer for lexical search
   kmdb_inferencing/    — ONNX Runtime + BGE embedding model for semantic search
   kmdb_lexical/        — lexical utilities (stemmer, stopwords) used by FTS
+  kmdb_google_drive/   — Google Drive SyncStorageAdapter (optional, opt-in)
 
 External packages pulled in via `git:` refs in `pubspec.yaml`
 `dependency_overrides`:

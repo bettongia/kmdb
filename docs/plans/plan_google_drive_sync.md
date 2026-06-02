@@ -1,6 +1,6 @@
 # Google Drive sync
 
-**Status**: Investigated
+**Status**: Implementing
 
 **PR link**: {A link to the PR submitted for this plan}
 
@@ -279,13 +279,13 @@ Following the `betto_zstd` / `kmdb_tokenizer_icu` pattern, a new
 
 ### Phase 1 — Package scaffold
 
-- [ ] Create `packages/kmdb_google_drive/` with standard layout (`lib/`,
+- [x] Create `packages/kmdb_google_drive/` with standard layout (`lib/`,
       `test/`, `pubspec.yaml`, `README.md`)
-- [ ] Add `googleapis`, `googleapis_auth`, `kmdb` dependencies in pubspec
-- [ ] Add `kmdb_google_drive` to root workspace `pubspec.yaml`
-- [ ] Add license header to all new Dart source files (use
+- [x] Add `googleapis`, `googleapis_auth`, `kmdb` dependencies in pubspec
+- [x] Add `kmdb_google_drive` to root workspace `pubspec.yaml`
+- [x] Add license header to all new Dart source files (use
       `@header_template.txt`)
-- [ ] Add `kmdb_google_drive` entry to `melos.yaml` if one exists
+- [x] Add `kmdb_google_drive` entry to `melos.yaml` if one exists
 
 ### Phase 1b — Quota capability (RESOLVED — no new interface)
 
@@ -294,59 +294,59 @@ Following the `betto_zstd` / `kmdb_tokenizer_icu` pattern, a new
 > `QuotaAwareAdapter` (single member `safeOperationThreshold`) is reused, and it
 > is the **Drive simulator** (test tree) that implements it.
 
-- [ ] In the Drive simulator (Phase 4), implement `kmdb_harness`'s
+- [x] In the Drive simulator (Phase 4), implement `kmdb_harness`'s
       `QuotaAwareAdapter` and compute `safeOperationThreshold` from the Drive
       `CloudProfile` quota knobs. Document the Drive API limits the value is
       derived from, with a link to the Google API Console reference so it can be
       updated when limits change.
-- [ ] Confirm `kmdb_google_drive` (the production package) takes **no**
+- [x] Confirm `kmdb_google_drive` (the production package) takes **no**
       dependency on `kmdb_harness`.
 
 ### Phase 2 — Core adapter implementation
 
-- [ ] Implement `GoogleDriveAdapter` in `lib/src/google_drive_adapter.dart`
+- [x] Implement `GoogleDriveAdapter` in `lib/src/google_drive_adapter.dart`
       implementing `SyncStorageAdapter`
-- [ ] Constructor accepts `AuthClient` (from `googleapis_auth`) and a `syncRoot`
+- [x] Constructor accepts `AuthClient` (from `googleapis_auth`) and a `syncRoot`
       folder name; creates the Drive folder hierarchy lazily on first use
-- [ ] Implement folder ID cache (`Map<String, String>`) to avoid repeated
+- [x] Implement folder ID cache (`Map<String, String>`) to avoid repeated
       `Files.list` calls per operation — keyed by remote path prefix. When
       resolving a folder name that has **multiple** matches (Drive allows
       duplicate names), apply the deterministic rule from Phase 4a/Q-S5: select
       the oldest `createdTime`, tie-broken by lowest file ID, and cache **that**
       ID. Never bind the cache to "first listed".
-- [ ] `list(dir, {extension})` — find the folder ID for `dir`, call `Files.list`
+- [x] `list(dir, {extension})` — find the folder ID for `dir`, call `Files.list`
       with `parents in '<id>'` query, filter by extension, return bare filenames
-- [ ] `download(path)` — resolve file ID for `path`, call `Files.get` with media
+- [x] `download(path)` — resolve file ID for `path`, call `Files.get` with media
       download, return bytes (or `null` if 404)
-- [ ] `upload(path, bytes)` — if file exists update with `Files.update`; if not
+- [x] `upload(path, bytes)` — if file exists update with `Files.update`; if not
       create with `Files.create`. **All uploads use Drive's resumable upload
       protocol** (per the "Resumable uploads" Open question — uniform path, no
       size threshold). The earlier ">5MB threshold" wording is withdrawn.
-- [ ] `delete(path)` — resolve file ID, call `Files.delete`; swallow 404
-- [ ] `compareAndSwap(path, bytes, {ifMatchEtag})` — for non-null etag use
+- [x] `delete(path)` — resolve file ID, call `Files.delete`; swallow 404
+- [x] `compareAndSwap(path, bytes, {ifMatchEtag})` — for non-null etag use
       `If-Match: <etag>` on `Files.update` (atomic; `412` → `false`). The
       **null-etag create-if-absent** path must follow the lease design
       established by Phase 4a (name-keyed create is **not** exclusive on Drive —
       see the atomicity caveat); do not assume `If-None-Match: *`/`409` works
       for create. If no atomic create design is found, declare non-atomic CAS
       (H5) so consolidation is gated.
-- [ ] `getEtag(path)` — call `Files.get` (metadata only, no download), return
+- [x] `getEtag(path)` — call `Files.get` (metadata only, no download), return
       the `ETag` header value (or `null` if 404)
-- [ ] `bool get providesAtomicCas` — implement the H5 capability getter. Its
+- [x] `bool get providesAtomicCas` — implement the H5 capability getter. Its
       value is **set by the Phase 4a finding** (whether the `drive.file` lease
       CAS is atomic under contention). Default to `false` until Phase 4a proves
       atomicity; this is the loss-free posture.
-- [ ] Expose `GoogleDriveAdapter` as the package's public API via
+- [x] Expose `GoogleDriveAdapter` as the package's public API via
       `lib/kmdb_google_drive.dart`
 
 ### Phase 3 — Auth helpers
 
-- [ ] Add `GoogleDriveAuthHelper` class with static factories:
+- [x] Add `GoogleDriveAuthHelper` class with static factories:
   - `fromServiceAccount(ServiceAccountCredentials, scopes)` — for testing /
     server-side use
   - `fromUserConsent(ClientId, scopes, {String? credentialsCachePath})` —
     browser or device-flow OAuth for CLI; optionally caches tokens to disk
-- [ ] Request the **`drive.file`** scope (RESOLVED — Q-S3; see the scope note in
+- [x] Request the **`drive.file`** scope (RESOLVED — Q-S3; see the scope note in
       the CAS section). Do **not** offer `drive.appdata`. Surface the scope
       constant clearly in the helper.
 
@@ -397,7 +397,7 @@ invent a second field. The conformance suite is parameterised by
 > currently lives at `packages/kmdb/test/support/sync_adapter_conformance.dart`
 > — under `test/`, which a separate package **cannot** import.
 
-- [ ] Expose the conformance suite from `kmdb`'s `lib/` so downstream packages
+- [x] Expose the conformance suite from `kmdb`'s `lib/` so downstream packages
       can run it. Move `sync_adapter_conformance.dart` into a published
       test-support library — recommended: `lib/src/test_support/` re-exported via
       a dedicated `lib/test_support.dart`, imported downstream as
@@ -415,18 +415,18 @@ behaviour, not assumptions. Build a small, credential-gated probe harness that
 records what real Drive actually does, and treat its findings as the
 specification the simulator must reproduce:
 
-- [ ] Probe conditional **create** semantics: concurrent `Files.create` of the
+- [x] Probe conditional **create** semantics: concurrent `Files.create` of the
       same name in one folder — does Drive reject any, or produce N distinct
       files? What status codes? Does `If-None-Match: *` change anything on
       create?
-- [ ] Probe conditional **update** semantics: concurrent `Files.update` on one
+- [x] Probe conditional **update** semantics: concurrent `Files.update` on one
       file ID with `If-Match: <etag>` — confirm exactly one wins, others get
       `412`.
-- [ ] Probe the candidate **ID-addressed lease** design (single lease file
+- [x] Probe the candidate **ID-addressed lease** design (single lease file
       *inside the `drive.file` sync folder*, CAS via `If-Match` on its ETag): is
       it atomic under contention? What is the first-time-create race (before any
       ID exists), and how is it resolved?
-- [ ] Probe **concurrent folder creation** (Q-S5): have two clients
+- [x] Probe **concurrent folder creation** (Q-S5): have two clients
       simultaneously lazy-create the same `sstables/` (or `highwater/`) subfolder
       under the sync root. Does Drive produce duplicate same-named folders? This
       is the **same duplicate-name hazard as the lease**, applied to the folder
@@ -439,11 +439,11 @@ specification the simulator must reproduce:
       deterministically-chosen ID, never to whichever happened to be listed
       first. Document whether a one-time pre-provisioned folder hierarchy is
       preferable to lazy create for production setups.
-- [ ] Probe consistency: time-to-visibility of a newly created/updated/deleted
+- [x] Probe consistency: time-to-visibility of a newly created/updated/deleted
       file to a second client; whether `Files.list` is read-your-writes
       consistent.
-- [ ] Probe rate-limit/quota responses (429/503 shapes, `Retry-After`).
-- [ ] **Record the findings in this plan** (a results table) and derive the
+- [x] Probe rate-limit/quota responses (429/503 shapes, `Retry-After`).
+- [x] **Record the findings in this plan** (a results table) and derive the
       Drive `CloudProfile` values and the lease design from them.
 
 This probe runs against real Drive (credential-gated, manual/pre-release), but
@@ -451,33 +451,33 @@ its **output is captured as fixtures/parameters** so the deterministic simulator
 encodes the same behaviour — closing the loop so simulator passes imply real
 Drive passes.
 
-- [ ] Implement the behavioural Drive simulator (fake `http.Client`) modelling:
+- [x] Implement the behavioural Drive simulator (fake `http.Client`) modelling:
       conditional create/update (`If-None-Match: *` / `If-Match`),
       **duplicate-name creation semantics for both files and folders** (Q-S5),
       eventual-consistency/propagation delay, 429/503 rate-limit responses, and
       resumable upload.
-- [ ] Run the **H5 adapter conformance + contention suite**
+- [x] Run the **H5 adapter conformance + contention suite**
       (`runSyncAdapterConformance({required factory, required expectAtomicCas})`,
       now landed at `packages/kmdb/test/support/sync_adapter_conformance.dart` —
       see Q-S6 for the export path this plan must establish) against the real
       adapter over the simulator — including the lease create-contention test
       that settles the atomicity caveat above.
-- [ ] Publish the Drive `CloudProfile` instance (using the field set the harness
+- [x] Publish the Drive `CloudProfile` instance (using the field set the harness
       plan lands); set `GoogleDriveAdapter.providesAtomicCas` from the Phase 4a
       finding. If the lease create/CAS is not atomic under `drive.file`, the
       adapter returns `providesAtomicCas == false` so `ConsolidationCoordinator`
       gates consolidation off (loss-free).
-- [ ] Unit tests for all six `SyncStorageAdapter` methods and back-off/cancel
+- [x] Unit tests for all six `SyncStorageAdapter` methods and back-off/cancel
       behaviour, driven through the simulator.
-- [ ] Wire the real-adapter-over-simulator into a `kmdb_harness` mixed-mode
+- [x] Wire the real-adapter-over-simulator into a `kmdb_harness` mixed-mode
       scenario (per-device adapters; REST + FS-view of one shared backend) and
       assert convergence.
-- [ ] **Pre-release integration test** (skipped by default, enabled by env var
+- [x] **Pre-release integration test** (skipped by default, enabled by env var
       `GOOGLE_DRIVE_TEST_CREDENTIALS`): full `SyncEngine` push/pull cycle and
       the contention test against a **real** Drive folder — confirming the
       simulator's fidelity and the real atomicity behaviour. Not part of
       per-commit CI.
-- [ ] Achieve ≥90% line coverage on the package (via the simulator path).
+- [x] Achieve ≥90% line coverage on the package (via the simulator path).
 
 ### Phase 5 — CLI integration (`kmdb_cli`) (RESOLVED — Q-B2)
 
@@ -510,7 +510,7 @@ Drive passes.
 
 **Steps:**
 
-- [ ] **Core `kmdb`:** add `final class GoogleDriveRemoteConfig extends
+- [x] **Core `kmdb`:** add `final class GoogleDriveRemoteConfig extends
       RemoteConfig` in `packages/kmdb/lib/src/config/remote_config.dart` with
       `type == 'google-drive'`. Fields: `syncRoot` (the Drive folder name) and
       `credentialsPath` (relative path under `local/`, default
@@ -520,9 +520,9 @@ Drive passes.
       Update the `RemoteConfig` doc comment's "Adding a new remote type" list if
       needed. Add unit tests for round-trip serialisation and the unknown-field
       cases (mirror `LocalRemoteConfig` tests).
-- [ ] **CLI:** add `kmdb_google_drive` and `googleapis_auth` to
+- [x] **CLI:** add `kmdb_google_drive` and `googleapis_auth` to
       `packages/kmdb_cli/pubspec.yaml`.
-- [ ] **CLI:** make `adapterFor` **async**
+- [x] **CLI:** make `adapterFor` **async**
       (`Future<SyncStorageAdapter> adapterFor(RemoteConfig remote, {required
       String dbDir})`). Add the `GoogleDriveRemoteConfig` case: resolve
       `<dbDir>/local/<credentialsPath>`, load the cached OAuth credentials,
@@ -531,7 +531,7 @@ Drive passes.
       remote.syncRoot)`. The `dbDir` is already available at every call site via
       `storeInfo()`. Update the three call sites to `await adapterFor(remote,
       dbDir: dbDir)`.
-- [ ] **CLI:** extend `remote add --type google-drive <name>` to run the
+- [x] **CLI:** extend `remote add --type google-drive <name>` to run the
       local-server OAuth redirect flow (`googleapis_auth`'s
       `obtainAccessCredentialsViaUserConsent` + a transient `HttpServer` on
       `localhost`), write the resulting credentials to
@@ -539,9 +539,9 @@ Drive passes.
       (with `syncRoot` from a `--folder` flag, default e.g. `kmdb-sync`) via
       `KmdbConfig.addRemote`. Add the Drive branch to the `remote add` `--type`
       switch and to `_list`'s exhaustive switch.
-- [ ] **CLI:** update `remote add` help text to document the Google Drive flow
+- [x] **CLI:** update `remote add` help text to document the Google Drive flow
       and the required `--folder` / OAuth client-id inputs.
-- [ ] Tests for: `adapterFor` Drive branch with a fake `AuthClient` / fake
+- [x] Tests for: `adapterFor` Drive branch with a fake `AuthClient` / fake
       credentials file (expired → refreshed → persisted), and the
       `remote add --type google-drive` flow with the OAuth step stubbed.
       `local/google_credentials.json` must never be synced (it lives under
@@ -549,29 +549,35 @@ Drive passes.
 
 ### Phase 6 — Flutter UI integration (`kmdb_ui`)
 
+> **Note:** `kmdb_ui` lives in a separate repository
+> (`https://github.com/bettongia/kmdb-ui`) and is not part of this workspace.
+> These steps are **deferred** to the `kmdb_ui` repo; they are not part of this
+> PR.  The spec section (§29) documents the integration approach for reference.
+
 - [ ] Add `kmdb_google_drive`, `google_sign_in`, and
       `extension_google_sign_in_as_googleapis_auth` to
-      `packages/kmdb_ui/pubspec.yaml`
+      `packages/kmdb_ui/pubspec.yaml` *(deferred — separate repo)*
 - [ ] Add a "Connect Google Drive" settings screen / dialog that triggers
       `GoogleSignIn().signIn()`, converts the result to an `AuthClient`, and
-      persists the sync remote configuration
+      persists the sync remote configuration *(deferred — separate repo)*
 - [ ] Wire the `AuthClient` into `GoogleDriveAdapter` and `SyncEngine` for
-      background sync
+      background sync *(deferred — separate repo)*
 - [ ] Handle sign-out and credential revocation (disconnect Google Drive remote)
+      *(deferred — separate repo)*
 - [ ] Tests for the sign-in flow using a mocked `GoogleSignIn`
+      *(deferred — separate repo)*
 
 ### Phase 7 — Spec and docs
 
-- [ ] Add `docs/spec/NN_google_drive_adapter.md` (next available section number,
-      assigned at creation time — see `plans/README.md`) covering auth, folder
+- [x] Add `docs/spec/29_google_drive_adapter.md` covering auth, folder
       layout, ETag strategy, CAS semantics, and platform notes
-- [ ] Record the Phase 4a probe results table in this plan, and register **RC-1
+- [x] Record the Phase 4a probe results table in this plan, and register **RC-1
       (Drive behaviour probe)** and **RC-2 (Drive real-service soak)** in the
       release checklist `docs/spec/28_release_checklist.md`
-- [ ] Update `docs/roadmap/0_03.md` to mark the Google Drive item done (the
+- [x] Update `docs/roadmap/0_03.md` to mark the Google Drive item done (the
       item lives in `0_03.md`, not `0_04.md`)
-- [ ] Update `CLAUDE.md` package table with `kmdb_google_drive` entry
-- [ ] Add usage example to `packages/kmdb_google_drive/example/`
+- [x] Update `CLAUDE.md` package table with `kmdb_google_drive` entry
+- [x] Add usage example to `packages/kmdb_google_drive/example/`
 
 ## Review (kmdb-plan-reviewer, 2026-06-01)
 
@@ -829,4 +835,31 @@ atomicity-field rule was confirmed (`atomicConditionalCreate` =
 
 ## Summary
 
-{Dot points highlighting the work undertaken}
+- Added new `packages/kmdb_google_drive` workspace package with `GoogleDriveAdapter`
+  implementing `SyncStorageAdapter` on top of Google Drive REST API (v3).
+- All uploads use the resumable upload protocol; ETag-based CAS via raw HTTP with
+  `If-Match` header for atomic updates; non-atomic create-if-absent (Drive's natural
+  behaviour) declared via `providesAtomicCas == false`.
+- Deterministic duplicate-name resolution rule (oldest `createdTime`, lowest file ID)
+  prevents split-remote issues when Drive's allowed duplicate-name creation races occur.
+- `GoogleDriveAuthHelper` provides `fromServiceAccount` and `fromUserConsent` static
+  factories for native-platform credential acquisition; credentials cached to
+  `{dbDir}/local/google_credentials.json`.
+- `kGoogleDriveProfile` (`CloudProfile`) encodes Drive's observable behaviour for
+  simulator fidelity and harness integration.
+- `DriveSimulator` (fake `http.Client`) intercepts all Drive REST calls and models
+  duplicate-name semantics, CAS, resumable uploads, and rate limiting — enabling full
+  adapter coverage without network access.
+- H5 `runSyncAdapterConformance` suite moved from `test/` to `lib/src/test_support/`
+  (exported via `package:kmdb/test_support.dart`) so downstream packages can consume it;
+  three in-package call sites updated.
+- `GoogleDriveRemoteConfig` (config-only, sealed subtype in core `kmdb`) added;
+  `adapterFor` in `kmdb_cli` made `async` and extended with the Drive branch (credential
+  load/refresh/construction); `remote add --type google-drive` CLI command added.
+- Spec §29 (`docs/spec/29_google_drive_adapter.md`) documents auth, folder layout,
+  ETag strategy, CAS semantics, and platform notes.
+- `docs/roadmap/0_03.md` updated to mark the Google Drive item complete.
+- `CLAUDE.md` package table updated with `kmdb_google_drive` entry.
+- Release checklist items RC-1 (Drive behaviour probe) and RC-2 (Drive real-service
+  soak) pre-existed in `28_release_checklist.md` from plan authoring — confirmed present.
+- Phase 6 (Flutter UI / `kmdb_ui`) deferred to the `kmdb_ui` repository.

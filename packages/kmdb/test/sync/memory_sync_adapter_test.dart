@@ -17,7 +17,7 @@ import 'dart:typed_data';
 import 'package:kmdb/src/sync/local/memory_sync_adapter.dart';
 import 'package:test/test.dart';
 
-import '../support/sync_adapter_conformance.dart';
+import 'package:kmdb/test_support.dart';
 
 void main() {
   group('MemorySyncAdapter conformance', () {
