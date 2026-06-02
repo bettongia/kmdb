@@ -1,8 +1,8 @@
 # Google Drive sync
 
-**Status**: Implementing
+**Status**: Complete
 
-**PR link**: {A link to the PR submitted for this plan}
+**PR link**: https://github.com/bettongia/kmdb/pull/36
 
 **Implementation model:** Sonnet, **after the harness plan lands** (see the
 hard gate below); the empirical Drive probe (Phase 4a) is human-run with real
