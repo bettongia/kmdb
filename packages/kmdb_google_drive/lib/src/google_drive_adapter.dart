@@ -80,9 +80,18 @@ const _listFields =
 /// ## Rate limiting
 ///
 /// 429 / 503 responses are retried with exponential back-off and jitter.
-/// Back-off respects the [CancellationToken] and [deadline] parameters on
-/// [upload] / [compareAndSwap].  The back-off configuration can be overridden
-/// via the [retryConfig] constructor parameter.
+/// Back-off respects the [SyncContext.cancel] and [SyncContext.deadline]
+/// parameters: the back-off sleep uses `Future.any([sleep, whenCancelled])`
+/// so cancellation wakes the sleep immediately. The back-off configuration
+/// can be overridden via the [retryConfig] constructor parameter.
+///
+/// ## Cancellation
+///
+/// All six methods call `ctx?.throwIfExpired()` at entry. The back-off sleep
+/// in [retryWithBackoff] also wakes immediately on cancel. Drive-specific
+/// cancellation exceptions use [DriveOperationCancelledException], which
+/// extends [SyncCancelledException] so engine catch sites work without knowing
+/// about Drive-specific types.
 ///
 /// ## Thread safety
 ///
@@ -136,36 +145,51 @@ final class GoogleDriveAdapter implements SyncStorageAdapter {
   bool get providesAtomicCas => false;
 
   @override
-  Future<List<String>> list(String remoteDir, {String? extension}) async {
+  Future<List<String>> list(
+    String remoteDir, {
+    String? extension,
+    SyncContext? ctx,
+  }) async {
+    ctx?.throwIfExpired();
     return retryWithBackoff(
       () => _list(remoteDir, extension: extension),
       config: _retryConfig,
+      ctx: ctx,
     );
   }
 
   @override
-  Future<Uint8List?> download(String remotePath) async {
-    return retryWithBackoff(() => _download(remotePath), config: _retryConfig);
+  Future<Uint8List?> download(String remotePath, {SyncContext? ctx}) async {
+    ctx?.throwIfExpired();
+    return retryWithBackoff(
+      () => _download(remotePath),
+      config: _retryConfig,
+      ctx: ctx,
+    );
   }
 
   @override
   Future<void> upload(
     String remotePath,
     Uint8List bytes, {
-    CancellationToken? cancellationToken,
-    DateTime? deadline,
+    SyncContext? ctx,
   }) async {
+    ctx?.throwIfExpired();
     return retryWithBackoff(
       () => _upload(remotePath, bytes),
       config: _retryConfig,
-      cancellationToken: cancellationToken,
-      deadline: deadline,
+      ctx: ctx,
     );
   }
 
   @override
-  Future<void> delete(String remotePath) async {
-    return retryWithBackoff(() => _delete(remotePath), config: _retryConfig);
+  Future<void> delete(String remotePath, {SyncContext? ctx}) async {
+    ctx?.throwIfExpired();
+    return retryWithBackoff(
+      () => _delete(remotePath),
+      config: _retryConfig,
+      ctx: ctx,
+    );
   }
 
   @override
@@ -173,16 +197,15 @@ final class GoogleDriveAdapter implements SyncStorageAdapter {
     String path,
     Uint8List newBytes, {
     String? ifMatchEtag,
-    CancellationToken? cancellationToken,
-    DateTime? deadline,
+    SyncContext? ctx,
   }) async {
+    ctx?.throwIfExpired();
     if (ifMatchEtag != null) {
       // Update-if-match: atomic via If-Match header on a known file ID.
       return retryWithBackoff(
         () => _casUpdate(path, newBytes, ifMatchEtag),
         config: _retryConfig,
-        cancellationToken: cancellationToken,
-        deadline: deadline,
+        ctx: ctx,
       );
     } else {
       // Create-if-absent: NOT exclusive on Drive (see providesAtomicCas).
@@ -191,17 +214,18 @@ final class GoogleDriveAdapter implements SyncStorageAdapter {
       return retryWithBackoff(
         () => _casCreate(path, newBytes),
         config: _retryConfig,
-        cancellationToken: cancellationToken,
-        deadline: deadline,
+        ctx: ctx,
       );
     }
   }
 
   @override
-  Future<String?> getEtag(String remotePath) async {
+  Future<String?> getEtag(String remotePath, {SyncContext? ctx}) async {
+    ctx?.throwIfExpired();
     return retryWithBackoff(
       () => _getEtagViaHttp(remotePath),
       config: _retryConfig,
+      ctx: ctx,
     );
   }
 

@@ -26,9 +26,14 @@ void main() {
   // declared non-atomic (providesAtomicCas == false), so the contention test
   // runs with expectAtomicCas: false and verifies forward progress only.
   group('GoogleDriveAdapter (SyncStorageAdapter conformance)', () {
+    // expectsCancellation: true — GoogleDriveAdapter calls ctx?.throwIfExpired()
+    // at entry of each method, so pre-cancelled tokens and expired deadlines are
+    // detected promptly. The GatedSyncAdapter mid-flight tests also pass because
+    // the simulator honours ctx propagated from the adapter layer.
     runSyncAdapterConformance(
       factory: () => adapterOverSimulator(DriveSimulator()),
       expectAtomicCas: false,
+      expectsCancellation: true,
     );
   });
 

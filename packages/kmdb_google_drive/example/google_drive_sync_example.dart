@@ -69,7 +69,9 @@ Future<void> main() async {
     syncRoot: 'myapp-kmdb-sync', // Drive folder name
   );
 
-  print('Google Drive adapter ready (providesAtomicCas: ${adapter.providesAtomicCas}).');
+  print(
+    'Google Drive adapter ready (providesAtomicCas: ${adapter.providesAtomicCas}).',
+  );
 
   // ── Step 3: Use the adapter with SyncEngine ───────────────────────────────
 

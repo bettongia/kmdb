@@ -19,7 +19,7 @@ import 'package:googleapis_auth/googleapis_auth.dart';
 import 'package:http/http.dart' as http;
 import 'package:kmdb/kmdb_test_cloud_support.dart'
     show CloudProfile, QuotaProfile;
-import 'package:kmdb/kmdb.dart' show SyncStorageAdapter;
+import 'package:kmdb/kmdb.dart' show SyncContext, SyncStorageAdapter;
 import 'package:kmdb_google_drive/kmdb_google_drive.dart'
     show GoogleDriveAdapter, kGoogleDriveProfile;
 import 'package:kmdb_harness/kmdb_harness.dart' show QuotaAwareAdapter;
@@ -530,29 +530,40 @@ final class SimulatorQuotaAdapter
   bool get providesAtomicCas => _adapter.providesAtomicCas;
 
   @override
-  Future<List<String>> list(String remoteDir, {String? extension}) =>
-      _adapter.list(remoteDir, extension: extension);
+  Future<List<String>> list(
+    String remoteDir, {
+    String? extension,
+    SyncContext? ctx,
+  }) => _adapter.list(remoteDir, extension: extension, ctx: ctx);
 
   @override
-  Future<Uint8List?> download(String remotePath) =>
-      _adapter.download(remotePath);
+  Future<Uint8List?> download(String remotePath, {SyncContext? ctx}) =>
+      _adapter.download(remotePath, ctx: ctx);
 
   @override
-  Future<void> upload(String remotePath, Uint8List bytes) =>
-      _adapter.upload(remotePath, bytes);
+  Future<void> upload(String remotePath, Uint8List bytes, {SyncContext? ctx}) =>
+      _adapter.upload(remotePath, bytes, ctx: ctx);
 
   @override
-  Future<void> delete(String remotePath) => _adapter.delete(remotePath);
+  Future<void> delete(String remotePath, {SyncContext? ctx}) =>
+      _adapter.delete(remotePath, ctx: ctx);
 
   @override
   Future<bool> compareAndSwap(
     String path,
     Uint8List newBytes, {
     String? ifMatchEtag,
-  }) => _adapter.compareAndSwap(path, newBytes, ifMatchEtag: ifMatchEtag);
+    SyncContext? ctx,
+  }) => _adapter.compareAndSwap(
+    path,
+    newBytes,
+    ifMatchEtag: ifMatchEtag,
+    ctx: ctx,
+  );
 
   @override
-  Future<String?> getEtag(String remotePath) => _adapter.getEtag(remotePath);
+  Future<String?> getEtag(String remotePath, {SyncContext? ctx}) =>
+      _adapter.getEtag(remotePath, ctx: ctx);
 }
 
 // ── Factory helpers ────────────────────────────────────────────────────────

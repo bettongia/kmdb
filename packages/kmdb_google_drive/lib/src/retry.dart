@@ -12,21 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:googleapis/drive/v3.dart' show DetailedApiRequestError;
+import 'package:kmdb/kmdb.dart';
 
-/// Thrown when an operation is cancelled before completing.
-final class DriveOperationCancelledException implements Exception {
+/// Thrown when a Drive operation is cancelled.
+///
+/// Extends [SyncCancelledException] so that the engine's generic cancellation
+/// catch sites work without needing to know about Drive-specific types. Existing
+/// Drive-specific catch clauses that catch [DriveOperationCancelledException]
+/// remain valid — [SyncCancelledException] is the base class.
+final class DriveOperationCancelledException extends SyncCancelledException {
   /// Creates a [DriveOperationCancelledException].
-  const DriveOperationCancelledException([this.message]);
-
-  /// Optional description of why the operation was cancelled.
-  final String? message;
+  const DriveOperationCancelledException([String message = 'Cancelled'])
+    : super(message);
 
   @override
-  String toString() =>
-      'DriveOperationCancelledException(${message ?? 'cancelled'})';
+  String toString() => 'DriveOperationCancelledException: $message';
 }
 
 /// Configuration for the exponential back-off strategy used by
@@ -60,22 +64,6 @@ final class RetryConfig {
   static const defaultConfig = RetryConfig();
 }
 
-/// A simple cancellation token for long-running async operations.
-///
-/// Call [cancel] to request cancellation.  The operation checks
-/// [isCancelled] at each back-off boundary and throws
-/// [DriveOperationCancelledException] if set.
-final class CancellationToken {
-  bool _cancelled = false;
-
-  /// Whether [cancel] has been called.
-  bool get isCancelled => _cancelled;
-
-  /// Requests cancellation.  Idempotent — calling more than once has no
-  /// additional effect.
-  void cancel() => _cancelled = true;
-}
-
 /// Executes [operation] with exponential back-off on transient Drive errors.
 ///
 /// Retries on:
@@ -85,15 +73,25 @@ final class CancellationToken {
 /// All other errors (including 412 Precondition Failed, which is a meaningful
 /// CAS signal) are rethrown immediately without retry.
 ///
-/// If [cancellationToken] is provided, each back-off wait checks for
-/// cancellation and throws [DriveOperationCancelledException] if set.
-/// If [deadline] is provided, no retry is attempted once the deadline has
-/// passed.
+/// ## Cancellation and deadline
+///
+/// If [ctx] is provided, each back-off sleep is implemented as
+/// `Future.any([Future.delayed(d), ctx.cancel?.whenCancelled ?? <never>])`,
+/// followed by `ctx.throwIfExpired()`. This wakes the back-off immediately
+/// when the context is cancelled rather than waiting for the next polling
+/// boundary.
+///
+/// The deadline check (`ctx.deadline`) is also applied before each retry
+/// attempt: if the deadline has passed, the last error is rethrown immediately
+/// without sleeping.
+///
+/// Note: cancellation / deadline checks apply only to the back-off path. The
+/// first attempt is not checked here — callers that want entry cancellation
+/// should call `ctx?.throwIfExpired()` before invoking [retryWithBackoff].
 Future<T> retryWithBackoff<T>(
   Future<T> Function() operation, {
   RetryConfig config = RetryConfig.defaultConfig,
-  CancellationToken? cancellationToken,
-  DateTime? deadline,
+  SyncContext? ctx,
 }) async {
   final rng = math.Random();
   var attempt = 0;
@@ -113,12 +111,11 @@ Future<T> retryWithBackoff<T>(
         rethrow; // Exhausted retries.
       }
 
-      // Check cancellation before sleeping.
-      if (cancellationToken?.isCancelled ?? false) {
-        throw const DriveOperationCancelledException();
-      }
+      // Check cancellation / deadline before sleeping.
+      ctx?.throwIfExpired();
 
-      // Check deadline before sleeping.
+      // Check deadline before sleeping: if it has already passed, do not sleep.
+      final deadline = ctx?.deadline;
       if (deadline != null && DateTime.now().isAfter(deadline)) {
         rethrow;
       }
@@ -133,12 +130,24 @@ Future<T> retryWithBackoff<T>(
       final jitter = rng.nextInt(config.jitterMs + 1);
       final actualDelay = baseDelay + jitter;
 
-      await Future<void>.delayed(Duration(milliseconds: actualDelay));
-
-      // Check cancellation again after sleeping.
-      if (cancellationToken?.isCancelled ?? false) {
-        throw const DriveOperationCancelledException();
+      // Sleep while watching for cancellation.
+      //
+      // Await Future.any([sleep, whenCancelled]) so that an in-flight back-off
+      // wakes immediately on cancel rather than sleeping out the full delay.
+      // The neverCompleter is used when no cancel signal is available, giving
+      // identical behaviour to a plain Future.delayed in that case.
+      final cancelFuture = ctx?.cancel?.whenCancelled;
+      if (cancelFuture != null) {
+        await Future.any([
+          Future<void>.delayed(Duration(milliseconds: actualDelay)),
+          cancelFuture,
+        ]);
+      } else {
+        await Future<void>.delayed(Duration(milliseconds: actualDelay));
       }
+
+      // Check cancellation again after waking from sleep.
+      ctx?.throwIfExpired();
 
       // Update delay for next iteration.
       delayMs = math.min(delayMs * 2, config.maxDelayMs);

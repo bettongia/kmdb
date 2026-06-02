@@ -42,3 +42,4 @@ export 'src/google_drive_adapter.dart' show GoogleDriveAdapter;
 export 'src/google_drive_auth_helper.dart'
     show GoogleDriveAuthHelper, kDriveFileScope;
 export 'src/google_drive_profile.dart' show kGoogleDriveProfile;
+export 'src/retry.dart' show DriveOperationCancelledException, RetryConfig;
