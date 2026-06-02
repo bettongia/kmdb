@@ -22,6 +22,15 @@ Bloom filter
   the engine skip a file in microseconds rather than opening and scanning it.
   See §9.
 
+CancellationToken
+
+: An imperative cancellation signal used to interrupt a sync run. Created by
+  the caller and passed to `KmdbDatabase.sync/push/pull` via the `cancel`
+  parameter. Backed by a `Completer<void>.sync()` so adapters can either poll
+  `isCancelled` at I/O boundaries or race `whenCancelled` inside a
+  `Future.any()` to wake immediately from a back-off sleep. See §12 —
+  Cancellation and Timeout.
+
 CAS (Content-Addressable Storage)
 
 : Storage model where objects are identified by a hash of their content rather
@@ -161,6 +170,23 @@ RRF (Reciprocal Rank Fusion)
   `Σ_{r} 1 / (k + rank_r(d))`, where `k = 60` (smoothing constant from the
   original paper, configurable) and `rank_r(d)` is the document's 1-based
   position in list `r`.
+
+SyncCancelledException
+
+: The exception thrown by `SyncContext.throwIfExpired()` — and by cloud
+  adapter implementations — when a sync run is cancelled or its deadline is
+  exceeded. Implements `Exception`. The `message` field distinguishes
+  user-initiated cancels (`'Sync cancelled'`) from timeouts
+  (`'Sync deadline exceeded'`). See §12 — Cancellation and Timeout.
+
+SyncContext
+
+: An immutable, per-sync-run carrier object threading `CancellationToken` and
+  an absolute `deadline` through every `SyncStorageAdapter` call. Constructed
+  once at `KmdbDatabase.sync/push/pull` from the caller's `cancel` and
+  `timeout` parameters. Adapters call `ctx?.throwIfExpired()` at I/O
+  boundaries; it throws `SyncCancelledException` if either signal is active.
+  See §12 — Cancellation and Timeout.
 
 SQ8 (Scalar Quantization, 8-bit)
 

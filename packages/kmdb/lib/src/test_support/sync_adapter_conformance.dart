@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:kmdb/kmdb.dart';
@@ -396,8 +395,7 @@ void _runCancellationConformanceTests({
         // Cancel mid-flight.
         token.cancel();
 
-        // The call must throw without the underlying operation completing
-        // (GatedSyncAdapter does not complete the delegate call on cancellation).
+        // The call must throw without the underlying operation completing.
         await expectLater(listFuture, throwsA(isA<SyncCancelledException>()));
       },
     );

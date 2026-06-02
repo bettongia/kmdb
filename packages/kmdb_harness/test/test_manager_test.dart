@@ -31,28 +31,36 @@ final class _QuotaAdapter implements SyncStorageAdapter, QuotaAwareAdapter {
   final int safeOperationThreshold;
 
   @override
-  Future<List<String>> list(String remoteDir, {String? extension}) =>
-      _inner.list(remoteDir, extension: extension);
+  Future<List<String>> list(
+    String remoteDir, {
+    String? extension,
+    SyncContext? ctx,
+  }) => _inner.list(remoteDir, extension: extension, ctx: ctx);
 
   @override
-  Future<Uint8List?> download(String remotePath) => _inner.download(remotePath);
+  Future<Uint8List?> download(String remotePath, {SyncContext? ctx}) =>
+      _inner.download(remotePath, ctx: ctx);
 
   @override
-  Future<void> upload(String remotePath, Uint8List bytes) =>
-      _inner.upload(remotePath, bytes);
+  Future<void> upload(String remotePath, Uint8List bytes, {SyncContext? ctx}) =>
+      _inner.upload(remotePath, bytes, ctx: ctx);
 
   @override
-  Future<void> delete(String remotePath) => _inner.delete(remotePath);
+  Future<void> delete(String remotePath, {SyncContext? ctx}) =>
+      _inner.delete(remotePath, ctx: ctx);
 
   @override
   Future<bool> compareAndSwap(
     String path,
     Uint8List newBytes, {
     String? ifMatchEtag,
-  }) => _inner.compareAndSwap(path, newBytes, ifMatchEtag: ifMatchEtag);
+    SyncContext? ctx,
+  }) =>
+      _inner.compareAndSwap(path, newBytes, ifMatchEtag: ifMatchEtag, ctx: ctx);
 
   @override
-  Future<String?> getEtag(String path) => _inner.getEtag(path);
+  Future<String?> getEtag(String path, {SyncContext? ctx}) =>
+      _inner.getEtag(path, ctx: ctx);
 
   @override
   bool get providesAtomicCas => _inner.providesAtomicCas;

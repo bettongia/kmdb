@@ -19,6 +19,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import '../../engine/util/xxhash.dart';
+import '../sync_context.dart';
 import '../sync_storage_adapter.dart';
 
 /// A [SyncStorageAdapter] backed by the local filesystem.
@@ -26,6 +27,12 @@ import '../sync_storage_adapter.dart';
 /// Suitable for use with NAS mounts, SMB/CIFS shares, locally-synced cloud
 /// folders (e.g. a Dropbox or OneDrive folder), or any directory accessible
 /// via `dart:io`.
+///
+/// ## Cancellation
+///
+/// This adapter calls `ctx?.throwIfExpired()` before each filesystem I/O
+/// call. If the [SyncContext] is cancelled or has exceeded its deadline,
+/// [SyncCancelledException] is thrown promptly before the I/O is attempted.
 ///
 /// ## ETag implementation
 ///
@@ -89,7 +96,12 @@ final class LocalDirectoryAdapter implements SyncStorageAdapter {
   String _resolve(String remotePath) => '$rootPath/$remotePath';
 
   @override
-  Future<List<String>> list(String remoteDir, {String? extension}) async {
+  Future<List<String>> list(
+    String remoteDir, {
+    String? extension,
+    SyncContext? ctx,
+  }) async {
+    ctx?.throwIfExpired();
     final dir = Directory(_resolve(remoteDir));
     if (!dir.existsSync()) return [];
     final results = <String>[];
@@ -103,21 +115,28 @@ final class LocalDirectoryAdapter implements SyncStorageAdapter {
   }
 
   @override
-  Future<Uint8List?> download(String remotePath) async {
+  Future<Uint8List?> download(String remotePath, {SyncContext? ctx}) async {
+    ctx?.throwIfExpired();
     final file = File(_resolve(remotePath));
     if (!file.existsSync()) return null;
     return file.readAsBytes();
   }
 
   @override
-  Future<void> upload(String remotePath, Uint8List bytes) async {
+  Future<void> upload(
+    String remotePath,
+    Uint8List bytes, {
+    SyncContext? ctx,
+  }) async {
+    ctx?.throwIfExpired();
     final file = File(_resolve(remotePath));
     await file.parent.create(recursive: true);
     await file.writeAsBytes(bytes, flush: true);
   }
 
   @override
-  Future<void> delete(String remotePath) async {
+  Future<void> delete(String remotePath, {SyncContext? ctx}) async {
+    ctx?.throwIfExpired();
     final file = File(_resolve(remotePath));
     if (file.existsSync()) await file.delete();
   }
@@ -127,7 +146,9 @@ final class LocalDirectoryAdapter implements SyncStorageAdapter {
     String path,
     Uint8List newBytes, {
     String? ifMatchEtag,
+    SyncContext? ctx,
   }) async {
+    ctx?.throwIfExpired();
     final resolvedPath = _resolve(path);
     final file = File(resolvedPath);
 
@@ -218,7 +239,8 @@ final class LocalDirectoryAdapter implements SyncStorageAdapter {
   }
 
   @override
-  Future<String?> getEtag(String path) async {
+  Future<String?> getEtag(String path, {SyncContext? ctx}) async {
+    ctx?.throwIfExpired();
     final file = File(_resolve(path));
     if (!file.existsSync()) return null;
     // Compute an XXH64 content hash as the ETag. This is collision-resistant

@@ -43,6 +43,8 @@ export 'src/sync/hlc_clock.dart' show HlcClock, ClockSkewException;
 export 'src/sync/sync_engine.dart' show SyncEngine;
 export 'src/sync/consolidation_coordinator.dart' show ConsolidationCoordinator;
 export 'src/sync/consolidation_config.dart' show ConsolidationConfig;
+export 'src/sync/sync_context.dart'
+    show CancellationToken, SyncContext, SyncCancelledException;
 export 'src/sync/sync_storage_adapter.dart'
     show SyncStorageAdapter, LockConflictException;
 export 'src/sync/local/memory_sync_adapter.dart' show MemorySyncAdapter;

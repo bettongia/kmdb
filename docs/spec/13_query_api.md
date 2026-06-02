@@ -555,10 +555,16 @@ protocol. The public API surface:
 | Method | Signature | Description |
 | ------ | --------- | ----------- |
 | `ensureDeviceId` | `Future<String> ensureDeviceId()` | Load or generate the stable device identifier. Call once after `open()` on production devices before the first `push()`. |
-| `sync` | `Future<void> sync({required SyncStorageAdapter syncAdapter, String syncRoot, Set<String>? syncNamespaces, StorageAdapter? localAdapter, ConsolidationConfig consolidationConfig})` | Flush, push, then pull in one step. **Native-only.** |
-| `push` | `Future<void> push({required SyncStorageAdapter syncAdapter, String syncRoot, Set<String>? syncNamespaces, StorageAdapter? localAdapter, ConsolidationConfig consolidationConfig})` | Flush and upload local SSTables. **Native-only.** |
-| `pull` | `Future<void> pull({required SyncStorageAdapter syncAdapter, String syncRoot, Set<String>? syncNamespaces, StorageAdapter? localAdapter, ConsolidationConfig consolidationConfig})` | Download and ingest peer SSTables. **Native-only.** |
+| `sync` | `Future<void> sync({required SyncStorageAdapter syncAdapter, String syncRoot, Set<String>? syncNamespaces, StorageAdapter? localAdapter, ConsolidationConfig consolidationConfig, CancellationToken? cancel, Duration? timeout})` | Flush, push, then pull in one step. **Native-only.** |
+| `push` | `Future<void> push({required SyncStorageAdapter syncAdapter, String syncRoot, Set<String>? syncNamespaces, StorageAdapter? localAdapter, ConsolidationConfig consolidationConfig, CancellationToken? cancel, Duration? timeout})` | Flush and upload local SSTables. **Native-only.** |
+| `pull` | `Future<void> pull({required SyncStorageAdapter syncAdapter, String syncRoot, Set<String>? syncNamespaces, StorageAdapter? localAdapter, ConsolidationConfig consolidationConfig, CancellationToken? cancel, Duration? timeout})` | Download and ingest peer SSTables. **Native-only.** |
 
 All three sync methods default `syncNamespaces` to all registered user (non-`$`)
 collections when omitted. System namespaces are always excluded from sync
 regardless of this parameter.
+
+The `cancel` and `timeout` parameters are combined into a `SyncContext` once
+at the entry point and threaded to every adapter call site for the duration of
+the sync run. If either signal is active when an adapter boundary is reached,
+`SyncCancelledException` is thrown and propagates to the caller. See §12 —
+Cancellation and Timeout for the full contract.
