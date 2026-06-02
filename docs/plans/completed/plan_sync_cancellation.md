@@ -1,8 +1,8 @@
 # Sync cancellation and timeout support
 
-**Status**: Implementing
+**Status**: Complete
 
-**PR link**: {A link to the PR submitted for this plan}
+**PR link**: https://github.com/bettongia/kmdb/pull/37
 
 **Implementation model:** Sonnet
 
@@ -439,4 +439,12 @@ implementation-readiness bar and can move to `Investigated`.
 
 ## Summary
 
-{Dot points highlighting the work undertaken}
+- Added `CancellationToken` (Completer.sync-based, with `isCancelled` getter and `whenCancelled` Future), `SyncContext` (immutable carrier with `throwIfExpired()`), and `SyncCancelledException` to `packages/kmdb/lib/src/sync/sync_context.dart`; exported from `kmdb.dart`.
+- Added `{SyncContext? ctx}` to all six `SyncStorageAdapter` method signatures. Adapters that honour cancellation (`LocalDirectoryAdapter`, `CloudSemanticsAdapter`, `GoogleDriveAdapter`) call `ctx?.throwIfExpired()` at entry; adapters with no long-running waits (`MemorySyncAdapter`, `SharedBackendAdapter`) accept but ignore `ctx` per the spec contract.
+- Threaded `SyncContext?` through `SyncEngine` (7 adapter call sites), `ConsolidationCoordinator` (9 sites), and `KmdbDatabase.sync/push/pull` (new `cancel: CancellationToken?` and `timeout: Duration?` public params; converted to an absolute `DateTime` deadline once at construction).
+- `PartitionableAdapter` forwards `ctx` opaquely on all six methods; verified by a spy-adapter test.
+- Added `GatedSyncAdapter` test decorator (per-method awaitable barrier; races barrier against `ctx.cancel.whenCancelled` for mid-flight cancellation). Key implementation detail: added `await Future<void>.value()` before `throwIfExpired()` to prevent `Completer.sync()` from propagating exceptions synchronously back to the `cancel()` caller.
+- Added `expectsCancellation: bool = false` opt-in to `runSyncAdapterConformance`. The conformance group tests both entry cancellation (pre-cancelled token) and mid-flight cancellation (GatedSyncAdapter barrier). Both the test-internal (`test/support/`) and exported (`lib/src/test_support/`) versions are updated; `GatedSyncAdapter` is now exported from `lib/test_support.dart`.
+- Google Drive branch (`.worktrees/20260602_plan_google_drive_sync`): replaced off-interface `cancellationToken`/`deadline` params with `{SyncContext? ctx}` on all six methods; `retryWithBackoff` already used `Future.any([sleep, whenCancelled])` and `throwIfExpired()`; `DriveOperationCancelledException extends SyncCancelledException`; exported from `kmdb_google_drive.dart`; `expectsCancellation: true` now passes (63 tests, 12 new cancellation tests); `SimulatorQuotaAdapter` updated to forward `ctx`.
+- Spec updated: `docs/spec/12_sync.md` (new "Cancellation and Timeout" subsection with core-type API, adapter contract, and back-off sleep pattern), `docs/spec/99_glossary.md` (CancellationToken, SyncCancelledException, SyncContext), `docs/spec/13_query_api.md` (updated sync method signatures).
+- All 230 `kmdb` tests pass; 153 `kmdb_harness` tests pass; 63 `kmdb_google_drive` tests pass; `make pre_commit` passes in both worktrees.
