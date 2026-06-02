@@ -341,6 +341,79 @@ For each release:
 
 ---
 
+### RC-12 — iCloud (CloudKit) empirical behaviour probe
+
+**Summary:** Re-verify the Phase 4a empirical probe findings whenever iOS or
+macOS ships a major version that may change CloudKit's consistency or
+atomicity behaviour.  The probe confirms the values in `kICloudProfile` and
+the `ICloudAdapter.providesAtomicCas` setting.
+
+- **What to verify:**
+  1. Zone-level create-if-absent atomicity: two devices simultaneously create
+     a `CKRecord` with the same deterministic record ID in the same custom
+     zone. Confirm exactly one succeeds and the other receives
+     `CKError.serverRecordChanged`.
+  2. Conditional update atomicity (`savePolicy: .ifServerRecordUnchanged`):
+     concurrent updates with the same `recordChangeTag`. Confirm exactly one
+     wins.
+  3. `CKQuery` BEGINSWITH consistency delay: time-to-visibility of a new
+     record to a second device.
+  4. `CKAsset` upload/download: verify large SSTables (≥10 MB) succeed.
+  5. Rate-limit error shape: `CKError.requestRateLimited` and
+     `CKErrorRetryAfterKey` availability.
+- **Why not automated:** requires a real CloudKit container with an active
+  Apple developer account; cannot be run in CI without Apple infrastructure.
+- **Applies when:** before any release that targets iOS or macOS; after any
+  iOS/macOS major version bump; after updating `kICloudProfile` values or
+  `ICloudAdapter.providesAtomicCas`.
+- **Prerequisites:** Apple developer account with a CloudKit-enabled container
+  (`iCloud.au.com.bettongia.kmdb` or a dedicated test container); two physical
+  iOS or macOS devices (or one device + simulator) on the same iCloud account.
+- **Steps:** Run the probe app in `packages/kmdb_icloud/example/` on two
+  devices; exercise each of the five verification points above and record the
+  observed CloudKit behaviour.  Update `kICloudProfile` and
+  `ICloudAdapter.providesAtomicCas` if the results differ from the current
+  values.
+- **Expected result:** create-if-absent is atomic (single winner); conditional
+  update is atomic; BEGINSWITH queries are consistent; large assets upload
+  without orphan residue; rate-limit errors include `retryAfterSeconds`.
+- **Related:** `docs/plans/plan_icloud_sync.md` (Phase 4a probe description),
+  RC-2 (Drive real-service soak), RC-13 (iCloud real-service soak).
+
+---
+
+### RC-13 — iCloud (CloudKit) real-service sync soak
+
+**Summary:** Full `SyncEngine` push/pull convergence against a real CloudKit
+container on two physical devices (or one device + simulator), including the
+contention test that exercises the lease protocol.
+
+- **What to verify:**
+  1. Two devices write documents and sync; after 2–3 sync cycles both devices
+     have identical data.
+  2. The lease contention test: two devices simultaneously attempt to acquire
+     the consolidation lease.  Confirm the outcome is consistent with
+     `ICloudAdapter.providesAtomicCas` (if `false`, consolidation is skipped
+     on both; if `true`, exactly one wins and the lease is acquired safely).
+  3. No data loss across network interruptions (disable WiFi mid-sync, re-enable,
+     verify convergence).
+- **Why not automated:** requires a real CloudKit container and physical devices;
+  network interruption simulation is not reproducible in CI.
+- **Applies when:** before any public release of `kmdb_icloud`; after any
+  change to the `ICloudAdapter` CAS or zone logic; after Phase 4a values are
+  finalised.
+- **Prerequisites:** Apple developer account; CloudKit container; two devices
+  on the same iCloud account.
+- **Steps:** Use the `packages/kmdb_icloud/example/` app as the test vehicle.
+  Run a full push/pull soak for ≥10 minutes with 2 devices, then run the
+  contention scenario.
+- **Expected result:** full convergence; no data loss; lease behaviour
+  consistent with `providesAtomicCas`.
+- **Related:** RC-12 (iCloud behaviour probe), RC-2 (Drive soak), RC-9
+  (harness-based cloud soak).
+
+---
+
 ## Release log
 
 | Version | Date | Tester | Checks run | Result | Notes |

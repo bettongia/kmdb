@@ -1,6 +1,6 @@
 # Apple iCloud sync adapter (CloudKit)
 
-**Status**: Investigated
+**Status**: Implementing
 
 **PR link**: {A link to the PR submitted for this plan}
 
@@ -413,28 +413,32 @@ constant the simulator and the conformance/quota tests share.
 
 ### Phase 1 — Package scaffold
 
-- [ ] Create `packages/kmdb_icloud/` with standard layout: `lib/`, `test/`,
+- [x] Create `packages/kmdb_icloud/` with standard layout: `lib/`, `test/`,
       `ios/`, `macos/`, `pubspec.yaml`, `README.md`
-- [ ] `pubspec.yaml`: Flutter plugin; dependencies: `flutter`, `kmdb`. Platform
+- [x] `pubspec.yaml`: Flutter plugin; dependencies: `flutter`, `kmdb`. Platform
       declarations for `ios` and `macos` plugin classes (Swift).
-- [ ] Add `kmdb_icloud` to root workspace `pubspec.yaml`
-- [ ] Add `kmdb_icloud` entry to `melos.yaml` if one exists
-- [ ] Add license header to all new Dart and Swift source files (use
+- [x] Add `kmdb_icloud` to root workspace `pubspec.yaml`
+- [x] Add `kmdb_icloud` entry to `melos.yaml` if one exists (melos config is
+      embedded in root `pubspec.yaml` — the workspace entry covers this)
+- [x] Add license header to all new Dart and Swift source files (use
       `@header_template.txt` for Dart; Apache 2.0 comment block for Swift)
-- [ ] Add `kmdb_icloud` to `CLAUDE.md` package table
+- [x] Add `kmdb_icloud` to `CLAUDE.md` package table
 
 ### Phase 2 — Platform channel plugin (`ICloudSyncChannel`)
 
-- [ ] Define `abstract interface class ICloudSyncChannel` in
+- [x] Define `abstract interface class ICloudSyncChannel` in
       `lib/src/icloud_sync_channel.dart` with methods mirroring the six
       `SyncStorageAdapter` operations (typed for the channel boundary — path
       strings, byte lists, nullable etag strings). This is the Dart-side
       contract the adapter calls and tests mock.
-- [ ] Implement `PlatformICloudSyncChannel` using `MethodChannel
+- [x] Implement `PlatformICloudSyncChannel` using `MethodChannel
       'kmdb_icloud/sync'`. Serialises call arguments to/from the channel
       (paths as `String`, bytes as `Uint8List`, etags as `String?`).
-- [ ] Implement `ICloudSyncPlugin.swift` in `ios/Classes/` and
-      `macos/Classes/` (shared Swift source via symlink or conditional):
+      Constructor accepts both `containerIdentifier` and `syncRoot` (per Q-A4);
+      both are sent in the lazy `initialize` call.
+- [x] Implement `ICloudSyncPlugin.swift` in `ios/Classes/` and
+      `macos/Classes/` (identical Swift source in both; N-3 resolved by
+      duplication rather than symlinks):
   - CloudKit initialisation: `CKContainer(identifier:)` → private database →
     custom zone `CKRecordZone(zoneName: "kmdb-\(syncRoot)")`, created lazily
     on first use.
@@ -445,38 +449,39 @@ constant the simulator and the conformance/quota tests share.
   - Error mapping: `CKError.unknownItem` → file-not-found sentinel;
     `CKError.serverRecordChanged` → CAS failure sentinel;
     `CKError.requestRateLimited` → retriable error with backoff hint.
+  - N-1 resolved: `upload` uses single `savePolicy: .changedKeys` (no
+    existence pre-check); `compareAndSwap` create-if-absent uses `.allKeys`,
+    update-if-match uses two-step fetch-then-save with `.ifServerRecordUnchanged`.
+  - N-2 documented: `path` field must be declared queryable in CloudKit
+    Dashboard for BEGINSWITH list queries to work in production.
 
 ### Phase 3 — Core adapter implementation
 
-- [ ] Implement `ICloudAdapter` in `lib/src/icloud_adapter.dart`
+- [x] Implement `ICloudAdapter` in `lib/src/icloud_adapter.dart`
       implementing `SyncStorageAdapter`
-- [ ] Constructor accepts `ICloudSyncChannel channel` and `String syncRoot`
+- [x] Constructor accepts `ICloudSyncChannel channel` and `String syncRoot`
       (zone name suffix). Production callers pass `PlatformICloudSyncChannel`;
       tests pass `FakeICloudSyncChannel`.
-- [ ] `list(dir, {extension})` — delegate to channel; strip `dir + "/"` prefix
-      from returned paths; filter by extension.
-- [ ] `download(path)` — delegate to channel; return `null` on file-not-found.
-- [ ] `upload(path, bytes)` — delegate to channel; channel's Swift layer writes
+- [x] `list(dir, {extension})` — delegate to channel; strip `dir + "/"` prefix
+      from returned paths; filter by extension. (Stripping is done in Swift.)
+- [x] `download(path)` — delegate to channel; return `null` on file-not-found.
+- [x] `upload(path, bytes)` — delegate to channel; channel's Swift layer writes
       bytes to a temp file, wraps in `CKAsset`, saves record with
       `savePolicy: .changedKeys` (creates if record is new, updates if
       existing).
-- [ ] `delete(path)` — delegate to channel; channel swallows not-found.
-- [ ] `compareAndSwap(path, bytes, {ifMatchEtag})` — delegate to channel;
+- [x] `delete(path)` — delegate to channel; channel swallows not-found.
+- [x] `compareAndSwap(path, bytes, {ifMatchEtag})` — delegate to channel;
       return `true`/`false` per the CAS semantics above.
-- [ ] `getEtag(path)` — delegate to channel; return `null` if absent.
-- [ ] `bool get providesAtomicCas` — a hardcoded getter (per-instance is not
-      needed; mirrors `GoogleDriveAdapter`'s `bool get providesAtomicCas =>
-      false`). Ships as `=> false` in Phase 3 (loss-free default). Phase 4a may
-      flip it to `=> true` if the probe confirms atomic create-if-absent. The
-      value must equal `kICloudProfile.atomicConditionalCreate` — the Phase 4
-      drift test (last checklist item) asserts this. Note: even when this is
-      `false`, conditional *update* by record ID is still atomic on CloudKit;
-      `false` only disables the create-if-absent contention guarantee that
-      `ConsolidationCoordinator` relies on.
-- [ ] Add `kICloudProfile` in `lib/src/icloud_profile.dart` with the
+- [x] `getEtag(path)` — delegate to channel; return `null` if absent.
+- [x] `bool get providesAtomicCas` — hardcoded `=> false` (loss-free default).
+      Ships as `=> false` in Phase 3. Phase 4a may flip it to `=> true` if the
+      probe confirms atomic create-if-absent. The value must equal
+      `kICloudProfile.atomicConditionalCreate` — the Phase 4 drift test asserts
+      this.
+- [x] Add `kICloudProfile` in `lib/src/icloud_profile.dart` with the
       preliminary values (Phase 4a fills in the real numbers). Mirrors
       `packages/kmdb_google_drive/lib/src/google_drive_profile.dart`.
-- [ ] Expose `ICloudAdapter` **and** `kICloudProfile` as the package's public
+- [x] Expose `ICloudAdapter` **and** `kICloudProfile` as the package's public
       API via `lib/kmdb_icloud.dart` (mirrors `kmdb_google_drive.dart` exporting
       both `GoogleDriveAdapter` and `kGoogleDriveProfile`).
 

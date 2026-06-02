@@ -1,0 +1,10 @@
+include: package:lints/recommended.yaml
+
+linter:
+  rules:
+    # prefer_initializing_formals requires the constructor parameter name to
+    # match the field name.  Our constructor uses named parameters (e.g.
+    # `syncRoot`, `channel`) whose public names differ from the private field
+    # names (`_syncRoot`, `_channel`).  Dart does not allow `this._x` in
+    # constructor signatures, so the lint cannot be satisfied here.
+    prefer_initializing_formals: false

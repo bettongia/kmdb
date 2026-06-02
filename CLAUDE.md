@@ -106,6 +106,7 @@ packages/
   kmdb_inferencing/    — ONNX Runtime + BGE embedding model for semantic search
   kmdb_lexical/        — lexical utilities (stemmer, stopwords) used by FTS
   kmdb_google_drive/   — Google Drive SyncStorageAdapter (optional, opt-in)
+  kmdb_icloud/         — Apple iCloud (CloudKit) SyncStorageAdapter (iOS/macOS only, optional, opt-in)
 
 External packages pulled in via `git:` refs in `pubspec.yaml`
 `dependency_overrides`:
