@@ -16,24 +16,32 @@ account.
   `docs/plans/completed/`). Landed: the `providesAtomicCas` getter on
   `SyncStorageAdapter`, `ConsolidationCoordinator` gating on it, and the
   reusable `runSyncAdapterConformance({required factory, required
-  expectAtomicCas})` suite at
-  `packages/kmdb/test/support/sync_adapter_conformance.dart`.
-- ✅ **`plan_harness_mixed_storage.md` — COMPLETE (PR #34, branch
-  `20260601_plan_harness_mixed_storage`).** Landed: `CloudProfile`
-  (`atomicConditionalCreate`, `allowsDuplicateNames`, `consistency`,
-  `quota`) at
-  `packages/kmdb/lib/src/test_cloud/cloud_profile.dart`; the per-device
-  adapter factory (`HarnessConfig.syncAdapterFactory`) and
+  expectAtomicCas})` suite. The suite was subsequently promoted into `lib/`
+  by the Google Drive plan (see below) and is now public at
+  `package:kmdb/test_support.dart` (source:
+  `packages/kmdb/lib/src/test_support/sync_adapter_conformance.dart`).
+- ✅ **`plan_harness_mixed_storage.md` — COMPLETE (PR #34, now in
+  `docs/plans/completed/`).** Landed: `CloudProfile`
+  (`consistency`, `atomicConditionalCreate`, `allowsDuplicateNames`,
+  `quota`, plus the `CloudProfile.strong()` and
+  `CloudProfile.eventual({maxPropagationDelayMs, jitterMs})` named
+  constructors) at `packages/kmdb/lib/src/test_cloud/cloud_profile.dart`;
+  the per-device adapter factory (`HarnessConfig.syncAdapterFactory`) and
   `SharedCloudBackend` / `SharedBackendAdapter` / `CloudSemanticsAdapter`
   exported via `package:kmdb/kmdb_test_cloud_support.dart`. The Phase 4
-  simulation framework is ready.
-- 🔄 **`plan_google_drive_sync.md` — In progress** (worktree
-  `20260602_plan_google_drive_sync`). That plan's Phase 4 prerequisite step
-  establishes the conformance suite's public export path
-  (`package:kmdb/test_support.dart`, moving `sync_adapter_conformance.dart`
-  from `test/` into `lib/`). This plan's Phase 4 consumes that export — it
-  does **not** repeat the move. This plan's Phase 4 is gated until the Drive
-  plan's Phase 4 prerequisite step lands.
+  simulation framework is ready and in code.
+- ✅ **`plan_google_drive_sync.md` — COMPLETE (PR #36, now in
+  `docs/plans/completed/`).** It established the conformance suite's public
+  export path (`package:kmdb/test_support.dart`, promoting
+  `sync_adapter_conformance.dart` from `test/` into `lib/src/test_support/`)
+  as the first downstream consumer. That export **now exists** — this plan's
+  Phase 4 consumes it directly and does **not** repeat the move. The Drive
+  plan is also the precedent for the patterns this plan mirrors: the
+  config-only `GoogleDriveRemoteConfig` sealed subtype in core `kmdb`, the
+  async `adapterFor(...)` CLI factory (now `Future<SyncStorageAdapter>`),
+  the `kGoogleDriveProfile` `CloudProfile` instance, and the test-side
+  `SimulatorQuotaAdapter` that implements `QuotaAwareAdapter` while the
+  production `GoogleDriveAdapter` does not.
 
 ## Problem statement
 
@@ -85,7 +93,11 @@ evaluated and excluded — see the API decision in the Investigation.
 ### Existing adapter interface
 
 `SyncStorageAdapter` (in `packages/kmdb/lib/src/sync/sync_storage_adapter.dart`)
-defines six methods:
+defines six methods. Each now also takes an optional `SyncContext? ctx`
+parameter (added by the sync-cancellation work, PR #37) for cooperative
+cancellation/timeout — the `ICloudAdapter` and `ICloudSyncChannel` signatures
+must thread `ctx` through, and how it maps onto CloudKit operation cancellation
+is an open design point for the implementer (see the note after the table):
 
 | Method                                       | Notes                          |
 | -------------------------------------------- | ------------------------------ |
@@ -99,6 +111,15 @@ defines six methods:
 All ETags are implementation-specific opaque strings. The lease protocol in
 `ConsolidationCoordinator` depends entirely on `compareAndSwap` behaving
 atomically from the server's perspective.
+
+> **`SyncContext? ctx` — open design point (not resolved here).** PR #37 added
+> an optional `SyncContext? ctx` to every adapter method. The `ICloudAdapter`
+> must accept and forward `ctx`, but how cancellation/timeout crosses the
+> method-channel boundary into a live CloudKit operation (e.g. cancelling a
+> `CKOperation` / `CKAsset` transfer mid-flight, vs. checking `ctx` only at Dart
+> entry/exit) is an iCloud-specific decision left for the user/implementer to
+> settle. Other in-tree adapters can be consulted for the prevailing
+> `ctx`-handling pattern when this is taken up.
 
 ### API choice: CloudKit vs iCloud Drive
 
@@ -299,8 +320,9 @@ The Google Drive plan's behavioural simulator sits below the `googleapis`
 - **Production:** `PlatformICloudSyncChannel` calls the native Swift plugin via
   `MethodChannel`. The Swift plugin uses the real `CloudKit` framework.
 - **Tests:** `FakeICloudSyncChannel` implements the same interface in Dart,
-  over `SharedCloudBackend` from the harness plan. It models the CloudKit
-  semantics verified in Phase 4a (atomicity, consistency delay, quota errors).
+  over `SharedCloudBackend` (from `package:kmdb/kmdb_test_cloud_support.dart`,
+  landed by the harness plan). It models the CloudKit semantics verified in
+  Phase 4a (atomicity, consistency delay, quota errors).
 
 Because `ICloudAdapter` takes an `ICloudSyncChannel` at construction, the real
 adapter code is exercised in tests — the abstraction boundary is between Dart
@@ -308,14 +330,21 @@ and Swift, not between the adapter and the adapter's caller.
 
 ### CloudProfile (preliminary)
 
-The Drive `CloudProfile` shape is already in code at
-`packages/kmdb/lib/src/test_cloud/cloud_profile.dart`. The iCloud `CloudProfile`
-instance ships with the simulator (Phase 4):
+The `CloudProfile` type is already in code at
+`packages/kmdb/lib/src/test_cloud/cloud_profile.dart`, exported via
+`package:kmdb/kmdb_test_cloud_support.dart`. Its constructor is
+`CloudProfile({required ConsistencyModel consistency, required bool
+atomicConditionalCreate, bool allowsDuplicateNames = false, QuotaProfile quota =
+const QuotaProfile.unlimited()})`, and it offers `CloudProfile.strong()` /
+`CloudProfile.eventual({maxPropagationDelayMs, jitterMs})` shorthands. CloudKit
+needs the general constructor (eventual consistency, but `allowsDuplicateNames:
+false`), so the iCloud `CloudProfile` instance ships with the simulator
+(Phase 4):
 
 ```dart
 // CloudKit CloudProfile — preliminary; atomicConditionalCreate and
 // consistency values are finalised by the Phase 4a empirical probe.
-CloudProfile(
+const kICloudProfile = CloudProfile(
   consistency: EventualConsistency(
     maxPropagationDelayMs: /* Phase 4a result */,
     jitterMs: /* Phase 4a result */,
@@ -329,8 +358,11 @@ CloudProfile(
     maxOpsPerMinute: /* from CKError.requestRateLimited / Apple docs */,
     maxUploadBytesPerDay: null,   // or derive from 2 GB daily transfer quota
   ),
-)
+);
 ```
+
+Following the `kGoogleDriveProfile` precedent, this instance is a named
+constant the simulator and the conformance/quota tests share.
 
 ## Implementation plan
 
@@ -395,9 +427,13 @@ CloudProfile(
 
 ### Phase 4 — Behavioural CloudKit simulator + tests
 
-**Phase 4 prerequisite:** the conformance suite export path
-(`package:kmdb/test_support.dart`) must be established by the Google Drive
-plan's Phase 4 step before this phase begins.
+**Phase 4 prerequisite:** ✅ already satisfied. The conformance suite export
+path (`package:kmdb/test_support.dart`, exporting `runSyncAdapterConformance`
+and `runSyncAdapterContentionTest`) was established by the Google Drive plan
+(PR #36) and is in `main`. Likewise the cloud-simulation infrastructure
+(`SharedCloudBackend`, `CloudSemanticsAdapter`, `CloudProfile`) is public via
+`package:kmdb/kmdb_test_cloud_support.dart`. No prerequisite work remains for
+this phase; it begins as soon as Phase 4a (the empirical probe) completes.
 
 #### Phase 4a — Empirical CloudKit behaviour probe (must run first)
 
@@ -435,13 +471,19 @@ configured CloudKit container) that records what real CloudKit actually does:
   - Implements `ICloudSyncChannel`; models the CloudKit semantics verified in
     Phase 4a (zone-level sequencing for CAS, eventual consistency delay,
     `CKError.serverRecordChanged` on CAS failure, no duplicate record IDs).
-  - Implements `kmdb_harness`'s `QuotaAwareAdapter` (single member
-    `safeOperationThreshold`) — the Drive simulator precedent; keeps
-    `kmdb_icloud` free of a `kmdb_harness` dependency at production level.
-    `safeOperationThreshold` derived from the CloudKit `QuotaProfile` quota
-    knobs.
-- [ ] Publish the CloudKit `CloudProfile` instance using the Phase 4a probe
-      results. Set `ICloudAdapter.providesAtomicCas` from the Phase 4a finding.
+- [ ] For the `kmdb_harness` mixed-mode scenario, follow the Drive precedent:
+      add a **test-side** `SimulatorICloudQuotaAdapter` in `test/` that
+      `implements SyncStorageAdapter, QuotaAwareAdapter` (wrapping an
+      `ICloudAdapter` over a `FakeICloudSyncChannel`), deriving
+      `safeOperationThreshold` from the iCloud `QuotaProfile` knobs. The
+      production `ICloudAdapter` does **not** implement `QuotaAwareAdapter` —
+      this keeps `kmdb_icloud`'s production code free of any `kmdb_harness`
+      dependency (mirrors `SimulatorQuotaAdapter` in
+      `packages/kmdb_google_drive/test/support/drive_simulator.dart`, which
+      imports `QuotaAwareAdapter` from `package:kmdb_harness/kmdb_harness.dart`).
+- [ ] Publish the CloudKit `CloudProfile` instance (`kICloudProfile`, per the
+      `kGoogleDriveProfile` precedent) using the Phase 4a probe results. Set
+      `ICloudAdapter.providesAtomicCas` from the Phase 4a finding.
       If zone-level CAS is not confirmed atomic, the adapter returns `false`
       so `ConsolidationCoordinator` gates consolidation off (loss-free).
 - [ ] Run the H5 adapter conformance suite
@@ -496,7 +538,9 @@ configured CloudKit container) that records what real CloudKit actually does:
     re-verified after any major iOS/macOS version bump.
   - **RC-Y (iCloud real-service soak)** — full `SyncEngine` convergence
     against real CloudKit, two devices, contention test. Not automated.
-  - Use next available RC IDs (currently RC-1 through RC-9 are taken).
+  - Use next available RC IDs (currently RC-1 through RC-11 are taken in
+    `docs/spec/28_release_checklist.md`, so RC-12 is the next free id —
+    re-grep `RC-[0-9]` at implementation time to confirm).
 - [ ] Update `docs/roadmap/0_03.md` to mark the Apple iCloud item done.
 - [ ] Confirm `kmdb_icloud` (production package) takes **no** dependency on
       `kmdb_harness`.
