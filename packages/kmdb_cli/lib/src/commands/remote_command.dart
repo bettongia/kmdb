@@ -12,7 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:googleapis_auth/auth_io.dart';
 import 'package:kmdb/kmdb_config.dart';
+import 'package:kmdb_google_drive/kmdb_google_drive.dart' show kDriveFileScope;
+
 import 'command.dart';
 
 /// Manages named sync remotes for a KMDB database.
@@ -23,7 +29,10 @@ import 'command.dart';
 /// ## Subcommands
 ///
 /// ```
-/// kmdb <db> remote add <name> --path <path> [--type local] [--force]
+/// kmdb <db> remote add <name> --type local --path <path> [--force]
+/// kmdb <db> remote add <name> --type google-drive --folder <name>
+///           --client-id <id> --client-secret <secret>
+///           [--credentials <file>] [--force]
 /// kmdb <db> remote remove <name>
 /// kmdb <db> remote list
 /// ```
@@ -42,9 +51,12 @@ final class RemoteCommand extends CliCommand {
 
   @override
   String get usage =>
-      '''remote add <name> --path <path> [--type local] [--force]
-       remote remove <name>
-       remote list''';
+      'remote add <name> --type local --path <path> [--force]\n'
+      '       remote add <name> --type google-drive --folder <folder-name>\n'
+      '                 --client-id <oauth-client-id> --client-secret <secret>\n'
+      '                 [--credentials <file>] [--force]\n'
+      '       remote remove <name>\n'
+      '       remote list';
 
   @override
   Future<bool> execute(
@@ -90,10 +102,9 @@ final class RemoteCommand extends CliCommand {
     }
     final name = args[0];
 
-    // Resolve adapter type — default to 'local' since it is the only
-    // supported type right now; allow explicit --type for future expansion.
     final type = (flags['type'] as String?) ?? 'local';
     final force = flags['force'] == true;
+    final dbDir = (await ctx.store.storeInfo()).dbDir;
 
     final RemoteConfig remote;
     switch (type) {
@@ -104,14 +115,51 @@ final class RemoteCommand extends CliCommand {
           return false;
         }
         remote = LocalRemoteConfig(path: path);
+
+      case 'google-drive':
+        // Validate required flags.
+        final folder = flags['folder'] as String?;
+        if (folder == null) {
+          ctx.writeError(
+            "remote add: --folder is required for type 'google-drive'.",
+          );
+          return false;
+        }
+        final clientId = flags['client-id'] as String?;
+        if (clientId == null) {
+          ctx.writeError(
+            "remote add: --client-id is required for type 'google-drive'.",
+          );
+          return false;
+        }
+        final clientSecret = (flags['client-secret'] as String?) ?? '';
+        final credPath =
+            (flags['credentials'] as String?) ?? 'google_credentials.json';
+
+        // Run the local-server OAuth redirect flow (opens a browser, captures
+        // the OAuth callback on localhost, persists the resulting credentials).
+        final authorised = await _authoriseGoogleDrive(
+          ctx,
+          dbDir: dbDir,
+          clientId: clientId,
+          clientSecret: clientSecret,
+          credentialsPath: credPath,
+        );
+        if (!authorised) return false;
+
+        remote = GoogleDriveRemoteConfig(
+          syncRoot: folder,
+          credentialsPath: credPath,
+        );
+
       default:
         ctx.writeError(
-          "remote add: unknown type '$type'. Supported types: local.",
+          "remote add: unknown type '$type'. "
+          'Supported types: local, google-drive.',
         );
         return false;
     }
 
-    final dbDir = (await ctx.store.storeInfo()).dbDir;
     final KmdbConfig config;
     try {
       config = await KmdbConfig.forDatabase(dbDir);
@@ -192,15 +240,84 @@ final class RemoteCommand extends CliCommand {
       return true;
     }
 
-    // Print one line per remote with name, type, and the most relevant field.
+    // Print one line per remote: name, type, and the key identifying field.
     for (final entry in config.remotes.entries) {
-      final name = entry.key;
+      final rname = entry.key;
       final remote = entry.value;
       switch (remote) {
         case LocalRemoteConfig(:final path):
-          ctx.out.writeln('$name\tlocal\t$path');
+          ctx.out.writeln('$rname\tlocal\t$path');
+        case GoogleDriveRemoteConfig(:final syncRoot):
+          ctx.out.writeln('$rname\tgoogle-drive\t$syncRoot');
       }
     }
+    return true;
+  }
+
+  // ── Google Drive OAuth helpers ─────────────────────────────────────────────
+
+  /// Runs the local-server OAuth redirect flow for Google Drive.
+  ///
+  /// Opens the user's browser to the Google consent page, starts a transient
+  /// HTTP server on `localhost` to capture the callback, and writes the
+  /// resulting [AccessCredentials] (plus the client ID) to
+  /// `{dbDir}/local/{credentialsPath}`.
+  ///
+  /// Returns `true` on success, `false` if the flow fails.
+  Future<bool> _authoriseGoogleDrive(
+    CommandContext ctx, {
+    required String dbDir,
+    required String clientId,
+    required String clientSecret,
+    required String credentialsPath,
+  }) async {
+    ctx.out.writeln(
+      '\nStarting Google Drive authorisation flow...\n'
+      'A browser window will open.  Please sign in and grant KMDB access.\n',
+    );
+
+    AutoRefreshingAuthClient? authClient;
+    try {
+      authClient = await clientViaUserConsent(
+        ClientId(clientId, clientSecret),
+        [kDriveFileScope],
+        (url) => ctx.out.writeln(
+          'Please visit the following URL to authorise KMDB:\n\n  $url\n',
+        ),
+      );
+    } catch (e) {
+      ctx.writeError('Google Drive authorisation failed: $e');
+      return false;
+    }
+
+    // Persist the credentials for future use, including the client ID so
+    // future refresh calls can re-use it.
+    final credentials = authClient.credentials;
+    final fullPath = [
+      dbDir,
+      'local',
+      credentialsPath,
+    ].join(Platform.pathSeparator);
+    try {
+      final file = File(fullPath);
+      await file.parent.create(recursive: true);
+      await file.writeAsString(
+        jsonEncode({
+          ...credentials.toJson(),
+          'client_id': clientId,
+          'client_secret': clientSecret,
+        }),
+      );
+    } catch (e) {
+      ctx.writeError(
+        'Failed to save Google Drive credentials to $fullPath: $e',
+      );
+      authClient.close();
+      return false;
+    }
+
+    authClient.close();
+    ctx.out.writeln('Google Drive authorisation successful.');
     return true;
   }
 }

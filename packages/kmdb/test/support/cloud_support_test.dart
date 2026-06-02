@@ -17,7 +17,7 @@ import 'dart:typed_data';
 import 'package:kmdb/kmdb_test_cloud_support.dart';
 import 'package:test/test.dart';
 
-import 'sync_adapter_conformance.dart';
+import 'package:kmdb/test_support.dart';
 
 void main() {
   group('SharedCloudBackend', () {

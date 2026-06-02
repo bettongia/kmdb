@@ -90,7 +90,7 @@ final class SyncCommand extends CliCommand {
       return false;
     }
 
-    final syncAdapter = adapterFor(remote);
+    final syncAdapter = await adapterFor(remote, dbDir: dbDir);
 
     try {
       await ctx.db.sync(syncAdapter: syncAdapter, syncNamespaces: collections);
