@@ -26,8 +26,7 @@ import 'package:kmdb/kmdb.dart';
 /// remain valid — [SyncCancelledException] is the base class.
 final class DriveOperationCancelledException extends SyncCancelledException {
   /// Creates a [DriveOperationCancelledException].
-  const DriveOperationCancelledException([String message = 'Cancelled'])
-    : super(message);
+  const DriveOperationCancelledException([super.message = 'Cancelled']);
 
   @override
   String toString() => 'DriveOperationCancelledException: $message';

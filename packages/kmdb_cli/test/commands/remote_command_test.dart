@@ -215,6 +215,69 @@ void main() {
     expect(output, contains('/Dropbox/sync'));
   });
 
+  // ── Google Drive add — validation failures ────────────────────────────────────
+  //
+  // The OAuth redirect flow (clientViaUserConsent) requires a real browser +
+  // Google server and cannot run in automated tests.  We cover the validation
+  // errors that are raised before reaching the OAuth step.
+
+  group('add: google-drive validation', () {
+    test('returns false when --folder is missing', () async {
+      final ctx = _ctx(db, out: out, err: err);
+      final ok = await cmd.execute(
+        ctx,
+        ['add', 'gdrive'],
+        {'type': 'google-drive', 'client-id': 'abc', 'client-secret': 'xyz'},
+      );
+      expect(ok, isFalse);
+      expect(err.toString(), contains('--folder is required'));
+    });
+
+    test('returns false when --client-id is missing', () async {
+      final ctx = _ctx(db, out: out, err: err);
+      final ok = await cmd.execute(
+        ctx,
+        ['add', 'gdrive'],
+        {'type': 'google-drive', 'folder': 'my-sync'},
+      );
+      expect(ok, isFalse);
+      expect(err.toString(), contains('--client-id is required'));
+    });
+
+    test('returns false for unknown remote type', () async {
+      final ctx = _ctx(db, out: out, err: err);
+      final ok = await cmd.execute(
+        ctx,
+        ['add', 'remote1'],
+        {'type': 'ftp', 'path': '/mnt/sync'},
+      );
+      expect(ok, isFalse);
+      expect(err.toString(), contains("unknown type 'ftp'"));
+    });
+  });
+
+  // ── list: google-drive remote shows sync-root ─────────────────────────────────
+  //
+  // This test adds a GoogleDriveRemoteConfig directly via KmdbConfig (bypassing
+  // the OAuth flow) and verifies that `remote list` displays it correctly.
+  test('list: shows google-drive remote with syncRoot', () async {
+    // Directly write a Google Drive remote to the config to bypass OAuth.
+    final config = await KmdbConfig.forDatabase(dbDir.path);
+    config.addRemote(
+      'gdrive',
+      GoogleDriveRemoteConfig(syncRoot: 'my-kmdb-sync'),
+    );
+    await config.save();
+
+    final ctx = _ctx(db, out: out, err: err);
+    final ok = await cmd.execute(ctx, ['list'], {});
+    expect(ok, isTrue);
+    final output = out.toString();
+    expect(output, contains('gdrive'));
+    expect(output, contains('google-drive'));
+    expect(output, contains('my-kmdb-sync'));
+  });
+
   // ── Round-trip: add → list → remove → list ───────────────────────────────────
 
   test('full round-trip: add, list, remove, list', () async {
