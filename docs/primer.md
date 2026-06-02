@@ -77,8 +77,9 @@ concrete implementation per platform:
   [storage_adapter_native.dart](lib/src/engine/platform/storage_adapter_native.dart)
   — wraps `dart:io`
 - **Web:**
-  [storage_adapter_web.dart](lib/src/engine/platform/storage_adapter_web.dart) —
-  uses the Origin Private File System (OPFS) API
+  [storage_adapter_sahpool.dart](lib/src/engine/platform/storage_adapter_sahpool.dart) —
+  uses the Origin Private File System (OPFS) via `FileSystemSyncAccessHandle`
+  in a dedicated Web Worker (SAHPool pattern, 3–4× faster than the async API)
 - **Tests:**
   [storage_adapter_memory.dart](lib/src/engine/platform/storage_adapter_memory.dart)
   — a `HashMap<String, Uint8List>` in memory

@@ -276,6 +276,69 @@ For each release:
   `docs/plans/completed/plan_harness_mixed_storage.md`,
   RC-2 (Drive-specific soak).
 
+### RC-10 — Web (OPFS SAHPool) crash/durability verification
+
+- **Area:** durability / platform (web)
+- **Validates:** that data acknowledged by `StorageAdapterSahPool` (writes
+  flushed via the per-op handle lifecycle) survives a browser tab-kill and a
+  mid-write page reload. Specifically:
+  1. A `writeFile` or `appendFile` that completes (Future resolved) must be
+     present on the next database open, even if the tab is killed immediately
+     after.
+  2. A `renameFile` that completes must leave the destination intact and the
+     source absent after a crash between the flush-and-close of the destination
+     and the deletion of the source.
+- **Why not automated:** `dart test -p chrome` cannot simulate a hard tab-kill
+  or a mid-write browser crash — the test runner requires a cooperative process
+  exit. `Worker.terminate()` is not equivalent (it does not simulate a power-off
+  or OS-kill scenario where the handle's `flush()` output may still be in a
+  browser I/O buffer).
+- **Applies when:** any change to `StorageAdapterSahPool`, `sahpool_worker.js`,
+  the per-op handle lifecycle, or the rename durability ordering; before a
+  release targeting web platforms.
+- **Prerequisites:** a Chromium-based browser; the KMDB web demo or a minimal
+  test page that opens a `StorageAdapterSahPool`, writes some records, and
+  re-opens to verify on reload.
+- **Steps:**
+  1. Open the KMDB web demo (or a test harness) in a fresh browser tab.
+  2. Write several documents so that at least one SSTable is flushed.
+  3. Immediately kill the tab (close it, or use the browser task manager to
+     hard-kill the renderer process).
+  4. Re-open the same origin in a new tab and reopen the database.
+  5. Verify that all committed documents are present and no corruption is
+     detected.
+  6. Repeat with a tab reload (`Cmd-R` / `F5`) triggered mid-write.
+- **Expected result:** all documents acknowledged before the kill are present
+  after recovery; no `StorageException` or data loss on re-open.
+- **Related:** `docs/plans/completed/plan_sahpool_opfs.md` (durability
+  contract), spec §19 (per-op handle lifecycle), RC-4 (Linux power-loss analog).
+
+### RC-11 — Web (OPFS SAHPool) cross-tab lock exclusion
+
+- **Area:** concurrency / platform (web)
+- **Validates:** that two browser tabs cannot open the same OPFS database path
+  concurrently — the second tab receives `LockException` with the message
+  "database is already open in another tab."
+- **Why not automated:** `dart test -p chrome` runs a single browser context.
+  Two `StorageAdapterSahPool` instances in the same tab share the same Worker
+  origin context and can both acquire the same SAH lock (Chrome's exclusion is
+  per-browsing-context, not per-tab, for Workers spawned in the same tab).
+  Cross-tab exclusion requires two independent browser tabs.
+- **Applies when:** any change to `acquireLock`/`releaseLock` or the Worker's
+  `opAcquireLock` function; before a release targeting web platforms.
+- **Prerequisites:** a Chromium-based browser; two tabs open to the same origin.
+- **Steps:**
+  1. Open the KMDB web demo in tab A; open the database (acquires lock).
+  2. While tab A has the database open, open the same origin in tab B and
+     attempt to open the same database path.
+  3. Verify that tab B's `acquireLock` raises `LockException`.
+  4. Close tab A (adapter `close()` releases the lock).
+  5. Attempt to open the database in tab B again.
+  6. Verify that tab B's `acquireLock` now succeeds.
+- **Expected result:** step 3 produces `LockException`; step 6 succeeds.
+- **Related:** `docs/plans/completed/plan_sahpool_opfs.md` (cross-tab locking),
+  spec §19 (cross-tab exclusion), RC-3 (native cross-process lock analog).
+
 ---
 
 ## Release log
