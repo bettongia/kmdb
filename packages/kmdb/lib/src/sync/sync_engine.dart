@@ -17,6 +17,7 @@ import '../engine/platform/storage_adapter_interface.dart';
 import '../engine/sstable/sstable_info.dart';
 import '../engine/sstable/sstable_reader.dart';
 import '../engine/util/hlc.dart';
+import 'sync_context.dart';
 import 'sync_storage_adapter.dart';
 import 'consolidation_config.dart';
 import 'consolidation_coordinator.dart';
@@ -56,6 +57,13 @@ import 'highwater.dart';
 ///
 /// [sync] is a convenience method that calls [push] then [pull].
 ///
+/// ## Cancellation
+///
+/// [SyncEngine] accepts a [SyncContext] at construction time and threads it
+/// to every adapter call site. A cancelled or timed-out context causes the
+/// first adapter call boundary to throw [SyncCancelledException], which
+/// propagates to the caller of [push], [pull], or [sync].
+///
 /// ## Concurrency
 ///
 /// All operations run synchronously on the calling isolate. The [KvStore]
@@ -87,7 +95,9 @@ final class SyncEngine {
   /// set of user namespaces to include in sync (system `$` namespaces are
   /// always excluded). [config] supplies the [KvStoreConfig.staleDeviceEvictionAfter]
   /// threshold used for the tombstone-GC horizon computation — if omitted,
-  /// [KvStoreConfig] defaults are used (90 days).
+  /// [KvStoreConfig] defaults are used (90 days). [ctx] is the optional
+  /// per-sync-run cancellation/deadline context; it is forwarded to every
+  /// adapter call site.
   SyncEngine({
     required this._store,
     required this._cloudAdapter,
@@ -98,6 +108,7 @@ final class SyncEngine {
     required this._syncNamespaces,
     this._consolidationConfig = const ConsolidationConfig(),
     KvStoreConfig? config,
+    this._ctx,
   }) : _config = config ?? const KvStoreConfig() {
     // Register the synced-database tombstone-GC horizon provider on the
     // store (H4 PR2 / H4-FU2). The store uses this for the all-levels
@@ -130,6 +141,13 @@ final class SyncEngine {
   /// The store configuration, used for the eviction threshold and other
   /// sync-related parameters.
   final KvStoreConfig _config;
+
+  /// The optional per-sync-run cancellation/deadline context.
+  ///
+  /// Forwarded to every adapter call site. When non-null, each adapter call
+  /// will throw [SyncCancelledException] if the context is cancelled or has
+  /// exceeded its deadline.
+  final SyncContext? _ctx;
 
   /// The set of user namespaces included in sync.
   ///
@@ -219,13 +237,14 @@ final class SyncEngine {
     final remoteFiles = (await _cloudAdapter.list(
       _remoteSstDir,
       extension: '.sst',
+      ctx: _ctx,
     )).toSet();
 
     // 5. Upload new SSTables.
     for (final filename in ownLocalFiles) {
       if (remoteFiles.contains(filename)) continue; // already uploaded
       final bytes = await _localAdapter.readFile('$_sstDir/$filename');
-      await _cloudAdapter.upload('$_remoteSstDir/$filename', bytes);
+      await _cloudAdapter.upload('$_remoteSstDir/$filename', bytes, ctx: _ctx);
     }
 
     // 6. Load or create the local HWM.
@@ -316,6 +335,7 @@ final class SyncEngine {
     final allHwmFiles = await _cloudAdapter.list(
       _remoteHwmDir,
       extension: '.hwm',
+      ctx: _ctx,
     );
 
     // Compute min(livePeers.currentHlc) — excluding self and stale peers.
@@ -408,13 +428,17 @@ final class SyncEngine {
     final remoteFiles = await _cloudAdapter.list(
       _remoteSstDir,
       extension: '.sst',
+      ctx: _ctx,
     );
 
     // 3. Ingest each downloaded SSTable. Handles both:
     //    - Consolidated set (4-segment filenames, if coordinator ran).
     //    - Individual flush SSTables (3-segment filenames, if no consolidation).
     for (final filename in remoteFiles) {
-      final bytes = await _cloudAdapter.download('$_remoteSstDir/$filename');
+      final bytes = await _cloudAdapter.download(
+        '$_remoteSstDir/$filename',
+        ctx: _ctx,
+      );
       if (bytes == null) continue; // file removed between list and download
 
       try {
@@ -467,6 +491,7 @@ final class SyncEngine {
     final remoteFiles = await _cloudAdapter.list(
       _remoteSstDir,
       extension: '.sst',
+      ctx: _ctx,
     );
 
     // Track highest ingested HLC per peer for HWM update.
@@ -494,7 +519,10 @@ final class SyncEngine {
       if (peerHwm != null && info.maxHlc <= peerHwm) continue;
 
       // Download the SSTable.
-      final bytes = await _cloudAdapter.download('$_remoteSstDir/$filename');
+      final bytes = await _cloudAdapter.download(
+        '$_remoteSstDir/$filename',
+        ctx: _ctx,
+      );
       if (bytes == null) continue; // file removed between list and download
 
       // Validate footer checksum before ingestion.
@@ -562,6 +590,7 @@ final class SyncEngine {
       localAdapter: _localAdapter,
       syncRoot: _syncRoot,
       config: _consolidationConfig,
+      ctx: _ctx,
     );
     await coordinator.runIfNeeded(remoteFiles);
   }

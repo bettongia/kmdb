@@ -41,6 +41,17 @@ import 'visibility_cursor_adapter.dart';
 ///   [CloudProfile.atomicConditionalCreate], so [ConsolidationCoordinator]'s
 ///   gate engages correctly.
 ///
+/// ## Cancellation
+///
+/// [CloudSemanticsAdapter] calls `ctx?.throwIfExpired()` at the start of each
+/// method. Eventual consistency is modelled with a synchronous visibility
+/// cursor (`_visibilitySeq`, advanced explicitly via
+/// [advancePropagationClock]) — there are no awaitable propagation delays.
+/// The only `Future.delayed` in this adapter is
+/// `Future<void>.delayed(Duration.zero)` in the non-atomic [compareAndSwap]
+/// path — that is the CAS race-window yield, not a long-running cancellable
+/// wait, and it is left as-is.
+///
 /// ## Visibility model
 ///
 /// Under [EventualConsistency], each write committed to the backend gets a
@@ -161,7 +172,12 @@ final class CloudSemanticsAdapter
   // ── SyncStorageAdapter ────────────────────────────────────────────────────
 
   @override
-  Future<List<String>> list(String remoteDir, {String? extension}) async {
+  Future<List<String>> list(
+    String remoteDir, {
+    String? extension,
+    SyncContext? ctx,
+  }) async {
+    ctx?.throwIfExpired();
     final prefix = remoteDir.endsWith('/') ? remoteDir : '$remoteDir/';
     final allPaths = backend.backend.listPaths(prefix);
     final results = <String>[];
@@ -180,7 +196,8 @@ final class CloudSemanticsAdapter
   }
 
   @override
-  Future<Uint8List?> download(String remotePath) async {
+  Future<Uint8List?> download(String remotePath, {SyncContext? ctx}) async {
+    ctx?.throwIfExpired();
     final file = backend.backend.getFile(remotePath);
     if (file == null) return null;
     if (file.writeSeq > visibleWriteSeq) return null;
@@ -188,13 +205,19 @@ final class CloudSemanticsAdapter
   }
 
   @override
-  Future<void> upload(String remotePath, Uint8List bytes) async {
+  Future<void> upload(
+    String remotePath,
+    Uint8List bytes, {
+    SyncContext? ctx,
+  }) async {
+    ctx?.throwIfExpired();
     await backend.upload(remotePath, bytes);
     _advanceToCurrentWriteSeq();
   }
 
   @override
-  Future<void> delete(String remotePath) {
+  Future<void> delete(String remotePath, {SyncContext? ctx}) {
+    ctx?.throwIfExpired();
     return backend.delete(remotePath);
   }
 
@@ -203,7 +226,9 @@ final class CloudSemanticsAdapter
     String path,
     Uint8List newBytes, {
     String? ifMatchEtag,
+    SyncContext? ctx,
   }) async {
+    ctx?.throwIfExpired();
     if (profile.atomicConditionalCreate) {
       // Atomic path: delegate directly to the strongly-consistent backend.
       final result = await backend.compareAndSwap(
@@ -230,6 +255,8 @@ final class CloudSemanticsAdapter
 
     // Yield to the event loop — this is the race window. Another concurrent
     // caller may also have passed the check and may now also write.
+    // NOTE: this is the CAS race-window yield, NOT a propagation delay.
+    // Do not wrap this with ctx cancellation — it is not a long-running wait.
     await Future<void>.delayed(Duration.zero);
 
     // Unconditionally write (non-atomic — no re-check after the yield).
@@ -239,7 +266,8 @@ final class CloudSemanticsAdapter
   }
 
   @override
-  Future<String?> getEtag(String path) async {
+  Future<String?> getEtag(String path, {SyncContext? ctx}) async {
+    ctx?.throwIfExpired();
     final file = backend.backend.getFile(path);
     if (file == null) return null;
     if (file.writeSeq > visibleWriteSeq) return null;

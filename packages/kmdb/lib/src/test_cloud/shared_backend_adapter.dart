@@ -31,6 +31,13 @@ import 'visibility_cursor_adapter.dart';
 /// to share a logical remote while keeping strongly-consistent semantics (e.g.
 /// the existing single-adapter harness presets).
 ///
+/// ## Cancellation
+///
+/// [SharedBackendAdapter] has no long-running waits; all operations complete in
+/// the same microtask. The `ctx` parameter is accepted on all methods (to
+/// satisfy the interface) but is silently ignored — this is permitted by the
+/// [SyncStorageAdapter] contract.
+///
 /// ## CAS atomicity
 ///
 /// [compareAndSwap] delegates to [SharedCloudBackend.compareAndSwap], which is
@@ -63,7 +70,12 @@ final class SharedBackendAdapter
   final String deviceId;
 
   @override
-  Future<List<String>> list(String remoteDir, {String? extension}) async {
+  Future<List<String>> list(
+    String remoteDir, {
+    String? extension,
+    SyncContext? ctx,
+  }) async {
+    // ctx is intentionally ignored — no long-running waits in this adapter.
     // Normalise: ensure remoteDir ends with '/' for prefix matching.
     final prefix = remoteDir.endsWith('/') ? remoteDir : '$remoteDir/';
     final results = <String>[];
@@ -78,19 +90,26 @@ final class SharedBackendAdapter
   }
 
   @override
-  Future<Uint8List?> download(String remotePath) async {
+  Future<Uint8List?> download(String remotePath, {SyncContext? ctx}) async {
+    // ctx is intentionally ignored — no long-running waits in this adapter.
     final file = backend.getFile(remotePath);
     if (file == null) return null;
     return Uint8List.fromList(file.bytes);
   }
 
   @override
-  Future<void> upload(String remotePath, Uint8List bytes) async {
+  Future<void> upload(
+    String remotePath,
+    Uint8List bytes, {
+    SyncContext? ctx,
+  }) async {
+    // ctx is intentionally ignored — no long-running waits in this adapter.
     backend.write(remotePath, bytes, writerDeviceId: deviceId);
   }
 
   @override
-  Future<void> delete(String remotePath) async {
+  Future<void> delete(String remotePath, {SyncContext? ctx}) async {
+    // ctx is intentionally ignored — no long-running waits in this adapter.
     backend.delete(remotePath);
   }
 
@@ -99,7 +118,9 @@ final class SharedBackendAdapter
     String path,
     Uint8List newBytes, {
     String? ifMatchEtag,
+    SyncContext? ctx,
   }) async {
+    // ctx is intentionally ignored — no long-running waits in this adapter.
     final result = backend.compareAndSwap(
       path,
       newBytes,
@@ -110,7 +131,8 @@ final class SharedBackendAdapter
   }
 
   @override
-  Future<String?> getEtag(String path) async {
+  Future<String?> getEtag(String path, {SyncContext? ctx}) async {
+    // ctx is intentionally ignored — no long-running waits in this adapter.
     return backend.getEtag(path);
   }
 

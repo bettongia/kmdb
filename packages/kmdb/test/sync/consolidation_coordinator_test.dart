@@ -22,6 +22,7 @@ import 'package:kmdb/src/engine/util/key_codec.dart';
 import 'package:kmdb/src/sync/consolidation_config.dart';
 import 'package:kmdb/src/sync/consolidation_coordinator.dart';
 import 'package:kmdb/src/sync/local/memory_sync_adapter.dart';
+import 'package:kmdb/src/sync/sync_context.dart';
 import 'package:kmdb/src/sync/sync_storage_adapter.dart';
 import 'package:test/test.dart';
 
@@ -689,18 +690,27 @@ final class _NonAtomicCloudAdapter implements SyncStorageAdapter {
   bool get providesAtomicCas => false;
 
   @override
-  Future<List<String>> list(String remoteDir, {String? extension}) async => [];
+  Future<List<String>> list(
+    String remoteDir, {
+    String? extension,
+    SyncContext? ctx,
+  }) async => [];
 
   @override
-  Future<Uint8List?> download(String remotePath) async => null;
+  Future<Uint8List?> download(String remotePath, {SyncContext? ctx}) async =>
+      null;
 
   @override
-  Future<void> upload(String remotePath, Uint8List bytes) async {
+  Future<void> upload(
+    String remotePath,
+    Uint8List bytes, {
+    SyncContext? ctx,
+  }) async {
     uploadCalls++;
   }
 
   @override
-  Future<void> delete(String remotePath) async {
+  Future<void> delete(String remotePath, {SyncContext? ctx}) async {
     deleteCalls++;
   }
 
@@ -709,11 +719,12 @@ final class _NonAtomicCloudAdapter implements SyncStorageAdapter {
     String path,
     Uint8List newBytes, {
     String? ifMatchEtag,
+    SyncContext? ctx,
   }) async {
     casCalls++;
     return true;
   }
 
   @override
-  Future<String?> getEtag(String path) async => null;
+  Future<String?> getEtag(String path, {SyncContext? ctx}) async => null;
 }

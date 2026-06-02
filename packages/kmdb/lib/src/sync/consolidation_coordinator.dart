@@ -23,6 +23,7 @@ import '../engine/sstable/sstable_reader.dart';
 import '../engine/sstable/sstable_writer.dart';
 import '../engine/util/hlc.dart';
 import '../engine/util/key_codec.dart';
+import 'sync_context.dart';
 import 'sync_storage_adapter.dart';
 import 'consolidation_config.dart';
 
@@ -174,6 +175,12 @@ final class ConsolidationLease {
 /// which prevents a previously-timed-out device from presenting a stale epoch
 /// as the largest known.
 ///
+/// ## Cancellation
+///
+/// [ConsolidationCoordinator] accepts a [SyncContext] at construction time and
+/// forwards it to every adapter call site. A cancelled or timed-out context
+/// causes the first adapter call to throw [SyncCancelledException].
+///
 /// ## Usage
 ///
 /// ```dart
@@ -188,6 +195,9 @@ final class ConsolidationLease {
 /// ```
 final class ConsolidationCoordinator {
   /// Creates a [ConsolidationCoordinator].
+  ///
+  /// [ctx] is the optional per-sync-run cancellation/deadline context,
+  /// forwarded to every adapter call site.
   ConsolidationCoordinator({
     required this.deviceId,
     required this.cloudAdapter,
@@ -195,6 +205,7 @@ final class ConsolidationCoordinator {
     required this.syncRoot,
     this._config = const ConsolidationConfig(),
     int Function()? wallClock,
+    this._ctx,
   }) : _wallClock = wallClock ?? (() => DateTime.now().millisecondsSinceEpoch);
 
   /// The 8-character identifier for this device.
@@ -211,6 +222,11 @@ final class ConsolidationCoordinator {
 
   final ConsolidationConfig _config;
   final int Function() _wallClock;
+
+  /// The optional per-sync-run cancellation/deadline context.
+  ///
+  /// Forwarded to every adapter call site.
+  final SyncContext? _ctx;
 
   /// Current state of the coordination state machine.
   ConsolidationState _state = ConsolidationState.idle;
@@ -325,7 +341,7 @@ final class ConsolidationCoordinator {
     int? existingEpoch;
 
     // Read existing lease if any.
-    final existingBytes = await cloudAdapter.download(_leasePath);
+    final existingBytes = await cloudAdapter.download(_leasePath, ctx: _ctx);
     if (existingBytes != null) {
       final existing = ConsolidationLease.fromBytes(existingBytes);
       // Capture the prior epoch regardless of whether the lease is expired, so
@@ -338,7 +354,7 @@ final class ConsolidationCoordinator {
       }
       // Lease is expired or corrupt — we need to overwrite it using CAS with
       // the current ETag so that only one device wins the race to replace it.
-      final currentEtag = await cloudAdapter.getEtag(_leasePath);
+      final currentEtag = await cloudAdapter.getEtag(_leasePath, ctx: _ctx);
       if (currentEtag != null) {
         final candidate = _buildLease(
           inputFiles,
@@ -349,6 +365,7 @@ final class ConsolidationCoordinator {
           _leasePath,
           candidate.toBytes(),
           ifMatchEtag: currentEtag,
+          ctx: _ctx,
         );
         if (!won) return null; // another device overwrote the expired lease
         // Fencing: re-read and verify we are the holder.
@@ -368,6 +385,7 @@ final class ConsolidationCoordinator {
       _leasePath,
       candidate.toBytes(),
       ifMatchEtag: null, // if-none-match: * semantics
+      ctx: _ctx,
     );
     if (!won) return null; // another device won the race
 
@@ -414,7 +432,10 @@ final class ConsolidationCoordinator {
 
       for (final filename in sortedInputs.reversed) {
         // Download from sync folder.
-        final bytes = await cloudAdapter.download('$_sstablesDir/$filename');
+        final bytes = await cloudAdapter.download(
+          '$_sstablesDir/$filename',
+          ctx: _ctx,
+        );
         if (bytes == null) continue; // file deleted by another device
 
         // Write to a temporary path via the local adapter.
@@ -470,7 +491,11 @@ final class ConsolidationCoordinator {
       final outputBytes = writer.finish();
 
       // Upload output SSTable to sync folder.
-      await cloudAdapter.upload('$_sstablesDir/$outputFilename', outputBytes);
+      await cloudAdapter.upload(
+        '$_sstablesDir/$outputFilename',
+        outputBytes,
+        ctx: _ctx,
+      );
 
       return outputFilename;
     } finally {
@@ -505,7 +530,7 @@ final class ConsolidationCoordinator {
     // Delete input SSTables from the sync folder.
     for (final filename in lease.inputFiles) {
       try {
-        await cloudAdapter.delete('$_sstablesDir/$filename');
+        await cloudAdapter.delete('$_sstablesDir/$filename', ctx: _ctx);
       } catch (_) {
         // Deletion failure is non-fatal — the file may have already been
         // removed by another device or a previous partial commit.
@@ -514,7 +539,7 @@ final class ConsolidationCoordinator {
 
     // Release the lease.
     try {
-      await cloudAdapter.delete(_leasePath);
+      await cloudAdapter.delete(_leasePath, ctx: _ctx);
     } catch (_) {
       // Non-fatal: lease will expire naturally.
     }
@@ -559,7 +584,7 @@ final class ConsolidationCoordinator {
   /// This fencing step guards against a TOCTOU race where two devices both
   /// write a lease in quick succession.
   Future<ConsolidationLease?> _verifyLeaseHolder(int expectedEpoch) async {
-    final bytes = await cloudAdapter.download(_leasePath);
+    final bytes = await cloudAdapter.download(_leasePath, ctx: _ctx);
     if (bytes == null) return null;
     final lease = ConsolidationLease.fromBytes(bytes);
     if (lease == null) return null;
