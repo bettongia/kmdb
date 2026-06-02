@@ -15,11 +15,6 @@
 import 'dart:typed_data';
 
 import 'package:kmdb/kmdb.dart';
-import 'package:kmdb/src/engine/kvstore/kv_store_impl.dart';
-import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
-import 'package:kmdb/src/sync/consolidation_config.dart';
-import 'package:kmdb/src/sync/local/memory_sync_adapter.dart';
-import 'package:kmdb/src/sync/sync_engine.dart';
 import 'package:test/test.dart';
 
 import '../support/gated_sync_adapter.dart';
