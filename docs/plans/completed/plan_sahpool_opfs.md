@@ -1,8 +1,8 @@
 # SAHPool OPFS Web Storage
 
-**Status**: Implementing
+**Status**: Complete
 
-**PR link**: {A link to the PR submitted for this plan}
+**PR link**: https://github.com/bettongia/kmdb/pull/35
 
 **Roadmap**: docs/roadmap/0_03.md
 
