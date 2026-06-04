@@ -401,6 +401,7 @@ HTML lives in [site/](site/) and is generated via `make docs`. Key spec files:
   score structure
 - `24_vault.md` — content-addressable blob store and KVLT packaging
 - `25_collection_schemas.md` — JSON Schema admission gate for collection writes
+- `30_icloud_adapter.md` — Apple iCloud (CloudKit) adapter: zone model, ETag strategy, CAS semantics, developer setup, Phase 4a probe results
 - `99_glossary.md` — terminology reference
 
 Full-codebase reviews live in [docs/reviews/](docs/reviews/) — start with
