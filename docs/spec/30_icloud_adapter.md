@@ -74,6 +74,23 @@ value supplied at adapter construction time.  The zone is created lazily on
 first use; once confirmed to exist, its `CKRecordZone.ID` is cached in
 memory.
 
+**Isolation boundaries:** There are two levels of separation:
+
+- **Container** — scoped to the app's bundle ID (`iCloud.<bundle-id>`).
+  CloudKit enforces complete isolation between containers: no app can read
+  another app's container, even on the same device.  Each app that embeds
+  `kmdb_icloud` therefore has its own container, and its sync data is
+  invisible to all other apps.
+
+- **Zone** — scoped to `syncRoot` within a container.  An app that manages
+  multiple independent KMDB databases (e.g. `"work"` and `"personal"`)
+  gives each a distinct `syncRoot`, resulting in separate zones
+  (`kmdb-work`, `kmdb-personal`) within the same container.  All devices
+  running the same app with the same `syncRoot` converge on the same zone.
+
+For the common case of a single-database app, one fixed `syncRoot` value
+(e.g. `"main"`) is sufficient.
+
 ## Sync folder layout
 
 The logical layout is identical to all other adapters:
