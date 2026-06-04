@@ -1,8 +1,8 @@
 # Apple iCloud sync adapter (CloudKit)
 
-**Status**: Implementing
+**Status**: Complete
 
-**PR link**: {A link to the PR submitted for this plan}
+**PR link**: https://github.com/bettongia/kmdb/pull/39
 
 **Implementation model:** Sonnet, **after the Phase 4a empirical probe**; the probe
 is human-run on a real iOS/macOS device with an iCloud-enabled Apple developer
@@ -834,4 +834,61 @@ plan off `Investigated`.
 
 ## Summary
 
-{Dot points highlighting the work undertaken}
+- **Phase 1 (scaffold):** Created `packages/kmdb_icloud/` as a Flutter plugin
+  package with `pubspec.yaml`, `analysis_options.yaml`, `README.md`, workspace
+  registration, and Apache 2.0 license headers on all new files.
+
+- **Phase 2 (platform channel):** Defined `ICloudSyncChannel` abstract
+  interface (the Dart/Swift test seam), `ICloudRateLimitException`, and
+  `PlatformICloudSyncChannel` (production `MethodChannel` implementation).
+  Swift plugin `ICloudSyncPlugin.swift` written for both `ios/Classes/` and
+  `macos/Classes/` (duplicated, not symlinked — N-3 resolution). Implements
+  all six `SyncStorageAdapter` operations via CloudKit CKRecord/CKAsset, with
+  correct error mapping for `CKError.unknownItem`, `CKError.serverRecordChanged`,
+  and `CKError.requestRateLimited`.
+
+- **Phase 3 (core adapter):** `ICloudAdapter` implements `SyncStorageAdapter`
+  with `providesAtomicCas => false` (permanent — Phase 4a confirmed CloudKit
+  create-if-absent is not atomic). `kICloudProfile` published with Phase 4a
+  empirical values: `EventualConsistency(maxPropagationDelayMs: 60000, jitterMs:
+  15000)`, `atomicConditionalCreate: false`, `allowsDuplicateNames: false`,
+  `maxOpsPerMinute: 60`. Exponential back-off with `ICloudRateLimitException`
+  retry using CloudKit's `retryAfterSeconds` hint. Cancellation via
+  `SyncContext`.
+
+- **Phase 4a (empirical probe — human-run):** Confirmed by the project's Apple
+  developer account on macOS/fast broadband: create-if-absent (`savePolicy:
+  .allKeys`) is NOT atomic; update-if-match (`savePolicy: .ifServerRecordUnchanged`)
+  IS atomic; CKQuery propagation delay ~5–7 s same-device; CKAsset integrity
+  confirmed at 1/10/50 MB.
+
+- **Phase 4 (test suite):**
+  - `ICloudSyncChannel` interface extracted to `icloud_sync_channel_interface.dart`
+    (no Flutter/dart:ui dependency) so tests run under `dart test`.
+  - `FakeICloudSyncChannel` — immediately-consistent, atomic in-memory fake over
+    `SharedCloudBackend` (Option C from R-4); does not model eventual consistency
+    or non-atomic CAS race window.
+  - `SimulatorICloudQuotaAdapter` — test-side `QuotaAwareAdapter` wrapper for
+    `kmdb_harness`; production `ICloudAdapter` has no harness dependency.
+  - H5 conformance suite (`runSyncAdapterConformance`) with `expectAtomicCas:
+    false` and `expectsCancellation: true`; conformance drift assertion tests.
+  - Unit tests for all six adapter methods, zone-bootstrap, rate-limit retry
+    (CloudKit hint path, exponential back-off path, cancellation, deadline).
+  - Harness convergence: 2- and 3-device `TestManager` scenarios via shared
+    `SharedCloudBackend` — both pass.
+  - Credential-gated e2e placeholder (RC-13).
+  - **98.1% Dart line coverage** (51/52 lines; one dead-code belt-and-suspenders
+    line in the retry loop is the only uncovered statement).
+
+- **Phase 6 (spec/docs):**
+  - `docs/spec/30_icloud_adapter.md` written with CloudKit zone model, ETag
+    strategy, CAS semantics, platform limitations, developer setup, and Phase 4a
+    probe results table.
+  - Release checklist RC-12 (behaviour probe) and RC-13 (real-service soak) added
+    to `docs/spec/28_release_checklist.md`.
+  - `docs/roadmap/0_03.md` marked Apple iCloud item complete.
+  - `packages/kmdb_icloud/example/` built as a minimal iOS/macOS Flutter app
+    exercising the full Dart → MethodChannel → Swift → CloudKit stack.
+
+- **PR:** https://github.com/bettongia/kmdb/pull/39  
+  **Branch:** `20260603_plan_icloud_sync`
