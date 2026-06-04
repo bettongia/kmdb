@@ -42,20 +42,29 @@
 /// await db.sync(syncAdapter: adapter);
 /// ```
 ///
-/// ## Preliminary `kICloudProfile` values
+/// ## Test usage
 ///
-/// The [kICloudProfile] constant shipped with this package has **placeholder**
-/// values for `maxPropagationDelayMs`, `jitterMs`, `maxOpsPerMinute`, and
-/// `atomicConditionalCreate`.  These are finalised by the Phase 4a empirical
-/// probe against the real CloudKit service (see
-/// `docs/plans/plan_icloud_sync.md`).
+/// In tests, import the non-Flutter parts of this library using the Dart-only
+/// library path to avoid pulling in `dart:ui`:
+///
+/// ```dart
+/// import 'package:kmdb_icloud/src/icloud_adapter.dart';
+/// import 'package:kmdb_icloud/src/icloud_sync_channel_interface.dart';
+/// import 'package:kmdb_icloud/src/icloud_profile.dart';
+/// ```
+///
+/// Or use the `FakeICloudSyncChannel` from the test support file:
+///
+/// ```dart
+/// import 'package:kmdb_icloud/test/support/fake_icloud_sync_channel.dart';
+/// ```
 library;
 
 export 'src/icloud_adapter.dart' show ICloudAdapter, ICloudRetryConfig;
 export 'src/icloud_profile.dart' show kICloudProfile;
+// ICloudSyncChannel interface and ICloudRateLimitException (no Flutter dep).
+export 'src/icloud_sync_channel_interface.dart'
+    show ICloudSyncChannel, ICloudRateLimitException;
+// PlatformICloudSyncChannel and kICloudMethodChannel require Flutter.
 export 'src/icloud_sync_channel.dart'
-    show
-        ICloudSyncChannel,
-        ICloudRateLimitException,
-        PlatformICloudSyncChannel,
-        kICloudMethodChannel;
+    show PlatformICloudSyncChannel, kICloudMethodChannel;

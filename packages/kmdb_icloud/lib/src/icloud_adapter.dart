@@ -17,7 +17,7 @@ import 'dart:typed_data';
 
 import 'package:kmdb/kmdb.dart';
 
-import 'icloud_sync_channel.dart';
+import 'icloud_sync_channel_interface.dart';
 
 /// Apple iCloud (CloudKit) sync adapter for KMDB.
 ///
@@ -40,21 +40,23 @@ import 'icloud_sync_channel.dart';
 /// [compareAndSwap]. The tag is stable for a given revision and changes on
 /// every write, satisfying the CAS contract.
 ///
-/// ## `providesAtomicCas == false` — safe default
+/// ## `providesAtomicCas == false` — permanent
 ///
-/// The create-if-absent atomicity of CloudKit (whether zone-level serialisation
-/// guarantees a single winner for concurrent first-time record creates with the
-/// same deterministic record ID) has not been empirically verified against the
-/// real service. Until the Phase 4a probe confirms it, this adapter ships with:
+/// The Phase 4a empirical probe confirmed that CloudKit create-if-absent is
+/// **not** atomic: `savePolicy: .allKeys` on a fresh local `CKRecord` (nil
+/// `recordChangeTag`) is an unconditional overwrite — CloudKit does not return
+/// `CKError.serverRecordChanged` when a record with the same ID already exists.
+/// This adapter therefore ships with:
 ///
 /// ```dart
 /// bool get providesAtomicCas => false;
 /// ```
 ///
-/// This causes [ConsolidationCoordinator] to skip consolidation rather than
-/// risk a split-lease data loss (H5 invariant). Once Phase 4a confirms the
-/// behaviour, set both `providesAtomicCas` and [kICloudProfile]'s
-/// `atomicConditionalCreate` to `true`.
+/// This is a permanent value, not a temporary default. It causes
+/// [ConsolidationCoordinator] to skip consolidation rather than risk a
+/// split-lease data loss (H5 invariant). It must stay equal to
+/// [kICloudProfile]'s `atomicConditionalCreate` (also permanently `false`); a
+/// conformance test asserts the two never drift.
 ///
 /// Conditional **update** (when `ifMatchEtag != null`) **is** atomic: the
 /// channel uses `savePolicy: .ifServerRecordUnchanged`, and CloudKit returns
@@ -99,8 +101,10 @@ final class ICloudAdapter implements SyncStorageAdapter {
 
   // ── SyncStorageAdapter ─────────────────────────────────────────────────────
 
-  /// CloudKit's create-if-absent atomicity is unverified pending the Phase 4a
-  /// empirical probe.  Ships as `false` (loss-free default) until confirmed.
+  /// CloudKit create-if-absent is not atomic (Phase 4a confirmed:
+  /// `savePolicy: .allKeys` overwrites unconditionally), so this is permanently
+  /// `false` — the loss-free posture that makes [ConsolidationCoordinator] skip
+  /// consolidation for this adapter.
   ///
   /// This value must equal [kICloudProfile]'s `atomicConditionalCreate`.
   /// A conformance test in the package's test suite asserts this invariant.

@@ -36,7 +36,10 @@ class KmdbICloudExampleApp extends StatelessWidget {
   }
 }
 
-/// A minimal page that runs [runICloudSyncExample] and displays its log output.
+/// Phase 4a probe runner.
+///
+/// Each button runs one probe function from [icloud_sync_example.dart] and
+/// streams its log output into the scrollable pane.
 ///
 /// Edit [_containerIdentifier] to match the CloudKit container configured in
 /// `macos/Runner.xcworkspace` → Signing & Capabilities → iCloud → Containers.
@@ -48,20 +51,26 @@ class _ProbePage extends StatefulWidget {
 }
 
 class _ProbePageState extends State<_ProbePage> {
-  // Replace with the container identifier from your Xcode entitlements.
-  static const _containerIdentifier = 'iCloud.au.com.bettongia.kmdb.probe';
+  static const _containerIdentifier = 'iCloud.com.bettongia.kmdb.probe';
   static const _syncRoot = 'kmdb-example-sync';
 
   final List<String> _log = [];
   bool _running = false;
 
-  Future<void> _run() async {
+  Future<void> _runProbe(
+    Future<void> Function({
+      String containerIdentifier,
+      String syncRoot,
+      void Function(String)? onLog,
+    })
+    probe,
+  ) async {
     setState(() {
       _running = true;
       _log.clear();
     });
     try {
-      await runICloudSyncExample(
+      await probe(
         containerIdentifier: _containerIdentifier,
         syncRoot: _syncRoot,
         onLog: (msg) => setState(() => _log.add(msg)),
@@ -90,9 +99,9 @@ class _ProbePageState extends State<_ProbePage> {
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
             child: Text(
               'Container: $_containerIdentifier\nSync root: $_syncRoot',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                fontFamily: 'monospace',
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
             ),
           ),
           const Divider(),
@@ -107,10 +116,34 @@ class _ProbePageState extends State<_ProbePage> {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.all(16),
-            child: FilledButton(
-              onPressed: _running ? null : _run,
-              child: Text(_running ? 'Running…' : 'Run Sync Example'),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton(
+                  onPressed: _running
+                      ? null
+                      : () => _runProbe(runICloudSyncExample),
+                  child: const Text('Basic sync'),
+                ),
+                FilledButton(
+                  onPressed: _running ? null : () => _runProbe(runCasProbe),
+                  child: const Text('CAS probe'),
+                ),
+                FilledButton(
+                  onPressed: _running
+                      ? null
+                      : () => _runProbe(runLargeFileProbe),
+                  child: const Text('Large files'),
+                ),
+                FilledButton(
+                  onPressed: _running
+                      ? null
+                      : () => _runProbe(runListPropagationProbe),
+                  child: const Text('List propagation delay'),
+                ),
+              ],
             ),
           ),
         ],

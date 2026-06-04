@@ -16,74 +16,62 @@ import 'package:kmdb/kmdb_test_cloud_support.dart';
 
 /// The [CloudProfile] for the Apple iCloud (CloudKit) sync adapter.
 ///
-/// ## Preliminary values (Phase 4a not yet run)
-///
-/// The numeric fields in this constant — `maxPropagationDelayMs`, `jitterMs`,
-/// `quota.maxOpsPerMinute`, and `atomicConditionalCreate` — are **placeholder
-/// values** pending the Phase 4a empirical probe against the real CloudKit
-/// service.  Once the probe is complete these values will be replaced with
-/// measured results.
+/// Values are derived from the Phase 4a empirical probe documented in
+/// `docs/spec/30_icloud_adapter.md` and `docs/plans/plan_icloud_sync.md`.
+/// The probe was run on macOS on a fast broadband connection (≈500 Mbps down /
+/// 40 Mbps up); real-world values on mobile or congested connections will be
+/// higher.
 ///
 /// ## Key characteristics
 ///
-/// - **`allowsDuplicateNames: false`** — CloudKit zones use a deterministic
-///   `CKRecord.ID` derived from the file's relative path.  CloudKit guarantees
-///   exactly one record per record ID per zone, so duplicate names are
-///   structurally impossible.
-///
-/// - **`atomicConditionalCreate: false` (safe default)** — whether CloudKit's
-///   zone-level serialisation guarantees a single winner for concurrent
-///   first-time record creates with the same deterministic record ID has not
-///   been empirically verified.  Until the Phase 4a probe confirms this
-///   behaviour, the adapter ships with `providesAtomicCas == false`, and
-///   `ConsolidationCoordinator` skips consolidation rather than risk a
-///   split-lease data loss (H5 invariant).
+/// - **`atomicConditionalCreate: false` (permanent)** — Phase 4a confirmed that
+///   `savePolicy: .allKeys` on a fresh local `CKRecord` (nil `recordChangeTag`)
+///   is an unconditional overwrite. CloudKit does NOT return
+///   `CKError.serverRecordChanged` when a record with the same ID already
+///   exists. Create-if-absent is therefore not atomic, and
+///   [ICloudAdapter.providesAtomicCas] is permanently `false`.
+///   [ConsolidationCoordinator] skips consolidation for this adapter.
 ///
 ///   Conditional **update** (`savePolicy: .ifServerRecordUnchanged`) **is**
-///   atomic on CloudKit: exactly one concurrent updater wins when both use the
-///   same `recordChangeTag` as the precondition.
+///   atomic: exactly one concurrent updater wins when both hold the same
+///   `recordChangeTag` as the precondition (Phase 4a confirmed).
 ///
-/// - **`consistency: EventualConsistency`** — CloudKit's private database
-///   eventually propagates writes to other devices.  The values below are
-///   conservative estimates; update them from the Phase 4a probe results.
+/// - **`allowsDuplicateNames: false`** — CloudKit zones use a deterministic
+///   `CKRecord.ID` derived from the file path. Exactly one record per ID per
+///   zone is possible.
 ///
-/// - **`quota`** — Apple does not publish per-app CloudKit rate-limit values
-///   publicly.  The placeholder below (60 ops/minute) is a conservative safe
-///   default; update from the Phase 4a probe or Apple documentation.
+/// - **`consistency: EventualConsistency`** — `CKQuery` results are eventually
+///   consistent even on the uploading device. Phase 4a measured ~5–7 s
+///   same-device propagation delay on fast broadband; `maxPropagationDelayMs`
+///   is set conservatively to accommodate slow mobile connections.
 ///
-/// ## Phase 4a probe
-///
-/// Before flipping `atomicConditionalCreate` to `true` and finalising the
-/// numeric values, run the empirical probe described in the Phase 4a section
-/// of `docs/plans/plan_icloud_sync.md`.  Record the findings in that plan,
-/// then update this constant accordingly.
+/// - **`quota`** — Apple does not publish per-app CloudKit rate-limit values.
+///   The value below is a conservative safe default. Rate-limit errors are
+///   handled defensively via `CKErrorRetryAfterKey` backoff in the Swift plugin.
 ///
 /// See also: [kGoogleDriveProfile] in `package:kmdb_google_drive` for the
 /// analogous constant for the Google Drive adapter.
 const kICloudProfile = CloudProfile(
-  /// Eventually consistent: CloudKit propagates writes to other devices
-  /// within a bounded window.  The values below are conservative estimates;
-  /// they will be replaced with Phase 4a measured results.
+  // Phase 4a: same-device CKQuery propagation measured at ~5–7 s on fast
+  // broadband. 60 s upper bound and 15 s jitter are conservative to cover
+  // slow mobile connections and cross-device propagation (not yet measured).
   consistency: EventualConsistency(
-    maxPropagationDelayMs: 60000, // 60 s conservative upper bound (placeholder)
-    jitterMs: 10000, // ±10 s realistic variation (placeholder)
+    maxPropagationDelayMs: 60000,
+    jitterMs: 15000,
   ),
 
-  /// Phase 4a probe has NOT yet confirmed atomic create-if-absent.
-  /// Kept as `false` (loss-free default) until verified.
-  /// Set to `true` only if Phase 4a confirms zone-level serialisation
-  /// guarantees a single winner for concurrent creates with the same record ID.
-  ///
-  /// Must equal [ICloudAdapter.providesAtomicCas].
+  // Phase 4a confirmed: create-if-absent is NOT atomic (savePolicy: .allKeys
+  // overwrites unconditionally). Permanently false — do not set to true.
+  // Must equal ICloudAdapter.providesAtomicCas.
   atomicConditionalCreate: false,
 
   /// CloudKit zones: one record per record ID, no duplicate record names.
   allowsDuplicateNames: false,
 
-  /// Conservative default rate limit (placeholder pending Phase 4a probe).
-  /// Apple does not publish exact per-app CloudKit rate limits publicly.
+  // Apple does not publish exact per-app CloudKit rate limits. Conservative
+  // default; rate-limit errors are handled via CKErrorRetryAfterKey backoff.
   quota: QuotaProfile(
-    maxOpsPerMinute: 60, // placeholder; update from Phase 4a results
+    maxOpsPerMinute: 60,
     maxUploadBytesPerDay:
         null, // CloudKit enforces storage quota, not byte-rate
   ),
