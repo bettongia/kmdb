@@ -13,6 +13,7 @@ workspace:
   - packages/kmdb_lexical
   - packages/kmdb_google_drive
   - packages/kmdb_icloud
+  - packages/kmdb_icloud/example
 
 dev_dependencies:
   lints: ^6.0.0

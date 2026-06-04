@@ -189,7 +189,8 @@ CloudKit containers are created through Xcode, not through the Apple Developer
 portal web UI.  The portal reflects what Xcode registers; CloudKit Dashboard
 is used only for schema management (step 3).
 
-1. Open your Xcode project (or create the probe app target).
+1. Open the example app's Xcode workspace:
+   `packages/kmdb_icloud/example/macos/Runner.xcworkspace`.
 2. Select the target → **Signing & Capabilities**.
 3. Click **+ Capability** and add **iCloud**.
 4. Under the iCloud capability, tick **CloudKit**.
@@ -273,6 +274,10 @@ final adapter = ICloudAdapter(channel: channel, syncRoot: 'my-sync-root');
 
 The zone `"kmdb-my-sync-root"` is created lazily in the container's private
 database on first use.
+
+The example app (`packages/kmdb_icloud/example/lib/main.dart`) has a
+`_containerIdentifier` constant at the top of `_ProbePage` — update this to
+match the container identifier you registered in Xcode before running.
 
 ### 5. Phase 4a probe app setup
 
