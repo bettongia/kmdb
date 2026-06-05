@@ -11,8 +11,17 @@ about indexes — they are a pure application-level concern using the same
 
 ## Index Entry Key Encoding
 
+> **Note — current implementation vs. aspirational layout.**  
+> The compound-key layout described below (`[encodedValue][0x00][documentKey]`)
+> is the target design for range-predicate index acceleration and is **not yet
+> implemented**. The current implementation uses one namespace per distinct
+> value (`$index:{ns}:{path}:{hexEncodedValue}`, key = docKey UUIDv7), which
+> supports equality lookups only. The compound-key layout requires the storage
+> engine to support variable-length user keys — a prerequisite tracked in
+> [`docs/proposals/range_predicate_index_scans.md`](../proposals/range_predicate_index_scans.md).
+
 An index entry's key encodes both the indexed field value and the document key
-so that a prefix scan on the value returns all matching document keys:
+so that a bounded scan on the value returns all matching document keys:
 
 ```
 [encodedValue][0x00][documentKey]
@@ -20,10 +29,14 @@ so that a prefix scan on the value returns all matching document keys:
 
 | Field type | Encoding |
 | :--------- | :------- |
-| String | UTF-8 bytes + `0x00` separator |
-| Number (int/double) | Big-endian fixed-width bytes — preserves sort order for range queries |
+| String | UTF-8 bytes as lowercase hex |
+| Number (int) | 8-byte big-endian with sign bit flipped — preserves sort order |
+| Number (double) | 8-byte IEEE-754 big-endian with bit adjustment (NaN not indexed) |
 | Boolean | `0x00` (false) or `0x01` (true) |
 | Null / missing | No index entry written |
+
+The `\x00` separator is safe because hex encoding uses only `[0-9a-f]` (codes
+≥ 48), which sort after `\x00` (code 0) and `\x01` (code 1).
 
 Index entry **values** are empty `Uint8List` — the key encodes everything needed.
 
