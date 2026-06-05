@@ -1,0 +1,22 @@
+PODS:
+  - FlutterMacOS (1.0.0)
+  - kmdb_icloud (0.1.0):
+    - FlutterMacOS
+
+DEPENDENCIES:
+  - FlutterMacOS (from `Flutter/ephemeral`)
+  - kmdb_icloud (from `Flutter/ephemeral/.symlinks/plugins/kmdb_icloud/macos`)
+
+EXTERNAL SOURCES:
+  FlutterMacOS:
+    :path: Flutter/ephemeral
+  kmdb_icloud:
+    :path: Flutter/ephemeral/.symlinks/plugins/kmdb_icloud/macos
+
+SPEC CHECKSUMS:
+  FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
+  kmdb_icloud: 404565ffae68e319befad518fbeaf7c52e9fa82d
+
+PODFILE CHECKSUM: 1e95c36afbfd1cb6423ceca4de7a8e1b256fb6ac
+
+COCOAPODS: 1.16.2
