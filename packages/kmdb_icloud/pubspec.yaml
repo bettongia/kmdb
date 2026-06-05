@@ -1,0 +1,32 @@
+name: kmdb_icloud
+description: Apple iCloud (CloudKit) sync adapter for KMDB — connects the
+  SyncStorageAdapter interface to the CloudKit framework via a Flutter
+  MethodChannel plugin (iOS and macOS only).
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.12.0
+  flutter: ">=3.29.0"
+
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+  kmdb:
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.6
+  kmdb_harness:
+
+flutter:
+  plugin:
+    platforms:
+      ios:
+        classPrefix: Kmdb
+        pluginClass: KmdbIcloudPlugin
+      macos:
+        classPrefix: Kmdb
+        pluginClass: KmdbIcloudPlugin

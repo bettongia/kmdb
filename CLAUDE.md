@@ -106,6 +106,7 @@ packages/
   kmdb_inferencing/    — ONNX Runtime + BGE embedding model for semantic search
   kmdb_lexical/        — lexical utilities (stemmer, stopwords) used by FTS
   kmdb_google_drive/   — Google Drive SyncStorageAdapter (optional, opt-in)
+  kmdb_icloud/         — Apple iCloud (CloudKit) SyncStorageAdapter (iOS/macOS only, optional, opt-in)
 
 External packages pulled in via `git:` refs in `pubspec.yaml`
 `dependency_overrides`:
@@ -400,6 +401,7 @@ HTML lives in [site/](site/) and is generated via `make docs`. Key spec files:
   score structure
 - `24_vault.md` — content-addressable blob store and KVLT packaging
 - `25_collection_schemas.md` — JSON Schema admission gate for collection writes
+- `30_icloud_adapter.md` — Apple iCloud (CloudKit) adapter: zone model, ETag strategy, CAS semantics, developer setup, Phase 4a probe results
 - `99_glossary.md` — terminology reference
 
 Full-codebase reviews live in [docs/reviews/](docs/reviews/) — start with
