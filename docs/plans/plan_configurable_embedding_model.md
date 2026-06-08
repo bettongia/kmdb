@@ -1,6 +1,6 @@
 # Configurable embedding model with download-on-demand
 
-**Status**: Investigated
+**Status**: Complete
 
 **PR link**: —
 
@@ -303,85 +303,85 @@ Explicitly **not** in scope: removing Git LFS assets (deferred, Q5);
 
 ### Phase 1 — Model specification and catalog
 
-- [ ] Define `ModelSpec` record type (`id`, `embeddingDimensions`, onnxUrl,
+- [x] Define `ModelSpec` record type (`id`, `embeddingDimensions`, onnxUrl,
       vocabUrl, onnxSha256, vocabSha256) in a new
       `packages/kmdb_inferencing/lib/src/model_spec.dart`
-- [ ] Create `ModelCatalog` in `model_catalog.dart` with entries for BGE Small
+- [x] Create `ModelCatalog` in `model_catalog.dart` with entries for BGE Small
       En v1.5 and (infrastructure only, not yet tested) BGE-M3
-- [ ] Write unit tests for catalog lookup by ID
+- [x] Write unit tests for catalog lookup by ID
 
 ### Phase 2 — Dimension generalisation (Q1)
 
-- [ ] Generalise `sq8.dart` `quantise`/`dequantise` asserts off the 384 constant
+- [x] Generalise `sq8.dart` `quantise`/`dequantise` asserts off the 384 constant
       (validate against a supplied dimension or `> 0`); update doc comments
-- [ ] Make `math_utils.dart` `meanPool` `hiddenDim` required (no 384 default)
-- [ ] Source `ort_session.dart` `hiddenDim` from the loaded `ModelSpec`; drop
+- [x] Make `math_utils.dart` `meanPool` `hiddenDim` required (no 384 default)
+- [x] Source `ort_session.dart` `hiddenDim` from the loaded `ModelSpec`; drop
       `const hiddenDim = 384`
-- [ ] Replace the two `bytes.length != 384` guards in `vec_manager.dart`
+- [x] Replace the two `bytes.length != 384` guards in `vec_manager.dart`
       `_scoreField` with `!= model.dimensions`; generalise the 384-byte doc
       comments in `vec_manager.dart` and `vec_index_state.dart`
-- [ ] Add `String get modelId` + `int get dimensions` to the `EmbeddingModel`
+- [x] Add `String get modelId` + `int get dimensions` to the `EmbeddingModel`
       interface; implement on `OnnxEmbeddingModel`; update the four test doubles
-- [ ] Confirm all existing semantic/hybrid tests still pass against 384
+- [x] Confirm all existing semantic/hybrid tests still pass against 384
 
 ### Phase 3 — Download-on-demand
 
-- [ ] Implement `ModelDownloader` with progress callback, SHA-256 verification,
+- [x] Implement `ModelDownloader` with progress callback, SHA-256 verification,
       and **download-to-temp-then-atomic-rename** (last-writer-wins, no locking)
-- [ ] Update `OnnxEmbeddingModel.load()` to accept `ModelSpec` + `cacheDir`;
+- [x] Update `OnnxEmbeddingModel.load()` to accept `ModelSpec` + `cacheDir`;
       short-circuit when a valid checksummed file is present; invoke downloader
       if absent or checksum mismatch
-- [ ] Write tests with **mock HTTP / stubbed responses only** (partial download,
+- [x] Write tests with **mock HTTP / stubbed responses only** (partial download,
       corrupt download, checksum mismatch + retry, temp-file-then-rename,
-      present- file short-circuit). No real network download in the suite
-- [ ] Leave the existing Git LFS assets in place (removal deferred to a
+      present-file short-circuit). No real network download in the suite
+- [x] Leave the existing Git LFS assets in place (removal deferred to a
       follow-up plan, Q5) so existing tests keep loading the bundled model
 
 ### Phase 4 — Model identity and index invalidation (Q3b / Q2)
 
-- [ ] Add a `modelId` field to `VecIndexState` (constructor, fields, `copyWith`,
+- [x] Add a `modelId` field to `VecIndexState` (constructor, fields, `copyWith`,
       `toCbor`, `fromCbor` with `?? ''` default for backward-compatible reads)
-- [ ] `VecManager.ensureBuilt` records `model.modelId` when it builds an index
-- [ ] On open, `VecManager` compares stored `modelId` vs `model.modelId` per
+- [x] `VecManager.ensureBuilt` records `model.modelId` when it builds an index
+- [x] On open, `VecManager` compares stored `modelId` vs `model.modelId` per
       field; on a non-empty mismatch, set `status = stale`; an empty stored id
       is treated as a match and stamped on the next build (no eager rebuild)
-- [ ] Confirm the lazy `ensureBuilt`-on-next-`search()` path rebuilds the stale
+- [x] Confirm the lazy `ensureBuilt`-on-next-`search()` path rebuilds the stale
       index inline — **no background scheduler is added** (Q2)
-- [ ] Add `KmdbDatabase.reindex()` over the existing `_vecManager`: rebuild all
+- [x] Add `KmdbDatabase.reindex()` over the existing `_vecManager`: rebuild all
       stale `$vec:` fields in the foreground; vec-only (not FTS); no-op when no
       embedding model is configured
-- [ ] Tests: index built with model A, reopen with model B → field marked
+- [x] Tests: index built with model A, reopen with model B → field marked
       `stale`, next `search()` rebuilds; reopen with same model → no rebuild;
       empty stored id → no churn, stamped on next build; `reindex()` rebuilds
       all stale fields and is a no-op with no model
 
 ### Phase 5 — Config and CLI
 
-- [ ] Change `EmbeddingModelConfig` typedef to `({String type, String modelId})`
-- [ ] In `_parseJson`, detect legacy `modelPath`-present + `modelId`-absent and
+- [x] Change `EmbeddingModelConfig` typedef to `({String type, String modelId})`
+- [x] In `_parseJson`, detect legacy `modelPath`-present + `modelId`-absent and
       throw the migration `FormatException` before the generic missing-`modelId`
       error; add a test for the migration message
-- [ ] **Do not** add `modelCacheDir` to `KmdbConfig` or thread a cache dir
+- [x] **Do not** add `modelCacheDir` to `KmdbConfig` or thread a cache dir
       through `VecManager` (Q4)
-- [ ] `ReplConfig` resolves the cache dir (`cacheDir` key in `~/.kmdbrc`,
+- [x] `ReplConfig` resolves the cache dir (`cacheDir` key in `~/.kmdbrc`,
       default `~/.kmdb_cache`, created lazily on first download) and passes it
       to `OnnxEmbeddingModel.load()` before `open()`
-- [ ] Include a commented-out `cacheDir` example in the defaults file written by
+- [x] Include a commented-out `cacheDir` example in the defaults file written by
       `ReplConfig._writeDefaults()`
-- [ ] Update CLI `search` command to surface first-use download progress to
+- [x] Update CLI `search` command to surface first-use download progress to
       stderr
-- [ ] Add `kmdb reindex` CLI command calling `KmdbDatabase.reindex()`; print a
+- [x] Add `kmdb reindex` CLI command calling `KmdbDatabase.reindex()`; print a
       message and exit 0 when no embedding model is configured
-- [ ] Update CLI integration tests and example code
+- [x] Update CLI integration tests and example code
 
 ### Phase 6 — Docs
 
-- [ ] Add a model-lifecycle subsection to `docs/spec/22_semantic_search.md`
+- [x] Add a model-lifecycle subsection to `docs/spec/22_semantic_search.md`
       (catalog/allowlist, download + temp-file-rename, per-field `modelId`
       identity, stale-on-mismatch + lazy rebuild, `reindex()`)
-- [ ] Add a `docs/spec/28_release_checklist.md` entry for the real ~127 MB
+- [x] Add a `docs/spec/28_release_checklist.md` entry for the real ~127 MB
       end-to-end model download verification (cannot run in automated CI)
-- [ ] Update `packages/kmdb_inferencing/README.md` (or doc comments) with the
+- [x] Update `packages/kmdb_inferencing/README.md` (or doc comments) with the
       new `load(ModelSpec, cacheDir:)` API
 
 ## Review (kmdb-plan-reviewer, 2026-06-05)

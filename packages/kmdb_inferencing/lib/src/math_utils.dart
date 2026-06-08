@@ -1,10 +1,10 @@
-// Copyright 2026 The Authors
+// Copyright 2026 The Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -26,7 +26,10 @@ import 'dart:typed_data';
 ///
 /// [seqLen] is the number of token positions.
 ///
-/// [hiddenDim] is the embedding dimension — 384 for BGE Small En v1.5.
+/// [hiddenDim] is the embedding dimension (e.g. 384 for BGE Small En v1.5,
+/// 1024 for BGE-M3). This is sourced from [ModelSpec.embeddingDimensions] and
+/// must be supplied by the caller — there is no default, as the dimension is
+/// model-specific and must not be assumed.
 ///
 /// Returns a float32 list of [hiddenDim] elements. Returns a zero vector if
 /// no attention-masked tokens are present (degenerate case).
@@ -34,7 +37,7 @@ Float32List meanPool(
   List<double> hiddenState,
   List<int> attentionMask, {
   int seqLen = 512,
-  int hiddenDim = 384,
+  required int hiddenDim,
 }) {
   final result = Float32List(hiddenDim);
   var active = 0;

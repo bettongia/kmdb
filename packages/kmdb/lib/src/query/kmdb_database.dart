@@ -705,6 +705,43 @@ final class KmdbDatabase {
   /// index maintenance.
   VecManager? get vecManager => _vecManager;
 
+  /// Rebuilds all stale or undefined `$vec:` indexes in the foreground.
+  ///
+  /// Calls [VecManager.reindex] on the underlying vector manager. This is a
+  /// foreground operation — it blocks until all stale indexes have been fully
+  /// rebuilt from the current document contents. For large collections this
+  /// may take several seconds.
+  ///
+  /// This method is **vec-only** — it does not touch FTS indexes.
+  ///
+  /// Returns the number of indexes that were (re)built. Returns `0` immediately
+  /// when no embedding model is configured (i.e., no vector indexes were
+  /// declared at [open] time).
+  ///
+  /// Use this after a planned model upgrade to force an immediate rebuild
+  /// rather than waiting for the next `search()` call:
+  ///
+  /// ```dart
+  /// // After upgrading to a new embedding model:
+  /// final model = await OnnxEmbeddingModel.load(
+  ///   spec: ModelCatalog.lookup('bge-small-en-v1.5'),
+  ///   cacheDir: cacheDir,
+  /// );
+  /// final db = await KmdbDatabase.open(
+  ///   path: '/path/to/db',
+  ///   adapter: adapter,
+  ///   vecIndexes: [...],
+  ///   embeddingModel: model,
+  /// );
+  /// final rebuilt = await db.reindex();
+  /// print('Rebuilt $rebuilt vector index(es).');
+  /// ```
+  Future<int> reindex() async {
+    final vec = _vecManager;
+    if (vec == null) return 0;
+    return vec.reindex();
+  }
+
   // ── Internal (used by KmdbCollection) ─────────────────────────────────────
 
   /// The ordered list of write validators (Layer 1 of the write pipeline).
