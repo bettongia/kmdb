@@ -1,4 +1,4 @@
-# kmdb_inferencing
+# KMDB Inferencing
 
 ONNX Runtime bindings and BGE Small En v1.5 embedding model for KMDB semantic
 search.

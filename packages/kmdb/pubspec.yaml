@@ -21,6 +21,8 @@ dependencies:
   uuid:
   web:
   intl: ^0.20.2
+
+  # Unicode nromalization
   unorm_dart: ^0.3.2
   # test is a regular (not dev) dependency because lib/test_support.dart is a
   # public test-support library that downstream packages import in their own
