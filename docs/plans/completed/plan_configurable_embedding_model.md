@@ -2,7 +2,7 @@
 
 **Status**: Complete
 
-**PR link**: —
+**PR link**: https://github.com/bettongia/kmdb/pull/39
 
 ## Problem statement
 
@@ -598,4 +598,32 @@ iOS ORT branch explicitly excluded). Proceed to implementation.
 
 ## Summary
 
-_To be completed after implementation._
+Implemented 2026-06-08 on branch `20260608_plan_configurable_embedding_model`
+(PR #39). All six phases complete. 32 files changed: 2,598 insertions,
+210 deletions. Test counts: 1,722 `kmdb` + 888 `kmdb_cli` + 60
+`kmdb_inferencing` (all passing; E2E skipped by default).
+
+**Key decisions and deviations from the plan:**
+
+- **`prefer_initializing_formals` lint items** in `kmdb_inferencing`: two
+  `info`-level hints remain in `model_downloader.dart` and its test. The private
+  fields have public-named parameters; using `this._field` would expose private
+  naming in the public API. Treated as acceptable per existing project practice.
+
+- **Empty `modelId` semantics confirmed**: a pre-identity index (empty stored
+  `modelId`) is treated as a match and stamped on the next `ensureBuilt()` call,
+  avoiding needless rebuilds on first upgrade. Only a non-empty stored id that
+  differs from the current model's `modelId` triggers a stale transition.
+
+- **`ModelDownloader` test doubles**: mock HTTP via `StreamController`/stub
+  `HttpClient` — no real network dependency in the suite. The real ~127 MB
+  download is deferred to RC-14 in `docs/spec/28_release_checklist.md`.
+
+- **`ReindexCommand` description** uses a raw string (`r'...'`) to prevent Dart
+  from interpreting `$vec:` as a string interpolation.
+
+- **Git LFS assets retained** in `packages/kmdb_inferencing/assets/models/` as
+  planned (removal deferred to a follow-up plan, Q5).
+
+**Coverage:** all three packages exceed 90%; the pre-commit gate (`make
+pre_commit`) passes clean with zero analyzer errors or warnings.
