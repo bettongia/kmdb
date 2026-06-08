@@ -60,6 +60,7 @@ final class VecIndexState {
     required this.status,
     this.builtThrough = '',
     this.builtAt = '',
+    this.modelId = '',
   });
 
   /// The collection namespace this index covers.
@@ -81,17 +82,28 @@ final class VecIndexState {
   /// Empty when not yet built. Informational only.
   final String builtAt;
 
+  /// The [EmbeddingModel.modelId] of the model that built this index.
+  ///
+  /// Persisted alongside the index state so that a model change can be
+  /// detected at open time and the index marked [VecIndexStatus.stale]. Empty
+  /// (`''`) on indexes built before model identity tracking was introduced
+  /// (backward-compatible reads: empty id is treated as a match and stamped
+  /// on the next build, not an eager rebuild trigger).
+  final String modelId;
+
   /// Returns a copy with the specified fields overridden.
   VecIndexState copyWith({
     VecIndexStatus? status,
     String? builtThrough,
     String? builtAt,
+    String? modelId,
   }) => VecIndexState(
     namespace: namespace,
     field: field,
     status: status ?? this.status,
     builtThrough: builtThrough ?? this.builtThrough,
     builtAt: builtAt ?? this.builtAt,
+    modelId: modelId ?? this.modelId,
   );
 
   // ── CBOR serialisation ─────────────────────────────────────────────────────
@@ -104,6 +116,8 @@ final class VecIndexState {
       CborString('status'): CborString(status.name),
       CborString('builtThrough'): CborString(builtThrough),
       CborString('builtAt'): CborString(builtAt),
+      // modelId is always written so future reads can detect model changes.
+      CborString('modelId'): CborString(modelId),
     });
     return Uint8List.fromList(cbor.encode(map));
   }
@@ -112,6 +126,12 @@ final class VecIndexState {
   ///
   /// Returns a state with [VecIndexStatus.undefined] if [bytes] is empty,
   /// null, or corrupt so that callers can always proceed safely.
+  ///
+  /// The [modelId] field defaults to `''` when absent from the serialised map
+  /// for backward-compatible reads (indexes built before model identity
+  /// tracking was added). An empty stored [modelId] is treated as a match
+  /// rather than a mismatch — it is stamped with the current model id on the
+  /// next [ensureBuilt] call.
   static VecIndexState fromBytes(
     String namespace,
     String field,
@@ -138,6 +158,8 @@ final class VecIndexState {
         status: status,
         builtThrough: map['builtThrough'] as String? ?? '',
         builtAt: map['builtAt'] as String? ?? '',
+        // Default to '' for backward-compatible reads (pre-identity indexes).
+        modelId: map['modelId'] as String? ?? '',
       );
     } catch (_) {
       return undefined;
@@ -151,7 +173,8 @@ final class VecIndexState {
   /// Format: `$vec:{ns}:{field}`
   ///
   /// Within this namespace, the key is the 32-character UUIDv7 docId and the
-  /// value is the 384-byte SQ8-quantised embedding.
+  /// value is the D-byte SQ8-quantised embedding, where D is the model's
+  /// [EmbeddingModel.dimensions].
   static String vecNamespace(String ns, String field) => '\$vec:$ns:$field';
 
   /// The KvStore namespace for corpus-level statistics.

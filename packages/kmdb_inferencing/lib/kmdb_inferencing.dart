@@ -16,8 +16,9 @@
 ///
 /// Provides [OnnxEmbeddingModel] (implements [EmbeddingModel]) backed by the
 /// BGE Small En v1.5 model via the ONNX Runtime C API, a [BertTokenizer]
-/// for BERT WordPiece tokenisation, and [quantise]/[dequantise] helpers for
-/// SQ8 vector quantisation.
+/// for BERT WordPiece tokenisation, [quantise]/[dequantise] helpers for
+/// SQ8 vector quantisation, and a [ModelCatalog] of supported models
+/// with their [ModelSpec]s and download-on-demand via [ModelDownloader].
 ///
 /// ## Platform support
 ///
@@ -33,4 +34,8 @@ library;
 
 export 'src/bert_tokenizer.dart' show BertTokenizer, TokenizerOutput;
 export 'src/embedding_model.dart' show OnnxEmbeddingModel;
+export 'src/model_catalog.dart' show ModelCatalog;
+export 'src/model_downloader.dart'
+    show ModelDownloader, ModelPaths, DownloadProgressCallback;
+export 'src/model_spec.dart' show ModelSpec;
 export 'src/sq8.dart' show quantise, dequantise;

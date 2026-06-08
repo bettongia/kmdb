@@ -176,7 +176,7 @@ void main() {
         config.addFtsIndex('docs', 'body');
         // Signal that an embedding model is configured — this tells the CLI
         // that a vector index would be active, enabling hybrid mode label.
-        config.embeddingModel = (type: 'onnx', modelPath: '/fake/model.onnx');
+        config.embeddingModel = (type: 'onnx', modelId: 'bge-small-en-v1.5');
 
         final ok = await SearchCommand().execute(
           _ctx(db, config: config, out: out, err: err),
@@ -212,7 +212,7 @@ void main() {
       () async {
         final config = KmdbConfig.empty();
         config.addFtsIndex('docs', 'body');
-        config.embeddingModel = (type: 'onnx', modelPath: '/fake/model.onnx');
+        config.embeddingModel = (type: 'onnx', modelId: 'bge-small-en-v1.5');
 
         final ok = await SearchCommand().execute(
           _ctx(db, config: config, out: out, err: err),
@@ -255,7 +255,7 @@ void main() {
     test('--candidates 5 limits candidates in hybrid mode', () async {
       final config = KmdbConfig.empty();
       config.addFtsIndex('docs', 'body');
-      config.embeddingModel = (type: 'onnx', modelPath: '/fake/model.onnx');
+      config.embeddingModel = (type: 'onnx', modelId: 'bge-small-en-v1.5');
 
       final ok = await SearchCommand().execute(
         _ctx(db, config: config, out: out),
@@ -308,7 +308,7 @@ void main() {
     test('json output includes rrfK when in hybrid mode', () async {
       final config = KmdbConfig.empty();
       config.addFtsIndex('docs', 'body');
-      config.embeddingModel = (type: 'onnx', modelPath: '/fake/model.onnx');
+      config.embeddingModel = (type: 'onnx', modelId: 'bge-small-en-v1.5');
 
       await SearchCommand().execute(
         _ctx(db, config: config, out: out),

@@ -39,13 +39,19 @@ typedef FtsIndexRecord = ({
 
 /// An embedding model configuration stored in the KMDB config.
 ///
-/// The model is referenced by its ONNX file path so that the caller can
-/// validate that semantic search is available before opening the database.
+/// The model is referenced by its catalog identifier ([modelId]) so that the
+/// correct [ModelSpec] can be looked up in `ModelCatalog` without hardcoding
+/// paths. The [type] field is always `"onnx"` for ONNX Runtime-backed models.
 ///
 /// ```json
-/// "embeddingModel": { "type": "onnx", "modelPath": "/path/to/bge_small.onnx" }
+/// "embeddingModel": { "type": "onnx", "modelId": "bge-small-en-v1.5" }
 /// ```
-typedef EmbeddingModelConfig = ({String type, String modelPath});
+///
+/// **Migration note:** Configs written before this plan used `"modelPath"`
+/// instead of `"modelId"`. Reading such a config produces a [FormatException]
+/// with a migration message directing the user to replace `modelPath` with
+/// `modelId` naming a catalog model.
+typedef EmbeddingModelConfig = ({String type, String modelId});
 
 /// Manages the per-database configuration stored at
 /// `{dbDir}/local/config.json`.
@@ -320,21 +326,34 @@ final class KmdbConfig {
           "Corrupt config.json: 'embeddingModel' must be a JSON object.",
         );
       }
+
+      // Detect legacy config written with 'modelPath' instead of 'modelId'.
+      // This check must fire before the generic missing-modelId error so the
+      // user receives an actionable migration message rather than a confusing
+      // "missing required field" error.
+      if (emRaw.containsKey('modelPath') && !emRaw.containsKey('modelId')) {
+        throw const FormatException(
+          "Corrupt config.json: 'embeddingModel.modelPath' is no longer "
+          'supported. Replace it with a "modelId" field naming a catalog '
+          'model (e.g. "modelId": "bge-small-en-v1.5").',
+        );
+      }
+
       final type = emRaw['type'];
-      final modelPath = emRaw['modelPath'];
+      final modelId = emRaw['modelId'];
       if (type is! String || type.isEmpty) {
         throw const FormatException(
           "Corrupt config.json: 'embeddingModel.type' must be a non-empty "
           'string.',
         );
       }
-      if (modelPath is! String || modelPath.isEmpty) {
+      if (modelId is! String || modelId.isEmpty) {
         throw const FormatException(
-          "Corrupt config.json: 'embeddingModel.modelPath' must be a "
-          'non-empty string.',
+          "Corrupt config.json: 'embeddingModel.modelId' must be a "
+          'non-empty string (e.g. "bge-small-en-v1.5").',
         );
       }
-      embeddingModel = (type: type, modelPath: modelPath);
+      embeddingModel = (type: type, modelId: modelId);
     }
 
     // ── Unknown keys (forward compatibility) ─────────────────────────────────
@@ -503,7 +522,7 @@ final class KmdbConfig {
       if (embeddingModel != null)
         'embeddingModel': {
           'type': embeddingModel!.type,
-          'modelPath': embeddingModel!.modelPath,
+          'modelId': embeddingModel!.modelId,
         },
     };
     return const JsonEncoder.withIndent('  ').convert(payload);

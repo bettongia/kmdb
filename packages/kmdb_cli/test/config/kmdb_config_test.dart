@@ -657,7 +657,7 @@ void main() {
         localDir.createSync();
         io.File('${tmpDir.path}/local/config.json').writeAsStringSync(
           jsonEncode({
-            'embeddingModel': {'modelPath': '/models/bge.onnx'},
+            'embeddingModel': {'modelId': 'bge-small-en-v1.5'},
           }),
         );
         expect(
@@ -674,7 +674,7 @@ void main() {
     );
 
     test(
-      'throws FormatException when embeddingModel.modelPath is missing',
+      'throws FormatException when embeddingModel.modelId is missing',
       () async {
         final localDir = io.Directory('${tmpDir.path}/local');
         localDir.createSync();
@@ -689,7 +689,36 @@ void main() {
             isA<FormatException>().having(
               (e) => e.message,
               'message',
-              contains("'embeddingModel.modelPath'"),
+              contains("'embeddingModel.modelId'"),
+            ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'throws FormatException with migration message for legacy modelPath',
+      () async {
+        // Config written before this plan used "modelPath" — must get an
+        // actionable migration message rather than a generic missing-field error.
+        final localDir = io.Directory('${tmpDir.path}/local');
+        localDir.createSync();
+        io.File('${tmpDir.path}/local/config.json').writeAsStringSync(
+          jsonEncode({
+            'embeddingModel': {'type': 'onnx', 'modelPath': '/models/bge.onnx'},
+          }),
+        );
+        expect(
+          () => KmdbConfig.forDatabase(tmpDir.path),
+          throwsA(
+            isA<FormatException>().having(
+              (e) => e.message,
+              'message',
+              allOf(
+                contains('modelPath'),
+                contains('no longer supported'),
+                contains('modelId'),
+              ),
             ),
           ),
         );
@@ -698,12 +727,12 @@ void main() {
 
     test('round-trips embeddingModel through save/load', () async {
       final config = await KmdbConfig.forDatabase(tmpDir.path);
-      config.embeddingModel = (type: 'onnx', modelPath: '/models/bge.onnx');
+      config.embeddingModel = (type: 'onnx', modelId: 'bge-small-en-v1.5');
       await config.save();
 
       final reloaded = await KmdbConfig.forDatabase(tmpDir.path);
       expect(reloaded.embeddingModel?.type, 'onnx');
-      expect(reloaded.embeddingModel?.modelPath, '/models/bge.onnx');
+      expect(reloaded.embeddingModel?.modelId, 'bge-small-en-v1.5');
     });
   });
 

@@ -27,17 +27,18 @@ import 'session_state.dart';
 ///
 /// ## Configurable fields
 ///
-/// | JSON key    | [SessionState] field  | Type           |
-/// |-------------|----------------------|----------------|
-/// | `bail`      | [SessionState.bail]         | bool           |
+/// | JSON key    | [SessionState] field  | Type              |
+/// |-------------|----------------------|-------------------|
+/// | `bail`      | [SessionState.bail]         | bool              |
 /// | `color`     | [SessionState.colorMode]    | `on`/`off`/`auto` |
-/// | `compact`   | [SessionState.compact]      | bool           |
-/// | `echo`      | [SessionState.echo]         | bool           |
-/// | `headers`   | [SessionState.headers]      | bool           |
-/// | `limit`     | [SessionState.defaultLimit] | int (0 = none) |
-/// | `mode`      | [SessionState.outputMode]   | `json`/`table`/… |
-/// | `nullvalue` | [SessionState.nullValue]    | string         |
-/// | `timer`     | [SessionState.timer]        | bool           |
+/// | `compact`   | [SessionState.compact]      | bool              |
+/// | `echo`      | [SessionState.echo]         | bool              |
+/// | `headers`   | [SessionState.headers]      | bool              |
+/// | `limit`     | [SessionState.defaultLimit] | int (0 = none)    |
+/// | `mode`      | [SessionState.outputMode]   | `json`/`table`/…  |
+/// | `nullvalue` | [SessionState.nullValue]    | string            |
+/// | `timer`     | [SessionState.timer]        | bool              |
+/// | `cacheDir`  | — (returned by [cacheDir])  | string path       |
 ///
 /// Unknown keys and invalid values are silently ignored so that forward- and
 /// backward-compatible config files can coexist with any KMDB version.
@@ -49,7 +50,21 @@ final class ReplConfig {
 
   final String _path;
 
+  /// The resolved model cache directory.
+  ///
+  /// Populated after [load] from the `cacheDir` key in `~/.kmdbrc`, or
+  /// defaults to `~/.kmdb_cache`. The directory is created lazily on first
+  /// download — it does not need to exist before [load] is called.
+  String? _cacheDir;
+
   // ── Public API ──────────────────────────────────────────────────────────────
+
+  /// Returns the resolved cache directory for downloaded model files.
+  ///
+  /// Value is available after [load] has been called. Defaults to
+  /// `~/.kmdb_cache` if not overridden in `~/.kmdbrc`. The directory is
+  /// created lazily by [ModelDownloader] on first download.
+  String get cacheDir => _cacheDir ?? _defaultCacheDir();
 
   /// Loads config from [_path] and applies it to [state].
   ///
@@ -86,7 +101,7 @@ final class ReplConfig {
     }
   }
 
-  static void _apply(Map<String, dynamic> json, SessionState state) {
+  void _apply(Map<String, dynamic> json, SessionState state) {
     if (json['bail'] is bool) state.bail = json['bail'] as bool;
     if (json['compact'] is bool) state.compact = json['compact'] as bool;
     if (json['echo'] is bool) state.echo = json['echo'] as bool;
@@ -113,6 +128,11 @@ final class ReplConfig {
         // Unknown mode string — keep default.
       }
     }
+    // Resolve cache dir — must be non-empty to override the default.
+    if (json['cacheDir'] is String) {
+      final dir = (json['cacheDir'] as String).trim();
+      if (dir.isNotEmpty) _cacheDir = dir;
+    }
   }
 
   static Map<String, dynamic> _defaults() => {
@@ -125,6 +145,9 @@ final class ReplConfig {
     'mode': 'json',
     'nullvalue': '',
     'timer': false,
+    // cacheDir is commented out in the defaults file to show the user the
+    // option exists without overriding the system default.
+    // 'cacheDir': '~/.kmdb_cache',
   };
 
   static String _defaultPath() {
@@ -133,5 +156,13 @@ final class ReplConfig {
         io.Platform.environment['USERPROFILE'] ??
         '.';
     return '$home/.kmdbrc';
+  }
+
+  static String _defaultCacheDir() {
+    final home =
+        io.Platform.environment['HOME'] ??
+        io.Platform.environment['USERPROFILE'] ??
+        '.';
+    return '$home/.kmdb_cache';
   }
 }

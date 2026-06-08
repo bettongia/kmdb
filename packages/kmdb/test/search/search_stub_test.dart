@@ -46,8 +46,14 @@ final class _DocCodec implements KmdbCodec<_Doc> {
 
 final class _FakeEmbeddingModel implements EmbeddingModel {
   @override
+  String get modelId => 'fake-model-v1';
+
+  @override
+  int get dimensions => 384;
+
+  @override
   Future<(Float32List, bool)> embed(String text) async =>
-      (Float32List(384), false);
+      (Float32List(dimensions), false);
 
   @override
   void dispose() {}

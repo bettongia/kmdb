@@ -29,9 +29,9 @@ import 'vec_index_state.dart';
 
 /// Manages all vector (semantic) search indexes for a [KmdbDatabase] instance.
 ///
-/// [VecManager] intercepts document writes to maintain SQ8-quantised BGE
-/// embedding indexes, executes flat-scan cosine similarity queries, and handles
-/// post-sync delta application. All vector key writes are included in the same
+/// [VecManager] intercepts document writes to maintain SQ8-quantised embedding
+/// indexes, executes flat-scan cosine similarity queries, and handles post-sync
+/// delta application. All vector key writes are included in the same
 /// [WriteBatch] as the triggering document write, ensuring atomicity (spec §22).
 ///
 /// ## Storage layout
@@ -40,9 +40,13 @@ import 'vec_index_state.dart';
 ///
 /// | Namespace | Key | Content |
 /// |---|---|---|
-/// | `$vec:{ns}:{field}` | `{docId}` (32-char UUID) | 384-byte SQ8 vector |
+/// | `$vec:{ns}:{field}` | `{docId}` (32-char UUID) | D-byte SQ8 vector |
 /// | `$vec:corpus:{ns}:{field}` | corpus sentinel | CBOR map — `{n}` |
 /// | `$vec:truncated:{ns}:{field}` | `{docId}` (32-char UUID) | empty bytes |
+///
+/// where `D = model.dimensions` (384 for BGE Small En v1.5, 1024 for BGE-M3,
+/// etc.). The byte length of each stored SQ8 vector equals the model dimension
+/// (1 byte per component).
 ///
 /// ## Index lifecycle
 ///
@@ -112,22 +116,44 @@ final class VecManager implements WriteAugmentor {
 
   // ── Startup ─────────────────────────────────────────────────────────────────
 
-  /// Called during [KmdbDatabase.open] to recover from unclean shutdowns.
+  /// Called during [KmdbDatabase.open] to recover from unclean shutdowns and
+  /// detect model identity mismatches.
   ///
-  /// Any index found in `syncing` state indicates that [applyDelta] was
-  /// interrupted by a crash. The index is transitioned to `stale` so the next
-  /// call to [ensureBuilt] triggers a full rebuild.
+  /// Performs two checks for each declared index:
+  ///
+  /// 1. **Crash recovery:** Any index found in `syncing` state indicates that
+  ///    [applyDelta] was interrupted by a crash. The index is transitioned to
+  ///    `stale` so the next call to [ensureBuilt] triggers a full rebuild.
+  ///
+  /// 2. **Model identity:** If the stored [VecIndexState.modelId] is non-empty
+  ///    and does not match [EmbeddingModel.modelId], the index was built by a
+  ///    different model and its entries are incompatible with the current
+  ///    model's dimension and embedding space. The index is transitioned to
+  ///    `stale`. The existing lazy `ensureBuilt`-on-next-`search()` path
+  ///    handles the rebuild; use [reindex] to force an immediate rebuild.
+  ///
+  ///    An empty stored [VecIndexState.modelId] means the index was built
+  ///    before model identity tracking was added. It is treated as a match —
+  ///    the id will be stamped on the next [ensureBuilt] call.
   Future<void> checkAndTransitionOnOpen() async {
     for (final def in _defs) {
-      final state = await _loadState(def.collection, def.field);
-      _statusCache[_cacheKey(def.collection, def.field)] = state.status;
+      var state = await _loadState(def.collection, def.field);
+
+      // Crash recovery: syncing → stale.
       if (state.status == VecIndexStatus.syncing) {
-        await _saveState(
-          state.copyWith(status: VecIndexStatus.stale),
-          def.collection,
-          def.field,
-        );
+        state = state.copyWith(status: VecIndexStatus.stale);
+        await _saveState(state, def.collection, def.field);
       }
+
+      // Model identity check: non-empty stored id that differs from current
+      // model's id indicates the index was built by a different model. Mark it
+      // stale so it will be rebuilt on the next search() call.
+      if (state.modelId.isNotEmpty && state.modelId != _model.modelId) {
+        state = state.copyWith(status: VecIndexStatus.stale);
+        await _saveState(state, def.collection, def.field);
+      }
+
+      _statusCache[_cacheKey(def.collection, def.field)] = state.status;
     }
   }
 
@@ -359,15 +385,42 @@ final class VecManager implements WriteAugmentor {
     _writeCorpusN(namespace, field, count, corpusBatch);
     await _store.writeBatchInternal(corpusBatch);
 
+    // Stamp the model identity so future opens can detect model changes.
     await _saveState(
       state.copyWith(
         status: VecIndexStatus.current,
         builtThrough: lastDocId,
         builtAt: DateTime.now().toUtc().toIso8601String(),
+        modelId: _model.modelId,
       ),
       namespace,
       field,
     );
+  }
+
+  /// Rebuilds all stale `$vec:` indexes in the foreground.
+  ///
+  /// Iterates every declared [VecIndexDefinition] and calls [ensureBuilt] for
+  /// any field whose current status is [VecIndexStatus.stale] or
+  /// [VecIndexStatus.undefined]. Fields that are already [VecIndexStatus.current]
+  /// or [VecIndexStatus.syncing] are skipped.
+  ///
+  /// This method is **vec-only** — it does not touch FTS indexes. It is
+  /// intended for use after a planned model upgrade to force the rebuild
+  /// immediately rather than waiting for the next `search()` call.
+  ///
+  /// Returns the number of indexes that were (re)built.
+  Future<int> reindex() async {
+    var count = 0;
+    for (final def in _defs) {
+      final state = await _loadState(def.collection, def.field);
+      if (state.status == VecIndexStatus.stale ||
+          state.status == VecIndexStatus.undefined) {
+        await ensureBuilt(def.collection, def.field);
+        count++;
+      }
+    }
+    return count;
   }
 
   // ── Delta sync ────────────────────────────────────────────────────────────
@@ -602,6 +655,11 @@ final class VecManager implements WriteAugmentor {
   }) async {
     final scores = <String, double>{};
 
+    // The expected byte length of an SQ8 entry equals the model's dimension
+    // (1 byte per component). Entries with a different length indicate a
+    // model mismatch or corruption and are silently skipped.
+    final expectedByteLen = _model.dimensions;
+
     if (candidateIds != null) {
       // Pre-filter path: targeted key lookups instead of a full prefix scan.
       for (final docId in candidateIds) {
@@ -609,7 +667,7 @@ final class VecManager implements WriteAugmentor {
           VecIndexState.vecNamespace(namespace, field),
           docId,
         );
-        if (bytes == null || bytes.length != 384) continue;
+        if (bytes == null || bytes.length != expectedByteLen) continue;
         final deq = _dequantise(bytes);
         scores[docId] = _dotProduct(queryEmbedding, deq);
       }
@@ -618,7 +676,7 @@ final class VecManager implements WriteAugmentor {
       await for (final entry in _store.scan(
         VecIndexState.vecNamespace(namespace, field),
       )) {
-        if (entry.value.length != 384) continue; // skip corrupt entries
+        if (entry.value.length != expectedByteLen) continue; // skip corrupt
         final deq = _dequantise(entry.value);
         scores[entry.key] = _dotProduct(queryEmbedding, deq);
       }

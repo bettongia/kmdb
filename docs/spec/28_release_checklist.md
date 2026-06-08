@@ -414,6 +414,47 @@ contention test that exercises the lease protocol.
 
 ---
 
+### RC-14 — Model download SHA-256 verification and atomic rename
+
+- **Area:** embedding model download (`kmdb_inferencing`)
+- **Validates:** that `ModelDownloader.ensure()` correctly:
+  1. Downloads the ONNX and vocabulary files to a `.part` temporary path.
+  2. Verifies each file's SHA-256 against `ModelSpec.onnxSha256` /
+     `ModelSpec.vocabSha256`.
+  3. Atomically renames `.part` → final name only after verification passes.
+  4. Refuses to use a corrupt or tampered cached file (re-downloads on
+     checksum mismatch).
+  5. Handles a crash mid-download (stale `.part` file) correctly on next open
+     (re-downloads without corrupting the cache directory).
+- **Why not automated:** requires real network access to the model CDN; the
+  file sizes are hundreds of MB; the crash-recovery test requires OS-level
+  process termination; the SHA-256 mismatch test requires network-level
+  interception or file mutation, which CI cannot reliably reproduce.
+- **Applies when:** `ModelDownloader` is introduced or its download/verify/rename
+  logic changes; before any release that ships download-on-demand model support;
+  when `ModelSpec` checksums are updated.
+- **Prerequisites:** network access to `huggingface.co` (or the configured CDN);
+  an empty or warm `~/.kmdb_cache`; a way to mutate a cached file or inject a
+  bad checksum.
+- **Steps:**
+  1. Fresh cache: call `OnnxEmbeddingModel.load(cacheDir: dir)` with an empty
+     `dir`; verify both files are downloaded, checksums verified, and the model
+     loads correctly.
+  2. Warm cache: call again with the same `dir`; verify no network requests are
+     made (add a logging proxy if needed) and the model loads from the cache.
+  3. Corrupt cache: mutate one byte of the cached ONNX file; call again; verify
+     the file is re-downloaded and the model loads correctly.
+  4. Mid-download crash: simulate a crash by leaving a `.part` file in the cache
+     directory; call again; verify the partial file is replaced and the model
+     loads correctly.
+- **Expected result:** all four scenarios complete without errors; no corrupt
+  data is used; the cache is left in a consistent state after each scenario.
+- **Related:** `docs/plans/plan_configurable_embedding_model.md` (Phase 3),
+  `packages/kmdb_inferencing/lib/src/model_downloader.dart`,
+  `packages/kmdb_inferencing/lib/src/model_spec.dart`.
+
+---
+
 ## Release log
 
 | Version | Date | Tester | Checks run | Result | Notes |
