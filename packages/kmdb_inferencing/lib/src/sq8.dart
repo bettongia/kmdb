@@ -1,10 +1,10 @@
-// Copyright 2026 The Authors
+// Copyright 2026 The Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -33,17 +33,16 @@ import 'dart:typed_data';
 ///   clamped rather than panicked.
 /// - No per-vector calibration is required; the fixed range provides adequate
 ///   accuracy for cosine similarity ranking.
+/// - [vector] may have any positive length (384 for BGE Small En v1.5, 1024
+///   for BGE-M3, etc.). A debug-mode assertion fires for empty vectors.
 ///
 /// The quantisation error is bounded by `2.0 / 255 ≈ 0.00784` per component
 /// (one quantisation step). In practice, round-trip error is ≤ 0.004 per
 /// element.
-///
-/// [vector] may have any length (the plan uses 384-element BGE vectors);
-/// a debug-mode assertion fires for lengths other than 384.
 Uint8List quantise(Float32List vector) {
   assert(
-    vector.length == 384,
-    'Expected a 384-element BGE embedding vector, got ${vector.length}',
+    vector.isNotEmpty,
+    'Embedding vector must be non-empty, got length ${vector.length}',
   );
   final out = Uint8List(vector.length);
   for (var i = 0; i < vector.length; i++) {
@@ -68,12 +67,12 @@ Uint8List quantise(Float32List vector) {
 /// For cosine similarity via dot product this is acceptable — the ranking
 /// order is preserved.
 ///
-/// [vector] may have any length; a debug-mode assertion fires for lengths
-/// other than 384.
+/// [vector] may have any positive length. A debug-mode assertion fires for
+/// empty vectors.
 Float32List dequantise(Uint8List vector) {
   assert(
-    vector.length == 384,
-    'Expected a 384-element SQ8 quantised vector, got ${vector.length}',
+    vector.isNotEmpty,
+    'SQ8 vector must be non-empty, got length ${vector.length}',
   );
   final out = Float32List(vector.length);
   for (var i = 0; i < vector.length; i++) {

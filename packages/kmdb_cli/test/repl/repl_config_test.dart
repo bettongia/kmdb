@@ -230,4 +230,61 @@ void main() {
       expect(state.outputMode, OutputMode.json);
     });
   });
+
+  // ── cacheDir ────────────────────────────────────────────────────────────────
+
+  group('cacheDir', () {
+    test('defaults to ~/.kmdb_cache when not set in config', () async {
+      // Write a config without cacheDir.
+      await io.File(configPath).writeAsString(jsonEncode({'bail': false}));
+      final config = ReplConfig(filePath: configPath);
+      await config.load(SessionState());
+
+      // Should end with the default suffix regardless of HOME.
+      expect(config.cacheDir, endsWith('.kmdb_cache'));
+    });
+
+    test('uses cacheDir from config when present', () async {
+      const customDir = '/custom/model/cache';
+      await io.File(
+        configPath,
+      ).writeAsString(jsonEncode({'cacheDir': customDir}));
+      final config = ReplConfig(filePath: configPath);
+      await config.load(SessionState());
+
+      expect(config.cacheDir, equals(customDir));
+    });
+
+    test('empty cacheDir string falls back to default', () async {
+      await io.File(configPath).writeAsString(jsonEncode({'cacheDir': ''}));
+      final config = ReplConfig(filePath: configPath);
+      await config.load(SessionState());
+
+      // Empty string is treated as absent — fall back to system default.
+      expect(config.cacheDir, endsWith('.kmdb_cache'));
+    });
+
+    test('whitespace-only cacheDir string falls back to default', () async {
+      await io.File(configPath).writeAsString(jsonEncode({'cacheDir': '   '}));
+      final config = ReplConfig(filePath: configPath);
+      await config.load(SessionState());
+
+      expect(config.cacheDir, endsWith('.kmdb_cache'));
+    });
+
+    test('cacheDir before load returns the default', () {
+      // cacheDir is valid to call before load — it uses the environment default.
+      final config = ReplConfig(filePath: configPath);
+      expect(config.cacheDir, endsWith('.kmdb_cache'));
+    });
+
+    test('wrong type for cacheDir is ignored', () async {
+      await io.File(configPath).writeAsString(jsonEncode({'cacheDir': 42}));
+      final config = ReplConfig(filePath: configPath);
+      await config.load(SessionState());
+
+      // Non-string values are silently ignored — fall back to default.
+      expect(config.cacheDir, endsWith('.kmdb_cache'));
+    });
+  });
 }

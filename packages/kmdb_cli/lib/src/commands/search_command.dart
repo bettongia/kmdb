@@ -229,7 +229,7 @@ final class SearchCommand extends CliCommand {
       ctx.writeError(
         'Semantic search requires an embedding model; configure '
         'embeddingModel in local/config.json.\n'
-        'Example: { "type": "onnx", "modelPath": "/path/to/bge_small.onnx" }',
+        'Example: { "type": "onnx", "modelId": "bge-small-en-v1.5" }',
       );
       return false;
     }

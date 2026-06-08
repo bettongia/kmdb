@@ -44,6 +44,7 @@ import 'commands/sync_command.dart';
 import 'commands/util_command.dart';
 import 'commands/index_command.dart';
 import 'commands/schema_command.dart';
+import 'commands/reindex_command.dart';
 import 'commands/search_command.dart';
 import 'commands/verify_command.dart';
 import 'commands/vault/vault_command.dart';
@@ -88,6 +89,7 @@ final _commands = <String, CliCommand>{
     const SyncCommand(),
     const IndexCommand(),
     const SchemaCommand(),
+    const ReindexCommand(),
     const SearchCommand(),
     const VaultCommand(),
     const VersionsCommand(),

@@ -28,9 +28,15 @@ import 'package:test/test.dart';
 /// controlled semantic similarity space without requiring ONNX.
 final class _DeterministicEmbeddingModel implements EmbeddingModel {
   @override
+  String get modelId => 'deterministic-model-v1';
+
+  @override
+  int get dimensions => 384;
+
+  @override
   Future<(Float32List, bool)> embed(String text) async {
     final lower = text.toLowerCase();
-    final v = Float32List(384);
+    final v = Float32List(dimensions);
 
     if (lower.contains('database') || lower.contains('storage')) {
       v[0] = 0.9;

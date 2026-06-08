@@ -12,7 +12,7 @@ vectors in the KV store under `$vec:` system namespaces.
 
 ## Embedding Model
 
-**Model:** [BGE Small En v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5)
+**Default model:** [BGE Small En v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5)
 
 | Property    | Value                              |
 | :---------- | :--------------------------------- |
@@ -22,17 +22,90 @@ vectors in the KV store under `$vec:` system namespaces.
 | Token limit | 512 (510 usable after [CLS]/[SEP]) |
 | Output      | L2-normalized float32 vectors      |
 
-### Bundling
+### Model Catalog
 
-The model and supporting assets (`vocab.txt`, `tokenizer_config.json`) are
-bundled in the `kmdb` package under `assets/models/bge-small-en/`. The binary
-`bge_small.onnx` is tracked in the repository using **Git LFS**. No internet
-access or user configuration is required to use semantic search.
+The `ModelCatalog` in `kmdb_inferencing` is an explicit allowlist of supported
+ONNX models. Each entry (`ModelSpec`) records the model's catalog identifier,
+embedding dimension, download URLs, and SHA-256 checksums.
+
+| Model ID            | Dimensions | Status       |
+| :------------------ | :--------- | :----------- |
+| `bge-small-en-v1.5` | 384        | Validated    |
+| `bge-m3-v1.0`       | 1024       | Unvalidated† |
+
+† Registered in the catalog but not yet tested end-to-end. Using an unvalidated
+model ID throws `UnsupportedError`. BGE-M3 support is deferred to v0.08.
+
+`ModelCatalog.lookup(id)` throws `ArgumentError` for unknown IDs and
+`UnsupportedError` for unvalidated ones. `ModelCatalog.isKnown(id)` returns
+`true` for any registered ID regardless of validation status.
+`ModelCatalog.defaultModelId` is `'bge-small-en-v1.5'`.
+
+### Bundling (LFS assets)
+
+The default model and supporting assets (`vocab.txt`, `tokenizer_config.json`)
+are bundled in the `kmdb` package under `assets/models/bge-small-en/`. The
+binary `bge_small.onnx` is tracked in the repository using **Git LFS**. No
+internet access or user configuration is required to use the default model.
+
+### Download-on-demand (`ModelDownloader`)
+
+For alternative catalog models the `kmdb_inferencing` package provides
+`ModelDownloader`, which downloads and verifies model assets on first use:
+
+1. The ONNX file and vocabulary are downloaded to a configurable local cache
+   directory (`cacheDir`, defaulting to `~/.kmdb_cache`).
+2. Each file is downloaded to a `.part` temporary name and atomically renamed
+   to its final name only after SHA-256 verification passes. This ensures a
+   crash during download leaves no corrupt files in the cache.
+3. On subsequent opens, the cached files are verified by SHA-256 before use.
+
+`OnnxEmbeddingModel.load(cacheDir: dir)` invokes `ModelDownloader` internally.
+The cache directory is configured per-REPL session in `~/.kmdbrc`
+(`cacheDir` key) and not in `KmdbConfig` or `KvStoreConfig` — it is a local
+client preference, not a per-database setting.
 
 All kmdb packages carry `publish_to: none`, so the pub.dev 100 MB package size
 limit does not currently apply. Publishing to pub.dev in future will require
-resolving this — either by moving to on-demand download or splitting the model
-into a separate package.
+resolving this — either by moving entirely to on-demand download or splitting the
+model into a separate package.
+
+## Model Lifecycle and Identity
+
+### Model Identity Tracking
+
+Each `$vec:` index remembers the catalog ID of the model that built it. This
+identity is stored in the `VecIndexState` CBOR payload under the `modelId` key
+and stamped by `VecManager.ensureBuilt()` after a successful full rebuild.
+
+On `KmdbDatabase.open()`, `VecManager.checkAndTransitionOnOpen()` compares the
+stored `modelId` against the current `EmbeddingModel.modelId`:
+
+- **Match** (or empty stored ID) — index is left in its existing state.
+  An empty stored `modelId` means the index was built before identity tracking
+  was introduced; it is treated as a match to avoid needless rebuilds on upgrade.
+  The ID is stamped on the next `ensureBuilt()` call.
+- **Mismatch** — the index is immediately transitioned to `stale`. The stored
+  vectors are byte-incompatible with the new model (different dimension and/or
+  embedding space) and must be discarded. A full rebuild happens lazily on the
+  next `search()` call, or immediately via `KmdbDatabase.reindex()`.
+
+### Changing the Model
+
+1. Update `embeddingModel.modelId` in `local/config.json`.
+2. Reopen the database (or restart the application).
+3. `checkAndTransitionOnOpen()` marks all affected indexes `stale`.
+4. Run `kmdb <db> reindex` to force an immediate foreground rebuild, or allow
+   the lazy rebuild to happen on the next `search()` call.
+
+### `KmdbDatabase.reindex()`
+
+`KmdbDatabase.reindex()` iterates every declared `VecIndexDefinition` and calls
+`VecManager.ensureBuilt()` on any field in `stale` or `undefined` state. Fields
+already in `current` or `syncing` state are skipped. Returns the count of
+indexes rebuilt. Returns `0` when no vector manager is configured.
+
+The CLI surface is `kmdb <db> reindex`.
 
 ## Tokenisation Pipeline
 
@@ -77,13 +150,16 @@ Three key types are written to the KV store, all exempt from the session object
 cache and materialised view cache (§15):
 
 ```
-$vec:{ns}:{field}:{docId}           →  Uint8List (384 bytes, SQ8 quantized)
+$vec:{ns}:{field}:{docId}           →  Uint8List (D bytes, SQ8 quantized)
 $vec:corpus:{ns}:{field}            →  { n: int }
 $vec:truncated:{ns}:{field}:{docId} →  (empty — key presence = truncation marker)
 ```
 
+where `D = EmbeddingModel.dimensions` (384 for BGE Small En v1.5, 1024 for
+BGE-M3, etc.). The byte length equals the model dimension (1 byte per component).
+
 **Vector entry** — the SQ8-quantized embedding for a single `(document, field)`
-pair. 384 bytes per entry (4× reduction from float32's 1,536 bytes).
+pair. `D` bytes per entry (4× reduction from float32's `4×D` bytes).
 
 **Corpus stats** — count of indexed documents (`n`). Used for index state
 reporting; not required for scoring (unlike the lexical corpus stats, there is
@@ -103,9 +179,9 @@ $$u = \text{clamp}\!\left(\text{round}\!\left(\frac{f + 1.0}{2.0} \times 255\rig
 
 $$f = \frac{u}{255.0} \times 2.0 - 1.0$$
 
-Storage per vector: 384 bytes. If a future model produces non-normalized
-outputs, per-dimension calibration values can be added to `$vec:corpus:` at that
-point.
+Storage per vector: `D` bytes (where `D = EmbeddingModel.dimensions`). If a
+future model produces non-normalized outputs, per-dimension calibration values
+can be added to `$vec:corpus:` at that point.
 
 ## Write Behaviour
 
@@ -185,7 +261,7 @@ replacing tokenisation.
 For each entry in the delta:
 
 - **Added / updated** — fetch the current document value, run inference to
-  produce a 384-dim embedding, quantize to SQ8, and write using the same insert
+  produce a `D`-dim embedding, quantize to SQ8, and write using the same insert
   / update path as §22 Write Behaviour.
 - **Deleted** — write DELETE entries and decrement corpus stats as per the
   delete path in §22 Write Behaviour. No inference is required.

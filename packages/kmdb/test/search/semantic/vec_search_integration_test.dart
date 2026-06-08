@@ -27,10 +27,16 @@ import 'package:test/test.dart';
 /// the text. This lets the integration tests assert ranking order.
 final class _ClusteredEmbeddingModel implements EmbeddingModel {
   @override
+  String get modelId => 'clustered-model-v1';
+
+  @override
+  int get dimensions => 384;
+
+  @override
   Future<(Float32List, bool)> embed(String text) async {
     final lower = text.toLowerCase();
     // Assign a base direction that reflects the semantic "cluster".
-    final v = Float32List(384);
+    final v = Float32List(dimensions);
 
     if (lower.contains('database') || lower.contains('storage')) {
       v[0] = 0.9;

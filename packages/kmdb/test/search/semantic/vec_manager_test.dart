@@ -29,16 +29,22 @@ final class _FakeEmbeddingModel implements EmbeddingModel {
   bool shouldThrow = false;
 
   @override
+  String get modelId => 'fake-model-v1';
+
+  @override
+  int get dimensions => 384;
+
+  @override
   Future<(Float32List, bool)> embed(String text) async {
     embedCalled = true;
     if (shouldThrow) throw Exception('inference failure');
     if (text.isEmpty) {
-      return (Float32List(384), false);
+      return (Float32List(dimensions), false);
     }
     final seed = text.codeUnits.fold(0, (a, b) => a ^ b);
     final rng = math.Random(seed);
     final v = Float32List.fromList(
-      List.generate(384, (_) => rng.nextDouble() * 2 - 1),
+      List.generate(dimensions, (_) => rng.nextDouble() * 2 - 1),
     );
     var norm = 0.0;
     for (final x in v) {
@@ -510,6 +516,205 @@ void main() {
     });
   });
 
+  // ── Model identity — mismatch detection ────────────────────────────────────
+
+  group('model identity', () {
+    test('reopening with a different model id marks the index stale', () async {
+      // Step 1: build the index with model-A.
+      final path = 'vec_identity_${Object().hashCode}';
+      final adapterA = MemoryStorageAdapter();
+      final modelA = _ConfigurableIdEmbeddingModel('model-a');
+      final dbA = await KmdbDatabase.open(
+        path: path,
+        adapter: adapterA,
+        vecIndexes: [VecIndexDefinition(collection: 'docs', field: 'body')],
+        embeddingModel: modelA,
+      );
+      final colA = dbA.collection(name: 'docs', codec: _codec);
+      await dbA.vecManager!.ensureBuilt('docs', 'body');
+      await colA.insert({'body': 'hello world'});
+      await dbA.close();
+
+      // Step 2: reopen the same adapter (same data) with model-B.
+      // checkAndTransitionOnOpen should detect the modelId mismatch.
+      final modelB = _ConfigurableIdEmbeddingModel('model-b');
+      final dbB = await KmdbDatabase.open(
+        path: path, // same path so memory adapter reuses the same lock key
+        adapter: adapterA, // reuse the same in-memory store
+        vecIndexes: [VecIndexDefinition(collection: 'docs', field: 'body')],
+        embeddingModel: modelB,
+      );
+
+      // The index should be stale because model-b != model-a.
+      final state = await _loadVecState(dbB, 'docs', 'body');
+      expect(state.status, equals(VecIndexStatus.stale));
+
+      await dbB.close();
+    });
+
+    test(
+      'reopening with the same model id does not mark the index stale',
+      () async {
+        final path = 'vec_same_model_${Object().hashCode}';
+        final adapter = MemoryStorageAdapter();
+        final modelFirst = _ConfigurableIdEmbeddingModel('same-model');
+        final dbFirst = await KmdbDatabase.open(
+          path: path,
+          adapter: adapter,
+          vecIndexes: [VecIndexDefinition(collection: 'docs', field: 'body')],
+          embeddingModel: modelFirst,
+        );
+        await dbFirst.vecManager!.ensureBuilt('docs', 'body');
+        await dbFirst.close();
+
+        // Reopen with the identical model id — index should stay current.
+        final modelSecond = _ConfigurableIdEmbeddingModel('same-model');
+        final dbSecond = await KmdbDatabase.open(
+          path: path,
+          adapter: adapter,
+          vecIndexes: [VecIndexDefinition(collection: 'docs', field: 'body')],
+          embeddingModel: modelSecond,
+        );
+
+        final state = await _loadVecState(dbSecond, 'docs', 'body');
+        expect(state.status, equals(VecIndexStatus.current));
+
+        await dbSecond.close();
+      },
+    );
+
+    test(
+      'index with empty stored modelId is treated as a match (pre-identity)',
+      () async {
+        final pathA = 'vec_empty_id_${Object().hashCode}';
+        final adapter = MemoryStorageAdapter();
+
+        // Open without building — state is undefined (empty modelId).
+        final modelA = _ConfigurableIdEmbeddingModel('any-model');
+        final dbA = await KmdbDatabase.open(
+          path: pathA,
+          adapter: adapter,
+          vecIndexes: [VecIndexDefinition(collection: 'docs', field: 'body')],
+          embeddingModel: modelA,
+        );
+        // Do NOT call ensureBuilt — state stays undefined with empty modelId.
+
+        // The undefined index must not be marked stale (empty id = no mismatch).
+        var state = await _loadVecState(dbA, 'docs', 'body');
+        expect(state.status, equals(VecIndexStatus.undefined));
+        expect(state.modelId, isEmpty);
+
+        await dbA.close();
+
+        // Reopen — checkAndTransitionOnOpen sees empty modelId → no stale mark.
+        final dbB = await KmdbDatabase.open(
+          path: pathA,
+          adapter: adapter,
+          vecIndexes: [VecIndexDefinition(collection: 'docs', field: 'body')],
+          embeddingModel: modelA,
+        );
+        state = await _loadVecState(dbB, 'docs', 'body');
+        // Still undefined, not stale — empty id is a match.
+        expect(state.status, equals(VecIndexStatus.undefined));
+
+        await dbB.close();
+      },
+    );
+
+    test('ensureBuilt stamps modelId on first build', () async {
+      final adapter = MemoryStorageAdapter();
+      const modelId = 'stamp-test-model';
+      final model = _ConfigurableIdEmbeddingModel(modelId);
+
+      final db = await KmdbDatabase.open(
+        path: 'vec_stamp_${Object().hashCode}',
+        adapter: adapter,
+        vecIndexes: [VecIndexDefinition(collection: 'docs', field: 'body')],
+        embeddingModel: model,
+      );
+
+      // Before build: modelId is empty.
+      var state = await _loadVecState(db, 'docs', 'body');
+      expect(state.modelId, isEmpty);
+
+      await db.vecManager!.ensureBuilt('docs', 'body');
+
+      // After build: modelId is stamped.
+      state = await _loadVecState(db, 'docs', 'body');
+      expect(state.modelId, equals(modelId));
+      expect(state.status, equals(VecIndexStatus.current));
+
+      await db.close();
+    });
+  });
+
+  // ── reindex() ──────────────────────────────────────────────────────────────
+
+  group('reindex()', () {
+    test('returns count of rebuilt indexes', () async {
+      final path = 'vec_reindex_${Object().hashCode}';
+      final adapter = MemoryStorageAdapter();
+      final modelA = _ConfigurableIdEmbeddingModel('model-a');
+      final dbA = await KmdbDatabase.open(
+        path: path,
+        adapter: adapter,
+        vecIndexes: [
+          VecIndexDefinition(collection: 'docs', field: 'body'),
+          VecIndexDefinition(collection: 'docs', field: 'title'),
+        ],
+        embeddingModel: modelA,
+      );
+      // Build first index, leave second undefined.
+      await dbA.vecManager!.ensureBuilt('docs', 'body');
+      await dbA.close();
+
+      // Reopen with a different model — body should be stale, title undefined.
+      final modelB = _ConfigurableIdEmbeddingModel('model-b');
+      final dbB = await KmdbDatabase.open(
+        path: path,
+        adapter: adapter,
+        vecIndexes: [
+          VecIndexDefinition(collection: 'docs', field: 'body'),
+          VecIndexDefinition(collection: 'docs', field: 'title'),
+        ],
+        embeddingModel: modelB,
+      );
+
+      // Both stale (body) and undefined (title) are rebuilt by reindex().
+      final count = await dbB.reindex();
+      expect(count, equals(2));
+
+      // Both fields should now be current.
+      final bodyState = await _loadVecState(dbB, 'docs', 'body');
+      final titleState = await _loadVecState(dbB, 'docs', 'title');
+      expect(bodyState.status, equals(VecIndexStatus.current));
+      expect(titleState.status, equals(VecIndexStatus.current));
+
+      await dbB.close();
+    });
+
+    test('returns 0 when all indexes are already current', () async {
+      final db = await _openDb();
+      await db.vecManager!.ensureBuilt('docs', 'body');
+
+      final count = await db.reindex();
+      expect(count, equals(0));
+
+      await db.close();
+    });
+
+    test('KmdbDatabase.reindex() returns 0 when no vecManager', () async {
+      // Open a database with no vector indexes — vecManager is null.
+      final db = await KmdbDatabase.open(
+        path: 'no_vec_${Object().hashCode}',
+        adapter: MemoryStorageAdapter(),
+      );
+      final count = await db.reindex();
+      expect(count, equals(0));
+      await db.close();
+    });
+  });
+
   // ── close() disposes model ─────────────────────────────────────────────────
 
   group('KmdbDatabase.close()', () {
@@ -530,6 +735,49 @@ void main() {
   });
 }
 
+// ── Configurable-id model for identity tests ──────────────────────────────────
+
+/// An embedding model whose [modelId] is set at construction time.
+///
+/// Used by model-identity tests to simulate reopening with a different model.
+final class _ConfigurableIdEmbeddingModel implements EmbeddingModel {
+  _ConfigurableIdEmbeddingModel(this._modelId);
+
+  final String _modelId;
+
+  @override
+  String get modelId => _modelId;
+
+  @override
+  int get dimensions => 384;
+
+  @override
+  Future<(Float32List, bool)> embed(String text) async =>
+      (Float32List(dimensions), false);
+
+  @override
+  void dispose() {}
+}
+
+// ── Helper: read VecIndexState from $meta ─────────────────────────────────────
+
+/// Loads the stored [VecIndexState] for [namespace]/[field] from [db]'s
+/// `$meta` namespace via the [MetaStore] API.
+///
+/// Returns the `undefined` sentinel when no state has been persisted yet.
+Future<VecIndexState> _loadVecState(
+  KmdbDatabase db,
+  String namespace,
+  String field,
+) async {
+  // VecManager stores state via MetaStore.getRawByName / putRawByName.
+  // Use the same API here to read without going through the UUID-keyed path.
+  final bytes = await db.store.meta.getRawByName(
+    VecIndexState.metaKey(namespace, field),
+  );
+  return VecIndexState.fromBytes(namespace, field, bytes);
+}
+
 // ── Tracking model for dispose test ───────────────────────────────────────────
 
 final class _TrackingEmbeddingModel implements EmbeddingModel {
@@ -537,8 +785,14 @@ final class _TrackingEmbeddingModel implements EmbeddingModel {
   final void Function() _onDispose;
 
   @override
+  String get modelId => 'tracking-model-v1';
+
+  @override
+  int get dimensions => 384;
+
+  @override
   Future<(Float32List, bool)> embed(String text) async =>
-      (Float32List(384), false);
+      (Float32List(dimensions), false);
 
   @override
   void dispose() => _onDispose();

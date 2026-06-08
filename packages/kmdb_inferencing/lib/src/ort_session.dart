@@ -46,17 +46,18 @@ Pointer<NativeFunction<T>> _slotPtr<T extends Function>(
 /// `Isolate` for inference causes ORT's internal thread pool to tear down
 /// when the isolate exits, corrupting shared mutex state.
 ///
-/// ## Input / output tensor shapes for BGE Small En v1.5
+/// ## Input / output tensor shapes
 ///
 /// Three int64 input tensors, all shaped `[1, seqLen]`:
 /// - `input_ids` — BERT token IDs produced by [BertTokenizer.encode].
 /// - `attention_mask` — 1 for real tokens, 0 for padding.
 /// - `token_type_ids` — all zeros for single-segment input.
 ///
-/// Single output tensor `last_hidden_state` has shape `[1, seqLen, 384]`
-/// and contains float32 per-token contextual embeddings. Callers must
-/// mean-pool over non-padding positions and L2-normalise to get the sentence
-/// embedding.
+/// Single output tensor `last_hidden_state` has shape `[1, seqLen, D]`
+/// where `D` is the model's embedding dimension (e.g. 384 for BGE Small En
+/// v1.5). The `D` value is sourced from [ModelSpec.embeddingDimensions] and
+/// passed to [run] as the `hiddenDim` parameter. Callers must mean-pool over
+/// non-padding positions and L2-normalise to get the sentence embedding.
 class OrtInferenceSession {
   final Pointer<OrtSession> _session;
   final Pointer<OrtMemoryInfo> _memInfo;
@@ -192,11 +193,15 @@ class OrtInferenceSession {
   /// [inputData] — parallel list of [Int64List] values. Each list must have
   /// `inputShape[1]` elements (one per token position).
   ///
-  /// [inputShape] — `[1, seqLen]` for all BGE inputs.
+  /// [inputShape] — `[1, seqLen]` for all model inputs.
   ///
   /// [outputName] — name of the output tensor, e.g. `'last_hidden_state'`.
-  /// For BGE Small En v1.5 this tensor has shape `[1, seqLen, 384]`, so the
-  /// returned list has `seqLen * 384` elements.
+  /// The output tensor has shape `[1, seqLen, hiddenDim]`, so the returned
+  /// list has `seqLen * hiddenDim` elements.
+  ///
+  /// [hiddenDim] — embedding dimension of the loaded model (e.g. 384 for
+  /// BGE Small En v1.5). Sourced from [ModelSpec.embeddingDimensions]; must
+  /// not be hardcoded in the caller.
   ///
   /// All native [OrtValue] handles are released before returning.
   List<double> run({
@@ -204,6 +209,7 @@ class OrtInferenceSession {
     required List<Int64List> inputData,
     required List<int> inputShape,
     required String outputName,
+    required int hiddenDim,
   }) {
     return using((arena) {
       final getErrorMessage = _slotPtr<GetErrorMessageC>(
@@ -289,11 +295,13 @@ class OrtInferenceSession {
       );
 
       // Extract float32 logits from the output tensor.
+      // hiddenDim is sourced from the loaded ModelSpec.embeddingDimensions,
+      // not hardcoded — this supports models with different dimensions (e.g.
+      // BGE Small En v1.5 = 384, BGE-M3 = 1024).
       final rawPtr = arena<Pointer<Void>>();
       check(getTensorData(outputPtrs[0], rawPtr));
 
       final seqLen = inputShape[1];
-      const hiddenDim = 384;
       final floatPtr = rawPtr.value.cast<Float>();
       final result = List<double>.generate(
         seqLen * hiddenDim,
