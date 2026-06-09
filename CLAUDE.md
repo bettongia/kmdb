@@ -114,6 +114,7 @@ External packages pulled in via `git:` refs in `pubspec.yaml`
   betto_zstd           — Zstd FFI compression provider (https://github.com/bettongia/zstd)
   betto_registry       — FreeDesktop shared-mime-info file-type identification (https://github.com/bettongia/registry)
   betto_builder_tools  — build helpers shared across Bettongia packages (https://github.com/bettongia/builder_tools)
+  betto_onnxrt         — ONNX Runtime for Dart: build-time binary via native-assets hook, OnnxSession API, model-download infrastructure (https://github.com/bettongia/onnxrt)
   betto_icu            — Unicode tokenizer (Tokenizer, IcuTokenizer, RegExpTokenizer) — pub.dev, consumed by kmdb_lexical
 
 Downstream consumer (separate repo, not pulled in here):

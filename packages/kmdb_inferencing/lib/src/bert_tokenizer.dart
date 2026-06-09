@@ -20,7 +20,7 @@ import 'package:kmdb_lexical/lexical.dart' show Tokenizer, RegExpTokenizer;
 /// A BERT WordPiece tokenizer backed by a `vocab.txt` file.
 ///
 /// Converts arbitrary text into BERT token IDs suitable for feeding into the
-/// BGE Small En v1.5 ONNX model via [OrtInferenceSession.run].
+/// BGE Small En v1.5 ONNX model via [OnnxSession.run].
 ///
 /// ## Pipeline
 ///

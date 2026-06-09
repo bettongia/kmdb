@@ -117,6 +117,9 @@ class _FakeHeaders implements HttpHeaders {
 }
 
 // ── Helper to build a ModelSpec with specific checksums ────────────────────
+// The betto_onnxrt ModelSpec uses a generic files map with ModelFile entries.
+// We use 'onnx' and 'vocab' as the canonical key names for the two BGE files,
+// matching the production ModelCatalog entries.
 
 ModelSpec _makeSpec({
   required String id,
@@ -124,11 +127,17 @@ ModelSpec _makeSpec({
   required List<int> vocabBytes,
 }) => ModelSpec(
   id: id,
-  embeddingDimensions: 384,
-  onnxUrl: 'https://example.com/$id/model.onnx',
-  vocabUrl: 'https://example.com/$id/vocab.txt',
-  onnxSha256: _sha256Hex(onnxBytes),
-  vocabSha256: _sha256Hex(vocabBytes),
+  files: {
+    'onnx': ModelFile(
+      url: Uri.parse('https://example.com/$id/model.onnx'),
+      sha256: _sha256Hex(onnxBytes),
+    ),
+    'vocab': ModelFile(
+      url: Uri.parse('https://example.com/$id/vocab.txt'),
+      sha256: _sha256Hex(vocabBytes),
+    ),
+  },
+  meta: {'dimensions': 384},
 );
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -158,20 +167,31 @@ void main() {
           );
 
           final server = _FakeHttpServer(
-            responses: {spec.onnxUrl: onnxBytes, spec.vocabUrl: vocabBytes},
+            responses: {
+              spec.files['onnx']!.url.toString(): onnxBytes,
+              spec.files['vocab']!.url.toString(): vocabBytes,
+            },
           );
 
           final downloader = ModelDownloader(
-            cacheDir: tempDir.path,
             httpClientFactory: () => server.client,
           );
 
-          final paths = await downloader.ensure(spec);
+          final resolved = await downloader.ensure(
+            spec,
+            cacheDir: tempDir.path,
+          );
 
-          expect(File(paths.onnxPath).existsSync(), isTrue);
-          expect(File(paths.vocabPath).existsSync(), isTrue);
-          expect(File(paths.onnxPath).readAsBytesSync(), equals(onnxBytes));
-          expect(File(paths.vocabPath).readAsBytesSync(), equals(vocabBytes));
+          expect(File(resolved.filePaths['onnx']!).existsSync(), isTrue);
+          expect(File(resolved.filePaths['vocab']!).existsSync(), isTrue);
+          expect(
+            File(resolved.filePaths['onnx']!).readAsBytesSync(),
+            equals(onnxBytes),
+          );
+          expect(
+            File(resolved.filePaths['vocab']!).readAsBytesSync(),
+            equals(vocabBytes),
+          );
         },
       );
 
@@ -185,15 +205,17 @@ void main() {
         );
 
         final server = _FakeHttpServer(
-          responses: {spec.onnxUrl: onnxBytes, spec.vocabUrl: vocabBytes},
+          responses: {
+            spec.files['onnx']!.url.toString(): onnxBytes,
+            spec.files['vocab']!.url.toString(): vocabBytes,
+          },
         );
 
         final downloader = ModelDownloader(
-          cacheDir: tempDir.path,
           httpClientFactory: () => server.client,
         );
 
-        await downloader.ensure(spec);
+        await downloader.ensure(spec, cacheDir: tempDir.path);
 
         // The model files should be in a subdirectory named after the model ID.
         final modelDir = Directory('${tempDir.path}/test-model-v2');
@@ -201,7 +223,7 @@ void main() {
       });
 
       test(
-        'returns ModelPaths with correct onnx and vocab file names',
+        'returns ResolvedModel with correct onnx and vocab file names',
         () async {
           final onnxBytes = [10, 20, 30];
           final vocabBytes = [40, 50];
@@ -212,18 +234,25 @@ void main() {
           );
 
           final server = _FakeHttpServer(
-            responses: {spec.onnxUrl: onnxBytes, spec.vocabUrl: vocabBytes},
+            responses: {
+              spec.files['onnx']!.url.toString(): onnxBytes,
+              spec.files['vocab']!.url.toString(): vocabBytes,
+            },
           );
 
           final downloader = ModelDownloader(
-            cacheDir: tempDir.path,
             httpClientFactory: () => server.client,
           );
 
-          final paths = await downloader.ensure(spec);
+          final resolved = await downloader.ensure(
+            spec,
+            cacheDir: tempDir.path,
+          );
 
-          expect(paths.onnxPath, endsWith('model.onnx'));
-          expect(paths.vocabPath, endsWith('vocab.txt'));
+          // betto_onnxrt derives the local filename from the URL's last path
+          // segment, so 'model.onnx' and 'vocab.txt'.
+          expect(resolved.filePaths['onnx'], endsWith('model.onnx'));
+          expect(resolved.filePaths['vocab'], endsWith('vocab.txt'));
         },
       );
 
@@ -237,18 +266,21 @@ void main() {
         );
 
         final server = _FakeHttpServer(
-          responses: {spec.onnxUrl: onnxBytes, spec.vocabUrl: vocabBytes},
+          responses: {
+            spec.files['onnx']!.url.toString(): onnxBytes,
+            spec.files['vocab']!.url.toString(): vocabBytes,
+          },
         );
 
         final progressCalls = <({int received, int total})>[];
 
         final downloader = ModelDownloader(
-          cacheDir: tempDir.path,
           httpClientFactory: () => server.client,
         );
 
         await downloader.ensure(
           spec,
+          cacheDir: tempDir.path,
           onProgress: (received, total) {
             progressCalls.add((received: received, total: total));
           },
@@ -276,7 +308,8 @@ void main() {
             vocabBytes: vocabBytes,
           );
 
-          // Pre-populate the cache.
+          // Pre-populate the cache — betto_onnxrt uses the URL's last path
+          // segment as the local filename.
           final modelDir = Directory('${tempDir.path}/cached-model');
           await modelDir.create(recursive: true);
           await File('${modelDir.path}/model.onnx').writeAsBytes(onnxBytes);
@@ -284,17 +317,16 @@ void main() {
 
           final server = _FakeHttpServer(
             responses: {
-              spec.onnxUrl: [99],
-              spec.vocabUrl: [99],
+              spec.files['onnx']!.url.toString(): [99],
+              spec.files['vocab']!.url.toString(): [99],
             },
           );
 
           final downloader = ModelDownloader(
-            cacheDir: tempDir.path,
             httpClientFactory: () => server.client,
           );
 
-          await downloader.ensure(spec);
+          await downloader.ensure(spec, cacheDir: tempDir.path);
 
           // Neither URL should have been requested.
           expect(server.requestedUrls, isEmpty);
@@ -318,20 +350,22 @@ void main() {
 
         final server = _FakeHttpServer(
           responses: {
-            spec.onnxUrl: [99],
-            spec.vocabUrl: vocabBytes,
+            spec.files['onnx']!.url.toString(): [99],
+            spec.files['vocab']!.url.toString(): vocabBytes,
           },
         );
 
         final downloader = ModelDownloader(
-          cacheDir: tempDir.path,
           httpClientFactory: () => server.client,
         );
 
-        await downloader.ensure(spec);
+        await downloader.ensure(spec, cacheDir: tempDir.path);
 
         // Only the vocab URL should have been fetched.
-        expect(server.requestedUrls, equals([spec.vocabUrl]));
+        expect(
+          server.requestedUrls,
+          equals([spec.files['vocab']!.url.toString()]),
+        );
       });
 
       test('re-downloads file when checksum does not match', () async {
@@ -351,20 +385,22 @@ void main() {
 
         final server = _FakeHttpServer(
           responses: {
-            spec.onnxUrl: onnxBytes,
-            spec.vocabUrl: [99],
+            spec.files['onnx']!.url.toString(): onnxBytes,
+            spec.files['vocab']!.url.toString(): [99],
           },
         );
 
         final downloader = ModelDownloader(
-          cacheDir: tempDir.path,
           httpClientFactory: () => server.client,
         );
 
-        await downloader.ensure(spec);
+        await downloader.ensure(spec, cacheDir: tempDir.path);
 
         // Only the onnx URL should have been re-fetched.
-        expect(server.requestedUrls, equals([spec.onnxUrl]));
+        expect(
+          server.requestedUrls,
+          equals([spec.files['onnx']!.url.toString()]),
+        );
         // The file should now have the correct content.
         expect(
           File('${modelDir.path}/model.onnx').readAsBytesSync(),
@@ -389,18 +425,17 @@ void main() {
 
           final server = _FakeHttpServer(
             responses: {
-              spec.onnxUrl: [0, 0, 0], // wrong content
-              spec.vocabUrl: vocabBytes,
+              spec.files['onnx']!.url.toString(): [0, 0, 0], // wrong content
+              spec.files['vocab']!.url.toString(): vocabBytes,
             },
           );
 
           final downloader = ModelDownloader(
-            cacheDir: tempDir.path,
             httpClientFactory: () => server.client,
           );
 
           await expectLater(
-            downloader.ensure(spec),
+            downloader.ensure(spec, cacheDir: tempDir.path),
             throwsA(
               isA<StateError>().having(
                 (e) => e.message,
@@ -425,23 +460,25 @@ void main() {
 
           final server = _FakeHttpServer(
             responses: {
-              spec.onnxUrl: [0xFF, 0xFF], // wrong content
-              spec.vocabUrl: vocabBytes,
+              spec.files['onnx']!.url.toString(): [0xFF, 0xFF], // wrong content
+              spec.files['vocab']!.url.toString(): vocabBytes,
             },
           );
 
           final downloader = ModelDownloader(
-            cacheDir: tempDir.path,
             httpClientFactory: () => server.client,
           );
 
           await expectLater(
-            downloader.ensure(spec),
+            downloader.ensure(spec, cacheDir: tempDir.path),
             throwsA(
               isA<StateError>().having(
                 (e) => e.message,
                 'message',
-                allOf([contains('SHA-256'), contains(spec.onnxSha256)]),
+                allOf([
+                  contains('SHA-256'),
+                  contains(spec.files['onnx']!.sha256),
+                ]),
               ),
             ),
           );
@@ -459,17 +496,19 @@ void main() {
 
         final server = _FakeHttpServer(
           responses: {
-            spec.onnxUrl: [7, 8, 9], // wrong bytes
-            spec.vocabUrl: vocabBytes,
+            spec.files['onnx']!.url.toString(): [7, 8, 9], // wrong bytes
+            spec.files['vocab']!.url.toString(): vocabBytes,
           },
         );
 
         final downloader = ModelDownloader(
-          cacheDir: tempDir.path,
           httpClientFactory: () => server.client,
         );
 
-        await expectLater(downloader.ensure(spec), throwsA(isA<StateError>()));
+        await expectLater(
+          downloader.ensure(spec, cacheDir: tempDir.path),
+          throwsA(isA<StateError>()),
+        );
 
         // Verify no .part file was left behind.
         final modelDir = Directory('${tempDir.path}/temp-cleanup');
@@ -494,16 +533,18 @@ void main() {
 
         final server = _FakeHttpServer(
           statusCode: 404,
-          responses: {spec.onnxUrl: [], spec.vocabUrl: []},
+          responses: {
+            spec.files['onnx']!.url.toString(): [],
+            spec.files['vocab']!.url.toString(): [],
+          },
         );
 
         final downloader = ModelDownloader(
-          cacheDir: tempDir.path,
           httpClientFactory: () => server.client,
         );
 
         await expectLater(
-          downloader.ensure(spec),
+          downloader.ensure(spec, cacheDir: tempDir.path),
           throwsA(isA<HttpException>()),
         );
       });
@@ -521,24 +562,100 @@ void main() {
 
           final server = _FakeHttpServer(
             statusCode: 503,
-            responses: {spec.onnxUrl: [], spec.vocabUrl: []},
+            responses: {
+              spec.files['onnx']!.url.toString(): [],
+              spec.files['vocab']!.url.toString(): [],
+            },
           );
 
           final downloader = ModelDownloader(
-            cacheDir: tempDir.path,
             httpClientFactory: () => server.client,
           );
 
           await expectLater(
-            downloader.ensure(spec),
+            downloader.ensure(spec, cacheDir: tempDir.path),
             throwsA(
               isA<HttpException>().having(
                 (e) => e.message,
                 'message',
-                allOf([contains('503'), contains(spec.onnxUrl)]),
+                allOf([
+                  contains('503'),
+                  contains(spec.files['onnx']!.url.toString()),
+                ]),
               ),
             ),
           );
+        },
+      );
+    });
+
+    group('allowlist rejection', () {
+      test('throws ArgumentError when spec is not on allowlist', () async {
+        // A spec with an unknown ID should be rejected by ModelCatalog.
+        final unknownSpec = ModelSpec(
+          id: 'unknown-model-v999',
+          files: {
+            'onnx': ModelFile(
+              url: Uri.parse('https://example.com/unknown.onnx'),
+              sha256: 'aabbcc',
+            ),
+          },
+        );
+
+        final downloader = ModelDownloader(allowlist: ModelCatalog());
+
+        await expectLater(
+          downloader.ensure(unknownSpec, cacheDir: tempDir.path),
+          throwsA(isA<ArgumentError>()),
+        );
+      });
+
+      test(
+        'permits download for a registered model (even if unvalidated)',
+        () async {
+          // bge-m3-v1.0 is registered in ModelCatalog but isValidated=false.
+          // The allowlist only checks registration, not validation status.
+          // We just want the allowlist NOT to reject it.
+          final bgeM3Spec = ModelCatalog.all.firstWhere(
+            (s) => s.id == 'bge-m3-v1.0',
+          );
+
+          final onnxBytes = [1, 2, 3];
+          final vocabBytes = [4, 5, 6];
+
+          // Craft a spec with matching checksums for the mock server.
+          final testSpec = ModelSpec(
+            id: bgeM3Spec.id,
+            files: {
+              'onnx': ModelFile(
+                url: bgeM3Spec.files['onnx']!.url,
+                sha256: _sha256Hex(onnxBytes),
+              ),
+              'vocab': ModelFile(
+                url: bgeM3Spec.files['vocab']!.url,
+                sha256: _sha256Hex(vocabBytes),
+              ),
+            },
+          );
+
+          final server = _FakeHttpServer(
+            responses: {
+              testSpec.files['onnx']!.url.toString(): onnxBytes,
+              testSpec.files['vocab']!.url.toString(): vocabBytes,
+            },
+          );
+
+          final downloader = ModelDownloader(
+            allowlist: ModelCatalog(),
+            httpClientFactory: () => server.client,
+          );
+
+          // Should not throw — the ID is registered even if not validated.
+          final resolved = await downloader.ensure(
+            testSpec,
+            cacheDir: tempDir.path,
+          );
+          expect(resolved.spec.id, equals('bge-m3-v1.0'));
         },
       );
     });
@@ -554,15 +671,17 @@ void main() {
         );
 
         final server = _FakeHttpServer(
-          responses: {spec.onnxUrl: onnxBytes, spec.vocabUrl: vocabBytes},
+          responses: {
+            spec.files['onnx']!.url.toString(): onnxBytes,
+            spec.files['vocab']!.url.toString(): vocabBytes,
+          },
         );
 
         final downloader = ModelDownloader(
-          cacheDir: tempDir.path,
           httpClientFactory: () => server.client,
         );
 
-        await downloader.ensure(spec);
+        await downloader.ensure(spec, cacheDir: tempDir.path);
 
         // No .part files should remain after a successful download.
         final modelDir = Directory('${tempDir.path}/atomic-rename');
@@ -580,14 +699,19 @@ void main() {
     });
   });
 
-  group('ModelPaths', () {
-    test('stores onnxPath and vocabPath correctly', () {
-      const paths = ModelPaths(
-        onnxPath: '/cache/model/model.onnx',
-        vocabPath: '/cache/model/vocab.txt',
+  group('ResolvedModel', () {
+    test('stores spec and filePaths correctly', () {
+      const spec = ModelSpec(id: 'test-model', files: {});
+      const resolved = ResolvedModel(
+        spec: spec,
+        filePaths: {
+          'onnx': '/cache/model/model.onnx',
+          'vocab': '/cache/model/vocab.txt',
+        },
       );
-      expect(paths.onnxPath, equals('/cache/model/model.onnx'));
-      expect(paths.vocabPath, equals('/cache/model/vocab.txt'));
+      expect(resolved.spec.id, equals('test-model'));
+      expect(resolved.filePaths['onnx'], equals('/cache/model/model.onnx'));
+      expect(resolved.filePaths['vocab'], equals('/cache/model/vocab.txt'));
     });
   });
 }

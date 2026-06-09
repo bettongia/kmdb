@@ -15,27 +15,34 @@
 /// ONNX Runtime inference for KMDB semantic search.
 ///
 /// Provides [OnnxEmbeddingModel] (implements [EmbeddingModel]) backed by the
-/// BGE Small En v1.5 model via the ONNX Runtime C API, a [BertTokenizer]
-/// for BERT WordPiece tokenisation, [quantise]/[dequantise] helpers for
-/// SQ8 vector quantisation, and a [ModelCatalog] of supported models
-/// with their [ModelSpec]s and download-on-demand via [ModelDownloader].
+/// BGE Small En v1.5 model via the `betto_onnxrt` [OnnxRuntime] API, a
+/// [BertTokenizer] for BERT WordPiece tokenisation, [quantise]/[dequantise]
+/// helpers for SQ8 vector quantisation, and a [ModelCatalog] of supported
+/// models with download-on-demand via [ModelDownloader] from `betto_onnxrt`.
 ///
 /// ## Platform support
 ///
 /// This package is **native-only** (macOS, Linux, Windows, Android). It must
 /// not be imported on the web platform.
 ///
-/// ## FFI dependency
+/// ## ORT binary acquisition
 ///
-/// The ONNX Runtime shared library is downloaded automatically on first use
-/// by [openOrtLibrary] and cached next to the compiled executable. On Android
-/// the `.so` is bundled by Gradle.
+/// The ONNX Runtime shared library is staged at build time by the
+/// `betto_onnxrt` native-assets build hook (`hook/build.dart` in the
+/// `betto_onnxrt` package). The hook downloads and SHA-256-verifies the
+/// platform-appropriate ORT binary from the official Microsoft ORT GitHub
+/// Releases. On Android the `.so` is bundled by the build system.
+///
+/// This replaces the old runtime-download approach in `ort_library.dart`.
 library;
+
+// Re-export betto_onnxrt types that callers of kmdb_inferencing need directly.
+// ModelSpec, ModelFile, ModelDownloader, ResolvedModel, and DownloadProgress
+// are part of the stable public surface of this package.
+export 'package:betto_onnxrt/betto_onnxrt.dart'
+    show DownloadProgress, ModelDownloader, ModelFile, ModelSpec, ResolvedModel;
 
 export 'src/bert_tokenizer.dart' show BertTokenizer, TokenizerOutput;
 export 'src/embedding_model.dart' show OnnxEmbeddingModel;
 export 'src/model_catalog.dart' show ModelCatalog;
-export 'src/model_downloader.dart'
-    show ModelDownloader, ModelPaths, DownloadProgressCallback;
-export 'src/model_spec.dart' show ModelSpec;
 export 'src/sq8.dart' show quantise, dequantise;

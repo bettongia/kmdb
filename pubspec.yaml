@@ -38,6 +38,8 @@ dependency_overrides:
   betto_registry:
     git: git@github.com:bettongia/registry.git
   betto_builder_tools: 0.1.0-dev.1
+  betto_onnxrt:
+    git: git@github.com:bettongia/onnxrt.git
 
 melos:
   # Disable generation of IntelliJ/Android Studio run configurations. Melos's
