@@ -75,19 +75,18 @@ typedef DownloadProgressCallback = void Function(int received, int total);
 /// );
 /// ```
 final class ModelDownloader {
-  /// Creates a [ModelDownloader] that caches files under [cacheDir].
+  /// Creates a [ModelDownloader] that caches files under [_cacheDir].
   ///
-  /// [cacheDir] is created lazily on the first download. Subsequent calls
+  /// [_cacheDir] is created lazily on the first download. Subsequent calls
   /// that find all files present and checksummed skip the directory creation.
   ///
   /// [httpClientFactory] is an optional override for the [HttpClient] used
   /// during downloads. Defaults to `HttpClient()`. Inject a custom factory in
   /// tests to return a mock HTTP client without hitting the network.
   ModelDownloader({
-    required String cacheDir,
+    required this._cacheDir,
     HttpClient Function()? httpClientFactory,
-  }) : _cacheDir = cacheDir,
-       _httpClientFactory = httpClientFactory ?? HttpClient.new;
+  }) : _httpClientFactory = httpClientFactory ?? HttpClient.new;
 
   final String _cacheDir;
   final HttpClient Function() _httpClientFactory;
