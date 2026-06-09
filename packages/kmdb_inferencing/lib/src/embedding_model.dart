@@ -15,6 +15,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:betto_onnxrt/betto_onnxrt.dart';
 import 'package:kmdb/kmdb.dart';
 import 'package:kmdb_lexical/lexical.dart' show Tokenizer;
 import 'package:path/path.dart' as p;
@@ -22,16 +23,12 @@ import 'package:path/path.dart' as p;
 import 'bert_tokenizer.dart';
 import 'math_utils.dart';
 import 'model_catalog.dart';
-import 'model_downloader.dart';
-import 'model_spec.dart';
-import 'ort_library.dart';
-import 'ort_session.dart';
 
 /// ONNX Runtime-backed embedding model for KMDB semantic search.
 ///
 /// Implements [EmbeddingModel] using a model from [ModelCatalog] via the
-/// ONNX Runtime C API. Produces L2-normalised float32 embeddings suitable for
-/// cosine similarity search.
+/// `betto_onnxrt` [OnnxRuntime] and [OnnxSession] API. Produces L2-normalised
+/// float32 embeddings suitable for cosine similarity search.
 ///
 /// ## Model identity
 ///
@@ -73,10 +70,10 @@ import 'ort_session.dart';
 ///
 /// ## Lifecycle
 ///
-/// [load] opens the native ORT session. [embed] runs synchronously on the
-/// calling isolate — do **not** call from the UI thread in Flutter without
-/// isolate offloading. [dispose] releases native resources; always call it
-/// (use `try/finally`).
+/// [load] opens the native ORT session via [OnnxRuntime.load]. [embed] runs
+/// synchronously on the calling isolate — do **not** call from the UI thread
+/// in Flutter without isolate offloading. [dispose] releases native resources;
+/// always call it (use `try/finally`).
 ///
 /// ## Thread safety
 ///
@@ -84,9 +81,15 @@ import 'ort_session.dart';
 /// from the same isolate that called [load].
 class OnnxEmbeddingModel implements EmbeddingModel {
   /// Internal constructor — use [load].
-  OnnxEmbeddingModel._(this._session, this._tokenizer, this._spec);
+  OnnxEmbeddingModel._(
+    this._runtime,
+    this._session,
+    this._tokenizer,
+    this._spec,
+  );
 
-  final OrtInferenceSession _session;
+  final OnnxRuntime _runtime;
+  final OnnxSession _session;
   final BertTokenizer _tokenizer;
 
   /// The [ModelSpec] of the loaded model.
@@ -105,10 +108,11 @@ class OnnxEmbeddingModel implements EmbeddingModel {
 
   /// Embedding vector length produced by this model.
   ///
-  /// Single source of truth for SQ8 byte lengths and score-path length guards.
+  /// Sourced from `spec.meta['dimensions']`. This is the single source of
+  /// truth for SQ8 byte lengths and score-path length guards.
   /// Example: 384 for BGE Small En v1.5.
   @override
-  int get dimensions => _spec.embeddingDimensions;
+  int get dimensions => _spec.meta['dimensions'] as int;
 
   // ── Factory ────────────────────────────────────────────────────────────────
 
@@ -146,12 +150,13 @@ class OnnxEmbeddingModel implements EmbeddingModel {
     String? cacheDir,
     String? modelPath,
     Tokenizer? tokenizer,
-    DownloadProgressCallback? onProgress,
+    DownloadProgress? onProgress,
   }) async {
     // Resolve the model spec. When no spec is given, use the default model.
     // When a raw modelPath is supplied without a spec, we still need an id for
     // model identity tracking — use the default catalog ID.
-    final resolvedSpec = spec ?? _defaultSpec();
+    final resolvedSpec =
+        spec ?? ModelCatalog.lookup(ModelCatalog.defaultModelId);
 
     final String resolvedModelPath;
     final String resolvedVocabPath;
@@ -163,13 +168,17 @@ class OnnxEmbeddingModel implements EmbeddingModel {
     } else if (cacheDir != null) {
       // Download-on-demand path: let ModelDownloader ensure the files are
       // present and their checksums match before opening the ORT session.
-      final downloader = ModelDownloader(cacheDir: cacheDir);
-      final paths = await downloader.ensure(
+      // The ModelCatalog allowlist gates which models may be downloaded.
+      final downloader = ModelDownloader(allowlist: ModelCatalog());
+      final resolved = await downloader.ensure(
         resolvedSpec,
+        cacheDir: cacheDir,
         onProgress: onProgress,
       );
-      resolvedModelPath = paths.onnxPath;
-      resolvedVocabPath = paths.vocabPath;
+      // File names in ResolvedModel.filePaths match the keys in ModelSpec.files:
+      // 'onnx' → absolute path to the .onnx model, 'vocab' → vocab.txt.
+      resolvedModelPath = resolved.filePaths['onnx']!;
+      resolvedVocabPath = resolved.filePaths['vocab']!;
     } else {
       // Default asset path (LFS bundle layout used in development).
       resolvedModelPath = _defaultModelPath();
@@ -179,13 +188,15 @@ class OnnxEmbeddingModel implements EmbeddingModel {
     _assertFileExists(resolvedModelPath, 'model file');
     _assertFileExists(resolvedVocabPath, 'vocab.txt');
 
-    final lib = await openOrtLibrary();
-    final session = OrtInferenceSession.create(lib, resolvedModelPath);
+    // Load the ORT runtime via the betto_onnxrt native-assets build hook.
+    // This replaces the old ort_library.dart runtime download mechanism.
+    final runtime = await OnnxRuntime.load();
+    final session = runtime.createSessionFromFile(resolvedModelPath);
     final tok = await BertTokenizer.load(
       resolvedVocabPath,
       tokenizer: tokenizer,
     );
-    return OnnxEmbeddingModel._(session, tok, resolvedSpec);
+    return OnnxEmbeddingModel._(runtime, session, tok, resolvedSpec);
   }
 
   // ── EmbeddingModel.embed ──────────────────────────────────────────────────
@@ -208,41 +219,58 @@ class OnnxEmbeddingModel implements EmbeddingModel {
   Future<(Float32List, bool)> embed(String text) async {
     final tokens = _tokenizer.encode(text);
     final seqLen = tokens.inputIds.length;
+    final hiddenDim = dimensions; // sourced from spec.meta['dimensions']
 
-    // Run ONNX inference. Output shape: [1, seqLen, dimensions].
-    // hiddenDim is sourced from the model spec — the single source of truth.
-    final raw = _session.run(
-      inputNames: ['input_ids', 'attention_mask', 'token_type_ids'],
-      inputData: [tokens.inputIds, tokens.attentionMask, tokens.tokenTypeIds],
-      inputShape: [1, seqLen],
-      outputName: 'last_hidden_state',
-      hiddenDim: _spec.embeddingDimensions,
+    // Build int64 input tensors shaped [1, seqLen].
+    // The BGE model requires three inputs: input_ids, attention_mask,
+    // and token_type_ids — all shaped [1, seqLen] with int64 elements.
+    final shape = [1, seqLen];
+    final inputIds = OnnxTensor.fromInt64(shape, tokens.inputIds);
+    final attentionMask = OnnxTensor.fromInt64(shape, tokens.attentionMask);
+    final tokenTypeIds = OnnxTensor.fromInt64(shape, tokens.tokenTypeIds);
+
+    // Run ONNX inference. The output 'last_hidden_state' has shape
+    // [1, seqLen, hiddenDim]. We rely on OnnxSession.run() populating
+    // the shape from the native OrtValue via the output-shape-readback
+    // slots (31/32/33) added in the generic betto_onnxrt API.
+    final outputs = _session.run(
+      inputs: {
+        'input_ids': inputIds,
+        'attention_mask': attentionMask,
+        'token_type_ids': tokenTypeIds,
+      },
+      outputNames: ['last_hidden_state'],
     );
+    final outputTensor = outputs.first;
+
+    // Extract the flat float32 output. The tensor shape is [1, seqLen, D].
+    // asFloat32() throws StateError if the output element type is not float32,
+    // which would indicate a mismatched model.
+    final raw = outputTensor.asFloat32().toList();
 
     // Mean-pool over non-padding token positions, then L2-normalise.
     final pooled = meanPool(
       raw,
       tokens.attentionMask.toList(),
       seqLen: seqLen,
-      hiddenDim: _spec.embeddingDimensions,
+      hiddenDim: hiddenDim,
     );
     final embedding = l2Normalize(pooled);
 
     return (embedding, tokens.truncated);
   }
 
-  /// Releases the native ORT session and associated resources.
+  /// Releases the native ORT session and runtime resources.
   ///
   /// Must be called exactly once when the model is no longer needed.
   /// After [dispose], [embed] must not be called.
   @override
-  void dispose() => _session.dispose();
+  void dispose() {
+    _session.dispose();
+    _runtime.dispose();
+  }
 
   // ── Private helpers ────────────────────────────────────────────────────────
-
-  /// Returns the default [ModelSpec] (BGE Small En v1.5).
-  static ModelSpec _defaultSpec() =>
-      ModelCatalog.lookup(ModelCatalog.defaultModelId);
 
   /// Returns the default model path relative to the compiled executable.
   ///

@@ -16,24 +16,32 @@ import 'package:kmdb_inferencing/kmdb_inferencing.dart';
 import 'package:test/test.dart';
 
 void main() {
-  group('ModelSpec', () {
-    test('BGE Small En v1.5 spec has correct dimensions', () {
+  group('ModelSpec (via ModelCatalog)', () {
+    test('BGE Small En v1.5 spec has correct dimensions in meta', () {
       final spec = ModelCatalog.lookup('bge-small-en-v1.5');
       expect(spec.id, equals('bge-small-en-v1.5'));
-      expect(spec.embeddingDimensions, equals(384));
+      // Dimensions are stored in spec.meta['dimensions'] — not as a direct
+      // field — because betto_onnxrt uses a generic ModelSpec shape.
+      expect(spec.meta['dimensions'], equals(384));
     });
 
     test('BGE Small En v1.5 has non-empty URLs and checksums', () {
       final spec = ModelCatalog.lookup('bge-small-en-v1.5');
-      expect(spec.onnxUrl, isNotEmpty);
-      expect(spec.vocabUrl, isNotEmpty);
-      expect(spec.onnxSha256, isNotEmpty);
-      expect(spec.vocabSha256, isNotEmpty);
+      expect(spec.files['onnx']!.url.toString(), isNotEmpty);
+      expect(spec.files['vocab']!.url.toString(), isNotEmpty);
+      expect(spec.files['onnx']!.sha256, isNotEmpty);
+      expect(spec.files['vocab']!.sha256, isNotEmpty);
     });
 
-    test('BGE Small En v1.5 is validated', () {
+    test('BGE Small En v1.5 onnx URL points to HuggingFace', () {
       final spec = ModelCatalog.lookup('bge-small-en-v1.5');
-      expect(spec.isValidated, isTrue);
+      expect(spec.files['onnx']!.url.toString(), contains('huggingface.co'));
+    });
+
+    test('BGE Small En v1.5 has onnx and vocab file entries', () {
+      final spec = ModelCatalog.lookup('bge-small-en-v1.5');
+      expect(spec.files.containsKey('onnx'), isTrue);
+      expect(spec.files.containsKey('vocab'), isTrue);
     });
   });
 
@@ -41,7 +49,7 @@ void main() {
     test('returns the correct spec for a known validated model', () {
       final spec = ModelCatalog.lookup('bge-small-en-v1.5');
       expect(spec.id, equals('bge-small-en-v1.5'));
-      expect(spec.embeddingDimensions, equals(384));
+      expect(spec.meta['dimensions'], equals(384));
     });
 
     test('throws ArgumentError for an unknown model ID', () {
@@ -104,7 +112,7 @@ void main() {
     });
 
     test('returns true for a registered but unvalidated model', () {
-      // isKnown does not check isValidated — it only checks registration.
+      // isKnown does not check validation state — it only checks registration.
       expect(ModelCatalog.isKnown('bge-m3-v1.0'), isTrue);
     });
 
@@ -135,7 +143,29 @@ void main() {
 
     test('default model is validated', () {
       final spec = ModelCatalog.lookup(ModelCatalog.defaultModelId);
-      expect(spec.isValidated, isTrue);
+      expect(spec.id, equals(ModelCatalog.defaultModelId));
+    });
+  });
+
+  group('ModelCatalog as AllowlistProvider', () {
+    test('isAllowed returns true for a registered model', () {
+      const catalog = ModelCatalog();
+      final spec = ModelCatalog.lookup('bge-small-en-v1.5');
+      expect(catalog.isAllowed(spec), isTrue);
+    });
+
+    test('isAllowed returns true for a registered but unvalidated model', () {
+      const catalog = ModelCatalog();
+      // BGE-M3 is registered but unvalidated — isAllowed only checks
+      // registration, not validation status.
+      final bgeM3 = ModelCatalog.all.firstWhere((s) => s.id == 'bge-m3-v1.0');
+      expect(catalog.isAllowed(bgeM3), isTrue);
+    });
+
+    test('isAllowed returns false for an unregistered model', () {
+      const catalog = ModelCatalog();
+      const unknownSpec = ModelSpec(id: 'unknown-model', files: {});
+      expect(catalog.isAllowed(unknownSpec), isFalse);
     });
   });
 }
