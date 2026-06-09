@@ -12,6 +12,7 @@ sandbox/
 .claude/agent-memory/
 
 coverage
+coverage_orig
 site
 test.log
 coverage.log
