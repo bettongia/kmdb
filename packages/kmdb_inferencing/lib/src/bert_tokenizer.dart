@@ -27,7 +27,7 @@ import 'package:kmdb_lexical/lexical.dart' show Tokenizer, RegExpTokenizer;
 /// 1. **Normalise** — lower-case and strip combining accent characters.
 /// 2. **Word segmentation** — delegate to the [Tokenizer] supplied at
 ///    construction time. [RegExpTokenizer] is used by default; `IcuTokenizer`
-///    from `package:kmdb_tokenizer_icu` can be substituted as a drop-in
+///    from `package:betto_icu` can be substituted as a drop-in
 ///    replacement for superior Unicode coverage.
 /// 3. **WordPiece** — split each word into sub-word pieces and look up IDs in
 ///    the vocabulary loaded from `vocab.txt`. Unknown pieces map to `[UNK]`.
@@ -43,7 +43,7 @@ import 'package:kmdb_lexical/lexical.dart' show Tokenizer, RegExpTokenizer;
 /// ## IcuTokenizer
 ///
 /// ```dart
-/// import 'package:kmdb_tokenizer_icu/kmdb_tokenizer_icu.dart';
+/// import 'package:betto_icu/betto_icu.dart';
 /// final tokenizer = await BertTokenizer.load(vocabPath,
 ///   tokenizer: IcuTokenizer());
 /// ```
@@ -78,7 +78,7 @@ class BertTokenizer {
   ///
   /// [tokenizer] controls word segmentation before WordPiece splitting.
   /// Defaults to [RegExpTokenizer]. Supply `IcuTokenizer()` from
-  /// `package:kmdb_tokenizer_icu` for improved Unicode coverage.
+  /// `package:betto_icu` for improved Unicode coverage.
   static Future<BertTokenizer> load(
     String vocabPath, {
     int maxLength = 512,
