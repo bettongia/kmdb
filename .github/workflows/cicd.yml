@@ -1,0 +1,51 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - uses: actions/cache@v5
+        with:
+          path: ~/.pub-cache
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y lcov
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-addlicense-v1.2.0
+
+      - name: Install addlicense
+        run: |
+          go install github.com/google/addlicense@v1.2.0
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+
+      - run: make cicd
+
+      - name: Coverage summary
+        run: |
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          grep -E '^\[.*\]:.*lines\.\.\.\.\.\.' coverage.log >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Benchmarks summary
+        run: cat benchmarks.log >> $GITHUB_STEP_SUMMARY
