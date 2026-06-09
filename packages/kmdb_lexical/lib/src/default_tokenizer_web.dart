@@ -11,12 +11,15 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-library;
 
-export 'package:betto_icu/betto_icu.dart'
-    show Tokenizer, RegExpTokenizer, IcuTokenizer, BrowserTokenizer;
-export 'src/default_tokenizer_native.dart'
-    if (dart.library.js_interop) 'src/default_tokenizer_web.dart'
-    show createDefaultTokenizer;
-export 'src/stemmer.dart' show Stemmer;
-export 'src/stopwords.dart' show getStopWords, Stopwords;
+import 'package:betto_icu/betto_icu.dart';
+
+/// Returns the default [Tokenizer] for web platforms.
+///
+/// On web, [BrowserTokenizer] is used: it delegates to the browser's native
+/// `Intl.Segmenter` API via `dart:js_interop`, giving UAX #29-quality word
+/// segmentation at zero bundle cost (the browser's own ICU handles it).
+///
+/// The companion file `default_tokenizer_native.dart` is selected instead when
+/// running on native via the conditional export in `lexical.dart`.
+Tokenizer createDefaultTokenizer() => BrowserTokenizer();

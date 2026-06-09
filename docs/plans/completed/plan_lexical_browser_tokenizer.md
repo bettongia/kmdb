@@ -1,8 +1,8 @@
 # Lexical Search: Wire `BrowserTokenizer` as the Default Web Tokenizer
 
-**Status**: Investigated
+**Status**: Complete
 
-**PR link**: _(pending)_
+**PR link**: https://github.com/bettongia/kmdb/pull/41
 
 ## Problem statement
 
@@ -104,54 +104,55 @@ constructor parameters.
 
 ### Phase 1 — `kmdb_lexical` factory
 
-- [ ] Add `packages/kmdb_lexical/lib/src/default_tokenizer_native.dart`:
+- [x] Add `packages/kmdb_lexical/lib/src/default_tokenizer_native.dart`:
   ```dart
   // [license header]
   import 'package:betto_icu/betto_icu.dart';
   /// Returns the default [Tokenizer] for native platforms ([RegExpTokenizer]).
   Tokenizer createDefaultTokenizer() => RegExpTokenizer();
   ```
-- [ ] Add `packages/kmdb_lexical/lib/src/default_tokenizer_web.dart`:
+- [x] Add `packages/kmdb_lexical/lib/src/default_tokenizer_web.dart`:
   ```dart
   // [license header]
   import 'package:betto_icu/betto_icu.dart';
   /// Returns the default [Tokenizer] for web platforms ([BrowserTokenizer]).
   Tokenizer createDefaultTokenizer() => BrowserTokenizer();
   ```
-- [ ] Update `packages/kmdb_lexical/lib/lexical.dart`:
+- [x] Update `packages/kmdb_lexical/lib/lexical.dart`:
   - Add `BrowserTokenizer` to the `show` list on the `betto_icu` export.
   - Add the `createDefaultTokenizer` conditional export.
-- [ ] Ensure license headers on both new files (use `header_template.txt`).
+- [x] Ensure license headers on both new files (use `header_template.txt`).
 
 ### Phase 2 — `FtsManager` wiring
 
-- [ ] In `packages/kmdb/lib/src/search/lexical/fts_manager.dart`:
+- [x] In `packages/kmdb/lib/src/search/lexical/fts_manager.dart`:
   - Update the import from `kmdb_lexical` to include `createDefaultTokenizer`
-    (and remove the now-unused direct `RegExpTokenizer` import if applicable).
+    and remove the now-unused `RegExpTokenizer` import (keeping `getStopWords`).
   - Replace all four `RegExpTokenizer()` call sites (lines 223, 289, 469, 599)
     with `createDefaultTokenizer()`.
 
 ### Phase 3 — Tests
 
-- [ ] Add a test to `packages/kmdb_lexical/test/` asserting that
+- [x] Add a test to `packages/kmdb_lexical/test/` asserting that
   `createDefaultTokenizer()` returns a working `Tokenizer` that tokenises a
   simple English sentence correctly.
-- [ ] Confirm the existing `kmdb_lexical` and `kmdb` FTS tests still pass:
+- [x] Confirm the existing `kmdb_lexical` and `kmdb` FTS tests still pass:
   `cd packages/kmdb_lexical && dart test`
   `cd packages/kmdb && dart test`
 
 ### Phase 4 — Spec and docs
 
-- [ ] Update `docs/spec/21_lexical_search.md` tokenizer table — add a
-  `BrowserTokenizer` row (`Intl.Segmenter JS interop, UAX #29`, Web: Yes,
-  Default: No).
-- [ ] Update `docs/spec/20_text_search.md` — revise the web lexical search
-  out-of-scope note to reflect that lexical search now works on web.
-- [ ] Run `make pre_commit` and confirm it passes.
+- [x] Update `docs/spec/21_lexical_search.md` tokenizer table — add a
+  `BrowserTokenizer` row with `Default: Yes (web)` (per reviewer correction:
+  the table must honestly reflect that `BrowserTokenizer` is the web default).
+- [x] Update `docs/spec/20_text_search.md` — revise the web lexical search
+  out-of-scope note to reflect that lexical search now works on web via
+  `BrowserTokenizer`.
+- [x] Run `make pre_commit` and confirm it passes.
 
 ### Phase 5 — PR
 
-- [ ] Open a pull request with all changes; update plan status to `Complete`
+- [x] Open a pull request with all changes; update plan status to `Complete`
   and move the file to `docs/plans/completed/`.
 
 ## Reviewer notes (kmdb-plan-reviewer, 2026-06-09)
@@ -223,4 +224,27 @@ Status remains **Investigated**.
 
 ## Summary
 
-_(To be filled in after implementation.)_
+- Added `createDefaultTokenizer()` as a platform-aware conditional export in
+  `kmdb_lexical`: resolves to `RegExpTokenizer` on native and `BrowserTokenizer`
+  on web (via `dart.library.js_interop` conditional export, mirroring the
+  pattern already proven in `betto_icu`).
+- Added two new source files: `default_tokenizer_native.dart` and
+  `default_tokenizer_web.dart` in `kmdb_lexical/lib/src/`, each with full
+  license header and doc comments.
+- Re-exported `BrowserTokenizer` from `kmdb_lexical/lib/lexical.dart` so
+  consumers of the package can reach it.
+- Updated `FtsManager` to import `createDefaultTokenizer` (removing the now-
+  unused direct `RegExpTokenizer` import) and replaced all four
+  `RegExpTokenizer()` call sites with `createDefaultTokenizer()`, ensuring
+  index-write and query-read tokenise identically on both platforms.
+- Added `default_tokenizer_test.dart` with 5 tests covering the factory
+  contract: correct type, English segmentation, technical identifiers, empty
+  input, and factory independence. All 1722 kmdb tests and all kmdb_lexical
+  tests pass.
+- Updated §21 tokenizer table to add `BrowserTokenizer` row with `Default:
+  Yes (web)` per the reviewer's correction, and added prose explaining the
+  platform-selected default.
+- Updated §20 out-of-scope note: lexical search on web is no longer deferred —
+  it is now supported via `BrowserTokenizer`.
+- Pre-commit gate (format_check, analyze across all 8 packages, license_check,
+  1722 tests) passed cleanly.
