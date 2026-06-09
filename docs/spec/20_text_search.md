@@ -31,7 +31,9 @@ the detail of each mode.
 - **Non-Latin scripts** — CJK, Thai, Arabic, and other scripts that require
   language-specific segmentation are not supported in this version.
 - **Web browser** — semantic search (ONNX inference) on the web platform is
-  deferred; lexical search may be revisited separately.
+  deferred. Lexical search is now supported on web: `FtsManager` uses
+  `BrowserTokenizer` (backed by the browser's native `Intl.Segmenter` API) as
+  the default tokenizer, giving UAX #29-quality segmentation at zero bundle cost.
 - **Plain text extraction** — content submitted for indexing must arrive as
   plain text. Extracting text from PDF, HTML, or DOCX is the caller's
   responsibility.
