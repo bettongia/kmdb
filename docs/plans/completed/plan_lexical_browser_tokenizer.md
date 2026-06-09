@@ -2,7 +2,7 @@
 
 **Status**: Complete
 
-**PR link**: _(pending)_
+**PR link**: https://github.com/bettongia/kmdb/pull/41
 
 ## Problem statement
 
@@ -152,7 +152,7 @@ constructor parameters.
 
 ### Phase 5 — PR
 
-- [ ] Open a pull request with all changes; update plan status to `Complete`
+- [x] Open a pull request with all changes; update plan status to `Complete`
   and move the file to `docs/plans/completed/`.
 
 ## Reviewer notes (kmdb-plan-reviewer, 2026-06-09)
