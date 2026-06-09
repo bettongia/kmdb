@@ -61,9 +61,10 @@ melos:
 
     benchmarks:
       description: Run all benchmarks
-      exec: dart run benchmark/main.dart
-      packageFilters:
-        dirExists: benchmark
+      stdio: inherit
+      run: |
+        cd packages/kmdb
+        dart run benchmark/main.dart
 
     test:
       description: Test all packages
