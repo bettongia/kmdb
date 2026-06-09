@@ -2,7 +2,7 @@
 
 **Status**: Complete
 
-**PR link**: _(pending)_
+**PR link**: https://github.com/bettongia/kmdb/pull/40
 
 **Roadmap**: [v0.05 — Multi-platform pipelines § ICU](../roadmap/0_05.md#icu)
 
