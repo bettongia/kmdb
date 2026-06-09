@@ -1,8 +1,8 @@
 # Extract `betto_icu` — Standalone ICU Tokenizer Package
 
-**Status**: Investigated
+**Status**: Complete
 
-**PR link**: _(pending)_
+**PR link**: https://github.com/bettongia/kmdb/pull/40
 
 **Roadmap**: [v0.05 — Multi-platform pipelines § ICU](../roadmap/0_05.md#icu)
 
@@ -240,16 +240,17 @@ Once those steps are done, return here and continue with Stage B.
 ### Stage B — Wire `betto_icu` into the KMDB workspace
 
 _Prerequisite: `betto_icu 0.1.0` is published and resolvable from pub.dev._
+_Note: published as `0.1.0-dev.1`; constraint used is `^0.1.0-dev.1`._
 
 #### Phase 4 — Wire `betto_icu` into the KMDB workspace
 
-- [ ] Update `packages/kmdb_lexical/pubspec.yaml`:
-  - Add `betto_icu: ^0.1.0` under `dependencies:` as a **regular pub.dev
+- [x] Update `packages/kmdb_lexical/pubspec.yaml`:
+  - Add `betto_icu: ^0.1.0-dev.1` under `dependencies:` as a **regular pub.dev
     dependency**. Do **not** add any `dependency_overrides` entry for
     `betto_icu`, and do **not** declare it bare — it is a published package, not
     a git ref. (This differs from `betto_zstd`/`betto_common`/etc., which remain
     git-ref overrides.)
-- [ ] Update `packages/kmdb_lexical/lib/lexical.dart`:
+- [x] Update `packages/kmdb_lexical/lib/lexical.dart`:
   - Remove `export 'src/tokenizer.dart' show Tokenizer`.
   - Remove `export 'src/regexp_tokenizer.dart' show RegExpTokenizer`.
   - Add re-exports from `betto_icu`:
@@ -257,29 +258,29 @@ _Prerequisite: `betto_icu 0.1.0` is published and resolvable from pub.dev._
     export 'package:betto_icu/betto_icu.dart'
         show Tokenizer, RegExpTokenizer, IcuTokenizer;
     ```
-- [ ] Delete `packages/kmdb_lexical/lib/src/tokenizer.dart`.
-- [ ] Delete `packages/kmdb_lexical/lib/src/regexp_tokenizer.dart`.
-- [ ] Delete `packages/kmdb_lexical/test/regexp_tokeniser_test.dart`.
-- [ ] Run `dart pub get` from the workspace root to verify dependency resolution.
-- [ ] Run `cd packages/kmdb_lexical && dart test` to confirm lexical tests pass.
+- [x] Delete `packages/kmdb_lexical/lib/src/tokenizer.dart`.
+- [x] Delete `packages/kmdb_lexical/lib/src/regexp_tokenizer.dart`.
+- [x] Delete `packages/kmdb_lexical/test/regexp_tokeniser_test.dart`.
+- [x] Run `dart pub get` from the workspace root to verify dependency resolution.
+- [x] Run `cd packages/kmdb_lexical && dart test` to confirm lexical tests pass.
 
 #### Phase 5 — Dissolve `kmdb_tokenizer_icu`
 
-- [ ] Remove `packages/kmdb_tokenizer_icu` from the `workspace:` list in the
+- [x] Remove `packages/kmdb_tokenizer_icu` from the `workspace:` list in the
       root `pubspec.yaml`.
-- [ ] Delete the `packages/kmdb_tokenizer_icu/` directory.
-- [ ] Run `dart pub get` from the workspace root.
-- [ ] Run `make analyze` to confirm no broken imports remain.
+- [x] Delete the `packages/kmdb_tokenizer_icu/` directory.
+- [x] Run `dart pub get` from the workspace root.
+- [x] Run `make analyze` to confirm no broken imports remain.
 
 #### Phase 6 — Full pre-commit gate and documentation
 
-- [ ] Run `make pre_commit` and confirm it passes cleanly (format_check,
+- [x] Run `make pre_commit` and confirm it passes cleanly (format_check,
       analyze, license_check, scoped tests).
-- [ ] Run `make test` to confirm the full workspace test suite passes.
-- [ ] Update `CLAUDE.md` `Repository Layout` section:
+- [x] Run `make test` to confirm the full workspace test suite passes.
+- [x] Update `CLAUDE.md` `Repository Layout` section:
   - Remove `kmdb_tokenizer_icu` from the package list.
   - Add `betto_icu` to the external `betto_*` packages list.
-- [ ] Update stale `kmdb_tokenizer_icu` doc-comment references in
+- [x] Update stale `kmdb_tokenizer_icu` doc-comment references in
       `kmdb_inferencing` to point at `betto_icu` (B3). These are doc-only — no
       imports, no pubspec dep — so they will not break the build, but they go
       stale the moment `kmdb_tokenizer_icu` is dissolved:
@@ -288,8 +289,8 @@ _Prerequisite: `betto_icu 0.1.0` is published and resolvable from pub.dev._
     the `import 'package:kmdb_tokenizer_icu/kmdb_tokenizer_icu.dart';` example —
     update to `package:betto_icu/betto_icu.dart`).
   - `packages/kmdb_inferencing/lib/src/embedding_model.dart` (line ~78).
-  - [ ] After editing, update `packages/kmdb_inferencing/README.md` if it also
-        names `kmdb_tokenizer_icu` (grep to confirm).
+  - [x] After editing, update `packages/kmdb_inferencing/README.md` if it also
+        names `kmdb_tokenizer_icu` (grep to confirm — updated).
 - [ ] Open a PR for the KMDB monorepo changes.
 
 ## Review (2026-06-08, kmdb-plan-reviewer)
@@ -412,4 +413,12 @@ decisions. Cleared for `kmdb-plan-implement`.
 
 ## Summary
 
-_(To be filled in after implementation.)_
+Extracted `Tokenizer`, `RegExpTokenizer`, and `IcuTokenizer` from the KMDB
+monorepo into the standalone `betto_icu` package published to pub.dev at
+`0.1.0-dev.1`. `kmdb_lexical` now re-exports all three symbols from
+`betto_icu` via a single `export 'package:betto_icu/betto_icu.dart'`
+declaration; existing call sites are fully backward-compatible. The
+`kmdb_tokenizer_icu` workspace package was dissolved (directory deleted,
+workspace entry removed). The full pre-commit gate and test suite pass
+cleanly. Doc-comment references to `package:kmdb_tokenizer_icu` in
+`kmdb_inferencing` were updated to `package:betto_icu`.

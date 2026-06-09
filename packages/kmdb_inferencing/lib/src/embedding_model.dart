@@ -136,7 +136,7 @@ class OnnxEmbeddingModel implements EmbeddingModel {
   ///
   /// [tokenizer] overrides the word-segmentation step inside [BertTokenizer].
   /// Defaults to [RegExpTokenizer]. Supply `IcuTokenizer()` from
-  /// `package:kmdb_tokenizer_icu` for superior Unicode coverage.
+  /// `package:betto_icu` for superior Unicode coverage.
   ///
   /// Throws [UnsupportedError] if the model file does not exist on disk.
   /// Throws [Exception] if the ORT library cannot be loaded or the model is

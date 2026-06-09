@@ -129,7 +129,7 @@ on the next `search()` call, or immediately by calling `KmdbDatabase.reindex()`
 
 - `package:kmdb` — core library; defines `EmbeddingModel`, `VecIndexDefinition`,
   and `VecManager`
-- `package:kmdb_tokenizer_icu` — ICU-backed word tokenizer, accepted by
+- `package:betto_icu` — ICU-backed word tokenizer (`IcuTokenizer`), accepted by
   `OnnxEmbeddingModel` as a substitute for the default `RegExpTokenizer`
 - KMDB specification §22 — semantic search index structure, model lifecycle, and
   model identity tracking

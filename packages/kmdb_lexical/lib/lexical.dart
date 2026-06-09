@@ -13,7 +13,7 @@
 // limitations under the License.
 library;
 
+export 'package:betto_icu/betto_icu.dart'
+    show Tokenizer, RegExpTokenizer, IcuTokenizer;
 export 'src/stemmer.dart' show Stemmer;
-export 'src/tokenizer.dart' show Tokenizer;
-export 'src/regexp_tokenizer.dart' show RegExpTokenizer;
 export 'src/stopwords.dart' show getStopWords, Stopwords;
