@@ -30,7 +30,7 @@ pre_commit: format_check analyze license_check
 	melos pre_commit_test --no-select
 .PHONY: pre_commit
 
-cicd: scrub prepare default e2e_test
+cicd: prepare format_check analyze license_check coverage benchmarks
 .PHONY: cicd
 
 analyze:
@@ -38,7 +38,7 @@ analyze:
 .PHONY: analyze
 
 benchmarks:
-	melos benchmarks
+	set -o pipefail; melos benchmarks --no-select 2>&1 | tee benchmarks.log
 .PHONY: benchmarks
 
 tests_all: test e2e_test
