@@ -1,6 +1,6 @@
 # Extract `betto_onnxrt` — Standalone ONNX Runtime Package
 
-**Status**: Investigated
+**Status**: Stage A Complete — Stage gate passed 2026-06-10. Ready for Stage B.
 
 **PR link**: _(pending)_
 
@@ -483,8 +483,9 @@ Complete the Stage gate checklist above before beginning Stage B._
       are documented as RC-15 in `docs/spec/28_release_checklist.md`.
 - [x] Run `dart test` from `/Users/gonk/development/bettongia/onnxrt/` and
       confirm all tests pass. Result: 63 passed, 6 skipped (2026-06-09).
-- [ ] Commit all files, create the GitHub repo at `github.com/bettongia/onnxrt`,
-      push, and open a PR.
+- [x] Commit all files, create the GitHub repo at `github.com/bettongia/onnxrt`,
+      push. CI/CD (GitHub Actions: ubuntu/macos/windows) passes. Stage gate
+      complete as of 2026-06-10.
 
 ---
 
