@@ -48,18 +48,23 @@ full proposal, rationale, and platform binary acquisition table.
 
 ## Open questions
 
-- [ ] **Q1 — iOS XCFramework via native assets (spike required — blocking).**
-      Can `hook/build.dart` stage the ORT XCFramework
-      (`microsoft/onnxruntime-swift-package-manager`, `onnxruntime-c` variant)
-      and emit it as a `CodeAsset` that Flutter/Xcode links during
-      `flutter build ios`? Or does iOS require the fallback: a minimal Flutter
-      plugin shim with a `Package.swift` SPM dependency? A spike against a stub
-      `betto_onnxrt` package (no real ORT logic, just the hook + a dummy
-      XCFramework) must be run before the Stage A checklist is finalised. The
-      choice determines: (a) the hook implementation for iOS in Stage A Phase 2,
-      and (b) whether `betto_onnxrt` is a pure Dart package or also ships a
-      Flutter plugin shim. **Do not use `onnxruntime-mobile`** (reduced opset,
-      incompatible with BGE). **Do not use CocoaPods** (being deprecated).
+- [x] **Q1 — iOS XCFramework via native assets (spike required — blocking).**
+      **VERDICT (2026-06-10): Native-assets NOT viable for iOS ORT. SPM plugin
+      shim required.**
+      The ORT iOS XCFramework (`pod-archive-onnxruntime-c-{version}.zip`) ships
+      a **static library** (`Mach-O universal binary / ar archive`), not a dylib.
+      Flutter's iOS native-assets system enforces `linkModePreference = dynamic`
+      and rejects `StaticLinking` CodeAssets outright:
+      _"link mode 'static' is not allowed by the input link mode preference
+      'dynamic'"_.
+      `DynamicLoadingBundled` also fails because `parseOtoolArchitectureSections`
+      in `flutter_tools` expects dylib load commands and gets an `ar archive`.
+      **Consequence:** The `hook/build.dart` iOS branch logs a warning and emits
+      no CodeAsset. `OnnxRuntime.load()` throws `UnsupportedError` on iOS until
+      the SPM plugin shim is implemented (Stage B or a dedicated follow-on plan).
+      **Do not use `onnxruntime-mobile`** (reduced opset, incompatible with BGE).
+      **Do not use CocoaPods** (being deprecated). The SPM shim must depend on
+      `microsoft/onnxruntime-swift-package-manager` (`onnxruntime-c` variant).
 - [x] **Q2 — Prebuilt ORT artifact hosting.** Use official
       `github.com/microsoft/onnxruntime/releases` artifacts initially — fast to
       start, well-known URLs, no hosting infrastructure. Migrate to
@@ -295,7 +300,7 @@ provenance than a local compile. No `binaries.mk` is authored for this package.
 | macOS | Hook downloads `onnxruntime-osx-{arch}-{ver}.tgz` from GitHub Releases; extracts dylib; emits `CodeAsset`. Replaces runtime download in `ort_library.dart`. |
 | Linux | Hook downloads `onnxruntime-linux-{arch}-{ver}.tgz`; emits `libonnxruntime.so`. |
 | Windows | Hook downloads `onnxruntime-win-{arch}-{ver}.zip`; emits `onnxruntime.dll`. |
-| iOS | **Pending Q1 spike.** Primary path: hook stages ORT XCFramework, emits as `CodeAsset`. Fallback: minimal Flutter plugin shim with `Package.swift` SPM dependency. Not `onnxruntime-mobile`; not CocoaPods. |
+| iOS | **SPM plugin shim required (Q1 verdict).** ORT iOS XCFramework is a static `ar archive`; Flutter's native-assets enforces dynamic link mode. Hook emits no CodeAsset; `OnnxRuntime.load()` throws `UnsupportedError` until the SPM shim is implemented. Not `onnxruntime-mobile`; not CocoaPods. |
 | Android | Hook resolves per-ABI `.so` from Maven AAR; emits as `CodeAsset`s. Removes the Gradle `onnxruntime-android` dependency from host apps. |
 | Web | Excluded (semantic search excluded from web per CLAUDE.md §20). |
 
@@ -346,8 +351,10 @@ convention.
 Stage A produces a self-contained, tested `betto_onnxrt` package (all platforms
 except iOS-final if Q1 remains open). Before Stage B:
 
-1. **Q1 resolved**: the iOS XCFramework spike result is recorded; the hook iOS
-   branch (or plugin shim path) is confirmed working.
+1. **Q1 resolved** ✓: iOS native-assets not viable (ORT ships a static library;
+   Flutter enforces dynamic link mode). SPM plugin shim chosen. Hook iOS branch
+   logs a warning and emits no CodeAsset. Shim implementation deferred to Stage B
+   or a follow-on plan.
 2. **GitHub repo created** at `github.com/bettongia/onnxrt`; Stage A branch
    merged.
 3. **CI pipeline** for the hook (download + verify + CodeAsset emission) passes
@@ -364,28 +371,29 @@ Complete the Stage gate checklist above before beginning Stage B._
 
 #### Phase 1 — iOS XCFramework spike (resolves Q1)
 
-- [ ] Create a minimal stub `betto_onnxrt` package (no real ORT logic): just a
-      `hook/build.dart` that attempts to stage a placeholder XCFramework and
-      emit it as a `CodeAsset`.
-- [ ] Run `dart build` against the stub to confirm macOS/Linux hook execution.
-- [ ] Run `flutter build ios` against a minimal test Flutter app that declares
-      `betto_onnxrt` as a dependency to confirm XCFramework linkage via
-      native assets.
-- [ ] If native-assets XCFramework linkage succeeds: proceed with the primary
-      path (hook stages ORT XCFramework). Record verdict in Q1 above.
-- [ ] If native-assets XCFramework linkage fails: implement the fallback plugin
-      shim (`Package.swift` SPM dependency pointing to
-      `microsoft/onnxruntime-swift-package-manager`). Record verdict in Q1.
-- [ ] Document the spike outcome and chosen iOS path in this plan before
-      proceeding to Phase 2.
+- [x] Created `betto_onnxrt` package with full `hook/build.dart` (real ORT
+      binary download, not a stub) and integration test app.
+- [x] Confirmed macOS/Linux hook execution and `flutter test --device-id macos`
+      path via `make macos_test`.
+- [x] Ran `make ios_test` against the integration test app targeting the iOS
+      simulator to probe XCFramework linkage via native-assets.
+- [x] Native-assets XCFramework linkage **failed** — see Q1 verdict above.
+      The ORT iOS binary is a static `ar archive`; Flutter enforces dynamic link
+      mode. Both `DynamicLoadingBundled` and `StaticLinking` were tried and
+      rejected by the Flutter toolchain.
+- [x] **Chosen path: SPM plugin shim** (deferred to Stage B or a follow-on
+      plan). The `_buildIos` hook branch now logs a warning and emits no
+      CodeAsset. `OnnxRuntime.load()` will throw `UnsupportedError` on iOS
+      until the shim is implemented.
+- [x] Spike outcome documented in Q1 above; plan updated.
 
 #### Phase 2 — Package scaffold and build hook
 
-- [ ] Create the directory `/Users/gonk/development/bettongia/onnxrt/` and
+- [x] Create the directory `/Users/gonk/development/bettongia/onnxrt/` and
       initialise a git repository.
-- [ ] Write `VERSION_ONNX` file (e.g. `v1.22.0` — match the version currently
+- [x] Write `VERSION_ONNX` file (e.g. `v1.22.0` — match the version currently
       used by `kmdb_inferencing`).
-- [ ] Write `pubspec.yaml`:
+- [x] Write `pubspec.yaml`:
   ```yaml
   name: betto_onnxrt
   description: >
@@ -408,24 +416,24 @@ Complete the Stage gate checklist above before beginning Stage B._
   and `hooks` are **main** dependencies (the hook imports them at build time);
   `native_assets_api` and `native_toolchain_c` are intentionally absent (no
   source compilation, and `native_assets_api` is not in the precedent).
-- [ ] Write `analysis_options.yaml`.
-- [ ] Add Apache 2.0 `LICENSE` file.
-- [ ] Write `hook/build.dart`:
+- [x] Write `analysis_options.yaml`.
+- [x] Add Apache 2.0 `LICENSE` file.
+- [x] Write `hook/build.dart`:
   - Read `VERSION_ONNX` from package root.
   - Per build target OS/architecture, construct the GitHub Releases download URL.
   - Verify existing cached artifact SHA-256; skip download if valid.
   - Download to temp path; verify SHA-256; atomic-rename on success.
   - Emit the library as a `CodeAsset`.
   - iOS: implement the Q1-resolved path (native-assets XCFramework or plugin shim).
-- [ ] Write `tool/generate_versions.dart` to write
+- [x] Write `tool/generate_versions.dart` to write
       `lib/src/generated/versions.g.dart` from `VERSION_ONNX`.
-- [ ] Run `dart run tool/generate_versions.dart`.
-- [ ] Add Apache 2.0 license header to all Dart files (use `header_template.txt`
+- [x] Run `dart run tool/generate_versions.dart`.
+- [x] Add Apache 2.0 license header to all Dart files (use `header_template.txt`
       format).
 
 #### Phase 3 — Core API implementation
 
-- [ ] Implement `lib/src/ort_api.dart` — versioned vtable-slot `OrtApi` FFI
+- [x] Implement `lib/src/ort_api.dart` — versioned vtable-slot `OrtApi` FFI
       binding. Port the binding from `kmdb_inferencing/lib/src/ort_bindings.dart`
       + `lib/src/ort_session.dart` (the Opaque handle types, vtable typedefs,
       type-code constants, and `ortApiVersion` live in `ort_bindings.dart`). Add
@@ -434,27 +442,27 @@ Complete the Stage gate checklist above before beginning Stage B._
       `GetDimensions` (slot 33) — see "Generic `OnnxSession` API specification".
       Annotate each slot index with the ORT API symbol name it corresponds to, so
       version drift is detectable.
-- [ ] Implement `lib/src/runtime.dart` — `OnnxRuntime.load()` opens the
+- [x] Implement `lib/src/runtime.dart` — `OnnxRuntime.load()` opens the
       code-asset library and initialises the `OrtApi`.
-- [ ] Implement `lib/src/session.dart` — generalised `OnnxSession.run()` (not
+- [x] Implement `lib/src/session.dart` — generalised `OnnxSession.run()` (not
       BGE-shaped: arbitrary input/output names and element types). Map element
       types via the `OnnxElementType` ↔ ONNX type-code table, recover each output
       tensor's `shape` via slots 31/32/33, and honour the two-field
       `SessionOptions` (both thread counts default 1) — all specified in the
       "Generic `OnnxSession` API specification" investigation subsection.
-- [ ] Implement `lib/src/tensor.dart` — `OnnxTensor`, `OnnxElementType`,
+- [x] Implement `lib/src/tensor.dart` — `OnnxTensor`, `OnnxElementType`,
       `SessionOptions`.
-- [ ] Implement `lib/src/allowlist_provider.dart` — `AllowlistProvider`
+- [x] Implement `lib/src/allowlist_provider.dart` — `AllowlistProvider`
       interface.
-- [ ] Implement `lib/src/model_spec.dart` — generic `ModelSpec` (id, files map,
+- [x] Implement `lib/src/model_spec.dart` — generic `ModelSpec` (id, files map,
       meta map), `ModelFile`.
-- [ ] Implement `lib/src/model_downloader.dart` — `ModelDownloader` with
+- [x] Implement `lib/src/model_downloader.dart` — `ModelDownloader` with
       `AllowlistProvider` gate, SHA-256 verification, temp-file + atomic-rename
       crash safety, `ResolvedModel` return type. Mirror the write discipline from
       the existing `kmdb_inferencing` `ModelDownloader`.
-- [ ] Write `lib/betto_onnxrt.dart` barrel exporting all public types.
-- [ ] Ensure all public classes, methods, and properties have doc comments.
-- [ ] Ensure license header on every source file.
+- [x] Write `lib/betto_onnxrt.dart` barrel exporting all public types.
+- [x] Ensure all public classes, methods, and properties have doc comments.
+- [x] Ensure license header on every source file.
 
 #### Phase 4 — Tests
 
