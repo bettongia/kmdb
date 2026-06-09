@@ -75,8 +75,7 @@ class _FakeHttpClientRequest implements HttpClientRequest {
 
 class _FakeHttpClientResponse extends Stream<List<int>>
     implements HttpClientResponse {
-  _FakeHttpClientResponse({required this.statusCode, required List<int> body})
-    : _body = body;
+  _FakeHttpClientResponse({required this.statusCode, required this._body});
 
   @override
   final int statusCode;
