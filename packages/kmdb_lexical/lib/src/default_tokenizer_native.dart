@@ -11,12 +11,15 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-library;
 
-export 'package:betto_icu/betto_icu.dart'
-    show Tokenizer, RegExpTokenizer, IcuTokenizer, BrowserTokenizer;
-export 'src/default_tokenizer_native.dart'
-    if (dart.library.js_interop) 'src/default_tokenizer_web.dart'
-    show createDefaultTokenizer;
-export 'src/stemmer.dart' show Stemmer;
-export 'src/stopwords.dart' show getStopWords, Stopwords;
+import 'package:betto_icu/betto_icu.dart';
+
+/// Returns the default [Tokenizer] for native platforms.
+///
+/// On native, [RegExpTokenizer] is used: a pure-Dart tokenizer based on the
+/// Unicode `\p{L}\p{N}` character classes that requires no native library and
+/// works identically across all native targets.
+///
+/// The companion file `default_tokenizer_web.dart` is selected instead when
+/// running on web via the conditional export in `lexical.dart`.
+Tokenizer createDefaultTokenizer() => RegExpTokenizer();
