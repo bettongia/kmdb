@@ -17,7 +17,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:betto_builder_tools/loader.dart';
+import 'package:betto_builder_tools/betto_builder_tools.dart';
 import 'package:code_builder/code_builder.dart';
 
 final copyrightHeader = '''
