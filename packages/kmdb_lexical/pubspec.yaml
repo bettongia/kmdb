@@ -12,6 +12,7 @@ environment:
 
 # Add regular dependencies here.
 dependencies:
+  betto_icu: ^0.1.0-dev.1
   intl:
 
 dev_dependencies:
