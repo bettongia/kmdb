@@ -18,8 +18,8 @@ import 'dart:typed_data';
 /// Produces a sentence-level embedding by averaging the token-level hidden
 /// states produced by the ONNX model, weighted by [attentionMask].
 ///
-/// [hiddenState] is the flat list of float32 logits returned by
-/// [OrtInferenceSession.run] with shape `[seqLen * hiddenDim]`.
+/// [hiddenState] is the flat list of float32 logits extracted from the
+/// [OnnxTensor] returned by [OnnxSession.run] with shape `[seqLen * hiddenDim]`.
 ///
 /// [attentionMask] is the parallel list from [TokenizerOutput], length
 /// `seqLen`. Padding positions (mask = 0) are excluded from the average.
@@ -27,7 +27,7 @@ import 'dart:typed_data';
 /// [seqLen] is the number of token positions.
 ///
 /// [hiddenDim] is the embedding dimension (e.g. 384 for BGE Small En v1.5,
-/// 1024 for BGE-M3). This is sourced from [ModelSpec.embeddingDimensions] and
+/// 1024 for BGE-M3). Sourced from `spec.meta['dimensions'] as int` and
 /// must be supplied by the caller — there is no default, as the dimension is
 /// model-specific and must not be assumed.
 ///
