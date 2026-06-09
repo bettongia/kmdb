@@ -1,8 +1,8 @@
 # Extract `betto_onnxrt` — Standalone ONNX Runtime Package
 
-**Status**: Implementing
+**Status**: Complete
 
-**PR link**: _(pending)_
+**PR link**: https://github.com/bettongia/kmdb/pull/42
 
 **Roadmap**: [v0.05 — Multi-platform pipelines § betto_onnxrt](../roadmap/0_05.md#betto_onnxrt)
 
@@ -576,11 +576,51 @@ git ref to the actual merged SHA before running these steps._
       updated "Model Catalog" subsection to describe generic `ModelSpec` shape;
       updated "Download-on-demand" subsection to reference `betto_onnxrt`
       `ModelDownloader` with `cacheDir:` parameter and `ResolvedModel` return.
-- [ ] Open a PR for the KMDB monorepo changes.
+- [x] Opened PR #42 for the KMDB monorepo changes:
+      https://github.com/bettongia/kmdb/pull/42
 
 ## Summary
 
-_(To be filled in after implementation.)_
+**Completed 2026-06-10.** Stage B migrated `kmdb_inferencing` from five in-tree
+ORT infrastructure files to the standalone `betto_onnxrt` package
+(`github.com/bettongia/onnxrt`, v0.1.0-dev.1).
+
+**Files deleted:** `ort_library.dart`, `ort_bindings.dart`, `ort_session.dart`,
+`model_spec.dart`, `model_downloader.dart` — ~980 lines of BGE-specific ORT
+infrastructure no longer maintained here.
+
+**Key implementation decisions:**
+
+1. **`ModelSpec` fields must be `static final`, not `static const`** — `Uri(...)`
+   is not a const constructor in Dart, so `ModelCatalog._bgeSmallEnV15` and the
+   catalog map getter must use `static final` / lazy getter. The plan text did not
+   note this; it is a mechanical Dart constraint, not a design decision.
+
+2. **`DownloadProgress` is a callback typedef** (`void Function(int, int)`) in
+   `betto_onnxrt`, not a value type. `OnnxEmbeddingModel.load(onProgress:)` uses
+   it directly — no wrapper needed.
+
+3. **Backward API compatibility preserved** by re-exporting `betto_onnxrt` types
+   (`ModelSpec`, `ModelFile`, `ModelDownloader`, `ResolvedModel`, `DownloadProgress`)
+   from the `kmdb_inferencing` barrel. Callers of `kmdb_inferencing` do not need
+   to import `betto_onnxrt` directly.
+
+4. **Coverage improved from 31.7% to 46%** — the total line count dropped from
+   341 to 161 (deleted infrastructure). Lines gated on a live ORT binary remain
+   uncovered in CI; they are documented as RC-15 in the release checklist.
+
+5. **iOS remains unsupported** — `OnnxRuntime.load()` throws `UnsupportedError`
+   on iOS until the SPM plugin shim is implemented (tracked in `betto_onnxrt`).
+   This matches the Q1 verdict recorded in Stage A.
+
+**Test additions:** `ModelCatalog as AllowlistProvider` group (3 tests) and
+`allowlist rejection` group in `model_downloader_test.dart` (verifying that
+`ModelDownloader` with `allowlist: ModelCatalog()` rejects unregistered models
+and permits catalog-registered ones regardless of validation status). Total:
+66 tests, 1 skip (ORT binary required).
+
+**Branch:** `20260610_plan_betto_onnxrt_extraction`
+**PR:** https://github.com/bettongia/kmdb/pull/42
 
 ---
 
