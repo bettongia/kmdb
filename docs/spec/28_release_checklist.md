@@ -455,6 +455,65 @@ contention test that exercises the lease protocol.
 
 ---
 
+### RC-15 — `betto_onnxrt` ORT binary download, session load, and identity-model inference
+
+- **Area:** native-assets hook / ONNX Runtime (`betto_onnxrt`)
+- **Validates:**
+  1. `hook/build.dart` downloads the ORT binary for the target platform from
+     GitHub Releases, verifies its SHA-256 against `_sha256Manifest` in the
+     hook, and stages it as a `CodeAsset` without errors.
+  2. `OnnxRuntime.load()` opens the staged library and returns a non-null
+     runtime instance with a valid `OrtApi` vtable pointer.
+  3. `OnnxSession.create()` loads `test/fixtures/identity_float32.onnx` (a
+     minimal float32[1,4] → float32[1,4] identity graph) without error.
+  4. `session.run()` with `{'input': OnnxTensor.fromFloat32([1,4], [1,2,3,4])}`
+     returns one output tensor with shape `[1,4]` and values `[1,2,3,4]`.
+  5. No `.part` temp files remain in `.dart_tool/betto_onnxrt/` after a
+     successful download (atomic-rename discipline holds).
+  6. Re-running `dart test` with a warm cache skips the download (short-circuit
+     check passes).
+- **Why not automated:** `OnnxRuntime.load()` calls `DynamicLibrary.open` with
+  a platform-specific short name (`libonnxruntime.dylib`, `libonnxruntime.so`,
+  `onnxruntime.dll`). Under plain `dart test` JIT mode the Dart SDK does not
+  inject the native-assets directory onto the OS library-search path for
+  filename-based opens, so all OnnxSession tests in
+  `test/onnx_session_test.dart` are automatically skipped in CI. A full
+  `dart build` or `flutter build` pipeline is required to place the library on
+  the search path. The `test/hook_smoke_test.dart` and
+  `test/model_downloader_test.dart` suites run fully in CI.
+- **Applies when:** `betto_onnxrt` is introduced; `VERSION_ONNX` is bumped;
+  `hook/build.dart` download/extract/SHA logic changes; `runtime.dart`
+  `_openLibrary()` changes; before any release of `betto_onnxrt` or
+  `kmdb_inferencing` that depends on it.
+- **Prerequisites:**
+  - macOS, Linux, or Windows native build environment.
+  - Network access to `github.com/microsoft/onnxruntime/releases`.
+  - Real SHA-256 checksums filled in `_sha256Manifest` in `hook/build.dart`
+    (currently placeholder zeros for v1.22.0 — replace before release; see
+    the TODO comment in that file).
+- **Steps:**
+  1. From `betto_onnxrt/` root, run `dart test` to confirm the non-FFI tests
+     pass and the OnnxSession tests are correctly skipped.
+  2. Fill in `_sha256Manifest` checksums for the target platform artifact (see
+     the TODO in `hook/build.dart`; obtain with
+     `curl -fsSL <url> | sha256sum`).
+  3. Run `dart build cli --output build/` (requires a minimal `bin/` entry
+     point, or use a scratch Flutter app that declares `betto_onnxrt` as a
+     dependency). Verify the build completes without hook errors and the
+     library is staged under `.dart_tool/betto_onnxrt/{version}/`.
+  4. Set `DYLD_LIBRARY_PATH` (macOS) or `LD_LIBRARY_PATH` (Linux) to the
+     staged library directory and run `dart test test/onnx_session_test.dart`.
+     Verify all 6 OnnxSession tests pass (no skips).
+  5. Confirm no `.part` files remain in `.dart_tool/betto_onnxrt/`.
+  6. Run again to confirm the short-circuit (no re-download).
+- **Expected result:** All OnnxSession tests pass; identity model outputs match
+  inputs; hook cache is clean; second run completes without a network request.
+- **Related:** `docs/plans/plan_betto_onnxrt_extraction.md` (Phase 4),
+  `betto_onnxrt/hook/build.dart`, `betto_onnxrt/test/onnx_session_test.dart`,
+  `betto_onnxrt/test/hook_smoke_test.dart`.
+
+---
+
 ## Release log
 
 | Version | Date | Tester | Checks run | Result | Notes |
