@@ -1,8 +1,8 @@
 # LFS Asset Removal — Replace bundled BGE model with download-on-demand
 
-**Status**: Implementing
+**Status**: Complete
 
-**PR link**: _(pending)_
+**PR link**: https://github.com/bettongia/kmdb/pull/43
 
 **Roadmap**: [v0.05 — LFS asset removal](../roadmap/0_05.md#lfs-asset-removal)
 
@@ -553,4 +553,21 @@ without making a design decision.
 
 ## Summary
 
-_To be completed after implementation._
+Implemented 2026-06-10 on branch `20260610_plan_lfs_asset_removal`, PR #43.
+
+- **Removed `bge_small.onnx` (~133 MB) from Git LFS.** The file is deleted from the working tree via `git rm` and the `*.onnx` filter is removed from `.gitattributes`. A human-coordinated history rewrite (`git filter-repo` + force-push to `main`) is documented in the PR and is required to stop new clones from paying the LFS bandwidth cost.
+
+- **`OnnxEmbeddingModel.load()` now requires `modelPath` or `cacheDir`.** The `_defaultModelPath()` LFS fallback method and the `else` branch that invoked it are deleted. A guard at the top of `load()` throws `ArgumentError` synchronously when neither parameter is supplied — fast, clear, no I/O. The doc comment is updated to remove all "Legacy / LFS assets" / "default assets directory" language.
+
+- **All broken callers fixed:**
+  - `test/kmdb_inferencing_test.dart`: assertion changed to `throwsA(isA<ArgumentError>())`, test renamed.
+  - `example/kmdb_inferencing_example.dart`: no-arg `load()` call replaced with a realistic download-on-demand example using `cacheDir:`.
+  - `packages/kmdb/lib/src/search/vec_index_definition.dart:35`: doc-comment example updated to `load(cacheDir: cacheDir)`.
+  - `packages/kmdb/lib/src/query/kmdb_database.dart:83`: doc-comment example updated to `load(cacheDir: cacheDir)`.
+  - `kmdb_database.dart:726` was already correct and left unchanged.
+
+- **Documentation updated:** `packages/kmdb_inferencing/README.md` — LFS bundle section replaced with "Model download" describing `ModelDownloader` / `cacheDir` usage. `docs/spec/22_semantic_search.md` — "Bundling (LFS assets)" section replaced with "Model acquisition (download-on-demand)".
+
+- **No new RC entry required.** RC-15 already covers AOT ORT inference at release time. The roadmap edits (`docs/roadmap/0_05.md`) are deferred to the kmdb-architect per plan.
+
+- **Tests:** `kmdb_inferencing` — 66 passed (1 skipped for absent vocab.txt in test path, expected). `kmdb` — 1722 passed. `make pre_commit` — format_check, analyze (all 8 packages), license_check, and pre_commit_test all passed.
