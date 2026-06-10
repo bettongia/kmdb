@@ -80,7 +80,7 @@ import 'write_validator.dart';
 ///   adapter: MemoryStorageAdapter(),
 ///   ftsIndexes: [FtsIndexDefinition(collection: 'docs', field: 'body')],
 ///   vecIndexes: [VecIndexDefinition(collection: 'docs', field: 'body')],
-///   embeddingModel: await OnnxEmbeddingModel.load(), // required for vecIndexes
+///   embeddingModel: await OnnxEmbeddingModel.load(cacheDir: cacheDir), // required for vecIndexes
 /// );
 /// ```
 ///

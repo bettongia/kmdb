@@ -48,15 +48,51 @@ branch logs a warning and emits no `CodeAsset`. `OnnxRuntime.load()` will throw
 `UnsupportedError` on iOS until an SPM plugin shim is implemented (tracked in
 the `betto_onnxrt` repository).
 
-## Model assets
+## Model download
 
-The default BGE Small En v1.5 binary (`bge_small.onnx`, ~127 MB) is tracked in
-the repository using **Git LFS**. Supporting assets (`vocab.txt`,
-`tokenizer_config.json`, etc.) are tracked normally. All assets live under
-`assets/models/bge-small-en/`.
+The BGE Small En v1.5 model binary (`bge_small.onnx`, ~133 MB) is **not
+bundled** in the repository. It is downloaded on first use via
+`ModelDownloader` from the `betto_onnxrt` package.
 
-Run `git lfs pull` after cloning to fetch the model binary before running tests
-that require inference.
+Supporting tokenizer assets (`vocab.txt`, `tokenizer_config.json`,
+`tokenizer.json`, `special_tokens_map.json`, `config.json`) are included in the
+package under `assets/models/bge-small-en/` and are used by `BertTokenizer`
+directly. No network access is required for tokenization.
+
+To load the model, supply a `cacheDir` where downloaded model files will be
+stored. On first use, `ModelDownloader` downloads and SHA-256-verifies the ONNX
+file. Subsequent calls reuse the cached file if the checksum still matches.
+
+```dart
+final model = await OnnxEmbeddingModel.load(
+  cacheDir: '/path/to/model/cache',
+);
+```
+
+Or specify the model explicitly with a `ModelSpec` from `ModelCatalog`:
+
+```dart
+final spec = ModelCatalog.lookup('bge-small-en-v1.5');
+final model = await OnnxEmbeddingModel.load(
+  spec: spec,
+  cacheDir: '/path/to/model/cache',
+  onProgress: (received, total) {
+    print('Downloading: ${received ~/ 1024} / ${total ~/ 1024} KB');
+  },
+);
+```
+
+Alternatively, load from an explicit filesystem path (e.g. after manually
+downloading the model):
+
+```dart
+final model = await OnnxEmbeddingModel.load(
+  modelPath: '/path/to/bge_small.onnx',
+);
+```
+
+**Note:** Either `cacheDir` or `modelPath` must be supplied. Calling
+`OnnxEmbeddingModel.load()` without either throws `ArgumentError` immediately.
 
 ## Getting started
 
@@ -74,16 +110,18 @@ Run `dart pub get` from the workspace root to resolve all dependencies.
 
 ## Usage
 
-### Default model (bundled LFS asset)
+### Download-on-demand (preferred)
 
 Pass an `OnnxEmbeddingModel` to `KmdbDatabase.open()` when using semantic or
-hybrid search. No network access required — uses the bundled LFS asset:
+hybrid search. The model is downloaded on first use and cached locally:
 
 ```dart
 import 'package:kmdb/kmdb.dart';
 import 'package:kmdb_inferencing/kmdb_inferencing.dart';
 
-final model = await OnnxEmbeddingModel.load();
+final model = await OnnxEmbeddingModel.load(
+  cacheDir: '/path/to/model/cache',
+);
 
 final db = await KmdbDatabase.open(
   store,
@@ -95,25 +133,6 @@ final db = await KmdbDatabase.open(
 
 // Always dispose the model when the database is closed
 await db.close(); // calls model.dispose() automatically
-```
-
-### Download-on-demand (catalog model + cache dir)
-
-Use `cacheDir` to download a catalog model on first use. The `ModelCatalog`
-allowlist gates which models may be downloaded. The model is verified via
-SHA-256 and stored in the specified directory:
-
-```dart
-import 'package:kmdb_inferencing/kmdb_inferencing.dart';
-
-final spec = ModelCatalog.lookup('bge-small-en-v1.5');
-final model = await OnnxEmbeddingModel.load(
-  spec: spec,
-  cacheDir: '/path/to/model/cache',
-  onProgress: (received, total) {
-    print('Downloading: ${received ~/ 1024} / ${total ~/ 1024} KB');
-  },
-);
 ```
 
 ### Using ModelDownloader directly

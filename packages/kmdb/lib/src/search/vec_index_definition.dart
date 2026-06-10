@@ -32,7 +32,7 @@
 ///   path: '/path/to/db',
 ///   adapter: adapter,
 ///   vecIndexes: [def],
-///   embeddingModel: await OnnxEmbeddingModel.load(),
+///   embeddingModel: await OnnxEmbeddingModel.load(cacheDir: cacheDir),
 /// );
 /// ```
 final class VecIndexDefinition {

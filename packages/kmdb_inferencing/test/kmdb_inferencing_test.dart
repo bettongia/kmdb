@@ -16,26 +16,22 @@ import 'package:kmdb_inferencing/kmdb_inferencing.dart';
 import 'package:test/test.dart';
 
 void main() {
-  group('OnnxEmbeddingModel — stub behaviour', () {
+  group('OnnxEmbeddingModel — contract', () {
     test('OnnxEmbeddingModel implements EmbeddingModel interface', () {
       // Type check is compile-time, but we can verify at runtime too.
       expect(OnnxEmbeddingModel, isNotNull);
       // The class must be assignable to EmbeddingModel once instantiated.
       // We verify this structurally by checking the type hierarchy.
-      // Actual instantiation throws UnimplementedError (see next test).
     });
 
-    test(
-      'OnnxEmbeddingModel.load() throws when model assets are absent',
-      () async {
-        // When the BGE model file is not present (e.g. in CI without assets),
-        // load() throws an UnsupportedError with a descriptive message.
-        await expectLater(
-          OnnxEmbeddingModel.load,
-          throwsA(isA<UnsupportedError>()),
-        );
-      },
-    );
+    test('OnnxEmbeddingModel.load() throws ArgumentError when neither '
+        'modelPath nor cacheDir is supplied', () async {
+      // The bundled LFS asset has been removed. Calling load() with no
+      // modelPath and no cacheDir must fail fast with ArgumentError so
+      // callers receive a clear, actionable error before any I/O is
+      // attempted. This is a required-argument check, not a file-not-found.
+      await expectLater(OnnxEmbeddingModel.load, throwsA(isA<ArgumentError>()));
+    });
 
     test('OnnxEmbeddingModel is exported from barrel', () {
       // If this file compiles, the export is correct.
