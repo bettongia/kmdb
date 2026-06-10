@@ -36,12 +36,13 @@ import 'model_catalog.dart';
 /// `bge-small-en-v1.5`). This is persisted in `$meta` with each `$vec:` index
 /// so that a model change can be detected and the index rebuilt.
 ///
-/// ## Loading with download-on-demand
+/// ## Loading with download-on-demand (preferred)
 ///
-/// The preferred approach is to supply a [ModelSpec] and a [cacheDir]. If the
-/// model files are already cached and their SHA-256 checksums match, they are
-/// used immediately. Otherwise [ModelDownloader] fetches the files before
-/// opening the ORT session:
+/// Supply a [cacheDir] (and optionally a [ModelSpec] via [spec]) to fetch the
+/// model on first use via [ModelDownloader]. If the model files are already
+/// cached and their SHA-256 checksums match, they are used immediately.
+/// Otherwise [ModelDownloader] fetches the files before opening the ORT
+/// session:
 ///
 /// ```dart
 /// final spec = ModelCatalog.lookup('bge-small-en-v1.5');
@@ -54,19 +55,21 @@ import 'model_catalog.dart';
 /// );
 /// ```
 ///
-/// ## Loading from an explicit path (legacy / LFS assets)
+/// ## Loading from an explicit path
 ///
 /// The [modelPath] parameter loads a model from a specific filesystem path,
-/// bypassing the catalog and downloader. This is retained for backward
-/// compatibility with the Git LFS asset layout. Specifying [modelPath] without
-/// [spec] uses [ModelCatalog.defaultModelId] for the identity.
+/// bypassing the catalog and downloader. Specifying [modelPath] without [spec]
+/// uses [ModelCatalog.defaultModelId] for the identity.
 ///
 /// ```dart
-/// // Legacy / LFS-bundled model path:
 /// final model = await OnnxEmbeddingModel.load(
-///   modelPath: '<executableDir>/assets/models/bge-small-en/bge_small.onnx',
+///   modelPath: '/path/to/bge_small.onnx',
 /// );
 /// ```
+///
+/// **Important:** Either [modelPath] or [cacheDir] must be supplied.
+/// Calling [load] without either throws [ArgumentError] synchronously — there
+/// is no bundled model asset path. See [ModelCatalog] and [ModelDownloader].
 ///
 /// ## Lifecycle
 ///
@@ -118,30 +121,41 @@ class OnnxEmbeddingModel implements EmbeddingModel {
 
   /// Loads an embedding model and returns an [OnnxEmbeddingModel].
   ///
+  /// **Either [modelPath] or [cacheDir] must be supplied.** Calling [load]
+  /// without either throws [ArgumentError] synchronously — there is no default
+  /// asset path or bundled model. Use [cacheDir] to download the model on
+  /// demand (preferred), or [modelPath] to load from an explicit filesystem
+  /// path. See [ModelCatalog] and [ModelDownloader].
+  ///
   /// ## Download-on-demand path (preferred)
   ///
-  /// When [spec] and [cacheDir] are provided the [ModelDownloader] is invoked
-  /// to ensure the model files are present and checksummed before opening the
-  /// ORT session. Files already in the cache are reused without downloading.
+  /// When [cacheDir] is provided, [ModelDownloader] is invoked to ensure the
+  /// model files are present and checksummed before opening the ORT session.
+  /// Files already in the cache are reused without downloading. Pass [spec] to
+  /// select a specific catalog model; if omitted, [ModelCatalog.defaultModelId]
+  /// (`'bge-small-en-v1.5'`) is used.
   ///
   /// [onProgress] is forwarded to [ModelDownloader.ensure] and receives
   /// incremental download progress. It is not called when files are cached.
   ///
-  /// ## Legacy explicit-path
+  /// ```dart
+  /// final model = await OnnxEmbeddingModel.load(
+  ///   cacheDir: '/path/to/cache',
+  ///   onProgress: (received, total) => print('$received / $total'),
+  /// );
+  /// ```
   ///
-  /// When [modelPath] is provided (and [spec] is `null`), the file at that
-  /// path is loaded directly (no download, no checksum). The model identity
-  /// is set to [ModelCatalog.defaultModelId]. This supports the Git LFS
-  /// bundle layout used in development and the existing test suite.
+  /// ## Explicit-path
   ///
-  /// If [modelPath] is `null` and [spec] is `null`, the model is looked up
-  /// from the default assets directory relative to the compiled executable:
-  /// `<executableDir>/assets/models/bge-small-en/bge_small.onnx`.
+  /// When [modelPath] is provided, the file at that path is loaded directly
+  /// (no download, no checksum). The model identity is set to
+  /// [ModelCatalog.defaultModelId] unless [spec] is also supplied.
   ///
   /// [tokenizer] overrides the word-segmentation step inside [BertTokenizer].
   /// Defaults to [RegExpTokenizer]. Supply `IcuTokenizer()` from
   /// `package:betto_icu` for superior Unicode coverage.
   ///
+  /// Throws [ArgumentError] if neither [modelPath] nor [cacheDir] is supplied.
   /// Throws [UnsupportedError] if the model file does not exist on disk.
   /// Throws [Exception] if the ORT library cannot be loaded or the model is
   /// corrupt.
@@ -152,6 +166,20 @@ class OnnxEmbeddingModel implements EmbeddingModel {
     Tokenizer? tokenizer,
     DownloadProgress? onProgress,
   }) async {
+    // Guard: at least one of modelPath or cacheDir must be supplied.
+    // This is a required-argument check: throw synchronously before any I/O
+    // so callers get a fast, clear failure rather than a confusing downstream
+    // error. The bundled LFS asset path has been removed — download-on-demand
+    // (cacheDir) or an explicit modelPath is the only supported mechanism.
+    if (modelPath == null && cacheDir == null) {
+      throw ArgumentError(
+        'Either modelPath or cacheDir must be supplied. '
+        'Pass an explicit modelPath, or pass cacheDir (with an optional spec) '
+        'to download the model on demand. '
+        'See ModelCatalog and ModelDownloader.',
+      );
+    }
+
     // Resolve the model spec. When no spec is given, use the default model.
     // When a raw modelPath is supplied without a spec, we still need an id for
     // model identity tracking — use the default catalog ID.
@@ -165,24 +193,21 @@ class OnnxEmbeddingModel implements EmbeddingModel {
       // Explicit path — bypass catalog and downloader.
       resolvedModelPath = modelPath;
       resolvedVocabPath = p.join(p.dirname(modelPath), 'vocab.txt');
-    } else if (cacheDir != null) {
+    } else {
+      // cacheDir != null is guaranteed by the guard above.
       // Download-on-demand path: let ModelDownloader ensure the files are
       // present and their checksums match before opening the ORT session.
       // The ModelCatalog allowlist gates which models may be downloaded.
       final downloader = ModelDownloader(allowlist: ModelCatalog());
       final resolved = await downloader.ensure(
         resolvedSpec,
-        cacheDir: cacheDir,
+        cacheDir: cacheDir!,
         onProgress: onProgress,
       );
       // File names in ResolvedModel.filePaths match the keys in ModelSpec.files:
       // 'onnx' → absolute path to the .onnx model, 'vocab' → vocab.txt.
       resolvedModelPath = resolved.filePaths['onnx']!;
       resolvedVocabPath = resolved.filePaths['vocab']!;
-    } else {
-      // Default asset path (LFS bundle layout used in development).
-      resolvedModelPath = _defaultModelPath();
-      resolvedVocabPath = p.join(p.dirname(resolvedModelPath), 'vocab.txt');
     }
 
     _assertFileExists(resolvedModelPath, 'model file');
@@ -271,21 +296,6 @@ class OnnxEmbeddingModel implements EmbeddingModel {
   }
 
   // ── Private helpers ────────────────────────────────────────────────────────
-
-  /// Returns the default model path relative to the compiled executable.
-  ///
-  /// Used when no [modelPath] is supplied and no [cacheDir] is provided. This
-  /// corresponds to the Git LFS asset layout used in development.
-  static String _defaultModelPath() {
-    final execDir = File(Platform.resolvedExecutable).parent.path;
-    return p.join(
-      execDir,
-      'assets',
-      'models',
-      'bge-small-en',
-      'bge_small.onnx',
-    );
-  }
 
   static void _assertFileExists(String path, String label) {
     if (!File(path).existsSync()) {

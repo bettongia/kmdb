@@ -105,14 +105,23 @@ model ID throws `UnsupportedError`. BGE-M3 support is deferred to v0.08.
 `true` for any registered ID regardless of validation status.
 `ModelCatalog.defaultModelId` is `'bge-small-en-v1.5'`.
 
-### Bundling (LFS assets)
+### Model acquisition (download-on-demand)
 
-The default model and supporting assets (`vocab.txt`, `tokenizer_config.json`)
-are bundled in the `kmdb` package under `assets/models/bge-small-en/`. The
-binary `bge_small.onnx` is tracked in the repository using **Git LFS**. No
-internet access or user configuration is required to use the default model.
+The `bge_small.onnx` binary (~133 MB) is **not bundled** in the repository.
+It is downloaded on first use via `ModelDownloader` from `betto_onnxrt`.
+Supporting tokenizer assets (`vocab.txt`, `tokenizer_config.json`,
+`tokenizer.json`, `special_tokens_map.json`, `config.json`) are included in
+`packages/kmdb_inferencing/assets/models/bge-small-en/` and are loaded
+directly by `BertTokenizer` without any network access.
 
-### Download-on-demand (`ModelDownloader` from `betto_onnxrt`)
+`OnnxEmbeddingModel.load()` requires either `modelPath` or `cacheDir`.
+Calling it without either throws `ArgumentError` synchronously. The
+recommended approach is to supply `cacheDir`, which triggers
+`ModelDownloader` on first use:
+
+```dart
+final model = await OnnxEmbeddingModel.load(cacheDir: '/path/to/cache');
+```
 
 `ModelDownloader` (provided by `betto_onnxrt`, re-exported from
 `kmdb_inferencing`) downloads and verifies model assets on first use. The
@@ -120,21 +129,15 @@ internet access or user configuration is required to use the default model.
 to catalog-registered models:
 
 1. The ONNX file and vocabulary are downloaded to a configurable local cache
-   directory (`cacheDir`, defaulting to `~/.kmdb_cache`).
+   directory (`cacheDir`).
 2. Each file is downloaded to a `.part` temporary name and atomically renamed
    to its final name only after SHA-256 verification passes. This ensures a
    crash during download leaves no corrupt files in the cache.
 3. On subsequent opens, the cached files are verified by SHA-256 before use.
 
-`OnnxEmbeddingModel.load(cacheDir: dir)` invokes `ModelDownloader` internally.
 The cache directory is configured per-REPL session in `~/.kmdbrc`
 (`cacheDir` key) and not in `KmdbConfig` or `KvStoreConfig` — it is a local
 client preference, not a per-database setting.
-
-All kmdb packages carry `publish_to: none`, so the pub.dev 100 MB package size
-limit does not currently apply. Publishing to pub.dev in future will require
-resolving this — either by moving entirely to on-demand download or splitting the
-model into a separate package.
 
 ## Model Lifecycle and Identity
 
