@@ -14,18 +14,19 @@
 
 import 'dart:typed_data';
 
-import 'package:betto_registry/mimeinfo.dart' as betto_registry;
+import 'package:betto_mediatype_detector/betto_mediatype_detector.dart'
+    as betto_registry;
 
 /// Abstract interface for detecting the MIME type of raw bytes.
 ///
 /// The vault subsystem uses [MediaTypeDetector] at ingestion time to determine
 /// the canonical `mediaType` stored in `manifest.json`. A concrete
 /// implementation delegates to the FreeDesktop shared-mime-info database via
-/// `package:betto_registry`.
+/// `package:betto_mediatype_detector`.
 ///
 /// ## Design
 ///
-/// The interface returns the full [MatchList] from `betto_registry`, giving
+/// The interface returns the full [MatchList] from `betto_mediatype_detector`, giving
 /// callers access to both `MatchList.bestMatch` (the top-priority type) and
 /// `MatchList.candidates` (all viable types in descending priority order).
 ///
@@ -53,7 +54,7 @@ abstract interface class MediaTypeDetector {
 }
 
 /// Concrete [MediaTypeDetector] backed by the FreeDesktop shared-mime-info
-/// database via `package:kmdb_mediatype`.
+/// database via `package:betto_mediatype_detector`.
 ///
 /// This implementation uses magic number (byte-sequence) matching together
 /// with filename glob patterns. It is the default detector used by [VaultStore].

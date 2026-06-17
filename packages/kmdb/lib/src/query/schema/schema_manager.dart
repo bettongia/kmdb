@@ -15,7 +15,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:betto_schema/schema.dart';
+import 'package:betto_schema/betto_schema.dart';
 
 import '../../engine/kvstore/meta_store.dart';
 import '../collection_schema.dart';

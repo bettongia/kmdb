@@ -14,7 +14,7 @@ dependencies:
   cbor:
   betto_schema:
   betto_zstd:
-  betto_registry:
+  betto_mediatype_detector:
   betto_common:
   meta: any
   kmdb_lexical:

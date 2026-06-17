@@ -107,15 +107,23 @@ packages/
   kmdb_google_drive/   — Google Drive SyncStorageAdapter (optional, opt-in)
   kmdb_icloud/         — Apple iCloud (CloudKit) SyncStorageAdapter (iOS/macOS only, optional, opt-in)
 
-External packages pulled in via `git:` refs in `pubspec.yaml`
-`dependency_overrides`:
-  betto_common         — shared Bettongia Dart utilities (https://github.com/bettongia/common)
-  betto_schema         — JSON schema validation (https://github.com/bettongia/schema)
-  betto_zstd           — Zstd FFI compression provider (https://github.com/bettongia/zstd)
-  betto_registry       — FreeDesktop shared-mime-info file-type identification (https://github.com/bettongia/registry)
-  betto_builder_tools  — build helpers shared across Bettongia packages (https://github.com/bettongia/builder_tools)
-  betto_onnxrt         — ONNX Runtime for Dart: build-time binary via native-assets hook, OnnxSession API, model-download infrastructure (https://github.com/bettongia/onnxrt)
-  betto_icu            — Unicode tokenizer (Tokenizer, IcuTokenizer, RegExpTokenizer) — pub.dev, consumed by kmdb_lexical
+External Bettongia packages — all published to pub.dev, pinned in
+`pubspec.yaml` `dependency_overrides`:
+  betto_common              — shared Bettongia Dart utilities
+  betto_schema              — JSON schema validation
+  betto_zstd                — Zstd FFI/WASM compression provider
+  betto_mediatype_detector  — MIME type detection via FreeDesktop shared-mime-info
+                              (replaced the former `betto_registry`)
+  betto_builder_tools       — build helpers shared across Bettongia packages
+  betto_onnxrt              — ONNX Runtime for Dart: native-assets build hook,
+                              OnnxSession API, model-download infrastructure
+                              (https://github.com/bettongia/onnxrt)
+  betto_icu                 — Unicode tokenizer (Tokenizer, IcuTokenizer,
+                              RegExpTokenizer) — consumed by kmdb_lexical
+
+iOS companion (consumer Flutter app only — not in this workspace):
+  betto_onnxrt_ios          — Flutter plugin; SPM-links ORT XCFramework so
+                              betto_onnxrt works on iOS (Flutter ≥ 3.27.0)
 
 Downstream consumer (separate repo, not pulled in here):
   kmdb_ui              — Flutter desktop/browser UI (https://github.com/bettongia/kmdb-ui)

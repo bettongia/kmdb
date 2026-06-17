@@ -48,6 +48,23 @@ blobs to the appropriate extractor — in v1, any blob whose `mediaType` is not
 `text/plain` is left unindexed, and the extraction status is recorded as
 `unsupported` (see §4.2).
 
+The indexing isolate (§5.2) is native-only and can run a second-pass media type
+check using Google's Magika model (available as an example in `betto_onnxrt`).
+Magika provides two signals not available from the rule-based detector:
+
+- **`is_text` flag** — a direct gate on whether extraction is worth attempting,
+  independent of MIME routing. A blob stored as `text/plain` whose Magika score
+  is below a confidence threshold (e.g. 0.5) is skipped and recorded as
+  `unsupported` rather than producing garbled index content.
+- **Confidence score** — surfaced in `extract_status.json` under a `"detectorScore"`
+  field for diagnostics, and usable by future format extractors to decide whether
+  to attempt parsing ambiguous input.
+
+The rule-based `FreedesktopMediaTypeDetector` remains the canonical detector at
+ingest time (it works on all platforms including web). Magika is an optional
+validation step within the indexing isolate only; it does not modify
+`manifest.json`.
+
 ### 2.2 VaultTextExtractor interface
 
 A `VaultTextExtractor` interface is defined in the core `kmdb` package:
@@ -191,7 +208,13 @@ independently (consistent with the `$fts:` and `$vec:` exclusion from sync in
   "chunkingParams": { "chunkSize": 300, "chunkOverlap": 50 },
   "chunkCount": 12,
   "extractedAt": "2026-04-22T...", // HLC timestamp
-  "error": null, // populated on "failed" status
+  "error": null,          // populated on "failed" status
+  // Phase A (§10.1) — charset detection:
+  "charset": "UTF-8",     // detected encoding, null if detection failed
+  // §2.1 — Magika second-pass confidence:
+  "detectorScore": 0.97,  // Magika confidence [0.0–1.0], null if not run
+  // Phase B (§10.2) — language detection:
+  "language": "en",       // BCP-47 tag, "und" if undetermined, null if not yet run
 }
 ```
 
@@ -483,9 +506,21 @@ validated in practice.
 
 ## 10. Multilingual Support
 
-Multilingual vault search requires four capabilities to be layered on top of the
-v1 English-only foundation. They are listed in dependency order — each builds on
-the one before.
+> **Revised framing.** An earlier draft treated language detection as the central
+> problem — triggering model routing and driving the embedding path. That framing
+> is heavier than necessary. The system breaks into two independent concerns:
+>
+> 1. **Semantic / embedding path** — solved by adopting *one* multilingual model
+>    into a single shared vector space. This is what delivers broad-language
+>    support and enables cross-lingual retrieval. It removes the need for
+>    language-based model routing entirely.
+> 2. **Lexical / reverse-index path** — language detection is still useful here
+>    for analyzer selection and document metadata, but the role is coarse and
+>    tolerant of error. A lightweight, pure-Dart detector is sufficient; no FFI
+>    or model runtime is needed.
+>
+> The phases below are listed in dependency order, but note that Phase C
+> (multilingual embedding) is **independent** of Phases A and B.
 
 ### 10.1 Charset detection
 
@@ -500,84 +535,202 @@ A charset detection step must be inserted before UTF-8 decoding in
 best guess) should be stored in `extract_status.json` under a `"charset"` field
 for diagnostics.
 
-Recommended approach: integrate a pure-Dart port of the ICU charset detection
-heuristics, or expose charset detection from `kmdb_tokenizer_icu` (which already
-links the ICU native library). A dedicated `kmdb_extractor_charset` helper
-package following the `kmdb_extractor_<name>` convention keeps the dependency
-optional.
+**`betto_charset_detector: ^0.1.0-dev.2` is now available on pub.dev and is the
+recommended implementation.** It is pure-Dart (no native dependencies), runs in
+the indexing isolate on all platforms, and requires no additional optional
+package — it can be added as a direct dependency of `kmdb` alongside
+`betto_mediatype_detector`.
 
 ### 10.2 Language detection
 
-Once text is correctly decoded, the language must be identified so that the
-lexical tokenizer and (in future) the embedding model can be selected
-appropriately. Language is stored in `extract_status.json` under a `"language"`
-field (BCP 47 tag, e.g. `"en"`, `"ja"`, `"fr"`).
+With the multilingual embedding model (§10.3) handling the semantic path, language
+detection is no longer load-bearing for embedding routing. Its remaining role is
+narrower:
 
-The appropriate detector depends on content length:
+1. **Lexical analyzer selection** — stemming, stop-word filtering, and
+   tokenization strategy for the BM25 reverse index are language-specific, but
+   degrade gracefully (a generic analyzer still produces a valid index). Coarse
+   accuracy on document-length text is sufficient.
+2. **Document metadata** — a `"language"` field in `extract_status.json` for
+   faceting, filtering, and display.
+3. **Script guard rails** — cheap detection of CJK/Cyrillic/Arabic to route to
+   `IcuTokenizer` (§10.4) without requiring full language identification.
 
-| Scenario              | Recommended library                                                                                |
-| --------------------- | -------------------------------------------------------------------------------------------------- |
-| Short texts (< ~200 words) | [Lingua](https://github.com/pemistahl/lingua-rs) (Rust FFI) — high accuracy on short, mixed-language input |
-| Long texts (≥ ~200 words) | [Floret / FastText](https://fasttext.cc/docs/en/language-identification.html) via ONNX — fast, compact model |
+This narrower role collapses the engine choice. A two-stage pure-Dart detector
+is sufficient:
 
-A mixed-length heuristic (use Lingua below a word-count threshold, Floret above)
-is likely the right default. Both libraries are to be packaged as optional
-`kmdb_detector_<name>` packages:
+- **Unicode script pre-filter** — resolves or sharply narrows many languages
+  from script alone (Han, Hiragana/Katakana, Hangul, Cyrillic, Greek, Arabic,
+  Hebrew, Devanagari, Thai, …). Deterministic, near-free, and driven by
+  code-generated Unicode tables. For the analyzer-selection use case, script
+  alone already routes a large fraction of non-Latin content correctly.
+- **Small character n-gram model** — distinguishes same-script languages (e.g.
+  English vs. Hungarian vs. German in Latin). Constrained to the vault's known
+  languages via `restrictTo`, which keeps the model data tiny and accurate.
 
-| Package                    | Library       |
-| -------------------------- | ------------- |
-| `kmdb_detector_lingua`     | Lingua (Rust FFI) |
-| `kmdb_detector_fasttext`   | FastText / Floret (ONNX) |
+This requires no FFI, no model runtime, and no per-platform builds.
 
-Detectors are registered in `VaultSearchConfig` analogously to extractors:
+> **Why not FastText/floret-in-ONNX.** FastText's tokenisation, n-gram
+> extraction, and hashing live outside any tensor graph; there is no maintained
+> FastText→ONNX exporter. FastText/floret is an embeddings tool, not a
+> classifier, and cannot be meaningfully expressed as an ONNX session. If a
+> model-grade detector were ever needed, a transformer LID model in ONNX would be
+> the route — but the pure-Dart detector suffices for the analyzer-selection task.
+
+#### API
 
 ```dart
-final db = await KmdbDatabase.open(
-  path: '/path/to/db',
-  vaultSearch: VaultSearchConfig(
-    extractors: [PlainTextExtractor()],
-    languageDetectors: [
-      LinguaDetector(),     // from kmdb_detector_lingua
-      FastTextDetector(),   // from kmdb_detector_fasttext
-    ],
-    // ...
-  ),
-);
+/// A detected language with its confidence in [0.0, 1.0].
+final class LanguageGuess {
+  final String code;       // BCP-47 / ISO 639-1 e.g. "en", "hu"
+  final double confidence; // 0.0–1.0
+  const LanguageGuess(this.code, this.confidence);
+}
+
+sealed class DetectionResult {}
+final class Detected extends DetectionResult {
+  final LanguageGuess best;
+  final List<LanguageGuess> ranked;
+  Detected(this.best, this.ranked);
+}
+final class Undetermined extends DetectionResult {
+  final List<LanguageGuess> ranked; // below threshold; may be empty
+  Undetermined(this.ranked);
+}
+
+abstract interface class LanguageDetectorBackend {
+  Set<String> get supportedLanguages;
+  List<LanguageGuess> score(String text);
+}
+
+final class LanguageDetector {
+  LanguageDetector({
+    required LanguageDetectorBackend backend,
+    double minConfidence = 0.5,
+    Set<String>? restrictTo, // constrain to a vault's known languages
+  });
+
+  /// Zero-dependency default: Unicode script filter + small n-gram model.
+  factory LanguageDetector.pureDart({
+    double minConfidence,
+    Set<String>? restrictTo,
+  }) = /* ... */;
+
+  /// Full detection (analyzer selection, metadata).
+  DetectionResult detect(String text);
+
+  /// Cheap script-only classification for guard rails and tokenizer routing.
+  ///
+  /// Returns a Unicode script name (e.g. "Latn", "Cyrl", "Han") or null.
+  String? dominantScript(String text);
+}
 ```
 
+Key design points:
+- **`restrictTo`** is the biggest practical accuracy lever — constraining to the
+  vault's known languages sharpens the n-gram model significantly.
+- **`Undetermined` as a first-class result** — never throws on ordinary input.
+- **`dominantScript`** provides the cheap guard rail needed for `IcuTokenizer`
+  routing (§10.4) without running full detection.
+- The detector is intentionally decoupled from the embedding path — nothing in
+  semantic indexing calls it.
+
 If no detector is registered, language defaults to `"und"` (undetermined) and
-the English-only pipeline is used as a fallback.
+the English-only lexical pipeline is used as a fallback.
+
+#### Package
+
+`kmdb_lang_id` — pure-Dart, no native dependencies:
+
+```
+kmdb_lang_id/
+  lib/
+    kmdb_lang_id.dart
+    src/
+      detector.dart
+      backend.dart
+      script/script_filter.dart
+      script/script_ranges.g.dart       # code-generated from UCD
+      ngram/ngram_backend.dart
+      ngram/profiles/*.g.dart           # code-generated; subset to needed languages
+```
 
 ### 10.3 Multilingual embedding model
 
-BGE Small En v1.5 accepts only English input. Embeddings for other languages
-produce vectors in an arbitrary space that is not meaningful for retrieval.
+Adopting a single multilingual model is what actually delivers broad-language
+support. Two benefits over a per-language routing approach:
 
-The recommended upgrade is **BGE-M3**, a single model supporting
-100+ languages via a unified embedding space. The tradeoffs relative to BGE
-Small En v1.5:
+- **Single shared vector space.** Per-language models embed into incompatible
+  coordinate systems — an English query cannot match a semantically relevant
+  Hungarian document. A multilingual model places everything in one space,
+  enabling cross-lingual retrieval by construction and without any query-side
+  language detection.
+- **No misroute failure mode.** A router must assign one language per document
+  and can route wrong; mixed-language documents (quotations, names, code,
+  citations) have no single right answer. A multilingual model has neither
+  failure mode.
 
-| Property           | BGE Small En v1.5 | BGE-M3         |
-| ------------------ | ----------------- | -------------- |
-| Model size         | ~33 MB            | ~570 MB        |
-| Vector dimensions  | 384               | 1024           |
-| Languages          | English only      | 100+           |
-| Inference speed    | Fast              | ~3–5× slower   |
-| Storage per chunk  | 384 bytes (SQ8)   | 1024 bytes (SQ8) |
+#### Model options
 
-Because the vector filename encodes the model name
-(`vectors_bge-m3_sq8.bin` vs `vectors_bge-small-en-v1.5_sq8.bin`), switching
-models does not require a migration — old files are ignored and recomputed. The
-`$vvec:idx` LSM key space is similarly model-agnostic since the key encodes only
-the sha256 and chunk index; a re-index clears and repopulates it.
+| Model | Languages | Dims | Max tokens | Notes |
+| ----- | --------- | ---- | ---------- | ----- |
+| `intfloat/multilingual-e5-small` | ~100 | 384 | 512 | **Recommended starting point.** Near drop-in: same 384 dims as current BGE model — vector store, SQ8 quantization, and ANN index need no dimensional change. Requires E5 input prefixes (see below). MIT licence. |
+| `BAAI/bge-m3` | 100+ | 1024 | 8192 | Long-document context; dense + sparse + multi-vector retrieval in one model. Changes index dimensionality to 1024; requires a full re-index. MIT licence. |
 
-BGE-M3 would be packaged in a new `kmdb_inferencing_m3` package (or as an
-additional model option within `kmdb_inferencing`) to keep the large model
-download optional for applications that do not need multilingual support.
+`multilingual-e5-small` is the pragmatic migration path: model size class and
+dimensionality match the current BGE model, so the only infrastructure change is
+the tokenizer. `bge-m3` is the upgrade if KMDB later wants long-document
+embeddings or hybrid dense/sparse retrieval and can absorb a re-index.
 
-A per-blob model selection strategy (choose the model based on detected language)
-is left as future work; in v2 the model is still a single global configuration
-in `VaultSearchConfig`.
+#### Tokenizer implication (the one real cost)
+
+The current BGE Small En v1.5 pipeline uses BERT **WordPiece** tokenisation.
+Both multilingual candidates are XLM-RoBERTa-based and use **SentencePiece /
+Unigram** tokenisation with a large (~250k) vocabulary. A pure-Dart
+XLM-R-compatible SentencePiece tokenizer must be written or sourced.
+
+Check pub.dev for an existing implementation before building. If porting,
+`transformers.js` (TypeScript, Apache-2.0) is the best direct porting source —
+a GC, class-based language close to Dart, already validated against Python
+outputs. Use `tokenizers` (Rust, Apache-2.0) and `spm_precompiled` as the byte-
+exact reference for resolving ambiguities.
+
+Components the implementation must cover, in complexity order:
+
+1. **Vocab loading** from `tokenizer.json` as `(piece, score)` pairs — avoids
+   protobuf parsing entirely.
+2. **Precompiled-charsmap normaliser** — a compiled trie of NFKC-like rewrites
+   baked into the model. This is *not* plain NFKC; approximating with bare NFKC
+   produces parity failures. Port from `spm_precompiled` logic.
+3. **Metaspace pre-tokenizer** — replace spaces with ▁ (U+2581) and prepend a
+   leading ▁.
+4. **Unigram Viterbi** — build the lattice of all vocab-matching substrings;
+   select maximum-log-probability segmentation; handle `<unk>`.
+5. **fairseq id remapping** — the fairseq XLM-R implementation offsets ids from
+   raw SentencePiece output. An off-by-one corrupts every id silently; take the
+   exact mapping from the HF/Keras source.
+6. **Post-processing** — wrap with `<s> … </s>`, build the attention mask.
+
+Gate the tokenizer in CI against byte-exact token id parity with HuggingFace
+`AutoTokenizer` on a fixed multilingual corpus. The charsmap normalizer and
+fairseq remapping are where silent parity bugs hide; the Unigram DP and Metaspace
+steps are straightforward.
+
+All porting sources (transformers.js, `tokenizers`, `spm_precompiled`) are
+Apache-2.0 and directly compatible with this project's licence.
+
+#### E5 input prefixes
+
+The E5 family requires plain-text prefixes prepended before tokenisation:
+`passage:` at index time, `query:` at query time. Encode this in the pipeline
+and apply it consistently. (BGE uses a query-side instruction only; if BGE-M3 is
+chosen, consult its model card for the equivalent convention.)
+
+#### Query encoding
+
+Queries are embedded with the same multilingual model. Because the vector space
+is shared across all languages, **query-side language detection is not required**
+for semantic retrieval.
 
 ### 10.4 Language-aware BM25 tokenization
 
@@ -591,12 +744,14 @@ produces incorrect or empty token sequences for:
 - **Agglutinative languages** (Finnish, Turkish, Korean) — compound words
   that benefit from morphological decomposition.
 
-The `kmdb_tokenizer_icu` package already wraps the ICU `BreakIterator`, which
-handles word segmentation correctly across all Unicode scripts. Vault search
-should select the tokenizer based on the detected language from §10.2:
+The `IcuTokenizer` from `betto_icu` (already used by `kmdb_lexical`) handles
+word segmentation correctly across all Unicode scripts via ICU `BreakIterator`.
+Vault search routes to it using the **`dominantScript()`** signal from
+`kmdb_lang_id` (§10.2) — a cheap, pre-detection step that does not require full
+language identification:
 
-- English (and most Latin-script languages): existing `RegExpTokenizer`
-- All others: `IcuTokenizer` from `kmdb_tokenizer_icu`
+- Latin-script text: existing `RegExpTokenizer`
+- All other scripts (Han, Cyrillic, Arabic, etc.): `IcuTokenizer`
 
 The tokenizer selection is encapsulated in the indexing isolate and requires no
 API changes — it is an internal routing decision based on the `"language"` field
@@ -608,18 +763,21 @@ produces a valid (if unoptimized) BM25 index.
 
 ### 10.5 Staging recommendation
 
-The four capabilities above have hard dependencies but can be shipped
-incrementally:
-
-| Phase | Capability            | Dependency          |
-| ----- | --------------------- | ------------------- |
-| A     | Charset detection     | None                |
-| B     | Language detection    | Phase A             |
-| C     | BGE-M3 model option   | Phase B (language tag stored for diagnostics) |
-| D     | ICU-backed BM25       | Phase B             |
+| Phase | Capability | Dependency | Package |
+| ----- | ---------- | ---------- | ------- |
+| A | Charset detection | None | `betto_charset_detector` ✅ published |
+| B | Language detection (lexical path + metadata) | Phase A | `kmdb_lang_id` (pure Dart, script + n-gram) |
+| C | Multilingual embedding model | **None** (independent of A/B) | extend `kmdb_inferencing` — `multilingual-e5-small` (384d, drop-in) or `bge-m3` (1024d, re-index required) |
+| D | Language-aware BM25 tokenizer routing | Phase B | `IcuTokenizer` via existing `betto_icu` / `kmdb_lexical` |
 
 Phase A alone fixes silent data corruption for non-UTF-8 plain-text files and is
-worthwhile independently of the multilingual search story.
+worthwhile independently of the multilingual search story. The package is
+available now; no new package needs to be written or published before Phase A
+can be planned and implemented.
+
+Phase C is independent of language detection because the multilingual model
+covers the embedding path without requiring a language label. It can be planned
+and shipped in parallel with or ahead of Phase B.
 
 ---
 

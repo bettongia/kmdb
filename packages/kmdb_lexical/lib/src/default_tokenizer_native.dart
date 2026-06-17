@@ -16,10 +16,16 @@ import 'package:betto_icu/betto_icu.dart';
 
 /// Returns the default [Tokenizer] for native platforms.
 ///
-/// On native, [RegExpTokenizer] is used: a pure-Dart tokenizer based on the
-/// Unicode `\p{L}\p{N}` character classes that requires no native library and
-/// works identically across all native targets.
+/// On native, [IcuTokenizer] is used: it delegates to the system ICU library
+/// via FFI and conforms to UAX #29 Unicode Text Segmentation. This handles
+/// non-Latin scripts (CJK, Thai, Arabic, etc.) correctly, making it suitable
+/// for multi-language content. ICU is a system library on every native target:
+/// `libicucore.dylib` on macOS/iOS, `libicuuc.so` on Android/Linux, and
+/// `icu.dll` on Windows — no bundling is required.
+///
+/// Use [RegExpTokenizer] directly when FFI is unavailable or a pure-Dart,
+/// English-only fallback is explicitly needed.
 ///
 /// The companion file `default_tokenizer_web.dart` is selected instead when
 /// running on web via the conditional export in `lexical.dart`.
-Tokenizer createDefaultTokenizer() => RegExpTokenizer();
+Tokenizer createDefaultTokenizer() => IcuTokenizer();
