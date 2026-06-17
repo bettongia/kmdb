@@ -60,12 +60,16 @@ fixed-size block arithmetic and keeps the compression choice self-describing via
 a 1-byte flag stored with each value.
 
 The decompressor reads the per-value flag and dispatches to the correct
-algorithm, enabling cross-platform databases where some values were compressed
-with Zstd (native) and others with Deflate (web).
+algorithm. Native devices write Zstd (`0x01`); web devices write uncompressed
+(`0x00`). Deflate (`0x02`) was removed as a pre-release clean break and is
+rejected by `CompressionFlag.fromByte`.
 
-The `zstandard` Dart package (v1.5+) provides full cross-platform support: FFI
-on native platforms, WASM on web. Dictionary compression is recommended after
-accumulating [sufficient documents per namespace](#zstd-dictionary-compression).
+Compression is provided by `betto_zstd` (published to pub.dev): FFI to
+libzstd on native platforms, and a frame-compatible self-built WASM module for
+web. KMDB's web compression path is not yet wired to the WASM build (tracked in
+the roadmap), so web currently stores values uncompressed. Dictionary
+compression is recommended after accumulating
+[sufficient documents per namespace](#zstd-dictionary-compression).
 
 ## Bloom Filter Migration Path
 

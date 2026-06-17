@@ -22,8 +22,9 @@ export 'storage_adapter_impl.dart'
 
 - **File I/O:** `dart:io` `RandomAccessFile` for reads/writes, with `fsync` for
   durability.
-- **Compression:** Zstd via `dart:ffi` to `libzstd`. Build hooks (Dart 3.10+)
-  handle native compilation via `hook/build.dart` with `native_toolchain_c`.
+- **Compression:** Zstd via `dart:ffi` to `libzstd`, provided by the published
+  `betto_zstd` package. Build hooks (Dart 3.10+) handle native compilation via
+  `hook/build.dart` with `native_toolchain_c`.
 - **File locking:** `flock()` / `LockFileEx()` on the database directory to
   prevent dual-process access.
 
@@ -174,7 +175,7 @@ the lock handle — the handle is released by the Worker's termination.
 | Feature             | Native (iOS/Android/macOS/Windows/Linux) | Web (OPFS via SAHPool)           |
 | :------------------ | :--------------------------------------- | :------------------------------- |
 | Core LSM engine     | ✓                                        | ✓                                |
-| Zstd compression    | ✓ (FFI via betto_zstd)                   | ✓ (WASM fallback: Deflate)       |
+| Zstd compression    | ✓ (FFI via betto_zstd)                   | Reads `0x00` only; writes uncompressed (WASM path not yet wired — see §5) |
 | Sync                | ✓                                        | ✓                                |
 | Lexical text search | ✓                                        | ✗ (deferred)                     |
 | Semantic search     | ✓ (ONNX via kmdb_inferencing)            | ✗ (deferred)                     |
@@ -200,22 +201,41 @@ packages/
   |
   kmdb_cli/                — CLI tool (bin/, lib/, test/)
   |
-  betto_zstd/              — Zstd FFI compression provider (external repo)
-  |                          (native only; kmdb depends on it conditionally)
+  kmdb_harness/            — multi-device sync test harness
   |
   kmdb_lexical/            — tokenizer pipeline and English stop-word list
-  |                          (RegExpTokenizer, IcuTokenizer, Snowball stemmer)
-  |                          used by FtsManager (§21) and VecManager (§22)
+  |                          (default: IcuTokenizer on native via betto_icu,
+  |                          BrowserTokenizer on web; RegExpTokenizer fallback;
+  |                          Snowball stemmer) used by FtsManager (§21) and
+  |                          VecManager (§22)
   |
-  kmdb_tokenizer_icu/      — ICU FFI word tokenizer (UAX #29; optional
-  |                          substitute for RegExpTokenizer)
+  kmdb_inferencing/        — BGE Small En v1.5 embedding model + ONNX inference
+  |                          (ORT binary via betto_onnxrt) used by VecManager
+  |                          (§22); native only
   |
-  kmdb_inferencing/        — ONNX Runtime + BGE Small En v1.5 embedding model
-  |                          used by VecManager (§22); native only
+  kmdb_google_drive/       — Google Drive SyncStorageAdapter (optional, opt-in; §29)
   |
-  kmdb_mediatype/          — MIME-type detection by file-signature inspection
-                             used by VaultStore (§24)
+  kmdb_icloud/             — Apple iCloud (CloudKit) SyncStorageAdapter
+                             (iOS/macOS only, optional, opt-in; §30)
 ```
+
+External Bettongia packages are published to **pub.dev** and pinned in the
+workspace-root `pubspec.yaml` `dependency_overrides` (they previously lived as
+git dependencies — that wiring is gone):
+
+| Package | Role | Binary mechanism |
+| :------ | :--- | :--------------- |
+| `betto_common` | shared Dart utilities | — |
+| `betto_schema` | JSON Schema validation (§25) | — |
+| `betto_zstd` | Zstd compression (§5) | `native_toolchain_c` (native) + self-built WASM (web) |
+| `betto_mediatype_detector` | MIME detection for the vault (§24); replaced `betto_registry` | pure Dart |
+| `betto_icu` | Unicode UAX #29 tokenizer (`IcuTokenizer`); consumed by `kmdb_lexical` | system ICU via FFI (no bundling) |
+| `betto_onnxrt` | ONNX Runtime for Dart (§22); consumed by `kmdb_inferencing` | native-assets build hook downloads/verifies ORT binary |
+| `betto_builder_tools` | shared build helpers | — |
+
+`betto_onnxrt_ios` (`^0.1.0-dev.1`) is an iOS-only Flutter plugin that
+SPM-links the ORT XCFramework; it is added by the **consumer Flutter app**, not
+by this workspace (which is Dart-only). See §22 for details.
 
 ### Conditional Export Pattern
 

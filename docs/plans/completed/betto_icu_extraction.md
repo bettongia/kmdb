@@ -29,7 +29,7 @@ The fix is to extract all three into a new standalone `betto_icu` package
 `betto_zstd` / `betto_onnxrt` family convention), then wire `kmdb_lexical` to
 depend on it and re-export its public surface.
 
-See [docs/proposals/betto_icu.md](../proposals/betto_icu.md) for the full
+See [docs/proposals/implemented/betto_icu.md](../proposals/implemented/betto_icu.md) for the full
 proposal, rationale, and platform ICU availability table.
 
 ## Open questions
@@ -311,7 +311,7 @@ instruction. These must be closed before this is mechanically implementable.
 - `kmdb_lexical/lib/lexical.dart` exports `src/tokenizer.dart` and
   `src/regexp_tokenizer.dart` as described (it also exports `stemmer` and
   `stopwords`, which correctly stay put).
-- The proposal (`docs/proposals/betto_icu.md`) and roadmap anchor
+- The proposal (`docs/proposals/implemented/betto_icu.md`) and roadmap anchor
   (`docs/roadmap/0_05.md#icu`) both exist.
 
 ### Blocking issues (all resolved — see follow-up below)
