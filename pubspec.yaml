@@ -30,15 +30,11 @@ dependency_overrides:
   archive: ^4.0.0
   intl: ^0.20.2
   betto_common: ^0.1.0-dev.1
-  betto_schema:
-    git: git@github.com:bettongia/schema.git
-  betto_zstd:
-    git: git@github.com:bettongia/zstd.git
-  betto_registry:
-    git: git@github.com:bettongia/registry.git
+  betto_schema: ^0.1.0-dev.1
+  betto_zstd: ^0.1.0-dev.3
+  betto_mediatype_detector: ^0.1.0-dev.1
   betto_builder_tools: ^0.1.0-dev.1
-  betto_onnxrt:
-    git: git@github.com:bettongia/onnxrt.git
+  betto_onnxrt: ^0.1.0-dev.1
 
 melos:
   # Disable generation of IntelliJ/Android Studio run configurations. Melos's

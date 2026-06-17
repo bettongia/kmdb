@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'package:betto_schema/schema.dart' show SchemaViolation;
+import 'package:betto_schema/betto_schema.dart' show SchemaViolation;
 import 'package:kmdb/kmdb.dart'
     show
         DocumentAlreadyExistsException,

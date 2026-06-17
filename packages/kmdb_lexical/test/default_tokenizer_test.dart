@@ -18,9 +18,10 @@ import 'package:test/test.dart';
 void main() {
   group('createDefaultTokenizer', () {
     // In the CI environment (native), createDefaultTokenizer() resolves to
-    // RegExpTokenizer(). On web it resolves to BrowserTokenizer() — that path
-    // is exercised by betto_icu's own test suite and the conditional-export
-    // structure is identical to the pattern already proven there.
+    // IcuTokenizer() — UAX #29 word segmentation via the system ICU library.
+    // On web it resolves to BrowserTokenizer() — that path is exercised by
+    // betto_icu's own test suite and the conditional-export structure is
+    // identical to the pattern already proven there.
     test('returns a working Tokenizer that segments an English sentence', () {
       final tokenizer = createDefaultTokenizer();
       expect(tokenizer, isA<Tokenizer>());
@@ -32,8 +33,27 @@ void main() {
     test('tokenises technical identifiers', () {
       final tokenizer = createDefaultTokenizer();
       final tokens = tokenizer.tokenise('mTLS 0x8004210B');
-      // Both RegExpTokenizer and BrowserTokenizer treat these as word tokens.
       expect(tokens, isNotEmpty);
+    });
+
+    test('tokenises non-Latin scripts', () {
+      // IcuTokenizer uses the system ICU library and conforms to UAX #29,
+      // so it segments CJK, Arabic, and Thai text correctly. RegExpTokenizer
+      // cannot do this reliably — this test guards against regression to the
+      // Latin-only fallback.
+      final tokenizer = createDefaultTokenizer();
+
+      // Japanese (CJK + kana): each character is a word unit
+      final japanese = tokenizer.tokenise('日本語テスト');
+      expect(japanese, isNotEmpty);
+
+      // Arabic: space-delimited but requires correct script handling
+      final arabic = tokenizer.tokenise('مرحبا بالعالم');
+      expect(arabic, containsAll(['مرحبا', 'بالعالم']));
+
+      // Thai: no spaces; ICU applies dictionary-based segmentation
+      final thai = tokenizer.tokenise('สวัสดีชาวโลก');
+      expect(thai, isNotEmpty);
     });
 
     test('returns empty list for empty input', () {
