@@ -1,6 +1,6 @@
 # Extract `betto_lexical` and `betto_inferencing` as standalone packages
 
-**Status**: Investigated
+**Status**: Implementing
 
 **PR link**: _pending_
 
@@ -458,11 +458,11 @@ Stop at the Stage gate before touching the KMDB monorepo._
 
 #### Phase A1 — `betto_lexical` standalone repo
 
-- [ ] Create the repo directory (e.g. `/Users/gonk/development/bettongia/lexical/`),
+- [x] Create the repo directory (e.g. `/Users/gonk/development/bettongia/lexical/`),
   `git init`, add Apache 2.0 `LICENSE` and `analysis_options.yaml`
   (`include: package:lints/recommended.yaml`).
-- [ ] Copy the contents of `packages/kmdb_lexical/` (lib, test) into the new repo.
-- [ ] Write `pubspec.yaml`:
+- [x] Copy the contents of `packages/kmdb_lexical/` (lib, test) into the new repo.
+- [x] Write `pubspec.yaml`:
   - `name: betto_lexical`, `version: 0.1.0-dev.1`,
     `homepage: https://github.com/bettongia/lexical`, `sdk: ^3.12.0`.
   - Description: "Lexical text utilities (tokenizer, stemmer, stopwords) for Dart
@@ -470,30 +470,30 @@ Stop at the Stage gate before touching the KMDB monorepo._
   - Dependencies: `betto_icu: ^0.1.0-dev.1`, `intl: ^0.20.2` (carry over the
     existing deps).
   - **Do not** set `publish_to: none` — this package is published.
-- [ ] Rename the barrel `lib/lexical.dart` → `lib/betto_lexical.dart`
+- [x] Rename the barrel `lib/lexical.dart` → `lib/betto_lexical.dart`
   (no content change required).
-- [ ] In `lib/src/third_party/snowball_stemmer/lib/src/snowball_stemmer_base.dart`,
+- [x] In `lib/src/third_party/snowball_stemmer/lib/src/snowball_stemmer_base.dart`,
   replace all `package:kmdb_lexical/src/` → `package:betto_lexical/src/`
   (~30 self-referencing import lines at the top of the file).
-- [ ] In the three own-test files, replace `package:kmdb_lexical/lexical.dart` →
+- [x] In the three own-test files, replace `package:kmdb_lexical/lexical.dart` →
   `package:betto_lexical/betto_lexical.dart` (R3):
   - `test/stemmer_test.dart`
   - `test/default_tokenizer_test.dart`
   - `test/stopwords_test.dart` (this one is `... show getStopWords`)
   (There is no `kmdb_lexical/example/` directory — confirmed.)
-- [ ] Ensure every file carries the `header_template.txt` license header with the
+- [x] Ensure every file carries the `header_template.txt` license header with the
   current year.
-- [ ] Run `dart pub get` then `dart test` in the new repo — all tests pass.
-- [ ] Commit on a branch (do **not** open the PR yet; the GitHub repo is created
+- [x] Run `dart pub get` then `dart test` in the new repo — all tests pass (21/21).
+- [x] Commit on a branch (do **not** open the PR yet; the GitHub repo is created
   in the Stage gate).
 
 #### Phase A2 — `betto_inferencing` standalone repo
 
-- [ ] Create the repo directory (e.g. `/Users/gonk/development/bettongia/inferencing/`),
+- [x] Create the repo directory (e.g. `/Users/gonk/development/bettongia/inferencing/`),
   `git init`, add Apache 2.0 `LICENSE` and `analysis_options.yaml`.
-- [ ] Copy the contents of `packages/kmdb_inferencing/` (lib, test, example) into
+- [x] Copy the contents of `packages/kmdb_inferencing/` (lib, test, example) into
   the new repo.
-- [ ] Write `pubspec.yaml`:
+- [x] Write `pubspec.yaml`:
   - `name: betto_inferencing`, `version: 0.1.0-dev.1`,
     `homepage: https://github.com/bettongia/inferencing`, `sdk: ^3.12.0`.
   - Description: "ONNX Runtime inference and embedding models for dense text
@@ -502,8 +502,8 @@ Stop at the Stage gate before touching the KMDB monorepo._
     (the just-published lexical package), `path`, `crypto`.
   - **Remove** the `kmdb:` dependency entirely. **Do not** set
     `publish_to: none`.
-- [ ] Rename the barrel `lib/kmdb_inferencing.dart` → `lib/betto_inferencing.dart`.
-- [ ] **Move the `EmbeddingModel` interface in** (file-layout step — resolves the
+- [x] Rename the barrel `lib/kmdb_inferencing.dart` → `lib/betto_inferencing.dart`.
+- [x] **Move the `EmbeddingModel` interface in** (file-layout step — resolves the
   name collision with `OnnxEmbeddingModel`):
   - Rename the existing `lib/src/embedding_model.dart` (which contains
     `OnnxEmbeddingModel`) → `lib/src/onnx_embedding_model.dart`.
@@ -512,77 +512,44 @@ Stop at the Stage gate before touching the KMDB monorepo._
     `packages/kmdb/lib/src/search/embedding_model.dart` with these changes:
     - Use the `header_template.txt` license header with the current year.
     - **Keep** the `import 'dart:typed_data';` — it backs `Float32List` and is
-      still needed. (Earlier draft said "remove (keep it)" — contradictory; the
-      instruction is: keep it.)
-    - Generalise the doc comment: the class doc references `VecManager` and
-      `KmdbDatabase.open`; the `dispose` doc references `KmdbDatabase.close`; the
-      embedded `## Usage` example uses `OnnxEmbeddingModel`, `KmdbDatabase.open`,
-      and `VecIndexDefinition`. Since `betto_inferencing` must not depend on
-      `kmdb`, rewrite these to the consuming-application framing. Exact
-      replacement: replace the first paragraph with "Allows a consuming database
-      or application to accept an embedding model without taking a dependency on
-      the FFI-heavy `betto_inferencing` package. The concrete implementation
-      (`OnnxEmbeddingModel`) lives in this package and implements this
-      interface."; replace the `## Usage` block's `KmdbDatabase.open(...)` call
-      with a comment-only sketch that constructs `OnnxEmbeddingModel.load(...)`
-      and passes it to "your database's open call" (no `KmdbDatabase` symbol);
-      in the `dispose` doc replace "Called by `KmdbDatabase.close`" with "Called
-      by the consuming database after all other cleanup."
+      still needed.
+    - Generalised doc comment: removed `VecManager`/`KmdbDatabase.open/close`
+      references; `## Usage` example updated to `OnnxEmbeddingModel.load(...)` +
+      "your database's open call" framing; `dispose` doc updated.
     - **Keep all four members unchanged**: `modelId`, `dimensions`, `embed`,
       `dispose` (R4 — the interface currently has four members, not three).
-- [ ] In `lib/src/onnx_embedding_model.dart`:
+- [x] In `lib/src/onnx_embedding_model.dart`:
   - Remove `import 'package:kmdb/kmdb.dart';`.
   - Add `import 'embedding_model.dart' show EmbeddingModel;`.
   - Replace `import 'package:kmdb_lexical/lexical.dart' show Tokenizer;` →
     `import 'package:betto_lexical/betto_lexical.dart' show Tokenizer;`.
-  - Generalise any "for KMDB semantic search" / `$meta` / `$vec:` framing in the
-    `OnnxEmbeddingModel` class doc comment to package-neutral wording, or
-    consciously leave the examples (they still compile). Decide and note in the
-    commit; recommended: generalise to "dense text retrieval".
-- [ ] In `lib/src/bert_tokenizer.dart`: replace
+  - Generalised "for KMDB semantic search" / `$meta` / `$vec:` framing to
+    "for dense text retrieval" / generic wording.
+- [x] In `lib/src/bert_tokenizer.dart`: replace
   `package:kmdb_lexical/lexical.dart show Tokenizer, RegExpTokenizer` →
   `package:betto_lexical/betto_lexical.dart show Tokenizer, RegExpTokenizer`.
-- [ ] Update the barrel `lib/betto_inferencing.dart`:
+- [x] Update the barrel `lib/betto_inferencing.dart`:
   - `export 'src/embedding_model.dart' show EmbeddingModel;`
   - `export 'src/onnx_embedding_model.dart' show OnnxEmbeddingModel;`
-  - Keep `BertTokenizer`/`TokenizerOutput`, `ModelCatalog`, `quantise`/`dequantise`
-    exports, and the `betto_onnxrt` re-exports (`DownloadProgress`,
-    `ModelDownloader`, `ModelFile`, `ModelSpec`, `ResolvedModel`).
-  - Note: the current barrel exports `OnnxEmbeddingModel` from
-    `src/embedding_model.dart` (line ~46) and does **not** re-export
-    `EmbeddingModel` at all (today `EmbeddingModel` comes from `kmdb` via the impl
-    file's `import 'package:kmdb/kmdb.dart';`). After the move, the barrel gains a
-    new `export 'src/embedding_model.dart' show EmbeddingModel;` line and the
-    `OnnxEmbeddingModel` export moves to `src/onnx_embedding_model.dart` as above.
-    There is no `kmdb` re-export block in the barrel to remove — the `kmdb`
-    dependency is dropped in the impl file (handled in the
-    `onnx_embedding_model.dart` step).
-  - Library doc: "ONNX Runtime inference and embedding models for dense text
-    retrieval."
-- [ ] `lib/src/model_catalog.dart`: replace "for KMDB semantic search" → "for
-  dense text retrieval"; "KMDB release" → "a future release" in the
-  `UnsupportedError` message. No behaviour change.
-- [ ] Update tests and example imports
-  (`package:kmdb_inferencing/kmdb_inferencing.dart` →
-  `package:betto_inferencing/betto_inferencing.dart`):
+  - Kept `BertTokenizer`/`TokenizerOutput`, `ModelCatalog`, `quantise`/`dequantise`
+    exports, and the `betto_onnxrt` re-exports.
+  - Library doc updated: "ONNX Runtime inference and embedding models for dense
+    text retrieval."
+- [x] `lib/src/model_catalog.dart`: replaced "for KMDB semantic search" → "for
+  dense retrieval"; "KMDB release" → "a future release".
+- [x] Updated tests and example imports to `package:betto_inferencing/...`:
   - `test/bert_tokenizer_test.dart`
-  - `test/kmdb_inferencing_test.dart` → rename to `test/betto_inferencing_test.dart`,
-    update import.
+  - `test/kmdb_inferencing_test.dart` → renamed to `test/betto_inferencing_test.dart`
   - `test/model_catalog_test.dart`
   - `test/model_downloader_test.dart`
   - `test/sq8_test.dart`
-  - `test/math_utils_test.dart` — **substitute the package name** (R2): this file
-    imports `package:kmdb_inferencing/src/math_utils.dart`, which must become
-    `package:betto_inferencing/src/math_utils.dart`. (The package name is part of
-    the `src/` URI; leaving it unchanged breaks the build.)
-  - `example/kmdb_inferencing_example.dart` → rename to
-    `example/betto_inferencing_example.dart`, update import.
-- [ ] Ensure every file carries the `header_template.txt` license header.
-- [ ] Run `dart pub get` then `dart test` in the new repo — all tests pass.
-  (Note: `betto_lexical` and `betto_onnxrt` must already resolve — either from
-  pub.dev once published in the Stage gate, or via a local path/git override used
-  only for Stage A verification, removed before publishing.)
-- [ ] Commit on a branch (do **not** open the PR yet).
+  - `test/math_utils_test.dart` — package name substituted (R2)
+  - `example/kmdb_inferencing_example.dart` → renamed to `example/betto_inferencing_example.dart`
+- [x] Ensure every file carries the `header_template.txt` license header.
+- [x] Run `dart pub get` then `dart test` — 66 tests pass (1 skipped: requires
+  model assets). Used `pubspec_overrides.yaml` with local `betto_lexical` path
+  for Stage A testing (to be removed before publishing).
+- [x] Commit on a branch (do **not** open the PR yet).
 
 ---
 
