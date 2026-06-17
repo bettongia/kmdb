@@ -43,7 +43,7 @@ workspace-wiring convention only** — see the hook-model note below; the hook
 *body* is a new design because ORT is a download-prebuilt, not compile-from-
 source, binary), then update `kmdb_inferencing` to depend on it.
 
-See [docs/proposals/betto_onnxrt.md](../proposals/betto_onnxrt.md) for the
+See [docs/proposals/implemented/betto_onnxrt.md](../proposals/implemented/betto_onnxrt.md) for the
 full proposal, rationale, and platform binary acquisition table.
 
 ## Open questions

@@ -37,8 +37,13 @@ Uint8List (compressed, if ratio > 1.1×, else original CBOR bytes)
 SSTable slot value
 ```
 
-Web clients always use flag `0x00` (uncompressed). The WASM Zstd path is
-reserved for a future release (see §Zstd Dictionary Compression below).
+Web clients always use flag `0x00` (uncompressed). `betto_zstd` ships a WASM
+build (self-built Emscripten, frame-compatible with the native path by
+construction), but KMDB has **not yet wired the web compression path to it** —
+`tryCompress` on web is a no-op that returns `(0x00, data)`, and `decompress`
+throws `UnsupportedError` for `0x01`. Wiring the published WASM build into the
+web path is tracked in the roadmap (see §Cross-Platform Reads and §Zstd
+Dictionary Compression below).
 
 ## Compression Flag
 
@@ -47,7 +52,7 @@ Each stored value is prefixed with a 1-byte compression flag:
 | Flag   | Algorithm | Platform       | Notes                                                              |
 | :----- | :-------- | :------------- | :----------------------------------------------------------------- |
 | `0x00` | None      | All            | Used when value is small, already compressed, or written on web.   |
-| `0x01` | Zstd      | Native (FFI)   | Level 3. Via `betto_zstd` (compiles libzstd from source via `native_toolchain_c`). |
+| `0x01` | Zstd      | Native (FFI)   | Level 3. Via `betto_zstd` (compiles libzstd from source via `native_toolchain_c`; published to pub.dev). |
 
 Any other flag byte is rejected with `ArgumentError` — unknown flags indicate
 data written by a future version of KMDB or silent corruption.
@@ -61,10 +66,11 @@ already-compressed images, encrypted blobs — are stored raw with flag `0x00`.
 Native clients write Zstd (`0x01`); web clients write uncompressed (`0x00`).
 Both can read `0x00` values transparently. Web clients receiving an SSTable
 written by a native client will encounter `0x01` values; attempting to decode
-these throws `UnsupportedError` — WASM Zstd decompression is not yet
-implemented on web (tracked in the roadmap). For the current release, sync
-between native and web clients requires the web client to operate in a
-native-primary setup where it only reads documents it wrote itself.
+these throws `UnsupportedError`. Although `betto_zstd` now provides a
+frame-compatible WASM decompressor, KMDB's web `decompress` is not yet wired to
+it (tracked in the roadmap). For the current release, sync between native and
+web clients requires the web client to operate in a native-primary setup where
+it only reads documents it wrote itself.
 
 Cross-native reads are fully transparent: any native device can decompress any
 other native device's Zstd values because `betto_zstd` produces standard Zstd

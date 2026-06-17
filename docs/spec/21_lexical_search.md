@@ -19,21 +19,25 @@ implementation. Three implementations are provided:
 
 | Implementation      | Approach                                          | Default        |
 | :------------------ | :------------------------------------------------ | :------------- |
-| `RegExpTokenizer`   | Pure Dart, Unicode `\p{L}\p{N}`                   | Yes (native)   |
+| `IcuTokenizer`      | ICU C FFI, UAX #29 (via `betto_icu`)              | Yes (native)   |
 | `BrowserTokenizer`  | `Intl.Segmenter` JS interop, UAX #29              | Yes (web)      |
-| `IcuTokenizer`      | ICU C FFI, UAX #29                                | No             |
+| `RegExpTokenizer`   | Pure Dart, Unicode `\p{L}\p{N}`                   | No (fallback)  |
 
 The default tokenizer is platform-selected: `FtsManager` uses
 `createDefaultTokenizer()` (exported from `kmdb_lexical`) which resolves to
-`RegExpTokenizer` on native and `BrowserTokenizer` on web. `BrowserTokenizer`
-delegates to the browser's native `Intl.Segmenter` API via `dart:js_interop`,
-giving UAX #29-quality word segmentation at zero bundle cost.
+`IcuTokenizer` on native and `BrowserTokenizer` on web. `IcuTokenizer`
+delegates to the system ICU library (provided via the `betto_icu` package) and
+conforms to UAX #29, handling non-Latin scripts (CJK, Thai, Arabic, etc.)
+correctly. ICU is a system library on every native target — `libicucore.dylib`
+on macOS/iOS, `libicuuc.so` on Android/Linux, `icu.dll` on Windows — so no
+bundling is required. `BrowserTokenizer` delegates to the browser's native
+`Intl.Segmenter` API via `dart:js_interop`, giving UAX #29-quality word
+segmentation at zero bundle cost.
 
-`RegExpTokenizer` produces equivalent output to `IcuTokenizer` for English prose
-and common technical identifiers (`mTLS`, `0x8004210B`). `IcuTokenizer` is
-available as a drop-in substitute where full UAX #29 compliance is required on
-native; ICU is a system library on all native target platforms and requires no
-bundling.
+`RegExpTokenizer` is a pure-Dart, Unicode `\p{L}\p{N}` fallback for use where
+FFI is unavailable or an English-only tokenizer is explicitly wanted. It
+produces equivalent output to `IcuTokenizer` for English prose and common
+technical identifiers (`mTLS`, `0x8004210B`).
 
 The `Tokenizer` interface is intentionally narrow — a single `tokenise(String)`
 method — so implementations can be swapped without touching the indexing

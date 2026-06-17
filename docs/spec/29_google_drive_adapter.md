@@ -11,7 +11,7 @@ workspace member — **not** under `packages/kmdb/lib/src/sync/cloud/` as the
 0_03 roadmap draft proposed.  The Drive adapter pulls in `googleapis`,
 `googleapis_auth`, and `http` (>3 MB of generated code); these heavy OAuth
 dependencies must not enter the core `kmdb` library.  The established
-`betto_zstd` / `kmdb_tokenizer_icu` pattern of a separate package with
+`betto_zstd` / `betto_onnxrt` pattern of a separate package with
 optional inclusion is the right model here.
 
 ## Authentication
