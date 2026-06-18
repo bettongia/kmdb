@@ -18,6 +18,7 @@ import 'dart:typed_data';
 import 'package:cbor/cbor.dart';
 
 import '../../encoding/value_codec.dart';
+import '../../encryption/encryption_provider.dart';
 import '../../engine/kvstore/kv_store.dart';
 import '../../engine/kvstore/kv_store_impl.dart';
 import '../../query/write_augmentor.dart';
@@ -94,18 +95,28 @@ final class VecManager implements WriteAugmentor {
   /// [store] is the underlying [KvStoreImpl] used for all index reads and
   /// writes. [defs] is the list of vector index definitions configured at
   /// [KmdbDatabase.open] time. [model] is the embedding model used to generate
-  /// float32 vectors from text fields.
+  /// Creates a [VecManager].
+  ///
+  /// [store] is the underlying [KvStoreImpl]. [defs] is the list of vector
+  /// index definitions. [model] is the embedding model used to generate
+  /// float32 vectors from text fields. [encryption] is the optional encryption
+  /// provider; when non-null, source document values are decrypted before
+  /// indexing.
   VecManager(
     KvStoreImpl store,
     List<VecIndexDefinition> defs,
-    EmbeddingModel model,
-  ) : _store = store,
-      _defs = List.unmodifiable(defs),
-      _model = model;
+    EmbeddingModel model, {
+    this._encryption,
+  }) : _store = store,
+       _defs = List.unmodifiable(defs),
+       _model = model;
 
   final KvStoreImpl _store;
   final List<VecIndexDefinition> _defs;
   final EmbeddingModel _model;
+
+  /// Optional encryption provider threaded through all [ValueCodec] calls.
+  final EncryptionProvider? _encryption;
 
   /// In-memory cache of index statuses, keyed by `'{namespace}:{field}'`.
   ///
@@ -354,7 +365,7 @@ final class VecManager implements WriteAugmentor {
       final docId = entry.key;
       Map<String, dynamic> doc;
       try {
-        doc = ValueCodec.decode(entry.value);
+        doc = await ValueCodec.decode(entry.value, encryption: _encryption);
       } catch (_) {
         continue; // skip corrupt entries
       }
@@ -492,7 +503,7 @@ final class VecManager implements WriteAugmentor {
         if (bytes == null) return; // deleted again before delta was applied
         Map<String, dynamic> doc;
         try {
-          doc = ValueCodec.decode(bytes);
+          doc = await ValueCodec.decode(bytes, encryption: _encryption);
         } catch (_) {
           return;
         }
@@ -503,7 +514,7 @@ final class VecManager implements WriteAugmentor {
         if (bytes == null) return;
         Map<String, dynamic> doc;
         try {
-          doc = ValueCodec.decode(bytes);
+          doc = await ValueCodec.decode(bytes, encryption: _encryption);
         } catch (_) {
           return;
         }

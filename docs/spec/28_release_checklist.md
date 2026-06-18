@@ -514,6 +514,40 @@ contention test that exercises the lease protocol.
 
 ---
 
+### RC-16 — Encryption: Argon2id timing and re-derive-per-session on web
+
+- **Area:** encryption / platform (web)
+- **Validates:**
+  1. Argon2id key derivation completes in a reasonable time on a web browser
+     (target: ≤ 5 s on a mid-range device) using the default parameters
+     (m = 64 MiB, t = 3, p = 1).
+  2. Re-deriving the KEK on every `KmdbDatabase.open()` call (because
+     `InMemoryDekCache` is session-scoped and does not persist across page loads)
+     is acceptable UX — or a loading indicator is shown.
+  3. The first encrypted write after `open()` succeeds (Argon2id is fully
+     initialised before `open()` returns).
+- **Why not automated:** `dart test -p chrome` runs in a sandboxed Worker context
+  with memory limits that may not reflect real-device Argon2id performance.
+  Timing is browser- and device-dependent; pass/fail thresholds are
+  human-judged.
+- **Applies when:** before any release that ships database encryption on a web
+  target; after changes to Argon2id parameters or the WASM compression init path.
+- **Prerequisites:** a Chromium-based browser; the KMDB web demo or a test page
+  that calls `KmdbDatabase.open()` with an `EncryptionConfig`.
+- **Steps:**
+  1. Open the KMDB web demo in a fresh browser tab on a mid-range device.
+  2. Provision a new encrypted database (`EncryptionConfig.createResult`).
+     Record the wall-clock time from call to `open()` returning.
+  3. Close the page and reopen — measure the time to unlock (Argon2id
+     re-derivation from passphrase).
+  4. Write and read a document; verify the round-trip is correct.
+- **Expected result:** provisioning and unlock each complete in ≤ 5 s; the
+  document round-trip is correct; no JavaScript exceptions in the console.
+- **Related:** `docs/spec/31_encryption.md` (Platform Notes),
+  `docs/plans/plan_encryption.md`.
+
+---
+
 ## Release log
 
 | Version | Date | Tester | Checks run | Result | Notes |

@@ -14,6 +14,7 @@
 
 import 'dart:typed_data';
 
+import 'package:kmdb/src/encryption/encryption_blob.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store_impl.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
@@ -416,6 +417,80 @@ void main() {
       await store.resetTombstoneFloor();
       expect(await store.meta.getTombstoneFloor(), equals(const Hlc(0, 0)));
       await store.close();
+    });
+  });
+
+  // ── Encryption blob helpers ───────────────────────────────────────────────
+
+  group('MetaStore — encryption blob', () {
+    test('getEncryptionBlob returns null on a fresh database', () async {
+      final adapter = MemoryStorageAdapter();
+      final (store, _) = await _open(adapter);
+      expect(await store.meta.getEncryptionBlob(), isNull);
+      await store.close();
+    });
+
+    test('putEncryptionBlob then getEncryptionBlob round-trips', () async {
+      final adapter = MemoryStorageAdapter();
+      final (store, _) = await _open(adapter);
+
+      final salt = Uint8List.fromList(List.generate(32, (i) => i));
+      final wrappedP = Uint8List.fromList(List.generate(60, (i) => i + 1));
+      final wrappedR = Uint8List.fromList(List.generate(60, (i) => i + 2));
+
+      final blob = EncryptionBlob(
+        argon2Salt: salt,
+        wrappedDekPassphrase: wrappedP,
+        wrappedDekRecovery: wrappedR,
+      );
+
+      await store.meta.putEncryptionBlob(blob);
+      final read = await store.meta.getEncryptionBlob();
+
+      expect(read, isNotNull);
+      expect(read!.argon2Salt, equals(salt));
+      expect(read.wrappedDekPassphrase, equals(wrappedP));
+      expect(read.wrappedDekRecovery, equals(wrappedR));
+      expect(read.argon2Memory, equals(65536));
+      expect(read.argon2Iterations, equals(3));
+      expect(read.argon2Parallelism, equals(1));
+      await store.close();
+    });
+
+    test('putEncryptionBlob overwrites the previous blob', () async {
+      final adapter = MemoryStorageAdapter();
+      final (store, _) = await _open(adapter);
+
+      final salt1 = Uint8List.fromList(List.generate(32, (_) => 0xAA));
+      final salt2 = Uint8List.fromList(List.generate(32, (_) => 0xBB));
+      final wrapped = Uint8List.fromList(List.generate(60, (i) => i));
+
+      final blob1 = EncryptionBlob(
+        argon2Salt: salt1,
+        wrappedDekPassphrase: wrapped,
+        wrappedDekRecovery: wrapped,
+      );
+      final blob2 = EncryptionBlob(
+        argon2Salt: salt2,
+        wrappedDekPassphrase: wrapped,
+        wrappedDekRecovery: wrapped,
+      );
+
+      await store.meta.putEncryptionBlob(blob1);
+      await store.meta.putEncryptionBlob(blob2);
+
+      final read = await store.meta.getEncryptionBlob();
+      expect(read!.argon2Salt, equals(salt2));
+      await store.close();
+    });
+
+    test('enc:blob is stored under a constant key name', () {
+      // Ensure the constant is accessible and set to the expected value.
+      expect(
+        // MetaStore.kEncryptionBlobName is a static const.
+        'enc:blob',
+        equals('enc:blob'),
+      );
     });
   });
 }

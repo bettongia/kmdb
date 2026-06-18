@@ -402,9 +402,9 @@ suitable for real sync: SSTables named with it will collide across machines.
 
 ## Namespace-Scoped Sync
 
-Not all namespaces should sync. A `local_cache` or `settings` namespace
-typically contains device-specific data. Pass `syncNamespaces` to restrict sync
-to a subset of collections:
+The `syncNamespaces` parameter allows restricting sync to a subset of
+user-defined collections. A `local_cache` or `settings` namespace that contains
+device-specific data should be excluded:
 
 ```dart
 // Sync only 'notes', 'contacts', and 'tasks'; exclude 'settings' and 'cache'.
@@ -414,13 +414,39 @@ await db.sync(
 );
 ```
 
-When `syncNamespaces` is omitted, all registered user collections (those without
-a `$` prefix) are synced. System namespaces (`$meta`, `$index:*`, `$fts:*`,
-`$vec:*`, `$cache`) are never uploaded regardless of this parameter.
+When `syncNamespaces` is omitted, all registered user collections are synced.
 
-During SSTable upload, the sync layer filters to include only entries for
-sync-enabled namespaces. This avoids uploading megabytes of device-local cache
-data.
+**Important:** sync is whole-file at the SSTable level. The `syncNamespaces`
+parameter restricts only *which user collections the caller intends to
+replicate*; it is **not** applied as a per-namespace content filter during
+upload. SSTables are uploaded verbatim — `SyncEngine.push` reads each local
+SSTable and uploads its bytes unchanged, and the consolidation coordinator
+merges whole SSTables. There is no upload-time, server-side, or per-entry
+namespace filtering. The `_syncNamespaces` field is resolved and exposed by
+`SyncEngine` but is **not consulted** in `push`, `pull`, or consolidation.
+
+A consequence is that every value written through the shared
+`WriteBatch` → memtable → SSTable path rides in uploaded SSTables and reaches
+cloud storage. This includes all system namespaces that persist data through
+that path: `$meta`, `$index:*` (secondary indexes), `$fts:*` (lexical search),
+`$vec:*` (semantic search), `$ver:*` (document versions), and `$vault`
+(vault references). None of these are excluded from upload by the sync layer.
+(The session object cache and the materialised-view `$cache` namespace are not
+in scope here: the session cache is in-memory only, and the materialised-view
+cache is not yet implemented, so neither produces SSTable content to upload.)
+
+Confidentiality of system-namespace values in the cloud is therefore provided
+by **value-level encryption** (§31), not by upload filtering. When database
+encryption is enabled, every value written through `ValueCodec` — user
+collections, indexes, and all other system namespaces — is stored as ciphertext
+in SSTables, so the bytes uploaded to cloud storage carry no plaintext document
+content.
+
+> **Future work.** Upload-time namespace filtering (so that an SSTable's
+> excluded-namespace entries are stripped before upload, or never reach a synced
+> SSTable) is not implemented. If it is added, this section must be updated to
+> describe the actual filter and which namespaces it excludes. Until then, do
+> not document filtering behaviour that the code does not perform.
 
 ## Cross-Device Compaction Coordinator
 

@@ -110,7 +110,7 @@ final class KmdbCollection<T> {
     // Inject the document key as '_id' before handing the map to the codec.
     // This gives codec.decode() a consistent fromJson-style map that includes
     // the system key without it being persisted in the value bytes.
-    final doc = ValueCodec.decode(bytes);
+    final doc = await ValueCodec.decode(bytes, encryption: _db.encryption);
     doc['_id'] = key;
     return decodeDoc(doc);
   }
@@ -198,7 +198,10 @@ final class KmdbCollection<T> {
     if (existingBytes == null) {
       throw DocumentNotFoundException(key, namespace);
     }
-    final oldDoc = ValueCodec.decode(existingBytes);
+    final oldDoc = await ValueCodec.decode(
+      existingBytes,
+      encryption: _db.encryption,
+    );
     await _writeDocument(key: key, newDoc: codec.encode(value), oldDoc: oldDoc);
   }
 
@@ -211,7 +214,7 @@ final class KmdbCollection<T> {
     final key = codec.keyOf(value);
     final existingBytes = await _db.cache.get(namespace, key);
     final oldDoc = existingBytes != null
-        ? ValueCodec.decode(existingBytes)
+        ? await ValueCodec.decode(existingBytes, encryption: _db.encryption)
         : null;
     await _writeDocument(key: key, newDoc: codec.encode(value), oldDoc: oldDoc);
   }
@@ -234,7 +237,10 @@ final class KmdbCollection<T> {
     final existingBytes = await _db.cache.get(namespace, key);
     if (existingBytes == null) return; // no-op
 
-    final oldDoc = ValueCodec.decode(existingBytes);
+    final oldDoc = await ValueCodec.decode(
+      existingBytes,
+      encryption: _db.encryption,
+    );
     await _deleteDocument(key: key, oldDoc: oldDoc);
   }
 
@@ -279,7 +285,7 @@ final class KmdbCollection<T> {
   /// }
   /// ```
   Future<List<DocumentVersion>> getVersions(String key) =>
-      readVersions(_db.store, namespace, key);
+      readVersions(_db.store, namespace, key, encryption: _db.encryption);
 
   /// Promotes a prior version of [docKey] to become the current latest write.
   ///
@@ -323,6 +329,7 @@ final class KmdbCollection<T> {
       namespace,
       docKey,
       fromVersion,
+      encryption: _db.encryption,
     );
     if (sourceEntry == null) {
       throw VersionNotFoundError(
@@ -337,7 +344,7 @@ final class KmdbCollection<T> {
       // Read the current document (if any) to pass to augmentors as oldDoc.
       final existingBytes = await _db.cache.get(namespace, docKey);
       final oldDoc = existingBytes != null
-          ? ValueCodec.decode(existingBytes)
+          ? await ValueCodec.decode(existingBytes, encryption: _db.encryption)
           : null;
       if (oldDoc == null) return; // already deleted — no-op
       await _writePromotedDelete(
@@ -357,12 +364,15 @@ final class KmdbCollection<T> {
         requestedHlc: fromVersion,
       );
     }
-    final newDoc = ValueCodec.decode(encodedValue);
+    final newDoc = await ValueCodec.decode(
+      encodedValue,
+      encryption: _db.encryption,
+    );
 
     // Read the current document to pass to augmentors as oldDoc.
     final existingBytes = await _db.cache.get(namespace, docKey);
     final oldDoc = existingBytes != null
-        ? ValueCodec.decode(existingBytes)
+        ? await ValueCodec.decode(existingBytes, encryption: _db.encryption)
         : null;
 
     // Write the promoted document as a new put, bypassing the version
@@ -504,7 +514,10 @@ final class KmdbCollection<T> {
       await for (final entry in _db.store.scan(namespace)) {
         Map<String, dynamic> doc;
         try {
-          doc = ValueCodec.decode(entry.value);
+          doc = await ValueCodec.decode(
+            entry.value,
+            encryption: _db.encryption,
+          );
         } catch (_) {
           continue;
         }
@@ -726,7 +739,10 @@ final class KmdbCollection<T> {
       validator.validate(namespace, newDoc);
     }
 
-    final encodedValue = ValueCodec.encode(newDoc);
+    final encodedValue = await ValueCodec.encode(
+      newDoc,
+      encryption: _db.encryption,
+    );
     final batch = WriteBatch()..put(namespace, key, encodedValue);
 
     // Run all augmentors EXCEPT the VersionWriteAugmentor.
@@ -750,7 +766,11 @@ final class KmdbCollection<T> {
       promotedFrom: promotedFrom,
       isDelete: false,
     );
-    batch.put(versionNamespace(namespace), key, verEntry.encode());
+    batch.put(
+      versionNamespace(namespace),
+      key,
+      await verEntry.encode(encryption: _db.encryption),
+    );
 
     await _db.store.writeBatchInternal(batch);
   }
@@ -786,7 +806,11 @@ final class KmdbCollection<T> {
       promotedFrom: promotedFrom,
       isDelete: true,
     );
-    batch.put(versionNamespace(namespace), key, verEntry.encode());
+    batch.put(
+      versionNamespace(namespace),
+      key,
+      await verEntry.encode(encryption: _db.encryption),
+    );
 
     await _db.store.writeBatchInternal(batch);
   }
@@ -808,7 +832,10 @@ final class KmdbCollection<T> {
       validator.validate(namespace, newDoc);
     }
 
-    final encodedValue = ValueCodec.encode(newDoc);
+    final encodedValue = await ValueCodec.encode(
+      newDoc,
+      encryption: _db.encryption,
+    );
     final batch = WriteBatch()..put(namespace, key, encodedValue);
 
     // Layer 2: run augmentors to add side-effect entries to the batch.

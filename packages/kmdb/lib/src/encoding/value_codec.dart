@@ -16,6 +16,8 @@ import 'dart:typed_data';
 
 import 'package:cbor/cbor.dart';
 
+import '../encryption/encryption_flag.dart';
+import '../encryption/encryption_provider.dart';
 import 'compression.dart';
 import 'compression_flag.dart';
 
@@ -29,19 +31,26 @@ const int _kCompressionThreshold = 64;
 
 /// Encodes and decodes document values for storage in the LSM engine.
 ///
-/// The encoding pipeline is:
-/// 1. Serialize the document to CBOR bytes via [CborEncoder].
-/// 2. Optionally compress — Zstd on native; web stores values uncompressed
-///    (WASM Zstd is deferred to a future release; see §5).
-/// 3. Prepend a 1-byte [CompressionFlag].
-///
-/// ## Format
-///
+/// The encoding pipeline when encryption is **disabled** (pre-Phase 12):
 /// ```
-/// [flag 1B][payload]
+/// [encryption_flag=0x00 1B][compression_flag 1B][payload]
 /// ```
 ///
-/// Where `payload` is either raw CBOR or compressed CBOR depending on [flag].
+/// The encoding pipeline when encryption is **enabled** (Phase 12):
+/// ```
+/// [encryption_flag=0x01 1B][96-bit nonce][AES-GCM ciphertext][16-byte tag]
+/// ```
+/// where the AES-GCM ciphertext, when decrypted, yields
+/// `[compression_flag 1B][compressed-or-raw payload]`.
+///
+/// ## Wire format detail (§5 extended)
+///
+/// The outermost byte is always [EncryptionFlag]:
+/// - `0x00` (none): the next byte is [CompressionFlag], followed by the
+///   (possibly compressed) CBOR payload — the pre-Phase-12 layout.
+/// - `0x01` (AES-GCM): the rest of the bytes are a self-describing
+///   `[nonce][ciphertext][tag]` blob produced by [AesGcmEncryptionProvider].
+///   The plaintext that was encrypted is `[CompressionFlag][payload]`.
 ///
 /// ## Compression strategy
 ///
@@ -50,48 +59,139 @@ const int _kCompressionThreshold = 64;
 /// function selects the algorithm and skips compression entirely if the
 /// output would not be smaller than the input.
 ///
+/// When encryption is enabled, the compression flag byte is inside the
+/// ciphertext — preventing the cloud provider from learning which compression
+/// algorithm was used (a minor confidentiality benefit).
+///
+/// ## Wire format note
+///
+/// Phase 12 introduced the two-byte prefix format as a clean break: all values
+/// (plaintext and encrypted) now start with an [EncryptionFlag] byte. Values
+/// written by pre-Phase-12 builds are not supported — any such database must
+/// be migrated (see §31) or re-opened fresh. [decode] requires at least two
+/// bytes and will throw [ArgumentError] for single-byte legacy payloads.
+///
 /// ## Thread safety
 ///
-/// All methods are synchronous and stateless — safe to call from any isolate.
+/// All methods are safe to call concurrently. The async methods return
+/// [Future]s and do not mutate shared state.
 final class ValueCodec {
   const ValueCodec._();
 
   // ── Encode ──────────────────────────────────────────────────────────────────
 
-  /// Encodes [value] (a JSON-compatible [Map]) into the storage format.
+  /// Encodes [value] (a JSON-compatible [Map]) into the Phase 12 storage format.
   ///
-  /// Returns a [Uint8List] with a 1-byte [CompressionFlag] prefix followed by
-  /// the (possibly compressed) CBOR payload.
-  static Uint8List encode(Map<String, dynamic> value) {
+  /// Always emits the [EncryptionFlag] outer byte:
+  ///
+  /// - Plaintext (`encryption == null`): `[0x00][compression_flag][payload]`
+  /// - Encrypted (`encryption != null`): `[0x01][nonce+ciphertext+tag]`
+  ///
+  /// When [encryption] is non-null, the post-compression bytes are encrypted
+  /// with AES-256-GCM and the encryption flag byte is `0x01` ([EncryptionFlag.aesGcm]).
+  static Future<Uint8List> encode(
+    Map<String, dynamic> value, {
+    EncryptionProvider? encryption,
+  }) async {
+    // Step 1: Serialize to CBOR.
     final cborBytes = _toCbor(value);
 
+    // Step 2: Optionally compress.
+    final Uint8List compressed;
     if (cborBytes.length < _kCompressionThreshold) {
-      return _prepend(CompressionFlag.none, cborBytes);
+      compressed = _prependCompression(CompressionFlag.none, cborBytes);
+    } else {
+      final (flag, payload) = tryCompress(cborBytes);
+      compressed = _prependCompression(flag, payload);
     }
 
-    final (flag, payload) = tryCompress(cborBytes);
-    return _prepend(flag, payload);
+    // Step 3: Optionally encrypt.
+    if (encryption == null) {
+      // No encryption: emit [EncryptionFlag.none][compression_flag][payload].
+      return _prependEncryption(EncryptionFlag.none, compressed);
+    }
+
+    // Encryption enabled: encrypt the [compression_flag][payload] bytes so
+    // the compression algorithm is hidden inside the ciphertext.
+    final ciphertext = await encryption.encrypt(compressed);
+    return _prependEncryption(EncryptionFlag.aesGcm, ciphertext);
   }
 
   // ── Decode ──────────────────────────────────────────────────────────────────
 
   /// Decodes a stored value produced by [encode].
   ///
+  /// Expects the Phase 12 two-byte prefix format:
+  /// `[EncryptionFlag 1B][CompressionFlag 1B][payload]` for plaintext, or
+  /// `[EncryptionFlag.aesGcm 1B][nonce+ciphertext+tag]` for encrypted values.
+  ///
+  /// When [encryption] is non-null, decrypts AES-GCM ciphertext before
+  /// decompressing. If the stored value was encrypted with a different key,
+  /// or the ciphertext is tampered, throws [EncryptionError.badCredentials].
+  ///
   /// Throws [FormatException] if the byte sequence is malformed or the CBOR
   /// payload cannot be decoded as a [Map].
   ///
-  /// Throws [ArgumentError] if [bytes] is empty or carries an unknown flag.
+  /// Throws [ArgumentError] if [bytes] is empty, too short, or carries an
+  /// unknown flag.
   ///
   /// Throws [UnsupportedError] if the flag identifies a compression algorithm
   /// not available on the current platform (e.g. Zstd on web).
-  static Map<String, dynamic> decode(Uint8List bytes) {
+  static Future<Map<String, dynamic>> decode(
+    Uint8List bytes, {
+    EncryptionProvider? encryption,
+  }) async {
     if (bytes.isEmpty) {
       throw ArgumentError.value(bytes, 'bytes', 'Cannot decode empty bytes');
     }
 
-    final flag = CompressionFlag.fromByte(bytes[0]);
-    final payload = bytes.sublist(1);
-    final cborBytes = decompress(flag, payload);
+    // Read the outer encryption flag byte.
+    // All values use the Phase 12 two-byte prefix format:
+    //   [EncryptionFlag 1B][CompressionFlag 1B][payload]  — plaintext
+    //   [EncryptionFlag.aesGcm 1B][nonce+ciphertext+tag]  — encrypted
+    // EncryptionFlag.none (0x00) and EncryptionFlag.aesGcm (0x01) are the
+    // only defined values; anything else throws via fromByte().
+    final encFlag = EncryptionFlag.fromByte(bytes[0]);
+
+    if (encFlag == EncryptionFlag.aesGcm) {
+      // Phase 12 encrypted value. Decrypt to get [compression_flag][payload].
+      if (encryption == null) {
+        // Encrypted value in a database opened without a key — fail loudly.
+        throw ArgumentError.value(
+          bytes[0],
+          'bytes[0]',
+          'Value is AES-GCM encrypted but no EncryptionProvider was supplied. '
+              'Open the database with an EncryptionConfig.',
+        );
+      }
+      final ciphertext = bytes.sublist(1);
+      final plaintext = await encryption.decrypt(ciphertext);
+      // plaintext = [compression_flag][compressed-or-raw payload]
+      if (plaintext.isEmpty) {
+        throw const FormatException('Decrypted payload is empty');
+      }
+      final compressionFlag = CompressionFlag.fromByte(plaintext[0]);
+      final payload = plaintext.sublist(1);
+      final cborBytes = decompress(compressionFlag, payload);
+      return _fromCbor(cborBytes);
+    }
+
+    // EncryptionFlag.none (0x00): Phase 12 unencrypted two-byte prefix format.
+    // bytes[0] = EncryptionFlag.none, bytes[1] = CompressionFlag, bytes[2..] = payload.
+    //
+    // Phase 12 uses the two-byte prefix format for all values regardless of
+    // whether encryption is active. Every encode() call now emits an
+    // EncryptionFlag byte first, so decode always expects at least 2 bytes.
+    if (bytes.length < 2) {
+      throw ArgumentError.value(
+        bytes,
+        'bytes',
+        'Value too short: expected [enc_flag][comp_flag][payload], got ${bytes.length} byte(s)',
+      );
+    }
+    final compressionFlag = CompressionFlag.fromByte(bytes[1]);
+    final payload = bytes.sublist(2);
+    final cborBytes = decompress(compressionFlag, payload);
     return _fromCbor(cborBytes);
   }
 
@@ -126,7 +226,19 @@ final class ValueCodec {
 
   // ── Utility ─────────────────────────────────────────────────────────────────
 
-  static Uint8List _prepend(CompressionFlag flag, Uint8List payload) {
+  /// Prepends the [CompressionFlag] byte to [payload].
+  static Uint8List _prependCompression(
+    CompressionFlag flag,
+    Uint8List payload,
+  ) {
+    final out = Uint8List(1 + payload.length);
+    out[0] = flag.byte;
+    out.setAll(1, payload);
+    return out;
+  }
+
+  /// Prepends the [EncryptionFlag] byte to [payload].
+  static Uint8List _prependEncryption(EncryptionFlag flag, Uint8List payload) {
     final out = Uint8List(1 + payload.length);
     out[0] = flag.byte;
     out.setAll(1, payload);

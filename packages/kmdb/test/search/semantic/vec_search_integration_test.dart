@@ -381,7 +381,7 @@ void main() {
           WriteBatch()..put(
             'articles',
             newDocId,
-            ValueCodec.encode({'body': 'relational database management'}),
+            await ValueCodec.encode({'body': 'relational database management'}),
           ),
         );
 

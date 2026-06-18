@@ -14,7 +14,13 @@
 
 import 'dart:typed_data';
 
+import 'package:cbor/cbor.dart';
+
 import '../encoding/value_codec.dart';
+import '../encoding/compression.dart';
+import '../encoding/compression_flag.dart';
+import '../encryption/encryption_flag.dart';
+import '../encryption/encryption_provider.dart';
 import '../engine/util/hlc.dart';
 
 /// A single version entry stored in the `$ver:{namespace}` system namespace.
@@ -99,15 +105,69 @@ final class VersionEntry {
   };
 
   /// Encodes this entry via [ValueCodec] for storage in the LSM engine.
-  Uint8List encode() => ValueCodec.encode(toMap());
+  ///
+  /// [encryption] is optional. When non-null the encoded bytes are encrypted
+  /// with AES-256-GCM (spec §31). Pass the same provider used for document
+  /// values so all `$ver:` bytes are uniformly encrypted.
+  Future<Uint8List> encode({EncryptionProvider? encryption}) =>
+      ValueCodec.encode(toMap(), encryption: encryption);
 
   /// Decodes a [VersionEntry] from a [ValueCodec]-encoded byte sequence.
   ///
+  /// [encryption] must match the provider used when [encode] was called, or
+  /// `null` for plaintext values.
+  ///
   /// Throws [FormatException] if [bytes] cannot be decoded or are missing
   /// required fields.
-  static VersionEntry decode(Uint8List bytes) {
-    final map = ValueCodec.decode(bytes);
+  static Future<VersionEntry> decode(
+    Uint8List bytes, {
+    EncryptionProvider? encryption,
+  }) async {
+    final map = await ValueCodec.decode(bytes, encryption: encryption);
     return fromMap(map);
+  }
+
+  /// Synchronously checks whether [bytes] represent a delete-version entry.
+  ///
+  /// This method is intended **only** for the compaction path
+  /// ([VersionRetentionPolicy._isDeleteVersion]), where the surrounding code
+  /// is synchronous and cannot `await`. It works by:
+  ///
+  /// 1. Peeking at `bytes[0]` — the [EncryptionFlag] outer byte.
+  ///    - `0x01` (aesGcm): the bytes are encrypted; we cannot decode without
+  ///      the DEK. Returns `false` (fail-safe: treat as a put-version so the
+  ///      entry is never incorrectly pruned).
+  ///    - `0x00` (none): the next byte is the [CompressionFlag]; decode
+  ///      synchronously via `cbor.decode` and extract `isDelete`.
+  /// 2. Any decode error returns `false` (fail-safe).
+  ///
+  /// **Do not use this method outside the compaction path.** All other
+  /// callers should use the async [decode] method to get full encryption
+  /// support.
+  static bool decodeIsDeleteSync(Uint8List bytes) {
+    if (bytes.isEmpty) return false;
+    final encFlagByte = bytes[0];
+
+    // If the byte is 0x01 (EncryptionFlag.aesGcm), the entry is encrypted.
+    // We cannot decrypt synchronously; return false (fail-safe retain).
+    if (encFlagByte == EncryptionFlag.aesGcm.byte) return false;
+
+    // EncryptionFlag.none (0x00): plaintext entry.
+    // The remaining bytes are [CompressionFlag][payload]. Strip the outer flag.
+    final rest = bytes.sublist(1);
+    if (rest.isEmpty) return false;
+
+    try {
+      final compressionFlag = CompressionFlag.fromByte(rest[0]);
+      final payload = rest.sublist(1);
+      final cborBytes = decompress(compressionFlag, payload);
+      final decoded = cbor.decode(cborBytes);
+      final map = CborMap.of(decoded as CborMap).toObject();
+      if (map is! Map) return false;
+      return map['isDelete'] as bool? ?? false;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Constructs a [VersionEntry] from a decoded [Map].

@@ -23,6 +23,11 @@ dependencies:
   web:
   intl: ^0.20.2
 
+  # AES-256-GCM encryption, Argon2id KDF, HKDF (pure-Dart; no Flutter dependency).
+  # cryptography_flutter (native acceleration) lives in the separate kmdb_flutter
+  # add-on package — do NOT add it here.
+  cryptography: ^2.9.0
+
   # Unicode nromalization
   unorm_dart: ^0.3.2
   # test is a regular (not dev) dependency because lib/test_support.dart is a

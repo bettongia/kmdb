@@ -47,7 +47,8 @@ import 'dart:convert';
 final class VaultManifest {
   /// Creates a [VaultManifest] with the given fields.
   ///
-  /// All fields are required. The [schemaVersion] defaults to `"1"`.
+  /// All fields except [encrypted] are required. The [schemaVersion] defaults
+  /// to `"1"`. [encrypted] defaults to `false` (plaintext blob).
   const VaultManifest({
     this.schemaVersion = kSchemaVersion,
     required this.sha256,
@@ -56,6 +57,7 @@ final class VaultManifest {
     required this.mediaType,
     required this.originalName,
     required this.createdAt,
+    this.encrypted = false,
   });
 
   /// The current manifest schema version (`"1"`).
@@ -101,9 +103,24 @@ final class VaultManifest {
   /// directly (see §24 for the one-directional dependency rationale).
   final String createdAt;
 
+  /// Whether the blob file is stored as AES-256-GCM ciphertext.
+  ///
+  /// When `true`, the file at `blob` is `[12-byte nonce][ciphertext][16-byte
+  /// tag]` produced by [EncryptionProvider.encrypt]. The SHA-256 and CRC32C
+  /// fields in this manifest are computed over the **plaintext** bytes, so
+  /// recovery must decrypt the blob before verifying the content address.
+  ///
+  /// Defaults to `false` for unencrypted databases.
+  final bool encrypted;
+
   // ── Serialisation ────────────────────────────────────────────────────────
 
   /// Encodes this manifest as a JSON-serialisable [Map].
+  ///
+  /// The `encrypted` field is only emitted when `true` to keep backward
+  /// compatibility — existing readers that do not know the field will see
+  /// only plaintext manifests (where the field is absent, i.e. defaulting to
+  /// `false`).
   Map<String, dynamic> toJson() => {
     'schemaVersion': schemaVersion,
     'sha256': sha256,
@@ -112,6 +129,7 @@ final class VaultManifest {
     'mediaType': mediaType,
     'originalName': originalName,
     'createdAt': createdAt,
+    if (encrypted) 'encrypted': true,
   };
 
   /// Encodes this manifest as a UTF-8 JSON string.
@@ -172,6 +190,10 @@ final class VaultManifest {
       );
     }
 
+    // Optional `encrypted` field — absent in plaintext manifests (defaults false).
+    final encryptedValue = json['encrypted'];
+    final isEncrypted = encryptedValue == true;
+
     return VaultManifest(
       schemaVersion: schemaVersion,
       sha256: sha256,
@@ -180,6 +202,7 @@ final class VaultManifest {
       mediaType: json['mediaType'] as String,
       originalName: json['originalName'] as String,
       createdAt: json['createdAt'] as String,
+      encrypted: isEncrypted,
     );
   }
 
@@ -211,7 +234,8 @@ final class VaultManifest {
           crc32c == other.crc32c &&
           mediaType == other.mediaType &&
           originalName == other.originalName &&
-          createdAt == other.createdAt;
+          createdAt == other.createdAt &&
+          encrypted == other.encrypted;
 
   @override
   int get hashCode => Object.hash(
@@ -222,6 +246,7 @@ final class VaultManifest {
     mediaType,
     originalName,
     createdAt,
+    encrypted,
   );
 
   @override

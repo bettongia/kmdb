@@ -139,7 +139,7 @@ void main() {
       // and uint16 integer widths.
       for (final n in [0, 1, 5, 23, 24, 100, 255, 256, 1000, 65535]) {
         test('refCount == $n decodes to RefCountValue($n)', () async {
-          kvStore.setRaw(_sha, ValueCodec.encode({'refCount': n}));
+          kvStore.setRaw(_sha, await ValueCodec.encode({'refCount': n}));
           final result = await VaultRefCount.read(kvStore, _sha);
           expect(result, isA<RefCountValue>());
           expect((result as RefCountValue).count, equals(n));
@@ -148,7 +148,7 @@ void main() {
     });
 
     test('negative stored count is clamped to RefCountValue(0)', () async {
-      kvStore.setRaw(_sha, ValueCodec.encode({'refCount': -3}));
+      kvStore.setRaw(_sha, await ValueCodec.encode({'refCount': -3}));
       final result = await VaultRefCount.read(kvStore, _sha);
       expect(result, isA<RefCountValue>());
       expect((result as RefCountValue).count, equals(0));
@@ -161,38 +161,39 @@ void main() {
     });
 
     test('truncated value bytes → RefCountUndecodable', () async {
-      final full = ValueCodec.encode({'refCount': 65535});
+      final full = await ValueCodec.encode({'refCount': 65535});
       // Drop the trailing bytes so the CBOR payload is incomplete.
       kvStore.setRaw(_sha, Uint8List.sublistView(full, 0, full.length - 1));
       final result = await VaultRefCount.read(kvStore, _sha);
       expect(result, isA<RefCountUndecodable>());
     });
 
-    test(
-      'wrong major type (CBOR int, not a map) → RefCountUndecodable',
-      () async {
-        // Flag byte 0x00 (no compression) + CBOR positive int 1 (0x01).
-        kvStore.setRaw(_sha, Uint8List.fromList([0x00, 0x01]));
-        final result = await VaultRefCount.read(kvStore, _sha);
-        expect(result, isA<RefCountUndecodable>());
-      },
-    );
+    test('wrong major type (CBOR int, not a map) → RefCountUndecodable', () async {
+      // Phase 12 format: [EncryptionFlag.none 0x00][CompressionFlag.none 0x00][CBOR positive int 1 (0x01)].
+      // CBOR 0x01 is a positive integer, not a map — decode returns int, not Map.
+      kvStore.setRaw(_sha, Uint8List.fromList([0x00, 0x00, 0x01]));
+      final result = await VaultRefCount.read(kvStore, _sha);
+      expect(result, isA<RefCountUndecodable>());
+    });
 
-    test('unknown compression flag → RefCountUndecodable', () async {
-      // 0xEE is not a valid CompressionFlag; ValueCodec.decode throws.
+    test('unknown encryption flag → RefCountUndecodable', () async {
+      // 0xEE is not a valid EncryptionFlag; ValueCodec.decode throws.
       kvStore.setRaw(_sha, Uint8List.fromList([0xEE, 0xA0]));
       final result = await VaultRefCount.read(kvStore, _sha);
       expect(result, isA<RefCountUndecodable>());
     });
 
     test('valid map missing the refCount key → RefCountUndecodable', () async {
-      kvStore.setRaw(_sha, ValueCodec.encode({'other': 5}));
+      kvStore.setRaw(_sha, await ValueCodec.encode({'other': 5}));
       final result = await VaultRefCount.read(kvStore, _sha);
       expect(result, isA<RefCountUndecodable>());
     });
 
     test('refCount present but non-integer → RefCountUndecodable', () async {
-      kvStore.setRaw(_sha, ValueCodec.encode({'refCount': 'not-a-number'}));
+      kvStore.setRaw(
+        _sha,
+        await ValueCodec.encode({'refCount': 'not-a-number'}),
+      );
       final result = await VaultRefCount.read(kvStore, _sha);
       expect(result, isA<RefCountUndecodable>());
     });

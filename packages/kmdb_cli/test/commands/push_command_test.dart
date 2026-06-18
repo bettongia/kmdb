@@ -130,7 +130,11 @@ void main() {
 
   test('push via --sync-dir uploads SSTables when data exists', () async {
     // Write a document so there is something to push.
-    await db.store.put('notes', _key(), ValueCodec.encode({'title': 'Hello'}));
+    await db.store.put(
+      'notes',
+      _key(),
+      await ValueCodec.encode({'title': 'Hello'}),
+    );
 
     final ctx = _ctx(db, out: out, err: err);
     final ok = await pushCmd.execute(ctx, [], {'sync-dir': syncDir.path});
@@ -158,7 +162,11 @@ void main() {
     );
 
     // Write a document.
-    await db.store.put('notes', _key(), ValueCodec.encode({'title': 'World'}));
+    await db.store.put(
+      'notes',
+      _key(),
+      await ValueCodec.encode({'title': 'World'}),
+    );
 
     final ctx = _ctx(db, out: out, err: err);
     final ok = await pushCmd.execute(ctx, [], {});
@@ -175,7 +183,11 @@ void main() {
       {'path': syncDir.path},
     );
 
-    await db.store.put('notes', _key(), ValueCodec.encode({'body': 'test'}));
+    await db.store.put(
+      'notes',
+      _key(),
+      await ValueCodec.encode({'body': 'test'}),
+    );
 
     final ctx = _ctx(db, out: out, err: err);
     final ok = await pushCmd.execute(ctx, ['dropbox'], {});
@@ -186,8 +198,8 @@ void main() {
   // ── Namespace filtering ───────────────────────────────────────────────────
 
   test('--namespace restricts sync to named namespace', () async {
-    await db.store.put('notes', _key(), ValueCodec.encode({'n': 1}));
-    await db.store.put('tasks', _key(), ValueCodec.encode({'t': 1}));
+    await db.store.put('notes', _key(), await ValueCodec.encode({'n': 1}));
+    await db.store.put('tasks', _key(), await ValueCodec.encode({'t': 1}));
 
     final ctx = _ctx(db, out: out, err: err);
     final ok = await pushCmd.execute(ctx, [], {

@@ -90,7 +90,7 @@ void main() {
 
       final raw1 = await db.store.get('notes', id1);
       expect(raw1, isNotNull);
-      expect(ValueCodec.decode(raw1!)['title'], 'Hello');
+      expect((await ValueCodec.decode(raw1!))['title'], 'Hello');
     });
 
     test('restores multiple collections', () async {
@@ -269,7 +269,7 @@ void main() {
       final db = await _openStore();
       addTearDown(() => db.close());
       final id1 = _key('v1');
-      await db.store.put('notes', id1, ValueCodec.encode({'x': 1}));
+      await db.store.put('notes', id1, await ValueCodec.encode({'x': 1}));
 
       final out = StringBuffer();
       final ok = await VerifyCommand().execute(_ctx(db, out: out), [], {});
@@ -296,8 +296,16 @@ void main() {
     test('verifies documents in multiple collections', () async {
       final db = await _openStore();
       addTearDown(() => db.close());
-      await db.store.put('notes', _key('v2'), ValueCodec.encode({'a': 1}));
-      await db.store.put('tasks', _key('v3'), ValueCodec.encode({'b': 2}));
+      await db.store.put(
+        'notes',
+        _key('v2'),
+        await ValueCodec.encode({'a': 1}),
+      );
+      await db.store.put(
+        'tasks',
+        _key('v3'),
+        await ValueCodec.encode({'b': 2}),
+      );
 
       final out = StringBuffer();
       final ok = await VerifyCommand().execute(_ctx(db, out: out), [], {});
@@ -328,7 +336,11 @@ void main() {
     test('returns false for a filter that is not a JSON object', () async {
       final db = await _openStore();
       addTearDown(() => db.close());
-      await db.store.put('notes', _key('c1'), ValueCodec.encode({'x': 1}));
+      await db.store.put(
+        'notes',
+        _key('c1'),
+        await ValueCodec.encode({'x': 1}),
+      );
 
       final err = StringBuffer();
       final ok = await CountCommand().execute(

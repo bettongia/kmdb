@@ -412,7 +412,10 @@ final class KmdbQuery<T> {
           if (bytes == null) continue;
           final Map<String, dynamic> doc;
           try {
-            doc = ValueCodec.decode(bytes);
+            doc = await ValueCodec.decode(
+              bytes,
+              encryption: _collection.database.encryption,
+            );
           } catch (_) {
             continue;
           }
@@ -505,7 +508,10 @@ final class KmdbQuery<T> {
       count++;
       final Map<String, dynamic> doc;
       try {
-        doc = ValueCodec.decode(entry.value);
+        doc = await ValueCodec.decode(
+          entry.value,
+          encryption: _collection.database.encryption,
+        );
       } catch (_) {
         continue;
       }

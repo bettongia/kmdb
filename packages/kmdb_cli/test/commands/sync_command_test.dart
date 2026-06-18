@@ -149,7 +149,7 @@ void main() {
     await peerStore.put(
       'notes',
       peerKey,
-      ValueCodec.encode({'msg': 'hello from peer'}),
+      await ValueCodec.encode({'msg': 'hello from peer'}),
     );
     final peerInfo = await peerStore.storeInfo();
     final peerEngine = SyncEngine(
@@ -174,13 +174,17 @@ void main() {
     // when sync started.
     final raw = await db.store.get('notes', peerKey);
     expect(raw, isNotNull);
-    expect(ValueCodec.decode(raw!)['msg'], equals('hello from peer'));
+    expect((await ValueCodec.decode(raw!))['msg'], equals('hello from peer'));
   });
 
   // ── Sync via --sync-dir ───────────────────────────────────────────────────
 
   test('sync via --sync-dir pushes local data', () async {
-    await db.store.put('notes', _key(), ValueCodec.encode({'t': 'sync test'}));
+    await db.store.put(
+      'notes',
+      _key(),
+      await ValueCodec.encode({'t': 'sync test'}),
+    );
 
     final ctx = _ctx(db, out: out, err: err);
     final ok = await syncCmd.execute(ctx, [], {'sync-dir': syncDir.path});
@@ -206,7 +210,11 @@ void main() {
       {'path': syncDir.path},
     );
 
-    await db.store.put('tasks', _key(), ValueCodec.encode({'task': 'test'}));
+    await db.store.put(
+      'tasks',
+      _key(),
+      await ValueCodec.encode({'task': 'test'}),
+    );
 
     final ctx = _ctx(db, out: out, err: err);
     final ok = await syncCmd.execute(ctx, [], {});
@@ -222,7 +230,11 @@ void main() {
     final peerDbDir = io.Directory('${tmpDir.path}/peerdb')..createSync();
     final peerStore = await _openStoreWithId(peerDbDir.path, peerDeviceId);
     final peerKey = _key();
-    await peerStore.put('notes', peerKey, ValueCodec.encode({'from': 'peer'}));
+    await peerStore.put(
+      'notes',
+      peerKey,
+      await ValueCodec.encode({'from': 'peer'}),
+    );
     await peerStore.flush();
     final peerInfo = await peerStore.storeInfo();
     final peerEngine = SyncEngine(
@@ -238,7 +250,11 @@ void main() {
     await peerStore.close(flush: false);
 
     // Our device writes data, then syncs.
-    await db.store.put('notes', _key(), ValueCodec.encode({'local': true}));
+    await db.store.put(
+      'notes',
+      _key(),
+      await ValueCodec.encode({'local': true}),
+    );
     final ctx = _ctx(db, out: out, err: err);
     final ok = await syncCmd.execute(ctx, [], {'sync-dir': syncDir.path});
     expect(ok, isTrue);
@@ -247,7 +263,7 @@ void main() {
     // After sync, the peer's document should be in our local store.
     final raw = await db.store.get('notes', peerKey);
     expect(raw, isNotNull);
-    final doc = ValueCodec.decode(raw!);
+    final doc = await ValueCodec.decode(raw!);
     expect(doc['from'], 'peer');
   });
 
