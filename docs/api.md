@@ -6,8 +6,8 @@ toc-title: "Contents"
 
 - [kmdb](api-docs/kmdb/api/index.html)
 - [kmdb_cli](api-docs/kmdb_cli/api/index.html)
-- [kmdb_inferencing](api-docs/kmdb_inferencing/api/index.html)
-- [kmdb_lexical](api-docs/kmdb_lexical/api/index.html)
+- [betto_inferencing](https://pub.dev/documentation/betto_inferencing/latest/)
+- [betto_lexical](https://pub.dev/documentation/betto_lexical/latest/)
 - [kmdb_tokenizer_icu](api-docs/kmdb_tokenizer_icu/api/index.html)
 
 ---

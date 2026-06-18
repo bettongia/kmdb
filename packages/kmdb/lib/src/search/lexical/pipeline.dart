@@ -17,14 +17,14 @@ library;
 
 // import 'package:snowball_stemmer/snowball_stemmer.dart';
 import 'package:intl/locale.dart';
-import 'package:kmdb_lexical/lexical.dart' show Stemmer, Tokenizer;
+import 'package:betto_lexical/betto_lexical.dart' show Stemmer, Tokenizer;
 
 /// Singleton English Snowball stemmer used by [stem].
 ///
 /// Instantiated once and reused. [SnowballStemmer] is not thread-safe, but
 /// KMDB is single-isolate so this is safe.
 ///
-/// This is accessed via the kmdb_lexical package
+/// This is accessed via the betto_lexical package
 final _englishStemmer = Stemmer(Locale.fromSubtags(languageCode: 'en'));
 
 /// Stage 1 + 2: tokenise [text] with [tokenizer] and lowercase each token.

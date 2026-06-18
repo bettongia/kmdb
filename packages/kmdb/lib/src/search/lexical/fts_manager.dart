@@ -21,7 +21,7 @@ import 'dart:typed_data';
 
 import 'package:cbor/cbor.dart';
 import 'package:intl/locale.dart' show Locale;
-import 'package:kmdb_lexical/lexical.dart'
+import 'package:betto_lexical/betto_lexical.dart'
     show createDefaultTokenizer, getStopWords;
 import 'package:meta/meta.dart' show visibleForTesting;
 
