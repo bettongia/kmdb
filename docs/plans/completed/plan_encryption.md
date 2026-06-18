@@ -1,8 +1,8 @@
 # Database Encryption (Phase 12)
 
-**Status**: Implementing
+**Status**: Complete
 
-**PR link**: —
+**PR link**: https://github.com/bettongia/kmdb/pull/46
 
 ## Problem statement
 
