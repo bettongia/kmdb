@@ -11,3 +11,11 @@ presets:
     tags:
       e2e:
         skip: false
+
+# Pass --no-sandbox to Chrome when running web tests in CI Linux environments
+# where the sandbox is not available (e.g. running as root in a container).
+# Mirrors the configuration used by bettongia/zstd's own web test lane.
+override_platforms:
+  chrome:
+    settings:
+      arguments: --no-sandbox

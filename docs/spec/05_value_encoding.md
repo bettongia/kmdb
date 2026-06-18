@@ -31,19 +31,17 @@ Dart object (T)
 Map<String, dynamic>
     ↓  cbor.encode()              // ~20–30% smaller than JSON; native Uint8List support
 Uint8List (CBOR bytes)
-    ↓  Zstd (native only)        // further 30–50% reduction on typical documents
-Uint8List (compressed, if ratio > 1.1×, else original CBOR bytes)
+    ↓  Zstd (native and web)     // further 30–50% reduction on typical documents
+Uint8List (compressed, if compressed length < raw length, else original CBOR bytes)
     ↓  1-byte compression flag    // prepended: 0x00 = raw, 0x01 = Zstd
 SSTable slot value
 ```
 
-Web clients always use flag `0x00` (uncompressed). `betto_zstd` ships a WASM
-build (self-built Emscripten, frame-compatible with the native path by
-construction), but KMDB has **not yet wired the web compression path to it** —
-`tryCompress` on web is a no-op that returns `(0x00, data)`, and `decompress`
-throws `UnsupportedError` for `0x01`. Wiring the published WASM build into the
-web path is tracked in the roadmap (see §Cross-Platform Reads and §Zstd
-Dictionary Compression below).
+Both native and web platforms compress values with Zstd. On native, `betto_zstd`
+uses FFI bindings compiled from source via `native_toolchain_c`. On web,
+`betto_zstd` provides a frame-compatible WASM module (self-built Emscripten) —
+KMDB calls `ZstdSimple.init()` at `KmdbDatabase.open()` time to load and
+initialise the WASM module before any document read or write.
 
 ## Compression Flag
 
@@ -51,30 +49,28 @@ Each stored value is prefixed with a 1-byte compression flag:
 
 | Flag   | Algorithm | Platform       | Notes                                                              |
 | :----- | :-------- | :------------- | :----------------------------------------------------------------- |
-| `0x00` | None      | All            | Used when value is small, already compressed, or written on web.   |
-| `0x01` | Zstd      | Native (FFI)   | Level 3. Via `betto_zstd` (compiles libzstd from source via `native_toolchain_c`; published to pub.dev). |
+| `0x00` | None      | All            | Used when value is small or already compressed.                    |
+| `0x01` | Zstd      | All            | Level 3. Via `betto_zstd` (native: FFI; web: WASM). Published to pub.dev. |
 
 Any other flag byte is rejected with `ArgumentError` — unknown flags indicate
 data written by a future version of KMDB or silent corruption.
 
-The 1.1× threshold means compression is only applied when the compressed form
-is at least 9% smaller than the original. Values that do not compress well —
-already-compressed images, encrypted blobs — are stored raw with flag `0x00`.
+Compression is applied only when the compressed form is strictly smaller than the
+raw CBOR bytes (`compressed.length < raw.length`). Values that do not compress
+well — already-compressed images, encrypted blobs — are stored raw with flag
+`0x00`. The minimum document size for compression is 64 bytes (smaller documents
+are always stored as `0x00`).
 
 ## Cross-Platform Reads
 
-Native clients write Zstd (`0x01`); web clients write uncompressed (`0x00`).
-Both can read `0x00` values transparently. Web clients receiving an SSTable
-written by a native client will encounter `0x01` values; attempting to decode
-these throws `UnsupportedError`. Although `betto_zstd` now provides a
-frame-compatible WASM decompressor, KMDB's web `decompress` is not yet wired to
-it (tracked in the roadmap). For the current release, sync between native and
-web clients requires the web client to operate in a native-primary setup where
-it only reads documents it wrote itself.
+Both native and web clients write Zstd (`0x01`) for compressible documents, and
+`0x00` for small or incompressible values. Any platform can read any flag: `0x00`
+is passed through as-is, and `0x01` is decompressed using `betto_zstd` (FFI on
+native, WASM on web).
 
-Cross-native reads are fully transparent: any native device can decompress any
-other native device's Zstd values because `betto_zstd` produces standard Zstd
-frames.
+Cross-platform reads are fully transparent: `betto_zstd` produces standard Zstd
+frames on native and identical frames on web (same C source, Emscripten-compiled).
+A database written by a native client can be read by a web client and vice versa.
 
 ## CBOR Boundary
 

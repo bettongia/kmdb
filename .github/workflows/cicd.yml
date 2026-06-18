@@ -49,3 +49,27 @@ jobs:
 
       - name: Benchmarks summary
         run: cat benchmarks.log >> $GITHUB_STEP_SUMMARY
+
+  test-web:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - uses: actions/cache@v5
+        with:
+          path: ~/.pub-cache
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+
+      - uses: browser-actions/setup-chrome@v2
+
+      - name: Run web compression tests in Chrome
+        run: make web_test
+        env:
+          CHROME_EXECUTABLE: chrome

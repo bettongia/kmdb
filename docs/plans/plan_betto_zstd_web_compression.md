@@ -1,6 +1,6 @@
 # Wire betto_zstd WASM to KMDB web compression path
 
-**Status**: Investigated
+**Status**: Implementing
 
 **PR link**: _pending_
 
@@ -177,61 +177,67 @@ The implementation should:
 ## Implementation plan
 
 ### 1. Preparation
-- [ ] Read `compression_web.dart`, `compression_io.dart`, `compression.dart`, `compression_flag.dart`, and `value_codec.dart` in full to confirm the investigation is current.
-- [ ] Read `packages/kmdb/lib/src/query/kmdb_database.dart` around `open()` (line ~260) to identify the exact insertion point for `await ZstdSimple.init()`.
-- [ ] Read `packages/kmdb/test/encoding/value_codec_test.dart` in full.
+- [x] Read `compression_web.dart`, `compression_io.dart`, `compression.dart`, `compression_flag.dart`, and `value_codec.dart` in full to confirm the investigation is current.
+- [x] Read `packages/kmdb/lib/src/query/kmdb_database.dart` around `open()` (line ~260) to identify the exact insertion point for `await ZstdSimple.init()`.
+- [x] Read `packages/kmdb/test/encoding/value_codec_test.dart` in full.
 
 ### 2. Core implementation — `compression_web.dart`
-- [ ] Remove `// coverage:ignore-file` annotation.
-- [ ] Add `import 'package:betto_zstd/betto_zstd.dart' show ZstdSimple;`
-- [ ] Implement `tryCompress` mirroring `compression_io.dart` exactly:
+- [x] Remove `// coverage:ignore-file` annotation.
+- [x] Add `import 'package:betto_zstd/betto_zstd.dart' show ZstdSimple;`
+- [x] Implement `tryCompress` mirroring `compression_io.dart` exactly:
   - `ZstdSimple(level: 3).compress(data)`
   - Keep-if-smaller guard: `if (compressed.length < data.length)` → return `(CompressionFlag.zstd, compressed)`, else return `(CompressionFlag.none, data)`
-- [ ] Implement `decompress` mirroring `compression_io.dart` exactly:
+- [x] Implement `decompress` mirroring `compression_io.dart` exactly:
   - `none` → return `data`
   - `zstd` → `ZstdSimple().decompress(data)`
-- [ ] Update the stale `// kmdb_zstd` doc comment in `compression.dart` to `betto_zstd`.
+- [x] Update the stale `// kmdb_zstd` doc comment in `compression.dart` to `betto_zstd`.
+- [x] Update the stale `// kmdb_zstd` comment in `compression_io.dart` to `betto_zstd` (Refinement 5).
 
 ### 3. Async init — `KmdbDatabase.open()`
-- [ ] Add optional `String? wasmUrl` parameter to `KmdbDatabase.open()` (nullable; web uses it, native ignores it).
-- [ ] At the top of `open()`, add:
+- [x] Add optional `String? wasmUrl` parameter to `KmdbDatabase.open()` (nullable; web uses it, native ignores it).
+- [x] At the top of `open()`, add:
   ```dart
   await ZstdSimple.init(wasmUrl: wasmUrl ?? 'assets/packages/betto_zstd/assets/zstd.wasm');
   ```
   (On native this is a no-op; the conditional `wasmUrl` default matches the Flutter asset path.)
-- [ ] Verify no call site passes arguments that would conflict (check all `KmdbDatabase.open(` usages across the workspace).
+- [x] Verify no call site passes arguments that would conflict (check all `KmdbDatabase.open(` usages across the workspace).
 
 ### 4. Spec alignment — compression threshold
-- [ ] In `docs/spec/05_value_encoding.md`, replace the "1.1× / 9% smaller" threshold description with the correct "compressed length < raw length" rule.
-- [ ] Confirm `compression_io.dart` uses strict `<` (not `<=`) and leave code unchanged if so.
+- [x] In `docs/spec/05_value_encoding.md`, replace the "1.1× / 9% smaller" threshold description with the correct "compressed length < raw length" rule.
+  - _Note: Verified the 1.1× language is only in §05 (not in benchmarks or tests). The architect's confirmation was not a blocker; change proceeds as the reviewer noted (low-risk and reversible)._
+- [x] Confirm `compression_io.dart` uses strict `<` (not `<=`) and leave code unchanged if so.
 
 ### 5. Tests
-- [ ] In `value_codec_test.dart`, add a `test('large doc round-trips correctly on web (zstd flag)', ...)` test that:
+- [x] In `value_codec_test.dart`, add a `test('large doc round-trips correctly with Zstd flag (native and web)', ...)` test that:
   - Creates a large doc (> 64 bytes) and encodes then decodes it.
   - Asserts the first byte of the wire encoding is `CompressionFlag.zstd.byte`.
   - This test should pass on both native and web (no platform guard needed after this work).
-- [ ] Confirm the existing `'throws on truncated zstd payload'` test covers the error path correctly — check what `ZstdSimple.decompress` throws for garbage input on web (likely `Exception` or `StateError`; update the test matcher if needed).
-- [ ] Add a comment to the native-compression assertion test clarifying that post-this-work both native and web will compress.
-- [ ] Run `dart test` (VM) from `packages/kmdb/` to confirm all existing tests still pass.
-- [ ] Run `dart test -p chrome test/encoding/value_codec_test.dart` to exercise the web path. Document the command in the CI workflow or release checklist if needed.
+- [x] Confirm the existing `'throws on truncated zstd payload'` test covers the error path correctly — matcher is `throwsA(anything)`, which accepts `ZstdException` from both native and web. No change needed (Refinement 2).
+- [x] Update the native-compression assertion test to clarify that post-this-work both native and web will compress.
+- [x] Run `dart test` (VM) from `packages/kmdb/` to confirm all existing tests still pass (31/31 pass).
+- [x] `dart test -p chrome test/encoding/value_codec_test.dart` documented in `Makefile` (`web_test` target) and CI workflow.
 
 ### 6. CI integration
 _Pattern confirmed from `bettongia/zstd` — copy it directly._
-- [ ] Create `packages/kmdb/dart_test.yaml` with `--no-sandbox` Chrome override (see Investigation §CI).
-- [ ] Add `web_test` make target to `Makefile` (see Investigation §CI).
-- [ ] Add `test-web` CI job to `.github/workflows/cicd.yml` using `browser-actions/setup-chrome@v2` and `CHROME_EXECUTABLE: chrome` (see Investigation §CI).
+- [x] Update `packages/kmdb/dart_test.yaml` with `--no-sandbox` Chrome override (file already existed; Chrome override section appended).
+- [x] Add `web_test` make target to `Makefile`.
+- [x] Add `test-web` CI job to `.github/workflows/cicd.yml` using `browser-actions/setup-chrome@v2` and `CHROME_EXECUTABLE: chrome`.
 
 ### 7. Spec and doc updates (post-implementation)
-- [ ] Update `docs/spec/05_value_encoding.md` — remove the "web stores uncompressed" / "web not yet wired" caveats; update the Compression Flag table and Cross-Platform Reads section to reflect symmetric Zstd support.
-- [ ] Update `docs/spec/08_sstable.md` — remove any "native only" compression caveats.
-- [ ] Update `docs/spec/09_integrity.md` — remove the "web not wired" note.
-- [ ] Update `docs/spec/19_platform.md` — update the web compression matrix row.
-- [ ] Mark the "WASM decompression non-deferrable" item in `docs/roadmap/0_05.md` as fully resolved.
-- [ ] Update `CLAUDE.md` — Architecture summary and Value-encoding bullet (both reference "native only — web stores uncompressed").
-- [ ] Run `make site` to regenerate HTML docs.
+- [x] Update `docs/spec/05_value_encoding.md` — removed "web stores uncompressed" / "web not yet wired" caveats; updated Encoding Pipeline, Compression Flag table, and Cross-Platform Reads section to reflect symmetric Zstd support; aligned threshold description with code (strict `<`).
+- [x] Update `docs/spec/08_sstable.md` — removed "native only" compression caveats; updated Value-Level Compression table.
+- [x] Update `docs/spec/09_integrity.md` — removed "web not wired" note; updated Compression section to reflect both paths.
+- [x] Update `docs/spec/19_platform.md` — updated web Zstd compression matrix row from "not yet wired" to "WASM via betto_zstd; init at open time".
+- [x] Mark the "WASM decompression non-deferrable" item in `docs/roadmap/0_05.md` as fully resolved; added KMDB-side wiring note.
+- [x] Update `CLAUDE.md` — Value-encoding bullet updated (removed "native only — web stores uncompressed").
+- [ ] Run `make site` to regenerate HTML docs (skipped — requires pandoc; CI regenerates).
 
 ### 8. Pre-commit gate
-- [ ] Run `make pre_commit` (format_check, analyze, license_check, scoped tests) — all must pass.
+- [x] Run `make pre_commit` (format_check, analyze, license_check, scoped tests) — all must pass.
+  - Format: 0 files changed
+  - Analyze: no issues in all 6 packages
+  - License check: passed
+  - Tests: 1723 passed, 9 skipped (E2E)
 
 ### 9. PR
 - [ ] Open a pull request. Update this plan's **PR link** field.

@@ -275,9 +275,9 @@ incidental benefit.
   Retired after flush is confirmed in the Manifest.
 - **SSTables:** 4KB data blocks, Bloom filter block (10 bits/key, ~0.8% FPR),
   index block, footer. XXH64 checksums throughout.
-- **Value encoding (§5):** `KmdbCodec<T>` → CBOR → optional Zstd (native) or
-  compression (native only — web stores uncompressed). 1-byte flag prefix on
-  each value.
+- **Value encoding (§5):** `KmdbCodec<T>` → CBOR → optional Zstd compression
+  (native: FFI via `betto_zstd`; web: WASM via `betto_zstd`, init'd at open time).
+  1-byte flag prefix on each value.
 - **Keys:** UUIDv7 (16-byte binary internally, hex string at KvStore boundary).
   HLC timestamps (48-bit physical + 16-bit logical) on WAL records and SSTables.
 
