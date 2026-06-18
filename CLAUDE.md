@@ -104,6 +104,9 @@ packages/
   kmdb_harness/        — multi-device sync test harness
   kmdb_google_drive/   — Google Drive SyncStorageAdapter (optional, opt-in)
   kmdb_icloud/         — Apple iCloud (CloudKit) SyncStorageAdapter (iOS/macOS only, optional, opt-in)
+  kmdb_flutter/        — Flutter add-on: FlutterSecureDekCache (DEK session cache via
+                         flutter_secure_storage) + cryptography_flutter registration
+                         for native AES-256-GCM / Argon2id (Flutter hosts only, optional, opt-in)
 
 External Bettongia packages — all published to pub.dev, pinned in
 `pubspec.yaml` `dependency_overrides`:
@@ -363,8 +366,11 @@ fan-out (`tags[]`).
 
 Three modes: **lexical** (BM25 inverted index, `$fts:` namespaces), **semantic**
 (BGE Small En v1.5 embeddings, SQ8 quantization, `$vec:` namespaces), and
-**hybrid** (Reciprocal Rank Fusion combining both). All `$fts:` and `$vec:`
-namespaces are excluded from sync and cache. Managed via `FtsManager` and
+**hybrid** (Reciprocal Rank Fusion combining both). `$fts:*` and `$vec:*`
+namespaces are written to SSTables and reach the cloud via whole-file upload
+(no upload-time namespace filter — see §12, §20.7); their values are protected
+by value-level encryption (§31) when encryption is enabled. Managed via
+`FtsManager` and
 `VecManager`; queried via `KmdbCollection.search()`. English-language only; web
 browser excluded. See §20 for shared types and CLI, §21–23 for each mode.
 
