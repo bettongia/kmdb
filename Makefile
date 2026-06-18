@@ -6,11 +6,11 @@ KMDB_PKG=packages/kmdb
 
 # ADDLICENSE_CONFIG=addlicense_config.txt
 
-default: format analyze test license_check
+default: prepare format analyze test license_check
 .PHONY: default
 
-all: format analyze license_check coverage site
-.PHONY: all
+#all: format analyze license_check coverage site
+#.PHONY: all
 
 # Pre-commit gate: formatting, static analysis, license headers, and the core
 # test suites (kmdb + kmdb_cli). Deliberately excludes coverage, the docs site
