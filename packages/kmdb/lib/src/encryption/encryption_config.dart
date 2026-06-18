@@ -28,7 +28,7 @@ import 'recovery_code.dart';
 /// final db = await KmdbDatabase.open(
 ///   path: path,
 ///   adapter: adapter,
-///   encryption: EncryptionConfig(passphrase: 'my-passphrase'),
+///   encryptionConfig: EncryptionConfig(passphrase: 'my-passphrase'),
 /// );
 /// ```
 ///
@@ -38,7 +38,7 @@ import 'recovery_code.dart';
 /// final db = await KmdbDatabase.open(
 ///   path: path,
 ///   adapter: adapter,
-///   encryption: EncryptionConfig(
+///   encryptionConfig: EncryptionConfig(
 ///     recoveryCode: 'able acid aged also apex arch area army ...',
 ///   ),
 /// );
@@ -47,11 +47,11 @@ import 'recovery_code.dart';
 /// ## Creating a new encrypted database
 ///
 /// ```dart
-/// final result = EncryptionConfig.createResult();
+/// final result = await EncryptionConfig.createResult(passphrase: '...');
 /// final db = await KmdbDatabase.open(
 ///   path: path,
 ///   adapter: adapter,
-///   encryption: result.config,
+///   encryptionConfig: result.config,
 /// );
 /// // Show result.recoveryCode to the user exactly once — it cannot be
 /// // recovered if lost.
@@ -86,7 +86,7 @@ final class EncryptionConfig {
       throw ArgumentError(
         'Exactly one of passphrase or recoveryCode must be supplied to '
         'EncryptionConfig. To create a new encrypted database, use '
-        'EncryptionConfig.create().',
+        'EncryptionConfig.createResult().',
       );
     }
     if (passphrase != null && recoveryCode != null) {
@@ -124,7 +124,7 @@ final class EncryptionConfig {
   /// final result = await EncryptionConfig.createResult(passphrase: 'my-passphrase');
   /// final db = await KmdbDatabase.open(
   ///   path: path, adapter: adapter,
-  ///   encryption: result.config,
+  ///   encryptionConfig: result.config,
   /// );
   /// // Show result.recoveryCode to the user.
   /// ```
