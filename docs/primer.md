@@ -45,17 +45,17 @@ Storage Engine    — WAL + memtable + SSTables + compaction
     ↓
 Platform Layer    — dart:io (native) | OPFS (web) | HashMap (tests)
 
-    ┌──────────────────────────┐   ┌──────────────────────────┐
-    │  Text Search Subsystem   │   │  Vault Subsystem         │
-    │  (native-only, §20–23)   │   │  (native-only, §24)      │
-    │                          │   │                          │
-    │  FtsManager  (BM25)      │   │  VaultStore              │
-    │  VecManager  (vectors)   │   │  VaultGc                 │
-    │  HybridManager (RRF)     │   │  VaultStorageAdapter     │
-    │                          │   │                          │
-    │  $fts: / $vec: in KvStore│   │  vault/ directory + $vault│
-    │  never synced            │   │  ref-counts in KvStore   │
-    └──────────────────────────┘   └──────────────────────────┘
+    ┌───────────────────────────┐   ┌────────────────────────────┐
+    │  Text Search Subsystem    │   │  Vault Subsystem           │
+    │  (native-only, §20–23)    │   │  (native-only, §24)        │
+    │                           │   │                            │
+    │  FtsManager  (BM25)       │   │  VaultStore                │
+    │  VecManager  (vectors)    │   │  VaultGc                   │
+    │  HybridManager (RRF)      │   │  VaultStorageAdapter       │
+    │                           │   │                            │
+    │  $fts: / $vec: in KvStore │   │  vault/ directory + $vault │
+    │  never synced             │   │  ref-counts in KvStore     │
+    └───────────────────────────┘   └────────────────────────────┘
 ```
 
 Both subsystems sit alongside the main vertical stack. They use KvStore and the
@@ -774,6 +774,14 @@ Provisioning only works on an empty database — a database with existing
 plaintext data cannot be retroactively encrypted (it would mix plaintext and
 ciphertext values), and the attempt throws
 `EncryptionError.cannotProvisionNonEmptyDatabase`.
+
+> **No migration path.** There is no in-place conversion from a plaintext
+> database to an encrypted one. If you need encryption, create a new encrypted
+> database and write your data into it fresh. The reverse is equally true:
+> once a database is encrypted, there is no built-in way to strip encryption
+> and produce a plaintext database (export via `.kvlt` packages and re-import
+> is the manual workaround). Key rotation and in-place migration are explicit
+> v1 non-goals; see §31 for the roadmap.
 
 ## Re-opening an Encrypted Database
 
