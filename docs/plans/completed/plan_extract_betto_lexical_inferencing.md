@@ -1,8 +1,8 @@
 # Extract `betto_lexical` and `betto_inferencing` as standalone packages
 
-**Status**: Implementing
+**Status**: Complete
 
-**PR link**: _pending_
+**PR link**: https://github.com/bettongia/kmdb/pull/44
 
 ## Problem statement
 
@@ -674,18 +674,53 @@ are published and resolvable from pub.dev._
 ---
 
 ### Phase 4: Pre-commit gate
-- [ ] Run `make pre_commit` — format_check, analyze, license_check, and scoped
-  `kmdb` tests must all pass.
+- [x] Run `make pre_commit` — format_check, analyze, license_check, and scoped
+  `kmdb` tests all passed. One auto-format applied to `pipeline_test.dart`
+  (import line wrapping); re-ran and passed clean.
 - [x] (The `betto_lexical` / `betto_inferencing` suites are exercised in their
   own repos' CI during Stage A — they are no longer in this workspace, so
   `make test` here covers only the monorepo packages.)
 
 ### Phase 5: PR
-- [ ] Open a pull request for the **KMDB monorepo** Stage B + docs changes
-  (the standalone-repo PRs were merged at the Stage gate). Update this plan's
-  **PR link** field.
-- [ ] Move this plan to `docs/plans/completed/` once the PR is merged.
+- [x] Opened PR #44 for the KMDB monorepo Stage B + docs changes. PR link:
+  https://github.com/bettongia/kmdb/pull/44
+- [x] Plan moved to `docs/plans/completed/`.
 
 ## Summary
 
-_To be filled in after implementation._
+Stage A (standalone repos, published to pub.dev) and the Stage gate were
+completed by the user before this implementation session. This session executed
+Stage B (KMDB monorepo wiring) and Phase 3 (spec/docs/roadmap updates).
+
+**What was done:**
+
+- Removed `packages/kmdb_lexical/` and `packages/kmdb_inferencing/` from the
+  Pub workspace; removed their `workspace:` entries from the root `pubspec.yaml`.
+- Added `betto_lexical: ^0.1.0-dev.1` and `betto_inferencing: ^0.1.0-dev.1` to
+  `dependency_overrides:` in the root `pubspec.yaml`, matching the existing
+  `betto_*` family pattern.
+- Updated `packages/kmdb/pubspec.yaml`: `kmdb_lexical:` → `betto_lexical:`;
+  added bare `betto_inferencing:` dependency.
+- Rewired imports: `fts_manager.dart`, `pipeline.dart`, and `pipeline_test.dart`
+  now import `package:betto_lexical/betto_lexical.dart`.
+- Deleted `packages/kmdb/lib/src/search/embedding_model.dart` (the interface
+  now lives in `betto_inferencing`). Updated `kmdb.dart` to re-export
+  `EmbeddingModel` from `betto_inferencing`; updated `kmdb_database.dart` and
+  `vec_manager.dart` to import from `betto_inferencing`.
+- Updated all affected spec files (`19_platform.md`, `21_lexical_search.md`,
+  `22_semantic_search.md`, `28_release_checklist.md`), roadmap files (`0_00.md`,
+  `0_05.md`, `0_06.md`), `CLAUDE.md`, `docs/api.md`, `analysis_options.yaml`,
+  `search_command.dart`, and the active `docs/proposals/vault_search.md` proposal.
+
+**Key decisions:**
+- `EmbeddingModel` dependency arrow is now correct: `kmdb` depends on
+  `betto_inferencing` for the interface; `betto_inferencing` implements it.
+  The backward-compat re-export from `package:kmdb/kmdb.dart` preserves the
+  public API for downstream consumers (e.g. `kmdb_ui`).
+- The Snowball stemmer `analyzer: exclude:` path in `analysis_options.yaml` was
+  removed since the path no longer exists in the workspace.
+
+**Test results:** 1722 tests passed, 9 skipped (E2E). `make pre_commit` clean.
+PR: https://github.com/bettongia/kmdb/pull/44
+Branch/worktree: `20260617_plan_extract_betto_lexical_inferencing` under
+`.worktrees/`
