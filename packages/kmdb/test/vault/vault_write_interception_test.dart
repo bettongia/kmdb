@@ -162,10 +162,10 @@ class _TrackingKvStore implements KvStore {
   Future<bool> createNamespace(String ns) async => false;
 
   /// Reads the ref count for [sha256] from the `$vault` namespace.
-  int readRefCount(String sha256) {
+  Future<int> readRefCount(String sha256) async {
     final bytes = _data[kVaultNamespace]?[sha256];
     if (bytes == null) return 0;
-    final decoded = ValueCodec.decode(bytes);
+    final decoded = await ValueCodec.decode(bytes);
     final v = decoded['refCount'];
     return v is int ? v : 0;
   }
@@ -207,7 +207,7 @@ void main() {
           newDoc: {'file': ref.uri},
         );
         await kvStore.writeBatch(batch);
-        expect(kvStore.readRefCount(ref.sha256), equals(1));
+        expect(await kvStore.readRefCount(ref.sha256), equals(1));
       });
 
       test('does not create tombstone when ref goes 0→1', () async {
@@ -244,7 +244,7 @@ void main() {
           },
         );
         await kvStore.writeBatch(batch);
-        expect(kvStore.readRefCount(ref.sha256), equals(1));
+        expect(await kvStore.readRefCount(ref.sha256), equals(1));
       });
 
       test('handles vault uri in list', () async {
@@ -263,7 +263,7 @@ void main() {
           },
         );
         await kvStore.writeBatch(batch);
-        expect(kvStore.readRefCount(ref.sha256), equals(1));
+        expect(await kvStore.readRefCount(ref.sha256), equals(1));
       });
 
       test('increments multiple different vault uris', () async {
@@ -284,8 +284,8 @@ void main() {
           newDoc: {'a': ref1.uri, 'b': ref2.uri},
         );
         await kvStore.writeBatch(batch);
-        expect(kvStore.readRefCount(ref1.sha256), equals(1));
-        expect(kvStore.readRefCount(ref2.sha256), equals(1));
+        expect(await kvStore.readRefCount(ref1.sha256), equals(1));
+        expect(await kvStore.readRefCount(ref2.sha256), equals(1));
       });
     });
 
@@ -305,7 +305,7 @@ void main() {
           newDoc: {'file': ref.uri},
         );
         await kvStore.writeBatch(initBatch);
-        expect(kvStore.readRefCount(ref.sha256), equals(1));
+        expect(await kvStore.readRefCount(ref.sha256), equals(1));
 
         // Update with same vault uri — count should stay at 1.
         final updateBatch = WriteBatch();
@@ -317,7 +317,7 @@ void main() {
           newDoc: {'file': ref.uri, 'extra': 'value'},
         );
         await kvStore.writeBatch(updateBatch);
-        expect(kvStore.readRefCount(ref.sha256), equals(1));
+        expect(await kvStore.readRefCount(ref.sha256), equals(1));
       });
 
       test('decrements old uri and increments new uri on swap', () async {
@@ -352,8 +352,8 @@ void main() {
         await kvStore.writeBatch(batch2);
 
         // ref1 should be tombstoned (went to 0), ref2 at 1.
-        expect(kvStore.readRefCount(ref1.sha256), equals(0));
-        expect(kvStore.readRefCount(ref2.sha256), equals(1));
+        expect(await kvStore.readRefCount(ref1.sha256), equals(0));
+        expect(await kvStore.readRefCount(ref2.sha256), equals(1));
         expect(await vaultStore.isTombstoned(ref1.sha256), isTrue);
         expect(await vaultStore.isTombstoned(ref2.sha256), isFalse);
       });
@@ -389,8 +389,8 @@ void main() {
         );
         await kvStore.writeBatch(batch2);
 
-        expect(kvStore.readRefCount(ref1.sha256), equals(1));
-        expect(kvStore.readRefCount(ref2.sha256), equals(1));
+        expect(await kvStore.readRefCount(ref1.sha256), equals(1));
+        expect(await kvStore.readRefCount(ref2.sha256), equals(1));
       });
     });
 
@@ -422,7 +422,7 @@ void main() {
         );
         await kvStore.writeBatch(batch2);
 
-        expect(kvStore.readRefCount(ref.sha256), equals(0));
+        expect(await kvStore.readRefCount(ref.sha256), equals(0));
         expect(await vaultStore.isTombstoned(ref.sha256), isTrue);
       });
 
@@ -512,7 +512,7 @@ void main() {
           newDoc: {'f': ref.uri},
         );
         await kvStore.writeBatch(b3);
-        expect(kvStore.readRefCount(ref.sha256), equals(1));
+        expect(await kvStore.readRefCount(ref.sha256), equals(1));
         expect(await vaultStore.isTombstoned(ref.sha256), isFalse);
       });
     });
@@ -536,19 +536,21 @@ void main() {
           newDoc: {'file': ref.uri},
         );
         await kvStore.writeBatch(incBatch);
-        expect(kvStore.readRefCount(ref.sha256), equals(1));
+        expect(await kvStore.readRefCount(ref.sha256), equals(1));
 
         // Decrement via decrementVersionRefs (the $ver: trim path).
-        final encodedValue = ValueCodec.encode({'file': ref.uri});
+        final encodedValue = await ValueCodec.encode({'file': ref.uri});
         final decBatch = WriteBatch();
         await interceptor.decrementVersionRefs(encodedValue, decBatch);
         await kvStore.writeBatch(decBatch);
 
-        expect(kvStore.readRefCount(ref.sha256), equals(0));
+        expect(await kvStore.readRefCount(ref.sha256), equals(0));
       });
 
       test('does nothing when encodedValue contains no vault URIs', () async {
-        final encodedValue = ValueCodec.encode({'title': 'no vault ref here'});
+        final encodedValue = await ValueCodec.encode({
+          'title': 'no vault ref here',
+        });
         final batch = WriteBatch();
         await interceptor.decrementVersionRefs(encodedValue, batch);
         expect(batch.isEmpty, isTrue);
@@ -594,7 +596,7 @@ void main() {
           await kvStore.writeBatch(incBatch);
 
           // Decrement both in one call.
-          final encodedValue = ValueCodec.encode({
+          final encodedValue = await ValueCodec.encode({
             'a': ref1.uri,
             'b': ref2.uri,
           });
@@ -602,8 +604,8 @@ void main() {
           await interceptor.decrementVersionRefs(encodedValue, decBatch);
           await kvStore.writeBatch(decBatch);
 
-          expect(kvStore.readRefCount(ref1.sha256), equals(0));
-          expect(kvStore.readRefCount(ref2.sha256), equals(0));
+          expect(await kvStore.readRefCount(ref1.sha256), equals(0));
+          expect(await kvStore.readRefCount(ref2.sha256), equals(0));
         },
       );
     });

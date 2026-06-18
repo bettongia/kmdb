@@ -1,10 +1,10 @@
-// Copyright 2026 The Authors
+// Copyright 2026 The Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,6 +15,7 @@
 import 'dart:typed_data';
 
 import '../encoding/value_codec.dart';
+import '../encryption/encryption_provider.dart';
 import '../engine/kvstore/kv_store.dart';
 import '../query/write_augmentor.dart';
 import 'vault_gc.dart';
@@ -41,19 +42,34 @@ import 'vault_ref_count.dart';
 /// [VaultGc], and `VaultRecovery` — decode it through the shared, fail-safe
 /// [VaultRefCount.read] rather than a hand-rolled parser.
 ///
+/// ## Encryption
+///
+/// When [encryption] is non-null, `$vault` ref count values are encrypted via
+/// [ValueCodec] before being written to the KV store (Q4/Q6 decision:
+/// encrypt every `ValueCodec` call site uniformly, because `$vault` entries
+/// ride in synced SSTables).
+///
 /// Implements [WriteAugmentor] so it integrates with the formal write pipeline
 /// without requiring special-casing in [KmdbCollection]. The [namespace] and
 /// [docKey] parameters are accepted but unused — vault URI diffing is
 /// purely document-content-based.
 final class VaultRefInterceptor implements WriteAugmentor {
   /// Creates a [VaultRefInterceptor].
-  const VaultRefInterceptor({required this.kvStore, required this.gc});
+  const VaultRefInterceptor({
+    required this.kvStore,
+    required this.gc,
+    this.encryption,
+  });
 
   /// The KV store used to read and write ref counts.
   final KvStore kvStore;
 
   /// The GC instance to notify when a ref count reaches zero or is restored.
   final VaultGc gc;
+
+  /// Optional encryption provider. When non-null, `$vault` ref count values
+  /// are encrypted with AES-256-GCM before storage.
+  final EncryptionProvider? encryption;
 
   // ── Public API ─────────────────────────────────────────────────────────────
 
@@ -116,7 +132,7 @@ final class VaultRefInterceptor implements WriteAugmentor {
   ) async {
     final Map<String, dynamic> doc;
     try {
-      doc = ValueCodec.decode(encodedValue);
+      doc = await ValueCodec.decode(encodedValue, encryption: encryption);
     } catch (_) {
       // Cannot decode — skip. The fail-safe posture means undecodable entries
       // leave the ref count over-counted (blob retained), never under-counted.
@@ -171,7 +187,11 @@ final class VaultRefInterceptor implements WriteAugmentor {
   /// [VaultRecovery]), both of which now re-read via [VaultRefCount.read] and
   /// retain on `undecodable`.
   Future<int> _readRefCount(String sha256) async {
-    final result = await VaultRefCount.read(kvStore, sha256);
+    final result = await VaultRefCount.read(
+      kvStore,
+      sha256,
+      encryption: encryption,
+    );
     return switch (result) {
       RefCountValue(:final count) => count,
       RefCountAbsent() => 0,
@@ -186,7 +206,11 @@ final class VaultRefInterceptor implements WriteAugmentor {
   Future<void> _increment(String sha256, WriteBatch batch) async {
     final current = await _readRefCount(sha256);
     final next = current + 1;
-    batch.put(kVaultNamespace, sha256, ValueCodec.encode({'refCount': next}));
+    batch.put(
+      kVaultNamespace,
+      sha256,
+      await ValueCodec.encode({'refCount': next}, encryption: encryption),
+    );
 
     // If transitioning from 0 → 1, a tombstone may have been left by a prior
     // zero-ref decrement. Remove it to un-tombstone the object.
@@ -211,7 +235,11 @@ final class VaultRefInterceptor implements WriteAugmentor {
       batch.delete(kVaultNamespace, sha256);
       await gc.onZeroRefs(sha256);
     } else {
-      batch.put(kVaultNamespace, sha256, ValueCodec.encode({'refCount': next}));
+      batch.put(
+        kVaultNamespace,
+        sha256,
+        await ValueCodec.encode({'refCount': next}, encryption: encryption),
+      );
     }
   }
 }

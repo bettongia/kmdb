@@ -70,8 +70,16 @@ void main() {
       addTearDown(() => db.close());
       final id1 = _key('doc1');
       final id2 = _key('doc2');
-      await db.store.put('notes', id1, ValueCodec.encode({'title': 'Hello'}));
-      await db.store.put('notes', id2, ValueCodec.encode({'title': 'World'}));
+      await db.store.put(
+        'notes',
+        id1,
+        await ValueCodec.encode({'title': 'Hello'}),
+      );
+      await db.store.put(
+        'notes',
+        id2,
+        await ValueCodec.encode({'title': 'World'}),
+      );
 
       final out = StringBuffer();
       final ok = await DumpCommand().execute(_ctx(db, out: out), [], {});
@@ -96,8 +104,16 @@ void main() {
     test('writes headers and documents for multiple collections', () async {
       final db = await _openStore();
       addTearDown(() => db.close());
-      await db.store.put('notes', _key('n1'), ValueCodec.encode({'n': 1}));
-      await db.store.put('tasks', _key('t1'), ValueCodec.encode({'t': 1}));
+      await db.store.put(
+        'notes',
+        _key('n1'),
+        await ValueCodec.encode({'n': 1}),
+      );
+      await db.store.put(
+        'tasks',
+        _key('t1'),
+        await ValueCodec.encode({'t': 1}),
+      );
 
       final out = StringBuffer();
       final ok = await DumpCommand().execute(_ctx(db, out: out), [], {});

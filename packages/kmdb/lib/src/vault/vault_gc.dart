@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import '../encryption/encryption_provider.dart';
 import '../engine/kvstore/kv_store.dart';
 import 'vault_ref_count.dart';
 import 'vault_store.dart';
@@ -44,13 +45,24 @@ import 'vault_store.dart';
 /// Its content is a timestamp for human-readability.
 final class VaultGc {
   /// Creates a [VaultGc] instance.
-  const VaultGc({required this.store, required this.kvStore});
+  ///
+  /// [encryption] must match the provider used when the `$vault` ref count
+  /// entries were written. When the database is encrypted (Q6 decision),
+  /// `$vault` ref counts are stored as encrypted [ValueCodec] payloads, so the
+  /// sweep must supply the same provider to decode them.
+  const VaultGc({required this.store, required this.kvStore, this.encryption});
 
   /// The vault store that holds the blobs and manifests.
   final VaultStore store;
 
   /// The KV store for looking up vault reference counts.
   final KvStore kvStore;
+
+  /// Active encryption provider, or `null` for plaintext databases.
+  ///
+  /// Forwarded to [VaultRefCount.read] so that encrypted `$vault` ref count
+  /// entries are decoded correctly during the GC sweep.
+  final EncryptionProvider? encryption;
 
   // ── Public API ─────────────────────────────────────────────────────────────
 
@@ -108,8 +120,15 @@ final class VaultGc {
       examined++;
 
       // Re-validate ref count before deleting — guard against TOCTOU and,
-      // crucially, against acting on an undecodable counter.
-      final result = await VaultRefCount.read(kvStore, sha256);
+      // crucially, against acting on an undecodable counter. Pass the
+      // encryption provider so that encrypted $vault entries are decoded
+      // correctly (Q6: ref counts ride in synced SSTables and are encrypted
+      // uniformly with all other ValueCodec call sites).
+      final result = await VaultRefCount.read(
+        kvStore,
+        sha256,
+        encryption: encryption,
+      );
       switch (result) {
         case RefCountAbsent():
           // No entry → genuinely zero references (the entry is deleted when the

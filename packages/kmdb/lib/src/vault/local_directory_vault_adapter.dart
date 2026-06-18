@@ -18,6 +18,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../encryption/encryption_provider.dart';
 import '../engine/kvstore/kv_store.dart';
 import 'vault_manifest.dart';
 import 'vault_storage_adapter.dart';
@@ -73,10 +74,14 @@ final class LocalDirectoryVaultAdapter implements VaultStorageAdapter {
   /// resolution. [_kvStore] is the local KV store, used by [syncVaultMetadata]
   /// to verify that a positive `$vault` reference is present before creating
   /// a stub (the producer-side contract enforced by [VaultStore.createStub]).
+  /// [encryption] must match the provider active on this database; when
+  /// non-null, `$vault` ref count entries are encrypted and must be decrypted
+  /// before the producer-side guard in [VaultStore.createStub] can read them.
   LocalDirectoryVaultAdapter({
     required this._syncRoot,
     required this._localStore,
     required this._kvStore,
+    this.encryption,
   });
 
   /// The base directory for all remote vault paths.
@@ -87,6 +92,12 @@ final class LocalDirectoryVaultAdapter implements VaultStorageAdapter {
 
   /// The local KV store, used to verify the `$vault` ref before stub creation.
   final KvStore _kvStore;
+
+  /// Active encryption provider, or `null` for plaintext databases.
+  ///
+  /// Forwarded to [VaultStore.createStub] so that encrypted `$vault` ref count
+  /// entries are decoded correctly when the producer-side guard runs.
+  final EncryptionProvider? encryption;
 
   // ── Remote path helpers ───────────────────────────────────────────────────
 
@@ -176,8 +187,13 @@ final class LocalDirectoryVaultAdapter implements VaultStorageAdapter {
     final manifest = VaultManifest.fromJsonString(utf8.decode(manifestBytes));
 
     // Delegate to VaultStore.createStub which checks the producer-side
-    // contract (positive ref required) and writes manifest.json.
-    await _localStore.createStub(manifest, kvStore: _kvStore);
+    // contract (positive ref required) and writes manifest.json. Pass
+    // encryption so the ref count guard can decode encrypted entries.
+    await _localStore.createStub(
+      manifest,
+      kvStore: _kvStore,
+      encryption: encryption,
+    );
 
     // Sync tombstone.json if present on the remote.
     final remoteTombstone = File(_remoteTombstonePath(sha256));

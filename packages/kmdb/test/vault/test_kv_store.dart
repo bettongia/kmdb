@@ -33,13 +33,14 @@ class TestKvStore implements KvStore {
 
   /// Seeds a properly-encoded `$vault:{sha256}` entry with `refCount: count`.
   ///
-  /// Uses the same CBOR encoding [VaultRefInterceptor] produces (a single
-  /// `0x00` codec flag prefix followed by a CBOR map with a `refCount` int).
+  /// Uses the Phase 12 two-byte prefix format that [VaultRefInterceptor]
+  /// produces: `[EncryptionFlag.none=0x00][CompressionFlag.none=0x00][CBOR map]`.
   void setRefCount(String sha256, int count) {
     _data[kVaultNamespace] ??= {};
     final keyBytes = utf8.encode('refCount');
     final builder = BytesBuilder();
-    builder.addByte(0x00); // ValueCodec raw flag
+    builder.addByte(0x00); // EncryptionFlag.none (Phase 12 outer byte)
+    builder.addByte(0x00); // CompressionFlag.none
     builder.addByte(0xA1); // CBOR map with 1 pair
     builder.addByte(0x60 | keyBytes.length); // text string
     builder.add(keyBytes);

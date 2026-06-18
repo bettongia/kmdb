@@ -23,13 +23,16 @@ void main() {
   group('VersionEntry', () {
     // ── Serialisation round-trips ─────────────────────────────────────────────
 
-    test('put-version round-trips via encode/decode', () {
+    test('put-version round-trips via encode/decode', () async {
       final hlc = const Hlc(1000, 0);
-      final encoded = ValueCodec.encode({'title': 'Hello', 'done': false});
+      final encoded = await ValueCodec.encode({
+        'title': 'Hello',
+        'done': false,
+      });
       final entry = VersionEntry(hlc: hlc, encodedValue: encoded);
 
-      final bytes = entry.encode();
-      final decoded = VersionEntry.decode(bytes);
+      final bytes = await entry.encode();
+      final decoded = await VersionEntry.decode(bytes);
 
       expect(decoded.hlc, equals(hlc));
       expect(decoded.encodedValue, equals(entry.encodedValue));
@@ -37,12 +40,12 @@ void main() {
       expect(decoded.promotedFrom, isNull);
     });
 
-    test('delete-version round-trips via encode/decode', () {
+    test('delete-version round-trips via encode/decode', () async {
       final hlc = const Hlc(2000, 5);
       final entry = VersionEntry(hlc: hlc, encodedValue: null, isDelete: true);
 
-      final bytes = entry.encode();
-      final decoded = VersionEntry.decode(bytes);
+      final bytes = await entry.encode();
+      final decoded = await VersionEntry.decode(bytes);
 
       expect(decoded.hlc, equals(hlc));
       expect(decoded.encodedValue, isNull);
@@ -50,18 +53,18 @@ void main() {
       expect(decoded.promotedFrom, isNull);
     });
 
-    test('promoted entry round-trips with promotedFrom set', () {
+    test('promoted entry round-trips with promotedFrom set', () async {
       final hlc = const Hlc(3000, 0);
       final promotedFrom = const Hlc(1000, 0);
-      final encoded = ValueCodec.encode({'title': 'Restored'});
+      final encoded = await ValueCodec.encode({'title': 'Restored'});
       final entry = VersionEntry(
         hlc: hlc,
         encodedValue: encoded,
         promotedFrom: promotedFrom,
       );
 
-      final bytes = entry.encode();
-      final decoded = VersionEntry.decode(bytes);
+      final bytes = await entry.encode();
+      final decoded = await VersionEntry.decode(bytes);
 
       expect(decoded.promotedFrom, equals(promotedFrom));
       expect(decoded.isDelete, isFalse);
@@ -93,10 +96,12 @@ void main() {
       );
     });
 
-    test('decode throws FormatException for corrupt bytes', () {
-      expect(
-        () => VersionEntry.decode(Uint8List.fromList([0x00, 0xFF, 0xAB])),
-        throwsA(isA<FormatException>()),
+    test('decode throws FormatException for corrupt bytes', () async {
+      // These bytes do not represent a valid ValueCodec-encoded map.
+      // EncryptionFlag=0x00, CompressionFlag=0xFF (unknown) → ArgumentError.
+      await expectLater(
+        VersionEntry.decode(Uint8List.fromList([0x00, 0xFF, 0xAB])),
+        throwsA(isA<ArgumentError>()),
       );
     });
 
@@ -143,6 +148,50 @@ void main() {
       final s = entry.toString();
       expect(s, contains('isDelete: true'));
       expect(s, contains('VersionEntry'));
+    });
+
+    // ── decodeIsDeleteSync ────────────────────────────────────────────────────
+
+    test('decodeIsDeleteSync returns false for empty bytes', () {
+      expect(VersionEntry.decodeIsDeleteSync(Uint8List(0)), isFalse);
+    });
+
+    test(
+      'decodeIsDeleteSync returns false for encrypted bytes (0x01 prefix)',
+      () {
+        // Simulate encrypted VersionEntry bytes (first byte = 0x01).
+        final encrypted = Uint8List.fromList([0x01, 0x42, 0x43, 0x44]);
+        expect(VersionEntry.decodeIsDeleteSync(encrypted), isFalse);
+      },
+    );
+
+    test(
+      'decodeIsDeleteSync returns true for plaintext delete-version entry',
+      () async {
+        // Build a real plaintext delete-version entry and check decodeIsDeleteSync.
+        final entry = VersionEntry(
+          hlc: const Hlc(1, 0),
+          encodedValue: null,
+          isDelete: true,
+        );
+        final bytes = await entry.encode(); // EncryptionFlag.none prefix
+        expect(VersionEntry.decodeIsDeleteSync(bytes), isTrue);
+      },
+    );
+
+    test(
+      'decodeIsDeleteSync returns false for plaintext put-version entry',
+      () async {
+        final encoded = await ValueCodec.encode({'title': 'Hello'});
+        final entry = VersionEntry(hlc: const Hlc(1, 0), encodedValue: encoded);
+        final bytes = await entry.encode();
+        expect(VersionEntry.decodeIsDeleteSync(bytes), isFalse);
+      },
+    );
+
+    test('decodeIsDeleteSync returns false for corrupt bytes', () {
+      final corrupt = Uint8List.fromList([0x00, 0xFF, 0xAB, 0xCD]);
+      expect(VersionEntry.decodeIsDeleteSync(corrupt), isFalse);
     });
   });
 

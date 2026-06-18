@@ -217,7 +217,7 @@ final class InsertCommand extends CliCommand {
 
     // Build a WriteBatch: document write + vault ref count increments.
     final batch = WriteBatch();
-    batch.put(collection, key, ValueCodec.encode(doc));
+    batch.put(collection, key, await ValueCodec.encode(doc));
     await applyVaultRefCounts(
       doc: doc,
       oldDoc: null,

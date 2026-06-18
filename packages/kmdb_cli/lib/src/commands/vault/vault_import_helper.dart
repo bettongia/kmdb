@@ -146,7 +146,7 @@ void _scan(dynamic value, Set<String> result) {
 Future<int> readVaultRefCount(KvStoreImpl store, String sha256) async {
   final bytes = await store.get(kVaultNamespace, sha256);
   if (bytes == null) return 0;
-  final decoded = ValueCodec.decode(bytes);
+  final decoded = await ValueCodec.decode(bytes);
   final count = decoded['refCount'];
   return count is int ? count : 0;
 }

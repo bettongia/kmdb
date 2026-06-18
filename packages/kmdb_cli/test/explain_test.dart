@@ -67,7 +67,11 @@ Future<void> _putDoc(
   Map<String, dynamic> doc,
 ) async {
   final id = doc['_id'] as String? ?? _key(doc.toString());
-  await db.store.put(coll, id, ValueCodec.encode({...doc}..remove('_id')));
+  await db.store.put(
+    coll,
+    id,
+    await ValueCodec.encode({...doc}..remove('_id')),
+  );
 }
 
 /// Waits until [manager] reports [IndexStatus.current] for [namespace]/[path],
@@ -298,9 +302,9 @@ void main() {
       final keyB = _key('bbb'); // sorts second
       final keyC = _key('ccc'); // sorts third
 
-      await db.store.put('items', keyA, ValueCodec.encode({'n': 1}));
-      await db.store.put('items', keyB, ValueCodec.encode({'n': 2}));
-      await db.store.put('items', keyC, ValueCodec.encode({'n': 3}));
+      await db.store.put('items', keyA, await ValueCodec.encode({'n': 1}));
+      await db.store.put('items', keyB, await ValueCodec.encode({'n': 2}));
+      await db.store.put('items', keyC, await ValueCodec.encode({'n': 3}));
 
       // Scanning from keyB should return keyB and keyC.
       final ctx = _ctx(db, out: out, err: err);
@@ -323,7 +327,7 @@ void main() {
       // Insert a document with keyA (sorts before keyC).
       final keyA = _key('abc');
       final keyC = _key('zzz'); // sorts after keyA
-      await db.store.put('items', keyA, ValueCodec.encode({'x': 1}));
+      await db.store.put('items', keyA, await ValueCodec.encode({'x': 1}));
 
       // Scanning from keyC (which sorts after keyA) yields nothing.
       final ctx = _ctx(db, out: out, err: err);
@@ -341,8 +345,8 @@ void main() {
     test('applies filter within key-prefix scan', () async {
       final keyA = _key('aaa');
       final keyB = _key('bbb');
-      await db.store.put('items', keyA, ValueCodec.encode({'n': 1}));
-      await db.store.put('items', keyB, ValueCodec.encode({'n': 2}));
+      await db.store.put('items', keyA, await ValueCodec.encode({'n': 1}));
+      await db.store.put('items', keyB, await ValueCodec.encode({'n': 2}));
 
       final ctx = _ctx(db, out: out, err: err);
       final ok = await ScanCommand().execute(

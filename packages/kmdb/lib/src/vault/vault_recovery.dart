@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import '../encryption/encryption_provider.dart';
 import '../engine/kvstore/kv_store.dart';
 import 'vault_ref_count.dart';
 import 'vault_store.dart';
@@ -59,13 +60,29 @@ import 'vault_store.dart';
 /// | —                | manifest.json + blob, undecodable ref  | Retain (fail-safe)    |
 final class VaultRecovery {
   /// Creates a [VaultRecovery] instance.
-  const VaultRecovery({required this.store, required this.kvStore});
+  ///
+  /// [encryption] must match the provider used when the `$vault` ref count
+  /// entries were written. When the database is encrypted (Q6 decision),
+  /// `$vault` ref counts are stored as encrypted [ValueCodec] payloads, so
+  /// recovery must supply the same provider to decode them during the
+  /// hash-directory sweep.
+  const VaultRecovery({
+    required this.store,
+    required this.kvStore,
+    this.encryption,
+  });
 
   /// The vault store to recover.
   final VaultStore store;
 
   /// The KV store used to check reference counts in the `$vault` namespace.
   final KvStore kvStore;
+
+  /// Active encryption provider, or `null` for plaintext databases.
+  ///
+  /// Forwarded to [VaultRefCount.read] so that encrypted `$vault` ref count
+  /// entries are decoded correctly during the hash-directory sweep.
+  final EncryptionProvider? encryption;
 
   // ── Public API ─────────────────────────────────────────────────────────────
 
@@ -157,7 +174,14 @@ final class VaultRecovery {
   /// - `manifest.json` present, KV ref present → [_RecoveryAction.retain] (a
   ///   valid stub or fully hydrated object).
   Future<_RecoveryAction> _classify(String sha256) async {
-    final refResult = await VaultRefCount.read(kvStore, sha256);
+    // Pass encryption so that encrypted $vault entries are decoded correctly
+    // (Q6: ref counts ride in synced SSTables and are encrypted uniformly
+    // with all other ValueCodec call sites).
+    final refResult = await VaultRefCount.read(
+      kvStore,
+      sha256,
+      encryption: encryption,
+    );
 
     // Fail-safe short-circuit: a present-but-undecodable ref entry means we
     // cannot prove the object is unreferenced. Treat it as referenced and keep

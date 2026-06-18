@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import '../encoding/value_codec.dart';
+import '../encryption/encryption_provider.dart';
 import '../engine/kvstore/kv_store.dart';
 import '../engine/kvstore/meta_store.dart';
 import '../engine/util/hlc.dart';
@@ -47,6 +48,12 @@ String versionNamespace(String userNamespace) =>
 /// Config entries use the symbolic key `version:config:{collection}` in
 /// `$meta`, resolved through the standard [MetaStore.getRawByName] /
 /// [MetaStore.putRawByName] helpers.
+///
+/// ## Encryption
+///
+/// `VersionConfig` values travel through [ValueCodec] and are therefore
+/// encrypted when the database is encrypted. This is consistent with the Phase
+/// 12 decision to encrypt every `ValueCodec` call site uniformly.
 final class VersionConfigStore {
   /// Creates a [VersionConfigStore] backed by [meta].
   const VersionConfigStore(this._meta);
@@ -57,11 +64,16 @@ final class VersionConfigStore {
 
   /// Returns the [VersionConfig] for [collection], or the
   /// [VersionConfig.defaults] if no config has been written.
-  Future<VersionConfig> get(String collection) async {
+  ///
+  /// [encryption] must match the provider used when [put] was called.
+  Future<VersionConfig> get(
+    String collection, {
+    EncryptionProvider? encryption,
+  }) async {
     final bytes = await _meta.getRawByName(_configKey(collection));
     if (bytes == null) return VersionConfig.defaults;
     try {
-      final map = ValueCodec.decode(bytes);
+      final map = await ValueCodec.decode(bytes, encryption: encryption);
       return VersionConfig.fromMap(map);
     } catch (_) {
       // Defensive: corrupt or unrecognised bytes → defaults rather than crash.
@@ -70,8 +82,15 @@ final class VersionConfigStore {
   }
 
   /// Persists [config] for [collection] in `$meta`.
-  Future<void> put(String collection, VersionConfig config) async {
-    final bytes = ValueCodec.encode(config.toMap());
+  Future<void> put(
+    String collection,
+    VersionConfig config, {
+    EncryptionProvider? encryption,
+  }) async {
+    final bytes = await ValueCodec.encode(
+      config.toMap(),
+      encryption: encryption,
+    );
     await _meta.putRawByName(_configKey(collection), bytes);
   }
 }
@@ -119,14 +138,24 @@ final class VersionConfigStore {
 ///
 /// When [VersionConfig.isDisabled] is true for the collection, no `$ver:`
 /// entry is appended.
+///
+/// ## Encryption
+///
+/// When [encryption] is non-null, the `$ver:` entry bytes are encrypted using
+/// the same provider as all other `ValueCodec` call sites, so version history
+/// is protected by the database DEK.
 final class VersionWriteAugmentor implements WriteAugmentor {
   /// Creates a [VersionWriteAugmentor].
-  const VersionWriteAugmentor({required this.configs});
+  const VersionWriteAugmentor({required this.configs, this.encryption});
 
   /// Per-collection versioning configuration, keyed by user namespace.
   ///
   /// If a namespace is absent, [VersionConfig.defaults] applies.
   final Map<String, VersionConfig> configs;
+
+  /// Optional encryption provider. When non-null, `$ver:` entries are
+  /// encrypted with AES-256-GCM before being written to the KV store.
+  final EncryptionProvider? encryption;
 
   @override
   Future<void> interceptWrite({
@@ -142,7 +171,9 @@ final class VersionWriteAugmentor implements WriteAugmentor {
     final isDelete = newDoc == null;
     // Store the encoded value for puts; null for deletes. The encoding is
     // identical to what the main namespace stores — decoding is symmetric.
-    final encodedValue = isDelete ? null : ValueCodec.encode(newDoc);
+    final encodedValue = isDelete
+        ? null
+        : await ValueCodec.encode(newDoc, encryption: encryption);
 
     // Store Hlc(0,0) as the placeholder — the real HLC is the internal key's HLC,
     // surfaced via scanVersionHistory(). See class doc for the rationale.
@@ -151,7 +182,11 @@ final class VersionWriteAugmentor implements WriteAugmentor {
       encodedValue: encodedValue,
       isDelete: isDelete,
     );
-    batch.put(versionNamespace(namespace), docKey, entry.encode());
+    batch.put(
+      versionNamespace(namespace),
+      docKey,
+      await entry.encode(encryption: encryption),
+    );
   }
 }
 
@@ -167,14 +202,18 @@ final class VersionWriteAugmentor implements WriteAugmentor {
 /// [namespace] must be a user namespace (e.g. `'tasks'`). This function
 /// reads from the corresponding `$ver:tasks` namespace automatically.
 ///
+/// [encryption] must match the provider used when the entries were written, or
+/// `null` for plaintext values.
+///
 /// Returns an empty list if no version entries exist for the key (e.g.
 /// versioning was disabled when the document was created, or the document
 /// has never been written).
 Future<List<DocumentVersion>> readVersions(
   KvStore store,
   String namespace,
-  String docKey,
-) async {
+  String docKey, {
+  EncryptionProvider? encryption,
+}) async {
   final verNs = versionNamespace(namespace);
   final entries = <DocumentVersion>[];
 
@@ -191,7 +230,10 @@ Future<List<DocumentVersion>> readVersions(
       VersionEntry? ve;
       if (histEntry.value.isNotEmpty) {
         try {
-          ve = VersionEntry.decode(histEntry.value);
+          ve = await VersionEntry.decode(
+            histEntry.value,
+            encryption: encryption,
+          );
         } catch (_) {
           // Skip undecodable entries rather than crashing.
           continue;
@@ -202,7 +244,10 @@ Future<List<DocumentVersion>> readVersions(
 
       Map<String, dynamic>? decodedValue;
       if (!isDelete && ve?.encodedValue != null) {
-        decodedValue = ValueCodec.decode(ve!.encodedValue!);
+        decodedValue = await ValueCodec.decode(
+          ve!.encodedValue!,
+          encryption: encryption,
+        );
       }
 
       entries.add(
@@ -232,6 +277,8 @@ Future<List<DocumentVersion>> readVersions(
 /// for that exact HLC. Used by [KmdbCollection.promoteVersion] to retrieve
 /// a specific historical version.
 ///
+/// [encryption] must match the provider used when the entries were written.
+///
 /// Scans `$ver:{namespace}` for entries whose internal-key HLC matches [hlc].
 /// Because each write in a batch gets a unique HLC (logical counter
 /// incremented per entry), and both the document and the `$ver:` entry are in
@@ -242,13 +289,17 @@ Future<VersionEntry?> readVersionAt(
   KvStore store,
   String namespace,
   String docKey,
-  Hlc hlc,
-) async {
+  Hlc hlc, {
+  EncryptionProvider? encryption,
+}) async {
   final verNs = versionNamespace(namespace);
   await for (final histEntry in store.scanVersionHistory(verNs, docKey)) {
     if (histEntry.hlc == hlc) {
       try {
-        return VersionEntry.decode(histEntry.value);
+        return await VersionEntry.decode(
+          histEntry.value,
+          encryption: encryption,
+        );
       } catch (_) {
         return null;
       }

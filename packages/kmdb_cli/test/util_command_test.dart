@@ -150,8 +150,16 @@ void main() {
       // Write data and flush to generate a real SSTable file.
       final k1 = _keygen.next();
       final k2 = _keygen.next();
-      await db.store.put('ns', k1, ValueCodec.encode({'id': 'a', 'x': 1}));
-      await db.store.put('ns', k2, ValueCodec.encode({'id': 'b', 'x': 2}));
+      await db.store.put(
+        'ns',
+        k1,
+        await ValueCodec.encode({'id': 'a', 'x': 1}),
+      );
+      await db.store.put(
+        'ns',
+        k2,
+        await ValueCodec.encode({'id': 'b', 'x': 2}),
+      );
       await db.store.flush();
     });
     tearDown(() => db.close());
@@ -375,8 +383,16 @@ void main() {
       tmpDir = _mkTempDir();
       db = await _openStore(tmpDir);
       // Write data to generate WAL records.
-      await db.store.put('ns', _keygen.next(), ValueCodec.encode({'id': 'a'}));
-      await db.store.put('ns', _keygen.next(), ValueCodec.encode({'id': 'b'}));
+      await db.store.put(
+        'ns',
+        _keygen.next(),
+        await ValueCodec.encode({'id': 'a'}),
+      );
+      await db.store.put(
+        'ns',
+        _keygen.next(),
+        await ValueCodec.encode({'id': 'b'}),
+      );
     });
     tearDown(() => db.close());
 
@@ -720,7 +736,7 @@ void main() {
         await db.store.put(
           'ns',
           _keygen.next(),
-          ValueCodec.encode({'id': 'a'}),
+          await ValueCodec.encode({'id': 'a'}),
         );
         await db.store.flush();
 
@@ -764,7 +780,7 @@ void main() {
         await db.store.put(
           'ns',
           _keygen.next(),
-          ValueCodec.encode({'id': 'a'}),
+          await ValueCodec.encode({'id': 'a'}),
         );
         await db.store.flush();
 

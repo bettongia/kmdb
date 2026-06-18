@@ -160,7 +160,7 @@ void main() {
 
     test('standard export (no --vault) writes NDJSON to out sink', () async {
       const id = '01900000000070809000000000000020';
-      await db.store.put('docs', id, ValueCodec.encode({'i': id}));
+      await db.store.put('docs', id, await ValueCodec.encode({'i': id}));
 
       final ctx = _ctx(db, out: out, err: err);
       final ok = await ExportCommand().execute(ctx, ['docs'], {});
@@ -192,7 +192,7 @@ void main() {
       '--vault exports plain documents to NDJSON (no package files)',
       () async {
         const id = '01900000000070809000000000000021';
-        await db.store.put('docs', id, ValueCodec.encode({'i': id}));
+        await db.store.put('docs', id, await ValueCodec.encode({'i': id}));
 
         final outputDir = '${tmpDir.path}/plain_export';
         final ctx = _ctx(db, out: out, err: err);

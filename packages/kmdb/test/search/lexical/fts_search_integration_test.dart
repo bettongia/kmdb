@@ -545,7 +545,8 @@ void main() {
       // Simulate a document arriving via sync by writing directly to the store.
       final newId = const UuidV7KeyGenerator().next();
       final newDoc = {'body': 'delta synced content'};
-      final batch = WriteBatch()..put('docs', newId, ValueCodec.encode(newDoc));
+      final batch = WriteBatch()
+        ..put('docs', newId, await ValueCodec.encode(newDoc));
       await db.store.writeBatchInternal(batch);
 
       await db.ftsManager!.applyDelta(

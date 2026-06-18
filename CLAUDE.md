@@ -204,6 +204,7 @@ cd packages/kmdb && dart run benchmark/main.dart
 | 9c    | Hybrid search (Reciprocal Rank Fusion, `--mode` flag, unified SearchResult types)                | ✅ Complete |
 | 10    | Vault (content-addressable blob store, KVLT packaging, ref-counted GC, distributed sync)         | ✅ Complete |
 | 11    | Document versioning (`$ver:` history, keep-N / retention window, promote, CLI commands)           | ✅ Complete |
+| 12    | Encryption (AES-256-GCM value-level, Argon2id KDF, recovery code, vault blob encryption, CLI)    | ✅ Complete |
 
 All tests pass on `main`. E2E tests are skipped by default — run them via
 `make e2e_test` (`melos e2e-test`).
@@ -413,6 +414,7 @@ HTML lives in [site/](site/) and is generated via `make docs`. Key spec files:
 - `24_vault.md` — content-addressable blob store and KVLT packaging
 - `25_collection_schemas.md` — JSON Schema admission gate for collection writes
 - `30_icloud_adapter.md` — Apple iCloud (CloudKit) adapter: zone model, ETag strategy, CAS semantics, developer setup, Phase 4a probe results
+- `31_encryption.md` — AES-256-GCM encryption: algorithm, pipeline format, key management, bootstrap sequence, vault integration, platform notes, API reference
 - `99_glossary.md` — terminology reference
 
 Full-codebase reviews live in [docs/reviews/](docs/reviews/) — start with

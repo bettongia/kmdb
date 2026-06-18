@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import '../encoding/value_codec.dart';
+import '../encryption/encryption_provider.dart';
 import '../engine/kvstore/kv_store.dart';
 import 'vault_recovery.dart' show kVaultNamespace;
 
@@ -95,6 +96,10 @@ final class VaultRefCount {
   /// Reads the reference count for [sha256] from the `$vault` namespace of
   /// [kvStore].
   ///
+  /// [encryption] must match the provider used when the ref count was written.
+  /// When the database is encrypted, `$vault` refcounts are also encrypted
+  /// (Q4/Q6 decision: encrypt every `ValueCodec` call site uniformly).
+  ///
   /// Returns:
   /// - [RefCountAbsent] when no entry exists (`null` bytes).
   /// - [RefCountValue] when the entry decodes to a map with an integer
@@ -105,13 +110,17 @@ final class VaultRefCount {
   /// This method never throws for malformed stored bytes — a decode failure is
   /// reported as [RefCountUndecodable] so callers can apply the fail-safe
   /// (retain) policy uniformly.
-  static Future<RefCountReadResult> read(KvStore kvStore, String sha256) async {
+  static Future<RefCountReadResult> read(
+    KvStore kvStore,
+    String sha256, {
+    EncryptionProvider? encryption,
+  }) async {
     final bytes = await kvStore.get(kVaultNamespace, sha256);
     if (bytes == null) return const RefCountAbsent();
 
     final Map<String, dynamic> decoded;
     try {
-      decoded = ValueCodec.decode(bytes);
+      decoded = await ValueCodec.decode(bytes, encryption: encryption);
     } catch (_) {
       // Corrupt, truncated, or an encoding this build cannot read. We cannot
       // prove the object is unreferenced, so report undecodable and let the

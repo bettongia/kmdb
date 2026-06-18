@@ -12,7 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'dart:typed_data';
+
 import '../cache/cache_layer.dart';
+import '../encryption/encryption_blob.dart';
+import '../encryption/encryption_config.dart';
+import '../encryption/encryption_error.dart';
+import '../encryption/encryption_provider.dart';
+import '../encryption/key_derivation.dart';
 import '../engine/kvstore/kv_store.dart';
 import '../engine/kvstore/kv_store_impl.dart';
 import '../engine/platform/storage_adapter_interface.dart';
@@ -137,18 +144,25 @@ final class KmdbDatabase {
     required this._ftsIndexes,
     required this._vecIndexes,
     required this._embeddingModel,
+    EncryptionProvider? encryption,
     VaultStore? vaultStore,
     VaultGc? vaultGc,
     Map<String, VersionConfig>? versionConfigs,
   }) : _store = store,
+       _encryption = encryption,
        _vaultStore = vaultStore,
        // Build the interceptor only when both a VaultStore and VaultGc are
        // present; if either is absent, vault reference counting is disabled.
        _vaultRefInterceptor = (vaultStore != null && vaultGc != null)
-           ? VaultRefInterceptor(kvStore: store, gc: vaultGc)
+           ? VaultRefInterceptor(
+               kvStore: store,
+               gc: vaultGc,
+               encryption: encryption,
+             )
            : null,
        _versionAugmentor = VersionWriteAugmentor(
          configs: versionConfigs ?? const {},
+         encryption: encryption,
        ) {
     // ── Layer 1: validators (run before any I/O) ─────────────────────────────
     // Always register the reserved-key validator first so that user fields
@@ -188,6 +202,13 @@ final class KmdbDatabase {
   final SchemaManager _schemaManager;
   final FtsManager? _ftsManager;
   final VecManager? _vecManager;
+
+  /// The active encryption provider, or `null` for plaintext databases.
+  ///
+  /// Threaded into every [ValueCodec] call site so that all stored values
+  /// (documents, `$index:`, `$ver:`, `$vault`, `$cache`) are encrypted
+  /// uniformly. Exposed to [KmdbCollection] via the [encryption] getter.
+  final EncryptionProvider? _encryption;
   final List<FtsIndexDefinition> _ftsIndexes;
   final List<VecIndexDefinition> _vecIndexes;
   final EmbeddingModel? _embeddingModel;
@@ -284,6 +305,26 @@ final class KmdbDatabase {
     void Function(String collection, int storedVersion, int supportedVersion)?
     onSchemaVersionMismatch,
     Map<String, VersionConfig> versionConfigs = const {},
+
+    /// Encryption configuration for this database.
+    ///
+    /// - Pass `null` (default) for a plaintext database.
+    /// - Pass `EncryptionConfig(passphrase: '...')` to open an existing
+    ///   encrypted database with a passphrase.
+    /// - Pass `EncryptionConfig(recoveryCode: '...')` to open with a recovery
+    ///   code.
+    /// - Pass `(await EncryptionConfig.createResult(passphrase: '...')).config`
+    ///   to provision a new encrypted database.
+    ///
+    /// The bootstrap (reading `enc:blob`, deriving the KEK, unwrapping the DEK,
+    /// and constructing the [EncryptionProvider]) runs inside [open] immediately
+    /// after the LSM engine opens. The resulting provider is threaded into every
+    /// value-decoding collaborator.
+    ///
+    /// Throws [EncryptionError] with the appropriate code if the 4-state
+    /// invariant is violated (e.g. encrypted database opened without config,
+    /// or wrong passphrase).
+    EncryptionConfig? encryptionConfig,
   }) async {
     // Initialise the Zstd compression module before any I/O begins.
     //
@@ -318,12 +359,29 @@ final class KmdbDatabase {
       config: config,
       deviceId: deviceId,
     );
+
+    // ── Encryption bootstrap ─────────────────────────────────────────────────
+    // Runs immediately after KvStoreImpl.open() and before any value-decoding
+    // collaborator is constructed. Reads the enc:blob (plaintext CBOR) from
+    // $meta to determine the 4-state outcome. The resulting EncryptionProvider?
+    // is threaded into every collaborator below.
+    //
+    // The bootstrap never routes through ValueCodec (MetaStore.getRawByName uses
+    // raw CBOR), keeping the read path non-circular: the DEK is available before
+    // any encrypted value needs to be decoded.
+    final encryption = await _runEncryptionBootstrap(
+      store,
+      encryptionConfig,
+      path,
+    );
+
     final cache = CacheLayer(store: store);
 
     final indexManager = IndexManager(
       store: store,
       definitions: indexes,
       onIndexReady: onIndexReady,
+      encryption: encryption,
     );
 
     // Report any indexes whose build was interrupted by an unclean shutdown.
@@ -339,7 +397,7 @@ final class KmdbDatabase {
 
     // Initialise FTS manager if any FTS indexes are configured.
     final ftsManager = ftsIndexes.isNotEmpty
-        ? FtsManager(store, ftsIndexes)
+        ? FtsManager(store, ftsIndexes, encryption: encryption)
         : null;
 
     // Recover from any unclean shutdown during a delta sync (transitions
@@ -348,21 +406,40 @@ final class KmdbDatabase {
 
     // Initialise VecManager if any vector indexes are configured.
     final vecManager = (vecIndexes.isNotEmpty && embeddingModel != null)
-        ? VecManager(store, vecIndexes, embeddingModel)
+        ? VecManager(store, vecIndexes, embeddingModel, encryption: encryption)
         : null;
 
     // Recover from any unclean sync shutdown for vector indexes.
     await vecManager?.checkAndTransitionOnOpen();
 
+    // Wire the encryption provider into the VaultStore (if any) so that
+    // blobs written after this point are encrypted and reads are decrypted.
+    // This must happen before VaultRecovery, because recovery may read blobs
+    // to verify SHA-256 content addresses (decryption is required first).
+    if (vaultStore != null) {
+      vaultStore.encryption = encryption;
+    }
+
     // Run vault recovery if a VaultStore is supplied. This sweeps the staging
     // directory and removes any incomplete or orphaned hash directories left
     // by a prior crash (§24 crash table). Runs after LSM recovery because it
     // uses the already-opened KvStore to validate ref counts.
+    // Thread the encryption provider so that encrypted $vault ref count entries
+    // are decoded correctly during the recovery sweep and subsequent GC sweeps
+    // (Q6 decision: all ValueCodec call sites encrypt uniformly).
     VaultGc? vaultGc;
     if (vaultStore != null) {
-      final recovery = VaultRecovery(store: vaultStore, kvStore: store);
+      final recovery = VaultRecovery(
+        store: vaultStore,
+        kvStore: store,
+        encryption: encryption,
+      );
       await recovery.recover();
-      vaultGc = VaultGc(store: vaultStore, kvStore: store);
+      vaultGc = VaultGc(
+        store: vaultStore,
+        kvStore: store,
+        encryption: encryption,
+      );
     }
 
     // Initialise SchemaManager: register caller-supplied schemas (persisting
@@ -385,7 +462,7 @@ final class KmdbDatabase {
     // other devices). We use the registered user namespaces as the scan set.
     final knownNamespaces = await store.listNamespaces();
     for (final ns in knownNamespaces) {
-      final persisted = await configStore.get(ns);
+      final persisted = await configStore.get(ns, encryption: encryption);
       // Only include explicitly-set configs (skip defaults — they are implicit).
       if (persisted != VersionConfig.defaults) {
         mergedVersionConfigs[ns] = persisted;
@@ -393,7 +470,7 @@ final class KmdbDatabase {
     }
     // Caller-supplied configs take precedence and are persisted.
     for (final entry in versionConfigs.entries) {
-      await configStore.put(entry.key, entry.value);
+      await configStore.put(entry.key, entry.value, encryption: encryption);
       mergedVersionConfigs[entry.key] = entry.value;
     }
 
@@ -405,7 +482,7 @@ final class KmdbDatabase {
       // VersionRetentionPolicy for all non-disabled collections.
       final versionPolicies = <String, ReclamationPolicy>{};
       for (final ns in await store.listNamespaces()) {
-        final cfg = await configStore.get(ns);
+        final cfg = await configStore.get(ns, encryption: encryption);
         if (!cfg.isDisabled) {
           versionPolicies[versionNamespace(ns)] = VersionRetentionPolicy(cfg);
         }
@@ -416,7 +493,11 @@ final class KmdbDatabase {
     // Wire the version drop callback into the engine so compaction-time $ver:
     // trims can decrement vault ref counts (RQ5).
     final vaultRefInterceptor = (vaultStore != null && vaultGc != null)
-        ? VaultRefInterceptor(kvStore: store, gc: vaultGc)
+        ? VaultRefInterceptor(
+            kvStore: store,
+            gc: vaultGc,
+            encryption: encryption,
+          )
         : null;
     store.setVersionDropCallback(
       vaultRefInterceptor != null
@@ -427,7 +508,12 @@ final class KmdbDatabase {
               final batch = WriteBatch();
               for (final bytes in droppedValues) {
                 try {
-                  final entry = VersionEntry.decode(bytes);
+                  // VersionEntry.decode is async when encryption is active
+                  // because the inner ValueCodec.decode is async.
+                  final entry = await VersionEntry.decode(
+                    bytes,
+                    encryption: encryption,
+                  );
                   if (entry.encodedValue != null) {
                     await vaultRefInterceptor.decrementVersionRefs(
                       entry.encodedValue!,
@@ -457,10 +543,130 @@ final class KmdbDatabase {
       ftsIndexes: ftsIndexes,
       vecIndexes: vecIndexes,
       embeddingModel: embeddingModel,
+      encryption: encryption,
       vaultStore: vaultStore,
       vaultGc: vaultGc,
       versionConfigs: mergedVersionConfigs,
     );
+  }
+
+  // ── Encryption bootstrap ────────────────────────────────────────────────────
+
+  /// Runs the 4-state encryption bootstrap immediately after [KvStoreImpl.open].
+  ///
+  /// Reads the `enc:blob` from `$meta` (plaintext CBOR — non-circular) and
+  /// applies the following logic:
+  ///
+  /// | `enc:blob` present? | `encryptionConfig` supplied? | Outcome |
+  /// |:-------------------|:-----------------------------|:--------|
+  /// | No                 | No                           | Normal unencrypted open. Returns `null`. |
+  /// | Yes                | No                           | Throws [EncryptionError.databaseIsEncrypted]. |
+  /// | No                 | Yes (unlock)                 | Throws [EncryptionError.databaseIsNotEncrypted]. |
+  /// | No                 | Yes (create)                 | Provisions encryption: writes `enc:blob`, returns provider. |
+  /// | Yes                | Yes (unlock)                 | Unwraps DEK. Returns provider, or throws [EncryptionError.badCredentials]. |
+  ///
+  /// Returns the [EncryptionProvider] to thread into all collaborators, or
+  /// `null` for an unencrypted database.
+  static Future<EncryptionProvider?> _runEncryptionBootstrap(
+    KvStoreImpl store,
+    EncryptionConfig? encryptionConfig,
+    String dbId,
+  ) async {
+    final blob = await store.meta.getEncryptionBlob();
+    final blobPresent = blob != null;
+
+    if (!blobPresent && encryptionConfig == null) {
+      // State 1: Unencrypted database, no config — normal open.
+      return null;
+    }
+
+    if (blobPresent && encryptionConfig == null) {
+      // State 2: Encrypted database opened without credentials — fail loudly.
+      throw EncryptionError.databaseIsEncrypted();
+    }
+
+    if (!blobPresent && encryptionConfig!.isProvisioning) {
+      // State 4: Provision a new encrypted database.
+      // Check that there is no user data already (cannot retrofit encryption).
+      final userNamespaces = (await store.listNamespaces())
+          .where((ns) => !ns.startsWith(r'$'))
+          .toList();
+      if (userNamespaces.isNotEmpty) {
+        throw EncryptionError.cannotProvisionNonEmptyDatabase();
+      }
+
+      // Wrap the pre-generated DEK under both the passphrase KEK and the
+      // recovery KEK, then persist the enc:blob.
+      final dek = encryptionConfig.provisioningDek;
+      final salt = encryptionConfig.provisioningSalt;
+      final recoveryEntropy = encryptionConfig.provisioningRecoveryEntropy;
+
+      final wrappedDekPassphrase = await encryptionConfig.wrapDekWithPassphrase(
+        dek,
+        salt,
+      );
+      final wrappedDekRecovery = await encryptionConfig.wrapDekWithRecovery(
+        dek,
+        recoveryEntropy,
+      );
+
+      final newBlob = EncryptionBlob(
+        argon2Salt: salt,
+        wrappedDekPassphrase: wrappedDekPassphrase,
+        wrappedDekRecovery: wrappedDekRecovery,
+      );
+
+      // Write the blob DURABLY before any encrypted user value can be written.
+      // putEncryptionBlob uses putRawByName which routes through the WAL and
+      // will be fsynced when the first flush occurs. The open() call returns
+      // after this point, but the caller cannot write encrypted user values
+      // until they call put/collection operations, by which time the WAL will
+      // have been fsynced on the write path.
+      await store.meta.putEncryptionBlob(newBlob);
+
+      // Cache the DEK for this session so the user is not re-prompted on
+      // repeated opens (relevant when a FlutterSecureDekCache is injected).
+      await encryptionConfig.dekCache.store(dbId, dek);
+
+      return encryptionConfig.buildProvider(dek);
+    }
+
+    if (!blobPresent &&
+        encryptionConfig != null &&
+        !encryptionConfig.isProvisioning) {
+      // State 3: Unlock config supplied but no blob — database is not encrypted.
+      throw EncryptionError.databaseIsNotEncrypted();
+    }
+
+    // State 5: enc:blob present + unlock config supplied — unwrap the DEK.
+    // Try the DEK cache first to avoid re-running Argon2id (Argon2id at the
+    // default parameters takes ~200ms, so skipping it on repeated opens is
+    // a significant UX improvement when a FlutterSecureDekCache is injected).
+    final cachedDek = await encryptionConfig!.dekCache.read(dbId);
+    if (cachedDek != null) {
+      return encryptionConfig.buildProvider(cachedDek);
+    }
+
+    final existingBlob = blob!;
+
+    // Try passphrase unwrap (Argon2id + AES-GCM).
+    Uint8List? dek = await encryptionConfig.tryUnwrapWithPassphrase(
+      existingBlob.wrappedDekPassphrase,
+      existingBlob.argon2Salt,
+    );
+
+    // Try recovery-code unwrap if passphrase didn't work.
+    dek ??= await encryptionConfig.tryUnwrapWithRecovery(
+      existingBlob.wrappedDekRecovery,
+    );
+
+    if (dek == null) {
+      throw EncryptionError.badCredentials();
+    }
+
+    // Cache the DEK and return the provider.
+    await encryptionConfig.dekCache.store(dbId, dek);
+    return encryptionConfig.buildProvider(dek);
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
@@ -785,6 +991,108 @@ final class KmdbDatabase {
   /// committed. All augmentor writes land in the same atomic batch as the
   /// document write.
   List<WriteAugmentor> get augmentors => _augmentors;
+
+  /// The active encryption provider, or `null` for plaintext databases.
+  ///
+  /// [KmdbCollection] uses this to thread encryption through all
+  /// [ValueCodec] encode/decode calls. Never expose the raw DEK — only
+  /// the provider is accessible here.
+  EncryptionProvider? get encryption => _encryption;
+
+  // ── Passphrase management ───────────────────────────────────────────────────
+
+  /// Changes the passphrase for an encrypted database.
+  ///
+  /// This re-wraps the existing DEK under a new passphrase KEK, then
+  /// atomically replaces the `enc:blob` in `$meta` with the updated wrapped
+  /// DEK. The DEK itself is unchanged: all existing data remains valid.
+  ///
+  /// [currentConfig] must successfully unlock the existing `enc:blob`
+  /// (passphrase or recovery code). [newPassphrase] is the replacement
+  /// passphrase; a new Argon2id salt is generated for it.
+  ///
+  /// Throws [StateError] if the database is not encrypted.
+  /// Throws [EncryptionError.badCredentials] if [currentConfig] does not
+  /// unlock the existing blob.
+  ///
+  /// On success, the in-memory [DekCache] in [currentConfig] is updated with
+  /// the DEK (so it can be reused without re-running Argon2id).
+  ///
+  /// Example:
+  /// ```dart
+  /// await db.changePassphrase(
+  ///   currentConfig: EncryptionConfig(passphrase: 'old-passphrase'),
+  ///   newPassphrase: 'new-passphrase',
+  /// );
+  /// ```
+  Future<void> changePassphrase({
+    required EncryptionConfig currentConfig,
+    required String newPassphrase,
+  }) async {
+    final existingBlob = await _store.meta.getEncryptionBlob();
+    if (existingBlob == null) {
+      throw StateError(
+        'changePassphrase called on a plaintext (unencrypted) database.',
+      );
+    }
+
+    // Step 1: Unwrap the DEK using the current credentials.
+    Uint8List? dek = await currentConfig.tryUnwrapWithPassphrase(
+      existingBlob.wrappedDekPassphrase,
+      existingBlob.argon2Salt,
+    );
+    dek ??= await currentConfig.tryUnwrapWithRecovery(
+      existingBlob.wrappedDekRecovery,
+    );
+    if (dek == null) {
+      throw EncryptionError.badCredentials();
+    }
+
+    // Step 2: Generate a new Argon2id salt for the new passphrase.
+    // The recovery-KEK-wrapped DEK is re-wrapped under the existing recovery
+    // entropy (the recovery code stays the same to avoid requiring the user to
+    // record a new mnemonic). Only the passphrase is changed.
+    final newSalt = await KeyDerivation.generateSalt();
+    final newPassphraseConfig = EncryptionConfig(passphrase: newPassphrase);
+    final newWrappedDekPassphrase = await newPassphraseConfig
+        .wrapDekWithPassphrase(dek, newSalt);
+
+    // Re-wrap under the existing recovery KEK. We cannot derive the original
+    // recovery entropy from the blob alone, so we must re-wrap from the current
+    // blob's recovery-wrapped DEK using the current credentials.
+    // Strategy: unwrap the recovery-wrapped DEK and re-wrap it under the same
+    // recovery KEK. Since we already have the DEK, we just re-wrap it with a
+    // freshly-derived recovery KEK from the same entropy.
+    // The recovery blob is unchanged — we re-wrap the DEK under the same
+    // recovery KEK. The existing wrappedDekRecovery has the recovery entropy
+    // encoded in it, but we don't need to know the entropy directly: we just
+    // keep the existing wrappedDekRecovery as-is (the recovery code hasn't
+    // changed, so the same recovery KEK will still unwrap it).
+    //
+    // The updated blob:
+    // - New Argon2id salt (invalidates the old passphrase KEK derivation).
+    // - New wrappedDekPassphrase (re-wrapped under the new passphrase + new salt).
+    // - Same wrappedDekRecovery (recovery code and entropy unchanged).
+    final updatedBlob = EncryptionBlob(
+      argon2Salt: newSalt,
+      wrappedDekPassphrase: newWrappedDekPassphrase,
+      wrappedDekRecovery: existingBlob.wrappedDekRecovery,
+      argon2Memory: existingBlob.argon2Memory,
+      argon2Iterations: existingBlob.argon2Iterations,
+      argon2Parallelism: existingBlob.argon2Parallelism,
+    );
+
+    // Step 3: Write the updated blob durably.
+    await _store.meta.putEncryptionBlob(updatedBlob);
+
+    // Clear the old cached DEK (it was valid under the old passphrase KEK but
+    // the dbId key is unchanged — a FlutterSecureDekCache keyed by dbId would
+    // still serve the DEK, but we overwrite it to ensure freshness).
+    final info = await _store.storeInfo();
+    await currentConfig.dekCache.clear(info.dbDir);
+    // Cache the DEK under the new config so future opens don't re-prompt.
+    await newPassphraseConfig.dekCache.store(info.dbDir, dek);
+  }
 
   /// The cache-aware read path.
   CacheLayer get cache => _cache;

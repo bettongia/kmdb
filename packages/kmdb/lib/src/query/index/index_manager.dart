@@ -19,6 +19,7 @@ import 'package:cbor/cbor.dart';
 import '../../engine/kvstore/kv_store.dart';
 import '../../engine/kvstore/kv_store_impl.dart';
 import '../../encoding/value_codec.dart';
+import '../../encryption/encryption_provider.dart';
 import '../write_augmentor.dart';
 import 'index_definition.dart';
 import 'index_reader.dart';
@@ -104,14 +105,23 @@ final class IndexState {
 /// Implements [WriteAugmentor] so it integrates cleanly with the formal write
 /// pipeline in [KmdbCollection] without requiring special-casing.
 final class IndexManager implements WriteAugmentor {
+  /// Creates an [IndexManager].
+  ///
+  /// [encryption] is the optional encryption provider. When non-null, source
+  /// document values are decrypted before indexing (they were written through
+  /// the same encrypted [ValueCodec] path).
   IndexManager({
     required this._store,
     required List<IndexDefinition> definitions,
     this.onIndexReady,
+    this._encryption,
   }) : _definitions = List.unmodifiable(definitions);
 
   final KvStoreImpl _store;
   final List<IndexDefinition> _definitions;
+
+  /// Optional encryption provider threaded through all [ValueCodec] calls.
+  final EncryptionProvider? _encryption;
 
   /// Called when an index transitions from `building` to `current`.
   ///
@@ -411,7 +421,7 @@ final class IndexManager implements WriteAugmentor {
     await for (final entry in _store.scan(definition.namespace)) {
       Map<String, dynamic> doc;
       try {
-        doc = ValueCodec.decode(entry.value);
+        doc = await ValueCodec.decode(entry.value, encryption: _encryption);
       } catch (_) {
         continue; // skip corrupt values
       }

@@ -87,7 +87,8 @@ final class DumpCommand extends CliCommand {
       await for (final entry in ctx.store.scan(coll)) {
         // Inject _id from the entry key — documents are stored without _id in
         // the value bytes; the key is the canonical identity.
-        final doc = ValueCodec.decode(entry.value)..['_id'] = entry.key;
+        final doc = await ValueCodec.decode(entry.value)
+          ..['_id'] = entry.key;
         ctx.out.writeln(enc.convert(doc));
       }
     }
@@ -132,7 +133,8 @@ final class DumpCommand extends CliCommand {
       final collDir = io.Directory('$vaultDirPath/$coll');
 
       await for (final entry in ctx.store.scan(coll)) {
-        final doc = ValueCodec.decode(entry.value)..['_id'] = entry.key;
+        final doc = await ValueCodec.decode(entry.value)
+          ..['_id'] = entry.key;
         final docId = entry.key;
 
         ctx.out.writeln(enc.convert(doc));

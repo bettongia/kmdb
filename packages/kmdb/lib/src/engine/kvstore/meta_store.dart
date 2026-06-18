@@ -16,6 +16,7 @@ import 'dart:typed_data';
 
 import 'package:cbor/cbor.dart';
 
+import '../../encryption/encryption_blob.dart';
 import '../util/hlc.dart';
 import '../util/xxhash.dart';
 import 'kv_store.dart';
@@ -367,6 +368,36 @@ final class MetaStore {
   /// deleted index.
   Future<void> deleteRawByName(String name) =>
       _engine.delete(kNamespace, _nameToKey(name));
+
+  // ── Encryption blob ─────────────────────────────────────────────────────────
+
+  /// The symbolic name under which the encryption metadata blob is stored.
+  static const String kEncryptionBlobName = 'enc:blob';
+
+  /// Reads the [EncryptionBlob] from `$meta`, or `null` if it has not been
+  /// written (i.e., the database is not encrypted).
+  ///
+  /// The blob is stored as raw CBOR — it is **not** routed through
+  /// [ValueCodec] — so that the bootstrap can read it before the DEK is
+  /// available (non-circular by design).
+  ///
+  /// Throws [FormatException] if the stored bytes cannot be decoded.
+  Future<EncryptionBlob?> getEncryptionBlob() async {
+    final bytes = await getRawByName(kEncryptionBlobName);
+    if (bytes == null) return null;
+    return EncryptionBlob.decode(bytes);
+  }
+
+  /// Writes [blob] to `$meta` under `enc:blob`.
+  ///
+  /// The blob is encoded as raw CBOR and stored via [putRawByName] — it does
+  /// NOT pass through [ValueCodec] — keeping the bootstrap non-circular.
+  ///
+  /// This must be called (and fully flushed) **before** any encrypted user value
+  /// is written, so that crash recovery can always find the blob when the engine
+  /// is reopened.
+  Future<void> putEncryptionBlob(EncryptionBlob blob) =>
+      putRawByName(kEncryptionBlobName, blob.encode());
 
   // ── Key encoding ───────────────────────────────────────────────────────────
 

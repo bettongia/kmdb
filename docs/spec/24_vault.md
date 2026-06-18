@@ -505,3 +505,26 @@ kmdb {db} vault get kmdb-vault://sha256/dd92c2600e28b5f44e9c7de81a629e1dd4cfd2ef
 Retrieves the vault object (triggering on-demand hydration if only a stub is
 present) and writes the binary content to stdout. The global `--output`
 parameter saves the result to a file instead.
+
+## Encryption
+
+When the database is opened with an `EncryptionConfig` (see §31), vault blobs are
+stored encrypted on disk. Encryption is applied by `VaultStore` at ingest time:
+
+1. The SHA-256 content address and CRC32C checksum are computed over the **plaintext** bytes — preserving the deduplication guarantee (the same plaintext always maps to the same hash, regardless of encryption).
+2. The blob is encrypted with AES-256-GCM using the database DEK:
+   ```
+   stored_bytes = nonce(12B) || AES-256-GCM(dek, plaintext) || tag(16B)
+   ```
+3. The `manifest.json` gains `"encrypted": true`.
+
+On read, `VaultStore.getBytes()` inspects the `encrypted` field. If `true`, it
+decrypts the raw bytes before returning them. If `encrypted: true` but no
+encryption provider is available, a `StateError` is thrown.
+
+### KVLT and Encryption
+
+KVLT archive export (`vault export`) decrypts blobs to plaintext before packing
+them into the archive. KVLT import re-encrypts blobs if the destination database
+has encryption active. This ensures KVLT archives are always portable plaintext
+containers and not silently tied to a specific DEK.

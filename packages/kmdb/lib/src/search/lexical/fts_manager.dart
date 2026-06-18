@@ -26,6 +26,7 @@ import 'package:betto_lexical/betto_lexical.dart'
 import 'package:meta/meta.dart' show visibleForTesting;
 
 import '../../encoding/value_codec.dart';
+import '../../encryption/encryption_provider.dart';
 import '../../engine/kvstore/kv_store.dart';
 import '../../engine/kvstore/kv_store_impl.dart';
 import '../../query/write_augmentor.dart';
@@ -97,14 +98,24 @@ final class FtsManager implements WriteAugmentor {
   /// Creates an [FtsManager].
   ///
   /// [store] is the underlying [KvStoreImpl] used for all index reads and
-  /// writes. [defs] is the list of FTS index definitions configured at
-  /// [KmdbDatabase.open] time.
-  FtsManager(KvStoreImpl store, List<FtsIndexDefinition> defs)
-    : _store = store,
-      _defs = List.unmodifiable(defs);
+  /// Creates an [FtsManager].
+  ///
+  /// [store] is the underlying [KvStoreImpl]. [defs] is the list of FTS index
+  /// definitions. [encryption] is the optional encryption provider; when
+  /// non-null, source document values are decrypted before indexing (they were
+  /// written through the same encrypted [ValueCodec] path).
+  FtsManager(
+    KvStoreImpl store,
+    List<FtsIndexDefinition> defs, {
+    this._encryption,
+  }) : _store = store,
+       _defs = List.unmodifiable(defs);
 
   final KvStoreImpl _store;
   final List<FtsIndexDefinition> _defs;
+
+  /// Optional encryption provider threaded through all [ValueCodec] calls.
+  final EncryptionProvider? _encryption;
 
   /// In-memory cache of index statuses, keyed by `'{namespace}:{field}'`.
   ///
@@ -415,7 +426,7 @@ final class FtsManager implements WriteAugmentor {
     await for (final entry in _store.scan(ns)) {
       Map<String, dynamic> doc;
       try {
-        doc = ValueCodec.decode(entry.value);
+        doc = await ValueCodec.decode(entry.value, encryption: _encryption);
       } catch (_) {
         continue;
       }
@@ -922,7 +933,7 @@ final class FtsManager implements WriteAugmentor {
         if (bytes == null) return; // deleted again before delta was applied
         Map<String, dynamic> doc;
         try {
-          doc = ValueCodec.decode(bytes);
+          doc = await ValueCodec.decode(bytes, encryption: _encryption);
         } catch (_) {
           return;
         }
@@ -933,7 +944,7 @@ final class FtsManager implements WriteAugmentor {
         if (bytes == null) return;
         Map<String, dynamic> doc;
         try {
-          doc = ValueCodec.decode(bytes);
+          doc = await ValueCodec.decode(bytes, encryption: _encryption);
         } catch (_) {
           return;
         }
