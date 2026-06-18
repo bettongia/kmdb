@@ -165,7 +165,7 @@ final class SearchCommand extends CliCommand {
   /// Note: the CLI search command uses [FtsManager] directly and routes to
   /// hybrid via `KmdbCollection.search()` for the output mode label; the
   /// lexical leg is always used for the actual results since `kmdb_cli` does
-  /// not depend on `kmdb_inferencing`.
+  /// not depend on `betto_inferencing`.
   Future<bool> _search(
     CommandContext ctx,
     List<String> args,
@@ -271,7 +271,7 @@ final class SearchCommand extends CliCommand {
     }
 
     // Determine whether hybrid mode would be active for this collection.
-    // The CLI cannot load the kmdb_inferencing package (ONNX Runtime), so it
+    // The CLI cannot load the betto_inferencing package (ONNX Runtime), so it
     // uses FtsManager directly for results. However, when both an FTS index
     // and an embedding model are configured, the output indicates that a hybrid
     // search would be active when accessed via the full database API.

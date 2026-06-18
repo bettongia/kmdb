@@ -24,7 +24,7 @@ implementation. Three implementations are provided:
 | `RegExpTokenizer`   | Pure Dart, Unicode `\p{L}\p{N}`                   | No (fallback)  |
 
 The default tokenizer is platform-selected: `FtsManager` uses
-`createDefaultTokenizer()` (exported from `kmdb_lexical`) which resolves to
+`createDefaultTokenizer()` (exported from `betto_lexical`) which resolves to
 `IcuTokenizer` on native and `BrowserTokenizer` on web. `IcuTokenizer`
 delegates to the system ICU library (provided via the `betto_icu` package) and
 conforms to UAX #29, handling non-Latin scripts (CJK, Thai, Arabic, etc.)

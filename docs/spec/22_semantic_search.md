@@ -30,7 +30,7 @@ are short-circuited by a present-file SHA check to avoid redundant downloads).
 
 ### Why a build hook, not a runtime download?
 
-The old `ort_library.dart` mechanism in `kmdb_inferencing` downloaded the ORT
+The old `ort_library.dart` mechanism in `betto_inferencing` downloaded the ORT
 dylib at first runtime:
 - It stalled on first use for ~80 MB.
 - It had no checksum verification, allowing silent corruption.
@@ -62,7 +62,7 @@ dependency_overrides:
 ```
 
 ```yaml
-# packages/kmdb_inferencing/pubspec.yaml
+# packages/betto_inferencing/pubspec.yaml (standalone repo — github.com/bettongia/inferencing)
 dependencies:
   betto_onnxrt:
 ```
@@ -85,7 +85,7 @@ consumer Flutter app that targets iOS additionally adds `betto_onnxrt_ios`
 
 ### Model Catalog
 
-`ModelCatalog` in `kmdb_inferencing` is the concrete `AllowlistProvider`
+`ModelCatalog` in `betto_inferencing` is the concrete `AllowlistProvider`
 implementation (from `betto_onnxrt`) that enumerates supported models. Each
 entry is a `ModelSpec` (from `betto_onnxrt`) with a generic shape:
 
@@ -117,7 +117,7 @@ The `bge_small.onnx` binary (~133 MB) is **not bundled** in the repository.
 It is downloaded on first use via `ModelDownloader` from `betto_onnxrt`.
 Supporting tokenizer assets (`vocab.txt`, `tokenizer_config.json`,
 `tokenizer.json`, `special_tokens_map.json`, `config.json`) are included in
-`packages/kmdb_inferencing/assets/models/bge-small-en/` and are loaded
+`assets/models/bge-small-en/` in the `betto_inferencing` package and are loaded
 directly by `BertTokenizer` without any network access.
 
 `OnnxEmbeddingModel.load()` requires either `modelPath` or `cacheDir`.
@@ -130,7 +130,7 @@ final model = await OnnxEmbeddingModel.load(cacheDir: '/path/to/cache');
 ```
 
 `ModelDownloader` (provided by `betto_onnxrt`, re-exported from
-`kmdb_inferencing`) downloads and verifies model assets on first use. The
+`betto_inferencing`) downloads and verifies model assets on first use. The
 `ModelCatalog` instance is passed as the `AllowlistProvider` to gate downloads
 to catalog-registered models:
 

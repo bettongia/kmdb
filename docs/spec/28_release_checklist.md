@@ -416,7 +416,7 @@ contention test that exercises the lease protocol.
 
 ### RC-14 — Model download SHA-256 verification and atomic rename
 
-- **Area:** embedding model download (`kmdb_inferencing`)
+- **Area:** embedding model download (`betto_inferencing`)
 - **Validates:** that `ModelDownloader.ensure()` correctly:
   1. Downloads the ONNX and vocabulary files to a `.part` temporary path.
   2. Verifies each file's SHA-256 against `ModelSpec.onnxSha256` /
@@ -450,8 +450,8 @@ contention test that exercises the lease protocol.
 - **Expected result:** all four scenarios complete without errors; no corrupt
   data is used; the cache is left in a consistent state after each scenario.
 - **Related:** `docs/plans/plan_configurable_embedding_model.md` (Phase 3),
-  `packages/kmdb_inferencing/lib/src/model_downloader.dart`,
-  `packages/kmdb_inferencing/lib/src/model_spec.dart`.
+  `betto_inferencing/lib/src/model_downloader.dart` (standalone repo),
+  `betto_inferencing/lib/src/model_spec.dart` (standalone repo).
 
 ---
 
@@ -484,7 +484,7 @@ contention test that exercises the lease protocol.
 - **Applies when:** `betto_onnxrt` is introduced; `VERSION_ONNX` is bumped;
   `hook/build.dart` download/extract/SHA logic changes; `runtime.dart`
   `_openLibrary()` changes; before any release of `betto_onnxrt` or
-  `kmdb_inferencing` that depends on it.
+  `betto_inferencing` that depends on it.
 - **Prerequisites:**
   - macOS, Linux, or Windows native build environment.
   - Network access to `github.com/microsoft/onnxruntime/releases`.

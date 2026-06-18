@@ -17,7 +17,7 @@ import '../engine/kvstore/kv_store.dart';
 import '../engine/kvstore/kv_store_impl.dart';
 import '../engine/platform/storage_adapter_interface.dart';
 import '../engine/platform/storage_adapter_native.dart';
-import '../search/embedding_model.dart';
+import 'package:betto_inferencing/betto_inferencing.dart';
 import '../search/fts_index_definition.dart';
 import '../search/lexical/fts_manager.dart';
 import '../search/semantic/vec_manager.dart';

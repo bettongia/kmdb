@@ -577,87 +577,94 @@ are published and resolvable from pub.dev._
 
 #### Phase B1 — Workspace + dependency_overrides
 
-- [ ] In the workspace root `pubspec.yaml`:
+- [x] In the workspace root `pubspec.yaml`:
   - **Remove** `- packages/kmdb_lexical` and `- packages/kmdb_inferencing` from
     the `workspace:` list (these packages have left the workspace).
   - **Add** to `dependency_overrides:`:
     `betto_lexical: ^0.1.0-dev.1` and `betto_inferencing: ^0.1.0-dev.1`
     (alongside the existing `betto_onnxrt: ^0.1.0-dev.1` etc.).
-- [ ] Delete the now-unused `packages/kmdb_lexical/` and
+- [x] Delete the now-unused `packages/kmdb_lexical/` and
   `packages/kmdb_inferencing/` directories from the monorepo.
 
 #### Phase B2 — `kmdb` consumer rewiring
 
-- [ ] `packages/kmdb/pubspec.yaml`:
+- [x] `packages/kmdb/pubspec.yaml`:
   - Replace the bare `kmdb_lexical:` entry with a bare `betto_lexical:` entry.
   - Add a bare `betto_inferencing:` entry under `dependencies:`.
-- [ ] `packages/kmdb/lib/src/search/lexical/fts_manager.dart`:
+- [x] `packages/kmdb/lib/src/search/lexical/fts_manager.dart`:
   `import 'package:kmdb_lexical/lexical.dart'` →
   `import 'package:betto_lexical/betto_lexical.dart'`.
-- [ ] `packages/kmdb/lib/src/search/lexical/pipeline.dart`: same substitution.
-- [ ] `packages/kmdb/test/search/lexical/pipeline_test.dart`: same substitution.
-- [ ] Delete `packages/kmdb/lib/src/search/embedding_model.dart` (the interface
+- [x] `packages/kmdb/lib/src/search/lexical/pipeline.dart`: same substitution.
+- [x] `packages/kmdb/test/search/lexical/pipeline_test.dart`: same substitution.
+- [x] Delete `packages/kmdb/lib/src/search/embedding_model.dart` (the interface
   now lives in `betto_inferencing`).
-- [ ] `packages/kmdb/lib/kmdb.dart`: change the `EmbeddingModel` export:
+- [x] `packages/kmdb/lib/kmdb.dart`: change the `EmbeddingModel` export:
   - Old: `export 'src/search/embedding_model.dart' show EmbeddingModel;`
   - New: `export 'package:betto_inferencing/betto_inferencing.dart' show EmbeddingModel;`
-- [ ] `packages/kmdb/lib/src/query/kmdb_database.dart` (line ~20): change
+- [x] `packages/kmdb/lib/src/query/kmdb_database.dart` (line ~20): change
   `import '../search/embedding_model.dart';` →
-  `import 'package:betto_inferencing/betto_inferencing.dart';` (R6). (Its doc
-  comments referencing `OnnxEmbeddingModel.load` / `ModelCatalog.lookup` become
-  valid doc refs once `kmdb` depends on `betto_inferencing` — no change needed.)
-- [ ] Grep `packages/kmdb/lib/` for any remaining direct imports of
+  `import 'package:betto_inferencing/betto_inferencing.dart';` (R6). Also
+  updated `vec_manager.dart` import similarly.
+- [x] Grep `packages/kmdb/lib/` for any remaining direct imports of
   `src/search/embedding_model.dart` and repoint them to
-  `package:betto_inferencing/betto_inferencing.dart`.
+  `package:betto_inferencing/betto_inferencing.dart`. Also updated comment
+  references in `vec_manager.dart` and `search_command.dart`.
 
 #### Phase B3 — Verify Stage B
 
-- [ ] Run `dart pub get` from the workspace root.
-- [ ] Run `cd packages/kmdb && dart test` — all tests pass.
-- [ ] Confirm the API-stability assertion from the Testing strategy: `dart
-  analyze` resolves the `EmbeddingModel` re-export from `package:kmdb/kmdb.dart`.
+- [x] Run `dart pub get` from the workspace root — resolved `betto_lexical
+  0.1.0-dev.1` and `betto_inferencing 0.1.0-dev.1` from pub.dev.
+- [x] Run `cd packages/kmdb && dart test` — 1722 tests passed, 9 skipped (E2E).
+- [x] Confirm the API-stability assertion from the Testing strategy: `dart
+  analyze` resolves the `EmbeddingModel` re-export from `package:kmdb/kmdb.dart`
+  with no issues found.
 
 ---
 
 ### Phase 3: Spec, docs, and roadmap updates
 
-- [ ] **`CLAUDE.md`** — Repository Layout table:
-  - `kmdb_lexical/` row → `betto_lexical/` (external Bettongia package, published)
-  - `kmdb_inferencing/` row → `betto_inferencing/` (external Bettongia package, published)
-  - External Bettongia packages list: add `betto_lexical` and `betto_inferencing`
-  - Architecture §Text Search: update package name references
-  - `betto_icu` row: "consumed by `kmdb_lexical`" → "consumed by `betto_lexical`"
+- [x] **`CLAUDE.md`** — Repository Layout table: removed `kmdb_lexical/` and
+  `kmdb_inferencing/` workspace rows; added `betto_lexical` and `betto_inferencing`
+  to External Bettongia packages list; updated `betto_icu` row to reference
+  `betto_lexical`.
 
-- [ ] **`docs/spec/19_platform.md`**:
-  - Package layout listing: `kmdb_lexical/` and `kmdb_inferencing/` rows
-  - Platform matrix rows: lexical and semantic search (`kmdb_inferencing` ref)
-  - Third-party dependency table: "consumed by `kmdb_lexical`" / "consumed by `kmdb_inferencing`"
+- [x] **`docs/spec/19_platform.md`**: removed `kmdb_lexical/` and
+  `kmdb_inferencing/` from package layout; updated platform matrix row; updated
+  third-party dependency table to add `betto_lexical` and `betto_inferencing`
+  rows and update `betto_icu`/`betto_onnxrt` consumer references.
 
-- [ ] **`docs/spec/21_lexical_search.md`**: update `createDefaultTokenizer()` ref from `kmdb_lexical`.
+- [x] **`docs/spec/21_lexical_search.md`**: updated `createDefaultTokenizer()` ref
+  from `kmdb_lexical` → `betto_lexical`.
 
-- [ ] **`docs/spec/22_semantic_search.md`**: update all `kmdb_inferencing` refs, pubspec
-  snippet, `ModelCatalog` description, path references.
+- [x] **`docs/spec/22_semantic_search.md`**: updated all `kmdb_inferencing` refs,
+  pubspec snippet comment, `ModelCatalog` description, path references,
+  `ModelDownloader` re-export attribution.
 
-- [ ] **`docs/spec/28_release_checklist.md`**: update the embedding model download entries
-  (lines ~419, 453–454, 487) that reference `kmdb_inferencing` paths.
+- [x] **`docs/spec/28_release_checklist.md`**: updated the embedding model download
+  entries (lines ~419, 453–454, 487) that referenced `kmdb_inferencing` paths.
 
-- [ ] **`docs/roadmap/0_00.md`**: add `[ ] betto_lexical` and `[ ] betto_inferencing` to
-  the "Bettongia packages" checklist under "Bettongia packages (not in this repo)".
+- [x] **`docs/roadmap/0_00.md`**: added `[x] Lexical (betto_lexical)` and
+  `[x] Inferencing (betto_inferencing)` to the "Bettongia packages" checklist.
 
-- [ ] **`docs/roadmap/0_05.md`**: update minor refs to `kmdb_inferencing`.
+- [x] **`docs/roadmap/0_05.md`**: updated `kmdb_inferencing` refs to
+  `betto_inferencing`.
 
-- [ ] **`docs/roadmap/0_06.md`**: update vault search context refs to `kmdb_inferencing`
-  → `betto_inferencing`.
+- [x] **`docs/roadmap/0_06.md`**: updated vault search context refs from
+  `kmdb_inferencing` → `betto_inferencing`.
 
-- [ ] **`docs/api.md`**: update the two API link entries (`kmdb_inferencing`, `kmdb_lexical`).
+- [x] **`docs/api.md`**: updated the two API link entries to point to pub.dev
+  documentation for `betto_inferencing` and `betto_lexical`.
 
-- [ ] **`docs/proposals/vault_search.md`** (active proposal): full-file grep and
-  replace `kmdb_inferencing` → `betto_inferencing`, `kmdb_lexical` →
-  `betto_lexical`, `kmdb_lang_id` → `betto_lang_id` (see "Vault search proposal
-  impact" for the verified occurrences; do not stop at the §10.2/§10.5 table —
-  there are refs at §2.3 and elsewhere). Add a one-line note that
-  `betto_lang_id` follows the `betto_*` convention for reusable Bettongia
-  utilities.
+- [x] **`docs/proposals/vault_search.md`** (active proposal): full-file grep and
+  replaced `kmdb_inferencing` → `betto_inferencing`, `kmdb_lexical` →
+  `betto_lexical`, `kmdb_lang_id` → `betto_lang_id` throughout (§2.3, §10.2
+  package definition + code block, §10.3/§10.4, §10.5 table); added one-line
+  note that `betto_lang_id` follows the `betto_*` convention for reusable
+  Bettongia utilities.
+
+- [x] Also updated: `analysis_options.yaml` (removed stale `kmdb_lexical`
+  analyzer exclusion path); comment refs in `search_command.dart` (lines 168, 274)
+  and `vec_manager.dart`.
 
 > **Frozen — not updated (Q2):** `docs/proposals/implemented/betto_icu.md`,
 > `docs/proposals/implemented/betto_onnxrt.md`, and
@@ -669,7 +676,7 @@ are published and resolvable from pub.dev._
 ### Phase 4: Pre-commit gate
 - [ ] Run `make pre_commit` — format_check, analyze, license_check, and scoped
   `kmdb` tests must all pass.
-- [ ] (The `betto_lexical` / `betto_inferencing` suites are exercised in their
+- [x] (The `betto_lexical` / `betto_inferencing` suites are exercised in their
   own repos' CI during Stage A — they are no longer in this workspace, so
   `make test` here covers only the monorepo packages.)
 
