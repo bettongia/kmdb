@@ -122,6 +122,21 @@ empirical probe against the real CloudKit service (see the implementation plan
 - `maxOpsPerMinute` is a conservative default; real CloudKit rate limits depend
   on the container subscription type
 
+### Running the probes
+
+The `example/` directory contains a macOS Flutter app that runs all four probes
+against a real CloudKit container and streams their log output to the screen:
+
+| Button | What it measures |
+|---|---|
+| **Basic sync** | Upload → list → download → getEtag → delete; checks read-your-writes consistency of `list`. |
+| **CAS probe** | `compareAndSwap` in four scenarios: create-if-absent (absent/present), update with correct/stale ETag. |
+| **Large files** | Upload + download at 1 MB, 10 MB, 50 MB; records timing and verifies byte-for-byte integrity. |
+| **List propagation delay** | Polls `list` after upload to measure how long a new record takes to appear in a CKQuery on the same device. |
+
+See [`example/README.md`](example/README.md) for Xcode and CloudKit Dashboard
+setup instructions before running.
+
 ---
 
 ## License

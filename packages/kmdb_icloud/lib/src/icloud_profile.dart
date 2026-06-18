@@ -30,7 +30,7 @@ import 'package:kmdb/kmdb_test_cloud_support.dart';
 ///   `CKError.serverRecordChanged` when a record with the same ID already
 ///   exists. Create-if-absent is therefore not atomic, and
 ///   [ICloudAdapter.providesAtomicCas] is permanently `false`.
-///   [ConsolidationCoordinator] skips consolidation for this adapter.
+///   `ConsolidationCoordinator` skips consolidation for this adapter.
 ///
 ///   Conditional **update** (`savePolicy: .ifServerRecordUnchanged`) **is**
 ///   atomic: exactly one concurrent updater wins when both hold the same
@@ -49,7 +49,7 @@ import 'package:kmdb/kmdb_test_cloud_support.dart';
 ///   The value below is a conservative safe default. Rate-limit errors are
 ///   handled defensively via `CKErrorRetryAfterKey` backoff in the Swift plugin.
 ///
-/// See also: [kGoogleDriveProfile] in `package:kmdb_google_drive` for the
+/// See also: `kGoogleDriveProfile` in `package:kmdb_google_drive` for the
 /// analogous constant for the Google Drive adapter.
 const kICloudProfile = CloudProfile(
   // Phase 4a: same-device CKQuery propagation measured at ~5–7 s on fast

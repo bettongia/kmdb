@@ -61,7 +61,7 @@ final defaultStopwords = getStopWords(Locale.fromSubtags(languageCode: 'en'));
 /// | `$fts:corpus:{ns}:{field}` | fixed 32-char hex sentinel | CBOR map — `{n, totalTokens}` |
 ///
 /// The hex term encoding uses `utf8.encode(term).map(hex).join()` — the same
-/// approach as [IndexWriter] for field values.
+/// approach as `IndexWriter` for field values.
 ///
 /// ## Index lifecycle
 ///
@@ -980,7 +980,7 @@ final class FtsManager implements WriteAugmentor {
   /// Per-term namespace: `$fts:{ns}:{field}:{hexTerm}`.
   ///
   /// The term is UTF-8 encoded and hex-stringified (same approach as
-  /// [IndexWriter] for field values). Within this namespace, the key is the
+  /// `IndexWriter` for field values). Within this namespace, the key is the
   /// 32-character UUIDv7 docId and the value is a CBOR-encoded term frequency.
   ///
   /// Using a separate namespace per term keeps all keys as 32-char hex UUIDs,

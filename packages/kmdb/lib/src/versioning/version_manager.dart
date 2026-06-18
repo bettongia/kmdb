@@ -24,7 +24,7 @@ import 'version_entry.dart';
 ///
 /// Version history for a document in collection `tasks` lives under the
 /// namespace `$ver:tasks`. The `$ver:` prefix is registered in the
-/// [ReclamationPolicyRegistry] so that [VersionRetentionPolicy] (with its
+/// `ReclamationPolicyRegistry` so that `VersionRetentionPolicy` (with its
 /// `filterGroup` method) is applied during compaction.
 const String kVersionNamespacePrefix = r'$ver:';
 

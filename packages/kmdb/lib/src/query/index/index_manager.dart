@@ -125,7 +125,7 @@ final class IndexManager implements WriteAugmentor {
   // ── Public API ──────────────────────────────────────────────────────────────
 
   /// Returns the definitions for [namespace] whose status is [current] or
-  /// [building] (i.e. write interception is active for them).
+  /// [IndexStatus.building] (i.e. write interception is active for them).
   Future<List<IndexDefinition>> activeDefinitionsFor(String namespace) async {
     final result = <IndexDefinition>[];
     for (final def in _definitions) {
@@ -230,7 +230,7 @@ final class IndexManager implements WriteAugmentor {
   /// [newDoc] is the new version (null if deleting).
   ///
   /// For indexes in `undefined` state, a lazy build is triggered on the first
-  /// write to the namespace so that [requireFreshIndex] queries issued shortly
+  /// write to the namespace so that [KmdbQuery.requireFreshIndex] queries issued shortly
   /// after can find the index current without waiting for the first explicit
   /// query to activate it.
   @override
@@ -319,7 +319,7 @@ final class IndexManager implements WriteAugmentor {
 
   /// Checks all declared indexes for interrupted builds on database open.
   ///
-  /// Returns [IndexRebuildEvents] for any index found in the `building` state,
+  /// Returns interrupted-build events for any index found in the `building` state,
   /// which indicates a build was interrupted by an unclean shutdown (spec §16
   /// "Interrupted Build Recovery").
   Future<List<({String namespace, String path})>>

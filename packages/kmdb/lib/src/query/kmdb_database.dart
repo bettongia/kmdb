@@ -801,11 +801,11 @@ final class KmdbDatabase {
   /// Registers [schema] for [collection] and persists it to `$meta`.
   ///
   /// This is a convenience wrapper around [SchemaManager.register] that
-  /// supplies the internal [MetaStore] automatically. After a successful call,
+  /// supplies the internal `MetaStore` automatically. After a successful call,
   /// every subsequent write to [collection] is validated against [schema].
   ///
   /// Use this method from outside the `kmdb` package (e.g. CLI commands) to
-  /// avoid direct access to the package-private [MetaStore].
+  /// avoid direct access to the package-private `MetaStore`.
   ///
   /// Example:
   /// ```dart
@@ -821,12 +821,12 @@ final class KmdbDatabase {
   /// cache.
   ///
   /// This is a convenience wrapper around [SchemaManager.deregister] that
-  /// supplies the internal [MetaStore] automatically. After a successful call,
+  /// supplies the internal `MetaStore` automatically. After a successful call,
   /// writes to [collection] are no longer validated. Deregistering an unknown
   /// collection is a no-op.
   ///
   /// Use this method from outside the `kmdb` package (e.g. CLI commands) to
-  /// avoid direct access to the package-private [MetaStore].
+  /// avoid direct access to the package-private `MetaStore`.
   ///
   /// Example:
   /// ```dart

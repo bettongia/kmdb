@@ -82,7 +82,7 @@ List<String> stem(List<String> tokens) {
   return tokens.map((t) => _englishStemmer.stem(t)).toList();
 }
 
-/// Full preprocessing pipeline: tokenise → normalise → [stop-word filter] → stem.
+/// Full preprocessing pipeline: tokenise → normalise → [filterStopWords] → stem.
 ///
 /// This is the entry point called by both the indexing path (when a document
 /// is written) and the query path (when a search query is submitted). Applying
@@ -93,7 +93,7 @@ List<String> stem(List<String> tokens) {
 ///
 /// - [text] — the raw input string (document field value or query string).
 /// - [tokenizer] — the [Tokenizer] implementation to use for segmentation.
-/// - [stopWords] — the stop-word set to apply. Pass [kEnglishStopWords] to
+/// - [stopWords] — the stop-word set to apply. Pass `kEnglishStopWords` to
 ///   enable English stop-word removal; pass an empty set (the default) to
 ///   disable filtering. Custom sets may also be supplied.
 ///

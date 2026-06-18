@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -39,16 +44,16 @@ jobs:
           go install github.com/google/addlicense@v1.2.0
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
 
-      - run: make cicd
+      - run: make cicd_build
 
-      - name: Coverage summary
-        run: |
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          grep -E '^\[.*\]:.*lines\.\.\.\.\.\.' coverage.log >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+      #- name: Coverage summary
+      #  run: |
+      #    echo '```' >> $GITHUB_STEP_SUMMARY
+      #    grep -E '^\[.*\]:.*lines\.\.\.\.\.\.' coverage.log >> $GITHUB_STEP_SUMMARY
+      #    echo '```' >> $GITHUB_STEP_SUMMARY
 
-      - name: Benchmarks summary
-        run: cat benchmarks.log >> $GITHUB_STEP_SUMMARY
+      #- name: Benchmarks summary
+      #  run: cat benchmarks.log >> $GITHUB_STEP_SUMMARY
 
   test-web:
     runs-on: ubuntu-latest
@@ -73,3 +78,47 @@ jobs:
         run: make web_test
         env:
           CHROME_EXECUTABLE: chrome
+
+  # At least 1 package requires Flutter so we'll need to rework the jobs below this one
+  # to get them to work - esp for producing coverage docs.
+  # docs:
+  #   runs-on: ubuntu-latest
+
+  #   steps:
+  #     - uses: actions/checkout@v6
+
+  #     - uses: dart-lang/setup-dart@v1
+  #       with:
+  #         sdk: stable
+
+  #     - name: Install system dependencies
+  #       run: sudo apt-get update && sudo apt-get install -y lcov
+
+  #     - uses: dart-lang/setup-dart@v1
+  #       with:
+  #         sdk: stable
+
+  #     - name: Install Pandoc
+  #       uses: pandoc/actions/setup@v1
+
+  #     - run: make doc_site
+
+  # The items below are commented out until the kmdb GitHub repo is public and we have Pages enabled.
+
+  #     - name: Upload Pages Artifact
+  #       uses: actions/upload-pages-artifact@v5
+  #       with:
+  #         path: "./site"
+
+  # deployment:
+  #   runs-on: ubuntu-latest
+  #   needs: docs
+
+  #   environment:
+  #     name: github-pages
+  #     url: ${{ steps.deployment.outputs.page_url }}
+
+  #   steps:
+  #     - name: Deploy to GitHub Pages
+  #       id: deployment
+  #       uses: actions/deploy-pages@v5

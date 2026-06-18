@@ -78,10 +78,10 @@ abstract interface class KvStore {
   /// exclusively for history-bearing namespaces such as `\$ver:{collection}`.
   ///
   /// Each yielded entry includes:
-  /// - [VersionHistoryEntry.value] — the raw bytes stored for this version.
-  /// - [VersionHistoryEntry.hlc] — the HLC extracted from the internal key,
+  /// - `VersionHistoryEntry.value` — the raw bytes stored for this version.
+  /// - `VersionHistoryEntry.hlc` — the HLC extracted from the internal key,
   ///   which is the authoritative version timestamp.
-  /// - [VersionHistoryEntry.isDelete] — whether this entry is a tombstone.
+  /// - `VersionHistoryEntry.isDelete` — whether this entry is a tombstone.
   ///
   /// Tombstones **are** included in the output (unlike [scan], which
   /// suppresses them). A tombstone in `\$ver:` is a delete-version entry
@@ -224,14 +224,14 @@ abstract interface class KvStore {
   Future<void> close({bool flush = true});
 
   /// Registers a callback that provides the [ReclamationPolicyRegistry] for
-  /// all-levels compaction, with per-collection [VersionRetentionPolicy]
+  /// all-levels compaction, with per-collection `VersionRetentionPolicy`
   /// entries built from the current [VersionConfig] values in `$meta`.
   ///
-  /// Called by [KvStoreImpl] after versioning is configured at [open] time.
+  /// Called by [KvStoreImpl] after versioning is configured at open time.
   /// Pass `null` to revert to the default registry (no per-collection
   /// trimming).
   ///
-  /// See [LsmEngine.setVersionRegistryProvider] for the implementation.
+  /// See `LsmEngine.setVersionRegistryProvider` for the implementation.
   void setVersionRegistryProvider(
     Future<ReclamationPolicyRegistry> Function()? provider,
   );
@@ -254,7 +254,7 @@ abstract interface class KvStore {
   void setTombstoneHorizonProvider(Future<Hlc> Function()? provider);
 
   /// Registers a callback invoked after an all-levels compaction trims one or
-  /// more `$ver:` version entries via [ReclamationPolicy.filterGroup].
+  /// more `$ver:` version entries via `ReclamationPolicy.filterGroup`.
   ///
   /// The callback receives the raw value bytes (`List<Uint8List>`) of every
   /// trimmed [VersionEntry]. Each entry may contain vault URIs; the callback is
@@ -509,7 +509,7 @@ final class KvStoreConfig {
   ///
   /// Forwarded to the engine's [HlcClock] and governs both the SSTable ingest
   /// path ([KvStore.ingestSstable]) and the write path. An [HlcClock] with this
-  /// skew limit is constructed by [CrashRecovery] and injected into [LsmEngine].
+  /// skew limit is constructed by `CrashRecovery` and injected into `LsmEngine`.
   /// If an observed HLC (from a peer SSTable) exceeds the local wall clock by
   /// more than this duration, a [ClockSkewException] is thrown.
   final Duration maxClockSkew;
@@ -598,7 +598,7 @@ final class KvStoreConfig {
   /// Wi-Fi network.
   final Duration staleDeviceEvictionAfter;
 
-  /// Maximum number of open [SstableReader]s held in the [TableCache].
+  /// Maximum number of open [SstableReader]s held in the `TableCache`.
   ///
   /// The table cache amortises the cost of opening an SSTable file: the first
   /// open validates the whole-file XXH64 checksum and loads the footer, index,

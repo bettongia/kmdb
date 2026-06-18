@@ -207,7 +207,7 @@ final class ReservedIndexPathException implements Exception {
 /// This occurs when:
 /// - The version was trimmed by compaction (beyond the collection's
 ///   `maxVersions` count or `retentionDays` window).
-/// - The [hlc] was not produced by a write to this collection (e.g. it is
+/// - The `hlc` was not produced by a write to this collection (e.g. it is
 ///   a typo or belongs to a different collection).
 /// - Versioning was disabled for this collection when the document was written.
 ///

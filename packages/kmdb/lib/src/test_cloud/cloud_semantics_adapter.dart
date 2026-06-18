@@ -69,7 +69,7 @@ import 'visibility_cursor_adapter.dart';
 /// `backend.currentWriteSeq`, so all writes are immediately visible — identical
 /// to [SharedBackendAdapter].
 ///
-/// ## Modelled on [PartitionableAdapter]
+/// ## Modelled on `PartitionableAdapter`
 ///
 /// The structure mirrors `packages/kmdb_harness/lib/src/partitionable_adapter.dart`:
 /// a thin decorator that overrides specific methods while forwarding others.

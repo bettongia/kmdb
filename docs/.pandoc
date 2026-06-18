@@ -4,7 +4,9 @@ standalone: true
 list-of-tables: true
 list-of-figures: true
 number-sections: true
-include-before-body: docs/template/header.html
-embed-resources: true
+include-before-body: site/_header.html
+include-after-body: docs/template/footer.html
+syntax-highlighting: default
+embed-resources: false
 css:
-  - docs/styles/styles.css
+  - bettongia-docs.css

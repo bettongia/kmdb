@@ -97,7 +97,7 @@ final class LockConflictException implements Exception {
 /// Note: [SyncCancelledException] is unrelated to [LockConflictException].
 /// Callers must not confuse the two. The engine does not catch
 /// [SyncCancelledException] — it propagates to the caller of
-/// [KmdbDatabase.sync], [push], or [pull].
+/// [KmdbDatabase.sync], [KmdbDatabase.push], or [KmdbDatabase.pull].
 abstract interface class SyncStorageAdapter {
   /// Lists all files in [remoteDir], optionally filtering by [extension].
   ///

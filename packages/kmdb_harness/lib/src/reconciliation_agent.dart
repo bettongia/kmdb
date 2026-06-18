@@ -58,7 +58,7 @@ final class WriteLogEntry {
   /// to the shared remote as part of an SSTable upload.
   ///
   /// `null` until the originating device completes a successful sync. Once
-  /// set, this value is the highest [StoredFile.writeSeq] visible at the
+  /// set, this value is the highest `StoredFile.writeSeq` visible at the
   /// time the push completed — i.e. the write's SSTable was committed to the
   /// backend at or before this sequence.
   ///
@@ -112,8 +112,8 @@ final class SyncLogEntry {
   /// The highest write-sequence visible to this device's adapter at the
   /// point the sync completed.
   ///
-  /// `null` when the adapter does not implement [VisibilityCursorAdapter]
-  /// (e.g. [MemorySyncAdapter]) — the agent falls back to the full global
+  /// `null` when the adapter does not implement `VisibilityCursorAdapter`
+  /// (e.g. `MemorySyncAdapter`) — the agent falls back to the full global
   /// merge in that case.
   final int? visibleWriteSeqHigh;
 
@@ -199,7 +199,7 @@ final class _DeviceState {
 /// This supports eventual-consistency profiles where a completed pull may
 /// legitimately observe only a subset of prior pushes.
 ///
-/// Under strong consistency (or with legacy [MemorySyncAdapter]), every sync
+/// Under strong consistency (or with legacy `MemorySyncAdapter`), every sync
 /// carries `null` and the agent falls back to merging the full
 /// [globalExpectedState], preserving previous behaviour exactly.
 ///
@@ -430,7 +430,7 @@ final class ReconciliationAgent {
   ///
   /// When [seqHigh] is non-null, uses [visibleExpectedStateFor] to restrict
   /// the merge to writes visible at that sequence (eventual-consistency path).
-  /// When [seqHigh] is `null` (legacy [MemorySyncAdapter] path), falls back
+  /// When [seqHigh] is `null` (legacy `MemorySyncAdapter` path), falls back
   /// to [globalExpectedState] — identical to the previous behaviour.
   void _mergeVisibleIntoDevice(int deviceId, int? seqHigh) {
     final ds = _deviceStates[deviceId]!;

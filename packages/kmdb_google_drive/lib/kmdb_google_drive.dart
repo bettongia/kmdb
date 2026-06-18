@@ -14,7 +14,7 @@
 
 /// Google Drive sync adapter for KMDB.
 ///
-/// Provides [GoogleDriveAdapter] — a [SyncStorageAdapter] implementation
+/// Provides [GoogleDriveAdapter] — a `SyncStorageAdapter` implementation
 /// backed by the Google Drive REST API (Drive v3).  Callers are responsible
 /// for constructing an authenticated [AuthClient] (from `googleapis_auth`)
 /// and passing it to the adapter constructor.

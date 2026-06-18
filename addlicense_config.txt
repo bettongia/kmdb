@@ -26,4 +26,5 @@
 --ignore=".worktrees/**"
 --ignore="**/third_party/**"
 --ignore="**/.venv/**"
+--ignore="docs/template/**"
 .

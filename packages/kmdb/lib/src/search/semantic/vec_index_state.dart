@@ -131,7 +131,7 @@ final class VecIndexState {
   /// for backward-compatible reads (indexes built before model identity
   /// tracking was added). An empty stored [modelId] is treated as a match
   /// rather than a mismatch — it is stamped with the current model id on the
-  /// next [ensureBuilt] call.
+  /// next [VecManager.ensureBuilt] call.
   static VecIndexState fromBytes(
     String namespace,
     String field,

@@ -205,7 +205,7 @@ final class CloudProfile {
   /// reconciliation oracle's visibility model.
   final ConsistencyModel consistency;
 
-  /// Whether [compareAndSwap] is truly atomic on this backend.
+  /// Whether `compareAndSwap` is truly atomic on this backend.
   ///
   /// When `true`, the backend guarantees that for any given `(path, ifMatchEtag)`
   /// precondition, at most one concurrent caller observes success. When `false`,
@@ -229,6 +229,6 @@ final class CloudProfile {
   /// Quota parameters for the simulated backend (descriptive only, per D6).
   ///
   /// Parameterises the simulator's 429/503 injection. Does NOT affect the
-  /// harness's [QuotaAwareAdapter] check.
+  /// harness's `QuotaAwareAdapter` check.
   final QuotaProfile quota;
 }

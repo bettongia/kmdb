@@ -14,7 +14,7 @@
 
 /// The type of action that a [UserAgent] can issue to a [Device].
 enum ActionType {
-  /// Initialise a new [KmdbDatabase] on the target device.
+  /// Initialise a new `KmdbDatabase` on the target device.
   createDb,
 
   /// Create a named collection on an initialised device.
@@ -149,18 +149,18 @@ final class ActionResult {
   /// at the point the sync completed.
   ///
   /// Populated on a completed sync ([syncCompleted] == `true`) from the
-  /// front-end's `visibleWriteSeq` — i.e. the highest [StoredFile.writeSeq]
+  /// front-end's `visibleWriteSeq` — i.e. the highest `StoredFile.writeSeq`
   /// whose files are currently observable through this device's adapter.
   ///
   /// Under a strongly-consistent adapter this equals the backend's global
   /// maximum (all committed writes visible), so the [ReconciliationAgent]
   /// behaves identically to the previous behaviour. Under an eventually-
-  /// consistent [CloudSemanticsAdapter] this is the adapter's current
+  /// consistent `CloudSemanticsAdapter` this is the adapter's current
   /// visibility cursor, so the agent merges only the visible subset of peer
   /// writes into the device's expected state.
   ///
   /// `null` when the action is not a completed sync, or when the adapter does
-  /// not expose a visibility cursor (e.g. the legacy [MemorySyncAdapter] path
+  /// not expose a visibility cursor (e.g. the legacy `MemorySyncAdapter` path
   /// — in that case the agent falls back to the global merge).
   final int? visibleWriteSeqHigh;
 }

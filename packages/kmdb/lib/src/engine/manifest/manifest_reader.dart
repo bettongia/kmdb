@@ -201,7 +201,7 @@ final class ManifestState {
   /// Values are sorted lists of [SstableMeta], ordered by filename for
   /// deterministic L1/L2 ordering. L0 ordering is also by filename; callers
   /// that need L0 newest-first must reverse the list themselves (the
-  /// [LsmEngine] does this in its read path).
+  /// `LsmEngine` does this in its read path).
   ///
   /// The metadata fields ([SstableMeta.minKey], [SstableMeta.maxKey],
   /// [SstableMeta.entryCount]) reflect whatever the manifest recorded verbatim.

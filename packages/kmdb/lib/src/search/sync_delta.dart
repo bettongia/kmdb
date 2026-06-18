@@ -56,8 +56,8 @@ final class SyncDelta {
 
   /// The list of document changes in this namespace.
   ///
-  /// Each entry names the document key ([DeltaEntry.docId]) and the type of
-  /// change ([DeltaEntry.changeType]).
+  /// Each entry names the document key (`DeltaEntry.docId`) and the type of
+  /// change (`DeltaEntry.changeType`).
   final List<DeltaEntry> changes;
 }
 

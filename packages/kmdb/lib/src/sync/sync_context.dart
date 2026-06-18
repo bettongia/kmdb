@@ -130,8 +130,8 @@ final class SyncContext {
 /// cancellation signal).
 ///
 /// The engine's catch sites do not catch [SyncCancelledException] — it is
-/// allowed to propagate to the caller of [KmdbDatabase.sync], [push], or
-/// [pull], which is where the cancellation originated.
+/// allowed to propagate to the caller of [KmdbDatabase.sync], [KmdbDatabase.push], or
+/// [KmdbDatabase.pull], which is where the cancellation originated.
 ///
 /// Note: [SyncCancelledException] is unrelated to [LockConflictException].
 /// Lock conflicts are internal coordinator races that the coordinator handles

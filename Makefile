@@ -1,16 +1,13 @@
 .DEFAULT_GOAL := default
 
-include make_release.mk make_site.mk
+include make_release.mk make_site.mk make_cicd.mk
 
 KMDB_PKG=packages/kmdb
 
 # ADDLICENSE_CONFIG=addlicense_config.txt
 
-default: prepare format analyze test license_check
+default: prepare license_check format analyze test
 .PHONY: default
-
-#all: format analyze license_check coverage site
-#.PHONY: all
 
 # Pre-commit gate: formatting, static analysis, license headers, and the core
 # test suites (kmdb + kmdb_cli). Deliberately excludes coverage, the docs site
@@ -30,25 +27,26 @@ pre_commit: format_check analyze license_check
 	melos pre_commit_test --no-select
 .PHONY: pre_commit
 
-cicd: prepare format_check analyze license_check coverage benchmarks
-.PHONY: cicd
-
 analyze:
 	melos run analyze
 .PHONY: analyze
 
 benchmarks:
-	set -o pipefail; melos benchmarks --no-select 2>&1 | tee benchmarks.log
+	melos benchmarks --no-select 2>&1 | tee benchmarks.log
 .PHONY: benchmarks
 
 tests_all: test e2e_test
 .PHONY: tests_all
 
+tests_dart:
+
+.PHONY: tests_dart
+
 test: test.log
 .PHONY: test
 
 test.log: packages/**
-	set -o pipefail; melos test --no-select 2>&1 | tee test.log
+	melos test --no-select 2>&1 | tee test.log
 
 
 e2e_test:
@@ -75,7 +73,7 @@ docs: site coverage
 
 coverage:
 	mkdir -p site
-	set -o pipefail; melos coverage 2>&1 | tee coverage.log
+	melos coverage 2>&1 | tee coverage.log
 
 ## Format all Dart sources under packages/ in place. Uses `dart format` directly
 ## (not `melos format`) to avoid the name collision with the `format` melos

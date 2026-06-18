@@ -1,49 +1,61 @@
-site: styles site/index.html site/api.html site/spec.html site/api-docs site/roadmap.html site/primer.html site/spec.pdf site/primer.pdf | site_dir
+# BEGIN: Documentation site tasks
+SITE_DIR = site
+DOCS_DIR = docs
+
+# Extract fields from pubspec.yaml for header template substitution
+PKG_NAME    := $(shell awk '/^name:/{print $$2}'        pubspec.yaml)
+PKG_DESC    := $(shell awk '/^description:/{print $$2}' pubspec.yaml)
+PKG_VERSION := $(shell awk '/^version:/{print $$2}'     pubspec.yaml)
+REPO_URL    := $(shell awk '/^repository:/{print $$2}'  pubspec.yaml)
+_HEADER := $(SITE_DIR)/_header.html
+_INDEX  := $(SITE_DIR)/_index.md
+
+doc_site: $(SITE_DIR)/favicon.ico $(SITE_DIR)/bettongia-$(DOCS_DIR).css $(SITE_DIR)/index.html $(SITE_DIR)/spec.html $(SITE_DIR)/roadmap.html $(SITE_DIR)/primer.html $(SITE_DIR)/api.html $(SITE_DIR)/api-docs coverage
 .PHONY: site
 
-site_dir:
-	mkdir -p site
-.PHONY: site_dir
+$(SITE_DIR):
+	mkdir -p $@
 
-styles: site/styles/styles.css
-.PHONY: styles
+# Generate header with $repo$ replaced by the pubspec.yaml repository URL.
+# include-before-body content is verbatim in pandoc (not template-processed),
+# so substitution must happen before pandoc runs.
+$(_HEADER): $(DOCS_DIR)/template/header.html pubspec.yaml | $(SITE_DIR)
+	sed -e 's|\$$name\$$|$(PKG_NAME)|g' \
+	    -e 's|\$$version\$$|$(PKG_VERSION)|g' \
+	    -e 's|\$$repo\$$|$(REPO_URL)|g' \
+	    $< > $@
 
-site/styles/styles.css: docs/styles/styles.css | site_dir
-	mkdir -p site/styles/
-	cp docs/styles/styles.css site/styles/styles.css
+$(_INDEX): $(DOCS_DIR)/index.md pubspec.yaml | $(SITE_DIR)
+	sed -e 's|\$$name\$$|$(PKG_NAME)|g' \
+	    -e 's|\$$version\$$|$(PKG_VERSION)|g' \
+	    -e 's|\$$repo\$$|$(REPO_URL)|g' \
+		-e 's|\$$description\$$|$(REPO_DESC)|g' \
+	    $< > $@
 
+$(SITE_DIR)/bettongia-$(DOCS_DIR).css: | $(SITE_DIR)
+	cp $(DOCS_DIR)/template/bettongia-$(DOCS_DIR).css $(SITE_DIR)/bettongia-$(DOCS_DIR).css
 
-site/api.html:
-	pandoc --defaults="docs/.pandoc" docs/api.md -o "site/api.html";
+$(SITE_DIR)/favicon.ico: $(DOCS_DIR)/template/favicon.ico  | $(SITE_DIR)
+	cp $(DOCS_DIR)/template/favicon.ico $(SITE_DIR)/favicon.ico
 
-site/spec.html:  docs/spec/*.md docs/spec/.pandoc docs/template/header.html | site_dir
-	pandoc --defaults="docs/spec/.pandoc" --mathml docs/spec/*.md -o "site/spec.html";
+$(SITE_DIR)/index.html: $(_INDEX) $(DOCS_DIR)/.pandoc $(_HEADER) | $(SITE_DIR)
+	pandoc --defaults="$(DOCS_DIR)/.pandoc" $(_INDEX) README.md -o "$(SITE_DIR)/index.html";
 
-site/index.html:  docs/index.md docs/.pandoc docs/template/header.html | site_dir
-	pandoc --defaults="docs/.pandoc" docs/index.md -o "site/index.html";
+$(SITE_DIR)/spec.html: $(DOCS_DIR)/spec/*.md $(DOCS_DIR)/.pandoc $(_HEADER) | $(SITE_DIR)
+	pandoc --defaults="$(DOCS_DIR)/.pandoc" --mathml $(DOCS_DIR)/spec/*.md -o "$(SITE_DIR)/spec.html";
 
-site/roadmap.html: docs/roadmap/*.md docs/.pandoc docs/template/header.html | site_dir
-	pandoc --defaults="docs/.pandoc" docs/roadmap/*.md -o "site/roadmap.html";
+$(SITE_DIR)/roadmap.html: $(DOCS_DIR)/roadmap/*.md $(DOCS_DIR)/.pandoc $(_HEADER) | $(SITE_DIR)
+	pandoc --defaults="$(DOCS_DIR)/.pandoc" $(DOCS_DIR)/roadmap/[0-9]_*.md -o "$(SITE_DIR)/roadmap.html";
 
-site/primer.html: docs/primer.md docs/.pandoc docs/template/header.html | site_dir
-	pandoc --defaults="docs/.pandoc" docs/primer.md -o "site/primer.html";
+$(SITE_DIR)/api.html: $(DOCS_DIR)/api.md | $(SITE_DIR)
+	pandoc --defaults="$(DOCS_DIR)/.pandoc" $(DOCS_DIR)/api.md -o "$(SITE_DIR)/api.html";
 
-site/api-docs: | site_dir
+$(SITE_DIR)/primer.html: $(DOCS_DIR)/primer.md  | $(SITE_DIR)
+	pandoc --defaults="$(DOCS_DIR)/.pandoc" $(DOCS_DIR)/primer.md -o "$(SITE_DIR)/primer.html";
+
+$(SITE_DIR)/api-docs: | $(SITE_DIR)
 	melos doc --no-select 2>&1 | tee doc.log
 
-site/spec.epub: docs/spec/*.md | site_dir
-	pandoc docs/spec/*.md -o site/spec.epub \
-		--include-before-body docs/template/preface.md
 
-site/spec.pdf: docs/spec/*.md | site_dir
-	pandoc docs/spec/*.md --pdf-engine=xelatex -o site/spec.pdf \
-		-V mainfont="DejaVu Sans" \
-  		-V monofont="DejaVu Sans Mono" \
-		-H docs/template/header.tex
 
-site/primer.pdf: docs/primer.md | site_dir
-	pandoc docs/primer.md --pdf-engine=xelatex -o site/primer.pdf \
-		--defaults="docs/.pandoc_pdf" \
-		-V mainfont="DejaVu Sans" \
-  		-V monofont="DejaVu Sans Mono" \
-		-H docs/template/header.tex
+# END: Documentation site tasks
