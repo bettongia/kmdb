@@ -6,11 +6,11 @@
 
 ## Problem statement
 
-Phase 12 (database encryption, `docs/plans/plan_encryption.md`) added opt-in,
-value-level AES-256-GCM encryption to `kmdb`. Two Flutter-specific capabilities
-were **deliberately deferred** from that plan (see Q3, Q7, and the "Follow-up:
-`kmdb_flutter` package" note at the bottom of `plan_encryption.md`) because they
-cannot live in the pure-Dart `kmdb` package without breaking it:
+The database encryption plan (`docs/plans/completed/plan_encryption.md`) added
+opt-in, value-level AES-256-GCM encryption to `kmdb`. Two Flutter-specific
+capabilities were **deliberately deferred** from that plan (see Q3, Q7, and the
+"Follow-up: `kmdb_flutter` package" note at the bottom of that plan) because
+they cannot live in the pure-Dart `kmdb` package without breaking it:
 
 1. **Persistent DEK session caching.** After a user unlocks an encrypted
    database with their passphrase, the unwrapped Data Encryption Key (DEK)
