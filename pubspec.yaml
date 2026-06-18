@@ -8,8 +8,6 @@ workspace:
   - packages/kmdb
   - packages/kmdb_cli
   - packages/kmdb_harness
-  - packages/kmdb_inferencing
-  - packages/kmdb_lexical
   - packages/kmdb_google_drive
   - packages/kmdb_icloud
   - packages/kmdb_icloud/example
@@ -35,6 +33,8 @@ dependency_overrides:
   betto_mediatype_detector: ^0.1.0-dev.1
   betto_builder_tools: ^0.1.0-dev.1
   betto_onnxrt: ^0.1.0-dev.1
+  betto_lexical: ^0.1.0-dev.1
+  betto_inferencing: ^0.1.0-dev.1
 
 melos:
   # Disable generation of IntelliJ/Android Studio run configurations. Melos's

@@ -17,7 +17,8 @@ dependencies:
   betto_mediatype_detector:
   betto_common:
   meta: any
-  kmdb_lexical:
+  betto_lexical:
+  betto_inferencing:
   uuid:
   web:
   intl: ^0.20.2

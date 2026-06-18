@@ -178,7 +178,7 @@ the lock handle — the handle is released by the Worker's termination.
 | Zstd compression    | ✓ (FFI via betto_zstd)                   | Reads `0x00` only; writes uncompressed (WASM path not yet wired — see §5) |
 | Sync                | ✓                                        | ✓                                |
 | Lexical text search | ✓                                        | ✗ (deferred)                     |
-| Semantic search     | ✓ (ONNX via kmdb_inferencing)            | ✗ (deferred)                     |
+| Semantic search     | ✓ (ONNX via betto_inferencing)           | ✗ (deferred)                     |
 | Vault               | ✓                                        | ✗ (deferred)                     |
 
 ## Package Structure
@@ -203,16 +203,6 @@ packages/
   |
   kmdb_harness/            — multi-device sync test harness
   |
-  kmdb_lexical/            — tokenizer pipeline and English stop-word list
-  |                          (default: IcuTokenizer on native via betto_icu,
-  |                          BrowserTokenizer on web; RegExpTokenizer fallback;
-  |                          Snowball stemmer) used by FtsManager (§21) and
-  |                          VecManager (§22)
-  |
-  kmdb_inferencing/        — BGE Small En v1.5 embedding model + ONNX inference
-  |                          (ORT binary via betto_onnxrt) used by VecManager
-  |                          (§22); native only
-  |
   kmdb_google_drive/       — Google Drive SyncStorageAdapter (optional, opt-in; §29)
   |
   kmdb_icloud/             — Apple iCloud (CloudKit) SyncStorageAdapter
@@ -229,8 +219,10 @@ git dependencies — that wiring is gone):
 | `betto_schema` | JSON Schema validation (§25) | — |
 | `betto_zstd` | Zstd compression (§5) | `native_toolchain_c` (native) + self-built WASM (web) |
 | `betto_mediatype_detector` | MIME detection for the vault (§24); replaced `betto_registry` | pure Dart |
-| `betto_icu` | Unicode UAX #29 tokenizer (`IcuTokenizer`); consumed by `kmdb_lexical` | system ICU via FFI (no bundling) |
-| `betto_onnxrt` | ONNX Runtime for Dart (§22); consumed by `kmdb_inferencing` | native-assets build hook downloads/verifies ORT binary |
+| `betto_icu` | Unicode UAX #29 tokenizer (`IcuTokenizer`); consumed by `betto_lexical` | system ICU via FFI (no bundling) |
+| `betto_lexical` | lexical text utilities (tokenizer, stemmer, stopwords) used by `FtsManager` (§21) and `VecManager` (§22) | pure Dart + `betto_icu` |
+| `betto_inferencing` | ONNX Runtime inference and embedding models for dense text retrieval; consumed by `VecManager` (§22); native only | `betto_onnxrt` native-assets hook |
+| `betto_onnxrt` | ONNX Runtime for Dart (§22); consumed by `betto_inferencing` | native-assets build hook downloads/verifies ORT binary |
 | `betto_builder_tools` | shared build helpers | — |
 
 `betto_onnxrt_ios` (`^0.1.0-dev.1`) is an iOS-only Flutter plugin that

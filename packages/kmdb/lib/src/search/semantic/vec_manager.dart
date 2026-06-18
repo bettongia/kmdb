@@ -21,7 +21,7 @@ import '../../encoding/value_codec.dart';
 import '../../engine/kvstore/kv_store.dart';
 import '../../engine/kvstore/kv_store_impl.dart';
 import '../../query/write_augmentor.dart';
-import '../embedding_model.dart';
+import 'package:betto_inferencing/betto_inferencing.dart' show EmbeddingModel;
 import '../search_result.dart';
 import '../sync_delta.dart';
 import '../vec_index_definition.dart';
@@ -777,8 +777,8 @@ final class VecManager implements WriteAugmentor {
   // ── SQ8 quantisation ──────────────────────────────────────────────────────
   //
   // These helpers duplicate the public quantise/dequantise functions from
-  // kmdb_inferencing to avoid a circular package dependency (kmdb_inferencing
-  // depends on kmdb, not the other way around).
+  // betto_inferencing. The duplication is intentional: the storage engine must
+  // remain self-contained for decode-only paths that do not load the model.
   //
   // Formula:
   //   encode: u = clamp(round((f + 1.0) / 2.0 * 255), 0, 255)

@@ -14,7 +14,8 @@
 
 import 'package:intl/locale.dart';
 import 'package:kmdb/kmdb.dart';
-import 'package:kmdb_lexical/lexical.dart' show RegExpTokenizer, getStopWords;
+import 'package:betto_lexical/betto_lexical.dart'
+    show RegExpTokenizer, getStopWords;
 import 'package:test/test.dart';
 
 final defaultStopwords = getStopWords(Locale.fromSubtags(languageCode: 'en'));

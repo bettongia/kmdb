@@ -102,8 +102,6 @@ packages/
   kmdb/                — the core library (lib/, test/, example/, benchmark/)
   kmdb_cli/            — the CLI tool (bin/, lib/, test/)
   kmdb_harness/        — multi-device sync test harness
-  kmdb_inferencing/    — ONNX Runtime + BGE embedding model for semantic search
-  kmdb_lexical/        — lexical utilities (stemmer, stopwords) used by FTS
   kmdb_google_drive/   — Google Drive SyncStorageAdapter (optional, opt-in)
   kmdb_icloud/         — Apple iCloud (CloudKit) SyncStorageAdapter (iOS/macOS only, optional, opt-in)
 
@@ -119,7 +117,11 @@ External Bettongia packages — all published to pub.dev, pinned in
                               OnnxSession API, model-download infrastructure
                               (https://github.com/bettongia/onnxrt)
   betto_icu                 — Unicode tokenizer (Tokenizer, IcuTokenizer,
-                              RegExpTokenizer) — consumed by kmdb_lexical
+                              RegExpTokenizer) — consumed by betto_lexical
+  betto_lexical             — lexical text utilities (tokenizer, stemmer, stopwords)
+                              used by FTS (https://github.com/bettongia/lexical)
+  betto_inferencing         — ONNX Runtime inference and embedding models for dense
+                              text retrieval (https://github.com/bettongia/inferencing)
 
 iOS companion (consumer Flutter app only — not in this workspace):
   betto_onnxrt_ios          — Flutter plugin; SPM-links ORT XCFramework so

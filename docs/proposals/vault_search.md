@@ -90,7 +90,7 @@ present.
 
 Additional format extractors live in dedicated optional packages following the
 convention `kmdb_extractor_<name>`, analogous to `betto_zstd` and
-`kmdb_inferencing`. Examples:
+`betto_inferencing`. Examples:
 
 | Package                   | Format            |
 | ------------------------- | ----------------- |
@@ -640,12 +640,13 @@ the English-only lexical pipeline is used as a fallback.
 
 #### Package
 
-`kmdb_lang_id` — pure-Dart, no native dependencies:
+`betto_lang_id` — pure-Dart, no native dependencies (follows the `betto_*`
+convention for reusable Bettongia utilities):
 
 ```
-kmdb_lang_id/
+betto_lang_id/
   lib/
-    kmdb_lang_id.dart
+    betto_lang_id.dart
     src/
       detector.dart
       backend.dart
@@ -744,10 +745,10 @@ produces incorrect or empty token sequences for:
 - **Agglutinative languages** (Finnish, Turkish, Korean) — compound words
   that benefit from morphological decomposition.
 
-The `IcuTokenizer` from `betto_icu` (already used by `kmdb_lexical`) handles
+The `IcuTokenizer` from `betto_icu` (already used by `betto_lexical`) handles
 word segmentation correctly across all Unicode scripts via ICU `BreakIterator`.
 Vault search routes to it using the **`dominantScript()`** signal from
-`kmdb_lang_id` (§10.2) — a cheap, pre-detection step that does not require full
+`betto_lang_id` (§10.2) — a cheap, pre-detection step that does not require full
 language identification:
 
 - Latin-script text: existing `RegExpTokenizer`
@@ -757,7 +758,7 @@ The tokenizer selection is encapsulated in the indexing isolate and requires no
 API changes — it is an internal routing decision based on the `"language"` field
 stored in `extract_status.json`.
 
-Stop-word filtering and stemming (currently English-only via `kmdb_lexical`) are
+Stop-word filtering and stemming (currently English-only via `betto_lexical`) are
 left as language-specific future work; disabling them for non-English content
 produces a valid (if unoptimized) BM25 index.
 
@@ -766,9 +767,9 @@ produces a valid (if unoptimized) BM25 index.
 | Phase | Capability | Dependency | Package |
 | ----- | ---------- | ---------- | ------- |
 | A | Charset detection | None | `betto_charset_detector` ✅ published |
-| B | Language detection (lexical path + metadata) | Phase A | `kmdb_lang_id` (pure Dart, script + n-gram) |
-| C | Multilingual embedding model | **None** (independent of A/B) | extend `kmdb_inferencing` — `multilingual-e5-small` (384d, drop-in) or `bge-m3` (1024d, re-index required) |
-| D | Language-aware BM25 tokenizer routing | Phase B | `IcuTokenizer` via existing `betto_icu` / `kmdb_lexical` |
+| B | Language detection (lexical path + metadata) | Phase A | `betto_lang_id` (pure Dart, script + n-gram) |
+| C | Multilingual embedding model | **None** (independent of A/B) | extend `betto_inferencing` — `multilingual-e5-small` (384d, drop-in) or `bge-m3` (1024d, re-index required) |
+| D | Language-aware BM25 tokenizer routing | Phase B | `IcuTokenizer` via existing `betto_icu` / `betto_lexical` |
 
 Phase A alone fixes silent data corruption for non-UTF-8 plain-text files and is
 worthwhile independently of the multilingual search story. The package is
