@@ -213,7 +213,7 @@ final class DocumentVersion {
   final Hlc hlc;
 
   /// Wall-clock time at which this version was written, derived from
-  /// [hlc.physicalMs].
+  /// [Hlc.physicalMs].
   ///
   /// Subject to clock skew across devices. Use [hlc] for causal ordering;
   /// use [timestamp] only for display purposes.

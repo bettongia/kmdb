@@ -75,7 +75,7 @@ final class PartitionableAdapter implements SyncStorageAdapter {
   /// The underlying delegate adapter.
   ///
   /// Exposed so callers can reach decorator-specific APIs (e.g.
-  /// [CloudSemanticsAdapter.advancePropagationClock]) without requiring
+  /// `CloudSemanticsAdapter.advancePropagationClock`) without requiring
   /// [PartitionableAdapter] to know about every concrete delegate type.
   SyncStorageAdapter get delegate => _delegate;
 

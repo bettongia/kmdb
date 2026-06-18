@@ -14,7 +14,7 @@
 
 /// Apple iCloud (CloudKit) sync adapter for KMDB.
 ///
-/// Provides [ICloudAdapter] — a [SyncStorageAdapter] implementation backed by
+/// Provides [ICloudAdapter] — a `SyncStorageAdapter` implementation backed by
 /// the CloudKit framework via a Flutter MethodChannel plugin.  Callers are
 /// responsible for constructing a [PlatformICloudSyncChannel] (passing the
 /// app's CloudKit container identifier and sync root name) and passing it to

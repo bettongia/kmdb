@@ -1,13 +1,10 @@
 ---
-title: KMDB
-subtitle: A Local-First Document Database for Dart & Flutter
+title: $name$
+subtitle: $description$
 toc-title: "Contents"
+abstract:
+  _Some links won't work in this site - please consult the project repository
+  for the [full documentation set]($repo$)._
+
+abstract-title: Note
 ...
-
-- [Primer](primer.html)
-- [Specification](spec.html)
-- [Roadmap](roadmap.html)
-- [API](api.html)
-- [Coverage](coverage/html/index.html)
-
----

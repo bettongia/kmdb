@@ -124,7 +124,7 @@ final class TestManager {
   /// 1. **Validate** — quota check, configuration sanity.
   /// 2. **Setup** — create devices, open databases.
   /// 3. **Pre-seed** — write initial data to selected devices.
-  /// 4. **Run** — drive devices with the [UserAgent] for [config.duration].
+  /// 4. **Run** — drive devices with the [UserAgent] for [HarnessConfig.duration].
   /// 5. **Drain** — process any pending actions.
   /// 6. **Reconcile** — compare actual vs expected state.
   /// 7. **Teardown** — close all databases.

@@ -38,7 +38,7 @@ import 'vault_ref_count.dart';
 ///
 /// Each entry is keyed by the SHA-256 hex string and encoded as a
 /// [ValueCodec]-encoded map: `{"refCount": N}`. All readers — this interceptor,
-/// [VaultGc], and [VaultRecovery] — decode it through the shared, fail-safe
+/// [VaultGc], and `VaultRecovery` — decode it through the shared, fail-safe
 /// [VaultRefCount.read] rather than a hand-rolled parser.
 ///
 /// Implements [WriteAugmentor] so it integrates with the formal write pipeline

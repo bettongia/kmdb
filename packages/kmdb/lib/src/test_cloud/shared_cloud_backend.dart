@@ -41,7 +41,7 @@ final class StoredFile {
 
   /// Global write-sequence number assigned at the moment of commit.
   ///
-  /// The backend's [SharedCloudBackend.nextWriteSeq] is the source. When a
+  /// The backend's [SharedCloudBackend.currentWriteSeq] is the source. When a
   /// [CloudSemanticsAdapter] has a visibility cursor at `seqHigh`, only files
   /// whose [writeSeq] is `<= seqHigh` are considered visible to that front-end.
   final int writeSeq;
@@ -76,7 +76,7 @@ final class StoredFile {
 ///
 /// ## Write-sequence model
 ///
-/// Every committed write increments [nextWriteSeq] and stamps the resulting
+/// Every committed write increments `_nextWriteSeq` and stamps the resulting
 /// [StoredFile] with that sequence number. The sequence is strictly monotonic.
 /// Front-ends that implement eventual consistency track a per-observer
 /// *visibility cursor* — the highest `writeSeq` whose files are currently
@@ -217,7 +217,7 @@ final class SharedCloudBackend {
   /// including [seqHigh], keyed by path.
   ///
   /// Used by [CloudSemanticsAdapter.visibleWriteSeq] and
-  /// [ReconciliationAgent.visibleExpectedStateFor] to determine which writes
+  /// `ReconciliationAgent.visibleExpectedStateFor` to determine which writes
   /// are visible to a particular front-end.
   Map<String, StoredFile> filesVisibleUpTo(int seqHigh) {
     final result = <String, StoredFile>{};

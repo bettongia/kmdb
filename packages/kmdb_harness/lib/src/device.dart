@@ -351,7 +351,7 @@ final class Device {
   /// maximum propagation delay.
   ///
   /// No-op when the underlying adapter is not a [CloudSemanticsAdapter]
-  /// (e.g. [MemorySyncAdapter], [SharedBackendAdapter]).
+  /// (e.g. `MemorySyncAdapter`, `SharedBackendAdapter`).
   ///
   /// Called by [TestManager._settleAndVerifyConvergence] before the final
   /// sync pass to ensure all writes are visible before asserting global

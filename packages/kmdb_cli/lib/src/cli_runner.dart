@@ -100,7 +100,7 @@ final _commands = <String, CliCommand>{
 
 /// Entry point for the KMDB CLI.
 ///
-/// [KmdbCli.run] is called from [bin/kmdb.dart]. It parses global flags,
+/// [KmdbCli.run] is called from `bin/kmdb.dart`. It parses global flags,
 /// opens the database, and dispatches to the appropriate [CliCommand].
 ///
 /// ## Invocation forms

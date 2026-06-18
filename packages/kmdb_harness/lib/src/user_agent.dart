@@ -182,11 +182,11 @@ final class UserAgent {
   /// Returns the next sequential action ID.
   int _nextId() => _nextActionId++;
 
-  /// Generates a [CreateDb] action for [deviceIndex].
+  /// Generates a [ActionType.createDb] action for [deviceIndex].
   Action createDb(int deviceIndex) =>
       Action(id: _nextId(), deviceId: deviceIndex, type: ActionType.createDb);
 
-  /// Generates a [CreateCollection] action for [deviceIndex].
+  /// Generates a [ActionType.createCollection] action for [deviceIndex].
   ///
   /// The collection name is derived deterministically from the device index
   /// and a counter so that all devices use the same set of collection names

@@ -97,8 +97,8 @@ final class DocSizeDistribution {
 /// Velocity preset index, controlling the rate and concurrency of actions.
 ///
 /// Presets are convenience shorthands that expand to specific
-/// [actionsPerMinute], [simultaneousDevices], [syncIntervalSeconds], and
-/// [syncAfterWrites] values when applied to a [HarnessConfig].
+/// [HarnessConfig.actionsPerMinute], [HarnessConfig.simultaneousDevices], [HarnessConfig.syncIntervalSeconds], and
+/// [HarnessConfig.syncAfterWrites] values when applied to a [HarnessConfig].
 enum VelocityPreset {
   /// Preset 1 — 2 actions/min, 1 device, sync every 300 s or 20 writes.
   one,
@@ -119,7 +119,7 @@ enum VelocityPreset {
 
 /// Harness configuration for a single test run.
 ///
-/// At least one of [syncIntervalSeconds] or [syncAfterWrites] must be set
+/// At least one of [HarnessConfig.syncIntervalSeconds] or [HarnessConfig.syncAfterWrites] must be set
 /// (either directly or via [velocityPreset]).
 ///
 /// ## Example — preset 1 configuration (single shared adapter)
@@ -157,8 +157,8 @@ final class HarnessConfig {
   /// Creates a [HarnessConfig].
   ///
   /// Either supply a [velocityPreset] (which expands to concrete values for
-  /// [actionsPerMinute], [simultaneousDevices], [syncIntervalSeconds], and
-  /// [syncAfterWrites]) or supply those values directly. Direct values override
+  /// [HarnessConfig.actionsPerMinute], [HarnessConfig.simultaneousDevices], [HarnessConfig.syncIntervalSeconds], and
+  /// [HarnessConfig.syncAfterWrites]) or supply those values directly. Direct values override
   /// preset values. When [velocityPreset] is `null`, all knobs must be provided
   /// manually.
   ///
@@ -166,7 +166,7 @@ final class HarnessConfig {
   /// [syncAdapter] is a convenience shorthand: it wraps the single instance in
   /// a factory that ignores the device index. [syncAdapterFactory] receives the
   /// 0-based device index on each call, allowing per-device adapters that all
-  /// front a single shared backend (e.g. [SharedCloudBackend]).
+  /// front a single shared backend (e.g. `SharedCloudBackend`).
   ///
   /// Throws [ArgumentError] if:
   /// - neither a sync interval nor a sync-after-writes value can be resolved

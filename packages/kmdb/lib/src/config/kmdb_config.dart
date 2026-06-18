@@ -39,7 +39,7 @@ typedef FtsIndexRecord = ({
 
 /// An embedding model configuration stored in the KMDB config.
 ///
-/// The model is referenced by its catalog identifier ([modelId]) so that the
+/// The model is referenced by its catalog identifier (`modelId`) so that the
 /// correct [ModelSpec] can be looked up in `ModelCatalog` without hardcoding
 /// paths. The [type] field is always `"onnx"` for ONNX Runtime-backed models.
 ///
@@ -51,6 +51,9 @@ typedef FtsIndexRecord = ({
 /// instead of `"modelId"`. Reading such a config produces a [FormatException]
 /// with a migration message directing the user to replace `modelPath` with
 /// `modelId` naming a catalog model.
+///
+/// The `type` and `modelId` named fields are accessed as record members:
+/// `config.type` and `config.modelId`.
 typedef EmbeddingModelConfig = ({String type, String modelId});
 
 /// Manages the per-database configuration stored at
@@ -172,7 +175,7 @@ final class KmdbConfig {
 
   /// Loads (or creates) a [KmdbConfig] from [store].
   ///
-  /// If [store.read] returns `null` (file not present), an empty config is
+  /// If [KmdbConfigStore.read] returns `null` (file not present), an empty config is
   /// returned backed by [store].  If the file exists but contains corrupt JSON
   /// or an invalid structure, a [FormatException] is thrown with a descriptive
   /// message.

@@ -22,7 +22,7 @@ import 'dart:typed_data';
 /// [MethodChannel], while test implementations (e.g. `FakeICloudSyncChannel`)
 /// operate entirely in Dart over an in-memory backend.
 ///
-/// Every method mirrors one of the six [SyncStorageAdapter] operations at the
+/// Every method mirrors one of the six `SyncStorageAdapter` operations at the
 /// channel boundary. Arguments are primitive types that serialise cleanly over
 /// the MethodChannel codec (path strings, [Uint8List] bytes, nullable ETag
 /// strings, nullable filename lists).

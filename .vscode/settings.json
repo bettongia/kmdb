@@ -1,5 +1,6 @@
 {
   "makefile.configureOnOpen": false,
   "copyrightInserter.holder": "The Authors",
-  "dart.analysisExcludedFolders": [".worktrees", ".claude/worktrees"]
+  "dart.analysisExcludedFolders": [".worktrees", ".claude/worktrees"],
+  "livePreview.defaultPreviewPath": "/site/index.html"
 }
