@@ -18,6 +18,7 @@ import '../engine/kvstore/kv_store_impl.dart';
 import '../engine/platform/storage_adapter_interface.dart';
 import '../engine/platform/storage_adapter_native.dart';
 import 'package:betto_inferencing/betto_inferencing.dart';
+import 'package:betto_zstd/betto_zstd.dart' show ZstdSimple;
 import '../search/fts_index_definition.dart';
 import '../search/lexical/fts_manager.dart';
 import '../search/semantic/vec_manager.dart';
@@ -256,6 +257,13 @@ final class KmdbDatabase {
   /// `retentionDays: 90`). Pass `VersionConfig.disabled` to disable versioning
   /// for a collection entirely.
   ///
+  /// [wasmUrl] is the URL from which the Zstd WASM module is loaded on the web
+  /// platform. On native platforms this parameter is ignored. Defaults to the
+  /// standard Flutter asset path (`assets/packages/betto_zstd/assets/zstd.wasm`),
+  /// which is correct for Flutter apps that declare `betto_zstd` as a dependency.
+  /// Override only when serving the WASM from a custom location (e.g. a pure-Dart
+  /// web server that hosts assets at a different path).
+  ///
   /// Throws [LockException] if another process holds the database lock.
   static Future<KmdbDatabase> open({
     required String path,
@@ -265,6 +273,7 @@ final class KmdbDatabase {
     Future<void> Function(List<IndexRebuildEvent> events)?
     onIndexRebuildRequired,
     KvStoreConfig config = const KvStoreConfig(),
+    String? wasmUrl,
     String deviceId = '00000000',
     List<FtsIndexDefinition> ftsIndexes = const [],
     List<VecIndexDefinition> vecIndexes = const [],
@@ -276,6 +285,25 @@ final class KmdbDatabase {
     onSchemaVersionMismatch,
     Map<String, VersionConfig> versionConfigs = const {},
   }) async {
+    // Initialise the Zstd compression module before any I/O begins.
+    //
+    // On web this loads and instantiates the WASM module (idempotent — safe to
+    // call multiple times). On native it is a no-op Future that resolves
+    // immediately. Must be the first await in open() so that tryCompress and
+    // decompress (called synchronously from ValueCodec.encode/decode) are always
+    // backed by an initialised compressor.
+    //
+    // Ordering rationale: KvStoreImpl.open() and the schema/meta loads that
+    // follow do NOT route through ValueCodec (MetaStore uses raw CBOR). The
+    // first compressed-value decode paths (KmdbCollection reads, IndexManager
+    // lazy build, versioning) are only reachable after open() returns, so
+    // placing init() before KvStoreImpl.open() is both sufficient and correct.
+    // If a future change causes documents to be decoded during recovery, this
+    // comment is the signal that init() must still precede that code.
+    await ZstdSimple.init(
+      wasmUrl: wasmUrl ?? 'assets/packages/betto_zstd/assets/zstd.wasm',
+    );
+
     // Validate that an embedding model is provided when vector indexes are
     // requested. We check this before any I/O so the error is immediate.
     if (vecIndexes.isNotEmpty && embeddingModel == null) {

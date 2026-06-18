@@ -14,7 +14,7 @@
 
 // Native compression implementation.
 //
-// Uses Zstd (via kmdb_zstd's FFI bindings compiled from source) for encoding
+// Uses Zstd (via betto_zstd's FFI bindings compiled from source) for encoding
 // and decoding. Deflate is no longer supported — values written with flag
 // 0x02 by older builds will cause an ArgumentError at the CompressionFlag
 // decode boundary, surfacing the incompatibility clearly.
