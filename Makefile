@@ -55,6 +55,13 @@ e2e_test:
 	melos e2e-test 2>&1
 .PHONY: e2e_test
 
+## Run Zstd web compression tests in Chrome (requires Chrome to be installed).
+## Uses --no-sandbox so it works in CI Linux environments (see dart_test.yaml).
+## Set CHROME_EXECUTABLE=chrome on Linux CI to point to the installed binary.
+web_test:
+	cd packages/kmdb && dart test --platform chrome test/encoding/value_codec_test.dart
+.PHONY: web_test
+
 license_check:
 	melos licenses
 

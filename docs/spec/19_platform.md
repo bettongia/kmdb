@@ -175,7 +175,7 @@ the lock handle — the handle is released by the Worker's termination.
 | Feature             | Native (iOS/Android/macOS/Windows/Linux) | Web (OPFS via SAHPool)           |
 | :------------------ | :--------------------------------------- | :------------------------------- |
 | Core LSM engine     | ✓                                        | ✓                                |
-| Zstd compression    | ✓ (FFI via betto_zstd)                   | Reads `0x00` only; writes uncompressed (WASM path not yet wired — see §5) |
+| Zstd compression    | ✓ (FFI via betto_zstd)                   | ✓ (WASM via betto_zstd; init at open time) |
 | Sync                | ✓                                        | ✓                                |
 | Lexical text search | ✓                                        | ✗ (deferred)                     |
 | Semantic search     | ✓ (ONNX via betto_inferencing)           | ✗ (deferred)                     |

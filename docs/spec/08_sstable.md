@@ -152,11 +152,11 @@ purposes.
 
 | Flag | Algorithm | Platform | Notes                                        |
 | :--- | :-------- | :------- | :------------------------------------------- |
-| 0x00 | None      | All      | When value is small, already compressed, or written on web. |
-| 0x01 | Zstd      | Native   | Level 3. Via `betto_zstd` (dart:ffi to libzstd). |
+| 0x00 | None      | All      | When value is small or already compressed.   |
+| 0x01 | Zstd      | All      | Level 3. Via `betto_zstd` (FFI on native; WASM on web). |
 
-Web stores values uncompressed (`0x00`); the WASM Zstd path is not yet wired
-(see §5). Deflate (`0x02`) was removed as a pre-release clean break —
+Both native and web platforms write Zstd (`0x01`) for compressible documents.
+Deflate (`0x02`) was removed as a pre-release clean break —
 `CompressionFlag.fromByte` rejects `0x02` with `ArgumentError`. See §5 for the
 full encoding pipeline.
 

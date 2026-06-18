@@ -161,14 +161,33 @@ void main() {
       expect(bytes[0], equals(0x00));
     });
 
-    test('large doc is compressed on native (flag 0x01 — Zstd)', () {
-      // A highly repetitive payload compresses well.
+    test('large doc is compressed with Zstd (flag 0x01) on native and web', () {
+      // A highly repetitive payload compresses well on both native (FFI) and web
+      // (WASM). After betto_zstd WASM was wired in (plan_betto_zstd_web_compression),
+      // both platforms compress large documents — the native-only caveat no longer
+      // applies. When run under `dart test` (VM), the native path is exercised.
+      // When run under `dart test -p chrome`, the WASM path is exercised.
       final doc = {
         for (var i = 0; i < 20; i++) 'key_$i': 'value_repeated_$i' * 5,
       };
       final bytes = ValueCodec.encode(doc);
-      // On native (dart:io) this must be Zstd.
       expect(bytes[0], equals(CompressionFlag.zstd.byte));
+    });
+
+    test('large doc round-trips correctly with Zstd flag (native and web)', () {
+      // Verifies that encode produces the Zstd flag byte (0x01) for a large,
+      // compressible document, and that decode recovers the original data.
+      // This test passes on both the VM (native FFI) and Chrome (WASM), confirming
+      // symmetric Zstd support on all platforms.
+      final doc = {
+        for (var i = 0; i < 20; i++) 'field_$i': 'hello_world_$i' * 10,
+      };
+      final encoded = ValueCodec.encode(doc);
+      // First byte must be the Zstd flag — both native and web should compress
+      // this repetitive payload.
+      expect(encoded[0], equals(CompressionFlag.zstd.byte));
+      // Decode must recover the original document exactly.
+      expect(ValueCodec.decode(encoded), equals(doc));
     });
 
     test('incompressible data falls back to no compression (flag 0x00)', () {
@@ -252,6 +271,9 @@ void main() {
 
     test('throws on truncated zstd payload', () {
       // 0x01 = zstd, followed by garbage bytes that cannot be decompressed.
+      // Native throws ZstdException (from betto_zstd FFI); web throws
+      // ZstdException (from betto_zstd WASM). The `anything` matcher accepts
+      // both — no platform-specific guard needed.
       final bad = Uint8List.fromList([0x01, 0xDE, 0xAD, 0xBE, 0xEF]);
       expect(() => ValueCodec.decode(bad), throwsA(anything));
     });
