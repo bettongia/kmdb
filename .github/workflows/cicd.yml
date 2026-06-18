@@ -38,8 +38,9 @@ jobs:
       #    grep -E '^\[.*\]:.*lines\.\.\.\.\.\.' coverage.log >> $GITHUB_STEP_SUMMARY
       #    echo '```' >> $GITHUB_STEP_SUMMARY
 
-      #- name: Benchmarks summary
-      #  run: cat benchmarks.log >> $GITHUB_STEP_SUMMARY
+      - run: make benchmarks
+      - name: Benchmarks summary
+        run: cat benchmarks.log >> $GITHUB_STEP_SUMMARY
 
   # Resolve Flutter req's first
   # test-web:

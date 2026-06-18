@@ -38,9 +38,9 @@ benchmarks:
 tests_all: test e2e_test
 .PHONY: tests_all
 
-tests_dart:
-
-.PHONY: tests_dart
+test_dart:
+	melos test_dart --no-select
+.PHONY: test_dart
 
 test: test.log
 .PHONY: test

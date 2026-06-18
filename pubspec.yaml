@@ -67,7 +67,9 @@ melos:
 
     test_dart:
       description: Test all pure Dart packages
-      exec: dart test
+      run: dart test
+      exec:
+        concurrency: 4
       packageFilters:
         dirExists: test
         flutter: false
