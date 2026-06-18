@@ -133,3 +133,13 @@ export 'src/vault/vault_storage_adapter.dart' show VaultStorageAdapter;
 export 'src/vault/local_directory_vault_adapter_stub.dart'
     if (dart.library.io) 'src/vault/local_directory_vault_adapter.dart'
     show LocalDirectoryVaultAdapter;
+
+// ── Encryption (Phase 12) ─────────────────────────────────────────────────────
+export 'src/encryption/dek_cache.dart' show DekCache, InMemoryDekCache;
+export 'src/encryption/encryption_blob.dart' show EncryptionBlob;
+export 'src/encryption/encryption_config.dart'
+    show EncryptionConfig, EncryptionSetupResult;
+export 'src/encryption/encryption_error.dart'
+    show EncryptionError, EncryptionErrorCode;
+export 'src/encryption/encryption_provider.dart'
+    show EncryptionProvider, AesGcmEncryptionProvider;

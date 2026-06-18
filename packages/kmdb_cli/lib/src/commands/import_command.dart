@@ -133,7 +133,7 @@ final class ImportCommand extends CliCommand {
         }
       }
 
-      final encoded = ValueCodec.encode(doc);
+      final encoded = await ValueCodec.encode(doc);
       await ctx.store.put(collection, key, encoded);
       imported++;
     }

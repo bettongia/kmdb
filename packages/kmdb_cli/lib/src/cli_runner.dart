@@ -19,6 +19,7 @@ import 'package:args/command_runner.dart';
 import 'package:kmdb/kmdb.dart';
 
 import 'commands/collections_command.dart';
+import 'commands/encryption_command.dart';
 import 'commands/command.dart';
 import 'commands/create_collection_command.dart';
 import 'commands/compact_command.dart';
@@ -94,6 +95,7 @@ final _commands = <String, CliCommand>{
     const VaultCommand(),
     const VersionsCommand(),
     const PromoteCommand(),
+    const EncryptionCommand(),
   ])
     cmd.name: cmd,
 };
@@ -138,6 +140,8 @@ abstract final class KmdbCli {
     var modeStr = 'json';
     String? outputPath;
     String? readPath;
+    String? passphrase;
+    String? recoveryCode;
     var continueOnError = false;
     var showVersion = false;
     var showHelp = false;
@@ -189,6 +193,28 @@ abstract final class KmdbCli {
               return 1;
             }
             outputPath = args[i];
+          }
+        case '--passphrase':
+          if (inlineValue != null) {
+            passphrase = inlineValue;
+          } else {
+            i++;
+            if (i >= args.length) {
+              io.stderr.writeln('Error: --passphrase requires a value.');
+              return 1;
+            }
+            passphrase = args[i];
+          }
+        case '--recovery-code':
+          if (inlineValue != null) {
+            recoveryCode = inlineValue;
+          } else {
+            i++;
+            if (i >= args.length) {
+              io.stderr.writeln('Error: --recovery-code requires a value.');
+              return 1;
+            }
+            recoveryCode = args[i];
           }
         case '--read' || '-r':
           if (inlineValue != null) {
@@ -291,16 +317,73 @@ abstract final class KmdbCli {
       config = KmdbConfig.empty();
     }
 
+    // Build the EncryptionConfig if credentials were supplied. Both flags
+    // cannot be provided simultaneously — validated here so the error is
+    // user-friendly rather than a stack trace from EncryptionConfig().
+    EncryptionConfig? encryptionConfig;
+    String? initRecoveryCode; // set during `init --encrypted` provisioning
+
+    if (passphrase != null && recoveryCode != null) {
+      io.stderr.writeln(
+        'Error: --passphrase and --recovery-code are mutually exclusive.',
+      );
+      return 1;
+    }
+
+    final isInitCommand = remaining.length > 1 && remaining[1] == 'init';
+    final dbAlreadyExists = io.File('$dbPath/CURRENT').existsSync();
+
+    if (passphrase != null && isInitCommand && !dbAlreadyExists) {
+      // `kmdb <db> init --passphrase <pp>` on a new database:
+      // Provision a new encrypted database. Generate the DEK + recovery code
+      // now so the recovery mnemonic can be printed to stdout after the DB
+      // is opened. The provisioning config is used instead of the unlock config.
+      final result = await EncryptionConfig.createResult(
+        passphrase: passphrase,
+      );
+      encryptionConfig = result.config;
+      initRecoveryCode = result.recoveryCode;
+    } else if (passphrase != null) {
+      // `kmdb --passphrase <pp> <db> <command>`: unlock an existing encrypted DB.
+      encryptionConfig = EncryptionConfig(passphrase: passphrase);
+    } else if (recoveryCode != null) {
+      encryptionConfig = EncryptionConfig(recoveryCode: recoveryCode);
+    }
+
     final KmdbDatabase db;
     final bool dbCreated;
     try {
-      (db, dbCreated) = await DatabaseOpener.open(dbPath, config);
+      (db, dbCreated) = await DatabaseOpener.open(
+        dbPath,
+        config,
+        encryptionConfig: encryptionConfig,
+      );
+    } on EncryptionError catch (e) {
+      io.stderr.writeln('Error: $e');
+      return 1;
     } on LockException catch (e) {
       io.stderr.writeln('Error: $e');
       return 1;
     } catch (e) {
       io.stderr.writeln('Error opening database: $e');
       return 1;
+    }
+
+    // If this was an `init --encrypted` provisioning, print the recovery code
+    // now (exactly once — the user must store it safely). Use stderr so it
+    // is not captured by --output redirection.
+    if (initRecoveryCode != null) {
+      io.stderr.writeln('');
+      io.stderr.writeln(
+        '  IMPORTANT: Save this recovery code in a secure location.',
+      );
+      io.stderr.writeln(
+        '  If you forget your passphrase, this is the only way to',
+      );
+      io.stderr.writeln('  recover your data. It cannot be regenerated.');
+      io.stderr.writeln('');
+      io.stderr.writeln('  Recovery code: $initRecoveryCode');
+      io.stderr.writeln('');
     }
 
     final ctx = CommandContext(

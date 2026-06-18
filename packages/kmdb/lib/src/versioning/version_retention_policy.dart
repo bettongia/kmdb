@@ -187,18 +187,17 @@ final class VersionRetentionPolicy implements ReclamationPolicy {
   ///
   /// `$ver:` entries are ALWAYS stored with [RecordType.put] in the internal
   /// key — including delete-versions. The actual delete flag lives inside the
-  /// [VersionEntry] payload. This helper decodes the payload and checks
-  /// [VersionEntry.isDelete]. Returns `false` on any decode failure (fail-safe:
-  /// treat as a live version so it is not incorrectly purged).
+  /// [VersionEntry] payload. This helper calls [VersionEntry.decodeIsDeleteSync]
+  /// which handles the two formats:
+  ///
+  /// - Plaintext (`bytes[0] == 0x00`): decodes CBOR and extracts `isDelete`.
+  /// - Encrypted (`bytes[0] == 0x01`): returns `false` (fail-safe: cannot
+  ///   decrypt synchronously; treat as a put-version so it is not pruned).
+  ///
+  /// Returns `false` on any decode failure (fail-safe: never incorrectly purge).
   static bool _isDeleteVersion(MergeEntry entry) {
     if (entry.value.isEmpty) return false;
-    try {
-      final ve = VersionEntry.decode(entry.value);
-      return ve.isDelete;
-    } catch (_) {
-      // Defensive: malformed entry is treated as a put-version (not deleted).
-      return false;
-    }
+    return VersionEntry.decodeIsDeleteSync(entry.value);
   }
 
   /// Milliseconds per day (used for retentionDays → ms conversion).

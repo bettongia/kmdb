@@ -37,6 +37,8 @@ final db = await KmdbDatabase.open(
   },
   // ── Vault (§24) ──────────────────────────────────────────────────────────
   vaultStore: vaultStore,       // null → vault features disabled
+  // ── Encryption (§31) ─────────────────────────────────────────────────────
+  encryptionConfig: EncryptionConfig(passphrase: 'my-passphrase'), // null → plaintext
   // ── Collection schemas (§25) ─────────────────────────────────────────────
   schemas: [
     CollectionSchema(
@@ -65,6 +67,17 @@ Indexes are **declared, not built**. The `indexes` list registers dot-path
 definitions so the write interception path knows which fields to maintain. No
 index entries are written at open time. An index that is declared but never
 queried incurs zero storage overhead. See §16 for the full index lifecycle.
+
+`encryptionConfig` controls at-rest encryption (see §31). Passing `null` opens
+the database in plaintext mode. `open()` throws an `EncryptionError` in four
+scenarios:
+
+| `EncryptionError.code`               | Trigger |
+| :----------------------------------- | :------ |
+| `databaseIsEncrypted`                | Encrypted database opened without a config |
+| `databaseIsNotEncrypted`             | Config supplied to a plaintext database |
+| `badCredentials`                     | Wrong passphrase or recovery code |
+| `cannotProvisionNonEmptyDatabase`    | Provisioning config supplied to a non-empty database |
 
 ## `KmdbCodec<T>`
 

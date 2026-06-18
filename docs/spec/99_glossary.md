@@ -31,6 +31,14 @@ CancellationToken
   `Future.any()` to wake immediately from a back-off sleep. See §12 —
   Cancellation and Timeout.
 
+Argon2id
+
+: A memory-hard key derivation function (KDF) combining the data-independent
+  Argon2i and data-dependent Argon2d passes. Used in KMDB to derive a Key
+  Encryption Key (KEK) from a user passphrase. Parameters (stored in `enc:blob`):
+  m = 64 MiB, t = 3 rounds, p = 1 lane. The memory-hardness makes brute-force
+  attacks prohibitively expensive. See §31.
+
 CAS (Content-Addressable Storage)
 
 : Storage model where objects are identified by a hash of their content rather
@@ -64,6 +72,21 @@ CRC32C
   differ in CRC32C, they are treated as distinct objects and the incoming
   file is rejected.
 
+DEK (Data Encryption Key)
+
+: A 256-bit random key used to encrypt and decrypt all document values in an
+  encrypted KMDB database. Generated once at provisioning time and stored only
+  in wrapped (encrypted) form inside `enc:blob`. The DEK never leaves process
+  memory in plaintext; it is held in a `DekCache` for the duration of the
+  session. See §31.
+
+DekCache
+
+: A session-scoped cache for the decrypted DEK, so Argon2id is only run once
+  per `KmdbDatabase.open()`. The default `InMemoryDekCache` stores the DEK in
+  process memory. The `FlutterSecureDekCache` from the `kmdb_flutter` add-on
+  stores it in iOS Keychain / Android Keystore. See §31.
+
 Embedding
 
 : A dense vector representation of a text string produced by a neural language
@@ -71,6 +94,14 @@ Embedding
   concepts produce similar vectors, enabling cosine similarity search. KMDB
   embeddings are 384-dimensional float32 vectors, quantized to SQ8 for
   storage. See §22.
+
+enc:blob
+
+: A CBOR-encoded record stored in the `$meta` namespace under the key `enc:blob`.
+  Contains the Argon2id salt, Argon2id parameters, and the DEK wrapped under
+  two KEKs (passphrase-derived and recovery-derived). Written at provisioning
+  time and read at every encrypted database open. Absent in plaintext databases.
+  See §31.
 
 Generation counter
 
@@ -117,6 +148,13 @@ ISS pattern (Identity–Size–Secondary)
   tertiary discriminator. An incoming blob must match all three before it is
   accepted as a duplicate of an existing vault object.
 
+KEK (Key Encryption Key)
+
+: A 256-bit key used to wrap (encrypt) the DEK. KMDB derives two KEKs:
+  one from the user's passphrase via Argon2id, and one from a random recovery
+  entropy via HKDF-SHA256. Both wrapped DEK copies are stored in `enc:blob`.
+  See §31.
+
 KVLT
 
 : The binary archive format used to package a document with its vault
@@ -161,6 +199,14 @@ Pin (vault)
 : A device-local entry in the `VAULT_OFFLINE` flat file that signals "keep
   this blob downloaded on this device." Pins do not affect the GC lifecycle;
   a pinned object with zero references is still tombstoned and deleted. See §24.
+
+Recovery code
+
+: A 16-word mnemonic encoding 128 bits of entropy, used as an alternative
+  credential to unlock an encrypted KMDB database. Generated once at
+  provisioning time and shown to the user exactly once — it is not stored
+  anywhere in the database. Uses a fixed 256-word wordlist (one word per byte
+  value). Decode is case-insensitive and whitespace-tolerant. See §31.
 
 RRF (Reciprocal Rank Fusion)
 
@@ -246,6 +292,13 @@ WAL (Write-Ahead Log)
   fsynced to the WAL before updating the memtable — the WAL entry is the commit
   point. On recovery, WAL entries newer than the highest sequence number in the
   Manifest are replayed to restore the memtable to its pre-crash state. See §7.
+
+Wrapped DEK
+
+: The DEK encrypted under a KEK using AES-256-GCM with a random nonce. Stored
+  as `nonce(12B) || ciphertext || tag(16B)` in the `enc:blob` (one copy per
+  KEK: passphrase-derived and recovery-derived). The term "wrapped" follows the
+  NIST key wrapping convention. See §31.
 
 XXH64
 

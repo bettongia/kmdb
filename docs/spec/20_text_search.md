@@ -11,9 +11,13 @@ hybrid ranking mode that combines them:
 | `semantic`  | Flat vector index | Cosine similarity          | Conceptual meaning, paraphrases       |
 | `hybrid`    | Both              | Reciprocal Rank Fusion     | General-purpose search                |
 
-Text search indexes are **device-local** — they are never synced (§20.7). Each
-device independently builds and maintains its own indexes against the documents
-it holds.
+Text search indexes are **device-local in intent** — each device independently
+builds and maintains its own indexes against the documents it holds, and a
+device never *relies* on a peer's index. However, their backing namespaces are
+**not excluded from upload**: `$fts:*` and `$vec:*` values ride in uploaded
+SSTables and reach cloud storage like every other system namespace (see
+§20.7 and §12). Their confidentiality in the cloud is provided by value-level
+encryption (§31), not by upload filtering.
 
 See §21 (Lexical Search), §22 (Semantic Search), and §23 (Hybrid Search) for
 the detail of each mode.
@@ -202,10 +206,9 @@ The first positional argument after `search` is inspected: if it matches a known
 subcommand name (`list`, `create`, `info`, `delete`, `build`) the invocation is
 treated as index management; otherwise it is treated as a query.
 
-## Sync Exclusion
+## Sync Behaviour
 
-All text search system namespaces are `$`-prefixed and are excluded from sync by
-the same rule that excludes `$index:*` and `$meta`:
+Text search uses the following `$`-prefixed system namespaces:
 
 ```
 $fts:          — lexical base index entries (term → tf per document)
@@ -217,17 +220,40 @@ $vec:corpus:   — semantic corpus statistics (n)
 $vec:truncated: — semantic truncation markers
 ```
 
-Text search indexes are rebuilt locally on each device from the documents that
-device holds. They are never uploaded in SSTables or referenced in high-water
-mark files.
+These namespaces are written through the shared `WriteBatch` → memtable →
+SSTable path, so their values **are uploaded** during sync. As §12 records,
+sync is whole-file at the SSTable level: `SyncEngine.push` uploads each local
+SSTable's bytes unchanged and the consolidation coordinator merges whole
+SSTables. There is no upload-time, server-side, or per-entry namespace filter —
+the `syncNamespaces` parameter restricts only which user collections the caller
+intends to replicate and is not consulted in `push`, `pull`, or consolidation.
+Consequently every `$fts:*` and `$vec:*` entry rides in uploaded SSTables and
+reaches cloud storage, alongside `$meta`, `$index:*`, `$ver:*`, and `$vault`.
+
+Confidentiality of these values in the cloud is provided by **value-level
+encryption** (§31), not by upload filtering: when database encryption is
+enabled, every value written through `ValueCodec` — including all `$fts:*` and
+`$vec:*` entries — is stored as ciphertext in SSTables, so the uploaded bytes
+carry no plaintext index content.
+
+Text search indexes nevertheless remain **device-local in operation**. A device
+does not search a peer's uploaded index entries directly; each device rebuilds
+and maintains its own indexes from the documents it holds (see Post-Sync Index
+Maintenance below), and high-water mark files track SSTables, not index state.
+
+> **Future work.** Upload-time namespace filtering — stripping `$fts:*`,
+> `$vec:*`, and other excluded-namespace entries before upload, or keeping them
+> out of synced SSTables entirely — is not implemented. If it is added, this
+> section and §12 must be updated together to describe the actual filter. Until
+> then, do not document exclusion behaviour the code does not perform.
 
 ## Post-Sync Index Maintenance
 
-Text search indexes are device-local and are never synced (§20.7). When
-documents arrive via sync they bypass the Query Layer's write interception path
-and are written directly into the LSM engine as SSTables. FTS and vector indexes
-are therefore not updated inline and must be brought current as a separate
-post-sync step.
+Each device maintains its own text search indexes; it does not query index
+entries that arrived from a peer (§20.7). When documents arrive via sync they
+bypass the Query Layer's write interception path and are written directly into
+the LSM engine as SSTables. FTS and vector indexes are therefore not updated
+inline and must be brought current as a separate post-sync step.
 
 ### The `syncing` Lifecycle State
 

@@ -194,7 +194,7 @@ final class UtilCommand extends CliCommand {
           final coll = KeyCodec.decodeNamespace(Uint8List.fromList(entry.key));
           if (!coll.startsWith(r'$')) {
             try {
-              valueMap['decoded'] = ValueCodec.decode(
+              valueMap['decoded'] = await ValueCodec.decode(
                 Uint8List.fromList(entry.value),
               );
             } catch (e) {
@@ -274,8 +274,11 @@ final class UtilCommand extends CliCommand {
 
     if (full) {
       // Full output: every record plus optional corruption marker.
-      // When data=true, augment each put record's value map with decoded content.
-      final recordMaps = records.map((r) {
+      // When data=true, augment each put record's value map with decoded
+      // content. ValueCodec.decode is async (Phase 12), so we use an async
+      // for loop instead of .map().
+      final recordMaps = <Map<String, dynamic>>[];
+      for (final r in records) {
         final map = r.toMap();
         if (data && r.value.isNotEmpty && !r.namespace.startsWith(r'$')) {
           // Only attempt ValueCodec decoding for user collections. System
@@ -285,7 +288,7 @@ final class UtilCommand extends CliCommand {
             map['value'] as Map<String, dynamic>,
           );
           try {
-            valueMap['decoded'] = ValueCodec.decode(
+            valueMap['decoded'] = await ValueCodec.decode(
               Uint8List.fromList(r.value),
             );
           } catch (e) {
@@ -293,8 +296,8 @@ final class UtilCommand extends CliCommand {
           }
           map['value'] = valueMap;
         }
-        return map;
-      }).toList();
+        recordMaps.add(map);
+      }
 
       ctx.writeValue({
         'file': filename,

@@ -15,7 +15,6 @@
 import 'dart:io' as io;
 
 import 'package:kmdb/kmdb.dart';
-
 import 'package:kmdb/kmdb_config.dart';
 
 /// Opens a [KmdbDatabase] from a filesystem path.
@@ -51,14 +50,22 @@ abstract final class DatabaseOpener {
   /// [KmdbDatabase.open]. Pass [KmdbConfig.empty] when the config file is
   /// absent or cannot be parsed.
   ///
+  /// [encryptionConfig] is the optional encryption credentials. Pass `null` for
+  /// plaintext databases. When non-null the bootstrap reads `enc:blob` from
+  /// `$meta` and derives the DEK; if the database is not encrypted an
+  /// [EncryptionError] is thrown.
+  ///
   /// Creates the directory if it does not exist.
   ///
   /// Throws [LockException] if another process has the database open.
+  /// Throws [EncryptionError] if the encryption state mismatches the supplied
+  /// config.
   /// Throws [ArgumentError] if [dbPath] is empty.
   static Future<(KmdbDatabase, bool created)> open(
     String dbPath,
-    KmdbConfig config,
-  ) async {
+    KmdbConfig config, {
+    EncryptionConfig? encryptionConfig,
+  }) async {
     if (dbPath.isEmpty) {
       throw ArgumentError.value(
         dbPath,
@@ -114,6 +121,7 @@ abstract final class DatabaseOpener {
       indexes: indexDefinitions,
       ftsIndexes: ftsDefinitions,
       // Schemas are loaded automatically from $meta — no caller parameter needed.
+      encryptionConfig: encryptionConfig,
     );
 
     return (db, created);

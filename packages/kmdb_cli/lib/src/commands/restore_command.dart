@@ -106,7 +106,7 @@ final class RestoreCommand extends CliCommand {
         return false;
       }
 
-      final encoded = ValueCodec.encode(doc);
+      final encoded = await ValueCodec.encode(doc);
       await ctx.store.put(currentCollection, '$keyRaw', encoded);
       imported++;
     }

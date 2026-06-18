@@ -267,7 +267,8 @@ final class SearchCommand extends CliCommand {
       if (bytes == null) return null;
       // Inject _id from the docId — documents are stored without _id in
       // the value bytes; the key is the canonical identity.
-      return ValueCodec.decode(bytes)..['_id'] = docId;
+      return await ValueCodec.decode(bytes)
+        ..['_id'] = docId;
     }
 
     // Determine whether hybrid mode would be active for this collection.

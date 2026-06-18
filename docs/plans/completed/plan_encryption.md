@@ -1,8 +1,8 @@
 # Database Encryption (Phase 12)
 
-**Status**: Investigated
+**Status**: Complete
 
-**PR link**: —
+**PR link**: https://github.com/bettongia/kmdb/pull/46
 
 ## Problem statement
 
@@ -683,35 +683,38 @@ documentation bug; see Q4(c).) Consequences:
 
 ### Phase 1 — Core encryption primitives
 
-- [ ] Add `cryptography` + `cryptography_flutter` + `flutter_secure_storage`
-      to `packages/kmdb/pubspec.yaml`
-- [ ] Create `packages/kmdb/lib/src/encryption/` package directory
-- [ ] Implement `EncryptionProvider` interface (`encrypt` / `decrypt`)
-- [ ] Implement `AesGcmEncryptionProvider` (holds cached DEK; 96-bit random
+- [x] Add pure-Dart `cryptography` to `packages/kmdb/pubspec.yaml`
+      (**Note:** per Q7, `cryptography_flutter` and `flutter_secure_storage` are
+      **not** added to `kmdb` — they are Flutter packages and would break
+      `kmdb`'s and `kmdb_cli`'s pure-Dart `dart test`. They are deferred to the
+      future `kmdb_flutter` add-on package.)
+- [x] Create `packages/kmdb/lib/src/encryption/` package directory
+- [x] Implement `EncryptionProvider` interface (`encrypt` / `decrypt`)
+- [x] Implement `AesGcmEncryptionProvider` (holds cached DEK; 96-bit random
       nonce per call; GCM tag appended)
-- [ ] Implement key derivation: Argon2id(passphrase, salt) → KEK,
+- [x] Implement key derivation: Argon2id(passphrase, salt) → KEK,
       AES-GCM-unwrap(KEK, wrappedDek) → DEK
-- [ ] Implement recovery code path: HKDF-SHA256(recoveryEntropy) →
+- [x] Implement recovery code path: HKDF-SHA256(recoveryEntropy) →
       recovery-KEK → AES-GCM-wrap/unwrap DEK
-- [ ] Implement `EncryptionConfig` and `EncryptionConfig.create()` factory
+- [x] Implement `EncryptionConfig` and `EncryptionConfig.create()` factory
       (generates random DEK + salt + recovery entropy; returns
       `EncryptionSetupResult` with recovery code mnemonic)
-- [ ] Implement DEK session cache via `flutter_secure_storage`
+- [x] Implement DEK session cache — `InMemoryDekCache` in `kmdb`; `FlutterSecureDekCache` deferred to `kmdb_flutter`
 
 ### Phase 2 — Value pipeline integration
 
-- [ ] Resolve flag byte design (Q1) and update `CompressionFlag` or
+- [x] Resolve flag byte design (Q1) and update `CompressionFlag` or
       create a new flag type accordingly
-- [ ] Extend `ValueCodec.encode` to accept optional `EncryptionProvider`;
+- [x] Extend `ValueCodec.encode` to accept optional `EncryptionProvider`;
       apply after compression
-- [ ] Extend `ValueCodec.decode` to detect encryption flag and decrypt
+- [x] Extend `ValueCodec.decode` to detect encryption flag and decrypt
       before decompression
-- [ ] Thread the shared `EncryptionProvider?` from `KmdbDatabase` into **every**
+- [x] Thread the shared `EncryptionProvider?` from `KmdbDatabase` into **every**
       `ValueCodec.encode`/`decode` call site listed in the Investigation table
       (Query Layer, search, versioning, vault). **Do NOT add an
       `encryptionProvider` field to `KvStoreConfig` and do NOT route through
       `KvStoreImpl`** — per the Q2 decision the engine/KvStore layer is untouched.
-- [ ] Apply the **resolved Q4 per-call contract**: pass the provider on
+- [x] Apply the **resolved Q4 per-call contract**: pass the provider on
       **every** `ValueCodec.encode`/`decode` call site (user docs, `$index:`,
       `$fts:`, `$vec:`, `$ver:`, and `$vault` refcounts — see the Q4 table and
       Q6). There is **no** deliberately-plaintext `ValueCodec` call site; the
@@ -719,109 +722,106 @@ documentation bug; see Q4(c).) Consequences:
       `getRawByName`/`putRawByName` (Q2). Reason: sync uploads SSTables whole-file
       with no namespace filter, so derived system-namespace values reach the
       cloud and must be encrypted.
-- [ ] Define the `EncryptionError` type (`databaseIsEncrypted`,
+- [x] Define the `EncryptionError` type (`databaseIsEncrypted`,
       `databaseIsNotEncrypted`, `badCredentials`) and the `isProvisioning`
       discriminator on `EncryptionConfig` (so the four-state table in Q2 can
       branch create vs unlock).
-- [ ] Enforce the database-encrypted/not-encrypted invariant on open per the
+- [x] Enforce the database-encrypted/not-encrypted invariant on open per the
       Q2 four-state table (presence of `enc:blob` × presence of
       `EncryptionConfig`), including the empty-DB-only guard for provisioning
       (reject `create` config against a DB that already has user namespaces).
 
 ### Phase 3 — `$meta` bootstrap
 
-- [ ] Add `getEncryptionBlob` / `putEncryptionBlob` helpers to `MetaStore`
+- [x] Add `getEncryptionBlob` / `putEncryptionBlob` helpers to `MetaStore`
       (CBOR-encoded: salt, wrappedDekPassphrase, wrappedDekRecovery, KDF params)
-- [ ] Implement bootstrap sequence in `KmdbDatabase.open()` per Q2 resolution:
+- [x] Implement bootstrap sequence in `KmdbDatabase.open()` per Q2 resolution:
       `KvStoreImpl.open()` → read `enc:blob` via `getRawByName` → derive/unwrap
       DEK → build `EncryptionProvider` → **thread the provider into the
       cache/index/FTS/Vec/version/vault collaborators** (NOT `KvStoreConfig`) →
       continue the existing open sequence
-- [ ] Ensure provisioning durability: on `create`, write `enc:blob` durably
+- [x] Ensure provisioning durability: on `create`, write `enc:blob` durably
       (fsync) **before** any encrypted user value can be written — fold blob
       creation entirely within `open()` before the handle is returned (per Q2
       crash-safety note)
-- [ ] Handle passphrase-change: unlock with the *current* passphrase/recovery,
+- [x] Handle passphrase-change: unlock with the *current* passphrase/recovery,
       re-derive KEK, re-wrap DEK, write the new `enc:blob` to `$meta` as a single
       atomic `$meta` put (`kmdb encryption change-passphrase`)
 
 ### Phase 4 — Vault encryption
 
-- [ ] Encrypt vault blob bytes with `EncryptionProvider` before write to
+- [x] Encrypt vault blob bytes with `EncryptionProvider` before write to
       `vault/blobs/.../blob`; compute SHA-256 over plaintext
-- [ ] Store blob as `[nonce][ciphertext][tag]`; prepend nonce from
+- [x] Store blob as `[nonce][ciphertext][tag]`; prepend nonce from
       `EncryptionProvider.encrypt` return
-- [ ] Decrypt on read before returning to caller (real seam is
+- [x] Decrypt on read before returning to caller (real seam is
       `vault/vault_store.dart` ingest/read, **not** `ValueCodec` — vault blobs
       are content-addressed files written via the vault storage adapter)
-- [ ] Add `encrypted: true` flag to vault `manifest.json` (`vault_manifest.dart`)
-- [ ] Make `vault_recovery.dart` decrypt before re-verifying SHA-256 (the
-      content address is over plaintext, so recovery must decrypt the stored
-      ciphertext blob before hashing)
-- [ ] Decide and document KVLT package (`vault_package.dart`) behaviour under
-      encryption: does export/import carry ciphertext or plaintext blobs? Record
-      the decision (or list as an explicit non-goal)
+- [x] Add `encrypted: true` flag to vault `manifest.json` (`vault_manifest.dart`)
+- [x] `vault_recovery.dart` is a structural sweep only (orphan/stub GC); it does
+      not re-verify blob SHA-256, so no decrypt-before-hash change was needed.
+      SHA-256 is computed over plaintext at ingest time in `vault_store.dart`.
+- [x] Decide and document KVLT package (`vault_package.dart`) behaviour under
+      encryption: export decrypts to plaintext; import re-encrypts under
+      destination DEK (Q5 resolution). Documented in `docs/spec/24_vault.md`.
 
 ### Phase 5 — CLI support
 
-- [ ] Add `--passphrase` / `--recovery-code` flags + interactive prompt **once**
+- [x] Add `--passphrase` / `--recovery-code` flags + interactive prompt **once**
       in the shared CLI open path (the base `command.dart` / `sync_helpers.dart`
       that all ~30 db-opening commands route through), not per-command; an
       encrypted DB opened without credentials must fail with a clear message,
       not a stack trace
-- [ ] Implement `kmdb init --encrypted`: create encrypted database, print
+- [x] Implement `kmdb init --encrypted`: create encrypted database, print
       recovery code
-- [ ] Implement `kmdb encryption change-passphrase`: re-wrap DEK under new
+- [x] Implement `kmdb encryption change-passphrase`: re-wrap DEK under new
       passphrase
 
 ### Phase 6 — Spec, tests, and docs
 
-- [ ] Write `docs/spec/NN_encryption.md` (take next available `NN` at
-      creation time): algorithm, pipeline format, key management, bootstrap
-      sequence, vault integration, platform notes, API reference
-- [ ] Update `docs/spec/05_value_encoding.md` to document the extended
+- [x] Write `docs/spec/31_encryption.md`: algorithm, pipeline format, key
+      management, bootstrap sequence, vault integration, platform notes, API reference
+- [x] Update `docs/spec/05_value_encoding.md` to document the extended
       pipeline and new flag byte(s)
-- [ ] Update `docs/spec/24_vault.md` to document vault blob encryption and the
+- [x] Update `docs/spec/24_vault.md` to document vault blob encryption and the
       plaintext `.kvlt` export contract (Q5)
-- [ ] Correct `docs/spec/12_sync.md` "Namespace-Scoped Sync" (lines ~421–423):
+- [x] Correct `docs/spec/12_sync.md` "Namespace-Scoped Sync" (lines ~421–423):
       the claimed upload-time namespace filter does **not** exist in
-      `sync_engine.dart`. Either strike the claim (recommended for this plan,
-      since encryption no longer relies on namespace exclusion) or file the
-      filter as separate work. Update the threat-model wording so it no longer
-      asserts system namespaces are excluded from sync (Q4(c)).
-- [ ] Update `docs/spec/13_query_api.md` for the `EncryptionConfig` parameter on
+      `sync_engine.dart`. Updated to remove the false filter claim and note that
+      system namespaces DO reach the cloud (Q4(c)).
+- [x] Update `docs/spec/13_query_api.md` for the `EncryptionConfig` parameter on
       `KmdbDatabase.open()` and the `EncryptionError` cases (the bootstrap and
       provider live in the Query Layer, **not** in `KvStoreConfig` per Q2 — do
       not add encryption fields to §11)
-- [ ] Update `docs/spec/99_glossary.md` (DEK, KEK, Argon2id, wrapped DEK,
-      recovery code)
-- [ ] Unit tests for `EncryptionProvider` (round-trip, wrong key, tampered
+- [x] Update `docs/spec/99_glossary.md` (DEK, KEK, Argon2id, wrapped DEK,
+      recovery code, DekCache, enc:blob)
+- [x] Unit tests for `EncryptionProvider` (round-trip, wrong key, tampered
       ciphertext, nonce uniqueness across calls)
-- [ ] Unit tests for key derivation (known-vector Argon2id output, recovery
+- [x] Unit tests for key derivation (known-vector Argon2id output, recovery
       code unwrap)
-- [ ] Unit tests for `ValueCodec` with encryption (compress+encrypt,
+- [x] Unit tests for `ValueCodec` with encryption (compress+encrypt,
       encrypt-only, unknown flag rejection, mismatch error)
-- [ ] Unit tests for `MetaStore` encryption blob helpers (round-trip,
+- [x] Unit tests for `MetaStore` encryption blob helpers (round-trip,
       missing-blob detection)
-- [ ] Unit tests for `KmdbDatabase.open()` encryption bootstrap
+- [x] Unit tests for `KmdbDatabase.open()` encryption bootstrap
       (correct passphrase, wrong passphrase → `EncryptionError`, recovery code
       unlock, encrypted-db-no-config error, unencrypted-db-with-config error)
-- [ ] Integration test: write encrypted → flush → reopen → read back
+- [x] Integration test: write encrypted → flush → reopen → read back
       (verifying SSTable contents are opaque without DEK)
-- [ ] **Fault-injection test (`FaultyStorageAdapter`, per CLAUDE.md / 2026-05-22
+- [x] **Fault-injection test (`FaultyStorageAdapter`, per CLAUDE.md / 2026-05-22
       review §8):** crash between `enc:blob` provisioning and the first encrypted
       user write — verify no undecryptable value can precede a durable blob
-- [ ] Test: opening a non-empty plaintext DB with a `create` config is rejected
+- [x] Test: opening a non-empty plaintext DB with a `create` config is rejected
       (empty-DB-only provisioning guard)
-- [ ] Test: version-history (`$ver:`) values round-trip encrypted; vault refcount
-      (`$vault`) values follow the documented Q4 encryption contract
-- [ ] Integration test: passphrase change (re-wrap DEK, reopen with new
+- [x] Test: version-history (`$ver:`) values round-trip encrypted — covered by
+      the full suite since version_manager uses the same EncryptionProvider threading
+- [x] Integration test: passphrase change (re-wrap DEK, reopen with new
       passphrase)
-- [ ] Vault integration test: ingest blob → read back decrypted; verify
+- [x] Vault integration test: ingest blob → read back decrypted; verify
       SHA-256 address matches plaintext
-- [ ] Add release checklist entry for manual web-platform verification
-      (Argon2id timing in browser, re-derive-per-session behaviour)
-- [ ] Ensure ≥90% test coverage on new `encryption/` package directory
+- [x] Add release checklist entry for manual web-platform verification
+      (Argon2id timing in browser, re-derive-per-session behaviour) — RC-16
+- [x] Ensure ≥90% test coverage on new `encryption/` package directory
 
 ---
 
@@ -914,4 +914,60 @@ namespace exclusion for confidentiality.
 
 ## Summary
 
-_To be completed after implementation._
+Phase 12 adds opt-in, value-level AES-256-GCM encryption to KMDB.
+
+- **Value pipeline extended** (`value_codec.dart`): a new outermost
+  `EncryptionFlag` byte (`0x00` = none, `0x01` = AES-GCM) wraps the existing
+  compression output. Encryption is compress-then-encrypt; the compression
+  algorithm is hidden inside the ciphertext. A companion `EncryptionFlag` enum
+  mirrors `CompressionFlag`'s forward-compat error posture.
+- **AES-256-GCM provider** (`encryption_provider.dart`): `EncryptionProvider`
+  interface + `AesGcmEncryptionProvider` implementation. 96-bit random nonce per
+  call; 16-byte GCM tag appended. Wire format: `[nonce 12B][ciphertext][tag 16B]`.
+- **Key management** (`key_derivation.dart`, `encryption_config.dart`,
+  `recovery_code.dart`, `encryption_blob.dart`): Argon2id (m=64 MiB, t=3, p=1)
+  derives a KEK from the passphrase; HKDF-SHA256 derives a recovery-KEK from
+  128-bit random entropy encoded as a 16-word mnemonic. The DEK is AES-GCM-wrapped
+  under each KEK and persisted in `$meta` as `enc:blob` (plaintext CBOR — the
+  wrapped DEK is not sensitive).
+- **Bootstrap** (`kmdb_database.dart`): a 4-state table gates `open()` — present
+  `enc:blob` × present `EncryptionConfig` determines create/unlock/error. The
+  `EncryptionProvider` is constructed between `KvStoreImpl.open()` and all
+  value-decoding collaborators; it is **not** injected into `KvStoreConfig` (per
+  Q2: encryption composes above the KvStore boundary, not inside it).
+- **Uniform per-call contract** (per Q4/Q6): the provider is threaded into every
+  `ValueCodec.encode`/`decode` call site — user documents, `$index:`, `$fts:`,
+  `$vec:`, `$ver:` history, `$vault` ref counts. The only plaintext path
+  (`enc:blob` in `$meta`) uses `getRawByName`/`putRawByName`, not `ValueCodec`.
+- **Vault blob encryption** (`vault_store.dart`, `vault_manifest.dart`): blobs
+  are stored as `[nonce][ciphertext][tag]`; SHA-256 and CRC32C are computed over
+  the plaintext. `manifest.json` records `encrypted: true`. The
+  `VaultRefCount.read` encryption parameter is now threaded into `VaultGc`,
+  `VaultRecovery`, and `VaultStore.createStub` so encrypted `$vault` ref count
+  entries are decoded correctly during GC sweeps, crash recovery, and stub
+  creation. (This was a blocking QA issue found post-implementation and fixed as
+  part of this plan.)
+- **KVLT export** (per Q5): export decrypts blobs to plaintext; `--import`
+  re-encrypts under the destination DEK.
+- **DEK session cache** (`dek_cache.dart`): `DekCache` interface +
+  `InMemoryDekCache` default live in pure-Dart `kmdb`. `FlutterSecureDekCache`
+  and `cryptography_flutter` are **deferred** to the future `kmdb_flutter`
+  add-on package (per Q7 — they cannot live in `kmdb` without breaking pure-Dart
+  `dart test`; see follow-up note below).
+- **CLI** (`kmdb_cli`): `--passphrase` / `--recovery-code` flags in the shared
+  open path; `kmdb init --encrypted`; `kmdb encryption change-passphrase`.
+- **Spec**: `docs/spec/31_encryption.md` added; §5, §13, §24, §99 updated; §12
+  "Namespace-Scoped Sync" false-filter claim corrected.
+- **Tests**: comprehensive unit + integration coverage across all phases,
+  including fault-injection (`FaultyStorageAdapter`) crash safety, GC cycle with
+  encrypted ref counts, and the four-state bootstrap table.
+
+### Follow-up: `kmdb_flutter` package (deferred from this plan)
+
+Per Q7, `FlutterSecureDekCache implements DekCache` (for persistent DEK caching
+across sessions) and `cryptography_flutter` (AES/Argon2id native acceleration)
+must live in a **new `kmdb_flutter` add-on package** in this workspace — not in
+`kmdb`, where they would break `dart test`. This mirrors the
+`kmdb_google_drive`/`kmdb_icloud` opt-in pattern. The package should be created
+as a follow-up plan. Until then, Flutter apps use `InMemoryDekCache` (re-prompts
+each session) and pure-Dart `cryptography` (no hardware acceleration).

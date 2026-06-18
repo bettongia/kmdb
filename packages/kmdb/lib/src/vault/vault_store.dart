@@ -18,6 +18,7 @@ library;
 import 'dart:convert';
 import 'dart:typed_data';
 
+import '../encryption/encryption_provider.dart';
 import '../engine/kvstore/kv_store.dart';
 import '../engine/platform/storage_adapter_interface.dart';
 import 'media_type_detector.dart';
@@ -64,18 +65,34 @@ class VaultStore {
   ///
   /// [_adapter] is the storage backend. [_detector] performs MIME type detection
   /// at ingestion time. [uuidGenerator] is used to name staging files — provide
-  /// a custom implementation for testing.
+  /// a custom implementation for testing. [encryption] is the active
+  /// [EncryptionProvider] for this database; when non-null, blobs are stored as
+  /// `[12-byte nonce][ciphertext][16-byte tag]` and the manifest records
+  /// `encrypted: true`. SHA-256 and CRC32C are computed over the **plaintext**
+  /// regardless of encryption.
   VaultStore({
     required this._dbDir,
     required this._adapter,
     this._detector = const FreedesktopMediaTypeDetector(),
     String Function()? uuidGenerator,
+    this.encryption,
   }) : _uuidGen = uuidGenerator ?? _defaultUuid;
 
   final String _dbDir;
   final StorageAdapter _adapter;
   final MediaTypeDetector _detector;
   final String Function() _uuidGen;
+
+  /// Active encryption provider, or `null` for plaintext vault storage.
+  ///
+  /// When non-null, vault blobs are encrypted with AES-256-GCM before being
+  /// written to disk. [EncryptionProvider.encrypt] is called after SHA-256 and
+  /// CRC32C computation — content identity always reflects the plaintext, not
+  /// the ciphertext.
+  ///
+  /// Set at construction time via the [encryption] constructor parameter, or
+  /// wired in by [KmdbDatabase.open] after the encryption bootstrap runs.
+  EncryptionProvider? encryption;
 
   /// Optional sync adapter for on-demand stub hydration.
   ///
@@ -178,17 +195,15 @@ class VaultStore {
     // Ensure staging directory exists.
     await _adapter.createDirectory(stagingDir);
 
-    // Step 1: write to staging.
-    final uuid = _uuidGen();
-    final staging = stagingPath(uuid);
-    await _adapter.writeFile(staging, bytes);
-
-    // Step 2: compute content-identity fields.
+    // Step 1: compute content-identity fields over the PLAINTEXT bytes.
+    // SHA-256 and CRC32C are always over plaintext — the content address must
+    // be stable regardless of whether encryption is active, and vault recovery
+    // verifies the content address after decryption (see §24 and §31).
     final sha256 = _computeSha256(bytes);
     final crc32c = _computeCrc32c(bytes);
     final size = bytes.length;
 
-    // Step 3: check for existing manifest (deduplication).
+    // Step 2: check for existing manifest (deduplication) before any I/O.
     if (await exists(sha256)) {
       // Object already in vault — verify CRC32C to guard against hash
       // collisions and then return the existing ref without any further I/O.
@@ -196,19 +211,37 @@ class VaultStore {
       if (existing.crc32c != crc32c) {
         // CRC32C mismatch: a different file with the same SHA-256 exists.
         // Per the ISS pattern, this is a collision — reject the incoming file.
-        await _adapter.deleteFile(staging);
         throw VaultCrcMismatchException(
           sha256: sha256,
           existingCrc32c: existing.crc32c,
           incomingCrc32c: crc32c,
         );
       }
-      // Duplicate — clean up staging and return existing ref.
-      await _adapter.deleteFile(staging);
+      // Duplicate — return existing ref without any file I/O.
       return _makeRef(sha256);
     }
 
-    // Detect media type from bytes + optional filename hint.
+    // Step 3: optionally encrypt the blob bytes before writing to staging.
+    // When encryption is active, the stored bytes are [nonce][ciphertext][tag]
+    // produced by EncryptionProvider.encrypt. The content address (sha256,
+    // crc32c) was computed above over the plaintext.
+    final Uint8List storedBytes;
+    final bool isEncrypted;
+    final enc = encryption;
+    if (enc != null) {
+      storedBytes = await enc.encrypt(bytes);
+      isEncrypted = true;
+    } else {
+      storedBytes = bytes;
+      isEncrypted = false;
+    }
+
+    // Step 4: write (encrypted or plaintext) bytes to staging.
+    final uuid = _uuidGen();
+    final staging = stagingPath(uuid);
+    await _adapter.writeFile(staging, storedBytes);
+
+    // Detect media type from the original plaintext bytes + filename hint.
     final matchList = _detector.detect(bytes, fileName: originalName);
 
     final String mediaType;
@@ -216,6 +249,7 @@ class VaultStore {
       // Validate the caller-supplied type against detected candidates.
       final candidates = matchList.toSet();
       if (candidates.isNotEmpty && !candidates.contains(explicitMediaType)) {
+        await _adapter.deleteFile(staging);
         throw FormatException(
           'Explicit media type "$explicitMediaType" is not among the detected '
           'candidates for "$originalName": $candidates',
@@ -228,12 +262,14 @@ class VaultStore {
           matchList.firstOrNull ?? FreedesktopMediaTypeDetector.kFallbackType;
     }
 
-    // Step 4: create hash directory and rename staging blob to final path.
+    // Step 5: create hash directory and rename staging blob to final path.
     final dir = hashDir(sha256);
     await _adapter.createDirectory(dir);
     await _adapter.renameFile(staging, blobPath(sha256));
 
-    // Step 5: write manifest.json.
+    // Step 6: write manifest.json.
+    // The `encrypted` flag signals to readers and vault recovery that the
+    // stored blob is ciphertext and must be decrypted before use.
     final manifest = VaultManifest(
       sha256: sha256,
       size: size,
@@ -241,6 +277,7 @@ class VaultStore {
       mediaType: mediaType,
       originalName: originalName,
       createdAt: hlcTimestamp,
+      encrypted: isEncrypted,
     );
     await _writeManifest(sha256, manifest);
 
@@ -249,11 +286,16 @@ class VaultStore {
 
   // ── Retrieval ──────────────────────────────────────────────────────────────
 
-  /// Returns the raw blob bytes for [sha256].
+  /// Returns the plaintext blob bytes for [sha256].
   ///
-  /// If the object is a stub (manifest present, blob absent), triggers on-demand
-  /// hydration via [syncAdapter]. Throws [StateError] if no sync adapter is
-  /// configured on a stub.
+  /// If the blob is stored as AES-256-GCM ciphertext (manifest has
+  /// `encrypted: true`), the blob is decrypted before returning. The
+  /// [EncryptionProvider] supplied at construction must be active — if the
+  /// manifest is encrypted but no provider is set, a [StateError] is thrown.
+  ///
+  /// If the object is a stub (manifest present, blob absent), triggers
+  /// on-demand hydration via [syncAdapter]. Throws [StateError] if no sync
+  /// adapter is configured on a stub.
   ///
   /// Throws [VaultObjectNotFoundException] if neither the blob nor the manifest
   /// exists locally.
@@ -273,7 +315,23 @@ class VaultStore {
       }
       await adapter.hydrateVaultBlob(sha256);
     }
-    return _adapter.readFile(blobPath(sha256));
+    final raw = await _adapter.readFile(blobPath(sha256));
+
+    // Decrypt if the manifest says the blob is encrypted.
+    // Read the manifest to check the encrypted flag.
+    final manifest = await getManifest(sha256);
+    if (manifest.encrypted) {
+      final enc = encryption;
+      if (enc == null) {
+        throw StateError(
+          'VaultStore.getBytes($sha256): blob is encrypted but no '
+          'EncryptionProvider is configured. Open the database with an '
+          'EncryptionConfig.',
+        );
+      }
+      return enc.decrypt(raw);
+    }
+    return raw;
   }
 
   /// Returns the [VaultManifest] for [sha256].
@@ -364,12 +422,22 @@ class VaultStore {
   /// or if the entry decodes to a zero ref count. Throws no exception when
   /// the entry is positive or undecodable (the latter consistent with the
   /// H3 fail-safe rule).
+  ///
+  /// [encryption] must match the provider used when the `$vault` ref count
+  /// entry was written. When the database is encrypted (Q6 decision), all
+  /// [ValueCodec] call sites — including `$vault` ref counts — use encryption
+  /// uniformly, so the guard read here must supply the same provider.
   Future<void> createStub(
     VaultManifest manifest, {
     required KvStore kvStore,
+    EncryptionProvider? encryption,
   }) async {
     final sha256 = manifest.sha256;
-    final refResult = await VaultRefCount.read(kvStore, sha256);
+    final refResult = await VaultRefCount.read(
+      kvStore,
+      sha256,
+      encryption: encryption,
+    );
     switch (refResult) {
       case RefCountAbsent():
         throw StateError(

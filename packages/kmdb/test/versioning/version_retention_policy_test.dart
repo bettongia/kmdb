@@ -27,7 +27,7 @@ const _kMsPerDay = 24 * 60 * 60 * 1000;
 /// Builds a [MergeEntry] for a put-version at [hlcMs].
 ///
 /// The value contains a minimal [VersionEntry] payload with `isDelete: false`.
-MergeEntry _putEntry(int hlcMs, {int logical = 0}) {
+Future<MergeEntry> _putEntry(int hlcMs, {int logical = 0}) async {
   final hlc = Hlc(hlcMs, logical);
   // Use a fixed UUIDv7 key — the exact value doesn't matter for policy tests.
   const hex = '01930000000070008000000000000001';
@@ -38,7 +38,7 @@ MergeEntry _putEntry(int hlcMs, {int logical = 0}) {
     RecordType.put,
   );
   // Encode a minimal VersionEntry so _isDeleteVersion can decode it correctly.
-  final value = VersionEntry(
+  final value = await VersionEntry(
     hlc: const Hlc(0, 0),
     encodedValue: null, // minimally valid put-version
     isDelete: false,
@@ -53,7 +53,7 @@ MergeEntry _putEntry(int hlcMs, {int logical = 0}) {
 /// [VersionRetentionPolicy._isDeleteVersion]). This helper matches that
 /// behaviour: the internal key uses [RecordType.put] and the value contains a
 /// [VersionEntry] with `isDelete: true`.
-MergeEntry _deleteEntry(int hlcMs, {int logical = 0}) {
+Future<MergeEntry> _deleteEntry(int hlcMs, {int logical = 0}) async {
   final hlc = Hlc(hlcMs, logical);
   const hex = '01930000000070008000000000000001';
   final key = KeyCodec.encodeInternalKey(
@@ -62,7 +62,7 @@ MergeEntry _deleteEntry(int hlcMs, {int logical = 0}) {
     hlc,
     RecordType.put, // delete-versions are stored as put in the $ver: namespace
   );
-  final value = VersionEntry(
+  final value = await VersionEntry(
     hlc: const Hlc(0, 0),
     encodedValue: null,
     isDelete: true,
@@ -71,14 +71,17 @@ MergeEntry _deleteEntry(int hlcMs, {int logical = 0}) {
 }
 
 // Sorted ascending HLC (oldest first), as the compaction merge produces.
-List<MergeEntry> _entriesAt(List<int> msList, {bool lastIsDelete = false}) {
+Future<List<MergeEntry>> _entriesAt(
+  List<int> msList, {
+  bool lastIsDelete = false,
+}) async {
   final entries = <MergeEntry>[];
   for (var i = 0; i < msList.length; i++) {
     final isLast = i == msList.length - 1;
     if (isLast && lastIsDelete) {
-      entries.add(_deleteEntry(msList[i]));
+      entries.add(await _deleteEntry(msList[i]));
     } else {
-      entries.add(_putEntry(msList[i]));
+      entries.add(await _putEntry(msList[i]));
     }
   }
   return entries;
@@ -90,11 +93,11 @@ void main() {
   group('VersionRetentionPolicy.filterGroup', () {
     // ── Keep-N boundary ───────────────────────────────────────────────────────
 
-    test('keep-N retains exactly maxVersions entries (count boundary)', () {
+    test('keep-N retains exactly maxVersions entries (count boundary)', () async {
       const policy = VersionRetentionPolicy(VersionConfig(maxVersions: 3));
       // 5 versions; only 3 should be kept (newest 3).
       final now = 5000 * _kMsPerDay;
-      final entries = _entriesAt([100, 200, 300, 400, 500]);
+      final entries = await _entriesAt([100, 200, 300, 400, 500]);
       final kept = policy.filterGroup(entries, nowMs: now);
       // Kept entries are sorted ascending; the newest 3 are at ms 300, 400, 500.
       expect(kept.length, equals(3));
@@ -102,20 +105,20 @@ void main() {
       expect(keptMs, containsAll([300, 400, 500]));
     });
 
-    test('keep-N always retains the newest entry (rank 1)', () {
+    test('keep-N always retains the newest entry (rank 1)', () async {
       // Even with maxVersions: 1, the newest entry is always kept.
       const policy = VersionRetentionPolicy(VersionConfig(maxVersions: 1));
       final now = 5000 * _kMsPerDay;
-      final entries = _entriesAt([100, 200, 300]);
+      final entries = await _entriesAt([100, 200, 300]);
       final kept = policy.filterGroup(entries, nowMs: now);
       expect(kept.length, equals(1));
       expect(KeyCodec.decodeHlc(kept.single.key).physicalMs, equals(300));
     });
 
-    test('fewer entries than maxVersions: all retained', () {
+    test('fewer entries than maxVersions: all retained', () async {
       const policy = VersionRetentionPolicy(VersionConfig(maxVersions: 10));
       final now = 5000 * _kMsPerDay;
-      final entries = _entriesAt([100, 200, 300]);
+      final entries = await _entriesAt([100, 200, 300]);
       final kept = policy.filterGroup(entries, nowMs: now);
       expect(kept.length, equals(3));
     });
@@ -128,14 +131,14 @@ void main() {
 
     // ── RetentionDays boundary ────────────────────────────────────────────────
 
-    test('retentionDays window retains recent entries', () {
+    test('retentionDays window retains recent entries', () async {
       // retentionDays: 30 → entries within 30 days of nowMs are kept.
       const policy = VersionRetentionPolicy(
         VersionConfig(maxVersions: null, retentionDays: 30),
       );
       final now = 100 * _kMsPerDay;
       // Entries at 60, 80, 90 days ago relative to now: 40, 20, 10 days old.
-      final entries = _entriesAt([
+      final entries = await _entriesAt([
         (now - 60 * _kMsPerDay).clamp(0, 9007199254740991),
         (now - 20 * _kMsPerDay).clamp(0, 9007199254740991),
         (now - 10 * _kMsPerDay).clamp(0, 9007199254740991),
@@ -150,25 +153,25 @@ void main() {
       expect(kept.length, equals(2));
     });
 
-    test('null retentionDays + null maxVersions: all retained', () {
+    test('null retentionDays + null maxVersions: all retained', () async {
       const policy = VersionRetentionPolicy(
         VersionConfig(maxVersions: null, retentionDays: null),
       );
       final now = 100 * _kMsPerDay;
-      final entries = _entriesAt([100, 200, 300, 400]);
+      final entries = await _entriesAt([100, 200, 300, 400]);
       expect(policy.filterGroup(entries, nowMs: now).length, equals(4));
     });
 
     // ── Combined keep-N + retentionDays ───────────────────────────────────────
 
-    test('either condition retains entry (keep-N OR window)', () {
+    test('either condition retains entry (keep-N OR window)', () async {
       // maxVersions: 2, retentionDays: 10
       const policy = VersionRetentionPolicy(
         VersionConfig(maxVersions: 2, retentionDays: 10),
       );
       final now = 100 * _kMsPerDay;
       // 5 versions: 95, 91, 85, 50, 1 days ago (sorted ascending by ms).
-      final entries = _entriesAt([
+      final entries = await _entriesAt([
         (now - 95 * _kMsPerDay).clamp(0, 9007199254740991),
         (now - 91 * _kMsPerDay).clamp(0, 9007199254740991),
         (now - 85 * _kMsPerDay).clamp(0, 9007199254740991),
@@ -186,30 +189,33 @@ void main() {
 
     // ── Post-delete full purge ────────────────────────────────────────────────
 
-    test('delete-version older than retentionDays triggers full purge', () {
-      const policy = VersionRetentionPolicy(
-        VersionConfig(maxVersions: 4, retentionDays: 30),
-      );
-      final now = 100 * _kMsPerDay;
-      // Delete-version is 31 days old — past grace window.
-      final deleteMs = now - 31 * _kMsPerDay;
-      final entries = _entriesAt([
-        (now - 50 * _kMsPerDay).clamp(0, 9007199254740991),
-        (now - 40 * _kMsPerDay).clamp(0, 9007199254740991),
-        deleteMs.clamp(0, 9007199254740991),
-      ], lastIsDelete: true);
-      final kept = policy.filterGroup(entries, nowMs: now);
-      expect(kept, isEmpty, reason: 'post-delete grace expired → full purge');
-    });
+    test(
+      'delete-version older than retentionDays triggers full purge',
+      () async {
+        const policy = VersionRetentionPolicy(
+          VersionConfig(maxVersions: 4, retentionDays: 30),
+        );
+        final now = 100 * _kMsPerDay;
+        // Delete-version is 31 days old — past grace window.
+        final deleteMs = now - 31 * _kMsPerDay;
+        final entries = await _entriesAt([
+          (now - 50 * _kMsPerDay).clamp(0, 9007199254740991),
+          (now - 40 * _kMsPerDay).clamp(0, 9007199254740991),
+          deleteMs.clamp(0, 9007199254740991),
+        ], lastIsDelete: true);
+        final kept = policy.filterGroup(entries, nowMs: now);
+        expect(kept, isEmpty, reason: 'post-delete grace expired → full purge');
+      },
+    );
 
-    test('delete-version within retentionDays keeps the chain', () {
+    test('delete-version within retentionDays keeps the chain', () async {
       const policy = VersionRetentionPolicy(
         VersionConfig(maxVersions: 2, retentionDays: 30),
       );
       final now = 100 * _kMsPerDay;
       // Delete-version is only 10 days old — within grace window.
       final deleteMs = now - 10 * _kMsPerDay;
-      final entries = _entriesAt([
+      final entries = await _entriesAt([
         (now - 50 * _kMsPerDay).clamp(0, 9007199254740991),
         (now - 20 * _kMsPerDay).clamp(0, 9007199254740991),
         deleteMs.clamp(0, 9007199254740991),
@@ -222,10 +228,10 @@ void main() {
       expect(kept.length, equals(2));
     });
 
-    test('disabled config: filterGroup drops all entries', () {
+    test('disabled config: filterGroup drops all entries', () async {
       const policy = VersionRetentionPolicy(VersionConfig.disabled);
       final now = 100 * _kMsPerDay;
-      final entries = _entriesAt([100, 200, 300]);
+      final entries = await _entriesAt([100, 200, 300]);
       expect(policy.filterGroup(entries, nowMs: now), isEmpty);
     });
 

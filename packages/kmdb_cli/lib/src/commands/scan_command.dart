@@ -306,7 +306,8 @@ final class ScanCommand extends CliCommand {
         startKey: keyPrefix,
       )) {
         count++;
-        final doc = ValueCodec.decode(entry.value)..['_id'] = entry.key;
+        final doc = await ValueCodec.decode(entry.value)
+          ..['_id'] = entry.key;
         if (filter != null && !filter.evaluate(doc)) continue;
         docs.add(doc);
       }

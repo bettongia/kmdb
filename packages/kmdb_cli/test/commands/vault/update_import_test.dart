@@ -75,7 +75,7 @@ CommandContext _ctx(KmdbDatabase db, {StringBuffer? out, StringBuffer? err}) =>
 Future<void> _putSmallDoc(KmdbDatabase db, String collection, String id) async {
   // {'i': id} where id is short → stays under 64 bytes in CBOR
   final doc = {'i': id}; // use short key to stay under threshold
-  await db.store.put(collection, id, ValueCodec.encode(doc));
+  await db.store.put(collection, id, await ValueCodec.encode(doc));
 }
 
 void main() {

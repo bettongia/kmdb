@@ -136,7 +136,7 @@ void main() {
     final ctx = _ctx(db, out: out, err: err);
 
     // Need a namespace to pull: add a doc first so pull doesn't exit early.
-    await db.store.put('notes', _key(), ValueCodec.encode({'x': 1}));
+    await db.store.put('notes', _key(), await ValueCodec.encode({'x': 1}));
 
     final ok = await pullCmd.execute(ctx, [], {'sync-dir': syncDir.path});
     expect(ok, isTrue);
@@ -167,7 +167,7 @@ void main() {
     await peerStore.put(
       'notes',
       peerKey,
-      ValueCodec.encode({'msg': 'from peer'}),
+      await ValueCodec.encode({'msg': 'from peer'}),
     );
     // Flush to materialise the SSTable, then push.
     await peerStore.flush();
@@ -189,7 +189,11 @@ void main() {
     await peerStore.close(flush: false);
 
     // Add a namespace on our store so we have something to pull into.
-    await db.store.put('notes', _key(), ValueCodec.encode({'local': true}));
+    await db.store.put(
+      'notes',
+      _key(),
+      await ValueCodec.encode({'local': true}),
+    );
 
     // Now pull from the sync folder.
     final ctx = _ctx(db, out: out, err: err);
@@ -200,7 +204,7 @@ void main() {
     // The peer's document should now be in our local store.
     final raw = await db.store.get('notes', peerKey);
     expect(raw, isNotNull);
-    final doc = ValueCodec.decode(raw!);
+    final doc = await ValueCodec.decode(raw!);
     expect(doc['msg'], 'from peer');
   });
 
@@ -216,7 +220,7 @@ void main() {
     );
 
     // Add a namespace so pull doesn't exit early.
-    await db.store.put('notes', _key(), ValueCodec.encode({'y': 2}));
+    await db.store.put('notes', _key(), await ValueCodec.encode({'y': 2}));
 
     final ctx = _ctx(db, out: out, err: err);
     final ok = await pullCmd.execute(ctx, [], {});
@@ -245,7 +249,7 @@ void main() {
 
     test('no-op when no index definitions are configured', () async {
       // A collection with documents but no index config — nothing should happen.
-      await db.store.put('notes', _key(), ValueCodec.encode({'x': 1}));
+      await db.store.put('notes', _key(), await ValueCodec.encode({'x': 1}));
       final config = KmdbConfig.empty();
       final ctx = makeCtx(db, config);
       await SyncHelpers.purgeOrphanedIndexes(ctx, dbDir.path);
@@ -261,7 +265,7 @@ void main() {
         await db.store.put(
           'contacts',
           _key(),
-          ValueCodec.encode({'city': 'Sydney'}),
+          await ValueCodec.encode({'city': 'Sydney'}),
         );
         final config = KmdbConfig.empty();
         config.addIndex('contacts', 'city');

@@ -118,7 +118,7 @@ void main() {
       () async {
         // Insert a small document using the raw KV store.
         const id = '01900000000070809000000000000010';
-        await db.store.put('notes', id, ValueCodec.encode({'i': id}));
+        await db.store.put('notes', id, await ValueCodec.encode({'i': id}));
 
         final ctx = _ctx(db, out: out, err: err);
         final ok = await DumpCommand().execute(ctx, [], {});
@@ -185,7 +185,7 @@ void main() {
 
     test('--vault skips documents without vault URIs', () async {
       const id = '01900000000070809000000000000011';
-      await db.store.put('docs', id, ValueCodec.encode({'i': id}));
+      await db.store.put('docs', id, await ValueCodec.encode({'i': id}));
 
       final vaultDirPath = '${tmpDir.path}/output2';
       final ctx = _ctx(db, out: out, err: err);
@@ -249,7 +249,7 @@ void main() {
 
       // Store a document containing the vault URI.
       // IMPORTANT: documents with vault URIs exceed the Zstd compression
-      // threshold. In environments without native Zstd, ValueCodec.encode will
+      // threshold. In environments without native Zstd, await ValueCodec.encode will
       // fail. We store a minimal document without a vault ref and verify the
       // packaging logic is wired correctly by testing the vaultStore state.
       //
