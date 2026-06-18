@@ -691,6 +691,136 @@ model. The Query Layer treats `VaultRef` as opaque.
 
 ---
 
+# Encryption
+
+[lib/src/encryption/](lib/src/encryption/)
+
+KMDB supports opt-in, value-level encryption using AES-256-GCM. It is applied at
+the Value Encoding layer (§5): every value is encrypted on the way into the
+storage engine and decrypted on the way out. Encryption is **transparent to sync
+and compaction** — SSTables are uploaded verbatim and merged as opaque bytes, so
+the cloud never sees a plaintext value.
+
+## What It Protects (and What It Doesn't)
+
+Encryption protects the **confidentiality of document values in the cloud**. The
+sync remote (Google Drive, iCloud, etc.) only ever holds ciphertext. Every value
+in every namespace is encrypted with the same key — user documents, secondary
+indexes (`$index:`), lexical/vector search (`$fts:`, `$vec:`), version history
+(`$ver:`) and vault blobs (`$vault`). This matters because all of those
+namespaces are whole-file synced to the cloud; there is no server-side
+namespace filtering, so encrypting them is the only thing that keeps document
+content out of cloud storage.
+
+The one exception is the `enc:blob` record in `$meta`, which stays plaintext — it
+*is* the wrapped key material, and is itself protected by your passphrase.
+
+What it does **not** hide:
+
+- **Key-level structure.** Keys (document IDs, index paths, term hashes) are
+  *not* encrypted. An observer of the cloud folder can see how many documents
+  and index entries exist and how they are structured, just not their values.
+- **Local index keys on disk.** The same applies to SSTables on the local
+  device — only the value side of each entry is ciphertext.
+
+In short: encryption is a confidentiality guarantee for *values*, not a
+structural-anonymity guarantee.
+
+## Key Management (Envelope Encryption)
+
+KMDB uses the standard envelope-encryption pattern:
+
+```
+passphrase ──Argon2id──▶ KEK ──wraps──▶ DEK ──AES-256-GCM──▶ every value
+recovery code ──HKDF──▶ recovery-KEK ──wraps──▶ DEK (second copy)
+```
+
+- A random 256-bit **Data Encryption Key (DEK)** encrypts all values.
+- The DEK is **wrapped** (AES-GCM encrypted) under a **Key Encryption Key
+  (KEK)** derived from your passphrase via Argon2id.
+- A *second* wrapped copy of the same DEK is stored under a **recovery KEK**
+  derived (via HKDF) from random entropy. That entropy is encoded as a 16-word
+  recovery mnemonic, shown to the user once.
+- Both wrapped copies live in the `enc:blob` record in `$meta`.
+
+Because only the DEK *wrapping* depends on the passphrase, changing the
+passphrase re-wraps the DEK without re-encrypting any data.
+
+## Opening a New Encrypted Database
+
+Provision with `EncryptionConfig.createResult()`. It returns an
+`EncryptionSetupResult` carrying the one-time recovery code — capture and show it
+to the user, because it cannot be recovered later:
+
+```dart
+final setup = await EncryptionConfig.createResult(passphrase: 'my-passphrase');
+
+final db = await KmdbDatabase.open(
+  path: '/path/to/db',
+  adapter: adapter,
+  encryptionConfig: setup.config,
+);
+
+// Show setup.recoveryCode to the user exactly once, then forget it.
+print(setup.recoveryCode); // "able acid aged ... zone"  (16 words)
+```
+
+Provisioning only works on an empty database — a database with existing
+plaintext data cannot be retroactively encrypted (it would mix plaintext and
+ciphertext values), and the attempt throws
+`EncryptionError.cannotProvisionNonEmptyDatabase`.
+
+## Re-opening an Encrypted Database
+
+Unlock an existing database by passing a passphrase or the recovery code:
+
+```dart
+// With the passphrase:
+final db = await KmdbDatabase.open(
+  path: '/path/to/db',
+  adapter: adapter,
+  encryptionConfig: EncryptionConfig(passphrase: 'my-passphrase'),
+);
+
+// Or, if the passphrase is lost, with the recovery code:
+final db = await KmdbDatabase.open(
+  path: '/path/to/db',
+  adapter: adapter,
+  encryptionConfig: EncryptionConfig(recoveryCode: 'able acid aged ... zone'),
+);
+```
+
+Opening an encrypted database *without* a config throws
+`EncryptionError.databaseIsEncrypted`; wrong credentials throw
+`EncryptionError.badCredentials`.
+
+## Caching the Unlocked Key
+
+Argon2id is deliberately slow (~1–2 s on mobile). To avoid re-deriving on every
+open, the unwrapped DEK can be cached for the session via the `DekCache`
+interface. The default `InMemoryDekCache` re-derives once per process. Flutter
+apps can use `FlutterSecureDekCache` from the forthcoming **`kmdb_flutter`**
+add-on package, which persists the DEK in the iOS Keychain / Android Keystore so
+the user is not re-prompted across launches.
+
+## Changing the Passphrase
+
+`changePassphrase()` re-wraps the DEK under a new passphrase. No document data is
+re-encrypted, and the recovery code is unchanged:
+
+```dart
+await db.changePassphrase(
+  currentConfig: EncryptionConfig(passphrase: 'old-passphrase'),
+  newPassphrase: 'new-passphrase',
+);
+```
+
+See [§31](spec/31_encryption.md) for the full specification — wire format, the
+4-state bootstrap matrix, key-derivation parameters, vault blob handling, and
+the complete error-code table.
+
+---
+
 # Navigating the Code
 
 If you want to trace a specific path, start at these files:
@@ -712,6 +842,7 @@ If you want to trace a specific path, start at these files:
 | Understand the vault                      | [vault_store.dart](lib/src/vault/vault_store.dart)                   |
 | Understand vault GC                       | [vault_gc.dart](lib/src/vault/vault_gc.dart)                         |
 | Understand vault crash recovery           | [vault_recovery.dart](lib/src/vault/vault_recovery.dart)             |
+| Understand encryption / key management    | [encryption_config.dart](lib/src/encryption/encryption_config.dart)  |
 
 The [docs/spec/](docs/spec/) directory has detailed specification documents for
 each subsystem, useful when you need the precise on-disk format or protocol
@@ -744,3 +875,6 @@ semantics.
 | **Stub**               | Vault object whose metadata is present locally but whose blob has not been downloaded                   |
 | **Tombstone (vault)**  | `tombstone.json` written when a vault object's ref-count reaches zero; GC signal                        |
 | **KVLT**               | Zstandard archive format bundling a document with its vault attachments                                 |
+| **DEK**                | Data Encryption Key — random 256-bit AES-GCM key that encrypts every value                               |
+| **KEK**                | Key Encryption Key — derived from the passphrase (Argon2id) or recovery code (HKDF); wraps the DEK       |
+| **Recovery code**      | One-time 16-word mnemonic; encodes the entropy that unwraps a second copy of the DEK                     |
