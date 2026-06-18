@@ -4,7 +4,6 @@ subtitle: A Developer's Guide
 toc-title: "Contents"
 ...
 
-
 This guide walks you through the architecture and design of KMDB. Read it before
 diving into the code. It explains *why* things work the way they do, not just
 *what* they are.
@@ -28,8 +27,6 @@ downloading the other's files.
 This is the Log-Structured Merge-tree (LSM) design, and it shapes every layer of
 the system.
 
----
-
 # The Layered Stack
 
 ```
@@ -39,7 +36,9 @@ Query Layer       — KmdbCollection<T> API, filter DSL, reactive watch(),
                     search(), VaultRef interception
     ↓
 Cache Layer       — session object cache + materialised views ($cache)
-    ↓
+    ↓                 ·············· value-encoding seam (§5) ··············
+    ↓                 CBOR → compress → [encrypt, if enabled] → bytes
+    ↓                 ── plaintext above · opaque ciphertext below ──
 KvStore           — public LSM API boundary (untyped bytes, String keys)
     ↓
 Storage Engine    — WAL + memtable + SSTables + compaction
@@ -64,6 +63,12 @@ Platform Layer but are not part of SSTable sync. Work from the bottom up when
 debugging storage issues. Work from the top down when adding new features to the
 query API.
 
+Encryption is not a layer or a side subsystem — it is a cross-cutting transform
+applied *at the value-encoding seam* (§5) marked above. Values cross that seam as
+plaintext on the way down and are encrypted before they reach `KvStore`, so the
+storage engine, SSTables, and sync see only opaque ciphertext. See _Encryption_
+below for the full picture.
+
 ---
 
 # Layer 1: The Platform Abstraction
@@ -77,8 +82,8 @@ concrete implementation per platform:
   [storage_adapter_native.dart](lib/src/engine/platform/storage_adapter_native.dart)
   — wraps `dart:io`
 - **Web:**
-  [storage_adapter_sahpool.dart](lib/src/engine/platform/storage_adapter_sahpool.dart) —
-  uses the Origin Private File System (OPFS) via `FileSystemSyncAccessHandle`
+  [storage_adapter_sahpool.dart](lib/src/engine/platform/storage_adapter_sahpool.dart)
+  — uses the Origin Private File System (OPFS) via `FileSystemSyncAccessHandle`
   in a dedicated Web Worker (SAHPool pattern, 3–4× faster than the async API)
 - **Tests:**
   [storage_adapter_memory.dart](lib/src/engine/platform/storage_adapter_memory.dart)
@@ -708,22 +713,22 @@ sync remote (Google Drive, iCloud, etc.) only ever holds ciphertext. Every value
 in every namespace is encrypted with the same key — user documents, secondary
 indexes (`$index:`), lexical/vector search (`$fts:`, `$vec:`), version history
 (`$ver:`) and vault blobs (`$vault`). This matters because all of those
-namespaces are whole-file synced to the cloud; there is no server-side
-namespace filtering, so encrypting them is the only thing that keeps document
-content out of cloud storage.
+namespaces are whole-file synced to the cloud; there is no server-side namespace
+filtering, so encrypting them is the only thing that keeps document content out
+of cloud storage.
 
-The one exception is the `enc:blob` record in `$meta`, which stays plaintext — it
-*is* the wrapped key material, and is itself protected by your passphrase.
+The one exception is the `enc:blob` record in `$meta`, which stays plaintext —
+it _is_ the wrapped key material, and is itself protected by your passphrase.
 
 What it does **not** hide:
 
 - **Key-level structure.** Keys (document IDs, index paths, term hashes) are
-  *not* encrypted. An observer of the cloud folder can see how many documents
+  _not_ encrypted. An observer of the cloud folder can see how many documents
   and index entries exist and how they are structured, just not their values.
-- **Local index keys on disk.** The same applies to SSTables on the local
-  device — only the value side of each entry is ciphertext.
+- **Local index keys on disk.** The same applies to SSTables on the local device
+  — only the value side of each entry is ciphertext.
 
-In short: encryption is a confidentiality guarantee for *values*, not a
+In short: encryption is a confidentiality guarantee for _values_, not a
 structural-anonymity guarantee.
 
 ## Key Management (Envelope Encryption)
@@ -738,19 +743,19 @@ recovery code ──HKDF──▶ recovery-KEK ──wraps──▶ DEK (second 
 - A random 256-bit **Data Encryption Key (DEK)** encrypts all values.
 - The DEK is **wrapped** (AES-GCM encrypted) under a **Key Encryption Key
   (KEK)** derived from your passphrase via Argon2id.
-- A *second* wrapped copy of the same DEK is stored under a **recovery KEK**
+- A _second_ wrapped copy of the same DEK is stored under a **recovery KEK**
   derived (via HKDF) from random entropy. That entropy is encoded as a 16-word
   recovery mnemonic, shown to the user once.
 - Both wrapped copies live in the `enc:blob` record in `$meta`.
 
-Because only the DEK *wrapping* depends on the passphrase, changing the
+Because only the DEK _wrapping_ depends on the passphrase, changing the
 passphrase re-wraps the DEK without re-encrypting any data.
 
 ## Opening a New Encrypted Database
 
 Provision with `EncryptionConfig.createResult()`. It returns an
-`EncryptionSetupResult` carrying the one-time recovery code — capture and show it
-to the user, because it cannot be recovered later:
+`EncryptionSetupResult` carrying the one-time recovery code — capture and show
+it to the user, because it cannot be recovered later:
 
 ```dart
 final setup = await EncryptionConfig.createResult(passphrase: 'my-passphrase');
@@ -790,7 +795,7 @@ final db = await KmdbDatabase.open(
 );
 ```
 
-Opening an encrypted database *without* a config throws
+Opening an encrypted database _without_ a config throws
 `EncryptionError.databaseIsEncrypted`; wrong credentials throw
 `EncryptionError.badCredentials`.
 
@@ -805,8 +810,8 @@ the user is not re-prompted across launches.
 
 ## Changing the Passphrase
 
-`changePassphrase()` re-wraps the DEK under a new passphrase. No document data is
-re-encrypted, and the recovery code is unchanged:
+`changePassphrase()` re-wraps the DEK under a new passphrase. No document data
+is re-encrypted, and the recovery code is unchanged:
 
 ```dart
 await db.changePassphrase(
@@ -875,6 +880,6 @@ semantics.
 | **Stub**               | Vault object whose metadata is present locally but whose blob has not been downloaded                   |
 | **Tombstone (vault)**  | `tombstone.json` written when a vault object's ref-count reaches zero; GC signal                        |
 | **KVLT**               | Zstandard archive format bundling a document with its vault attachments                                 |
-| **DEK**                | Data Encryption Key — random 256-bit AES-GCM key that encrypts every value                               |
-| **KEK**                | Key Encryption Key — derived from the passphrase (Argon2id) or recovery code (HKDF); wraps the DEK       |
-| **Recovery code**      | One-time 16-word mnemonic; encodes the entropy that unwraps a second copy of the DEK                     |
+| **DEK**                | Data Encryption Key — random 256-bit AES-GCM key that encrypts every value                              |
+| **KEK**                | Key Encryption Key — derived from the passphrase (Argon2id) or recovery code (HKDF); wraps the DEK      |
+| **Recovery code**      | One-time 16-word mnemonic; encodes the entropy that unwraps a second copy of the DEK                    |
