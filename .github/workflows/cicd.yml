@@ -18,26 +18,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: subosito/flutter-action@v2
+      - uses: dart-lang/setup-dart@v1
         with:
-          channel: stable
-
-      - uses: actions/cache@v5
-        with:
-          path: ~/.pub-cache
-          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pub-
+          sdk: stable
 
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y lcov
-
-      - uses: actions/cache@v5
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ runner.os }}-go-addlicense-v1.2.0
 
       - name: Install addlicense
         run: |
@@ -55,29 +41,31 @@ jobs:
       #- name: Benchmarks summary
       #  run: cat benchmarks.log >> $GITHUB_STEP_SUMMARY
 
-  test-web:
-    runs-on: ubuntu-latest
+  # Resolve Flutter req's first
+  # test-web:
+  #   runs-on: ubuntu-latest
+  #   needs: build
 
-    steps:
-      - uses: actions/checkout@v6
+  #   steps:
+  #     - uses: actions/checkout@v6
 
-      - uses: dart-lang/setup-dart@v1
-        with:
-          sdk: stable
+  #     - uses: dart-lang/setup-dart@v1
+  #       with:
+  #         sdk: stable
 
-      - uses: actions/cache@v5
-        with:
-          path: ~/.pub-cache
-          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pub-
+  #     - uses: actions/cache@v5
+  #       with:
+  #         path: ~/.pub-cache
+  #         key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.yaml') }}
+  #         restore-keys: |
+  #           ${{ runner.os }}-pub-
 
-      - uses: browser-actions/setup-chrome@v2
+  #     - uses: browser-actions/setup-chrome@v2
 
-      - name: Run web compression tests in Chrome
-        run: make web_test
-        env:
-          CHROME_EXECUTABLE: chrome
+  #     - name: Run web compression tests in Chrome
+  #       run: make web_test
+  #       env:
+  #         CHROME_EXECUTABLE: chrome
 
   # At least 1 package requires Flutter so we'll need to rework the jobs below this one
   # to get them to work - esp for producing coverage docs.
