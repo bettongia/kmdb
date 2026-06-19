@@ -30,6 +30,8 @@ dev_dependencies:
 # the same versions used by the rest of the repo.  Keep in sync with the root
 # pubspec.yaml dependency_overrides block.
 dependency_overrides:
+  kmdb:
+    path: ../kmdb
   meta: ^1.18.2
   uuid: ^4.5.3
   cbor: ^6.5.1

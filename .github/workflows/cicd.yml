@@ -136,6 +136,32 @@ jobs:
       - run: make cicd_windows
         shell: bash
 
+  # ── iCloud Flutter plugin: format, analyze, unit tests ──────────────────────
+  #
+  # Bootstraps kmdb_icloud and its example app with the Flutter SDK, then runs
+  # format check, flutter analyze, and flutter test (harness convergence tests).
+  # e2e tests are credential-gated and skip automatically.
+  test-icloud:
+    runs-on: macos-latest
+    needs: build
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Cache pub dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.pub-cache
+          key: ${{ runner.os }}-flutter-pub-${{ hashFiles('packages/kmdb_icloud/pubspec.lock', 'packages/kmdb_icloud/example/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-flutter-pub-
+
+      - run: make cicd_icloud
+
   # ── Web: WASM compression codec tests in Chrome ──────────────────────────────
   #
   # Verifies that betto_zstd's WASM path compresses and decompresses correctly
