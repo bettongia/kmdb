@@ -179,9 +179,8 @@ podspec `s.source_files` path changes from `'Classes/**/*'` to
       `packages/kmdb_icloud/macos/kmdb_icloud/Sources/kmdb_icloud/`.
 - [x] Move `macos/Classes/ICloudSyncPlugin.swift` to
       `macos/kmdb_icloud/Sources/kmdb_icloud/ICloudSyncPlugin.swift`.
-- [x] Create `packages/kmdb_icloud/macos/kmdb_icloud/Package.swift` with the
-      following content (verified against `url_launcher_macos-3.2.5` and
-      `cryptography_flutter-2.3.4`):
+- [x] Create `packages/kmdb_icloud/macos/kmdb_icloud/Package.swift`
+      *(superseded — see Phase 4 Correction; `FlutterFramework` dependency added)*:
 
   ```swift
   // swift-tools-version: 5.9
@@ -197,11 +196,15 @@ podspec `s.source_files` path changes from `'Classes/**/*'` to
       products: [
           .library(name: "kmdb-icloud", targets: ["kmdb_icloud"]),
       ],
-      dependencies: [],
+      dependencies: [
+          .package(name: "FlutterFramework", path: "../FlutterFramework"),
+      ],
       targets: [
           .target(
               name: "kmdb_icloud",
-              dependencies: []
+              dependencies: [
+                  .product(name: "FlutterFramework", package: "FlutterFramework"),
+              ]
           ),
       ]
   )
@@ -227,7 +230,8 @@ podspec `s.source_files` path changes from `'Classes/**/*'` to
       `packages/kmdb_icloud/ios/kmdb_icloud/Sources/kmdb_icloud/`.
 - [x] Move `ios/Classes/ICloudSyncPlugin.swift` to
       `ios/kmdb_icloud/Sources/kmdb_icloud/ICloudSyncPlugin.swift`.
-- [x] Create `packages/kmdb_icloud/ios/kmdb_icloud/Package.swift`:
+- [x] Create `packages/kmdb_icloud/ios/kmdb_icloud/Package.swift`
+      *(superseded — see Phase 4 Correction; `FlutterFramework` dependency added)*:
 
   ```swift
   // swift-tools-version: 5.9
@@ -243,11 +247,15 @@ podspec `s.source_files` path changes from `'Classes/**/*'` to
       products: [
           .library(name: "kmdb-icloud", targets: ["kmdb_icloud"]),
       ],
-      dependencies: [],
+      dependencies: [
+          .package(name: "FlutterFramework", path: "../FlutterFramework"),
+      ],
       targets: [
           .target(
               name: "kmdb_icloud",
-              dependencies: []
+              dependencies: [
+                  .product(name: "FlutterFramework", package: "FlutterFramework"),
+              ]
           ),
       ]
   )
