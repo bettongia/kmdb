@@ -1,3 +1,4 @@
+timeout: 90s
 tags:
   e2e:
     skip:
