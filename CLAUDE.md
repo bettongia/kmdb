@@ -180,6 +180,11 @@ make site
 cd packages/kmdb && dart run benchmark/main.dart
 ```
 
+> **GitHub Actions versions.** Use `actions/checkout@v6` (not v4) — v4
+> uses a deprecated Node.js version and GitHub emits warnings. Apply the
+> same principle to other actions: prefer the latest major version that
+> avoids Node deprecation warnings.
+
 > **Native-asset hooks.** Any package whose dependencies have native-asset
 > build hooks (currently `betto_zstd` via `package:betto_zstd`) must have
 > `dart test` invoked from **inside** the package directory — `dart test
