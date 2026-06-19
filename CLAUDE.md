@@ -52,6 +52,15 @@ All code files must have a license at the top. The template file is
 programming language. Also replace `{{.Year}}` to match the current year. The
 `kmdb-pre-commit` agent enforces this via `license_check`.
 
+**Swift Package Manager (SPM) for iOS/macOS Flutter plugins.** Any Flutter
+plugin that targets iOS or macOS must include a `Package.swift` manifest
+alongside its CocoaPods `.podspec`. Flutter is deprecating CocoaPods and will
+make the absence of `Package.swift` a hard build error in a future release.
+When creating a new iOS/macOS-targeting Flutter plugin, add SPM support
+(`ios/Package.swift` and/or `macos/Package.swift`) from the start. For
+existing plugins, add it before the next Flutter major that makes it mandatory.
+See `docs/plans/plan_icloud_spm.md` for the reference implementation pattern.
+
 ## Workflow & Agents
 
 This project runs a plan-driven workflow backed by specialised subagents. The
