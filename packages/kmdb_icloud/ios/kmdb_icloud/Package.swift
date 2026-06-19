@@ -11,11 +11,15 @@ let package = Package(
     products: [
         .library(name: "kmdb-icloud", targets: ["kmdb_icloud"]),
     ],
-    dependencies: [],
+    dependencies: [
+        .package(name: "FlutterFramework", path: "../FlutterFramework"),
+    ],
     targets: [
         .target(
             name: "kmdb_icloud",
-            dependencies: []
+            dependencies: [
+                .product(name: "FlutterFramework", package: "FlutterFramework"),
+            ]
         ),
     ]
 )

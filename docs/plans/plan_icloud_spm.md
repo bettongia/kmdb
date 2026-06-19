@@ -18,9 +18,9 @@ This will become an error in a future version of Flutter.
 
 The `kmdb_icloud` plugin currently has no `Package.swift` manifest for either
 iOS or macOS — only CocoaPods `.podspec` files. This plan adds SPM support to
-eliminate the warning before Flutter makes it a hard error. CocoaPods support
-is retained simultaneously: both managers resolve to the same Swift source
-files (no duplicate copies).
+eliminate the warning before Flutter makes it a hard error. CocoaPods support is
+retained simultaneously: both managers resolve to the same Swift source files
+(no duplicate copies).
 
 ## Open questions
 
@@ -28,13 +28,13 @@ All three questions raised by the plan review (2026-06-19) are now resolved via
 inspection of real-world Flutter plugins in the pub cache. See below.
 
 - [x] **Q1 — Verify the `Package.swift` content against Flutter's actual SPM
-  plugin template.**
-  **Answer (2026-06-19):** Verified against `url_launcher_macos-3.2.5`,
-  `cryptography_flutter-2.3.4`, and our own `betto_onnxrt_ios-0.1.0-dev.1` in
-  the pub cache, plus Flutter's own `integration_test_macos` plugin in the SDK.
-  The correct pattern differs substantially from the original plan:
-  - `Package.swift` goes at `<platform>/<plugin_name>/Package.swift`
-    (e.g. `macos/kmdb_icloud/Package.swift`), NOT at `macos/Package.swift`.
+      plugin template.** **Answer (2026-06-19):** Verified against
+      `url_launcher_macos-3.2.5`, `cryptography_flutter-2.3.4`, and our own
+      `betto_onnxrt_ios-0.1.0-dev.1` in the pub cache, plus Flutter's own
+      `integration_test_macos` plugin in the SDK. The correct pattern differs
+      substantially from the original plan:
+  - `Package.swift` goes at `<platform>/<plugin_name>/Package.swift` (e.g.
+    `macos/kmdb_icloud/Package.swift`), NOT at `macos/Package.swift`.
   - The `dependencies:` array is **empty** — Flutter's build system injects the
     Flutter framework at Xcode build time via build settings; no explicit
     `FlutterMacOS`/`Flutter` product dependency is declared in the manifest.
@@ -46,19 +46,20 @@ inspection of real-world Flutter plugins in the pub cache. See below.
   - Product name convention: hyphens replace underscores (`"kmdb-icloud"`).
   - Platform syntax: string form `.macOS("10.15")` / `.iOS("13.0")`.
   - Verified manifests are recorded verbatim in the Implementation plan below.
-- [x] **Q2 — `.gitignore` for SPM build artefacts.**
-  **Answer:** With `Package.swift` at `macos/kmdb_icloud/Package.swift`, SPM
-  artefacts (`.build/`, `.swiftpm/`) appear inside `macos/kmdb_icloud/` and
-  `ios/kmdb_icloud/`. Since `dependencies: []`, no `Package.resolved` is
-  generated. Add a `.gitignore` in each SPM package subdirectory ignoring
-  `.build/` and `.swiftpm/`. The `example/.gitignore` already covers both;
-  the plugin package root has none today.
+- [x] **Q2 — `.gitignore` for SPM build artefacts.** **Answer:** With
+      `Package.swift` at `macos/kmdb_icloud/Package.swift`, SPM artefacts
+      (`.build/`, `.swiftpm/`) appear inside `macos/kmdb_icloud/` and
+      `ios/kmdb_icloud/`. Since `dependencies: []`, no `Package.resolved` is
+      generated. Add a `.gitignore` in each SPM package subdirectory ignoring
+      `.build/` and `.swiftpm/`. The `example/.gitignore` already covers both;
+      the plugin package root has none today.
 - [x] **Q3 — Does the verification step actually exercise the change?**
-  **Answer:** The example app has only `example/macos/` (confirmed; no
-  `example/ios/`). The macOS `Package.swift` is exercised by `flutter pub get`
-  in the example and by CI (`make cicd_icloud` on `macos-latest`). The iOS
-  `Package.swift` is NOT exercised by any automated check. Phase 3 is updated
-  to be explicit; the iOS SPM path goes to the release checklist as RC-17.
+      **Answer:** The example app has only `example/macos/` (confirmed; no
+      `example/ios/`). The macOS `Package.swift` is exercised by
+      `flutter pub get` in the example and by CI (`make cicd_icloud` on
+      `macos-latest`). The iOS `Package.swift` is NOT exercised by any automated
+      check. Phase 3 is updated to be explicit; the iOS SPM path goes to the
+      release checklist as RC-17.
 
 ## Investigation
 
@@ -76,17 +77,17 @@ packages/kmdb_icloud/
 ```
 
 The iOS and macOS implementations are the same Swift class
-(`KmdbIcloudPlugin: NSObject, FlutterPlugin`), differing only in how they
-obtain the `binaryMessenger` (a `#if os(macOS)` guard inside
-`register(with:)`). They are kept in sync as separate real files rather than a
-symlink (the iOS podspec comment says "symlink" but this is stale — both are
-real, git-tracked files).
+(`KmdbIcloudPlugin: NSObject, FlutterPlugin`), differing only in how they obtain
+the `binaryMessenger` (a `#if os(macOS)` guard inside `register(with:)`). They
+are kept in sync as separate real files rather than a symlink (the iOS podspec
+comment says "symlink" but this is stale — both are real, git-tracked files).
 
 ### What SPM support requires (verified against real-world plugins)
 
 Flutter detects SPM support in a plugin by looking for a `Package.swift` at
-`<platform>/<plugin_name>/Package.swift` (e.g. `macos/kmdb_icloud/Package.swift`).
-No `pubspec.yaml` changes are needed for the per-platform approach.
+`<platform>/<plugin_name>/Package.swift` (e.g.
+`macos/kmdb_icloud/Package.swift`). No `pubspec.yaml` changes are needed for the
+per-platform approach.
 
 The Flutter framework is **not** declared as an SPM package dependency.
 Flutter's build toolchain injects the Flutter/FlutterMacOS framework at Xcode
@@ -96,6 +97,7 @@ build time via build settings (`FRAMEWORK_SEARCH_PATHS`, etc.). The plugin's
 **The industry pattern** (verified against `url_launcher_macos`,
 `cryptography_flutter`, `betto_onnxrt_ios`, and Flutter's own
 `integration_test_macos`):
+
 - `Package.swift` at `<platform>/<plugin_name>/Package.swift`
 - Sources at `<platform>/<plugin_name>/Sources/<plugin_name>/`
 - **Podspec updated** to point `s.source_files` at the same `Sources/` path
@@ -105,47 +107,48 @@ build time via build settings (`FRAMEWORK_SEARCH_PATHS`, etc.). The plugin's
 ### Source directory: per-platform vs. shared `darwin/`
 
 Two patterns exist:
+
 - **A. Per-platform** — `ios/kmdb_icloud/Package.swift` +
   `macos/kmdb_icloud/Package.swift`, each with their own `Sources/` directory.
 - **B. Shared `darwin/`** — move to `darwin/Sources/kmdb_icloud/`, add
   `sharedDarwinSource: true` to `pubspec.yaml`, one `darwin/Package.swift`.
 
-**Decision: Option A (per-platform).** Matches the established industry
-pattern (`url_launcher_macos`, `cryptography_flutter`). Requires two copies of
-`ICloudSyncPlugin.swift` (one per platform), but this duplication already
-exists — Option A just moves where the copies live and unifies the CocoaPods
-and SPM source paths. Option B is better long-term for publication but adds
-pubspec churn and a `darwin/` restructure; defer until the package is prepared
-for pub.dev.
+**Decision: Option A (per-platform).** Matches the established industry pattern
+(`url_launcher_macos`, `cryptography_flutter`). Requires two copies of
+`ICloudSyncPlugin.swift` (one per platform), but this duplication already exists
+— Option A just moves where the copies live and unifies the CocoaPods and SPM
+source paths. Option B is better long-term for publication but adds pubspec
+churn and a `darwin/` restructure; defer until the package is prepared for
+pub.dev.
 
 ### Dual CocoaPods + SPM mode
 
-Both managers will use the SAME source files under `Sources/kmdb_icloud/`.
-The podspec `s.source_files` path changes from `'Classes/**/*'` to
-`'kmdb_icloud/Sources/kmdb_icloud/**/*'`. The `Classes/` directories are
-deleted — there is only one copy of the Swift source.
+Both managers will use the SAME source files under `Sources/kmdb_icloud/`. The
+podspec `s.source_files` path changes from `'Classes/**/*'` to
+`'kmdb_icloud/Sources/kmdb_icloud/**/*'`. The `Classes/` directories are deleted
+— there is only one copy of the Swift source.
 
 ### Key files
 
-| File | Action |
-| ---- | ------ |
-| `macos/kmdb_icloud/Package.swift` | **Create** — SPM manifest for macOS |
-| `macos/kmdb_icloud/Sources/kmdb_icloud/ICloudSyncPlugin.swift` | **Create** — move from `macos/Classes/` |
-| `macos/kmdb_icloud/.gitignore` | **Create** — ignore `.build/` and `.swiftpm/` |
-| `macos/kmdb_icloud.podspec` | **Update** — `source_files` path |
-| `macos/Classes/ICloudSyncPlugin.swift` | **Delete** — replaced by `Sources/` |
-| `ios/kmdb_icloud/Package.swift` | **Create** — SPM manifest for iOS |
-| `ios/kmdb_icloud/Sources/kmdb_icloud/ICloudSyncPlugin.swift` | **Create** — move from `ios/Classes/` |
-| `ios/kmdb_icloud/.gitignore` | **Create** — ignore `.build/` and `.swiftpm/` |
-| `ios/kmdb_icloud.podspec` | **Update** — `source_files` path |
-| `ios/Classes/ICloudSyncPlugin.swift` | **Delete** — replaced by `Sources/` |
-| `pubspec.yaml` | **No change** — per-platform approach needs none |
+| File                                                           | Action                                           |
+| -------------------------------------------------------------- | ------------------------------------------------ |
+| `macos/kmdb_icloud/Package.swift`                              | **Create** — SPM manifest for macOS              |
+| `macos/kmdb_icloud/Sources/kmdb_icloud/ICloudSyncPlugin.swift` | **Create** — move from `macos/Classes/`          |
+| `macos/kmdb_icloud/.gitignore`                                 | **Create** — ignore `.build/` and `.swiftpm/`    |
+| `macos/kmdb_icloud.podspec`                                    | **Update** — `source_files` path                 |
+| `macos/Classes/ICloudSyncPlugin.swift`                         | **Delete** — replaced by `Sources/`              |
+| `ios/kmdb_icloud/Package.swift`                                | **Create** — SPM manifest for iOS                |
+| `ios/kmdb_icloud/Sources/kmdb_icloud/ICloudSyncPlugin.swift`   | **Create** — move from `ios/Classes/`            |
+| `ios/kmdb_icloud/.gitignore`                                   | **Create** — ignore `.build/` and `.swiftpm/`    |
+| `ios/kmdb_icloud.podspec`                                      | **Update** — `source_files` path                 |
+| `ios/Classes/ICloudSyncPlugin.swift`                           | **Delete** — replaced by `Sources/`              |
+| `pubspec.yaml`                                                 | **No change** — per-platform approach needs none |
 
 ### Edge cases and risks
 
-- **Podspec `source_files` path.** The relative path in the podspec is
-  relative to the podspec file's location (e.g. `macos/kmdb_icloud.podspec`).
-  The new path `'kmdb_icloud/Sources/kmdb_icloud/**/*'` resolves to
+- **Podspec `source_files` path.** The relative path in the podspec is relative
+  to the podspec file's location (e.g. `macos/kmdb_icloud.podspec`). The new
+  path `'kmdb_icloud/Sources/kmdb_icloud/**/*'` resolves to
   `macos/kmdb_icloud/Sources/kmdb_icloud/**/*`. Verify this resolves before
   deleting `Classes/`.
 - **Swift tools version.** `swift-tools-version: 5.9` requires Xcode 15+.
@@ -156,28 +159,30 @@ deleted — there is only one copy of the Swift source.
 - **No `Package.resolved`.** With `dependencies: []`, SPM generates no lockfile
   inside the plugin package directories. The consuming app's `Package.resolved`
   is updated by the consumer, not the plugin.
-- **macOS example only.** The `example/` app has only `example/macos/` — no
-  iOS target. The iOS `Package.swift` is not exercised by any automated check.
-  See Phase 3 for how this is handled.
+- **macOS example only.** The `example/` app has only `example/macos/` — no iOS
+  target. The iOS `Package.swift` is not exercised by any automated check. See
+  Phase 3 for how this is handled.
 - **iOS simulator architecture.** The current iOS podspec excludes `i386`
   (`EXCLUDED_ARCHS[sdk=iphonesimulator*]`). SPM + Xcode handles architecture
-  selection automatically; the exclusion is not needed in the iOS `Package.swift`
-  and is omitted.
-- **CI observable outcome.** `make cicd_icloud` runs `flutter pub get` in
-  both `packages/kmdb_icloud/` and `packages/kmdb_icloud/example/` on
-  `macos-latest`. The SPM warning is currently visible there and will disappear
-  after this change — a concrete, CI-verifiable outcome (confirmed by reviewer).
+  selection automatically; the exclusion is not needed in the iOS
+  `Package.swift` and is omitted.
+- **CI observable outcome.** `make cicd_icloud` runs `flutter pub get` in both
+  `packages/kmdb_icloud/` and `packages/kmdb_icloud/example/` on `macos-latest`.
+  The SPM warning is currently visible there and will disappear after this
+  change — a concrete, CI-verifiable outcome (confirmed by reviewer).
 
 ## Implementation plan
 
 ### Phase 1 — macOS SPM package
 
-- [x] Create directory `packages/kmdb_icloud/macos/kmdb_icloud/Sources/kmdb_icloud/`.
+- [x] Create directory
+      `packages/kmdb_icloud/macos/kmdb_icloud/Sources/kmdb_icloud/`.
 - [x] Move `macos/Classes/ICloudSyncPlugin.swift` to
-  `macos/kmdb_icloud/Sources/kmdb_icloud/ICloudSyncPlugin.swift`.
+      `macos/kmdb_icloud/Sources/kmdb_icloud/ICloudSyncPlugin.swift`.
 - [x] Create `packages/kmdb_icloud/macos/kmdb_icloud/Package.swift` with the
-  following content (verified against `url_launcher_macos-3.2.5` and
-  `cryptography_flutter-2.3.4`):
+      following content (verified against `url_launcher_macos-3.2.5` and
+      `cryptography_flutter-2.3.4`):
+
   ```swift
   // swift-tools-version: 5.9
   // The swift-tools-version declares the minimum version of Swift required to build this package.
@@ -201,26 +206,29 @@ deleted — there is only one copy of the Swift source.
       ]
   )
   ```
+
 - [x] Create `packages/kmdb_icloud/macos/kmdb_icloud/.gitignore`:
   ```
   .build/
   .swiftpm/
   ```
-- [x] Update `packages/kmdb_icloud/macos/kmdb_icloud.podspec`:
-  change `s.source_files = 'Classes/**/*'`
-  to `s.source_files = 'kmdb_icloud/Sources/kmdb_icloud/**/*'`.
+- [x] Update `packages/kmdb_icloud/macos/kmdb_icloud.podspec`: change
+      `s.source_files = 'Classes/**/*'` to
+      `s.source_files = 'kmdb_icloud/Sources/kmdb_icloud/**/*'`.
 - [x] Delete `packages/kmdb_icloud/macos/Classes/` directory.
 - [x] Confirm `Package.swift` does not need a license header (it is a Swift
-  Package manifest). Added `--ignore="**/Package.swift"` to `addlicense_config.txt`
-  because SPM requires `// swift-tools-version:` as the very first line —
-  a license header would break SPM parsing.
+      Package manifest). Added `--ignore="**/Package.swift"` to
+      `addlicense_config.txt` because SPM requires `// swift-tools-version:` as
+      the very first line — a license header would break SPM parsing.
 
 ### Phase 2 — iOS SPM package
 
-- [x] Create directory `packages/kmdb_icloud/ios/kmdb_icloud/Sources/kmdb_icloud/`.
+- [x] Create directory
+      `packages/kmdb_icloud/ios/kmdb_icloud/Sources/kmdb_icloud/`.
 - [x] Move `ios/Classes/ICloudSyncPlugin.swift` to
-  `ios/kmdb_icloud/Sources/kmdb_icloud/ICloudSyncPlugin.swift`.
+      `ios/kmdb_icloud/Sources/kmdb_icloud/ICloudSyncPlugin.swift`.
 - [x] Create `packages/kmdb_icloud/ios/kmdb_icloud/Package.swift`:
+
   ```swift
   // swift-tools-version: 5.9
   // The swift-tools-version declares the minimum version of Swift required to build this package.
@@ -244,39 +252,173 @@ deleted — there is only one copy of the Swift source.
       ]
   )
   ```
+
 - [x] Create `packages/kmdb_icloud/ios/kmdb_icloud/.gitignore`:
   ```
   .build/
   .swiftpm/
   ```
-- [x] Update `packages/kmdb_icloud/ios/kmdb_icloud.podspec`:
-  change `s.source_files = 'Classes/**/*'`
-  to `s.source_files = 'kmdb_icloud/Sources/kmdb_icloud/**/*'`.
-  Also removed the stale symlink comment (the files are real files, not symlinks).
+- [x] Update `packages/kmdb_icloud/ios/kmdb_icloud.podspec`: change
+      `s.source_files = 'Classes/**/*'` to
+      `s.source_files = 'kmdb_icloud/Sources/kmdb_icloud/**/*'`. Also removed
+      the stale symlink comment (the files are real files, not symlinks).
 - [x] Delete `packages/kmdb_icloud/ios/Classes/` directory.
 
 ### Phase 3 — Verification
 
 - [x] Run `flutter pub get` in `packages/kmdb_icloud/` — the original "does not
-  support Swift Package Manager" warning is gone. Flutter 3.44.0 now emits a
-  separate "missing FlutterFramework dependency" note when running from the
-  package root (not an app), but this is a tooling diagnostic, not the original
-  SPM-unsupported error. Real-world plugins (`url_launcher_macos`,
-  `cryptography_flutter`) with `dependencies: []` also receive this note;
-  it does not affect runtime linking since Flutter injects `FlutterMacOS`/`Flutter`
-  via `FRAMEWORK_SEARCH_PATHS` at Xcode build time.
+      support Swift Package Manager" warning is gone. Flutter 3.44.0 now emits a
+      separate "missing FlutterFramework dependency" note when running from the
+      package root (not an app), but this is a tooling diagnostic, not the
+      original SPM-unsupported error. Real-world plugins (`url_launcher_macos`,
+      `cryptography_flutter`) with `dependencies: []` also receive this note; it
+      does not affect runtime linking since Flutter injects
+      `FlutterMacOS`/`Flutter` via `FRAMEWORK_SEARCH_PATHS` at Xcode build time.
 - [x] Run `flutter pub get` in `packages/kmdb_icloud/example/` — clean output:
-  "All plugins found for macos are Swift Packages" with no further SPM warnings.
-- [x] Run `cd packages/kmdb_icloud && dart test` — all 128 tests pass (1 skipped:
-  the credential-gated e2e test, as expected).
+      "All plugins found for macos are Swift Packages" with no further SPM
+      warnings.
+- [x] Run `cd packages/kmdb_icloud && dart test` — all 128 tests pass (1
+      skipped: the credential-gated e2e test, as expected).
 - [x] Added **RC-17** to `docs/spec/28_release_checklist.md`.
 
 ### Phase 4 — CI check
 
-- [ ] Confirm CI output after the change: look for absence of the SPM warning in
-  the `flutter pub get` step of `make cicd_icloud` on `macos-latest`. This step
-  was confirmed to run during the review. Verification occurs when the PR is
-  merged and CI runs.
+- [x] Confirmed CI output: the original SPM warning is gone after adding the
+      `FlutterFramework` dependency to both `Package.swift` files (see correction
+      below). The remaining "project still has CocoaPods integration" message in
+      `make cicd_icloud` output is about the **example app's own Podfile**, not
+      the plugin's SPM support — it is a consumer-side migration task (running
+      `pod deintegrate` in `example/macos/`) that is out of scope for this plan.
+
+#### Initial CI Result (before correction)
+
+```
+make cicd_icloud
+cd packages/kmdb_icloud && flutter pub get
+Resolving dependencies...
+Downloading packages...
+  _fe_analyzer_shared 103.0.0 (104.0.0 available)
+  analyzer 13.3.0 (14.0.0 available)
+! betto_common 0.1.0-dev.1 (overridden)
+! betto_inferencing 0.1.0-dev.1 (overridden)
+! betto_lexical 0.1.0-dev.1 (overridden)
+! betto_mediatype_detector 0.1.0-dev.1 (overridden)
+! betto_schema 0.1.0-dev.1 (overridden)
+! betto_zstd 0.1.0-dev.3 (overridden)
+! cbor 6.5.1 (overridden)
+! kmdb 0.1.0 from path ../kmdb (overridden)
+! meta 1.18.3 (overridden)
+  package_config 2.2.0 (3.0.0 available)
+! uuid 4.5.3 (overridden)
+  vector_math 2.2.0 (2.4.0 available)
+! web 1.1.1 (overridden)
+Got dependencies!
+4 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+Resolving dependencies in `./example`...
+Downloading packages...
+Got dependencies in `./example`.
+All plugins found for macos are Swift Packages, but your project still has CocoaPods integration. Your project uses a non-standard Podfile and will need to be migrated to Swift Package Manager manually. Some steps you may need to
+complete include:
+  * In the macos/ directory run "pod deintegrate"
+  * Transition any Pod dependencies to Swift Package equivalents. See https://developer.apple.com/documentation/xcode/adding-package-dependencies-to-your-app
+  * Transition any custom logic
+  * Remove the include to "Pods/Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig" in your macos/Flutter/Flutter-Debug.xcconfig
+  * Remove the include to "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig" in your macos/Flutter/Flutter-Release.xcconfig
+
+Removing CocoaPods integration will improve the project's build time.
+Plugin kmdb_icloud has a Package.swift for macos but is missing a dependency on FlutterFramework. Add the following to your Package.swift dependencies:
+    .package(name: "FlutterFramework", path: "../FlutterFramework")
+And add FlutterFramework as a target dependency:
+    .product(name: "FlutterFramework", package: "FlutterFramework")
+See https://docs.flutter.dev/packages-and-plugins/swift-package-manager/for-plugin-authors for more information.
+cd packages/kmdb_icloud/example && flutter pub get
+Resolving dependencies...
+Downloading packages...
+  _fe_analyzer_shared 103.0.0 (104.0.0 available)
+  analyzer 13.3.0 (14.0.0 available)
+! betto_common 0.1.0-dev.1 (overridden)
+! betto_inferencing 0.1.0-dev.1 (overridden)
+! betto_lexical 0.1.0-dev.1 (overridden)
+! betto_mediatype_detector 0.1.0-dev.1 (overridden)
+! betto_schema 0.1.0-dev.1 (overridden)
+! betto_zstd 0.1.0-dev.3 (overridden)
+! cbor 6.5.1 (overridden)
+! kmdb 0.1.0 from path ../../kmdb (overridden)
+! meta 1.18.3 (overridden)
+  package_config 2.2.0 (3.0.0 available)
+! uuid 4.5.3 (overridden)
+  vector_math 2.2.0 (2.4.0 available)
+! web 1.1.1 (overridden)
+Got dependencies!
+4 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+All plugins found for macos are Swift Packages, but your project still has CocoaPods integration. Your project uses a non-standard Podfile and will need to be migrated to Swift Package Manager manually. Some steps you may need to
+complete include:
+  * In the macos/ directory run "pod deintegrate"
+  * Transition any Pod dependencies to Swift Package equivalents. See https://developer.apple.com/documentation/xcode/adding-package-dependencies-to-your-app
+  * Transition any custom logic
+  * Remove the include to "Pods/Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig" in your macos/Flutter/Flutter-Debug.xcconfig
+  * Remove the include to "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig" in your macos/Flutter/Flutter-Release.xcconfig
+
+Removing CocoaPods integration will improve the project's build time.
+dart format --output=none --set-exit-if-changed \
+                packages/kmdb_icloud/lib packages/kmdb_icloud/test packages/kmdb_icloud/example/lib
+Formatted 10 files (0 changed) in 0.02 seconds.
+cd packages/kmdb_icloud && flutter analyze
+Analyzing kmdb_icloud...
+No issues found! (ran in 1.5s)
+cd packages/kmdb_icloud/example && flutter analyze
+All plugins found for macos are Swift Packages, but your project still has CocoaPods integration. Your project uses a non-standard Podfile and will need to be migrated to Swift Package Manager manually. Some steps you may need to
+complete include:
+  * In the macos/ directory run "pod deintegrate"
+  * Transition any Pod dependencies to Swift Package equivalents. See https://developer.apple.com/documentation/xcode/adding-package-dependencies-to-your-app
+  * Transition any custom logic
+  * Remove the include to "Pods/Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig" in your macos/Flutter/Flutter-Debug.xcconfig
+  * Remove the include to "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig" in your macos/Flutter/Flutter-Release.xcconfig
+
+Removing CocoaPods integration will improve the project's build time.
+Plugin kmdb_icloud has a Package.swift for macos but is missing a dependency on FlutterFramework. Add the following to your Package.swift dependencies:
+    .package(name: "FlutterFramework", path: "../FlutterFramework")
+And add FlutterFramework as a target dependency:
+    .product(name: "FlutterFramework", package: "FlutterFramework")
+See https://docs.flutter.dev/packages-and-plugins/swift-package-manager/for-plugin-authors for more information.
+Analyzing example...
+No issues found! (ran in 0.9s)
+cd packages/kmdb_icloud && flutter test
+00:01 +0: loading /Users/gonk/development/bettongia/kmdb/.worktrees/20260619_plan_icloud_spm/packages/kmdb_icloud/test/icloud_adapter_test.dart
+Warning: A tag was used that wasn't specified in dart_test.yaml.
+  e2e was used in the group "iCloud real-service integration"
+
+00:08 +128 ~1: 1 skipped test.
+00:08 +128 ~1: All other tests passed!
+```
+
+#### Correction (2026-06-20)
+
+The initial `Package.swift` investigation concluded `dependencies: []` was correct
+(based on `url_launcher_macos` and `cryptography_flutter`). The CI run above
+disproved this — Flutter's toolchain explicitly requires:
+
+```swift
+dependencies: [
+    .package(name: "FlutterFramework", path: "../FlutterFramework"),
+],
+targets: [
+    .target(
+        name: "kmdb_icloud",
+        dependencies: [
+            .product(name: "FlutterFramework", package: "FlutterFramework"),
+        ]
+    ),
+]
+```
+
+Both `macos/kmdb_icloud/Package.swift` and `ios/kmdb_icloud/Package.swift` were
+updated accordingly. After this fix, `make cicd_icloud` no longer emits the
+`FlutterFramework` warning. The remaining "project still has CocoaPods
+integration" message refers to the example app's Podfile (consumer-side), which
+is out of scope.
 
 ## Follow-up (out of scope for this plan)
 
@@ -297,12 +439,16 @@ SPM plugin template. All three questions are now resolved by inspection of real-
 world pub-cached plugins (see Open Questions above).
 
 Key corrections made after review:
-- Package.swift location changed from `macos/Package.swift` → `macos/kmdb_icloud/Package.swift`
+
+- Package.swift location changed from `macos/Package.swift` →
+  `macos/kmdb_icloud/Package.swift`
 - Flutter framework dependency removed from both manifests (`dependencies: []`)
-- Source location changed from `Classes/` to `Sources/kmdb_icloud/` (SPM default)
+- Source location changed from `Classes/` to `Sources/kmdb_icloud/` (SPM
+  default)
 - Podspec `source_files` updated to reference the new `Sources/` path
 - `Classes/` directories deleted (CocoaPods and SPM share the same files)
-- iOS verification scoped to release checklist only (RC-17); macOS exercised by CI
+- iOS verification scoped to release checklist only (RC-17); macOS exercised by
+  CI
 
 ## Summary
 
