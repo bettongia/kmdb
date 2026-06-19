@@ -1,6 +1,6 @@
 # Add Swift Package Manager Support to `kmdb_icloud`
 
-**Status**: Investigated
+**Status**: Implementing
 
 **PR link**: —
 
@@ -172,10 +172,10 @@ deleted — there is only one copy of the Swift source.
 
 ### Phase 1 — macOS SPM package
 
-- [ ] Create directory `packages/kmdb_icloud/macos/kmdb_icloud/Sources/kmdb_icloud/`.
-- [ ] Move `macos/Classes/ICloudSyncPlugin.swift` to
+- [x] Create directory `packages/kmdb_icloud/macos/kmdb_icloud/Sources/kmdb_icloud/`.
+- [x] Move `macos/Classes/ICloudSyncPlugin.swift` to
   `macos/kmdb_icloud/Sources/kmdb_icloud/ICloudSyncPlugin.swift`.
-- [ ] Create `packages/kmdb_icloud/macos/kmdb_icloud/Package.swift` with the
+- [x] Create `packages/kmdb_icloud/macos/kmdb_icloud/Package.swift` with the
   following content (verified against `url_launcher_macos-3.2.5` and
   `cryptography_flutter-2.3.4`):
   ```swift
@@ -201,25 +201,26 @@ deleted — there is only one copy of the Swift source.
       ]
   )
   ```
-- [ ] Create `packages/kmdb_icloud/macos/kmdb_icloud/.gitignore`:
+- [x] Create `packages/kmdb_icloud/macos/kmdb_icloud/.gitignore`:
   ```
   .build/
   .swiftpm/
   ```
-- [ ] Update `packages/kmdb_icloud/macos/kmdb_icloud.podspec`:
+- [x] Update `packages/kmdb_icloud/macos/kmdb_icloud.podspec`:
   change `s.source_files = 'Classes/**/*'`
   to `s.source_files = 'kmdb_icloud/Sources/kmdb_icloud/**/*'`.
-- [ ] Delete `packages/kmdb_icloud/macos/Classes/` directory.
-- [ ] Confirm `Package.swift` does not need a license header (it is a Swift
-  Package manifest). If `license_check` flags it, add the Apache 2.0 header
-  comment at the top (before `// swift-tools-version`).
+- [x] Delete `packages/kmdb_icloud/macos/Classes/` directory.
+- [x] Confirm `Package.swift` does not need a license header (it is a Swift
+  Package manifest). Added `--ignore="**/Package.swift"` to `addlicense_config.txt`
+  because SPM requires `// swift-tools-version:` as the very first line —
+  a license header would break SPM parsing.
 
 ### Phase 2 — iOS SPM package
 
-- [ ] Create directory `packages/kmdb_icloud/ios/kmdb_icloud/Sources/kmdb_icloud/`.
-- [ ] Move `ios/Classes/ICloudSyncPlugin.swift` to
+- [x] Create directory `packages/kmdb_icloud/ios/kmdb_icloud/Sources/kmdb_icloud/`.
+- [x] Move `ios/Classes/ICloudSyncPlugin.swift` to
   `ios/kmdb_icloud/Sources/kmdb_icloud/ICloudSyncPlugin.swift`.
-- [ ] Create `packages/kmdb_icloud/ios/kmdb_icloud/Package.swift`:
+- [x] Create `packages/kmdb_icloud/ios/kmdb_icloud/Package.swift`:
   ```swift
   // swift-tools-version: 5.9
   // The swift-tools-version declares the minimum version of Swift required to build this package.
@@ -243,44 +244,39 @@ deleted — there is only one copy of the Swift source.
       ]
   )
   ```
-- [ ] Create `packages/kmdb_icloud/ios/kmdb_icloud/.gitignore`:
+- [x] Create `packages/kmdb_icloud/ios/kmdb_icloud/.gitignore`:
   ```
   .build/
   .swiftpm/
   ```
-- [ ] Update `packages/kmdb_icloud/ios/kmdb_icloud.podspec`:
+- [x] Update `packages/kmdb_icloud/ios/kmdb_icloud.podspec`:
   change `s.source_files = 'Classes/**/*'`
   to `s.source_files = 'kmdb_icloud/Sources/kmdb_icloud/**/*'`.
-- [ ] Delete `packages/kmdb_icloud/ios/Classes/` directory.
+  Also removed the stale symlink comment (the files are real files, not symlinks).
+- [x] Delete `packages/kmdb_icloud/ios/Classes/` directory.
 
 ### Phase 3 — Verification
 
-- [ ] Run `flutter pub get` in `packages/kmdb_icloud/` — confirm no SPM warning
-  for either platform.
-- [ ] Run `flutter pub get` in `packages/kmdb_icloud/example/` — confirm no
-  warning (exercises the **macOS** manifest only; no iOS example app exists).
-- [ ] Run `cd packages/kmdb_icloud && dart test` — confirm Dart-side tests pass
-  (these do not build native code; they validate the Dart channel logic).
-- [ ] Add **RC-17** to `docs/spec/28_release_checklist.md` (RC-16 is the current
-  last entry). Use the standard entry format:
-  - **Area:** `kmdb_icloud` plugin / SPM
-  - **Validates:** iOS SPM manifest (`ios/kmdb_icloud/Package.swift`) compiles
-    and links the Flutter plugin correctly. macOS is covered by CI; iOS is
-    human-only because the example has no iOS target.
-  - **Why not automated:** No iOS Simulator CI lane; CloudKit requires a real
-    entitlement.
-  - **Applies when:** releasing any version of `kmdb_icloud` that includes this
-    change or any subsequent Swift source modification.
-  - **Steps:** Build and run the example (or any test host app) on an iOS
-    Simulator with CocoaPods disabled (`--no-codesign` / SPM-only mode). Confirm
-    the plugin registers without linker errors and that `import Flutter` resolves.
-  - **Expected result:** App launches; plugin channel responds to a method call.
+- [x] Run `flutter pub get` in `packages/kmdb_icloud/` — the original "does not
+  support Swift Package Manager" warning is gone. Flutter 3.44.0 now emits a
+  separate "missing FlutterFramework dependency" note when running from the
+  package root (not an app), but this is a tooling diagnostic, not the original
+  SPM-unsupported error. Real-world plugins (`url_launcher_macos`,
+  `cryptography_flutter`) with `dependencies: []` also receive this note;
+  it does not affect runtime linking since Flutter injects `FlutterMacOS`/`Flutter`
+  via `FRAMEWORK_SEARCH_PATHS` at Xcode build time.
+- [x] Run `flutter pub get` in `packages/kmdb_icloud/example/` — clean output:
+  "All plugins found for macos are Swift Packages" with no further SPM warnings.
+- [x] Run `cd packages/kmdb_icloud && dart test` — all 128 tests pass (1 skipped:
+  the credential-gated e2e test, as expected).
+- [x] Added **RC-17** to `docs/spec/28_release_checklist.md`.
 
 ### Phase 4 — CI check
 
 - [ ] Confirm CI output after the change: look for absence of the SPM warning in
   the `flutter pub get` step of `make cicd_icloud` on `macos-latest`. This step
-  was confirmed to run during the review.
+  was confirmed to run during the review. Verification occurs when the PR is
+  merged and CI runs.
 
 ## Follow-up (out of scope for this plan)
 
