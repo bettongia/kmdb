@@ -1,18 +1,20 @@
-.dart_tool
-**/.idea
-sandbox/
-.worktrees
-*.log
+# Generated artifacts
+**/build/
+**/.dart_tool/
 site/
-**/.dart_tool
-.vscode/
-.gemini
-.claude
-dist/
-**/coverage
-**/*.iml
-.DS_store
-.geminiignore
+coverage/
+*.log
+
+# Documentation source (Markdown/HTML/CSS only — not needed by cicd_linux)
+docs/
+
+# Container and dev metadata
+.containerignore
+Dockerfile
+pubspec.lock
+.claude/
+.worktrees/
 .git/
-**/.venv
-**/.DS_Store
+.github/
+.gitignore
+.packages

@@ -12,8 +12,12 @@ workspace:
   - packages/kmdb_cli
   - packages/kmdb_harness
   - packages/kmdb_google_drive
-  - packages/kmdb_icloud
-  - packages/kmdb_icloud/example
+  # kmdb_icloud and kmdb_icloud/example are Flutter plugins and are NOT part of
+  # the Dart workspace.  They depend on `flutter: sdk: flutter`, which requires
+  # the Flutter SDK — something Dart-only CI runners (Linux, Windows) do not
+  # have.  Those packages manage their own dependency resolution (path deps on
+  # kmdb/kmdb_harness) and are bootstrapped separately when Flutter is available
+  # (e.g. the macOS CI job, or local development with Flutter installed).
 
 dev_dependencies:
   lints: ^6.0.0
@@ -69,7 +73,7 @@ melos:
       description: Test all pure Dart packages
       run: dart test
       exec:
-        concurrency: 4
+        concurrency: 2
       packageFilters:
         dirExists: test
         flutter: false
@@ -114,7 +118,7 @@ melos:
       description: Combine coverage across packages
       steps:
         - rm -rf $MELOS_ROOT_PATH/site/coverage
-        - mkdir $MELOS_ROOT_PATH/site/coverage
+        - mkdir -p $MELOS_ROOT_PATH/site/coverage
         - coverage:aggregate
         - lcov --summary site/coverage/lcov.info
 
