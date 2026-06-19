@@ -59,10 +59,7 @@ cicd_linux: cicd_linux_base
 # Verifies that Dart tests pass on the macOS file system and that the
 # betto_zstd native dylib builds and links correctly on arm64/x86_64.
 # Skips quality checks (format/analyze/license) — those run in cicd_linux.
-#
-# Flutter is not required here: kmdb_icloud is outside the workspace and its
-# dedicated testing (via the Flutter plugin integration) is a manual step for
-# now (see docs/roadmap/0_00.md).
+# kmdb_icloud (Flutter plugin) is tested separately via cicd_icloud.
 cicd_macos:
 	dart pub global activate melos
 	dart pub global activate coverage
@@ -81,6 +78,25 @@ cicd_windows:
 	melos bootstrap
 	melos test_dart --no-select
 .PHONY: cicd_windows
+
+# ── iCloud Flutter plugin ─────────────────────────────────────────────────────
+#
+# Verifies the kmdb_icloud Flutter plugin and its example app: bootstraps both
+# packages, format-checks Dart sources, analyzes, and runs the unit tests
+# (harness convergence tests via FakeICloudSyncChannel).  e2e tests that
+# require a real CloudKit container are credential-gated and skip automatically.
+# Requires the Flutter SDK — run on macOS only.
+# License check is intentionally omitted: addlicense covers the full repo in
+# cicd_linux_base (it runs from the workspace root).
+cicd_icloud:
+	cd packages/kmdb_icloud && flutter pub get
+	cd packages/kmdb_icloud/example && flutter pub get
+	dart format --output=none --set-exit-if-changed \
+		packages/kmdb_icloud/lib packages/kmdb_icloud/test packages/kmdb_icloud/example/lib
+	cd packages/kmdb_icloud && flutter analyze
+	cd packages/kmdb_icloud/example && flutter analyze
+	cd packages/kmdb_icloud && flutter test
+.PHONY: cicd_icloud
 
 # ── Web / Chrome ───────────────────────────────────────────────────────────────
 #

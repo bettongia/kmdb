@@ -94,6 +94,13 @@ prepare:
 	dart pub global activate melos
 	dart pub global activate coverage
 	melos bootstrap
+	@if command -v flutter >/dev/null 2>&1; then \
+	    echo "Flutter found — bootstrapping kmdb_icloud..."; \
+	    ( cd packages/kmdb_icloud && flutter pub get ); \
+	    ( cd packages/kmdb_icloud/example && flutter pub get ); \
+	else \
+	    echo "Flutter not found — skipping kmdb_icloud bootstrap (iOS/macOS adapter only)"; \
+	fi
 .PHONY: prepare
 
 clean:

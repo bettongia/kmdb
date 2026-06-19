@@ -18,5 +18,22 @@ dependencies:
 dev_dependencies:
   flutter_lints: ^6.0.0
 
+# Mirror the workspace-level overrides so transitive betto_* deps resolve to
+# the same versions used by the rest of the repo.  Keep in sync with the root
+# pubspec.yaml dependency_overrides block and packages/kmdb_icloud/pubspec.yaml.
+dependency_overrides:
+  kmdb:
+    path: ../../kmdb
+  meta: ^1.18.2
+  uuid: ^4.5.3
+  cbor: ^6.5.1
+  web: ^1.1.0
+  betto_common: ^0.1.0-dev.1
+  betto_schema: ^0.1.0-dev.1
+  betto_zstd: ^0.1.0-dev.3
+  betto_mediatype_detector: ^0.1.0-dev.1
+  betto_lexical: ^0.1.0-dev.1
+  betto_inferencing: ^0.1.0-dev.1
+
 flutter:
   uses-material-design: true
