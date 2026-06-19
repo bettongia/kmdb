@@ -38,10 +38,16 @@ void main() {
   /// Runs the CLI with [args] and returns the result.
   Future<io.ProcessResult> run(List<String> args) async {
     // Run from the package root where pubspec.yaml is located.
-    final result = await io.Process.run('dart', [
-      binPath,
-      ...args,
-    ], workingDirectory: packageRoot);
+    // Clear DART_VM_OPTIONS so coverage tool flags (--pause-isolates-on-exit,
+    // --enable-vm-service) are not inherited by the subprocess.  Without this,
+    // each CLI subprocess pauses before exiting waiting for a VM-service
+    // connection that never comes, causing 30-second test timeouts.
+    final result = await io.Process.run(
+      'dart',
+      [binPath, ...args],
+      workingDirectory: packageRoot,
+      environment: {...io.Platform.environment, 'DART_VM_OPTIONS': ''},
+    );
     // Give the OS/FS a tiny bit of time to settle after command exit.
     await Future.delayed(const Duration(milliseconds: 50));
     return result;

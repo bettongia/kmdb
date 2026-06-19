@@ -7,12 +7,13 @@ environment:
   sdk: ^3.12.0
   flutter: ">=3.29.0"
 
-resolution: workspace
+# Not a workspace member — see packages/kmdb_icloud/pubspec.yaml for rationale.
 
 dependencies:
   flutter:
     sdk: flutter
   kmdb_icloud:
+    path: ..
 
 dev_dependencies:
   flutter_lints: ^6.0.0
