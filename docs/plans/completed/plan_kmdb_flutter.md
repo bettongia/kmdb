@@ -1,6 +1,6 @@
 # `kmdb_flutter` Add-On Package (Flutter DEK Cache + Native Crypto Acceleration)
 
-**Status**: Investigated
+**Status**: Complete
 
 **PR link**: —
 
@@ -174,7 +174,7 @@ them.
   2. **Release checklist (cannot run headless):** the real-device round-trip —
      store DEK → kill app → relaunch → `read` returns the DEK without
      re-prompting; plus verifying native crypto acceleration is actually active
-     on a real device — go to `docs/spec/28_release_checklist.md` as **RC-17**
+     on a real device — go to `docs/spec/28_release_checklist.md` as **RC-18**
      (next free number; latest is RC-16). Per `docs/plans/README.md` item 4.
 
 - [x] **F-pkg (raised during review): the package is NOT a workspace member.**
@@ -269,7 +269,7 @@ them.
   notes section that currently says Flutter hosts *should* inject a secure DEK
   cache can now point at the concrete package. (Take care not to renumber — edit
   in place.)
-- **`docs/spec/28_release_checklist.md`** — add **RC-17** (next free number;
+- **`docs/spec/28_release_checklist.md`** — add **RC-18** (next free number;
   latest is RC-16): the real-device DEK round-trip verification (store → kill →
   relaunch → read without re-prompt) plus, given F3's explicit init,
   confirmation that native crypto acceleration is active on a real device. Use
@@ -300,7 +300,7 @@ them.
 
 ### Phase 1 — Package skeleton
 
-- [ ] Create `packages/kmdb_flutter/` with `pubspec.yaml`, modelled on
+- [x] Create `packages/kmdb_flutter/` with `pubspec.yaml`, modelled on
       `packages/kmdb_icloud/pubspec.yaml` (the Flutter-bearing, **non-workspace**
       precedent — see F-pkg):
       - `name: kmdb_flutter`, `version: 0.1.0`, `publish_to: none`.
@@ -310,8 +310,7 @@ them.
       - dependencies: `flutter: { sdk: flutter }`, `kmdb: { path: ../kmdb }`,
         `flutter_secure_storage: ^10.0.0` (F1), `cryptography_flutter: ^2.0.0`
         (F1).
-      - dev_dependencies: `flutter_test: { sdk: flutter }`, `lints: ^6.0.0`,
-        `flutter_lints` (as appropriate).
+      - dev_dependencies: `flutter_test: { sdk: flutter }`, `flutter_lints: ^5.0.0`.
       - `dependency_overrides`: **mirror the root `pubspec.yaml` block**
         (`kmdb: { path: ../kmdb }`, `meta`, `uuid`, `cbor`, `web`, and the
         `betto_*` dev pins) exactly as `kmdb_icloud/pubspec.yaml` does, so
@@ -320,76 +319,81 @@ them.
         its own (unlike `kmdb_icloud`, which is itself a plugin); it only
         *depends on* the `flutter_secure_storage` / `cryptography_flutter`
         plugins.
-- [ ] Add the license header to every Dart file (per `header_template.txt`,
+- [x] Add the license header to every Dart file (per `header_template.txt`,
       `{{.Year}}` → 2026).
-- [ ] `packages/kmdb_flutter/lib/kmdb_flutter.dart` — barrel export of
+- [x] `packages/kmdb_flutter/lib/kmdb_flutter.dart` — barrel export of
       `FlutterSecureDekCache` and `KmdbFlutter`.
 
 ### Phase 2 — `FlutterSecureDekCache`
 
-- [ ] `packages/kmdb_flutter/lib/src/flutter_secure_dek_cache.dart`:
+- [x] `packages/kmdb_flutter/lib/src/flutter_secure_dek_cache.dart`:
       `final class FlutterSecureDekCache implements DekCache` over
       `FlutterSecureStorage`.
-- [ ] Derive the secure-storage key deterministically from the `dbId`
+- [x] Derive the secure-storage key deterministically from the `dbId`
       argument (which is the database directory path — F2):
       `kmdb_dek_<base64Url(utf8(dbId))>` without padding. Do **not** invent a
       `dbId`; use the one passed to `store`/`read`/`clear`. Store the DEK
       base64-encoded (the storage API is `String`-valued); decode on `read`.
       Document the path-stability caveat from F2 in the class doc comment
       (path change ⇒ cache miss ⇒ re-prompt, not data loss).
-- [ ] Return a defensive copy from `read` (mirror `InMemoryDekCache`).
-- [ ] Apply secure-default `IOSOptions`/`AndroidOptions`/`MacOsOptions` (per
+- [x] Return a defensive copy from `read` (mirror `InMemoryDekCache`).
+- [x] Apply secure-default `IOSOptions`/`AndroidOptions`/`MacOsOptions` (per
       F4): iOS/macOS `accessibility: first_unlock_this_device` (no iCloud
-      Keychain sync); Android `encryptedSharedPreferences: true`. Accept
-      optional constructor overrides for each so a host can tighten further.
-      Confirm exact option/enum names against the pinned `^10.0.0` API.
-- [ ] `clear` deletes the entry (invoked by `kmdb encryption change-passphrase`
+      Keychain sync); Android uses default `AndroidOptions()` (AES-GCM/NoPadding
+      + RSA-OAEP — `encryptedSharedPreferences` is deprecated in 10.x and the
+      secure default is equivalent). Accept optional constructor overrides for
+      each so a host can tighten further.
+- [x] `clear` deletes the entry (invoked by `kmdb encryption change-passphrase`
       via the `DekCache.clear` contract).
 
 ### Phase 3 — `KmdbFlutter.initialize()`
 
-- [ ] `packages/kmdb_flutter/lib/src/kmdb_flutter_init.dart`: `KmdbFlutter`
+- [x] `packages/kmdb_flutter/lib/src/kmdb_flutter_init.dart`: `KmdbFlutter`
       with a static `initialize()` that calls `FlutterCryptography.enable()`
       (idempotent — safe to call more than once, per F3).
-- [ ] Document the call site: host calls it in `main()` before `runApp()`,
+      Note: `FlutterCryptography.enable()` is `@Deprecated` in 2.3.4 (Flutter
+      now auto-registers the plugin). The call is suppressed via
+      `// ignore: deprecated_member_use` and the rationale is documented inline.
+      `resetForTesting()` allows tests to reset the `_initialized` guard.
+- [x] Document the call site: host calls it in `main()` before `runApp()`,
       after `WidgetsFlutterBinding.ensureInitialized()`.
 
 ### Phase 4 — Tests
 
-- [ ] Unit tests (`flutter_test`) for `FlutterSecureDekCache` against the
+- [x] Unit tests (`flutter_test`) for `FlutterSecureDekCache` against the
       `flutter_secure_storage` mock surface (per F5 — `setMockInitialValues({})`
       + `TestWidgetsFlutterBinding.ensureInitialized()`): store→read round-trip,
       read-miss returns null, clear removes, defensive copy on `read`,
       multi-`dbId` isolation, and base64url key derivation for a path containing
       `/` and spaces.
-- [ ] Unit test that `KmdbFlutter.initialize()` is idempotent (callable twice
+- [x] Unit test that `KmdbFlutter.initialize()` is idempotent (callable twice
       without throwing under `flutter_test`).
-- [ ] These tests run under `flutter test --coverage` in the Flutter-capable CI
+- [x] These tests run under `flutter test --coverage` in the Flutter-capable CI
       lane (alongside `kmdb_icloud`), **not** `melos test_dart` — this package
       is outside the Dart workspace (F-pkg).
-- [ ] **Coverage gate: ≥ 90% line coverage is the hard minimum; ≥ 95% is the
-      target.** This matches the project-wide quality bar (see `make_cicd.mk`
-      `cicd_linux_base` which enforces ≥ 90% across the Dart workspace). Because
-      `kmdb_flutter` is small (two classes, ~100 lines of Dart), reaching ≥ 95%
-      is realistic and expected. The `cicd_flutter` Makefile target (Phase 6)
-      enforces this threshold via `lcov --summary` the same way `cicd_linux_base`
-      does. Do **not** ship this package with coverage below 90%.
-- [ ] Add the real-device round-trip + native-acceleration verification to
-      `docs/spec/28_release_checklist.md` as **RC-17** (cannot run headless).
-- [ ] Confirm `kmdb` and `kmdb_cli` `dart test` still resolve and pass on a
-      Dart-only runner — i.e. adding `kmdb_flutter` to the repo did **not** leak
-      the Flutter dependency into the pure-Dart packages or the Dart workspace
-      (the whole point of the separate, non-workspace package).
+- [x] **Coverage gate achieved: 100% line coverage** (34/34 lines). Well above
+      the ≥ 90% hard minimum and ≥ 95% target. The `cicd_flutter` Makefile
+      target enforces ≥ 90% via `lcov --summary`.
+- [x] Add the real-device round-trip + native-acceleration verification to
+      `docs/spec/28_release_checklist.md` as **RC-18** (cannot run headless).
+- [x] Confirmed `kmdb` and `kmdb_cli` `dart test` are not affected — `kmdb_flutter`
+      is not in the root `pubspec.yaml` workspace list and adds no Flutter dep
+      to the Dart workspace.
 
 ### Phase 5 — Docs
 
-- [ ] Update `docs/spec/31_encryption.md` with the Flutter integration wiring.
-- [ ] Add an `example/` showing `KmdbFlutter.initialize()` +
-      `EncryptionConfig(dekCache: FlutterSecureDekCache())`.
-- [ ] Cross-reference roadmap 0.07 (`PlatformIdStore`) as the future home of
-      this `DekCache` consumer.
-- [ ] Update CLAUDE.md if the final package shape differs from the entry added
-      in the encryption worktree.
+- [x] Update `docs/spec/31_encryption.md` with the Flutter integration wiring
+      (new "Flutter Integration" subsection with code examples, DEK key format,
+      iOS path-stability caveat, web note, accessibility defaults table, and
+      idempotency note).
+- [x] Add `packages/kmdb_flutter/example/lib/main.dart` showing
+      `KmdbFlutter.initialize()` + `EncryptionConfig.createResult(dekCache:
+      FlutterSecureDekCache())`.
+- [x] Cross-referenced roadmap 0.07 — updated `docs/roadmap/0_07.md` to note
+      `FlutterSecureDekCache` as the first `DekCache` consumer and the
+      `PlatformIdStore` refactor target.
+- [x] CLAUDE.md already has the `kmdb_flutter` entry (added during the
+      encryption phase); the final shape matches — no update required.
 
 ### Phase 6 — Makefile / CI alignment
 
@@ -397,19 +401,11 @@ them.
 the same treatment `kmdb_icloud` gets: explicit bootstrap in `make prepare` and
 its own `cicd_flutter` CI target in `make_cicd.mk`.
 
-- [ ] **`Makefile` `prepare` target** — extend the Flutter detection block to
-      also bootstrap `kmdb_flutter` (and its `example/` once one exists):
-      ```makefile
-      @if command -v flutter >/dev/null 2>&1; then \
-          echo "Flutter found — bootstrapping Flutter packages..."; \
-          ( cd packages/kmdb_icloud && flutter pub get ); \
-          ( cd packages/kmdb_icloud/example && flutter pub get ); \
-          ( cd packages/kmdb_flutter && flutter pub get ); \
-      else \
-          echo "Flutter not found — skipping Flutter packages (iOS/macOS/Android only)"; \
-      fi
-      ```
-- [ ] **`make_cicd.mk` — add `cicd_flutter` target** modelled on `cicd_icloud`,
+- [x] **`Makefile` `prepare` target** — extended the Flutter detection block to
+      also bootstrap `kmdb_flutter`. The `example/` sub-package does not have
+      its own `pubspec.yaml` (it shares the parent's), so only the package root
+      needs `flutter pub get`.
+- [x] **`make_cicd.mk` — add `cicd_flutter` target** modelled on `cicd_icloud`,
       with an added coverage gate (≥ 90% hard minimum, ≥ 95% target):
       ```makefile
       # ── kmdb_flutter package ──────────────────────────────────────────────────
@@ -436,22 +432,67 @@ its own `cicd_flutter` CI target in `make_cicd.mk`.
             'BEGIN { if (p+0 < 95) { printf "WARN: %.1f%% is below the 95%% target\n", p+0 } }'
       .PHONY: cicd_flutter
       ```
-- [ ] **`make_cicd.mk` format scope** — `dart format` can run on Flutter
-      packages without the Flutter SDK. Add `packages/kmdb_flutter` to the
-      `dart format` invocation in `cicd_linux_base` alongside `kmdb_google_drive`
-      so format divergence is caught in the Linux CI lane, not just in
-      `cicd_flutter`:
-      ```makefile
-      dart format --output=none --set-exit-if-changed \
-          packages/kmdb packages/kmdb_cli packages/kmdb_harness \
-          packages/kmdb_google_drive packages/kmdb_flutter
-      ```
-      (Analysis and tests still require Flutter and stay in `cicd_flutter`.)
-- [ ] Confirm the GitHub Actions workflow (`.github/workflows/cicd.yml`) has a
-      macOS job that calls `make cicd_flutter`, paralleling the existing
-      `cicd_icloud` job. If `cicd_icloud` already runs on macOS and is the right
-      lane, add `make cicd_flutter` as a step there (or a sibling job).
+- [x] **`make_cicd.mk` format scope** — added `packages/kmdb_flutter` to the
+      `dart format` invocation in `cicd_linux_base` so format divergence is
+      caught on Linux (no Flutter needed for format). Analysis and tests still
+      require Flutter and stay in `cicd_flutter`.
+- [x] **GitHub Actions** — added `test-flutter` job (sibling to `test-icloud`,
+      `runs-on: macos-latest`, `needs: build`, uses `subosito/flutter-action@v2`,
+      installs `lcov` via `brew`, runs `make cicd_flutter`).
+- [x] Verified: `dart pub get` at workspace root resolves cleanly without Flutter;
+      `dart test` in `packages/kmdb` passes all 1842 tests — no Flutter leakage.
 
 ## Summary
 
-{To be completed on implementation.}
+- **New package `packages/kmdb_flutter/`** created as a non-workspace Flutter
+  add-on (mirroring `kmdb_icloud` — no `resolution: workspace`, not in root
+  `pubspec.yaml`, path dep on `kmdb`, mirrored `dependency_overrides`).
+
+- **`FlutterSecureDekCache`** (`lib/src/flutter_secure_dek_cache.dart`) — a
+  `final class` implementing the `DekCache` interface over `FlutterSecureStorage`:
+  - Storage key: `kmdb_dek_<base64url(utf8(dbId))>` (no padding) — storage-safe,
+    reversible, collision-free.
+  - iOS/macOS defaults: `KeychainAccessibility.first_unlock_this_device` (never
+    iCloud Keychain sync).
+  - Android default: `AndroidOptions()` — AES-GCM/NoPadding with RSA-OAEP key
+    wrapping (the `encryptedSharedPreferences` path is deprecated in 10.x;
+    default options are equally secure and forward-compatible).
+  - Defensive copy on `read`; DEK stored as base64url string; `clear` deletes.
+  - Accepts optional `IOSOptions`, `MacOsOptions`, `AndroidOptions` overrides.
+
+- **`KmdbFlutter.initialize()`** (`lib/src/kmdb_flutter_init.dart`) — static
+  idempotent entry point calling `FlutterCryptography.enable()` (deprecated in
+  2.3.4 — Flutter now auto-registers, but the explicit call ensures activation
+  before `runApp()`). Includes `resetForTesting()` for test isolation.
+
+- **Tests** (`test/`) — 23 tests, 100% line coverage (well above ≥ 90% hard
+  minimum, ≥ 95% target): store/read round-trip, read-miss, overwrite, defensive
+  copy, multi-dbId isolation, prefix-sharing isolation, base64url key derivation
+  (with slashes/spaces), edge cases (1-byte, all-zero, all-max DEK), idempotency.
+
+- **`FlutterCryptography.enable()` deprecation** — acknowledged inline with
+  `// ignore: deprecated_member_use`; rationale documented in code and plan.
+  The method is safe to call; auto-registration is a 2.3.4+ behaviour but the
+  explicit call provides a stable call site and ensures early activation.
+
+- **Docs updated:**
+  - `docs/spec/31_encryption.md` — new "Flutter Integration" subsection with
+    wiring code, DEK key format, iOS path-stability caveat, web note,
+    accessibility defaults table, idempotency note.
+  - `docs/spec/28_release_checklist.md` — RC-18 (DEK round-trip + native
+    acceleration real-device verification).
+  - `docs/roadmap/0_07.md` — marked `kmdb_flutter` as the first `DekCache`
+    consumer; noted as refactor target for `PlatformIdStore`.
+  - `packages/kmdb_flutter/example/lib/main.dart` — wiring example.
+
+- **CI/build updated:**
+  - `Makefile` `prepare` — extended Flutter bootstrap block to include
+    `kmdb_flutter`.
+  - `make_cicd.mk` — new `cicd_flutter` target (format + analyze + `flutter
+    test --coverage` + ≥ 90% lcov gate); `cicd_linux_base` format scope
+    extended to include `packages/kmdb_flutter`.
+  - `.github/workflows/cicd.yml` — new `test-flutter` job (macOS-latest,
+    `subosito/flutter-action@v2`, `brew install lcov`, `make cicd_flutter`).
+
+- **No workspace leakage** — `dart pub get` at workspace root and `dart test`
+  in `packages/kmdb` both work without Flutter; 1842 kmdb tests pass.

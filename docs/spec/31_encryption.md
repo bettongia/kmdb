@@ -337,8 +337,92 @@ final recovered  = await provider.decrypt(ciphertext);
   isolate when possible.
 - The `kmdb_flutter` add-on package provides:
   - `FlutterSecureDekCache` — caches the DEK in iOS Keychain / Android Keystore.
-  - `cryptography_flutter` registration — enables hardware-accelerated AES-GCM
-    on iOS (Secure Enclave) and Android (Keystore) for the data encryption path.
+  - `KmdbFlutter.initialize()` — registers `cryptography_flutter` for
+    hardware-accelerated AES-GCM on iOS (Secure Enclave) and Android (Keystore).
+
+### Flutter Integration
+
+Flutter apps should use the `kmdb_flutter` add-on package to enable both
+persistent DEK caching and hardware-accelerated cryptography.  Add it to your
+`pubspec.yaml`:
+
+```yaml
+dependencies:
+  kmdb: ...
+  kmdb_flutter:
+    path: packages/kmdb_flutter  # or a pub.dev version once published
+```
+
+Then wire it in `main()`:
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:kmdb/kmdb.dart';
+import 'package:kmdb_flutter/kmdb_flutter.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Register native AES-256-GCM / Argon2id acceleration.
+  // Must be called before any KmdbDatabase.open() with encryption enabled.
+  KmdbFlutter.initialize();
+
+  final db = await KmdbDatabase.open(
+    path: '/path/to/db',
+    adapter: adapter,
+    encryptionConfig: EncryptionConfig(
+      passphrase: 'my-secure-passphrase',
+      // Persist the DEK in Keychain/Keystore so the user is only prompted
+      // once per device, not on every app launch.
+      dekCache: FlutterSecureDekCache(),
+    ),
+  );
+
+  runApp(MyApp(db: db));
+}
+```
+
+#### DEK storage key
+
+`FlutterSecureDekCache` derives a Keychain/Keystore key from the database path
+using `kmdb_dek_<base64url(utf8(path))>` (no padding).  The key is stable as
+long as the database path is byte-identical across launches.
+
+**Path-stability caveat (iOS):** On iOS, the app sandbox container path can
+change after an OS restore or device migration.  If it does, `read` returns
+`null` and the user is re-prompted for their passphrase — a graceful degradation,
+not data loss.  The roadmap 0.07 `PlatformIdStore` abstraction is designed to
+provide a stable cross-path device identifier that will resolve this limitation;
+`FlutterSecureDekCache` is its intended first consumer.
+
+#### Web
+
+Web does not use `FlutterSecureDekCache`.  The project's position is that DEKs
+are not persisted in browser storage (v1).  Flutter web apps should omit the
+`dekCache` parameter (or use the default `InMemoryDekCache`) and re-derive the
+DEK from the passphrase on each page load.  See RC-16 in
+`docs/spec/28_release_checklist.md` for the web Argon2id timing verification.
+
+#### Accessibility defaults
+
+| Platform | Default                                           |
+| :------- | :------------------------------------------------ |
+| iOS      | `KeychainAccessibility.first_unlock_this_device`  |
+| macOS    | `KeychainAccessibility.first_unlock_this_device`  |
+| Android  | `AndroidOptions()` (AES-GCM/NoPadding, RSA-OAEP) |
+
+The "this device" variant on iOS/macOS ensures the DEK is **never synced to
+iCloud Keychain**.  Hosts that need tighter access control (biometric gate,
+Secure Enclave) can supply custom `IOSOptions`/`MacOsOptions`/`AndroidOptions`
+to the `FlutterSecureDekCache` constructor.
+
+#### `KmdbFlutter.initialize()` idempotency
+
+`initialize()` is safe to call more than once (e.g. across hot-reloads or in
+tests) — a static guard ensures `FlutterCryptography.enable()` is called at most
+once per process.  As of `cryptography_flutter` 2.3.4 Flutter auto-registers the
+plugin, so `initialize()` is technically optional; calling it explicitly remains
+the recommended pattern to document intent and ensure activation before `runApp()`.
 
 ## Crash Safety
 

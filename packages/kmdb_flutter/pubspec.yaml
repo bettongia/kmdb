@@ -1,0 +1,48 @@
+name: kmdb_flutter
+description: Flutter add-on for KMDB — persistent DEK session cache via
+  flutter_secure_storage (iOS Keychain / Android Keystore) and native
+  AES-256-GCM / Argon2id acceleration via cryptography_flutter.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.12.0
+  flutter: ">=3.29.0"
+
+# Not a workspace member — this package depends on `flutter: sdk: flutter`
+# (transitively via flutter_secure_storage and cryptography_flutter), which
+# requires the Flutter SDK.  Dart-only CI runners (Linux, Windows) do not have
+# Flutter, so adding this to the workspace would break `dart pub get` and
+# `dart test` for all pure-Dart packages.  Dependencies on workspace packages
+# are expressed as path references; this package is bootstrapped separately
+# when Flutter is available (e.g. the macOS CI job, local dev with Flutter).
+
+dependencies:
+  flutter:
+    sdk: flutter
+  kmdb:
+    path: ../kmdb
+  flutter_secure_storage: ^10.0.0
+  cryptography_flutter: ^2.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+# Mirror the workspace-level overrides so transitive betto_* deps resolve to
+# the same versions used by the rest of the repo.  Keep in sync with the root
+# pubspec.yaml dependency_overrides block.
+dependency_overrides:
+  kmdb:
+    path: ../kmdb
+  meta: ^1.18.2
+  uuid: ^4.5.3
+  cbor: ^6.5.1
+  web: ^1.1.0
+  betto_common: ^0.1.0-dev.1
+  betto_schema: ^0.1.0-dev.1
+  betto_zstd: ^0.1.0-dev.3
+  betto_mediatype_detector: ^0.1.0-dev.1
+  betto_lexical: ^0.1.0-dev.1
+  betto_inferencing: ^0.1.0-dev.1

@@ -162,6 +162,36 @@ jobs:
 
       - run: make cicd_icloud
 
+  # ── kmdb_flutter add-on package: format, analyze, unit tests, coverage ────────
+  #
+  # Bootstraps kmdb_flutter with the Flutter SDK, then runs format check,
+  # flutter analyze, flutter test with coverage, and enforces the ≥ 90%
+  # line-coverage threshold (≥ 95% is the target for this small package).
+  # Requires the Flutter SDK — run on macOS only (same lane as test-icloud).
+  test-flutter:
+    runs-on: macos-latest
+    needs: build
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Install lcov
+        run: brew install lcov
+
+      - name: Cache pub dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.pub-cache
+          key: ${{ runner.os }}-flutter-pub-${{ hashFiles('packages/kmdb_flutter/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-flutter-pub-
+
+      - run: make cicd_flutter
+
   # ── Web: WASM compression codec tests in Chrome ──────────────────────────────
   #
   # Verifies that betto_zstd's WASM path compresses and decompresses correctly
