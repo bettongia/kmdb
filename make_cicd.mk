@@ -28,7 +28,8 @@ cicd_linux_base:
 	dart pub global activate coverage
 	melos bootstrap
 	dart format --output=none --set-exit-if-changed \
-		packages/kmdb packages/kmdb_cli packages/kmdb_harness packages/kmdb_google_drive
+		packages/kmdb packages/kmdb_cli packages/kmdb_harness \
+		packages/kmdb_google_drive packages/kmdb_flutter
 	melos run analyze
 	cat addlicense_config.txt | xargs addlicense --check
 	melos coverage
@@ -97,6 +98,32 @@ cicd_icloud:
 	cd packages/kmdb_icloud/example && flutter analyze
 	cd packages/kmdb_icloud && flutter test
 .PHONY: cicd_icloud
+
+# ── kmdb_flutter package ──────────────────────────────────────────────────────
+#
+# Verifies the kmdb_flutter add-on package: bootstraps, format-checks Dart
+# sources, analyzes, runs unit tests with coverage, and enforces the ≥ 90%
+# line-coverage threshold (≥ 95% is the target for this small package).
+# Requires the Flutter SDK — run on macOS only (same lane as cicd_icloud).
+# License check is intentionally omitted: addlicense covers the full repo in
+# cicd_linux_base (it runs from the workspace root).
+cicd_flutter:
+	cd packages/kmdb_flutter && flutter pub get
+	dart format --output=none --set-exit-if-changed \
+		packages/kmdb_flutter/lib packages/kmdb_flutter/test
+	cd packages/kmdb_flutter && flutter analyze
+	cd packages/kmdb_flutter && flutter test --coverage
+	@pct=$$(lcov --summary packages/kmdb_flutter/coverage/lcov.info 2>&1 \
+	  | grep 'lines\.\.\.\.' | grep -oE '[0-9]+\.[0-9]+' | head -1); \
+	echo "kmdb_flutter line coverage: $${pct:-unknown}%"; \
+	if [ -z "$$pct" ]; then \
+	  echo "ERROR: could not parse line coverage"; exit 1; \
+	fi; \
+	awk -v p="$$pct" \
+	  'BEGIN { if (p+0 < 90) { printf "FAIL: %.1f%% < 90%% minimum\n", p+0; exit 1 } }'; \
+	awk -v p="$$pct" \
+	  'BEGIN { if (p+0 < 95) { printf "WARN: %.1f%% is below the 95%% target\n", p+0 } }'
+.PHONY: cicd_flutter
 
 # ── Web / Chrome ───────────────────────────────────────────────────────────────
 #
