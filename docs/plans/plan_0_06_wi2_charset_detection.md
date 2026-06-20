@@ -1,6 +1,6 @@
 # WI-2: Charset detection for vault text extraction
 
-**Status**: Open
+**Status**: Questions
 
 **PR link**: —
 
@@ -35,7 +35,71 @@ without mixing detection concerns into the larger vault-search implementation.
 
 ## Open questions
 
-_(none — design is settled by the proposal and package is published)_
+The package surface, decode helpers, and label set have now been verified
+against the published `betto_charset_detector 0.1.0-dev.2` and its transitive
+`charset 2.0.1`. That verification surfaced design decisions the plan currently
+leaves to the implementer. These must be resolved before `Investigated`:
+
+- [ ] **Q1 — BOM stripping for UTF-8.** The plan's edge-case table asserts
+      "UTF-8 with BOM → BOM stripped from output", but `detectCharset` does
+      **not** strip BOMs (it only inspects them to pick a label), and
+      `dart:convert`'s `utf8.decode` does **not** strip a leading U+FEFF either.
+      So a literal detect → `utf8.decode` path returns a string with a leading
+      U+FEFF and fails the plan's own asserted behaviour. Decide and specify
+      who strips the UTF-8 BOM and how (e.g. `decodeText` drops a leading
+      U+FEFF from the decoded string when `charset == 'utf-8'`), or change the
+      asserted edge-case behaviour. Do BOM-bearing UTF-16/UTF-32 outputs need
+      the same treatment? (See Q3 — the `charset` UTF-16/UTF-32 decoders strip
+      the BOM themselves, so the answer likely differs per family — spell it
+      out.)
+- [ ] **Q2 — Label → decoder dispatch table.** The plan says "`dart:convert`
+      handles utf8/latin1/ascii; `charset` provides
+      `Charset.getByName(label).decode(bytes)`". The full set of labels
+      `detectCharset` can return is fixed and known: `utf-8`, `utf-16be`,
+      `utf-16le`, `utf-32be`, `utf-32le`, `windows-1252`, `iso-8859-1`,
+      `iso-8859-2`, `iso-8859-15`, `shift-jis`, `euc-jp`, `euc-kr`, `gbk`
+      (note: `ascii` is never returned — ASCII is reported as `utf-8`). Specify
+      the exact dispatch: which labels route to `dart:convert` and which to
+      `Charset.getByName`. Note `Charset.getByName('iso-8859-1')` is **not** in
+      the `charset` package's name map — it resolves via the `dart:convert`
+      fallback inside `getByName` (which returns `latin1`). Decide whether to
+      rely on that fallback or special-case `latin1`/`utf8`/`ascii` directly.
+      A single explicit `switch`/map keyed on the known label set is the
+      mechanical, testable choice; state it so the implementer doesn't invent
+      one.
+- [ ] **Q3 — UTF-16/UTF-32 endianness and the `getByName` quirk.** In
+      `charset 2.0.1`, both `utf-16be` and `utf-16le` map to the **same**
+      `utf16` codec instance (likewise `utf-32be`/`utf-32le` → `utf32`); the
+      decoder derives endianness from the leading BOM and strips it, ignoring
+      the label. Because `detectCharset` only emits these labels when a BOM is
+      present, `getByName(label).decode(bytes)` works and strips the BOM — but
+      this is a non-obvious dependence on byte content rather than the label.
+      Confirm this is acceptable and document it, so the implementer doesn't try
+      (and fail) to force LE/BE via the label.
+- [ ] **Q4 — Decode-failure contract (`text: null`).** The API doc says `text`
+      is `null` "only if decoding fails after detection", described as "rare".
+      With the dispatch in Q2, identify the **concrete** path that yields
+      `null`: which decode call, under what input, throws or is caught? If the
+      detector's fallback is `windows-1252` (which accepts essentially any byte
+      sequence) and the Unicode codecs are only chosen behind a validated BOM
+      or structural check, is `null` actually reachable at all? If it is not
+      reachable, the `null` branch is dead code that cannot be covered to 90%+
+      and the `String?` should become `String`. If it is reachable, give the
+      implementer a constructible test input that triggers it. Decide one way
+      or the other — this directly affects both the return type and the
+      coverage target.
+- [ ] **Q5 — Export visibility.** The checklist says "Export
+      `CharsetDecodeResult` and `decodeText` from the library." The only
+      consumer is WI-3's `PlainTextExtractor`, which lives inside `kmdb`. Decide
+      whether these become part of the **public** API surface (a `show` in
+      `packages/kmdb/lib/kmdb.dart`, with the stability obligations that
+      implies) or stay an internal `src/` symbol imported directly by WI-3.
+      Prefer internal unless there's a reason to expose it; either way, name the
+      exact file the export line goes in so the step is mechanical. (Note the
+      doc comment already references `extract_status.json`, a WI-3 artifact that
+      does not exist yet — keep the WI-2 surface self-contained and avoid
+      coupling its doc comments to unbuilt WI-3 structures, or phrase them as
+      forward references.)
 
 ## Investigation
 

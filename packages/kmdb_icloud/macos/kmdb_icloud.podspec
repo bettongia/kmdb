@@ -16,7 +16,7 @@ SyncStorageAdapter over CloudKit custom zones.
   s.author           = { 'Bettongia' => 'dev@bettongia.au' }
 
   s.source           = { :path => '.' }
-  s.source_files     = 'Classes/**/*'
+  s.source_files     = 'kmdb_icloud/Sources/kmdb_icloud/**/*'
 
   s.dependency 'FlutterMacOS'
   s.platform = :osx, '10.15'
