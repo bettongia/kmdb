@@ -589,6 +589,53 @@ contention test that exercises the lease protocol.
 
 ---
 
+### RC-18 — `kmdb_flutter`: DEK round-trip and native crypto acceleration
+
+- **Area:** encryption / platform (Flutter mobile/desktop)
+- **Validates:**
+  1. `FlutterSecureDekCache` persists the DEK across app restarts: store DEK
+     → kill app process → relaunch → `read` returns the DEK without re-prompting
+     the user for their passphrase.
+  2. `KmdbFlutter.initialize()` actually enables native AES-256-GCM and Argon2id
+     hardware acceleration on a real device (i.e. `FlutterCryptography.isPluginPresent`
+     is `true` after the call and operations are measurably faster than the
+     pure-Dart path).
+  3. Passphrase unlock latency is acceptable on a mid-range mobile device
+     (Argon2id ≤ 2 s with native acceleration; the pure-Dart path may reach 10+ s
+     on low-end hardware).
+- **Why not automated:** `flutter_secure_storage` platform-channel calls are
+  mocked in `flutter_test`; the real Keychain/Keystore write-then-kill-then-read
+  cycle requires a physical or simulator device.  Native crypto acceleration
+  is confirmed by `FlutterCryptography.isPluginPresent`, which is always `false`
+  under `flutter_test`.  Timing depends on device hardware and cannot be
+  asserted in a headless test.
+- **Applies when:** `kmdb_flutter` is introduced or updated; before any release
+  that ships `kmdb_flutter` as a recommended add-on; after changes to
+  `FlutterSecureDekCache` or `KmdbFlutter.initialize()`.
+- **Prerequisites:** an iOS simulator or device (for Keychain) or Android
+  emulator/device (for Keystore); Xcode or Android Studio; Flutter SDK installed.
+- **Steps:**
+  1. Build and run the `packages/kmdb_flutter/example/` app on an iOS simulator
+     or Android emulator.
+  2. Open an encrypted database with `EncryptionConfig(passphrase: 'test',
+     dekCache: FlutterSecureDekCache())`.  Verify the app opens without error.
+  3. Write a document (to confirm encryption is active) and close the app process
+     (terminate, not just background).
+  4. Relaunch the app and reopen the same database path.  Verify:
+     a. No passphrase prompt appears — the DEK was loaded from Keychain/Keystore.
+     b. The previously written document is readable.
+  5. Inspect `FlutterCryptography.isPluginPresent` after `KmdbFlutter.initialize()`;
+     confirm it is `true`.
+  6. Time a passphrase unlock with and without `initialize()` on a mid-range
+     device; confirm the native path is faster (target: ≤ 2 s; pure-Dart: ≥ 5 s).
+- **Expected result:** steps 3–4 confirm DEK persistence; step 5 confirms plugin
+  registration; step 6 confirms measurable acceleration on real hardware.
+- **Related:** `docs/plans/completed/plan_kmdb_flutter.md`,
+  `docs/spec/31_encryption.md` (Flutter Integration subsection), RC-16 (web
+  Argon2id timing).
+
+---
+
 ## Release log
 
 | Version | Date | Tester | Checks run | Result | Notes |
