@@ -1,6 +1,6 @@
 # WI-2: Charset detection for vault text extraction
 
-**Status**: Questions
+**Status**: Investigated
 
 **PR link**: —
 
@@ -35,71 +35,33 @@ without mixing detection concerns into the larger vault-search implementation.
 
 ## Open questions
 
-The package surface, decode helpers, and label set have now been verified
-against the published `betto_charset_detector 0.1.0-dev.2` and its transitive
-`charset 2.0.1`. That verification surfaced design decisions the plan currently
-leaves to the implementer. These must be resolved before `Investigated`:
-
-- [ ] **Q1 — BOM stripping for UTF-8.** The plan's edge-case table asserts
-      "UTF-8 with BOM → BOM stripped from output", but `detectCharset` does
-      **not** strip BOMs (it only inspects them to pick a label), and
-      `dart:convert`'s `utf8.decode` does **not** strip a leading U+FEFF either.
-      So a literal detect → `utf8.decode` path returns a string with a leading
-      U+FEFF and fails the plan's own asserted behaviour. Decide and specify
-      who strips the UTF-8 BOM and how (e.g. `decodeText` drops a leading
-      U+FEFF from the decoded string when `charset == 'utf-8'`), or change the
-      asserted edge-case behaviour. Do BOM-bearing UTF-16/UTF-32 outputs need
-      the same treatment? (See Q3 — the `charset` UTF-16/UTF-32 decoders strip
-      the BOM themselves, so the answer likely differs per family — spell it
-      out.)
-- [ ] **Q2 — Label → decoder dispatch table.** The plan says "`dart:convert`
-      handles utf8/latin1/ascii; `charset` provides
-      `Charset.getByName(label).decode(bytes)`". The full set of labels
-      `detectCharset` can return is fixed and known: `utf-8`, `utf-16be`,
-      `utf-16le`, `utf-32be`, `utf-32le`, `windows-1252`, `iso-8859-1`,
-      `iso-8859-2`, `iso-8859-15`, `shift-jis`, `euc-jp`, `euc-kr`, `gbk`
-      (note: `ascii` is never returned — ASCII is reported as `utf-8`). Specify
-      the exact dispatch: which labels route to `dart:convert` and which to
-      `Charset.getByName`. Note `Charset.getByName('iso-8859-1')` is **not** in
-      the `charset` package's name map — it resolves via the `dart:convert`
-      fallback inside `getByName` (which returns `latin1`). Decide whether to
-      rely on that fallback or special-case `latin1`/`utf8`/`ascii` directly.
-      A single explicit `switch`/map keyed on the known label set is the
-      mechanical, testable choice; state it so the implementer doesn't invent
-      one.
-- [ ] **Q3 — UTF-16/UTF-32 endianness and the `getByName` quirk.** In
-      `charset 2.0.1`, both `utf-16be` and `utf-16le` map to the **same**
-      `utf16` codec instance (likewise `utf-32be`/`utf-32le` → `utf32`); the
-      decoder derives endianness from the leading BOM and strips it, ignoring
-      the label. Because `detectCharset` only emits these labels when a BOM is
-      present, `getByName(label).decode(bytes)` works and strips the BOM — but
-      this is a non-obvious dependence on byte content rather than the label.
-      Confirm this is acceptable and document it, so the implementer doesn't try
-      (and fail) to force LE/BE via the label.
-- [ ] **Q4 — Decode-failure contract (`text: null`).** The API doc says `text`
-      is `null` "only if decoding fails after detection", described as "rare".
-      With the dispatch in Q2, identify the **concrete** path that yields
-      `null`: which decode call, under what input, throws or is caught? If the
-      detector's fallback is `windows-1252` (which accepts essentially any byte
-      sequence) and the Unicode codecs are only chosen behind a validated BOM
-      or structural check, is `null` actually reachable at all? If it is not
-      reachable, the `null` branch is dead code that cannot be covered to 90%+
-      and the `String?` should become `String`. If it is reachable, give the
-      implementer a constructible test input that triggers it. Decide one way
-      or the other — this directly affects both the return type and the
-      coverage target.
-- [ ] **Q5 — Export visibility.** The checklist says "Export
-      `CharsetDecodeResult` and `decodeText` from the library." The only
-      consumer is WI-3's `PlainTextExtractor`, which lives inside `kmdb`. Decide
-      whether these become part of the **public** API surface (a `show` in
-      `packages/kmdb/lib/kmdb.dart`, with the stability obligations that
-      implies) or stay an internal `src/` symbol imported directly by WI-3.
-      Prefer internal unless there's a reason to expose it; either way, name the
-      exact file the export line goes in so the step is mechanical. (Note the
-      doc comment already references `extract_status.json`, a WI-3 artifact that
-      does not exist yet — keep the WI-2 surface self-contained and avoid
-      coupling its doc comments to unbuilt WI-3 structures, or phrase them as
-      forward references.)
+- [x] **Q1 — BOM stripping for UTF-8.** `decodeText` explicitly strips a
+      leading U+FEFF from the decoded string when the label is `'utf-8'`.
+      `dart:convert`'s `utf8.decode` does not strip it, so `decodeText` does
+      it with a `startsWith` guard after decoding. UTF-16/UTF-32 BOMs are
+      stripped by the `charset` codec itself — no extra step needed there.
+- [x] **Q2 — Label → decoder dispatch table.** Two-branch dispatch:
+      - `'utf-8'` → `utf8.decode(bytes)`, then strip leading U+FEFF if present.
+      - All other labels → `Charset.getByName(label)!.decode(bytes)`.
+      The `iso-8859-1` → `latin1` fallback inside `getByName` is relied upon,
+      not special-cased. `ascii` is never returned — ASCII content passes UTF-8
+      structural validation and is reported as `'utf-8'`.
+- [x] **Q3 — UTF-16/UTF-32 endianness.** In `charset 2.0.1`, both `utf-16be`
+      and `utf-16le` map to the same `utf16` codec (likewise `utf-32be`/`utf-32le`
+      → `utf32`); endianness is derived from the leading BOM in the byte content,
+      not the label. Because `detectCharset` only emits these labels when a BOM
+      is present, `getByName(label).decode(bytes)` works correctly and strips the
+      BOM. This is acceptable; a code comment in `decodeText` must document it so
+      the implementer does not try to force LE/BE via the label.
+- [x] **Q4 — Decode-failure contract.** `null` is not reachable. The
+      `windows-1252` fallback accepts any byte sequence, and all other decoders
+      are chosen only behind a validated BOM or UTF-8 structural check. Change
+      `String?` to `String` in the return type — no null branch, no dead code,
+      no coverage concern.
+- [x] **Q5 — Export visibility.** Internal only. `CharsetDecodeResult` and
+      `decodeText` are **not** exported from `packages/kmdb/lib/kmdb.dart`. WI-3's
+      `PlainTextExtractor` imports them directly from
+      `src/vault/search/charset_util.dart`. No public API stability obligation.
 
 ## Investigation
 
@@ -146,24 +108,30 @@ never need to branch on the label.
 
 /// The result of charset detection and decoding.
 ///
-/// [charset] is the IANA encoding label (e.g. `"utf-8"`, `"windows-1252"`)
-/// detected from [bytes]. Stored in `extract_status.json` by WI-3.
-///
-/// [text] is the decoded string, or `null` if decoding failed after detection
-/// (a rare fallback case — e.g. the detected encoding cannot decode the bytes).
-typedef CharsetDecodeResult = ({String charset, String? text});
+/// [charset] is the detected IANA encoding label (e.g. `"utf-8"`,
+/// `"windows-1252"`). [text] is the decoded string. Both fields are always
+/// non-null — decoding cannot fail for the closed label set returned by
+/// `detectCharset`.
+typedef CharsetDecodeResult = ({String charset, String text});
 
 /// Detects the character encoding of [bytes] and decodes them to a string.
 ///
-/// Returns a [CharsetDecodeResult] with the detected IANA label and the
-/// decoded text. The [text] field is `null` only if decoding fails after
-/// detection.
+/// Detection uses `betto_charset_detector`'s three-stage pipeline (BOM
+/// inspection → UTF-8 structural validation → candidate probe). Decoding
+/// uses a two-branch dispatch:
+///
+/// - `'utf-8'` → `dart:convert`'s `utf8.decode`, with a leading U+FEFF
+///   (UTF-8 BOM) stripped from the result if present.
+/// - All other labels → `Charset.getByName(label).decode(bytes)`.
+///   UTF-16/UTF-32 endianness is derived from the leading BOM in the byte
+///   content by the `charset` codec (not the label) — do not attempt to
+///   force LE/BE via the label string.
+///   `iso-8859-1` resolves via `getByName`'s internal fallback to `latin1`.
 CharsetDecodeResult decodeText(Uint8List bytes);
 ```
 
-The record return type keeps both the charset label and decoded text together
-without an out-param, making the `extract_status.json` write in WI-3
-straightforward: `final (:charset, :text) = decodeText(bytes);`.
+The record return type keeps both values together without an out-param.
+Callers destructure with `final (:charset, :text) = decodeText(bytes);`.
 
 ### File location
 
@@ -177,30 +145,28 @@ must be created as part of this WI.
 
 | Scenario | Expected behaviour |
 | -------- | ------------------ |
-| Valid UTF-8, no BOM | Returns decoded string, label `"utf-8"` |
-| UTF-8 with BOM | BOM stripped from output, label `"utf-8"` |
-| UTF-16 BE with BOM | Decoded correctly, label `"utf-16be"` |
-| UTF-16 LE with BOM | Decoded correctly, label `"utf-16le"` |
-| Windows-1252 (no BOM, high bytes) | Decoded correctly, label `"windows-1252"` |
-| ISO-8859-1 (Latin-1 text) | Decoded correctly, label `"iso-8859-1"` |
-| Shift-JIS | Decoded correctly, label `"shift-jis"` |
-| EUC-JP | Decoded correctly, label `"euc-jp"` |
-| GBK | Decoded correctly, label `"gbk"` |
-| Empty bytes | Returns empty string, label `"utf-8"` |
-| Bytes that pass UTF-8 validation but are actually Windows-1252 | `"utf-8"` (structural match takes priority — documented limitation) |
-| `detectedCharset` out-param is populated | Label written to buffer |
+| Valid UTF-8, no BOM | `text` = decoded string, `charset` = `"utf-8"` |
+| UTF-8 with BOM (0xEF 0xBB 0xBF) | `text` has no leading U+FEFF — stripped by `decodeText`; `charset` = `"utf-8"` |
+| UTF-16 BE with BOM | Decoded correctly, BOM stripped by `charset` codec; `charset` = `"utf-16be"` |
+| UTF-16 LE with BOM | Decoded correctly, BOM stripped by `charset` codec; `charset` = `"utf-16le"` |
+| Windows-1252 (no BOM, high bytes) | Decoded correctly, `charset` = `"windows-1252"` |
+| ISO-8859-1 (Latin-1 text) | Decoded correctly via `getByName` → `latin1` fallback; `charset` = `"iso-8859-1"` |
+| Shift-JIS | Decoded correctly, `charset` = `"shift-jis"` |
+| EUC-JP | Decoded correctly, `charset` = `"euc-jp"` |
+| GBK | Decoded correctly, `charset` = `"gbk"` |
+| Empty bytes | `text` = `""`, `charset` = `"utf-8"` |
+| ASCII-only bytes | `text` = decoded string, `charset` = `"utf-8"` (ASCII never returned as its own label) |
+| Bytes valid as UTF-8 but authored as Windows-1252 | `charset` = `"utf-8"` (structural validation is a hard gate — documented limitation, assert explicitly in tests) |
 
-The last row is important: `betto_charset_detector`'s UTF-8 structural
-validation is a hard gate — valid UTF-8 bytes are always classified as
-`"utf-8"` even if the file was authored in a superset encoding. This is
-the expected and documented behaviour, not a bug. The test should assert
-it explicitly so the limitation is on record.
+The UTF-8 structural validation gate is intentional: valid UTF-8 bytes are
+always classified as `"utf-8"` regardless of original authoring encoding. Tests
+must assert this to put the limitation on record.
 
 ### Coverage target
 
-The `charset_util.dart` file is small and all paths are reachable. >90%
-coverage is expected to be achievable at 100% in practice. Run
-`make coverage` to verify.
+`charset_util.dart` is small, the label set is closed, and `text` is always
+non-null (Q4) so there is no dead branch. 100% line coverage is expected.
+Run `make coverage` to verify; the project gate is >90%.
 
 ### Spec impact
 
@@ -222,7 +188,8 @@ for plain-text blobs, and that the detected label is stored in
       `packages/kmdb/lib/src/vault/search/charset_util.dart` with licence
       header (year 2026). Keep the implementation free of side effects —
       pure bytes-in, string-out.
-- [ ] Export `CharsetDecodeResult` and `decodeText` from the library.
+- [ ] Do **not** export `CharsetDecodeResult` or `decodeText` from
+      `packages/kmdb/lib/kmdb.dart` — internal `src/` symbols only.
 - [ ] Write `packages/kmdb/test/vault/search/charset_util_test.dart`
       covering all rows in the edge-case table above plus a round-trip test
       for each supported IANA label.
@@ -231,6 +198,86 @@ for plain-text blobs, and that the detected label is stored in
       two sentences; no structural change to the spec).
 - [ ] Run `make pre_commit` — format, analyze, license_check, tests all
       green.
+
+## Review (kmdb-plan-reviewer, 2026-06-20)
+
+**Verdict: Questions — close, but not yet mechanically implementable.** The
+problem is real and well-scoped, the package choice is sound and verified, but
+the *decode* half of the utility (which is the only thing this WI actually
+builds) is under-specified at exactly the points where the package's behaviour
+is non-obvious. An implementer following the plan literally would ship a
+function that fails the plan's own asserted edge cases.
+
+### What's strong
+- **Problem statement is correct and worth solving.** Silent mis-decode of
+  legacy-encoded plain text corrupting both the BM25 index and embedding input
+  is a genuine data-quality bug, and it aligns with proposal §10.1 / roadmap
+  WI-2. Splitting the dependency + utility out of WI-3 is good scoping —
+  keeps detection concerns out of the larger vault-search change.
+- **Package is verified, not assumed.** Confirmed against pub.dev:
+  `betto_charset_detector 0.1.0-dev.2` resolves and pulls `charset 2.0.1`; pure
+  Dart, no native assets (so the native-asset `dart test` caveat does not apply
+  here). Public API is exactly one function, `detectCharset(Uint8List) ->
+  String` (lowercase IANA label). The three-stage pipeline, the >15% high-byte
+  CJK promotion, the `windows-1252` fallback, and the empty-input → `utf-8`
+  behaviour described in the plan all match the source.
+- **Dependency wiring matches house style.** The checklist's split (bare dep in
+  `packages/kmdb/pubspec.yaml`, version pin in root `dependency_overrides`)
+  matches how every other `betto_*` package is wired in this workspace. Good.
+
+### What blocks Investigated (see Open questions Q1–Q5)
+The crux: `detectCharset` **only returns a label and never decodes or strips
+BOMs.** The entire value of `decodeText` is the detect→decode→(BOM-strip)
+dispatch, and that dispatch is the part the plan hand-waves:
+
+1. **BOM stripping is unspecified and the plan's own edge case is wrong as
+   written (Q1).** `utf8.decode` does not strip a leading U+FEFF, so the
+   asserted "UTF-8 with BOM → BOM stripped" outcome will not happen unless
+   `decodeText` does it explicitly. By contrast the `charset` UTF-16/UTF-32
+   decoders *do* strip the BOM. So the behaviour differs by family and must be
+   pinned down per-family, not asserted uniformly.
+2. **The label→decoder table is the core deliverable and isn't written down
+   (Q2).** The label set is small, closed, and known — there is no excuse to
+   leave the mapping implicit. Spell out the `switch`/map. Watch the
+   `iso-8859-1` trap: it is absent from the `charset` name map and only resolves
+   via `getByName`'s internal `Encoding.getByName` fallback to `latin1`.
+3. **UTF-16/32 endianness comes from the BOM, not the label (Q3)** — a
+   non-obvious quirk that, undocumented, will send an implementer down a dead
+   end trying to honour the `be`/`le` label.
+4. **The `text: null` branch may be unreachable dead code (Q4)**, which
+   collides head-on with the 90%+ coverage requirement. Either produce a
+   triggering input or drop `String?` to `String`. This must be decided before
+   implementation, not discovered during it.
+5. **Export visibility is a real choice (Q5)** with public-API-stability
+   consequences; "export from the library" is ambiguous about whether that
+   means `kmdb.dart` (public) or an internal `src/` symbol.
+
+### Smaller notes
+- **Edge-case table row 12 is stale.** "`detectedCharset` out-param is
+  populated / Label written to buffer" describes an out-parameter API that this
+  plan explicitly rejected in favour of the record return type. Delete the row;
+  it would confuse the implementer.
+- **Coverage claim needs the Q4 resolution.** "100% in practice" is only true
+  if the `null` branch is removed or made reachable. As written, the `String?`
+  with an unreachable `null` assignment caps achievable line coverage below
+  100% and possibly trips the 90% gate on such a small file.
+- **Spec impact note is adequate but soft.** "Add a brief note to
+  `20_text_search.md` (or the forthcoming vault search spec section)" is fine
+  for a utility this small. Per `docs/plans/README.md`, do not hard-code a spec
+  number; since WI-3 will own the vault-search spec section, a one-line forward
+  note in `20_text_search.md` here is reasonable. No release-checklist entry is
+  needed — this is pure-Dart and fully exercisable in the automated suite.
+- **No architectural concerns.** This touches none of the LSM/sync/cache
+  invariants; it is a leaf utility with no storage, sync, or platform-branching
+  implications. OPFS/web is unaffected (pure Dart, no `dart:io`).
+
+### Path to Investigated
+Resolve Q1–Q5 in the plan text (most are quick decisions, not research), fix
+the two table/coverage notes, and replace the "Proposed utility API" doc
+comment's reference to `extract_status.json` with a forward-reference phrasing.
+Once the decode dispatch table, BOM-strip rule, and `null`-reachability are
+written down, this is a genuinely small, mechanical implementation and can move
+to `Investigated`.
 
 ## Summary
 
