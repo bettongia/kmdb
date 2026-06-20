@@ -15,6 +15,7 @@
 --ignore="packages/**/doc/api/**"
 --ignore="**/.dart_tool/**"
 --ignore="**/Flutter/GeneratedPluginRegistrant.swift"
+--ignore="**/Package.swift"
 --ignore="**/Flutter/ephemeral/**"
 --ignore="**/build/**"
 --ignore="**/Pods/**"

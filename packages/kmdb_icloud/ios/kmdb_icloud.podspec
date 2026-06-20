@@ -16,10 +16,8 @@ SyncStorageAdapter over CloudKit custom zones.
   s.author           = { 'Bettongia' => 'dev@bettongia.au' }
 
   s.source           = { :path => '.' }
-  s.source_files     = 'Classes/**/*'
+  s.source_files     = 'kmdb_icloud/Sources/kmdb_icloud/**/*'
 
-  # Share the Swift source with the macOS target via a symlink.
-  # Both iOS/Classes/ and macos/Classes/ point to the same Swift sources.
   s.dependency 'Flutter'
   s.platform = :ios, '13.0'
 
