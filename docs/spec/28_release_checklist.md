@@ -548,6 +548,47 @@ contention test that exercises the lease protocol.
 
 ---
 
+### RC-17 — iOS SPM manifest: compile and link verification
+
+- **Area:** `kmdb_icloud` plugin / SPM
+- **Validates:** The iOS SPM manifest (`ios/kmdb_icloud/Package.swift`) compiles
+  and links the Flutter plugin correctly on iOS. The macOS manifest is exercised
+  automatically by CI (`make cicd_icloud` runs `flutter pub get` on
+  `macos-latest`); the iOS manifest is human-only because the example app has no
+  iOS target and CloudKit requires a real entitlement.
+- **Why not automated:** No iOS Simulator CI lane exists for `kmdb_icloud`.
+  CloudKit requires a real Apple developer entitlement that cannot be provisioned
+  in CI.
+- **Applies when:** Releasing any version of `kmdb_icloud` that includes the SPM
+  manifest change (`ios/kmdb_icloud/Package.swift`) or any subsequent
+  modification to the Swift source in `ios/kmdb_icloud/Sources/kmdb_icloud/`.
+- **Prerequisites:**
+  - Xcode 15 or later (required for `swift-tools-version: 5.9`).
+  - A Flutter app project (or the example adapted for iOS) that declares
+    `kmdb_icloud` as a dependency.
+  - A real Apple developer account with a CloudKit-enabled container (or at
+    minimum, a bundle ID for which the iCloud capability can be activated in
+    Xcode).
+- **Steps:**
+  1. Create (or adapt) a Flutter iOS app that declares `kmdb_icloud` as a
+     dependency with a path reference to `packages/kmdb_icloud`.
+  2. Run `flutter pub get` in the app; confirm no "does not support Swift
+     Package Manager" warning for `kmdb_icloud`.
+  3. Build and run the app on an iOS Simulator with CocoaPods disabled (use
+     `--no-codesign` or SPM-only mode: remove `Podfile` from the iOS target).
+  4. Confirm the plugin registers without linker errors and that `import Flutter`
+     resolves correctly.
+  5. Send a method call to the `kmdb_icloud/sync` channel (e.g. `initialize`)
+     and confirm the plugin responds.
+- **Expected result:** App launches on the iOS Simulator; the plugin channel
+  responds to the `initialize` method call without a linker error or missing
+  symbol.
+- **Related:** `docs/plans/completed/plan_icloud_spm.md`,
+  `packages/kmdb_icloud/ios/kmdb_icloud/Package.swift`, RC-12 (iCloud behaviour
+  probe), RC-13 (iCloud real-service sync soak).
+
+---
+
 ## Release log
 
 | Version | Date | Tester | Checks run | Result | Notes |
