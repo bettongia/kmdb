@@ -52,15 +52,24 @@ All code files must have a license at the top. The template file is
 programming language. Also replace `{{.Year}}` to match the current year. The
 `kmdb-pre-commit` agent enforces this via `license_check`.
 
-**Swift Package Manager (SPM) for iOS/macOS Flutter plugins.** Any Flutter
-plugin that targets iOS or macOS must include a `Package.swift` manifest
-alongside its CocoaPods `.podspec`. Flutter is deprecating CocoaPods and will
-make the absence of `Package.swift` a hard build error in a future release.
-When creating a new iOS/macOS-targeting Flutter plugin, add SPM support
-(`ios/<plugin_name>/Package.swift` and/or `macos/<plugin_name>/Package.swift`)
-from the start. For existing plugins, add it before the next Flutter major that
-makes it mandatory. See `docs/plans/completed/plan_icloud_spm.md` for the reference
-implementation pattern (key: `dependencies` must include `FlutterFramework`;
+**Swift Package Manager (SPM) is the required approach for all iOS/macOS
+Flutter work — do not use CocoaPods for new integrations.** Flutter is
+deprecating CocoaPods; the absence of `Package.swift` will become a hard build
+error in a future Flutter release. Concretely:
+
+- **New Flutter plugins** targeting iOS or macOS: add `Package.swift` at
+  `ios/<plugin_name>/Package.swift` and/or `macos/<plugin_name>/Package.swift`
+  from the start. Do not create a `Podfile` or rely on `pod install`.
+- **Existing plugins** (like `kmdb_icloud`): already migrated — `Package.swift`
+  manifests are in place and `Classes/` dirs removed.
+- **Example apps**: do not add or regenerate a `Podfile`. The example app's
+  xcconfig files must not include Pods xcconfig references.
+- **New third-party dependencies** in a plugin: declare them as SPM packages in
+  `Package.swift`, not as CocoaPods in a `Podfile`.
+
+See `docs/plans/completed/plan_icloud_spm.md` for the reference implementation
+pattern (key: `dependencies` must declare `FlutterFramework` via
+`.package(name: "FlutterFramework", path: "../FlutterFramework")`;
 `dependencies: []` triggers a Flutter toolchain warning).
 
 ## Workflow & Agents
