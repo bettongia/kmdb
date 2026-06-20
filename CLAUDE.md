@@ -57,9 +57,11 @@ plugin that targets iOS or macOS must include a `Package.swift` manifest
 alongside its CocoaPods `.podspec`. Flutter is deprecating CocoaPods and will
 make the absence of `Package.swift` a hard build error in a future release.
 When creating a new iOS/macOS-targeting Flutter plugin, add SPM support
-(`ios/Package.swift` and/or `macos/Package.swift`) from the start. For
-existing plugins, add it before the next Flutter major that makes it mandatory.
-See `docs/plans/plan_icloud_spm.md` for the reference implementation pattern.
+(`ios/<plugin_name>/Package.swift` and/or `macos/<plugin_name>/Package.swift`)
+from the start. For existing plugins, add it before the next Flutter major that
+makes it mandatory. See `docs/plans/completed/plan_icloud_spm.md` for the reference
+implementation pattern (key: `dependencies` must include `FlutterFramework`;
+`dependencies: []` triggers a Flutter toolchain warning).
 
 ## Workflow & Agents
 

@@ -1,8 +1,8 @@
 # Add Swift Package Manager Support to `kmdb_icloud`
 
-**Status**: Investigated
+**Status**: Complete
 
-**PR link**: —
+**PR link**: #47
 
 ## Problem statement
 
