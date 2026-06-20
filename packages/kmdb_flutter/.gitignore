@@ -1,0 +1,12 @@
+# Flutter-generated files — not committed.
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Dart tool artifacts.
+.dart_tool/
+
+# Build outputs.
+build/
+
+# Coverage.
+coverage/
