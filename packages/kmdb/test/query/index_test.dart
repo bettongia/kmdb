@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'dart:typed_data';
+
+import 'package:cbor/cbor.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
 import 'package:kmdb/src/engine/util/key_codec.dart';
@@ -682,6 +685,138 @@ void main() {
           value: 'London',
         );
         expect(keys, contains(k1));
+      },
+    );
+  });
+
+  // ── checkInterruptedBuilds ────────────────────────────────────────────────
+
+  group('checkInterruptedBuilds', () {
+    test(
+      'returns events for each index in building state, empty otherwise',
+      () async {
+        // Exercises IndexManager.checkInterruptedBuilds() (lines 335-341):
+        // simulate an interrupted build by writing `building` status to meta,
+        // then verify checkInterruptedBuilds() returns the expected event.
+        final db = await KmdbDatabase.open(
+          path: '/check_interrupted_builds_test',
+          adapter: MemoryStorageAdapter(),
+          indexes: [IndexDefinition('contacts', 'city')],
+          config: KvStoreConfig.forTesting(),
+        );
+        addTearDown(db.close);
+        addTearDown(MemoryStorageAdapter.releaseAllLocks);
+
+        // No build has been started yet — no interrupted builds.
+        expect(await db.indexManager.checkInterruptedBuilds(), isEmpty);
+
+        // Directly write a `building` state for the index to simulate an
+        // interrupted build (as if the process crashed mid-build).
+        // The symbolic name matches IndexManager._persistState's format.
+        final stateBytes = Uint8List.fromList(
+          cbor.encode(
+            CborMap({
+              CborString('path'): CborString('city'),
+              CborString('namespace'): CborString('contacts'),
+              CborString('status'): CborString('building'),
+              CborString('builtThrough'): CborSmallInt(0),
+              CborString('builtAt'): CborString(''),
+            }),
+          ),
+        );
+        await db.store.meta.putRawByName('index:contacts:city', stateBytes);
+
+        // Now checkInterruptedBuilds() must report the interrupted build.
+        final events = await db.indexManager.checkInterruptedBuilds();
+        expect(events, hasLength(1));
+        expect(events.first.namespace, equals('contacts'));
+        expect(events.first.path, equals('city'));
+      },
+    );
+  });
+
+  // ── IndexState.copyWith ───────────────────────────────────────────────────────
+
+  group('IndexState.copyWith', () {
+    // Covers the `status: status ?? this.status` branch (line 78 in
+    // index_manager.dart) when copyWith is called without a new status value.
+    test('copyWith preserves status when not overridden', () {
+      const state = IndexState(
+        namespace: 'contacts',
+        path: 'city',
+        status: IndexStatus.current,
+        builtThrough: 42,
+        builtAt: '2026-01-01',
+      );
+      // Pass only builtThrough — status should fall back to this.status.
+      final updated = state.copyWith(builtThrough: 99);
+      expect(updated.status, equals(IndexStatus.current));
+      expect(updated.builtThrough, equals(99));
+      expect(updated.namespace, equals('contacts'));
+    });
+  });
+
+  // ── IndexManager — fallback full-scan while building ─────────────────────────
+
+  group('IndexManager — building-state fallback', () {
+    test('query on collection while index is building returns correct results '
+        'via full-scan fallback', () async {
+      // Pre-populate the collection with documents before any index is built.
+      final (db, col) = await _openWithIndexes();
+      final k1 = _key();
+      final k2 = _key();
+      await col.put(_Contact(id: k1, city: 'London'));
+      await col.put(_Contact(id: k2, city: 'Paris'));
+
+      // getOrActivate transitions undefined → building (launching a background
+      // build) and returns the building-state. The returned state is building
+      // because the build has just been kicked off but not yet completed.
+      final activatedState = await db.indexManager.getOrActivate(
+        'contacts',
+        'city',
+      );
+      // getOrActivate returns `building` when the index was `undefined`
+      // (first activation). It may return `current` on subsequent calls if
+      // the build completed synchronously — accept both.
+      expect(
+        activatedState.status,
+        anyOf(equals(IndexStatus.building), equals(IndexStatus.current)),
+      );
+
+      // A full-scan query on the collection must still return the correct
+      // documents regardless of index state — the query layer falls back to
+      // a full scan when the index is building.
+      final results = await col.all().get();
+      expect(results.map((c) => c.id).toSet(), equals({k1, k2}));
+
+      await db.close();
+    });
+  });
+
+  // ── IndexManager.removeIndex ──────────────────────────────────────────────────
+
+  group('IndexManager.removeIndex', () {
+    test(
+      'removeIndex on an undefined (never-built) index is a no-op',
+      () async {
+        // Open a database with a city index, but never trigger a build.
+        final (db, _) = await _openWithIndexes();
+
+        // Index is in `undefined` state — no sub-namespaces have been written.
+        final before = await db.indexManager.getState('contacts', 'city');
+        expect(before.status, equals(IndexStatus.undefined));
+
+        // removeIndex on an undefined index must complete without error.
+        await expectLater(
+          db.indexManager.removeIndex('contacts', 'city'),
+          completes,
+        );
+
+        // State should still be undefined (no meta entry to clean up).
+        final after = await db.indexManager.getState('contacts', 'city');
+        expect(after.status, equals(IndexStatus.undefined));
+
+        await db.close();
       },
     );
   });

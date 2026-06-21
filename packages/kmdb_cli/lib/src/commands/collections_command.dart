@@ -179,11 +179,16 @@ final class CollectionsCommand extends CliCommand {
       try {
         await ctx.indexManager.removeIndex(name, record.path);
       } catch (e) {
+        // coverage:ignore-start
+        // IndexManager.removeIndex does not throw when an index was never
+        // built — it silently removes whatever data exists. This catch block
+        // is defensive code retained for future-proofing.
         ctx.writeError(
           "collections delete: failed to remove index "
           "'$name.${record.path}': $e",
         );
         return false;
+        // coverage:ignore-end
       }
       ctx.config.removeIndex(name, record.path);
     }

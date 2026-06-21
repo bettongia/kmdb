@@ -266,6 +266,62 @@ void main() {
       expect(info.minHlc.physicalMs, equals(1000));
       expect(info.maxHlc.physicalMs, equals(2000));
     });
+
+    test('parse round-trips through consolidationName', () {
+      final original = SstableInfo.consolidationName(
+        'a1b2c3d4',
+        42,
+        const Hlc(1500, 0),
+        const Hlc(3000, 0),
+      );
+      final info = SstableInfo.parse(original);
+      expect(info.deviceId, equals('a1b2c3d4'));
+      expect(info.epoch, equals(42));
+      expect(info.minHlc.physicalMs, equals(1500));
+      expect(info.maxHlc.physicalMs, equals(3000));
+      expect(info.isConsolidation, isTrue);
+    });
+
+    test('flushName produces isConsolidation=false', () {
+      final name = SstableInfo.flushName(
+        'cafebabe',
+        const Hlc(100, 0),
+        const Hlc(200, 0),
+      );
+      final info = SstableInfo.parse(name);
+      expect(info.isConsolidation, isFalse);
+      expect(info.epoch, isNull);
+    });
+
+    test('throws FormatException for deviceId with wrong length', () {
+      // deviceId must be exactly 8 chars — 'short' is 5 chars.
+      expect(
+        () => SstableInfo.parse('short-017F8A0A00000000-017F8A0AFFFF0000.sst'),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test(
+      'throws FormatException for invalid epoch string in consolidation name',
+      () {
+        // 4 segments but epoch segment is not a number.
+        expect(
+          () => SstableInfo.parse(
+            'a1b2c3d4-notanumber-017F8A0A0000-017F8A0AFFFF.sst',
+          ),
+          throwsA(isA<FormatException>()),
+        );
+      },
+    );
+
+    test('throws FormatException for invalid HLC hex in filename', () {
+      // Invalid hex string for minHlc.
+      expect(
+        () =>
+            SstableInfo.parse('a1b2c3d4-ZZZZZZZZZZZZZZZZ-017F8A0AFFFF0000.sst'),
+        throwsA(isA<FormatException>()),
+      );
+    });
   });
 }
 

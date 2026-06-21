@@ -300,4 +300,51 @@ void main() {
     expect(await cmd.execute(ctx, ['list'], {}), isTrue);
     expect(out.toString(), contains('No remotes configured'));
   });
+
+  // ── Corrupt config: FormatException propagation ───────────────────────────────
+
+  group('corrupt config.json', () {
+    /// Write an invalid JSON blob to `{dbDir}/local/config.json`.
+    Future<void> writeCorruptConfig() async {
+      final localDir = io.Directory('${dbDir.path}/local');
+      localDir.createSync(recursive: true);
+      io.File(
+        '${dbDir.path}/local/config.json',
+      ).writeAsStringSync('NOT VALID JSON !!!');
+    }
+
+    // Lines 168-169 in remote_command.dart: FormatException from
+    // KmdbConfig.forDatabase inside _add (local add path).
+    test('remote add: corrupt config returns error', () async {
+      await writeCorruptConfig();
+      final ctx = _ctx(db, out: out, err: err);
+      final ok = await cmd.execute(
+        ctx,
+        ['add', 'origin'],
+        {'path': '/backups'},
+      );
+      expect(ok, isFalse);
+      expect(err.toString(), isNotEmpty);
+    });
+
+    // Lines 204-205 in remote_command.dart: FormatException from
+    // KmdbConfig.forDatabase inside _remove.
+    test('remote remove: corrupt config returns error', () async {
+      await writeCorruptConfig();
+      final ctx = _ctx(db, out: out, err: err);
+      final ok = await cmd.execute(ctx, ['remove', 'origin'], {});
+      expect(ok, isFalse);
+      expect(err.toString(), isNotEmpty);
+    });
+
+    // Lines 235-236 in remote_command.dart: FormatException from
+    // KmdbConfig.forDatabase inside _list.
+    test('remote list: corrupt config returns error', () async {
+      await writeCorruptConfig();
+      final ctx = _ctx(db, out: out, err: err);
+      final ok = await cmd.execute(ctx, ['list'], {});
+      expect(ok, isFalse);
+      expect(err.toString(), isNotEmpty);
+    });
+  });
 }

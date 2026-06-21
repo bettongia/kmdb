@@ -24,10 +24,13 @@ import '../sync_storage_adapter.dart';
 ///
 /// ## Cancellation
 ///
-/// [MemorySyncAdapter] has no long-running waits; all operations complete in the
-/// same microtask. The `ctx` parameter is accepted on all methods (to satisfy
-/// the interface) but is silently ignored — this is permitted by the
-/// [SyncStorageAdapter] contract.
+/// [MemorySyncAdapter] calls `ctx?.throwIfExpired()` at the entry of each
+/// method so that pre-cancelled [SyncContext]s are honoured immediately.
+/// This allows the adapter to pass the full cancellation conformance suite
+/// ([runSyncAdapterConformance] with `expectsCancellation: true`). Because all
+/// operations complete in the same microtask, mid-flight cancellation of
+/// already-started operations is not possible — only pre-entry cancellation
+/// is enforced.
 ///
 /// ## Compare-and-swap semantics
 ///
@@ -63,7 +66,7 @@ final class MemorySyncAdapter implements SyncStorageAdapter {
     String? extension,
     SyncContext? ctx,
   }) async {
-    // ctx is intentionally ignored — no long-running waits in this adapter.
+    ctx?.throwIfExpired();
     // Normalise: ensure remoteDir ends with '/' for prefix matching.
     final prefix = remoteDir.endsWith('/') ? remoteDir : '$remoteDir/';
     final results = <String>[];
@@ -80,7 +83,7 @@ final class MemorySyncAdapter implements SyncStorageAdapter {
 
   @override
   Future<Uint8List?> download(String remotePath, {SyncContext? ctx}) async {
-    // ctx is intentionally ignored — no long-running waits in this adapter.
+    ctx?.throwIfExpired();
     final data = _files[remotePath];
     if (data == null) return null;
     return Uint8List.fromList(data);
@@ -92,14 +95,14 @@ final class MemorySyncAdapter implements SyncStorageAdapter {
     Uint8List bytes, {
     SyncContext? ctx,
   }) async {
-    // ctx is intentionally ignored — no long-running waits in this adapter.
+    ctx?.throwIfExpired();
     _files[remotePath] = Uint8List.fromList(bytes);
     _versions[remotePath] = (_versions[remotePath] ?? 0) + 1;
   }
 
   @override
   Future<void> delete(String remotePath, {SyncContext? ctx}) async {
-    // ctx is intentionally ignored — no long-running waits in this adapter.
+    ctx?.throwIfExpired();
     _files.remove(remotePath);
     _versions.remove(remotePath);
   }
@@ -111,7 +114,7 @@ final class MemorySyncAdapter implements SyncStorageAdapter {
     String? ifMatchEtag,
     SyncContext? ctx,
   }) async {
-    // ctx is intentionally ignored — no long-running waits in this adapter.
+    ctx?.throwIfExpired();
     // All of this runs synchronously within one microtask — true atomic CAS.
     final currentVersion = _versions[path];
     final fileExists = _files.containsKey(path);
@@ -135,7 +138,7 @@ final class MemorySyncAdapter implements SyncStorageAdapter {
 
   @override
   Future<String?> getEtag(String path, {SyncContext? ctx}) async {
-    // ctx is intentionally ignored — no long-running waits in this adapter.
+    ctx?.throwIfExpired();
     final version = _versions[path];
     if (version == null || !_files.containsKey(path)) return null;
     return version.toString();

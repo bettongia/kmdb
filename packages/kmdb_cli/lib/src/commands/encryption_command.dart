@@ -90,6 +90,10 @@ final class EncryptionCommand extends CliCommand {
 final class _ChangePassphraseCommand extends CliCommand {
   const _ChangePassphraseCommand();
 
+  // Metadata getters are never accessed by the dispatch path (sub.execute) and
+  // are not exposed to the top-level CommandRunner builder because
+  // _ChangePassphraseCommand is a private sub-command.
+  // coverage:ignore-start
   @override
   String get name => 'change-passphrase';
 
@@ -104,6 +108,7 @@ final class _ChangePassphraseCommand extends CliCommand {
 
   @override
   String get usage => 'encryption change-passphrase';
+  // coverage:ignore-end
 
   @override
   Future<bool> execute(
@@ -123,6 +128,9 @@ final class _ChangePassphraseCommand extends CliCommand {
     // Prompt for the new passphrase on stderr (so it is not captured by
     // --output). Use dart:io directly because CommandContext.out may be
     // redirected to a file.
+    // stdin interaction; not testable in automated tests
+    // (blocking stdin.readLineSync in a non-tty isolate would hang).
+    // coverage:ignore-start
     io.stderr.write('Enter new passphrase: ');
     final newPassphrase = _readPassword();
 
@@ -174,11 +182,14 @@ final class _ChangePassphraseCommand extends CliCommand {
       'message': 'Passphrase changed successfully.',
     });
     return true;
+    // coverage:ignore-end
   }
 
   /// Reads a line from stdin, hiding echo if the terminal supports it.
   ///
   /// Returns `null` if stdin is closed or reading fails.
+  // Requires interactive terminal for echo suppression.
+  // coverage:ignore-start
   String? _readPassword() {
     // echoMode suppression requires dart:io and a real terminal.
     // In tests (non-tty stdin), we read normally.
@@ -195,4 +206,6 @@ final class _ChangePassphraseCommand extends CliCommand {
       }
     }
   }
+
+  // coverage:ignore-end
 }

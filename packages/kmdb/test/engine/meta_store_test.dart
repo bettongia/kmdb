@@ -17,6 +17,7 @@ import 'dart:typed_data';
 import 'package:kmdb/src/encryption/encryption_blob.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store_impl.dart';
+import 'package:kmdb/src/engine/kvstore/meta_store.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
 import 'package:kmdb/src/engine/util/hlc.dart';
 import 'package:kmdb/src/engine/util/key_codec.dart';
@@ -491,6 +492,98 @@ void main() {
         'enc:blob',
         equals('enc:blob'),
       );
+    });
+  });
+
+  // ── incrementGenerationCounter ─────────────────────────────────────────────
+
+  group('MetaStore — incrementGenerationCounter', () {
+    test('starts at 0 and returns 1 on first increment', () async {
+      final adapter = MemoryStorageAdapter();
+      final (store, _) = await _open(adapter);
+
+      final result = await store.meta.incrementGenerationCounter('ns');
+      expect(result, equals(1));
+      expect(await store.meta.getGenerationCounter('ns'), equals(1));
+      await store.close();
+    });
+
+    test('increments monotonically on repeated calls', () async {
+      final adapter = MemoryStorageAdapter();
+      final (store, _) = await _open(adapter);
+
+      expect(await store.meta.incrementGenerationCounter('ns'), equals(1));
+      expect(await store.meta.incrementGenerationCounter('ns'), equals(2));
+      expect(await store.meta.incrementGenerationCounter('ns'), equals(3));
+      await store.close();
+    });
+  });
+
+  // ── registerNamespace (direct) ─────────────────────────────────────────────
+
+  group('MetaStore — registerNamespace (direct)', () {
+    test('registers an unknown namespace', () async {
+      final adapter = MemoryStorageAdapter();
+      final (store, _) = await _open(adapter);
+
+      await store.meta.registerNamespace('myns');
+      expect(await store.meta.getNamespaces(), contains('myns'));
+      await store.close();
+    });
+
+    test('registering an existing namespace is a no-op (idempotent)', () async {
+      final adapter = MemoryStorageAdapter();
+      final (store, _) = await _open(adapter);
+
+      await store.meta.registerNamespace('myns');
+      await store.meta.registerNamespace('myns'); // second call
+      final namespaces = await store.meta.getNamespaces();
+      // Only one entry even after duplicate registration.
+      expect(namespaces.where((ns) => ns == 'myns'), hasLength(1));
+      await store.close();
+    });
+  });
+
+  // ── setDirty / clearDirty ─────────────────────────────────────────────────
+
+  group('MetaStore — setDirty / clearDirty', () {
+    test('setDirty marks the dirty flag', () async {
+      final adapter = MemoryStorageAdapter();
+      final (store, _) = await _open(adapter);
+
+      await store.meta.setDirty();
+      expect(await store.meta.getDirtyFlag(), isTrue);
+      await store.close(flush: false);
+    });
+
+    test('clearDirty removes the dirty flag', () async {
+      final adapter = MemoryStorageAdapter();
+      final (store, _) = await _open(adapter);
+
+      await store.meta.setDirty();
+      await store.meta.clearDirty();
+      expect(await store.meta.getDirtyFlag(), isFalse);
+      await store.close(flush: false);
+    });
+  });
+
+  // ── indexKey ──────────────────────────────────────────────────────────────
+
+  group('MetaStore — indexKey', () {
+    test('returns a non-empty string for namespace + path', () {
+      final key = MetaStore.indexKey('contacts', 'city');
+      // The key is hashed internally (MD5/hex), so just verify it is non-empty
+      // and that the same namespace+path always produces the same key (stable).
+      expect(key, isNotEmpty);
+      expect(MetaStore.indexKey('contacts', 'city'), equals(key));
+    });
+
+    test('different namespace/path combinations produce different keys', () {
+      final k1 = MetaStore.indexKey('contacts', 'city');
+      final k2 = MetaStore.indexKey('contacts', 'country');
+      final k3 = MetaStore.indexKey('orders', 'city');
+      expect(k1, isNot(equals(k2)));
+      expect(k1, isNot(equals(k3)));
     });
   });
 }

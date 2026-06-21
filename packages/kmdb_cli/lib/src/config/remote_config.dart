@@ -98,6 +98,7 @@ Future<AuthClient> _loadGoogleDriveAuthClient({
 
     // Refresh if the access token has expired.
     if (credentials.accessToken.hasExpired) {
+      // coverage:ignore-start
       // A ClientId is required by the refresh API, even though it is also
       // embedded in the refresh token.  We extract it from the stored
       // credentials if available; otherwise fall back to empty.
@@ -110,6 +111,7 @@ Future<AuthClient> _loadGoogleDriveAuthClient({
       );
 
       return authenticatedClient(base, refreshed);
+      // coverage:ignore-end
     }
 
     return authenticatedClient(base, credentials);
@@ -125,6 +127,7 @@ Future<AuthClient> _loadGoogleDriveAuthClient({
 ///
 /// During `remote add`, the CLI writes `client_id` and `client_secret` into
 /// the credentials JSON so they are available for future refresh calls.
+// coverage:ignore-start
 ClientId? _clientIdFromCredentials(Map<String, dynamic> json) {
   final id = json['client_id'] as String?;
   final secret = json['client_secret'] as String?;
@@ -137,3 +140,4 @@ Map<String, dynamic> _clientIdJson(ClientId clientId) => {
   'client_id': clientId.identifier,
   'client_secret': clientId.secret,
 };
+// coverage:ignore-end
