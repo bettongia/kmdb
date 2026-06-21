@@ -1,9 +1,4 @@
----
-title: "§19 Platform Adaptation"
-nav_order: 19
----
-
-# §19 Platform Adaptation
+# Platform Adaptation
 
 ## Conditional Exports
 
@@ -39,9 +34,9 @@ async File System Access API.
 
 `FileSystemSyncAccessHandle` — which supports direct byte-level reads and writes
 without async overhead — is only available inside a dedicated Web Worker. The
-main-thread Dart code communicates with the Worker via `postMessage` round-trips.
-This keeps the Dart API fully async (all 14 `StorageAdapter` methods return
-`Future<T>`) while the Worker executes I/O synchronously.
+main-thread Dart code communicates with the Worker via `postMessage`
+round-trips. This keeps the Dart API fully async (all 14 `StorageAdapter`
+methods return `Future<T>`) while the Worker executes I/O synchronously.
 
 ### Worker asset loading
 
@@ -56,8 +51,8 @@ This avoids any Flutter asset-bundle or `base href` dependency and works
 identically under `dart compile js` and WASM builds. The only required CSP
 directive beyond your app's standard policy is `worker-src blob:`.
 
-The source `.js` file lives at
-`lib/src/engine/platform/sahpool_worker.js` and the `const String` companion at
+The source `.js` file lives at `lib/src/engine/platform/sahpool_worker.js` and
+the `const String` companion at
 `lib/src/engine/platform/sahpool_worker_source.dart`. **These two files must be
 kept in sync manually** — a build step could automate this, but manual sync is
 currently required.
@@ -90,20 +85,20 @@ operations.
 
 ### Supported operations
 
-| Worker op     | StorageAdapter method | Direction       | Notes                                  |
-| ------------- | --------------------- | --------------- | -------------------------------------- |
-| `readAll`     | `readFile`            | Worker → Dart   | Transfers `Uint8Array` buffer (zero-copy) |
-| `read`        | `readFileRange`       | Worker → Dart   | Read at exact offset — O(length), not O(file size) |
-| `write`       | `writeFile`           | Dart → Worker   | Transfers `Uint8Array` buffer (zero-copy) |
-| `append`      | `appendFile`          | Dart → Worker   | `getSize()` then `write(at: size)` — true append, no read |
-| `getSize`     | `fileSize`            | Worker → Dart   | Returns `number` |
-| `list`        | `listFiles`           | Worker → Dart   | Optional extension filter |
-| `delete`      | `deleteFile`          | —               | No-op if file missing |
-| `rename`      | `renameFile`          | —               | Durability ordering enforced (see below) |
-| `exists`      | `fileExists`          | Worker → Dart   | Returns `boolean` |
-| `createDir`   | `createDirectory`     | —               | Creates all intermediate directories |
-| `acquireLock` | `acquireLock`         | —               | Holds SAH open for session; throws on collision |
-| `releaseLock` | `releaseLock`         | —               | Flushes, closes, and deletes lock file |
+| Worker op     | StorageAdapter method | Direction     | Notes                                                     |
+| ------------- | --------------------- | ------------- | --------------------------------------------------------- |
+| `readAll`     | `readFile`            | Worker → Dart | Transfers `Uint8Array` buffer (zero-copy)                 |
+| `read`        | `readFileRange`       | Worker → Dart | Read at exact offset — O(length), not O(file size)        |
+| `write`       | `writeFile`           | Dart → Worker | Transfers `Uint8Array` buffer (zero-copy)                 |
+| `append`      | `appendFile`          | Dart → Worker | `getSize()` then `write(at: size)` — true append, no read |
+| `getSize`     | `fileSize`            | Worker → Dart | Returns `number`                                          |
+| `list`        | `listFiles`           | Worker → Dart | Optional extension filter                                 |
+| `delete`      | `deleteFile`          | —             | No-op if file missing                                     |
+| `rename`      | `renameFile`          | —             | Durability ordering enforced (see below)                  |
+| `exists`      | `fileExists`          | Worker → Dart | Returns `boolean`                                         |
+| `createDir`   | `createDirectory`     | —             | Creates all intermediate directories                      |
+| `acquireLock` | `acquireLock`         | —             | Holds SAH open for session; throws on collision           |
+| `releaseLock` | `releaseLock`         | —             | Flushes, closes, and deletes lock file                    |
 
 `syncFile` and `syncDir` are no-ops (see Durability below). `truncate` is an
 internal Worker helper used by `write` and is not exposed as a Dart-level
@@ -147,8 +142,8 @@ with enforced durability ordering:
 
 After step 2, the destination is fully flushed-and-closed before the source is
 deleted. A crash between steps 2 and 3 leaves both files intact; a crash after
-step 3 leaves only the destination. This satisfies the `CurrentFile.write`
-(M3) invariant: a crash leaves either the intact source or the fully-written
+step 3 leaves only the destination. This satisfies the `CurrentFile.write` (M3)
+invariant: a crash leaves either the intact source or the fully-written
 destination.
 
 ### Cross-tab exclusion (single-tab contract)
@@ -161,25 +156,24 @@ the handle, `createSyncAccessHandle()` throws a `DOMException`
 (`NoModificationAllowedError`). The Dart adapter surfaces this as a
 `LockException` with the message "database is already open in another tab."
 
-**Single-tab-per-database is the documented contract.** Multiple tabs
-accessing the same OPFS path concurrently will race for the lock; the first tab
-wins and subsequent tabs receive `LockException` immediately (no retry, no
-timeout).
+**Single-tab-per-database is the documented contract.** Multiple tabs accessing
+the same OPFS path concurrently will race for the lock; the first tab wins and
+subsequent tabs receive `LockException` immediately (no retry, no timeout).
 
 `releaseLock(path)` flushes and closes the held handle, then deletes the lock
-file. `close()` on the adapter terminates the Worker without explicitly releasing
-the lock handle — the handle is released by the Worker's termination.
+file. `close()` on the adapter terminates the Worker without explicitly
+releasing the lock handle — the handle is released by the Worker's termination.
 
 ### Platform feature matrix
 
-| Feature             | Native (iOS/Android/macOS/Windows/Linux) | Web (OPFS via SAHPool)           |
-| :------------------ | :--------------------------------------- | :------------------------------- |
-| Core LSM engine     | ✓                                        | ✓                                |
+| Feature             | Native (iOS/Android/macOS/Windows/Linux) | Web (OPFS via SAHPool)                     |
+| :------------------ | :--------------------------------------- | :----------------------------------------- |
+| Core LSM engine     | ✓                                        | ✓                                          |
 | Zstd compression    | ✓ (FFI via betto_zstd)                   | ✓ (WASM via betto_zstd; init at open time) |
-| Sync                | ✓                                        | ✓                                |
-| Lexical text search | ✓                                        | ✗ (deferred)                     |
-| Semantic search     | ✓ (ONNX via betto_inferencing)           | ✗ (deferred)                     |
-| Vault               | ✓                                        | ✗ (deferred)                     |
+| Sync                | ✓                                        | ✓                                          |
+| Lexical text search | ✓                                        | ✗ (deferred)                               |
+| Semantic search     | ✓ (ONNX via betto_inferencing)           | ✗ (deferred)                               |
+| Vault               | ✓                                        | ✗ (deferred)                               |
 
 ## Package Structure
 
@@ -213,21 +207,21 @@ External Bettongia packages are published to **pub.dev** and pinned in the
 workspace-root `pubspec.yaml` `dependency_overrides` (they previously lived as
 git dependencies — that wiring is gone):
 
-| Package | Role | Binary mechanism |
-| :------ | :--- | :--------------- |
-| `betto_common` | shared Dart utilities | — |
-| `betto_schema` | JSON Schema validation (§25) | — |
-| `betto_zstd` | Zstd compression (§5) | `native_toolchain_c` (native) + self-built WASM (web) |
-| `betto_mediatype_detector` | MIME detection for the vault (§24); replaced `betto_registry` | pure Dart |
-| `betto_icu` | Unicode UAX #29 tokenizer (`IcuTokenizer`); consumed by `betto_lexical` | system ICU via FFI (no bundling) |
-| `betto_lexical` | lexical text utilities (tokenizer, stemmer, stopwords) used by `FtsManager` (§21) and `VecManager` (§22) | pure Dart + `betto_icu` |
-| `betto_inferencing` | ONNX Runtime inference and embedding models for dense text retrieval; consumed by `VecManager` (§22); native only | `betto_onnxrt` native-assets hook |
-| `betto_onnxrt` | ONNX Runtime for Dart (§22); consumed by `betto_inferencing` | native-assets build hook downloads/verifies ORT binary |
-| `betto_builder_tools` | shared build helpers | — |
+| Package                    | Role                                                                                                              | Binary mechanism                                       |
+| :------------------------- | :---------------------------------------------------------------------------------------------------------------- | :----------------------------------------------------- |
+| `betto_common`             | shared Dart utilities                                                                                             | —                                                      |
+| `betto_schema`             | JSON Schema validation (§25)                                                                                      | —                                                      |
+| `betto_zstd`               | Zstd compression (§5)                                                                                             | `native_toolchain_c` (native) + self-built WASM (web)  |
+| `betto_mediatype_detector` | MIME detection for the vault (§24); replaced `betto_registry`                                                     | pure Dart                                              |
+| `betto_icu`                | Unicode UAX #29 tokenizer (`IcuTokenizer`); consumed by `betto_lexical`                                           | system ICU via FFI (no bundling)                       |
+| `betto_lexical`            | lexical text utilities (tokenizer, stemmer, stopwords) used by `FtsManager` (§21) and `VecManager` (§22)          | pure Dart + `betto_icu`                                |
+| `betto_inferencing`        | ONNX Runtime inference and embedding models for dense text retrieval; consumed by `VecManager` (§22); native only | `betto_onnxrt` native-assets hook                      |
+| `betto_onnxrt`             | ONNX Runtime for Dart (§22); consumed by `betto_inferencing`                                                      | native-assets build hook downloads/verifies ORT binary |
+| `betto_builder_tools`      | shared build helpers                                                                                              | —                                                      |
 
-`betto_onnxrt_ios` (`^0.1.0-dev.1`) is an iOS-only Flutter plugin that
-SPM-links the ORT XCFramework; it is added by the **consumer Flutter app**, not
-by this workspace (which is Dart-only). See §22 for details.
+`betto_onnxrt_ios` (`^0.1.0-dev.1`) is an iOS-only Flutter plugin that SPM-links
+the ORT XCFramework; it is added by the **consumer Flutter app**, not by this
+workspace (which is Dart-only). See §22 for details.
 
 ### Conditional Export Pattern
 
@@ -241,6 +235,6 @@ export 'storage_adapter_impl.dart'
 ```
 
 `dart.library.js_interop` is tested (not the deprecated `dart.library.html`) for
-correct WASM targeting. The default stub re-exports `storage_adapter_sahpool.dart`
-for platforms where neither `dart:io` nor `dart:js_interop` is available —
-in practice this should never be reached.
+correct WASM targeting. The default stub re-exports
+`storage_adapter_sahpool.dart` for platforms where neither `dart:io` nor
+`dart:js_interop` is available — in practice this should never be reached.

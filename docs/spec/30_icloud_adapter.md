@@ -1,4 +1,4 @@
-# §30 Apple iCloud Adapter (CloudKit)
+# Apple iCloud Adapter (CloudKit)
 
 The `kmdb_icloud` package provides `ICloudAdapter`, a `SyncStorageAdapter`
 implementation backed by Apple's CloudKit framework. It gives iOS and macOS
@@ -17,14 +17,14 @@ The package is **not** part of core `kmdb` — consumers opt in by adding
 
 ## Platform scope
 
-| Platform | Supported |
-| -------- | --------- |
-| iOS      | ✅        |
+| Platform | Supported  |
+| -------- | ---------- |
+| iOS      | ✅         |
 | macOS    | ✅ (12.0+) |
-| Android  | No        |
-| Web      | No        |
-| Windows  | No        |
-| Linux    | No        |
+| Android  | No         |
+| Web      | No         |
+| Windows  | No         |
+| Linux    | No         |
 
 CloudKit requires Apple platforms and an iCloud-capable Apple ID. Users who need
 cross-platform sync should use the Google Drive adapter (§29) instead.
@@ -118,10 +118,10 @@ returns the `recordChangeTag`, or `null` if the record does not exist.
 
 ## Conditional writes (CAS)
 
-| Operation                                | CloudKit mechanism                                                               | Atomic?              |
-| ---------------------------------------- | -------------------------------------------------------------------------------- | -------------------- |
+| Operation                                | CloudKit mechanism                                                               | Atomic?                                               |
+| ---------------------------------------- | -------------------------------------------------------------------------------- | ----------------------------------------------------- |
 | Create-if-absent (`ifMatchEtag == null`) | Save fresh record with nil `recordChangeTag`, `savePolicy: .allKeys`             | **No** — unconditional overwrite (Phase 4a confirmed) |
-| Update-if-match (`ifMatchEtag != null`)  | Save record with known `recordChangeTag`, `savePolicy: .ifServerRecordUnchanged` | **Yes** (Phase 4a confirmed)              |
+| Update-if-match (`ifMatchEtag != null`)  | Save record with known `recordChangeTag`, `savePolicy: .ifServerRecordUnchanged` | **Yes** (Phase 4a confirmed)                          |
 
 ### Create-if-absent
 
@@ -148,22 +148,22 @@ atomic and documented by Apple.
 
 ### Phase 4a probe results
 
-> Probe run on macOS, fast broadband (≈500 Mbps down / 40 Mbps up). Timings
-> are best-case; expect significantly higher values on mobile or congested
+> Probe run on macOS, fast broadband (≈500 Mbps down / 40 Mbps up). Timings are
+> best-case; expect significantly higher values on mobile or congested
 > connections.
 
-| Behaviour                                                                 | Observed |
-| ------------------------------------------------------------------------- | -------- |
-| Create-if-absent (`savePolicy: .allKeys`, nil `recordChangeTag`) when record absent → true | **Yes** — returned `true` as expected. |
-| Create-if-absent (`savePolicy: .allKeys`, nil `recordChangeTag`) when record present → false | **No** — returned `true` (silently overwrote the existing record). CloudKit does NOT return `CKError.serverRecordChanged` in this case; `savePolicy: .allKeys` on a fresh local record is an unconditional write regardless of server state. **`providesAtomicCas` is permanently `false`.** |
-| `savePolicy: .ifServerRecordUnchanged` with correct ETag → true           | **Yes** — returned `true` as expected. |
-| `savePolicy: .ifServerRecordUnchanged` with stale ETag → false            | **Yes** — returned `false` as expected. Update-if-match is atomic. |
-| Read-your-writes consistency (`CKQueryOperation` after save, same device) | **No** — upload succeeded (download and getEtag both worked immediately) but a `CKQuery` on the same device returned `[]` straight after the upload. `CKQuery` results are eventually consistent even on the uploading device. |
-| Same-device `CKQuery` propagation delay (upload → list visibility)        | **~5–7 s** across three runs (7014 ms, 5256 ms, 5397 ms). Not visible at 0 s; visible at the first 2 s poll in every run. Cross-device delay is expected to be longer and is TBD. |
-| Other-device propagation delay                                            | TBD      |
-| Max observed SSTable size (probe at 1 MB, 10 MB, 50 MB)                   | **All succeeded with byte-for-byte integrity.** Upload: 1 MB→3029ms, 10 MB→1196ms, 50 MB→1536ms. Download: 1 MB→1353ms, 10 MB→354ms, 50 MB→466ms. The 1 MB upload was slower, likely due to cold-start CloudKit initialisation overhead. 50 MB is well above KMDB's 20 MB L2 compaction target. |
-| `CKError.requestRateLimited` shape, `retryAfterSeconds` present           | Not empirically triggered. Handled defensively per Apple docs: the plugin maps this to `RATE_LIMITED` with `retryAfterMs` derived from `CKErrorRetryAfterKey`; the Dart adapter retries with exponential back-off honouring that hint. |
-| `CKError.quotaExceeded` shape                                             | Not empirically triggered. Handled defensively per Apple docs: the plugin maps this to `QUOTA_EXCEEDED`; the Dart adapter surfaces it as a `KmdbException`. |
+| Behaviour                                                                                    | Observed                                                                                                                                                                                                                                                                                        |
+| -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Create-if-absent (`savePolicy: .allKeys`, nil `recordChangeTag`) when record absent → true   | **Yes** — returned `true` as expected.                                                                                                                                                                                                                                                          |
+| Create-if-absent (`savePolicy: .allKeys`, nil `recordChangeTag`) when record present → false | **No** — returned `true` (silently overwrote the existing record). CloudKit does NOT return `CKError.serverRecordChanged` in this case; `savePolicy: .allKeys` on a fresh local record is an unconditional write regardless of server state. **`providesAtomicCas` is permanently `false`.**    |
+| `savePolicy: .ifServerRecordUnchanged` with correct ETag → true                              | **Yes** — returned `true` as expected.                                                                                                                                                                                                                                                          |
+| `savePolicy: .ifServerRecordUnchanged` with stale ETag → false                               | **Yes** — returned `false` as expected. Update-if-match is atomic.                                                                                                                                                                                                                              |
+| Read-your-writes consistency (`CKQueryOperation` after save, same device)                    | **No** — upload succeeded (download and getEtag both worked immediately) but a `CKQuery` on the same device returned `[]` straight after the upload. `CKQuery` results are eventually consistent even on the uploading device.                                                                  |
+| Same-device `CKQuery` propagation delay (upload → list visibility)                           | **~5–7 s** across three runs (7014 ms, 5256 ms, 5397 ms). Not visible at 0 s; visible at the first 2 s poll in every run. Cross-device delay is expected to be longer and is TBD.                                                                                                               |
+| Other-device propagation delay                                                               | TBD                                                                                                                                                                                                                                                                                             |
+| Max observed SSTable size (probe at 1 MB, 10 MB, 50 MB)                                      | **All succeeded with byte-for-byte integrity.** Upload: 1 MB→3029ms, 10 MB→1196ms, 50 MB→1536ms. Download: 1 MB→1353ms, 10 MB→354ms, 50 MB→466ms. The 1 MB upload was slower, likely due to cold-start CloudKit initialisation overhead. 50 MB is well above KMDB's 20 MB L2 compaction target. |
+| `CKError.requestRateLimited` shape, `retryAfterSeconds` present                              | Not empirically triggered. Handled defensively per Apple docs: the plugin maps this to `RATE_LIMITED` with `retryAfterMs` derived from `CKErrorRetryAfterKey`; the Dart adapter retries with exponential back-off honouring that hint.                                                          |
+| `CKError.quotaExceeded` shape                                                                | Not empirically triggered. Handled defensively per Apple docs: the plugin maps this to `QUOTA_EXCEEDED`; the Dart adapter surfaces it as a `KmdbException`.                                                                                                                                     |
 
 These findings are encoded in `kICloudProfile` (in
 `packages/kmdb_icloud/lib/src/icloud_profile.dart`). `providesAtomicCas` is
