@@ -167,4 +167,37 @@ void main() {
       expect(recovered, equals(plaintext));
     });
   });
+
+  // ── EncryptionError ───────────────────────────────────────────────────────────
+
+  group('EncryptionError', () {
+    // toString() must include the error code name and the message.
+    test('badCredentials toString() includes code name and message', () {
+      final err = EncryptionError.badCredentials();
+      final s = err.toString();
+      expect(s, contains('badCredentials'));
+      expect(s, contains('Wrong passphrase or recovery code'));
+    });
+
+    test('databaseIsEncrypted toString() includes code name', () {
+      final err = EncryptionError.databaseIsEncrypted();
+      final s = err.toString();
+      expect(s, contains('databaseIsEncrypted'));
+      expect(s, contains('encrypted'));
+    });
+
+    test('databaseIsNotEncrypted toString() includes code name', () {
+      final err = EncryptionError.databaseIsNotEncrypted();
+      final s = err.toString();
+      expect(s, contains('databaseIsNotEncrypted'));
+      expect(s, contains('not encrypted'));
+    });
+
+    test('cannotProvisionNonEmptyDatabase toString() includes code name', () {
+      final err = EncryptionError.cannotProvisionNonEmptyDatabase();
+      final s = err.toString();
+      expect(s, contains('cannotProvisionNonEmptyDatabase'));
+      expect(s, contains('non-empty'));
+    });
+  });
 }

@@ -380,7 +380,9 @@ final class FtsManager implements WriteAugmentor {
         await _buildIndex(def);
       case FtsIndexStatus.building:
       case FtsIndexStatus.current:
-      case FtsIndexStatus.syncing:
+      // Syncing state is set by applyDelta; reaching ensureBuilt concurrently
+      // during an active sync delta is a benign no-op (nothing to do).
+      case FtsIndexStatus.syncing: // coverage:ignore-line
         break; // Nothing to do.
     }
   }

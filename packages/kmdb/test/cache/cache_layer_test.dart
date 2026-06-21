@@ -22,7 +22,10 @@ import 'package:kmdb/src/engine/compaction/reclamation_policy.dart'
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store_impl.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
+import 'package:kmdb/src/engine/sstable/sstable_info.dart';
+import 'package:kmdb/src/engine/sstable/sstable_writer.dart';
 import 'package:kmdb/src/engine/util/hlc.dart';
+import 'package:kmdb/src/engine/util/key_codec.dart';
 import 'package:test/test.dart';
 
 // ── Counting KvStore wrapper ──────────────────────────────────────────────────
@@ -103,6 +106,26 @@ Future<(KvStoreImpl, MemoryStorageAdapter)> _openStore() async {
   final dir = '/db${_dbCounter++}';
   final (store, _) = await KvStoreImpl.open(dir, adapter);
   return (store, adapter);
+}
+
+/// Builds a minimal valid SSTable with [count] entries starting at [basePhysical].
+Uint8List _buildSst({int count = 2, int basePhysical = 5000}) {
+  final writer = SstableWriter();
+  for (var i = 0; i < count; i++) {
+    final hlc = Hlc(basePhysical + i, 0);
+    // UUIDv7-format key.
+    final keyHex =
+        '${i.toRadixString(16).padLeft(12, '0')}70008${i.toRadixString(16).padLeft(15, '0')}';
+    final keyBytes = KeyCodec.keyToBytes(keyHex);
+    final internalKey = KeyCodec.encodeInternalKey(
+      'ns',
+      keyBytes,
+      hlc,
+      RecordType.put,
+    );
+    writer.add(internalKey, Uint8List.fromList([i + 1]));
+  }
+  return writer.finish();
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -375,6 +398,100 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(await cache.get('ns', k1), equals(_b(10)));
       expect(await cache.get('ns', k2), equals(_b(20)));
+    });
+
+    // ── Additional delegate methods ───────────────────────────────────────────
+    //
+    // These are thin pass-through wrappers in CacheLayer. Tests confirm that
+    // delegation is wired correctly (i.e. no assertion errors or missing
+    // overrides) and that the underlying store reflects the operation.
+
+    test('setTombstoneHorizonProvider delegates without throwing', () {
+      // The setter is fire-and-forget; just confirm it delegates.
+      expect(() => cache.setTombstoneHorizonProvider(null), returnsNormally);
+      expect(
+        () => cache.setTombstoneHorizonProvider(() async => const Hlc(1, 0)),
+        returnsNormally,
+      );
+    });
+
+    test('setVersionDropCallback delegates without throwing', () {
+      // Install and then uninstall a callback.
+      expect(
+        () => cache.setVersionDropCallback((dropped) async {
+          // no-op callback
+        }),
+        returnsNormally,
+      );
+      expect(() => cache.setVersionDropCallback(null), returnsNormally);
+    });
+
+    test('setVersionRegistryProvider delegates without throwing', () {
+      expect(() => cache.setVersionRegistryProvider(null), returnsNormally);
+    });
+
+    test('resetTombstoneFloor delegates to underlying store', () async {
+      // Should complete without error; no observable state change in-memory.
+      await expectLater(cache.resetTombstoneFloor(), completes);
+    });
+
+    test('ingestSstable delegates SSTable bytes to underlying store', () async {
+      const peerId = 'peer0042';
+      final filename = SstableInfo.flushName(
+        peerId,
+        const Hlc(5000, 0),
+        const Hlc(5001, 0),
+      );
+      final bytes = _buildSst(basePhysical: 5000);
+      // Ingestion should complete without error.
+      await expectLater(cache.ingestSstable(filename, bytes), completes);
+    });
+
+    test(
+      'ingestSstable propagates CorruptedSstableException for bad bytes',
+      () async {
+        const peerId = 'peer0043';
+        final filename = SstableInfo.flushName(
+          peerId,
+          const Hlc(5000, 0),
+          const Hlc(5001, 0),
+        );
+        final garbage = Uint8List.fromList(List.filled(64, 0xDE));
+        await expectLater(
+          cache.ingestSstable(filename, garbage),
+          throwsA(isA<Exception>()),
+        );
+      },
+    );
+
+    test('dropAllSstables delegates to underlying store', () async {
+      // Write something so there are SSTables to drop.
+      await cache.writeBatch(
+        WriteBatch()..put('x', '00000000000070008000000000000010', _b(1)),
+      );
+      await cache.flush();
+      await expectLater(cache.dropAllSstables(), completes);
+    });
+
+    test('createNamespace delegates to underlying store', () async {
+      // Namespace creation should return a bool (true if created, false if
+      // already exists) and not throw.
+      final result = await cache.createNamespace('my-new-ns');
+      expect(result, isA<bool>());
+    });
+
+    test('reassignDeviceId delegates to underlying store', () async {
+      // Device IDs must be 8 lowercase hex characters per spec.
+      await expectLater(cache.reassignDeviceId('deadbeef'), completes);
+    });
+
+    test('scanVersionHistory delegates to underlying store', () async {
+      // Insert a record, then scan it — the stream should be non-null.
+      final key = '00000000000070008000000000000099';
+      await cache.writeBatch(WriteBatch()..put('history-ns', key, _b(7)));
+      final stream = cache.scanVersionHistory('history-ns', key);
+      // Should emit at least one entry or complete without error.
+      await expectLater(stream.toList(), completes);
     });
   });
 }

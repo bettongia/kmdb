@@ -253,6 +253,53 @@ void main() {
       expect(result, containsAll([sha256, sha256b]));
     });
   });
+
+  // ── ingestVaultAttachments — idempotency ──────────────────────────────────
+
+  group('ingestVaultAttachments — idempotency', () {
+    test(
+      'ingesting the same blob twice is idempotent: second call no-ops',
+      () async {
+        // The vault is content-addressed: a second ingest of the same bytes
+        // must return the same VaultRef without error or duplication.
+        final (db, vault) = await _openWithVault();
+        addTearDown(() => db.close());
+
+        final attachment = VaultAttachment(
+          subdirName: '0',
+          bytes: _kBytes,
+          uploadManifest: null,
+        );
+        final hlcTimestamp = '0000000000000001';
+        final errSink = StringBuffer();
+
+        // First ingest — should succeed.
+        final hashes1 = await ingestVaultAttachments(
+          vaultStore: vault,
+          attachments: [attachment],
+          hlcTimestamp: hlcTimestamp,
+          errSink: errSink,
+        );
+        expect(hashes1, isNotNull);
+        expect(hashes1!, hasLength(1));
+        expect(errSink.toString(), isEmpty);
+
+        // Second ingest of identical bytes — must be idempotent:
+        // same SHA-256 returned, no error, no duplicate data written.
+        final errSink2 = StringBuffer();
+        final hashes2 = await ingestVaultAttachments(
+          vaultStore: vault,
+          attachments: [attachment],
+          hlcTimestamp: hlcTimestamp,
+          errSink: errSink2,
+        );
+        expect(hashes2, isNotNull);
+        expect(hashes2!, hasLength(1));
+        expect(hashes2.first, equals(hashes1.first));
+        expect(errSink2.toString(), isEmpty);
+      },
+    );
+  });
 }
 
 // ── Fake VaultStore that always throws VaultCrcMismatchException ──────────────

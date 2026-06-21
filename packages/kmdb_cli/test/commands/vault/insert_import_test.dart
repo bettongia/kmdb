@@ -285,5 +285,40 @@ void main() {
       // The absence of errors in the error sink tells us it wasn't a package
       // validation error.
     });
+
+    test(
+      'returns false when package document contains reserved "_"-prefixed field',
+      () async {
+        // Exercises the reserved-field guard in InsertCommand._executeImport
+        // (lines 207-213): a package document with a "_ver" field must be
+        // rejected with a descriptive error.
+        final docWithReserved = {'title': 'ok', '_ver': 42};
+        final packageBytes = VaultPackage.write(
+          documentJson: docWithReserved,
+          attachments: [],
+        );
+
+        final tmpPath =
+            '${io.Directory.systemTemp.path}'
+            '/kmdb_insert_reserved_${DateTime.now().microsecondsSinceEpoch}.kvlt';
+        io.File(tmpPath).writeAsBytesSync(packageBytes);
+        addTearDown(() {
+          try {
+            io.File(tmpPath).deleteSync();
+          } catch (_) {}
+        });
+
+        final ctx = _ctx(db, out: out, err: err);
+        final result = await InsertCommand().execute(
+          ctx,
+          ['col'],
+          {'import': tmpPath},
+        );
+
+        expect(result, isFalse);
+        expect(err.toString(), contains('reserved'));
+        expect(err.toString(), contains('"_ver"'));
+      },
+    );
   });
 }

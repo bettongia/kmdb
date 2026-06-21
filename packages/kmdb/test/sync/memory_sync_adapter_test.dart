@@ -21,9 +21,13 @@ import 'package:kmdb/test_support.dart';
 
 void main() {
   group('MemorySyncAdapter conformance', () {
+    // expectsCancellation: true exercises the cancellation conformance group
+    // (sync_adapter_conformance.dart lines 298–490) and all 45 lines in
+    // gated_sync_adapter.dart (lib/ copy) — critical for the coverage target.
     runSyncAdapterConformance(
       factory: MemorySyncAdapter.new,
       expectAtomicCas: true,
+      expectsCancellation: true,
     );
   });
 

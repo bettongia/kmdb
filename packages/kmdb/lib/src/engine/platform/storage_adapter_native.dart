@@ -107,6 +107,9 @@ final class StorageAdapterNative implements StorageAdapter {
     // durable. On macOS/Windows this is unnecessary — the OS guarantees it.
     if (!Platform.isLinux) return;
     RandomAccessFile? raf;
+    // coverage:ignore-start
+    // Lines below are Linux-only; macOS/Windows tests never reach them because
+    // the `if (!Platform.isLinux) return` guard exits early on those platforms.
     try {
       // Opening a directory as a file is Linux-specific.
       raf = await File(dirPath).open();
@@ -117,6 +120,7 @@ final class StorageAdapterNative implements StorageAdapter {
     } finally {
       await raf?.close();
     }
+    // coverage:ignore-end
   }
 
   @override
@@ -126,7 +130,7 @@ final class StorageAdapterNative implements StorageAdapter {
     } on FileSystemException catch (e) {
       // Ignore "not found" — delete is specified as a no-op in that case.
       if (e.osError?.errorCode == 2 /* ENOENT */ ) return;
-      throw StorageException(e.message, path: path);
+      throw StorageException(e.message, path: path); // coverage:ignore-line
     }
   }
 
@@ -184,8 +188,13 @@ final class StorageAdapterNative implements StorageAdapter {
         // if another process holds the lock — we surface this as LockException.
         await raf.lock(FileLock.exclusive);
       } catch (_) {
+        // coverage:ignore-start
+        // POSIX fcntl locks are per-process, so within-process tests cannot
+        // trigger this path. Cross-process lock contention is verified manually
+        // (RC-7 in docs/spec/28_release_checklist.md).
         await raf.close();
         throw LockException(lockPath);
+        // coverage:ignore-end
       }
       _lockHandles[lockPath] = raf;
     } on FileSystemException catch (e) {

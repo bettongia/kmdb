@@ -57,6 +57,18 @@ void main() {
         throwsA(isA<StorageException>()),
       );
     });
+
+    // writeFile must propagate FileSystemException as StorageException when
+    // the parent directory does not exist.
+    test(
+      'writeFile throws StorageException when parent dir is missing',
+      () async {
+        await expectLater(
+          adapter.writeFile(p('nonexistent_dir/foo'), Uint8List.fromList([1])),
+          throwsA(isA<StorageException>()),
+        );
+      },
+    );
   });
 
   group('readFileRange', () {
@@ -75,17 +87,30 @@ void main() {
       expect(await adapter.readFileRange(p('foo'), 1, 2), equals([20, 30]));
     });
 
+    test(
+      'throws StorageException on short read (fewer bytes than requested)',
+      () async {
+        // Write 3 bytes, then request 5 bytes from offset 0 — the file is shorter
+        // than the requested length, triggering the "only N available" error.
+        await adapter.writeFile(p('short'), Uint8List.fromList([1, 2, 3]));
+        await expectLater(
+          adapter.readFileRange(p('short'), 0, 5),
+          throwsA(isA<StorageException>()),
+        );
+      },
+    );
+
     test('throws on out-of-bounds range', () async {
       await adapter.writeFile(p('foo'), Uint8List.fromList([1, 2, 3]));
-      expect(
-        () => adapter.readFileRange(p('foo'), 2, 5),
+      await expectLater(
+        adapter.readFileRange(p('foo'), 2, 5),
         throwsA(isA<StorageException>()),
       );
     });
 
     test('throws for missing file', () async {
-      expect(
-        () => adapter.readFileRange(p('missing'), 0, 1),
+      await expectLater(
+        adapter.readFileRange(p('missing'), 0, 1),
         throwsA(isA<StorageException>()),
       );
     });
@@ -109,6 +134,21 @@ void main() {
       }
       expect(await adapter.readFile(p('wal')), equals([0, 1, 2, 3, 4]));
     });
+
+    // appendFile must propagate FileSystemException as StorageException when
+    // the parent directory does not exist.
+    test(
+      'appendFile throws StorageException when parent dir is missing',
+      () async {
+        await expectLater(
+          adapter.appendFile(
+            p('nonexistent_dir/wal.log'),
+            Uint8List.fromList([1]),
+          ),
+          throwsA(isA<StorageException>()),
+        );
+      },
+    );
   });
 
   group('deleteFile', () {
@@ -201,9 +241,9 @@ void main() {
       expect(await adapter.readFile(p('current')), equals([42]));
     });
 
-    test('throws for missing source', () async {
-      expect(
-        () => adapter.renameFile(p('missing'), p('dest')),
+    test('throws StorageException for missing source', () async {
+      await expectLater(
+        adapter.renameFile(p('missing'), p('dest')),
         throwsA(isA<StorageException>()),
       );
     });
@@ -220,6 +260,19 @@ void main() {
       await adapter.createDirectory(tempDir.path);
       await expectLater(adapter.createDirectory(tempDir.path), completes);
     });
+
+    // createDirectory must surface FileSystemException as StorageException when
+    // the path cannot be created, e.g. when a path component is a regular file.
+    test('throws StorageException when a path component is a file', () async {
+      // Create a file where createDirectory will attempt to make a directory.
+      final blockingFile = '${tempDir.path}/blocker';
+      await adapter.writeFile(blockingFile, Uint8List.fromList([1]));
+      await expectLater(
+        // Try to create a subdirectory *inside* the file — this is invalid.
+        adapter.createDirectory('$blockingFile/sub'),
+        throwsA(isA<StorageException>()),
+      );
+    });
   });
 
   group('syncFile', () {
@@ -229,8 +282,8 @@ void main() {
     });
 
     test('throws StorageException for missing file', () async {
-      expect(
-        () => adapter.syncFile(p('missing')),
+      await expectLater(
+        adapter.syncFile(p('missing')),
         throwsA(isA<StorageException>()),
       );
     });
@@ -264,5 +317,18 @@ void main() {
       await expectLater(adapter2.acquireLock(p('LOCK')), completes);
       await adapter2.releaseLock(p('LOCK'));
     });
+
+    // acquireLock must throw StorageException when the lock file itself cannot
+    // be opened because the parent directory does not exist (FileSystemException
+    // outer catch, lines 191-192).
+    test(
+      'acquireLock throws StorageException when parent dir is missing',
+      () async {
+        await expectLater(
+          adapter.acquireLock(p('nosuchdir/LOCK')),
+          throwsA(isA<StorageException>()),
+        );
+      },
+    );
   });
 }

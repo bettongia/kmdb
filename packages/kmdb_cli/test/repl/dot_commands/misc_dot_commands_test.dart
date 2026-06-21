@@ -16,10 +16,13 @@ import 'package:kmdb/kmdb.dart';
 import 'package:kmdb_cli/src/commands/command.dart';
 import 'package:kmdb_cli/src/output/output_mode.dart';
 import 'package:kmdb_cli/src/repl/dot_commands/color_command.dart';
+import 'package:kmdb_cli/src/repl/dot_commands/history_command.dart';
 import 'package:kmdb_cli/src/repl/dot_commands/limit_command.dart';
 import 'package:kmdb_cli/src/repl/dot_commands/mode_command.dart';
 import 'package:kmdb_cli/src/repl/dot_commands/nullvalue_command.dart';
 import 'package:kmdb_cli/src/repl/dot_commands/show_command.dart';
+import 'package:kmdb_cli/src/repl/dot_commands/toggle_commands.dart';
+import 'package:kmdb_cli/src/repl/history.dart';
 import 'package:kmdb_cli/src/repl/session_state.dart';
 import 'package:test/test.dart';
 
@@ -133,6 +136,23 @@ void main() {
       final ok = await const LimitCommand().execute(state, ctx, ['abc']);
       expect(ok, isFalse);
     });
+
+    // The no-args display path: prints the current limit and returns true.
+    // This exercises the `state.defaultLimit == 0 ? 'none' : '${state.defaultLimit}'`
+    // branch when limit is zero (line 41) and non-zero (line 43).
+    test('no args prints "none" when defaultLimit is 0', () async {
+      state.defaultLimit = 0;
+      final ok = await const LimitCommand().execute(state, ctx, []);
+      expect(ok, isTrue);
+      expect(out.toString(), contains('none'));
+    });
+
+    test('no args prints the current positive limit', () async {
+      state.defaultLimit = 25;
+      final ok = await const LimitCommand().execute(state, ctx, []);
+      expect(ok, isTrue);
+      expect(out.toString(), contains('25'));
+    });
   });
 
   group('ShowCommand', () {
@@ -147,6 +167,119 @@ void main() {
       expect(output, contains('csv'));
       expect(output, contains('posts'));
       expect(output, contains('25'));
+    });
+  });
+
+  // ── HistoryCommand ────────────────────────────────────────────────────────────
+
+  group('HistoryCommand', () {
+    History makeHistory() => History(filePath: '/tmp/unused_hist');
+
+    test('invalid arg (zero) returns false with error', () async {
+      final cmd = HistoryCommand(makeHistory());
+      final ok = await cmd.execute(state, ctx, ['0']);
+      expect(ok, isFalse);
+      expect(err.toString(), contains('positive integer'));
+    });
+
+    test('invalid arg (non-integer) returns false with error', () async {
+      final cmd = HistoryCommand(makeHistory());
+      final ok = await cmd.execute(state, ctx, ['abc']);
+      expect(ok, isFalse);
+      expect(err.toString(), contains('positive integer'));
+    });
+
+    test('empty history prints "(no history)"', () async {
+      final h = makeHistory();
+      // No entries added — history is empty.
+      final cmd = HistoryCommand(h);
+      final ok = await cmd.execute(state, ctx, []);
+      expect(ok, isTrue);
+      expect(out.toString(), contains('no history'));
+    });
+
+    test('prints entries with explicit n arg', () async {
+      final h = makeHistory();
+      h.add('scan notes');
+      h.add('count notes');
+      h.add('get notes abc');
+      final cmd = HistoryCommand(h);
+      final ok = await cmd.execute(state, ctx, ['2']);
+      expect(ok, isTrue);
+      // Should show last 2 entries.
+      expect(out.toString(), contains('count notes'));
+      expect(out.toString(), contains('get notes abc'));
+    });
+  });
+
+  // ── HeadersCommand ────────────────────────────────────────────────────────────
+
+  group('HeadersCommand', () {
+    test('no args prints current state (on)', () async {
+      state.headers = true;
+      final ok = await const HeadersCommand().execute(state, ctx, []);
+      expect(ok, isTrue);
+      expect(out.toString(), contains('headers: on'));
+    });
+
+    test('no args prints current state (off)', () async {
+      state.headers = false;
+      final ok = await const HeadersCommand().execute(state, ctx, []);
+      expect(ok, isTrue);
+      expect(out.toString(), contains('headers: off'));
+    });
+
+    test('invalid arg returns false with error', () async {
+      final ok = await const HeadersCommand().execute(state, ctx, ['yes']);
+      expect(ok, isFalse);
+    });
+  });
+
+  // ── EchoCommand ────────────────────────────────────────────────────────────────
+
+  group('EchoCommand', () {
+    test('no args prints current state (off)', () async {
+      state.echo = false;
+      final ok = await const EchoCommand().execute(state, ctx, []);
+      expect(ok, isTrue);
+      expect(out.toString(), contains('echo: off'));
+    });
+
+    test('invalid arg returns false with error', () async {
+      final ok = await const EchoCommand().execute(state, ctx, ['maybe']);
+      expect(ok, isFalse);
+    });
+  });
+
+  // ── BailCommand ────────────────────────────────────────────────────────────────
+
+  group('BailCommand', () {
+    test('no args prints current state (off)', () async {
+      state.bail = false;
+      final ok = await const BailCommand().execute(state, ctx, []);
+      expect(ok, isTrue);
+      expect(out.toString(), contains('bail: off'));
+    });
+
+    test('invalid arg returns false with error', () async {
+      final ok = await const BailCommand().execute(state, ctx, ['1']);
+      expect(ok, isFalse);
+    });
+  });
+
+  // ── TimerCommand ────────────────────────────────────────────────────────────────
+
+  group('TimerCommand', () {
+    test('no args prints current state (off)', () async {
+      state.timer = false;
+      final ok = await const TimerCommand().execute(state, ctx, []);
+      expect(ok, isTrue);
+      expect(out.toString(), contains('timer: off'));
+    });
+
+    test('invalid arg returns false with error', () async {
+      final ok = await const TimerCommand().execute(state, ctx, ['2']);
+      expect(ok, isFalse);
     });
   });
 }

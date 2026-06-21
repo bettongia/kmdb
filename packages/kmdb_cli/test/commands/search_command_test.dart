@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import 'dart:convert';
+import 'dart:io' as io;
 
 import 'package:kmdb/kmdb.dart';
 import 'package:kmdb_cli/src/commands/command.dart';
@@ -611,6 +612,156 @@ void main() {
 
       config.removeFtsIndex('docs', 'body');
       expect(config.ftsIndexesForCollection('docs'), isEmpty);
+    });
+  });
+
+  // ── --rrf-k validation ────────────────────────────────────────────────────
+
+  group('SearchCommand — --rrf-k validation', () {
+    test('--rrf-k < 1 returns error', () async {
+      final (:db, :ids) = await _seedDb(bodies: ['hello world']);
+      addTearDown(db.close);
+
+      final config = KmdbConfig.empty();
+      config.addFtsIndex('docs', 'body');
+
+      final err = StringBuffer();
+      final ok = await SearchCommand().execute(
+        _ctx(db, config: config, err: err),
+        ['docs', 'hello'],
+        {'rrf-k': '0'},
+      );
+      expect(ok, isFalse);
+      expect(err.toString(), contains('rrf-k'));
+    });
+  });
+
+  // ── --explain flag ────────────────────────────────────────────────────────
+
+  group('SearchCommand — --explain flag', () {
+    test('--explain with table output prints search plan', () async {
+      final (:db, :ids) = await _seedDb(bodies: ['hello world', 'foo bar']);
+      addTearDown(db.close);
+
+      final config = KmdbConfig.empty();
+      config.addFtsIndex('docs', 'body');
+
+      final out = StringBuffer();
+      final ok = await SearchCommand().execute(
+        _ctx(db, config: config, out: out),
+        ['docs', 'hello'],
+        {'explain': true},
+      );
+      expect(ok, isTrue);
+      // Table explain output includes "Search plan".
+      expect(out.toString(), contains('Search plan'));
+      expect(out.toString(), contains('Results'));
+    });
+
+    test('--explain with json output includes _explain block', () async {
+      final (:db, :ids) = await _seedDb(bodies: ['hello world', 'foo bar']);
+      addTearDown(db.close);
+
+      final config = KmdbConfig.empty();
+      config.addFtsIndex('docs', 'body');
+
+      final out = StringBuffer();
+      final ok = await SearchCommand().execute(
+        _ctx(db, config: config, out: out),
+        ['docs', 'hello'],
+        {'explain': true, 'output': 'json'},
+      );
+      expect(ok, isTrue);
+      // Output has two JSON objects (explain + results). Check the raw string.
+      final output = out.toString();
+      expect(output, contains('_explain'));
+    });
+  });
+
+  // ── search create / delete execute path (with real config store) ───────────────
+
+  group('SearchCommand — create and delete with disk config', () {
+    // These tests use a real tmpdir to cover the ctx.config.save() paths in
+    // _create (lines 524-548) and _delete (lines 573-588).
+
+    test('search create registers index and saves config to disk', () async {
+      final tmpDir = io.Directory.systemTemp.createTempSync('kmdb_sc_create_');
+      addTearDown(() => tmpDir.deleteSync(recursive: true));
+
+      final db = await KmdbDatabase.open(
+        path: '${tmpDir.path}/db',
+        adapter: StorageAdapterNative(),
+        config: KvStoreConfig.forTesting(),
+      );
+      addTearDown(db.close);
+
+      // Load config from the real dbDir so save() works.
+      final config = await KmdbConfig.forDatabase('${tmpDir.path}/db');
+      final out = StringBuffer();
+      final err = StringBuffer();
+
+      final result = await SearchCommand().execute(
+        _ctx(db, config: config, out: out, err: err),
+        ['create', 'docs', 'body'],
+        {},
+      );
+
+      expect(result, isTrue, reason: err.toString());
+      expect(out.toString(), contains('registered'));
+      // Verify the config file was written.
+      final configFile = io.File('${tmpDir.path}/db/local/config.json');
+      expect(configFile.existsSync(), isTrue);
+      final saved =
+          jsonDecode(configFile.readAsStringSync()) as Map<String, dynamic>;
+      expect(saved, isA<Map<String, dynamic>>());
+    });
+
+    test('search delete removes index and saves config to disk', () async {
+      final tmpDir = io.Directory.systemTemp.createTempSync('kmdb_sc_delete_');
+      addTearDown(() => tmpDir.deleteSync(recursive: true));
+
+      final db = await KmdbDatabase.open(
+        path: '${tmpDir.path}/db',
+        adapter: StorageAdapterNative(),
+        config: KvStoreConfig.forTesting(),
+      );
+      addTearDown(db.close);
+
+      // Set up config with a pre-existing FTS index.
+      final config = await KmdbConfig.forDatabase('${tmpDir.path}/db');
+      config.addFtsIndex('docs', 'body');
+      await config.save();
+
+      final out = StringBuffer();
+      final err = StringBuffer();
+
+      final result = await SearchCommand().execute(
+        _ctx(db, config: config, out: out, err: err),
+        ['delete', 'docs', 'body'],
+        {},
+      );
+
+      expect(result, isTrue, reason: err.toString());
+      expect(out.toString(), contains('deleted from config'));
+    });
+
+    test('search: --mode with invalid value returns error', () async {
+      // Covers line 185: writeError for unknown --mode value.
+      final (:db, :ids) = await _seedDb(bodies: ['hello world']);
+      addTearDown(db.close);
+
+      final config = KmdbConfig.empty();
+      config.addFtsIndex('docs', 'body');
+
+      final err = StringBuffer();
+      final result = await SearchCommand().execute(
+        _ctx(db, config: config, err: err),
+        ['docs', 'hello'],
+        {'mode': 'invalid_mode'},
+      );
+
+      expect(result, isFalse);
+      expect(err.toString(), contains("unknown --mode value 'invalid_mode'"));
     });
   });
 }
