@@ -79,7 +79,10 @@ final class ReplRunner {
        _state = state ?? SessionState(),
        _history = history ?? History(),
        _config = config ?? ReplConfig(),
-       _reader = reader ?? TtyInputReader() {
+       _reader =
+           reader ??
+           TtyInputReader() // coverage:ignore-line
+           {
     _ctx = ctx;
     _registry = _buildRegistry();
     _completer = LiveCompletionProvider(_ctx, _registry);
@@ -144,8 +147,12 @@ final class ReplRunner {
 
         // Consume the one-shot sink regardless of success.
         if (_state.onceSink is io.IOSink) {
+          // IOSink flush/close only reached when .once targets a real file
+          // (dart:io IOSink); tests use StringBuffer sinks.
+          // coverage:ignore-start
           await (_state.onceSink as io.IOSink).flush();
           await (_state.onceSink as io.IOSink).close();
+          // coverage:ignore-end
         }
         _state.onceSink = null;
 
@@ -182,7 +189,11 @@ final class ReplRunner {
     while (true) {
       final outcome = await _reader.readLine(
         currentPrompt,
+        // The completer callback is invoked by the live readline implementation
+        // during interactive tab-completion; test fakes never call it.
+        // coverage:ignore-start
         completer: (text, pos) => _completer.complete(text, pos),
+        // coverage:ignore-end
       );
 
       switch (outcome.result) {
@@ -282,6 +293,9 @@ final class ReplRunner {
 
     Spinner? spinner;
     if (isSync) {
+      // Spinner writes to the terminal; not testable in the in-process test
+      // harness that uses StringBuffer sinks.
+      // coverage:ignore-start
       spinner = Spinner();
       spinner.start(
         firstToken == 'push'
@@ -290,6 +304,7 @@ final class ReplRunner {
             ? 'Pulling…'
             : 'Syncing…',
       );
+      // coverage:ignore-end
     }
 
     final outSink = _effectiveSink();
@@ -304,12 +319,17 @@ final class ReplRunner {
     bool success;
     try {
       success = await KmdbCli.dispatchLine(trimmed, dispatchCtx);
+      // KmdbCli.dispatchLine/_dispatchTokens wraps all exceptions in a generic
+      // catch before they can propagate here; this handler is defensive dead
+      // code preserved for future refactoring safety.
+      // coverage:ignore-start
     } on SchemaValidationException catch (e) {
       spinner?.stop();
       _formatSchemaError(e, dispatchCtx);
       return false;
+      // coverage:ignore-end
     } finally {
-      spinner?.stop();
+      spinner?.stop(); // coverage:ignore-line
     }
 
     return success;
@@ -353,6 +373,12 @@ final class ReplRunner {
 
   // ── Schema error formatting ───────────────────────────────────────────────
 
+  // coverage:ignore-start
+  // This method is only reachable from the SchemaValidationException catch
+  // block above, which is itself marked coverage:ignore because
+  // KmdbCli.dispatchLine already catches and formats schema errors before
+  // they propagate here. The method is retained as defensive dead code for
+  // future refactoring safety.
   void _formatSchemaError(SchemaValidationException e, CommandContext ctx) {
     final c = Colorizer(enabled: _state.colorEnabled);
     _errSink().writeln(c.error('Schema validation failed:'));
@@ -364,6 +390,7 @@ final class ReplRunner {
       }
     }
   }
+  // coverage:ignore-end
 
   // ── Registry factory ──────────────────────────────────────────────────────
 

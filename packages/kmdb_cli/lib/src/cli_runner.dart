@@ -415,18 +415,22 @@ abstract final class KmdbCli {
       }
     } else if (!io.stdin.hasTerminal) {
       // Pipe: read all lines from stdin.
+      // coverage:ignore-start
       commandLines = await io.stdin
           .transform(utf8.decoder)
           .transform(const LineSplitter())
           .toList();
+      // coverage:ignore-end
     } else {
       // Interactive mode: stdin is a tty and no inline commands were given.
+      // coverage:ignore-start
       final replCommands = {
         for (final e in _commands.entries)
           if (e.value.replVisible) e.key: e.value,
       };
       final repl = ReplRunner(ctx: ctx, dbPath: dbPath, commands: replCommands);
       return repl.run();
+      // coverage:ignore-end
     }
 
     // ── Execute commands ─────────────────────────────────────────────────────

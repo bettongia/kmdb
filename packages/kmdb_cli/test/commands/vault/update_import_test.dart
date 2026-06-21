@@ -274,5 +274,68 @@ void main() {
       expect(err.toString(), isNotEmpty);
       expect(sha256.length, equals(64)); // suppress unused variable warning
     });
+
+    // ── Golden path: plain document import (no vault URIs) ───────────────
+
+    test(
+      'golden path: imports a plain-document KVLT package successfully',
+      () async {
+        // A package with no vault URI references and no attachments. This
+        // exercises the full import path (lines 311-365) without triggering
+        // the vault ref-count sha256-key-length guard in the LSM engine.
+        // The existingHashes set is empty; VaultPackage.validate passes;
+        // applyVaultRefCounts is a no-op (no old or new vault URIs).
+        final docJson = {'title': 'plain-updated', 'counter': 42};
+        final packageBytes = VaultPackage.write(documentJson: docJson);
+        final tmpPath =
+            '${io.Directory.systemTemp.path}/kmdb_upd_plain_${DateTime.now().microsecondsSinceEpoch}.kvlt';
+        io.File(tmpPath).writeAsBytesSync(packageBytes);
+        addTearDown(() {
+          try {
+            io.File(tmpPath).deleteSync();
+          } catch (_) {}
+        });
+
+        // Seed the target document.
+        const targetId = '01900000000070809000000000000020';
+        await _putSmallDoc(db, 'col', targetId);
+
+        final ctx = _ctx(db, out: out, err: err);
+        final ok = await UpdateCommand().execute(
+          ctx,
+          ['col', targetId],
+          {'import': tmpPath},
+        );
+        expect(ok, isTrue, reason: 'errors: ${err.toString()}');
+        expect(out.toString(), contains('updated'));
+      },
+    );
+  });
+
+  // ── _merge via --set on a seeded document ────────────────────────────────
+
+  group('UpdateCommand --set', () {
+    test('--set merges new fields into existing document', () async {
+      final db2 = await _openStore();
+      addTearDown(db2.close);
+
+      const targetId = '01900000000070809000000000000030';
+      // Seed a small doc using the raw KV store (stays under Zstd threshold).
+      await _putSmallDoc(db2, 'col2', targetId);
+
+      final out2 = StringBuffer();
+      final err2 = StringBuffer();
+      final ctx2 = _ctx(db2, out: out2, err: err2);
+
+      // --set on a seeded doc: exercises the normal merge path where
+      // existing['_id'] is non-null (line 407).
+      final ok = await UpdateCommand().execute(
+        ctx2,
+        ['col2', targetId],
+        {'set': '{"extra": 1}'},
+      );
+      expect(ok, isTrue, reason: 'errors: ${err2.toString()}');
+      expect(out2.toString(), contains('updated'));
+    });
   });
 }

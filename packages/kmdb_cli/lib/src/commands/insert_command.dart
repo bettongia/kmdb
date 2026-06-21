@@ -307,6 +307,11 @@ final class InsertCommand extends CliCommand {
   ///
   /// Content starting with `{` or `[` is tried as JSON. If parsing fails or
   /// the content looks like multi-line records, it falls back to NDJSON.
+  ///
+  /// This method is only called from the stdin input path (lines 265-266) which
+  /// is excluded from coverage. The method itself cannot be exercised in
+  /// in-process tests because stdin is not pipeable in a test isolate.
+  // coverage:ignore-start
   List<Map<String, dynamic>>? _parseJsonOrNdjson(
     CommandContext ctx,
     String input, {
@@ -328,6 +333,7 @@ final class InsertCommand extends CliCommand {
     }
     return _parseNdjson(ctx, trimmed.split('\n'), source: source);
   }
+  // coverage:ignore-end
 
   /// Validates and flattens a JSON [array] into a list of document maps.
   List<Map<String, dynamic>>? _expandArray(

@@ -938,6 +938,75 @@ void main() {
         expect(await db.store.scan('notes').toList(), isNotEmpty);
         expect(await db.store.listNamespaces(), contains('notes'));
       });
+
+      // The delete code path iterates over CLI config index definitions and calls
+      // ctx.indexManager.removeIndex (line 180) and ctx.config.removeIndex (line
+      // 188) for each. Then it calls ctx.config.save() (line 194). When save()
+      // fails — e.g. because KmdbConfig.empty() has no backing store — the
+      // command returns false with an error message (lines 195-197).
+      //
+      // Note: KmdbDatabase always has an index manager that accepts
+      // removeIndex on any collection/path (it silently drops the record if the
+      // index doesn't exist or was never built), so removeIndex succeeds and the
+      // failure falls through to the config.save() path.
+      test(
+        'reports error when config.save fails after index removal',
+        () async {
+          await _putDoc(db, 'products', {'_id': _key('p1'), 'sku': 'abc'});
+
+          // Create a KmdbConfig with an index definition for 'products'. The
+          // empty config has no backing store, so config.save() will throw.
+          final config = KmdbConfig.empty()..addIndex('products', 'sku');
+          final ctx = CommandContext(
+            db: db,
+            config: config,
+            out: out,
+            err: err,
+          );
+
+          // The index removal succeeds (removeIndex + config.removeIndex),
+          // but config.save() throws because KmdbConfig.empty() has no store.
+          final ok = await CollectionsCommand().execute(ctx, [
+            'delete',
+            'products',
+          ], {});
+          expect(ok, isFalse);
+          expect(err.toString(), contains('failed to save config'));
+        },
+      );
+
+      // The delete implementation batches deletes in groups of 200. When the
+      // collection contains more than 200 documents, the intermediate
+      // `writeBatch(batch); batch = WriteBatch(); count = 0;` lines
+      // (collections_command.dart:167-168) are executed.
+      test(
+        'deletes more than 200 documents using intermediate batch flushes',
+        () async {
+          // Insert 201 documents with distinct 32-hex keys.
+          // We embed the zero-padded counter in the low 6 hex chars to guarantee
+          // uniqueness while keeping the UUIDv7 version (char 12 = '7') and
+          // variant (char 16 = '8') bits valid. The first _putDoc call registers
+          // the namespace so CollectionsCommand can find it via listNamespaces().
+          await _putDoc(db, 'large', {'_id': _key('seed'), 'n': -1});
+          for (var i = 0; i < 201; i++) {
+            final suffix = i.toRadixString(16).padLeft(6, '0');
+            // Build a valid 32-hex UUIDv7 key: version nibble at position 12,
+            // variant nibble at position 16.
+            final key = 'aaaaaaaaaaaa7aaaa8aaaaaaaa$suffix';
+            await db.store.put('large', key, await ValueCodec.encode({'n': i}));
+          }
+          // 202 total: 1 from _putDoc + 201 from direct put.
+          expect(await db.store.scan('large').toList(), hasLength(202));
+
+          final ctx = _ctx(db, out: out, err: err);
+          final ok = await CollectionsCommand().execute(ctx, [
+            'delete',
+            'large',
+          ], {});
+          expect(ok, isTrue);
+          expect(await db.store.scan('large').toList(), isEmpty);
+        },
+      );
     });
   });
 

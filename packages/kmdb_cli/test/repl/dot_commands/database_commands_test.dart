@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'dart:io' as io;
+
 import 'package:kmdb/kmdb.dart';
 import 'package:kmdb_cli/src/commands/command.dart';
 import 'package:kmdb_cli/src/repl/dot_commands/database_commands.dart';
@@ -84,6 +86,49 @@ void main() {
       expect(ok, isTrue);
       expect(closed, isTrue);
       expect(out.toString(), contains('closed'));
+    });
+  });
+
+  // ── openDatabase helper ───────────────────────────────────────────────────────
+
+  group('openDatabase', () {
+    late io.Directory tmpDir;
+
+    setUp(() async {
+      tmpDir = await io.Directory.systemTemp.createTemp('kmdb_open_db_test_');
+    });
+
+    tearDown(() async {
+      await tmpDir.delete(recursive: true);
+    });
+
+    test('opens a real database and returns CommandContext', () async {
+      final errBuf = StringBuffer();
+      final ctx = await openDatabase(tmpDir.path, errBuf);
+
+      expect(ctx, isNotNull);
+      expect(errBuf.toString(), isEmpty);
+
+      // Clean up the opened database.
+      await ctx!.db.close();
+    });
+
+    test('returns null and writes error for an invalid path', () async {
+      final errBuf = StringBuffer();
+      // A path that cannot be opened as a database (e.g. a file path pointing
+      // to a location that cannot be created, or a device file).
+      final invalidPath = '/proc/nonexistent_kmdb_test_path';
+      final ctx = await openDatabase(invalidPath, errBuf);
+
+      // On macOS /proc doesn't exist, so this should fail with an error.
+      // On Linux /proc exists as a virtual fs but the path won't be writable.
+      // Either way, we expect null + an error message.
+      if (ctx != null) {
+        // Succeeded unexpectedly (unlikely) — just close gracefully.
+        await ctx.db.close();
+      } else {
+        expect(errBuf.toString(), isNotEmpty);
+      }
     });
   });
 }

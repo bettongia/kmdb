@@ -200,6 +200,207 @@ void main() {
       final records = await reader.replay('/missing.log').toList();
       expect(records, isEmpty);
     });
+
+    test(
+      'entirely empty WAL file → treated as no WAL, returns empty stream',
+      () async {
+        // An empty file (zero bytes) is a valid edge case: power loss before any
+        // record was written. The reader must return an empty stream, not crash.
+        final adapter = MemoryStorageAdapter();
+        const path = '$_dir/wal-empty.log';
+        await adapter.writeFile(path, Uint8List(0));
+
+        final reader = _reader(adapter);
+        final records = await reader.replay(path).toList();
+        expect(records, isEmpty);
+      },
+    );
+
+    test(
+      'multiple WAL files: second has valid frames after first corruption',
+      () async {
+        // Simulate a DB that has two WAL files: the first ends with corrupt
+        // trailing bytes (power loss mid-write), and the second contains a
+        // valid record written after a successful WAL rotation.
+        final adapter = MemoryStorageAdapter();
+        final writer = _writer(adapter);
+
+        // Write a valid record to the first WAL file.
+        await writer.writePut(
+          sequence: const Hlc(1, 0),
+          namespace: 'ns',
+          keyBytes: _key,
+          value: _value,
+        );
+        // Corrupt the first WAL by appending garbage.
+        final path1 = writer.activePath;
+        final existing = await adapter.readFile(path1);
+        final corrupted = Uint8List(existing.length + 32);
+        corrupted.setAll(0, existing);
+        // Leave appended region as zeros — will fail decode.
+        await adapter.writeFile(path1, corrupted);
+
+        // Rotate to a second WAL and write a valid record.
+        await writer.rotate();
+        await writer.writePut(
+          sequence: const Hlc(2, 0),
+          namespace: 'ns',
+          keyBytes: _key,
+          value: _value,
+        );
+        final path2 = writer.activePath;
+
+        // The reader must be able to replay each file independently.
+        final reader = _reader(adapter);
+
+        // First file: one good record + truncated corrupt tail → 1 record.
+        final records1 = await reader.replay(path1).toList();
+        expect(records1, hasLength(1));
+
+        // Second file: fully valid → 1 record.
+        final records2 = await reader.replay(path2).toList();
+        expect(records2, hasLength(1));
+      },
+    );
+
+    test('replays batch frame records in order (non-strict)', () async {
+      // Write a WalBatchFrame directly so the batch-frame branch is exercised.
+      final adapter = MemoryStorageAdapter();
+      const path = '$_dir/wal-00001.log';
+
+      // Build a batch frame containing two put records.
+      final r1 = WalRecord(
+        type: WalRecordType.put,
+        sequence: const Hlc(10, 0),
+        namespace: 'ns',
+        key: _key,
+        value: _value,
+      );
+      final r2 = WalRecord(
+        type: WalRecordType.put,
+        sequence: const Hlc(11, 0),
+        namespace: 'ns',
+        key: _key,
+        value: _value,
+      );
+      final frame = WalBatchFrame([r1, r2]);
+      await adapter.writeFile(path, frame.encode());
+
+      final reader = _reader(adapter);
+      final records = await reader.replay(path).toList();
+      // Both records from the batch should be replayed.
+      expect(records.length, equals(2));
+      expect(records.every((r) => r.type == WalRecordType.put), isTrue);
+    });
+
+    test('replay stops on corrupt batch frame (non-strict)', () async {
+      // Write a valid record, then append a corrupt batch-frame marker.
+      final adapter = MemoryStorageAdapter();
+      final writer = _writer(adapter);
+
+      await writer.writePut(
+        sequence: const Hlc(1, 0),
+        namespace: 'ns',
+        keyBytes: _key,
+        value: _value,
+      );
+
+      // Append bytes that start with the batch type byte but are corrupt.
+      final path = writer.activePath;
+      final existing = await adapter.readFile(path);
+      // Construct a fake header: 8 bytes checksum + batch type byte + garbage.
+      final fake = Uint8List(existing.length + 32);
+      fake.setAll(0, existing);
+      fake[existing.length + 8] = WalRecordType.batch.byte; // type byte
+      // Leave rest as zeros → will fail decode.
+      await adapter.writeFile(path, fake);
+
+      final reader = _reader(adapter);
+      final records = await reader.replay(path).toList();
+      // Should get the first valid record and then stop.
+      expect(records.length, equals(1));
+      expect(records[0].type, equals(WalRecordType.put));
+    });
+
+    test('replay stops on short trailing bytes (non-strict)', () async {
+      // Write one valid record then append only 5 bytes (< 9, cannot be header).
+      final adapter = MemoryStorageAdapter();
+      final writer = _writer(adapter);
+
+      await writer.writePut(
+        sequence: const Hlc(1, 0),
+        namespace: 'ns',
+        keyBytes: _key,
+        value: _value,
+      );
+
+      final path = writer.activePath;
+      final existing = await adapter.readFile(path);
+      final truncated = Uint8List(existing.length + 5);
+      truncated.setAll(0, existing);
+      truncated.fillRange(existing.length, truncated.length, 0xFF);
+      await adapter.writeFile(path, truncated);
+
+      final reader = _reader(adapter);
+      final records = await reader.replay(path).toList();
+      // Should still get the first valid record; trailing garbage is ignored.
+      expect(records.length, equals(1));
+    });
+
+    test('replayStrict throws on corrupt batch frame', () async {
+      final adapter = MemoryStorageAdapter();
+      final writer = _writer(adapter);
+
+      await writer.writePut(
+        sequence: const Hlc(1, 0),
+        namespace: 'ns',
+        keyBytes: _key,
+        value: _value,
+      );
+
+      final path = writer.activePath;
+      final existing = await adapter.readFile(path);
+      // Append a fake batch-frame header (type byte) + garbage.
+      final corrupted = Uint8List(existing.length + 32);
+      corrupted.setAll(0, existing);
+      corrupted[existing.length + 8] = WalRecordType.batch.byte;
+      await adapter.writeFile(path, corrupted);
+
+      final strictReader = _reader(adapter);
+      await expectLater(
+        strictReader.replayStrict(path).toList(),
+        throwsA(isA<CorruptedWalException>()),
+      );
+    });
+
+    test(
+      'replayStrict throws on short trailing bytes (< 9 bytes, incomplete header)',
+      () async {
+        final adapter = MemoryStorageAdapter();
+        final writer = _writer(adapter);
+
+        await writer.writePut(
+          sequence: const Hlc(1, 0),
+          namespace: 'ns',
+          keyBytes: _key,
+          value: _value,
+        );
+
+        final path = writer.activePath;
+        final existing = await adapter.readFile(path);
+        // Append only 4 bytes — too short for a header.
+        final truncated = Uint8List(existing.length + 4);
+        truncated.setAll(0, existing);
+        truncated.fillRange(existing.length, truncated.length, 0xAA);
+        await adapter.writeFile(path, truncated);
+
+        final strictReader = _reader(adapter);
+        await expectLater(
+          strictReader.replayStrict(path).toList(),
+          throwsA(isA<CorruptedWalException>()),
+        );
+      },
+    );
   });
 
   group('WalRecordType', () {

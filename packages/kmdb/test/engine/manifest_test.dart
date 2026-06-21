@@ -58,6 +58,64 @@ void main() {
       expect(decoded.removed, isEmpty);
     });
 
+    // The `cbor` library can return BigInt for integers that exceed 32 bits.
+    // _toInt() handles this transparently; SstableMeta.fromMap uses _toInt()
+    // on every integer field, so a round-trip through toCbor/fromCbor with a
+    // large HLC value exercises the BigInt branch.
+    test('BigInt integers (large HLC values) round-trip via _toInt', () {
+      // Use a nextSeq value > 2^32 to ensure the cbor library may return BigInt.
+      final largeSeq = 0x1FFFFFFFF; // 8 589 934 591 — exceeds int32 range.
+      final edit = VersionEdit(
+        logNumber: 42,
+        nextSeq: largeSeq,
+        added: [
+          SstableMeta(
+            level: 1,
+            filename: 'dev-${largeSeq}00-${largeSeq}01.sst',
+            minKey: '0' * 32,
+            maxKey: 'f' * 32,
+            entryCount: largeSeq,
+            walSequence: largeSeq,
+          ),
+        ],
+        removed: [const SstableRef(level: 1, filename: 'old-big.sst')],
+      );
+      final decoded = VersionEdit.fromCbor(edit.toCbor());
+      expect(decoded.logNumber, equals(42));
+      expect(decoded.nextSeq, equals(largeSeq));
+      expect(decoded.added.first.entryCount, equals(largeSeq));
+      expect(decoded.added.first.walSequence, equals(largeSeq));
+    });
+
+    // toMap() is the diagnostic representation used by `kmdb util manifest --full`.
+    // Exercise it directly to cover the code path.
+    test('VersionEdit.toMap returns JSON-compatible map', () {
+      final edit = _edit(
+        log: 7,
+        seq: 12345,
+        added: [_meta('add-file.sst')],
+        removed: [const SstableRef(level: 0, filename: 'rem-file.sst')],
+      );
+      final m = edit.toMap();
+      expect(m['logNumber'], equals(7));
+      expect(m['nextSeq'], equals(12345));
+      expect((m['added'] as List).length, equals(1));
+      expect((m['removed'] as List).length, equals(1));
+      // Added entry map should have the filename key.
+      expect((m['added'] as List).first['filename'], equals('add-file.sst'));
+      // Removed entry map should have the filename key.
+      expect((m['removed'] as List).first['filename'], equals('rem-file.sst'));
+    });
+
+    test('fromCbor throws FormatException on non-CBOR-map bytes', () {
+      // CBOR uint(42) = 0x18 0x2A — a valid CBOR value but not a CborMap.
+      // VersionEdit.fromCbor must reject it with FormatException.
+      expect(
+        () => VersionEdit.fromCbor([0x18, 0x2A]),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
     test('add and remove entries survive round-trip', () {
       final edit = _edit(
         log: 3,

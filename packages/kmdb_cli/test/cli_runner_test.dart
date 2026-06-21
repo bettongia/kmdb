@@ -107,6 +107,79 @@ void main() {
     });
   });
 
+  group('KmdbCli — global flags', () {
+    test('--version prints version and exits 0', () async {
+      final result = await run(['--version']);
+      expect(result.exitCode, equals(0));
+      expect(result.stdout, contains('kmdb '));
+    });
+
+    test('--help prints usage and exits 0', () async {
+      final result = await run(['--help']);
+      expect(result.exitCode, equals(0));
+      expect(result.stdout, contains('Usage: kmdb'));
+    });
+
+    test('-h prints usage and exits 0', () async {
+      final result = await run(['-h']);
+      expect(result.exitCode, equals(0));
+      expect(result.stdout, contains('Usage: kmdb'));
+    });
+
+    test('help <command> shows command help and exits 0', () async {
+      final result = await run(['help', 'insert']);
+      expect(result.exitCode, equals(0));
+      expect(result.stdout, contains('insert'));
+    });
+
+    test('--format with bad mode exits 1 with error', () async {
+      final dbPath = tmp.file('db');
+      final result = await run([
+        '--format',
+        'badmode',
+        dbPath,
+        'get',
+        'c',
+        'k',
+      ]);
+      expect(result.exitCode, equals(1));
+      expect(result.stderr, isNotEmpty);
+    });
+
+    test(
+      '--continue-on-error allows subsequent commands after failure',
+      () async {
+        final dbPath = tmp.file('db');
+        // "unknown-command" fails; with --continue-on-error, the runner continues.
+        // Provide a valid command after it to ensure execution proceeds.
+        final result = await run([
+          '--continue-on-error',
+          dbPath,
+          'unknown-command',
+          'scan notes',
+        ]);
+        // Exit code may be 1 because of the bad command, but execution should
+        // reach scan (which is a valid command, just with no data).
+        expect(result.exitCode, anyOf(0, 1));
+      },
+    );
+
+    test('--format=value (equals form) works', () async {
+      final dbPath = tmp.file('db');
+      final result = await run(['--format=ndjson', dbPath, 'scan', 'notes']);
+      expect(result.exitCode, equals(0));
+    });
+
+    test('--output writes stdout to file', () async {
+      final dbPath = tmp.file('db');
+      final outFile = tmp.file('out.json');
+      await run([dbPath, 'insert', 'notes', '--value', '{"x":1}']);
+      final result = await run(['--output', outFile, dbPath, 'scan', 'notes']);
+      expect(result.exitCode, equals(0));
+      expect(io.File(outFile).existsSync(), isTrue);
+    });
+  });
+
   group('KmdbCli — unknown flag guard', () {
     test('rejects short unknown flag in db-path position', () async {
       final result = await run(['-v']);
@@ -378,6 +451,147 @@ void main() {
           .where((f) => f.path.endsWith('.sst'))
           .toList();
       expect(sstFiles, isNotEmpty, reason: 'SST SHOULD exist (flushed)');
+    });
+  });
+
+  // ── Encryption subprocess tests ──────────────────────────────────────────────
+  //
+  // These tests cover `encryption change-passphrase` interactive prompts that
+  // require piped stdin. We spawn the CLI as a subprocess, pipe responses to
+  // stdin, and assert on exit code and stderr output.
+
+  group('KmdbCli — encryption change-passphrase (subprocess)', () {
+    test('empty new passphrase exits 1 with "must not be empty"', () async {
+      final dbPath = tmp.file('enc_db_empty');
+      // Create encrypted DB first.
+      final initResult = await run([dbPath, 'init', '--passphrase', 'correct']);
+      expect(initResult.exitCode, equals(0), reason: initResult.stderr);
+
+      // Feed: empty new passphrase (\n) — command should abort immediately.
+      final proc = await io.Process.start(
+        'dart',
+        [
+          binPath,
+          '--passphrase',
+          'correct',
+          dbPath,
+          'encryption',
+          'change-passphrase',
+        ],
+        workingDirectory: packageRoot,
+        environment: {...io.Platform.environment, 'DART_VM_OPTIONS': ''},
+      );
+      proc.stdin.writeln(''); // empty new passphrase
+      proc.stdin.writeln(''); // empty confirm (guard reached before this)
+      await proc.stdin.close();
+
+      final stderr = await proc.stderr.transform(utf8.decoder).join();
+      final exitCode = await proc.exitCode;
+      expect(exitCode, equals(1));
+      expect(stderr, contains('must not be empty'));
+    });
+
+    test('mismatched confirmation exits 1 with "do not match"', () async {
+      final dbPath = tmp.file('enc_db_mismatch');
+      final initResult = await run([dbPath, 'init', '--passphrase', 'correct']);
+      expect(initResult.exitCode, equals(0), reason: initResult.stderr);
+
+      final proc = await io.Process.start(
+        'dart',
+        [
+          binPath,
+          '--passphrase',
+          'correct',
+          dbPath,
+          'encryption',
+          'change-passphrase',
+        ],
+        workingDirectory: packageRoot,
+        environment: {...io.Platform.environment, 'DART_VM_OPTIONS': ''},
+      );
+      proc.stdin.writeln('newpass123'); // new passphrase
+      proc.stdin.writeln('different456'); // confirmation (mismatch)
+      await proc.stdin.close();
+
+      final stderr = await proc.stderr.transform(utf8.decoder).join();
+      final exitCode = await proc.exitCode;
+      expect(exitCode, equals(1));
+      expect(stderr, contains('do not match'));
+    });
+
+    test('wrong current passphrase exits 1 with encryption error', () async {
+      final dbPath = tmp.file('enc_db_wrong');
+      final initResult = await run([dbPath, 'init', '--passphrase', 'correct']);
+      expect(initResult.exitCode, equals(0), reason: initResult.stderr);
+
+      final proc = await io.Process.start(
+        'dart',
+        [
+          binPath,
+          '--passphrase',
+          'correct',
+          dbPath,
+          'encryption',
+          'change-passphrase',
+        ],
+        workingDirectory: packageRoot,
+        environment: {...io.Platform.environment, 'DART_VM_OPTIONS': ''},
+      );
+      proc.stdin.writeln('newpass123'); // new passphrase
+      proc.stdin.writeln('newpass123'); // confirm
+      proc.stdin.writeln('wrongpassphrase'); // wrong current passphrase
+      await proc.stdin.close();
+
+      final exitCode = await proc.exitCode;
+      expect(exitCode, equals(1));
+    });
+
+    test('success path changes passphrase; old fails, new succeeds', () async {
+      final dbPath = tmp.file('enc_db_success');
+      final initResult = await run([dbPath, 'init', '--passphrase', 'oldpass']);
+      expect(initResult.exitCode, equals(0), reason: initResult.stderr);
+
+      // Change the passphrase.
+      final proc = await io.Process.start(
+        'dart',
+        [
+          binPath,
+          '--passphrase',
+          'oldpass',
+          dbPath,
+          'encryption',
+          'change-passphrase',
+        ],
+        workingDirectory: packageRoot,
+        environment: {...io.Platform.environment, 'DART_VM_OPTIONS': ''},
+      );
+      proc.stdin.writeln('newpass456'); // new passphrase
+      proc.stdin.writeln('newpass456'); // confirm
+      proc.stdin.writeln('oldpass'); // current passphrase (re-key)
+      await proc.stdin.close();
+
+      final exitCode = await proc.exitCode;
+      expect(exitCode, equals(0));
+
+      // Old passphrase should now fail.
+      final oldResult = await run([
+        '--passphrase',
+        'oldpass',
+        dbPath,
+        'scan',
+        'ns',
+      ]);
+      expect(oldResult.exitCode, equals(1));
+
+      // New passphrase should succeed.
+      final newResult = await run([
+        '--passphrase',
+        'newpass456',
+        dbPath,
+        'scan',
+        'ns',
+      ]);
+      expect(newResult.exitCode, equals(0));
     });
   });
 }

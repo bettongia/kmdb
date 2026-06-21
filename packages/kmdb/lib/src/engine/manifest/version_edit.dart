@@ -21,7 +21,9 @@ import 'package:cbor/cbor.dart';
 int _toInt(dynamic v) {
   if (v is int) return v;
   if (v is BigInt) return v.toInt();
-  return (v as num).toInt();
+  // The cbor package only returns int or BigInt for integer CBOR values, so
+  // this num fallback is defensive dead code.
+  return (v as num).toInt(); // coverage:ignore-line
 }
 
 /// Metadata for one SSTable file referenced in a [VersionEdit].

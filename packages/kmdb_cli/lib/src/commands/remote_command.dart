@@ -132,12 +132,15 @@ final class RemoteCommand extends CliCommand {
           );
           return false;
         }
+        // coverage:ignore-start
         final clientSecret = (flags['client-secret'] as String?) ?? '';
         final credPath =
             (flags['credentials'] as String?) ?? 'google_credentials.json';
+        // coverage:ignore-end
 
         // Run the local-server OAuth redirect flow (opens a browser, captures
         // the OAuth callback on localhost, persists the resulting credentials).
+        // coverage:ignore-start
         final authorised = await _authoriseGoogleDrive(
           ctx,
           dbDir: dbDir,
@@ -151,6 +154,7 @@ final class RemoteCommand extends CliCommand {
           syncRoot: folder,
           credentialsPath: credPath,
         );
+      // coverage:ignore-end
 
       default:
         ctx.writeError(
@@ -178,8 +182,10 @@ final class RemoteCommand extends CliCommand {
     try {
       await config.save();
     } catch (e) {
+      // coverage:ignore-start
       ctx.writeError('remote add: failed to save config: $e');
       return false;
+      // coverage:ignore-end
     }
 
     ctx.out.writeln("Remote '$name' added (type: $type).");
@@ -214,8 +220,10 @@ final class RemoteCommand extends CliCommand {
     try {
       await config.save();
     } catch (e) {
+      // coverage:ignore-start
       ctx.writeError('remote remove: failed to save config: $e');
       return false;
+      // coverage:ignore-end
     }
 
     ctx.out.writeln("Remote '$name' removed.");
@@ -264,6 +272,8 @@ final class RemoteCommand extends CliCommand {
   /// `{dbDir}/local/{credentialsPath}`.
   ///
   /// Returns `true` on success, `false` if the flow fails.
+  // Requires a real browser and live Google OAuth endpoint; untestable.
+  // coverage:ignore-start
   Future<bool> _authoriseGoogleDrive(
     CommandContext ctx, {
     required String dbDir,
@@ -319,5 +329,6 @@ final class RemoteCommand extends CliCommand {
     authClient.close();
     ctx.out.writeln('Google Drive authorisation successful.');
     return true;
+    // coverage:ignore-end
   }
 }

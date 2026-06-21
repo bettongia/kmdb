@@ -14,6 +14,7 @@
 
 import 'dart:typed_data';
 
+import 'package:kmdb/src/encoding/value_codec.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
 import 'package:kmdb/src/query/kmdb_codec.dart';
 import 'package:kmdb/src/query/kmdb_database.dart';
@@ -74,6 +75,30 @@ final class _AttachmentCodec implements KmdbCodec<_Attachment> {
       _ => null,
     },
   );
+}
+
+/// A pass-through codec that returns the raw decoded [Map<String, dynamic>].
+///
+/// Used in tests that need to inspect the raw decoded document (including wired
+/// [VaultRef] instances) without domain-model deserialization.
+final class _RawCodec implements KmdbCodec<Map<String, dynamic>> {
+  const _RawCodec();
+
+  @override
+  String keyOf(Map<String, dynamic> v) => v['_id'] as String;
+
+  @override
+  Map<String, dynamic> withKey(Map<String, dynamic> v, String key) => {
+    ...v,
+    '_id': key,
+  };
+
+  @override
+  Map<String, dynamic> encode(Map<String, dynamic> v) =>
+      Map.of(v)..remove('_id');
+
+  @override
+  Map<String, dynamic> decode(Map<String, dynamic> json) => json;
 }
 
 // ── Test vault store ──────────────────────────────────────────────────────────
@@ -321,5 +346,129 @@ void main() {
         expect(fetched.file, isNull);
       });
     });
+  });
+
+  // ── _wireVaultRefsInMap / _wireVaultRefsInList coverage ──────────────────────
+  //
+  // These tests are NOT tagged e2e. They exercise the vault-URI wiring path in
+  // KmdbCollection.decodeDoc() (lines 685-717) by storing documents with vault
+  // URI strings via db.store.put() (bypassing VaultRefInterceptor) and reading
+  // them back via the collection API.
+  //
+  // Background: VaultRefInterceptor stores ref counts under sha256 (64-char hex)
+  // keys, but the LSM engine requires 32-char hex (UUIDv7) keys — inserting via
+  // KmdbCollection.insert() with vault URIs therefore fails. Bypassing the
+  // interceptor via db.store.put() lets us test the decode wiring path in
+  // isolation.
+  group('vault URI wiring in collection.get()', () {
+    // Fresh vault-configured DB for these tests (not the shared 'e2e' setUp).
+    late KmdbDatabase vaultDb;
+
+    setUp(() async {
+      final dbAdapter2 = MemoryStorageAdapter();
+      final vaultAdapter2 = MemoryStorageAdapter();
+      final vaultStore2 = _TestVaultStore(vaultAdapter2);
+      vaultDb = await KmdbDatabase.open(
+        path: '/vault_wire_test',
+        adapter: dbAdapter2,
+        vaultStore: vaultStore2,
+      );
+    });
+
+    tearDown(() async {
+      await vaultDb.close(flush: false);
+      MemoryStorageAdapter.releaseAllLocks();
+    });
+
+    test('get() wires a vault URI at the top level of a document', () async {
+      // Store a document with a vault URI string directly (bypasses
+      // VaultRefInterceptor ref-count writes).
+      const fakeSha256 =
+          'aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899';
+      final vaultUri = 'kmdb-vault://sha256/$fakeSha256';
+      const docId = '01900000000070809000000000000070';
+
+      final docBytes = await ValueCodec.encode({
+        'name': 'attachment',
+        'file': vaultUri,
+      });
+      await vaultDb.store.put('attachments', docId, docBytes);
+
+      // Read back via collection — _wireVaultRefsInMap must replace the URI
+      // string with a wired VaultRef instance.
+      final col = vaultDb.collection(
+        name: 'attachments',
+        codec: const _AttachmentCodec(),
+      );
+      final fetched = await col.get(docId);
+
+      expect(fetched, isNotNull);
+      expect(fetched!.file, isNotNull);
+      expect(fetched.file!.sha256, equals(fakeSha256));
+      // The VaultRef URI must match the stored string.
+      expect(fetched.file!.uri, equals(vaultUri));
+    });
+
+    test(
+      'get() wires vault URIs inside a list field (_wireVaultRefsInList)',
+      () async {
+        // Exercises _wireVaultRefsInList (lines 708-719) by storing a document
+        // with a list containing both a vault URI and a plain string.
+        const fakeSha256 =
+            'aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899';
+        final vaultUri = 'kmdb-vault://sha256/$fakeSha256';
+        const docId = '01900000000070809000000000000071';
+
+        final docBytes = await ValueCodec.encode({
+          '_id': docId,
+          'name': 'list-doc',
+          'files': [vaultUri, 'plain-string', vaultUri],
+        });
+        await vaultDb.store.put('items', docId, docBytes);
+
+        // Use a raw codec so we can inspect the raw decoded map.
+        final col = vaultDb.collection(name: 'items', codec: _RawCodec());
+        final fetched = await col.get(docId);
+        expect(fetched, isNotNull);
+
+        final files = fetched!['files'] as List<dynamic>;
+        // The vault URI strings at index 0 and 2 must have been replaced with
+        // wired VaultRef instances.
+        expect(files[0], isA<VaultRef>());
+        expect((files[0] as VaultRef).sha256, equals(fakeSha256));
+        // Plain string is unchanged.
+        expect(files[1], isA<String>());
+        // Second vault URI entry.
+        expect(files[2], isA<VaultRef>());
+      },
+    );
+
+    test(
+      'get() wires vault URIs inside a nested map (_wireVaultRefsInMap recursion)',
+      () async {
+        // Exercises the nested-map recursion branch (line 699) in
+        // _wireVaultRefsInMap.
+        const fakeSha256 =
+            'aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899';
+        final vaultUri = 'kmdb-vault://sha256/$fakeSha256';
+        const docId = '01900000000070809000000000000072';
+
+        final docBytes = await ValueCodec.encode({
+          'name': 'nested-doc',
+          'meta': {'attachment': vaultUri, 'other': 'plain'},
+        });
+        await vaultDb.store.put('items', docId, docBytes);
+
+        final col = vaultDb.collection(name: 'items', codec: _RawCodec());
+        final fetched = await col.get(docId);
+        expect(fetched, isNotNull);
+
+        final meta = fetched!['meta'] as Map<String, dynamic>;
+        // The nested vault URI must be wired.
+        expect(meta['attachment'], isA<VaultRef>());
+        expect((meta['attachment'] as VaultRef).sha256, equals(fakeSha256));
+        expect(meta['other'], isA<String>());
+      },
+    );
   });
 }
