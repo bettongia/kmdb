@@ -14,6 +14,7 @@
 
 import 'dart:typed_data';
 
+import 'package:betto_zstd/betto_zstd.dart' show ZstdSimple;
 import 'package:cbor/cbor.dart';
 import 'package:test/test.dart';
 
@@ -23,6 +24,9 @@ import 'package:kmdb/src/encryption/encryption_flag.dart';
 import 'package:kmdb/src/query/filter/field_path.dart';
 
 void main() {
+  // On web the Zstd WASM module must be initialised before any codec call.
+  // ZstdSimple.init() is a no-op on native, so this is safe on all platforms.
+  setUpAll(() async => ZstdSimple.init());
   // ── CompressionFlag ──────────────────────────────────────────────────────────
 
   group('CompressionFlag', () {
