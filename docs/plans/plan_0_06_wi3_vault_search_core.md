@@ -1,6 +1,6 @@
 # WI-3: Vault search — core
 
-**Status**: Open
+**Status**: Questions
 
 **PR link**: —
 
@@ -41,8 +41,189 @@ author to minimise migration cost.
 
 ## Open questions
 
-All seven open questions from proposal §8 are resolved below in the
-Investigation section. No questions remain that would block implementation.
+The seven proposal §8 questions are resolved in the Investigation section. The
+review below (2026-06-21) surfaced **new** blocking questions that must be
+resolved before this plan can reach `Investigated`:
+
+- [ ] **RQ-1 (BLOCKING): Sync exclusion is built on a false premise.** Replace
+      the entire sync-exclusion design with the §20.7 model: index namespaces
+      ride in SSTables and are kept private by §31 value-level encryption, not by
+      a sync-engine filter. See review §"Architecture Fit". Specifically decide
+      and document: (a) do `$vfts:`/`$vvec:`/`$vault:extract` simply ride along
+      in SSTables like `$fts:`/`$vec:` (yes, per §20.7 — so Step 10 must be
+      rewritten, not "extend the exclusion list")? (b) confirm `$vault:extract`
+      riding to the cloud is benign (it carries extraction status/charset/model
+      version per blob — is that an acceptable leak, and does it cause incorrect
+      behaviour on a peer that has the SSTable but not the blob?).
+- [ ] **RQ-2 (BLOCKING): `VaultSearchHit extends SearchHit` will not compile.**
+      `SearchHit<T>` is a `final class` (not extendable) and its fields are
+      `rank, score, fieldScores, id, document` — not the `key, scores` the
+      plan's constructor passes via `super.key`/`super.scores`. Decide the real
+      result-type shape (see review §"Implementation Readiness").
+- [ ] **RQ-3 (BLOCKING): Two embedding-model parameters, unreconciled.**
+      `KmdbDatabase.open()` already takes `EmbeddingModel? embeddingModel` (used
+      by `VecManager`). This plan adds a *second* one inside `VaultSearchConfig`.
+      Decide: does vault search reuse the database-level model, or is an
+      independent model genuinely intended? If independent, justify it and state
+      how lifecycle/`dispose` ownership is split.
+- [ ] **RQ-4: `VaultRefInterceptor` extension does not match the real seam.**
+      `interceptWrite()` operates on `{batch, namespace, docKey, newDoc, oldDoc}`
+      and computes added/removed sha256 sets internally — it never sees a
+      `sha256`/`docId` pair as Step 4 describes. Restate the extension in terms
+      of the actual `WriteAugmentor.interceptWrite` contract, including how
+      `docKey` maps to the `{docId}` key segment and how the field path is
+      recovered from `_extractVaultUris` (which today returns only sha256s, not
+      their field paths — a non-trivial change).
+- [ ] **RQ-5: First Isolate in KMDB vs. the synchronous-engine invariant.** The
+      plan introduces background-isolate indexing. §18 establishes KMDB as a
+      synchronous, no-background-isolate engine (compaction is on the write
+      path). Confirm with kmdb-architect that a search-indexing isolate is an
+      acceptable boundary (it does not touch the LSM write path; it hands results
+      back to the main isolate which commits) and document that boundary
+      explicitly so it is not read as licence to move storage work off-thread.
+
+## Review — 2026-06-21 (kmdb-plan-reviewer)
+
+This is a thorough, well-structured plan with genuine strengths: the crash-safety
+sequencing (filesystem-before-WriteBatch with a documented recovery path), the
+stub/hydration handling, the model-version staleness detection, and the
+edge-case table are all of high quality and clearly the product of real
+investigation. The Q1–Q7 resolutions are sound and well-argued (the
+`searchVault()`-as-separate-method call in Q1 is correct). However, the plan is
+**not implementation-ready** — it rests on three load-bearing claims that are
+false against the current code/spec, and a Sonnet implementer following it
+verbatim would write code that does not compile and a sync design that
+contradicts §20.7.
+
+### Problem statement assessment
+
+Solid and worth solving. Vault content search is a roadmap v0.06 commitment
+(`docs/roadmap/0_06.md`, WI-3) backed by a real proposal
+(`docs/proposals/vault_search.md`). Scope is appropriately narrowed to
+`text/plain`, with extractors (PDF/HTML) correctly deferred to WI-8/WI-9. The
+dependency framing (WI-1 complete, WI-2 first) is accurate — I verified
+`VecIndexState.modelId` exists and WI-1 is marked Complete in the roadmap.
+
+One scoping note: the §"Sequencing note — v0.08 encryption reconciliation"
+references the v0.08 roadmap and "Gap B HMAC tokens." Encryption shipped in Phase
+12 and the roadmap numbering has moved; confirm with kmdb-architect that the HMAC
+vocabulary-token work is still a live, separately-tracked item before relying on
+that sequencing note. This is informational, not blocking.
+
+### Proposed solution assessment
+
+The architecture is mostly coherent and the data-flow narrative is good. The
+extract-artifacts-on-disk approach (text.txt + chunks_v1.json + vectors.bin +
+status) with filesystem-first write ordering is a reasonable crash-recovery
+design and the strongest part of the plan. Reusing `RegExpTokenizer` from
+`betto_lexical` and mirroring `FtsManager`/`VecManager` write patterns is the
+right instinct.
+
+Weaknesses are concentrated in the integration seams (below), not the core idea.
+
+### Architecture fit
+
+**FATAL — sync exclusion contradicts §20.7 (RQ-1).** The plan's "New storage
+namespaces" section and Step 10 instruct the implementer to "Locate the
+namespace-exclusion list in the sync engine" and "add `$vfts:`, `$vvec:`,
+`$vault:extract` to the exclusion list," citing "`$fts:`, `$vec:` exclusion in
+§20." This is backwards. Verified facts:
+
+- `grep` for `$fts`/`$vec`/exclusion-by-prefix in `lib/src/sync/` returns **no
+  namespace-exclusion mechanism**. It does not exist.
+- Spec §20.7 (`docs/spec/20_text_search.md`, lines ~17–246) states `$fts:*` and
+  `$vec:*` are *"**not excluded from upload**"* — they "ride in uploaded
+  SSTables," "sync is whole-file at the SSTable level," "There is no upload-time,
+  server-side, or per-entry namespace filter," and they are kept private "by
+  **value-level encryption (§31)**, not by upload filtering." The spec even calls
+  out that a filter "is not implemented" as a future possibility.
+
+So the design must flip: the new index namespaces *will* ride to the cloud inside
+SSTables (same as `$fts:`/`$vec:`), and privacy comes from §31 encryption — which
+the plan's "Encryption compatibility" section already half-acknowledges for
+`$vfts:`/`$vvec:idx`. Step 10 should not "extend an exclusion list"; it should
+verify these namespaces are encrypted under §31 when encryption is on, and the
+test in Step 10 must be rewritten (you cannot assert `$vfts:` keys are "absent
+from the set of keys that would be uploaded" — they are present). The `$vault:docref`
+"must sync" reasoning is fine and lands in the same place, but for the wrong
+stated reason (it's not "not excluded" vs "excluded" — *everything* in an SSTable
+is uploaded).
+
+**`extract/` filesystem artifacts** — this part is actually correct: those files
+live under the vault blob directory, which is on the *filesystem* and not in the
+synced SSTable path, so they are genuinely device-local. The §"known gap" about
+plaintext `text.txt` leakage is a good and honest call-out, and WI-10 in the
+roadmap already tracks encrypting them. No change needed here beyond not
+conflating it with the SSTable-namespace question above.
+
+**First Isolate vs §18 synchronous model (RQ-5).** Flagged as a question, not a
+blocker — the boundary looks defensible but must be confirmed and documented.
+
+### Risk & edge cases
+
+The edge-case table is excellent and covers crash points, stubs, model changes,
+GC, empty/zero-match, and degraded lexical-only mode. Two gaps:
+
+- **`$vault:extract` syncing to peers.** Once RQ-1 is resolved and you accept
+  these namespaces ride in SSTables, you inherit a new scenario the table does
+  not cover: a peer receives an SSTable containing device-A's `$vault:extract`
+  entry (status `indexed`, model X) for a blob that device B has not downloaded
+  (a stub on B). B's `vaultIndexingStatus()` and recovery logic must not treat
+  that foreign `$vault:extract` entry as "this blob is indexed locally." The
+  `stub`-detection logic ("`$vault` ref but no `$vault:extract`") breaks if
+  `$vault:extract` entries arrive via sync. This needs an explicit answer.
+- **Concurrent `reindexVault()` + isolate cancellation** is listed
+  ("Cancel in-flight isolate work") but the isolate cancellation protocol is not
+  specified anywhere in the design. Spell out how in-flight work is cancelled
+  (Isolate.kill? a cancellation token checked between chunks?).
+
+### Implementation readiness
+
+Not ready. Beyond RQ-1, two seams are specified against code that does not match:
+
+- **`VaultSearchHit extends SearchHit` will not compile (RQ-2).**
+  `SearchHit<T>` (`lib/src/search/search_result.dart:109`) is a `final class`
+  and cannot be extended. Its fields are `rank, score, fieldScores, id,
+  document` — the plan's constructor passes `super.key` and `super.scores`, which
+  do not exist. The result-type design must be redone (composition, or a shared
+  non-final base, or a standalone `VaultSearchHit`).
+- **`VaultRefInterceptor` extension is specified against a non-existent
+  signature (RQ-4).** The real `interceptWrite({batch, namespace, docKey,
+  newDoc, oldDoc})` computes sha256 deltas internally and `_extractVaultUris`
+  returns sha256s without field paths. "Store the field path" requires changing
+  URI extraction to also yield the field path — a real change the plan
+  under-specifies.
+- **Two embedding models (RQ-3).** `KmdbDatabase.open()` already has
+  `EmbeddingModel? embeddingModel`. The plan adds another inside
+  `VaultSearchConfig` without reconciling them.
+
+Smaller specificity gaps to tighten once the blockers are resolved:
+
+- The BM25 scoring design says "IDF from corpus sentinel" but
+  `$vfts:corpus:{sha256}` stores only `{n: chunkCount, totalTokens}` per blob —
+  document frequency (how many chunks contain a term) is needed for IDF and is
+  not in the schema. Specify where DF comes from, or the BM25 math is
+  unimplementable as written.
+- `searchVault()` per-blob brute-force vector scan is fine for small corpora;
+  note the expected scale and that this is O(chunks) per query, consistent with
+  the existing `VecManager` full-scan approach.
+
+### Recommendations
+
+Reconsider-and-revise, do not proceed. The core architecture is salvageable and
+mostly good; the failures are at the integration boundary and are correctable:
+
+1. Rewrite the sync story around §20.7 (ride-in-SSTables + §31 encryption),
+   delete the "exclusion list" framing, and rewrite the Step 10 test.
+2. Redo the `VaultSearchHit` result type against the real `SearchHit`.
+3. Reconcile the embedding-model parameter with the existing `open()` seam.
+4. Restate the `VaultRefInterceptor` and `_extractVaultUris` changes against the
+   real signatures, including field-path recovery.
+5. Add the peer-`$vault:extract`/stub-detection scenario to the edge-case table.
+6. Confirm the isolate boundary with kmdb-architect and specify cancellation.
+
+Once RQ-1 through RQ-4 are resolved in the plan text (RQ-5 confirmed), this is a
+strong candidate for `Investigated`.
 
 ## Investigation
 
