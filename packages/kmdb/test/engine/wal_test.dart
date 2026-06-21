@@ -201,18 +201,20 @@ void main() {
       expect(records, isEmpty);
     });
 
-    test('entirely empty WAL file → treated as no WAL, returns empty stream',
-        () async {
-      // An empty file (zero bytes) is a valid edge case: power loss before any
-      // record was written. The reader must return an empty stream, not crash.
-      final adapter = MemoryStorageAdapter();
-      const path = '$_dir/wal-empty.log';
-      await adapter.writeFile(path, Uint8List(0));
+    test(
+      'entirely empty WAL file → treated as no WAL, returns empty stream',
+      () async {
+        // An empty file (zero bytes) is a valid edge case: power loss before any
+        // record was written. The reader must return an empty stream, not crash.
+        final adapter = MemoryStorageAdapter();
+        const path = '$_dir/wal-empty.log';
+        await adapter.writeFile(path, Uint8List(0));
 
-      final reader = _reader(adapter);
-      final records = await reader.replay(path).toList();
-      expect(records, isEmpty);
-    });
+        final reader = _reader(adapter);
+        final records = await reader.replay(path).toList();
+        expect(records, isEmpty);
+      },
+    );
 
     test(
       'multiple WAL files: second has valid frames after first corruption',

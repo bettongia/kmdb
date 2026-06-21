@@ -879,4 +879,47 @@ Everything else in the plan is solid and can stand as written.
 
 ## Summary
 
-_To be filled in when implementation is complete._
+Implementation raised test coverage from 87.6% (8,878 / 10,139 lines) to
+**95.0% (9,526 / 10,027 lines)**, exceeding the project's >95% target.
+
+All eight groups were implemented across two phases:
+
+- **Phase 1 (Groups A–H):** Established the major coverage gains. Group A added
+  in-process `KmdbCli.run` tests via `IOOverrides.runZoned` (covering
+  `cli_runner.dart`). Group B added `expectsCancellation: true` to the
+  `MemorySyncAdapter` conformance suite and a direct `GatedSyncAdapter` unit test,
+  covering `sync_adapter_conformance.dart` lines 298–490 and all 45 lines of
+  `gated_sync_adapter.dart`. Group C covered `FtsManager` edge cases
+  (`_interceptDelete`, `compact`, `applyDelta`, `checkAndTransitionOnOpen`).
+  Groups D and E covered the encryption command dispatch logic and all nine
+  `CacheLayer` delegate forwarders. Groups F–H covered REPL dot-commands,
+  engine/query resilience (using `FaultyStorageAdapter` and real tmpdir adapters
+  per the 2026-05-22 review mandate), and CLI command edge cases.
+
+- **Phase 2 (targeted gap tests):** After Phase 1 reached 94.2%, targeted tests
+  filled the remaining ~76 lines: toggle/limit dot-command no-args display paths,
+  `StorageAdapterNative` error paths with `// coverage:ignore` for the
+  POSIX in-process lock path, `VersionEdit` BigInt/toMap round-trips,
+  `CollectionsCommand` delete path, `RemoteCommand` corrupt-config error paths,
+  `ReplRunner` `.open`/`.close`/`.read` callbacks, `EncryptionError.toString()`
+  variants, `KmdbDatabase` schema management methods, and `IndexManager.copyWith`.
+
+**Notable deferred items:**
+- FTS compact fault injection via `FaultyStorageAdapter` mid-write (Group C) —
+  complex setup; 95% achieved without it.
+- `MetaStore.incrementGenerationCounter` rollover at max uint64 — not a practical
+  scenario with Dart's 64-bit signed int.
+- Vault double-GC ref-count floor enforcement — existing `vault_gc_test.dart`
+  already covers the zero-ref-count delete path; the additional double-GC scenario
+  was not needed for the coverage target.
+- `IndexManager` concurrent-build prevention — not deterministically testable in
+  KMDB's synchronous single-isolate model.
+
+**Follow-up items noted by QA:**
+- A stale duplicate of `GatedSyncAdapter` exists at
+  `test/support/gated_sync_adapter.dart` (used only by
+  `sync_cancellation_integration_test.dart`). Consider consolidating to the lib/
+  path in a future cleanup pass.
+- The `--recovery-code <rc>` success path on an existing encrypted DB is partially
+  tested (wrong code → exit 1 is covered); a full success-path subprocess test
+  would complete Group A's coverage of the recovery-code flow.

@@ -191,7 +191,7 @@ final class StorageAdapterNative implements StorageAdapter {
         // coverage:ignore-start
         // POSIX fcntl locks are per-process, so within-process tests cannot
         // trigger this path. Cross-process lock contention is verified manually
-        // (RC-7 in docs/spec/28_release_checklist.md).
+        // (RC-3 in docs/spec/28_release_checklist.md).
         await raf.close();
         throw LockException(lockPath);
         // coverage:ignore-end

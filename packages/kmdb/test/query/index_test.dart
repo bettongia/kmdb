@@ -759,65 +759,65 @@ void main() {
   // ── IndexManager — fallback full-scan while building ─────────────────────────
 
   group('IndexManager — building-state fallback', () {
-    test(
-      'query on collection while index is building returns correct results '
-      'via full-scan fallback',
-      () async {
-        // Pre-populate the collection with documents before any index is built.
-        final (db, col) = await _openWithIndexes();
-        final k1 = _key();
-        final k2 = _key();
-        await col.put(_Contact(id: k1, city: 'London'));
-        await col.put(_Contact(id: k2, city: 'Paris'));
+    test('query on collection while index is building returns correct results '
+        'via full-scan fallback', () async {
+      // Pre-populate the collection with documents before any index is built.
+      final (db, col) = await _openWithIndexes();
+      final k1 = _key();
+      final k2 = _key();
+      await col.put(_Contact(id: k1, city: 'London'));
+      await col.put(_Contact(id: k2, city: 'Paris'));
 
-        // getOrActivate transitions undefined → building (launching a background
-        // build) and returns the building-state. The returned state is building
-        // because the build has just been kicked off but not yet completed.
-        final activatedState = await db.indexManager.getOrActivate(
-          'contacts',
-          'city',
-        );
-        // getOrActivate returns `building` when the index was `undefined`
-        // (first activation). It may return `current` on subsequent calls if
-        // the build completed synchronously — accept both.
-        expect(
-          activatedState.status,
-          anyOf(equals(IndexStatus.building), equals(IndexStatus.current)),
-        );
+      // getOrActivate transitions undefined → building (launching a background
+      // build) and returns the building-state. The returned state is building
+      // because the build has just been kicked off but not yet completed.
+      final activatedState = await db.indexManager.getOrActivate(
+        'contacts',
+        'city',
+      );
+      // getOrActivate returns `building` when the index was `undefined`
+      // (first activation). It may return `current` on subsequent calls if
+      // the build completed synchronously — accept both.
+      expect(
+        activatedState.status,
+        anyOf(equals(IndexStatus.building), equals(IndexStatus.current)),
+      );
 
-        // A full-scan query on the collection must still return the correct
-        // documents regardless of index state — the query layer falls back to
-        // a full scan when the index is building.
-        final results = await col.all().get();
-        expect(results.map((c) => c.id).toSet(), equals({k1, k2}));
+      // A full-scan query on the collection must still return the correct
+      // documents regardless of index state — the query layer falls back to
+      // a full scan when the index is building.
+      final results = await col.all().get();
+      expect(results.map((c) => c.id).toSet(), equals({k1, k2}));
 
-        await db.close();
-      },
-    );
+      await db.close();
+    });
   });
 
   // ── IndexManager.removeIndex ──────────────────────────────────────────────────
 
   group('IndexManager.removeIndex', () {
-    test('removeIndex on an undefined (never-built) index is a no-op', () async {
-      // Open a database with a city index, but never trigger a build.
-      final (db, _) = await _openWithIndexes();
+    test(
+      'removeIndex on an undefined (never-built) index is a no-op',
+      () async {
+        // Open a database with a city index, but never trigger a build.
+        final (db, _) = await _openWithIndexes();
 
-      // Index is in `undefined` state — no sub-namespaces have been written.
-      final before = await db.indexManager.getState('contacts', 'city');
-      expect(before.status, equals(IndexStatus.undefined));
+        // Index is in `undefined` state — no sub-namespaces have been written.
+        final before = await db.indexManager.getState('contacts', 'city');
+        expect(before.status, equals(IndexStatus.undefined));
 
-      // removeIndex on an undefined index must complete without error.
-      await expectLater(
-        db.indexManager.removeIndex('contacts', 'city'),
-        completes,
-      );
+        // removeIndex on an undefined index must complete without error.
+        await expectLater(
+          db.indexManager.removeIndex('contacts', 'city'),
+          completes,
+        );
 
-      // State should still be undefined (no meta entry to clean up).
-      final after = await db.indexManager.getState('contacts', 'city');
-      expect(after.status, equals(IndexStatus.undefined));
+        // State should still be undefined (no meta entry to clean up).
+        final after = await db.indexManager.getState('contacts', 'city');
+        expect(after.status, equals(IndexStatus.undefined));
 
-      await db.close();
-    });
+        await db.close();
+      },
+    );
   });
 }
