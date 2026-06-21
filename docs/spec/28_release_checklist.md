@@ -1,28 +1,23 @@
----
-title: "§28 Release Checklist"
-nav_order: 28
----
-
-# §28 Release Checklist
+# Release Checklist
 
 ## Purpose and scope
 
-This is the catalogue of **manual / out-of-band tests** a human must run before a
-release — the checks that the automated suite (`make test`) deliberately cannot
-cover. Examples: tests against a real cloud service (credentials, quota,
+This is the catalogue of **manual / out-of-band tests** a human must run before
+a release — the checks that the automated suite (`make test`) deliberately
+cannot cover. Examples: tests against a real cloud service (credentials, quota,
 non-determinism), durability behaviour that depends on real OS/hardware
 (`fsync`, power loss), and cross-process or multi-host concurrency that a
 single-process test harness cannot reproduce.
 
 It is a **living document**. It starts small and is grown by plan work: any plan
 that introduces a test which cannot run in CI **must add an entry here** as part
-of its "Spec and docs" phase (see `plans/README.md`). The automated suite remains
-the first line of defence; this checklist covers only what it structurally
-cannot.
+of its "Spec and docs" phase (see `plans/README.md`). The automated suite
+remains the first line of defence; this checklist covers only what it
+structurally cannot.
 
-> If a check listed here *can* be automated later (e.g. a behaviour is captured by
-> a behavioural simulator), move it into the automated suite and mark the entry
-> **Superseded** with a pointer to the test — do not delete the history.
+> If a check listed here _can_ be automated later (e.g. a behaviour is captured
+> by a behavioural simulator), move it into the automated suite and mark the
+> entry **Superseded** with a pointer to the test — do not delete the history.
 
 ## How to use it
 
@@ -54,15 +49,16 @@ For each release:
 ## Checks
 
 ### RC-1 — Google Drive API behaviour probe
+
 - **Area:** cloud sync
-- **Validates:** the *actual* semantics real Google Drive exposes for
+- **Validates:** the _actual_ semantics real Google Drive exposes for
   conditional create/update, duplicate-name creation, read-after-write
-  visibility, and rate limiting — the observations that calibrate the behavioural
-  Drive simulator and the lease design.
+  visibility, and rate limiting — the observations that calibrate the
+  behavioural Drive simulator and the lease design.
 - **Why not automated:** requires real Drive credentials, consumes quota, and is
   non-deterministic; cannot run in CI or the build sandbox.
-- **Applies when:** the Google Drive adapter is introduced or its
-  request/lease logic changes.
+- **Applies when:** the Google Drive adapter is introduced or its request/lease
+  logic changes.
 - **Prerequisites:** a test Google account; OAuth client; `drive.file` scope;
   `GOOGLE_DRIVE_TEST_CREDENTIALS` configured.
 - **Steps:** run the Phase 4a probe harness (concurrent same-name create;
@@ -75,6 +71,7 @@ For each release:
   `plans/plan_sync_cas_atomicity.md` (H5), `code-review-2026-05-22.md` (H5).
 
 ### RC-2 — Google Drive real-service sync soak
+
 - **Area:** cloud sync
 - **Validates:** a full multi-device `SyncEngine` push/pull cycle plus lease
   contention converges correctly against real Drive, confirming the simulator's
@@ -83,8 +80,8 @@ For each release:
 - **Applies when:** before any release that ships or changes the Drive adapter.
 - **Prerequisites:** as RC-1, plus a shared Drive folder.
 - **Steps:** run the credential-gated integration test
-  (`GOOGLE_DRIVE_TEST_CREDENTIALS`); optionally a longer `kmdb_harness` soak with
-  the real adapter at a quota-safe velocity.
+  (`GOOGLE_DRIVE_TEST_CREDENTIALS`); optionally a longer `kmdb_harness` soak
+  with the real adapter at a quota-safe velocity.
 - **Expected result:** all devices converge to the global LWW state; no data
   loss; consolidation behaves per the declared `CloudProfile` (single
   consolidator if atomic, else gated/skipped).
@@ -92,9 +89,10 @@ For each release:
   `plans/plan_harness_mixed_storage.md`.
 
 ### RC-3 — Cross-process database lock exclusivity
+
 - **Area:** concurrency
-- **Validates:** the `LOCK` file genuinely prevents two **separate OS processes**
-  from opening the same database directory concurrently.
+- **Validates:** the `LOCK` file genuinely prevents two **separate OS
+  processes** from opening the same database directory concurrently.
 - **Why not automated:** the test suite uses the in-memory adapter (single
   process); real `flock`/`LockFileEx` exclusion is only observable across real
   processes.
@@ -105,16 +103,18 @@ For each release:
   B; close A; reopen in B.
 - **Expected result:** B throws `LockException` while A holds the lock; B
   succeeds after A closes.
-- **Related:** `packages/kmdb/lib/src/engine/platform/storage_adapter_native.dart`.
+- **Related:**
+  `packages/kmdb/lib/src/engine/platform/storage_adapter_native.dart`.
 
 ### RC-4 — Linux directory-fsync durability
+
 - **Area:** durability
 - **Validates:** `syncDir` durably persists new directory entries (new SSTables,
   WAL files, the `CURRENT` rename) on Linux, so a power loss does not lose files
   the manifest already references.
-- **Why not automated:** `syncDir` is a no-op on macOS/Windows/memory; its effect
-  is only meaningful on real Linux, and true verification needs power-loss-class
-  fault injection.
+- **Why not automated:** `syncDir` is a no-op on macOS/Windows/memory; its
+  effect is only meaningful on real Linux, and true verification needs
+  power-loss-class fault injection.
 - **Applies when:** changes to the durability ordering (C2/H1) or the native
   adapter; before a release targeting Linux.
 - **Prerequisites:** a Linux host (ideally with a way to simulate unclean
@@ -126,6 +126,7 @@ For each release:
   `code-review-2026-05-22.md` (C2, H1).
 
 ### RC-5 — Harness preset 5 (real-isolate) stress soak
+
 - **Area:** concurrency
 - **Validates:** sync convergence under genuine parallel isolate execution at
   high velocity (the only mode that exercises real concurrency rather than
@@ -143,29 +144,29 @@ For each release:
 - **Related:** `docs/spec/27_test_harness.md`.
 
 ### RC-6 — Multi-device tombstone non-resurrection
+
 - **Area:** sync + compaction (H4 PR2)
 - **Validates:** that the sync-horizon-gated tombstone GC in `_compactAll` does
   not allow a deleted key to resurrect across devices. Device A writes a key,
-  deletes it, and runs `_compactAll` with a horizon below the tombstone HLC
-  so the tombstone is dropped. Device B (carrying an older copy of the key in
-  its synced SSTables) then converges with A. The key must remain deleted
-  globally.
+  deletes it, and runs `_compactAll` with a horizon below the tombstone HLC so
+  the tombstone is dropped. Device B (carrying an older copy of the key in its
+  synced SSTables) then converges with A. The key must remain deleted globally.
 - **Why not automated (as a gate):** the in-harness scenario covers the
   cross-device convergence invariant (tombstone non-resurrection) via
-  `packages/kmdb_harness/test/cloud_semantics_test.dart`
-  ("Tombstone non-resurrection — deleted key stays absent after peer syncs").
-  The compaction-side in-process invariant is covered by `compaction_test.dart`
-  and `lsm_engine_test.dart`. The remaining gap is exercising compaction with a
-  *real* elapsed HLC horizon (not a test clock) across separate processes —
-  that requires a real-OS multi-process run.
+  `packages/kmdb_harness/test/cloud_semantics_test.dart` ("Tombstone
+  non-resurrection — deleted key stays absent after peer syncs"). The
+  compaction-side in-process invariant is covered by `compaction_test.dart` and
+  `lsm_engine_test.dart`. The remaining gap is exercising compaction with a
+  _real_ elapsed HLC horizon (not a test clock) across separate processes — that
+  requires a real-OS multi-process run.
 - **Applies when:** changes to the tombstone-GC predicate, the horizon
   computation, the HWM-min helper, or `SyncEngine`'s horizon-provider
   registration.
 - **Prerequisites:** native build; two separate database directories.
 - **Steps:** run the harness scenario that drives a fresh delete on device A,
-  forces `_compactAll` with horizon below the tombstone HLC, then drives
-  device B's sync. Assert `get` for the deleted key returns null on every
-  device after settle.
+  forces `_compactAll` with horizon below the tombstone HLC, then drives device
+  B's sync. Assert `get` for the deleted key returns null on every device after
+  settle.
 - **Expected result:** no device observes the resurrected value; all devices
   agree the key is absent.
 - **Related:** `docs/spec/06_storage_engine.md`, `docs/spec/12_sync.md`,
@@ -174,41 +175,39 @@ For each release:
   `packages/kmdb_harness/test/cloud_semantics_test.dart`.
 
 ### RC-7 — Returning stale device does not resurrect deleted data
+
 - **Area:** sync re-admission (H4-FU2)
-- **Validates:** that a device evicted from the sync horizon performs a
-  full re-sync on return and does not deliver pre-eviction SSTables to its
-  peers. Device A writes a key, deletes it, advances its HWM past the
-  tombstone, and a separate flush-compaction drops the tombstone while
-  device B is excluded from the horizon (B's HWM `lastUpdated` exceeds
-  `staleDeviceEvictionAfter`). Device B then returns. With the
-  re-admission check enabled, B detects both `localCurrentHlc <
-  min(livePeers.currentHlc)` and `localHwm.lastUpdated < now -
-  staleDeviceEvictionAfter`, discards its local SSTables (via
-  `KvStore.dropAllSstables`), and re-downloads the current consolidated
-  set; the deleted key stays absent on every device.
-- **Why not automated (as a gate):** the cross-device verification (B
-  pushing a *real* pre-eviction SSTable and being rejected) is the same
-  per-device adapter shape that gates RC-6. The in-process invariant —
-  that `_checkAndHandleEviction` triggers `_fullResync` on the two-
-  condition rule and that `_fullResync` keeps the manifest consistent
-  during the SSTable drop — *is* covered in CI by the
-  `sync_engine_test.dart` H4-FU2 tests, including the negative-control
-  test that proves resurrection occurs without the guard.
+- **Validates:** that a device evicted from the sync horizon performs a full
+  re-sync on return and does not deliver pre-eviction SSTables to its peers.
+  Device A writes a key, deletes it, advances its HWM past the tombstone, and a
+  separate flush-compaction drops the tombstone while device B is excluded from
+  the horizon (B's HWM `lastUpdated` exceeds `staleDeviceEvictionAfter`). Device
+  B then returns. With the re-admission check enabled, B detects both
+  `localCurrentHlc < min(livePeers.currentHlc)` and
+  `localHwm.lastUpdated < now - staleDeviceEvictionAfter`, discards its local
+  SSTables (via `KvStore.dropAllSstables`), and re-downloads the current
+  consolidated set; the deleted key stays absent on every device.
+- **Why not automated (as a gate):** the cross-device verification (B pushing a
+  _real_ pre-eviction SSTable and being rejected) is the same per-device adapter
+  shape that gates RC-6. The in-process invariant — that
+  `_checkAndHandleEviction` triggers `_fullResync` on the two- condition rule
+  and that `_fullResync` keeps the manifest consistent during the SSTable drop —
+  _is_ covered in CI by the `sync_engine_test.dart` H4-FU2 tests, including the
+  negative-control test that proves resurrection occurs without the guard.
 - **Applies when:** changes to `SyncEngine._checkAndHandleEviction`,
   `SyncEngine._fullResync`, `KvStore.dropAllSstables`, the
-  `KvStoreConfig.staleDeviceEvictionAfter` semantics, or the eviction
-  filter in `HighwaterMark.minCurrentHlcAcrossDevices`.
+  `KvStoreConfig.staleDeviceEvictionAfter` semantics, or the eviction filter in
+  `HighwaterMark.minCurrentHlcAcrossDevices`.
 - **Prerequisites:** `plan_harness_mixed_storage.md` landed; multi-device
   harness scenario with adjustable HWM `lastUpdated`.
-- **Steps:** drive A through delete + two advance-pushes so its local
-  store has GC'd the tombstone. Configure B's `staleDeviceEvictionAfter`
-  short enough that B's injected stale HWM evicts B from A's horizon, but
-  use a separate eviction setting on B to control re-admission detection.
-  Have B return and call `push()`. Assert that B performs a full re-sync
-  (local SSTables replaced) and that `get` for the deleted key returns
-  null on every device.
-- **Expected result:** the returning device does not resurrect the
-  deleted key; A's local state stays consistent with the cloud.
+- **Steps:** drive A through delete + two advance-pushes so its local store has
+  GC'd the tombstone. Configure B's `staleDeviceEvictionAfter` short enough that
+  B's injected stale HWM evicts B from A's horizon, but use a separate eviction
+  setting on B to control re-admission detection. Have B return and call
+  `push()`. Assert that B performs a full re-sync (local SSTables replaced) and
+  that `get` for the deleted key returns null on every device.
+- **Expected result:** the returning device does not resurrect the deleted key;
+  A's local state stays consistent with the cloud.
 - **Related:** `docs/spec/06_storage_engine.md`, `docs/spec/12_sync.md`,
   `docs/plans/completed/plan_tombstone_gc_stale_eviction.md`,
   `docs/plans/plan_harness_mixed_storage.md`.
@@ -217,8 +216,8 @@ For each release:
 
 - **Area:** document versioning (§26), tombstone GC ingest floor (H4-FU3)
 - **Validates:** that purging `$ver:` history on one device cannot cause a
-  resurrection on another device, and that an old peer SSTable carrying
-  both below-floor main-namespace entries and old `$ver:` history is rejected
+  resurrection on another device, and that an old peer SSTable carrying both
+  below-floor main-namespace entries and old `$ver:` history is rejected
   wholesale by the ingest-floor guard without causing incorrect trim or
   resurrection.
 - **Why not automated:** requires two independent device databases (different
@@ -227,8 +226,8 @@ For each release:
   in-process harness cannot reproduce the timing of compaction, clock advance,
   and SSTable ingest from a peer.
 - **Applies when:** changes to `VersionRetentionPolicy.filterGroup`,
-  `KvStoreImpl.ingestSstable`, `LsmEngine._computeTombstoneHorizon`,
-  or `VersionConfig` defaults.
+  `KvStoreImpl.ingestSstable`, `LsmEngine._computeTombstoneHorizon`, or
+  `VersionConfig` defaults.
 - **Steps:**
   1. Device A writes a doc, then deletes it. Device B pulls the SSTable.
   2. Advance both devices' clocks by more than `retentionDays` (default 90 days
@@ -249,17 +248,19 @@ For each release:
   `docs/spec/12_sync.md`, `docs/plans/plan_document_versioning.md`.
 
 ### RC-9 — Real-service cloud-soak via the harness framework
+
 - **Area:** cloud sync
 - **Validates:** that a full multi-device `SyncEngine` push/pull cycle converges
-  correctly against a *real* cloud service (e.g. Google Drive, Dropbox), using
+  correctly against a _real_ cloud service (e.g. Google Drive, Dropbox), using
   the same harness scenarios that run in CI against the behavioural simulator.
   This confirms the simulator's fidelity and catches provider behaviour that the
-  simulator does not model exactly (rate limits, real propagation timing, service
-  outages).
+  simulator does not model exactly (rate limits, real propagation timing,
+  service outages).
 - **Why not automated:** requires real credentials and service access, consumes
   quota, is non-deterministic, and is slow. Runs in-sandbox are unsuitable.
 - **Applies when:** before any release that ships or changes a cloud adapter;
-  after any change to `SyncEngine` push/pull logic or `ConsolidationCoordinator`.
+  after any change to `SyncEngine` push/pull logic or
+  `ConsolidationCoordinator`.
 - **Prerequisites:** provider credentials configured (e.g.
   `GOOGLE_DRIVE_TEST_CREDENTIALS`); a shared folder/bucket; the provider's
   `QuotaAwareAdapter` configured with a safe threshold.
@@ -273,8 +274,8 @@ For each release:
   loss; consolidation behaves per the declared `CloudProfile` (single
   consolidator if atomic, gated/skipped if not).
 - **Related:** `docs/spec/27_test_harness.md` (§ Simulated vs real service),
-  `docs/plans/completed/plan_harness_mixed_storage.md`,
-  RC-2 (Drive-specific soak).
+  `docs/plans/completed/plan_harness_mixed_storage.md`, RC-2 (Drive-specific
+  soak).
 
 ### RC-10 — Web (OPFS SAHPool) crash/durability verification
 
@@ -344,25 +345,25 @@ For each release:
 ### RC-12 — iCloud (CloudKit) empirical behaviour probe
 
 **Summary:** Re-verify the Phase 4a empirical probe findings whenever iOS or
-macOS ships a major version that may change CloudKit's consistency or
-atomicity behaviour.  The probe confirms the values in `kICloudProfile` and
-the `ICloudAdapter.providesAtomicCas` setting.
+macOS ships a major version that may change CloudKit's consistency or atomicity
+behaviour. The probe confirms the values in `kICloudProfile` and the
+`ICloudAdapter.providesAtomicCas` setting.
 
 - **What to verify:**
-  1. Zone-level create-if-absent atomicity: two devices simultaneously create
-     a `CKRecord` with the same deterministic record ID in the same custom
-     zone. Confirm exactly one succeeds and the other receives
+  1. Zone-level create-if-absent atomicity: two devices simultaneously create a
+     `CKRecord` with the same deterministic record ID in the same custom zone.
+     Confirm exactly one succeeds and the other receives
      `CKError.serverRecordChanged`.
   2. Conditional update atomicity (`savePolicy: .ifServerRecordUnchanged`):
      concurrent updates with the same `recordChangeTag`. Confirm exactly one
      wins.
-  3. `CKQuery` BEGINSWITH consistency delay: time-to-visibility of a new
-     record to a second device.
+  3. `CKQuery` BEGINSWITH consistency delay: time-to-visibility of a new record
+     to a second device.
   4. `CKAsset` upload/download: verify large SSTables (≥10 MB) succeed.
   5. Rate-limit error shape: `CKError.requestRateLimited` and
      `CKErrorRetryAfterKey` availability.
-- **Why not automated:** requires a real CloudKit container with an active
-  Apple developer account; cannot be run in CI without Apple infrastructure.
+- **Why not automated:** requires a real CloudKit container with an active Apple
+  developer account; cannot be run in CI without Apple infrastructure.
 - **Applies when:** before any release that targets iOS or macOS; after any
   iOS/macOS major version bump; after updating `kICloudProfile` values or
   `ICloudAdapter.providesAtomicCas`.
@@ -371,7 +372,7 @@ the `ICloudAdapter.providesAtomicCas` setting.
   iOS or macOS devices (or one device + simulator) on the same iCloud account.
 - **Steps:** Run the probe app in `packages/kmdb_icloud/example/` on two
   devices; exercise each of the five verification points above and record the
-  observed CloudKit behaviour.  Update `kICloudProfile` and
+  observed CloudKit behaviour. Update `kICloudProfile` and
   `ICloudAdapter.providesAtomicCas` if the results differ from the current
   values.
 - **Expected result:** create-if-absent is atomic (single winner); conditional
@@ -392,18 +393,17 @@ contention test that exercises the lease protocol.
   1. Two devices write documents and sync; after 2–3 sync cycles both devices
      have identical data.
   2. The lease contention test: two devices simultaneously attempt to acquire
-     the consolidation lease.  Confirm the outcome is consistent with
-     `ICloudAdapter.providesAtomicCas` (if `false`, consolidation is skipped
-     on both; if `true`, exactly one wins and the lease is acquired safely).
-  3. No data loss across network interruptions (disable WiFi mid-sync, re-enable,
-     verify convergence).
-- **Why not automated:** requires a real CloudKit container and physical devices;
-  network interruption simulation is not reproducible in CI.
-- **Applies when:** before any public release of `kmdb_icloud`; after any
-  change to the `ICloudAdapter` CAS or zone logic; after Phase 4a values are
-  finalised.
-- **Prerequisites:** Apple developer account; CloudKit container; two devices
-  on the same iCloud account.
+     the consolidation lease. Confirm the outcome is consistent with
+     `ICloudAdapter.providesAtomicCas` (if `false`, consolidation is skipped on
+     both; if `true`, exactly one wins and the lease is acquired safely).
+  3. No data loss across network interruptions (disable WiFi mid-sync,
+     re-enable, verify convergence).
+- **Why not automated:** requires a real CloudKit container and physical
+  devices; network interruption simulation is not reproducible in CI.
+- **Applies when:** before any public release of `kmdb_icloud`; after any change
+  to the `ICloudAdapter` CAS or zone logic; after Phase 4a values are finalised.
+- **Prerequisites:** Apple developer account; CloudKit container; two devices on
+  the same iCloud account.
 - **Steps:** Use the `packages/kmdb_icloud/example/` app as the test vehicle.
   Run a full push/pull soak for ≥10 minutes with 2 devices, then run the
   contention scenario.
@@ -422,17 +422,17 @@ contention test that exercises the lease protocol.
   2. Verifies each file's SHA-256 against `ModelSpec.onnxSha256` /
      `ModelSpec.vocabSha256`.
   3. Atomically renames `.part` → final name only after verification passes.
-  4. Refuses to use a corrupt or tampered cached file (re-downloads on
-     checksum mismatch).
+  4. Refuses to use a corrupt or tampered cached file (re-downloads on checksum
+     mismatch).
   5. Handles a crash mid-download (stale `.part` file) correctly on next open
      (re-downloads without corrupting the cache directory).
-- **Why not automated:** requires real network access to the model CDN; the
-  file sizes are hundreds of MB; the crash-recovery test requires OS-level
-  process termination; the SHA-256 mismatch test requires network-level
-  interception or file mutation, which CI cannot reliably reproduce.
-- **Applies when:** `ModelDownloader` is introduced or its download/verify/rename
-  logic changes; before any release that ships download-on-demand model support;
-  when `ModelSpec` checksums are updated.
+- **Why not automated:** requires real network access to the model CDN; the file
+  sizes are hundreds of MB; the crash-recovery test requires OS-level process
+  termination; the SHA-256 mismatch test requires network-level interception or
+  file mutation, which CI cannot reliably reproduce.
+- **Applies when:** `ModelDownloader` is introduced or its
+  download/verify/rename logic changes; before any release that ships
+  download-on-demand model support; when `ModelSpec` checksums are updated.
 - **Prerequisites:** network access to `huggingface.co` (or the configured CDN);
   an empty or warm `~/.kmdb_cache`; a way to mutate a cached file or inject a
   bad checksum.
@@ -472,8 +472,8 @@ contention test that exercises the lease protocol.
      successful download (atomic-rename discipline holds).
   6. Re-running `dart test` with a warm cache skips the download (short-circuit
      check passes).
-- **Why not automated:** `OnnxRuntime.load()` calls `DynamicLibrary.open` with
-  a platform-specific short name (`libonnxruntime.dylib`, `libonnxruntime.so`,
+- **Why not automated:** `OnnxRuntime.load()` calls `DynamicLibrary.open` with a
+  platform-specific short name (`libonnxruntime.dylib`, `libonnxruntime.so`,
   `onnxruntime.dll`). Under plain `dart test` JIT mode the Dart SDK does not
   inject the native-assets directory onto the OS library-search path for
   filename-based opens, so all OnnxSession tests in
@@ -489,21 +489,20 @@ contention test that exercises the lease protocol.
   - macOS, Linux, or Windows native build environment.
   - Network access to `github.com/microsoft/onnxruntime/releases`.
   - Real SHA-256 checksums filled in `_sha256Manifest` in `hook/build.dart`
-    (currently placeholder zeros for v1.22.0 — replace before release; see
-    the TODO comment in that file).
+    (currently placeholder zeros for v1.22.0 — replace before release; see the
+    TODO comment in that file).
 - **Steps:**
   1. From `betto_onnxrt/` root, run `dart test` to confirm the non-FFI tests
      pass and the OnnxSession tests are correctly skipped.
   2. Fill in `_sha256Manifest` checksums for the target platform artifact (see
-     the TODO in `hook/build.dart`; obtain with
-     `curl -fsSL <url> | sha256sum`).
+     the TODO in `hook/build.dart`; obtain with `curl -fsSL <url> | sha256sum`).
   3. Run `dart build cli --output build/` (requires a minimal `bin/` entry
      point, or use a scratch Flutter app that declares `betto_onnxrt` as a
-     dependency). Verify the build completes without hook errors and the
-     library is staged under `.dart_tool/betto_onnxrt/{version}/`.
-  4. Set `DYLD_LIBRARY_PATH` (macOS) or `LD_LIBRARY_PATH` (Linux) to the
-     staged library directory and run `dart test test/onnx_session_test.dart`.
-     Verify all 6 OnnxSession tests pass (no skips).
+     dependency). Verify the build completes without hook errors and the library
+     is staged under `.dart_tool/betto_onnxrt/{version}/`.
+  4. Set `DYLD_LIBRARY_PATH` (macOS) or `LD_LIBRARY_PATH` (Linux) to the staged
+     library directory and run `dart test test/onnx_session_test.dart`. Verify
+     all 6 OnnxSession tests pass (no skips).
   5. Confirm no `.part` files remain in `.dart_tool/betto_onnxrt/`.
   6. Run again to confirm the short-circuit (no re-download).
 - **Expected result:** All OnnxSession tests pass; identity model outputs match
@@ -519,19 +518,20 @@ contention test that exercises the lease protocol.
 - **Area:** encryption / platform (web)
 - **Validates:**
   1. Argon2id key derivation completes in a reasonable time on a web browser
-     (target: ≤ 5 s on a mid-range device) using the default parameters
-     (m = 64 MiB, t = 3, p = 1).
+     (target: ≤ 5 s on a mid-range device) using the default parameters (m = 64
+     MiB, t = 3, p = 1).
   2. Re-deriving the KEK on every `KmdbDatabase.open()` call (because
-     `InMemoryDekCache` is session-scoped and does not persist across page loads)
-     is acceptable UX — or a loading indicator is shown.
+     `InMemoryDekCache` is session-scoped and does not persist across page
+     loads) is acceptable UX — or a loading indicator is shown.
   3. The first encrypted write after `open()` succeeds (Argon2id is fully
      initialised before `open()` returns).
-- **Why not automated:** `dart test -p chrome` runs in a sandboxed Worker context
-  with memory limits that may not reflect real-device Argon2id performance.
-  Timing is browser- and device-dependent; pass/fail thresholds are
+- **Why not automated:** `dart test -p chrome` runs in a sandboxed Worker
+  context with memory limits that may not reflect real-device Argon2id
+  performance. Timing is browser- and device-dependent; pass/fail thresholds are
   human-judged.
 - **Applies when:** before any release that ships database encryption on a web
-  target; after changes to Argon2id parameters or the WASM compression init path.
+  target; after changes to Argon2id parameters or the WASM compression init
+  path.
 - **Prerequisites:** a Chromium-based browser; the KMDB web demo or a test page
   that calls `KmdbDatabase.open()` with an `EncryptionConfig`.
 - **Steps:**
@@ -557,8 +557,8 @@ contention test that exercises the lease protocol.
   `macos-latest`); the iOS manifest is human-only because the example app has no
   iOS target and CloudKit requires a real entitlement.
 - **Why not automated:** No iOS Simulator CI lane exists for `kmdb_icloud`.
-  CloudKit requires a real Apple developer entitlement that cannot be provisioned
-  in CI.
+  CloudKit requires a real Apple developer entitlement that cannot be
+  provisioned in CI.
 - **Applies when:** Releasing any version of `kmdb_icloud` that includes the SPM
   manifest change (`ios/kmdb_icloud/Package.swift`) or any subsequent
   modification to the Swift source in `ios/kmdb_icloud/Sources/kmdb_icloud/`.
@@ -576,8 +576,8 @@ contention test that exercises the lease protocol.
      Package Manager" warning for `kmdb_icloud`.
   3. Build and run the app on an iOS Simulator with CocoaPods disabled (use
      `--no-codesign` or SPM-only mode: remove `Podfile` from the iOS target).
-  4. Confirm the plugin registers without linker errors and that `import Flutter`
-     resolves correctly.
+  4. Confirm the plugin registers without linker errors and that
+     `import Flutter` resolves correctly.
   5. Send a method call to the `kmdb_icloud/sync` channel (e.g. `initialize`)
      and confirm the plugin responds.
 - **Expected result:** App launches on the iOS Simulator; the plugin channel
@@ -593,41 +593,44 @@ contention test that exercises the lease protocol.
 
 - **Area:** encryption / platform (Flutter mobile/desktop)
 - **Validates:**
-  1. `FlutterSecureDekCache` persists the DEK across app restarts: store DEK
-     → kill app process → relaunch → `read` returns the DEK without re-prompting
+  1. `FlutterSecureDekCache` persists the DEK across app restarts: store DEK →
+     kill app process → relaunch → `read` returns the DEK without re-prompting
      the user for their passphrase.
   2. `KmdbFlutter.initialize()` actually enables native AES-256-GCM and Argon2id
-     hardware acceleration on a real device (i.e. `FlutterCryptography.isPluginPresent`
-     is `true` after the call and operations are measurably faster than the
-     pure-Dart path).
+     hardware acceleration on a real device (i.e.
+     `FlutterCryptography.isPluginPresent` is `true` after the call and
+     operations are measurably faster than the pure-Dart path).
   3. Passphrase unlock latency is acceptable on a mid-range mobile device
-     (Argon2id ≤ 2 s with native acceleration; the pure-Dart path may reach 10+ s
-     on low-end hardware).
+     (Argon2id ≤ 2 s with native acceleration; the pure-Dart path may reach 10+
+     s on low-end hardware).
 - **Why not automated:** `flutter_secure_storage` platform-channel calls are
   mocked in `flutter_test`; the real Keychain/Keystore write-then-kill-then-read
-  cycle requires a physical or simulator device.  Native crypto acceleration
-  is confirmed by `FlutterCryptography.isPluginPresent`, which is always `false`
-  under `flutter_test`.  Timing depends on device hardware and cannot be
-  asserted in a headless test.
+  cycle requires a physical or simulator device. Native crypto acceleration is
+  confirmed by `FlutterCryptography.isPluginPresent`, which is always `false`
+  under `flutter_test`. Timing depends on device hardware and cannot be asserted
+  in a headless test.
 - **Applies when:** `kmdb_flutter` is introduced or updated; before any release
   that ships `kmdb_flutter` as a recommended add-on; after changes to
   `FlutterSecureDekCache` or `KmdbFlutter.initialize()`.
 - **Prerequisites:** an iOS simulator or device (for Keychain) or Android
-  emulator/device (for Keystore); Xcode or Android Studio; Flutter SDK installed.
+  emulator/device (for Keystore); Xcode or Android Studio; Flutter SDK
+  installed.
 - **Steps:**
   1. Build and run the `packages/kmdb_flutter/example/` app on an iOS simulator
      or Android emulator.
-  2. Open an encrypted database with `EncryptionConfig(passphrase: 'test',
-     dekCache: FlutterSecureDekCache())`.  Verify the app opens without error.
-  3. Write a document (to confirm encryption is active) and close the app process
-     (terminate, not just background).
-  4. Relaunch the app and reopen the same database path.  Verify:
-     a. No passphrase prompt appears — the DEK was loaded from Keychain/Keystore.
-     b. The previously written document is readable.
-  5. Inspect `FlutterCryptography.isPluginPresent` after `KmdbFlutter.initialize()`;
-     confirm it is `true`.
+  2. Open an encrypted database with
+     `EncryptionConfig(passphrase: 'test', dekCache: FlutterSecureDekCache())`.
+     Verify the app opens without error.
+  3. Write a document (to confirm encryption is active) and close the app
+     process (terminate, not just background).
+  4. Relaunch the app and reopen the same database path. Verify: a. No
+     passphrase prompt appears — the DEK was loaded from Keychain/Keystore. b.
+     The previously written document is readable.
+  5. Inspect `FlutterCryptography.isPluginPresent` after
+     `KmdbFlutter.initialize()`; confirm it is `true`.
   6. Time a passphrase unlock with and without `initialize()` on a mid-range
-     device; confirm the native path is faster (target: ≤ 2 s; pure-Dart: ≥ 5 s).
+     device; confirm the native path is faster (target: ≤ 2 s; pure-Dart: ≥ 5
+     s).
 - **Expected result:** steps 3–4 confirm DEK persistence; step 5 confirms plugin
   registration; step 6 confirms measurable acceleration on real hardware.
 - **Related:** `docs/plans/completed/plan_kmdb_flutter.md`,
@@ -638,6 +641,6 @@ contention test that exercises the lease protocol.
 
 ## Release log
 
-| Version | Date | Tester | Checks run | Result | Notes |
-| ------- | ---- | ------ | ---------- | ------ | ----- |
+| Version      | Date         | Tester | Checks run  | Result      | Notes              |
+| ------------ | ------------ | ------ | ----------- | ----------- | ------------------ |
 | _e.g. 0.x.0_ | _YYYY-MM-DD_ | _name_ | _RC-1…RC-5_ | _pass/fail_ | _link to evidence_ |

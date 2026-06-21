@@ -1,9 +1,4 @@
----
-title: "§27 Test Harness"
-nav_order: 27
----
-
-# §27 Test Harness
+# Test Harness
 
 ## Purpose and scope
 
@@ -59,15 +54,15 @@ does not call internal KMDB methods.
 
 Action types:
 
-| Action              | Description                                                    |
-| ------------------- | -------------------------------------------------------------- |
-| `CreateDb`          | Initialises a new `KmdbDatabase` on the device                 |
-| `CreateCollection`  | Creates a named `KmdbCollection` on an initialised device      |
-| `Put`               | Writes a generated document to a randomly-selected key pool    |
-| `Get`               | Reads a document by key                                        |
-| `Delete`            | Deletes a document                                             |
-| `Sync`              | Triggers push/pull with the remote sync adapter                |
-| `NetworkPartition`  | Injects or restores a connectivity failure on the target device |
+| Action             | Description                                                     |
+| ------------------ | --------------------------------------------------------------- |
+| `CreateDb`         | Initialises a new `KmdbDatabase` on the device                  |
+| `CreateCollection` | Creates a named `KmdbCollection` on an initialised device       |
+| `Put`              | Writes a generated document to a randomly-selected key pool     |
+| `Get`              | Reads a document by key                                         |
+| `Delete`           | Deletes a document                                              |
+| `Sync`             | Triggers push/pull with the remote sync adapter                 |
+| `NetworkPartition` | Injects or restores a connectivity failure on the target device |
 
 ### Device
 
@@ -97,8 +92,8 @@ without crashing the harness.
 
 Maintains two append-only in-memory logs and is the harness's source of truth:
 
-**Write log**: `(actionId, deviceId, collectionName, key, hlcEncoded, document,
-isDelete)`
+**Write log**:
+`(actionId, deviceId, collectionName, key, hlcEncoded, document, isDelete)`
 
 **Sync log**: `(actionId, deviceId, direction, sstablesTransferred, completed)`
 
@@ -132,25 +127,25 @@ Fork events appear in the `HarnessReport` regardless of pass/fail status.
 
 ## Configuration knobs
 
-| Knob                   | Type                  | Default    | Notes                                             |
-| ---------------------- | --------------------- | ---------- | ------------------------------------------------- |
-| `deviceCount`          | `int`                 | 3          | Total simulated devices                           |
-| `preSeededDeviceCount` | `int`                 | 1          | Devices initialised with data before run starts   |
-| `collectionCount`      | `int`                 | 10         | Collections created per device                    |
-| `duration`             | `Duration`            | 10 minutes | Total test run time                               |
-| `velocityPreset`       | `VelocityPreset?`     | `null`     | Convenience preset; `null` = supply knobs manually |
-| `actionsPerMinute`     | `int?`                | from preset | Per-active-device write/read rate                |
-| `simultaneousDevices`  | `int?`                | from preset | Devices active concurrently                      |
-| `syncIntervalSeconds`  | `int?`                | from preset | Time-driven sync trigger                         |
-| `syncAfterWrites`      | `int?`                | from preset | Write-count-driven sync trigger                  |
-| `syncAdapter`          | `SyncStorageAdapter?`                   | —          | Single shared adapter for all devices (convenience form). Mutually exclusive with `syncAdapterFactory`. |
-| `syncAdapterFactory`   | `SyncStorageAdapter Function(int)?`     | —          | Per-device adapter factory. Called once per device with the 0-based device index. Mutually exclusive with `syncAdapter`. |
-| `prngseed`             | `int?`                                  | `null`     | Fixed seed for seeded mode; `null` = fuzz mode |
-| `keyPoolRatios`        | `KeyPoolRatios`                         | 50/40/10   | Shared / device-local / hot key mix |
-| `docSizeDistribution`  | `DocSizeDistribution`                   | 60/30/10   | Small / medium / large document mix |
+| Knob                   | Type                                | Default     | Notes                                                                                                                    |
+| ---------------------- | ----------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `deviceCount`          | `int`                               | 3           | Total simulated devices                                                                                                  |
+| `preSeededDeviceCount` | `int`                               | 1           | Devices initialised with data before run starts                                                                          |
+| `collectionCount`      | `int`                               | 10          | Collections created per device                                                                                           |
+| `duration`             | `Duration`                          | 10 minutes  | Total test run time                                                                                                      |
+| `velocityPreset`       | `VelocityPreset?`                   | `null`      | Convenience preset; `null` = supply knobs manually                                                                       |
+| `actionsPerMinute`     | `int?`                              | from preset | Per-active-device write/read rate                                                                                        |
+| `simultaneousDevices`  | `int?`                              | from preset | Devices active concurrently                                                                                              |
+| `syncIntervalSeconds`  | `int?`                              | from preset | Time-driven sync trigger                                                                                                 |
+| `syncAfterWrites`      | `int?`                              | from preset | Write-count-driven sync trigger                                                                                          |
+| `syncAdapter`          | `SyncStorageAdapter?`               | —           | Single shared adapter for all devices (convenience form). Mutually exclusive with `syncAdapterFactory`.                  |
+| `syncAdapterFactory`   | `SyncStorageAdapter Function(int)?` | —           | Per-device adapter factory. Called once per device with the 0-based device index. Mutually exclusive with `syncAdapter`. |
+| `prngseed`             | `int?`                              | `null`      | Fixed seed for seeded mode; `null` = fuzz mode                                                                           |
+| `keyPoolRatios`        | `KeyPoolRatios`                     | 50/40/10    | Shared / device-local / hot key mix                                                                                      |
+| `docSizeDistribution`  | `DocSizeDistribution`               | 60/30/10    | Small / medium / large document mix                                                                                      |
 
-Exactly one of `syncAdapter` or `syncAdapterFactory` must be set; providing
-both or neither raises `ArgumentError`. The convenience helper
+Exactly one of `syncAdapter` or `syncAdapterFactory` must be set; providing both
+or neither raises `ArgumentError`. The convenience helper
 `resolveAdapter(deviceId)` returns the adapter for a given device index,
 handling both forms transparently.
 
@@ -206,9 +201,8 @@ device's last completed pull. When a fork is detected:
 
 1. A `ForkEvent` is created capturing both writes and the LWW winner.
 2. The event is appended to `forkEvents`.
-3. After the next completed sync, the agent verifies that the actual value
-   (as read from the device) matches the LWW winner. A mismatch is a test
-   failure.
+3. After the next completed sync, the agent verifies that the actual value (as
+   read from the device) matches the LWW winner. A mismatch is a test failure.
 
 ---
 
@@ -216,36 +210,36 @@ device's last completed pull. When a fork is detected:
 
 All documents share a fixed schema:
 
-| Field    | Type           | Notes                        |
-| -------- | -------------- | ---------------------------- |
-| `title`  | `String`       | Short random text            |
-| `body`   | `String`       | Variable-length; size tier   |
-| `count`  | `int`          | Random integer               |
-| `active` | `bool`         | Random boolean               |
-| `tags`   | `List<String>` | 0–5 random short strings     |
+| Field    | Type           | Notes                      |
+| -------- | -------------- | -------------------------- |
+| `title`  | `String`       | Short random text          |
+| `body`   | `String`       | Variable-length; size tier |
+| `count`  | `int`          | Random integer             |
+| `active` | `bool`         | Random boolean             |
+| `tags`   | `List<String>` | 0–5 random short strings   |
 
 There is no `attachment` / Vault URI field. The Large size tier is achieved
 entirely through an extended `body` string — no blob or Vault interaction.
 
 ### Size tiers
 
-| Tier   | Approximate encoded size | `body` length   |
-| ------ | ------------------------ | --------------- |
-| Small  | ~100 B                   | ~60 chars       |
-| Medium | ~10 KB                   | ~6 000 chars    |
-| Large  | ~500 KB                  | ~300 000 chars  |
+| Tier   | Approximate encoded size | `body` length  |
+| ------ | ------------------------ | -------------- |
+| Small  | ~100 B                   | ~60 chars      |
+| Medium | ~10 KB                   | ~6 000 chars   |
+| Large  | ~500 KB                  | ~300 000 chars |
 
 ### Key pools
 
-| Pool         | Description                                                              |
-| ------------ | ------------------------------------------------------------------------ |
+| Pool         | Description                                                             |
+| ------------ | ----------------------------------------------------------------------- |
 | Shared       | Pre-distributed to all devices; writes deliberately collide for LWW     |
-| Device-local | Owned by a single device; tests non-conflicting write arrival on peers   |
-| Hot          | Small shared subset at high write frequency; exercises rapid-succession  |
+| Device-local | Owned by a single device; tests non-conflicting write arrival on peers  |
+| Hot          | Small shared subset at high write frequency; exercises rapid-succession |
 
-Keys are deterministic UUIDv7 hex strings derived from the pool label and
-index — they are reproducible across runs with the same configuration,
-regardless of PRNG seed.
+Keys are deterministic UUIDv7 hex strings derived from the pool label and index
+— they are reproducible across runs with the same configuration, regardless of
+PRNG seed.
 
 ### PRNG modes
 
@@ -269,21 +263,22 @@ across "devices" that masks bugs that only occur per-device).
 
 The `syncAdapterFactory: SyncStorageAdapter Function(int deviceId)` parameter
 allows each simulated device to receive its own adapter instance. All instances
-should front the same `SharedCloudBackend` to ensure they share a logical remote.
+should front the same `SharedCloudBackend` to ensure they share a logical
+remote.
 
 ### `SharedCloudBackend` and front-end adapters
 
 `SharedCloudBackend` (`package:kmdb/kmdb_test_cloud_support.dart`) is the
 canonical in-memory backing store for multi-device tests. It owns a file map
-where every write is stamped with a monotonically-increasing global
-`writeSeq`. All per-device adapters reference the same backend object.
+where every write is stamped with a monotonically-increasing global `writeSeq`.
+All per-device adapters reference the same backend object.
 
 Two front-end adapter types are provided:
 
-| Front-end | Type | Consistency | `providesAtomicCas` |
-|---|---|---|---|
-| `SharedBackendAdapter` | Strongly-consistent direct view | All writes immediately visible | `true` |
-| `CloudSemanticsAdapter` | Eventual-consistency decorator | Writes visible after `advancePropagationClock()` | per `CloudProfile.atomicConditionalCreate` |
+| Front-end               | Type                            | Consistency                                      | `providesAtomicCas`                        |
+| ----------------------- | ------------------------------- | ------------------------------------------------ | ------------------------------------------ |
+| `SharedBackendAdapter`  | Strongly-consistent direct view | All writes immediately visible                   | `true`                                     |
+| `CloudSemanticsAdapter` | Eventual-consistency decorator  | Writes visible after `advancePropagationClock()` | per `CloudProfile.atomicConditionalCreate` |
 
 ### `CloudProfile`
 
@@ -297,24 +292,25 @@ observable behaviour. The profile drives:
 
 Two built-in profiles ship with the framework:
 
-| Profile | Consistency | `providesAtomicCas` | Use case |
-|---|---|---|---|
-| `CloudProfile.strong()` | Strong | `true` | Baseline (existing behaviour) |
-| `CloudProfile.eventual(maxPropagationDelayMs: N)` | Eventual | `false` | Delayed-visibility scenarios |
+| Profile                                           | Consistency | `providesAtomicCas` | Use case                      |
+| ------------------------------------------------- | ----------- | ------------------- | ----------------------------- |
+| `CloudProfile.strong()`                           | Strong      | `true`              | Baseline (existing behaviour) |
+| `CloudProfile.eventual(maxPropagationDelayMs: N)` | Eventual    | `false`             | Delayed-visibility scenarios  |
 
-Provider-specific profiles (e.g. a Drive profile with `allowsDuplicateNames: true`)
-ship in their respective provider packages.
+Provider-specific profiles (e.g. a Drive profile with
+`allowsDuplicateNames: true`) ship in their respective provider packages.
 
 ### Mixed-mode: one remote, two views
 
 "Mixed-mode" means one shared `SharedCloudBackend` accessed by two different
-adapter front-ends — for example, device 0 reaches it via a `CloudSemanticsAdapter`
-(simulating REST access) while device 1 reaches it via a `SharedBackendAdapter`
-(simulating FS-like access). This tests that a file written via REST is correctly
-seen by the FS-view device and vice versa.
+adapter front-ends — for example, device 0 reaches it via a
+`CloudSemanticsAdapter` (simulating REST access) while device 1 reaches it via a
+`SharedBackendAdapter` (simulating FS-like access). This tests that a file
+written via REST is correctly seen by the FS-view device and vice versa.
 
-**True FS-and-REST-bridged-to-different-stores is not a real deployment** — a user
-picks one remote — so the harness never synthesises a bridge between distinct stores.
+**True FS-and-REST-bridged-to-different-stores is not a real deployment** — a
+user picks one remote — so the harness never synthesises a bridge between
+distinct stores.
 
 ```dart
 final backend = SharedCloudBackend();
@@ -335,21 +331,22 @@ final config = HarnessConfig(
 ### Eventual-consistency visibility model
 
 When a `CloudSemanticsAdapter` is used, a completed sync may observe only a
-subset of prior peer pushes (those whose `writeSeq` is at or below the
-adapter's visibility cursor). The `ReconciliationAgent` tracks a
-`visibleWriteSeqHigh` field on each completed `ActionResult` and uses
-`visibleExpectedStateFor(deviceId, seqHigh)` to merge only the visible
-subset — not the full global state. This prevents false failures from
-delayed-visibility runs.
+subset of prior peer pushes (those whose `writeSeq` is at or below the adapter's
+visibility cursor). The `ReconciliationAgent` tracks a `visibleWriteSeqHigh`
+field on each completed `ActionResult` and uses
+`visibleExpectedStateFor(deviceId, seqHigh)` to merge only the visible subset —
+not the full global state. This prevents false failures from delayed-visibility
+runs.
 
 After the run loop, `TestManager._settleAndVerifyConvergence()`:
-1. Advances the propagation clock on all `CloudSemanticsAdapter` fronts
-   (making all writes visible).
+
+1. Advances the propagation clock on all `CloudSemanticsAdapter` fronts (making
+   all writes visible).
 2. Forces a final `syncForVerification()` on all devices.
 
 Global convergence is then asserted implicitly by the verdict comparison.
 
-**Fork detection is unchanged.** `_detectFork` keys on write *ordering*, not
+**Fork detection is unchanged.** `_detectFork` keys on write _ordering_, not
 propagation. Delayed visibility does not affect fork detection and must not be
 used to modify `_detectFork`.
 
@@ -362,9 +359,10 @@ comes from the **behavioural simulator**. The framework supports both with the
 same harness scenarios by switching the per-device adapter factory.
 
 Every cloud provider package must ship:
+
 - Its real adapter.
-- A behavioural API simulator (fake `http.Client` implementing provider
-  REST endpoints with realistic semantics).
+- A behavioural API simulator (fake `http.Client` implementing provider REST
+  endpoints with realistic semantics).
 - A `CloudProfile` instance for that provider.
 
 Real-service soak runs are reserved for pre-release (see §28 RC-2, RC-9).
@@ -396,14 +394,14 @@ constraint. This covers `MemorySyncAdapter`, `LocalDirectoryAdapter`, and
 
 Fields:
 
-| Field            | Type                   | Description                               |
-| ---------------- | ---------------------- | ----------------------------------------- |
-| `prngseed`       | `int`                  | PRNG seed used for this run               |
-| `deviceVerdicts` | `List<DeviceVerdict>`  | Per-device pass/fail, with key breakdown  |
-| `forkRecords`    | `List<ForkRecord>`     | All detected forks with LWW outcome       |
-| `noOpCounts`     | `List<NoOpCount>`      | Per-device no-op action counts            |
-| `totalActions`   | `int`                  | Total actions executed across all devices |
-| `durationMs`     | `int`                  | Elapsed wall-clock time in milliseconds   |
+| Field            | Type                  | Description                               |
+| ---------------- | --------------------- | ----------------------------------------- |
+| `prngseed`       | `int`                 | PRNG seed used for this run               |
+| `deviceVerdicts` | `List<DeviceVerdict>` | Per-device pass/fail, with key breakdown  |
+| `forkRecords`    | `List<ForkRecord>`    | All detected forks with LWW outcome       |
+| `noOpCounts`     | `List<NoOpCount>`     | Per-device no-op action counts            |
+| `totalActions`   | `int`                 | Total actions executed across all devices |
+| `durationMs`     | `int`                 | Elapsed wall-clock time in milliseconds   |
 
 ---
 
@@ -429,8 +427,8 @@ sync protocol.
 ## Known limitations and edge cases
 
 - **Preset 5 non-determinism** — Dart isolate scheduling is not deterministic.
-  The same seed will not produce the same action interleaving across two preset 5
-  runs. Flakiness detection is documented as not applicable in preset 5.
+  The same seed will not produce the same action interleaving across two preset
+  5 runs. Flakiness detection is documented as not applicable in preset 5.
 
 - **`maxValueBytes` proximity** — the Large tier (~500 KB after encoding) is
   within the default 1 MiB limit but close. The harness overrides
