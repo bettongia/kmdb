@@ -2,7 +2,7 @@
 
 **Status**: Complete
 
-**PR link**: (see below)
+**PR link**: https://github.com/bettongia/kmdb/pull/50
 
 ## Problem statement
 
