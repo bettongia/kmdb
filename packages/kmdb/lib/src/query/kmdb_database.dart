@@ -206,7 +206,7 @@ final class KmdbDatabase {
   /// The active encryption provider, or `null` for plaintext databases.
   ///
   /// Threaded into every [ValueCodec] call site so that all stored values
-  /// (documents, `$index:`, `$ver:`, `$vault`, `$cache`) are encrypted
+  /// (documents, `$$index:`, `$ver:`, `$vault`, `$cache`) are encrypted
   /// uniformly. Exposed to [KmdbCollection] via the [encryption] getter.
   final EncryptionProvider? _encryption;
   final List<FtsIndexDefinition> _ftsIndexes;
@@ -939,7 +939,7 @@ final class KmdbDatabase {
   /// index maintenance.
   VecManager? get vecManager => _vecManager;
 
-  /// Rebuilds all stale or undefined `$vec:` indexes in the foreground.
+  /// Rebuilds all stale or undefined `$$vec:` indexes in the foreground.
   ///
   /// Calls [VecManager.reindex] on the underlying vector manager. This is a
   /// foreground operation — it blocks until all stale indexes have been fully

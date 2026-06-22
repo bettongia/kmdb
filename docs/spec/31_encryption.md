@@ -272,13 +272,15 @@ final doc   = await ValueCodec.decode(bytes, encryption: _db.encryption);
 All call sites in `KmdbCollection`, `IndexManager`, `VersionManager`, and
 `VaultRefInterceptor` receive the provider from `KmdbDatabase.encryption`.
 
-System namespace values (`$index:`, `$fts:`, `$vec:`, `$ver:`, `$vault:`) are
-whole-file synced to the cloud — there is no server-side namespace filtering.
-The **design intent** is that all index values are encrypted so cloud storage
-never sees plaintext document content. In practice there is a known gap:
-`FtsManager` and `VecManager` currently write their index values via raw
-`cbor.encode()`, not `ValueCodec.encode(encryption:)`, so `$fts:` and `$vec:`
-values are **not yet encrypted**. This is tracked as a defect in the v0.08
+System namespace values vary in their sync behaviour. `$ver:` and `$vault:`
+entries ride in syncable SSTables and reach the cloud. `$$index:`, `$$fts:`,
+and `$$vec:` entries are **local-only** — they are stored in `.local.sst` files
+and never uploaded (see §6 Flush Partitioning, §12). The **design intent** is
+that all index values are encrypted so disk storage never sees plaintext document
+content. In practice there is a known gap: `FtsManager` and `VecManager`
+currently write their index values via raw `cbor.encode()`, not
+`ValueCodec.encode(encryption:)`, so `$$fts:` and `$$vec:` values are **not yet
+encrypted**. This is tracked as a defect in the v0.08
 encryption reconciliation work item and will be corrected before the v1 beta.
 See the "Threat Model & Confidentiality Boundaries" section for the full picture
 of protected and unprotected surfaces.
@@ -470,7 +472,7 @@ sync:
 - **Document values** — encrypted via `ValueCodec.encode(encryption:)` before
   they enter the storage engine (see _Encoding Pipeline with Encryption_).
 - **System namespace values that pass through `ValueCodec`** — the _values_
-  stored under `$index:`, `$ver:`, `$vault:` ref-count entries, and `$cache:`
+  stored under `$$index:`, `$ver:`, `$vault:` ref-count entries, and `$cache:`
   materialised views (when the materialised-view cache is implemented) are
   encrypted, because their write paths thread the `EncryptionProvider` through
   `ValueCodec.encode` (see _Provider Threading_).
@@ -494,24 +496,26 @@ reason about the true confidentiality boundary.
 
 `FtsManager` and `VecManager` currently serialise their index entries with a
 direct `cbor.encode()` call rather than `ValueCodec.encode(encryption:)`. As a
-result, the _values_ stored under the `$fts:` and `$vec:` namespaces are **not
+result, the _values_ stored under the `$$fts:` and `$$vec:` namespaces are **not
 encrypted**, even when encryption is active.
 
 This **contradicts the claim made above in _Provider Threading_** (the statement
-that `$fts:` and `$vec:` values are encrypted). That claim is currently
-incorrect for FTS and Vec; it is accurate for `$index:`, `$ver:`, and `$vault:`.
+that `$$fts:` and `$$vec:` values are encrypted). That claim is currently
+incorrect for FTS and Vec; it is accurate for `$$index:`, `$ver:`, and `$vault:`.
 This is a code defect to be fixed by routing the FTS and Vec write paths through
-`ValueCodec`. Until it is fixed, `$fts:doc:` values in particular **leak the
-full tokenised term list of every document** to anyone with SSTable access.
+`ValueCodec`. Until it is fixed, `$$fts:doc:` values in particular **leak the
+full tokenised term list of every document** to anyone with local SSTable access.
 
 #### 2. FTS namespace names embed search terms (architectural limitation)
 
 The lexical index uses a namespace-per-term layout,
-`$fts:{ns}:{field}:{hexTerm}`, which embeds the (hex-encoded) search term
+`$$fts:{ns}:{field}:{hexTerm}`, which embeds the (hex-encoded) search term
 directly in the namespace name. Namespace names are part of the SSTable _key_
-and are **never encrypted**. An adversary with SSTable access can therefore
+and are **never encrypted**. An adversary with local SSTable access can therefore
 enumerate the entire **search vocabulary** of the database — every distinct term
-that appears in any indexed field — simply by scanning namespace names.
+that appears in any indexed field — simply by scanning namespace names. (These
+SSTables are local-only and never uploaded; the threat is a compromised local
+filesystem.)
 
 Closing this requires an architectural change to the FTS key layout and is under
 active research. It is documented here as a known limitation rather than a
@@ -519,7 +523,7 @@ defect that can be fixed by threading a provider.
 
 #### 3. Secondary index namespace names embed indexed values
 
-Secondary indexes use the layout `$index:{ns}:{field}:{value}`, which embeds the
+Secondary indexes use the layout `$$index:{ns}:{field}:{value}`, which embeds the
 **indexed field value** in the namespace name. As with FTS namespaces (gap 2),
 namespace names are part of the SSTable key and are never encrypted. This is not
 document content per se, but the indexed values drawn from documents — e.g.

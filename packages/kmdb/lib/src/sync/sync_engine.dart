@@ -223,15 +223,31 @@ final class SyncEngine {
     }
 
     // 3. List local SSTables — only include files belonging to this device
-    //    (named with our deviceId prefix) to avoid re-uploading peer files
-    //    that were ingested during pull.
+    //    (named with our deviceId prefix) and exclude local-only files
+    //    (`.local.sst` suffix). Local-only SSTables contain derived data
+    //    (FTS, vector, secondary indexes) that each device rebuilds locally;
+    //    uploading them would waste bandwidth and the receiving device would
+    //    discard them anyway.
+    //
+    //    Because `.local.sst` files end in `.sst`, they are included in the
+    //    `listFiles(extension: '.sst')` result. Parsing the filename via
+    //    [SstableInfo.parse] is the authoritative way to detect the suffix —
+    //    both the upload loop and the HWM fold iterate `ownLocalFiles`, so
+    //    excluding here covers both in one place.
     final localFiles = await _localAdapter.listFiles(
       _sstDir,
       extension: '.sst',
     );
-    final ownLocalFiles = localFiles
-        .where((f) => _safeDeviceId(f) == _deviceId)
-        .toSet();
+    final ownLocalFiles = localFiles.where((f) {
+      if (_safeDeviceId(f) != _deviceId) return false;
+      // Exclude local-only SSTables by parsing the filename.
+      try {
+        return !SstableInfo.parse(f).localOnly;
+      } catch (_) {
+        // Unparseable filename — treat as syncable to be conservative.
+        return true;
+      }
+    }).toSet();
 
     // 4. List remote SSTables.
     final remoteFiles = (await _cloudAdapter.list(

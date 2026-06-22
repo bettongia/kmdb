@@ -28,7 +28,8 @@ import '../util/hlc.dart';
 /// ## System namespaces
 ///
 /// Namespaces prefixed with `$` are reserved for internal use (e.g. `$meta`,
-/// `$index:...`). Client code must not read or write these directly.
+/// `$$index:…`, `$$fts:…`, `$$vec:…`). Client code must not read or write
+/// these directly.
 ///
 /// ## Thread safety
 ///

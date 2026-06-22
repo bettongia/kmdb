@@ -7,7 +7,8 @@
    point.
 3. Insert the key into the in-memory memtable (skip list).
 4. If the memtable has reached the flush threshold (64KB): flush synchronously
-   to a new L0 SSTable, update the Manifest, rotate the WAL, check the
+   to **up to two L0 SSTables** (see *Flush Partitioning* below), update the
+   Manifest with a single atomic VersionEdit, rotate the WAL, check the
    single-file shortcut, trigger L0 compaction if needed.
 5. Return success to the caller.
 
@@ -57,6 +58,31 @@ state for the majority of users (< ~300 documents at 2KB avg):
 The shortcut is evaluated after every flush and compaction and engages silently
 — no API or behaviour change for the caller.
 
+## Flush Partitioning (local-only namespace segregation)
+
+At flush time the frozen memtable is **partitioned into two writers** by the
+`isLocalOnly(namespace)` predicate (`namespace.startsWith(r'$$')`):
+
+- **Syncable writer** — receives entries from user namespaces and non-`$$`
+  system namespaces (`$meta`, `$cache`, `$ver:`, etc.). Produces
+  `{deviceId}-{minHlc}-{maxHlc}.sst` if non-empty.
+- **Local-only writer** — receives entries from `$$`-prefixed derived-data
+  namespaces (`$$fts:*`, `$$vec:*`, `$$index:*`). Produces
+  `{deviceId}-{minHlc}-{maxHlc}.local.sst` if non-empty.
+
+**Empty-partition rule.** If a partition has zero entries, its writer is
+discarded — no file is created and no `SstableMeta` entry is added for it.
+
+**Single atomic Manifest append.** A single `VersionEdit` carrying up to two
+`SstableMeta` entries (each with its `localOnly` flag) is appended after both
+files are written and fsynced. This preserves the crash-atomicity guarantee: a
+crash between the two file writes leaves both files on disk but neither
+referenced by the Manifest; crash recovery discards them as orphans.
+
+The same two-writer split is applied inside `CompactionJob.run()`, so all three
+call sites (`_compactAll`, `_compactL0ToL1`, `_compactL1ToL2`) partition their
+output without further changes to `LsmEngine`.
+
 ## Compaction
 
 All compaction uses an N-way merge iterator that yields entries in ascending
@@ -81,11 +107,15 @@ entry. The same argument extends across devices via HLC LWW.
 The transform consults a **per-namespace-class reclamation policy** for each
 group. The default policy collapses to the newest version (applied to every
 user namespace and to KMDB current-state system namespaces — `$meta`,
-`$cache`, `$index:`, `$fts:`, `$vec:`, `$sync`). A namespace whose policy
-returns `collapseVersions = false` is exempt and passes every version
+`$cache`, `$ver:`, `$sync`, and the local-only `$$` class). A namespace whose
+policy returns `collapseVersions = false` is exempt and passes every version
 through unchanged. The default registry exempts `$ver:` (document-versioning
 history); future history-bearing namespace classes can be registered the
 same way without touching the compaction code.
+
+`$$`-prefixed namespaces (`$$fts:`, `$$vec:`, `$$index:`) use a specialised
+`LocalOnlyCollapsePolicy` that relaxes the sync-horizon check for tombstone GC
+(see below).
 
 ### Reclamation: tombstone GC
 
@@ -125,6 +155,22 @@ The drop decision is made by the active `ReclamationPolicy.dropTombstone`
 predicate — see `lib/src/engine/compaction/reclamation_policy.dart`.
 `CollapseToNewestPolicy` (the default) drops when `allLevels && hlc <
 horizon`; `RetainAllVersionsPolicy` (registered for `$ver:`) never drops.
+
+**Local-only tombstone GC.** `$$`-prefixed namespaces use
+`LocalOnlyCollapsePolicy`, which relaxes condition (b) — the sync-horizon
+check is irrelevant because local-only data is never synced to other devices.
+The rule: a `$$`-namespace tombstone may be dropped whenever `allLevels` is
+`true`, regardless of the horizon. Condition (a) (`allLevels`) is **not**
+relaxed — dropping a local-only tombstone in a partial compaction would
+resurrect a deleted key from an un-compacted lower level, which is a
+correctness violation.
+
+**`tombstonesDropped` counts only syncable drops.** `CompactionJob` increments
+`tombstonesDropped` only when a tombstone in a *syncable* (non-`$$`) namespace
+is dropped. Local-only tombstones are elided from the output but not counted.
+`_compactAll` advances the GC floor only when `tombstonesDropped > 0`, which
+now correctly means "at least one syncable tombstone was GC'd." A compaction
+that drops only local-only tombstones does not advance the floor.
 
 **Stale-device eviction.** A peer whose `.hwm` `lastUpdated` is older than
 `KvStoreConfig.staleDeviceEvictionAfter` (default 90 days) is excluded

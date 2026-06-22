@@ -102,12 +102,16 @@ final class IndexDefinition {
 
   /// The system namespace where index entries are stored.
   ///
-  /// Format: `$index:{namespace}:{path}` where `{path}` is the normalised
+  /// Format: `$$index:{namespace}:{path}` where `{path}` is the normalised
   /// path. Because normalisation runs at construction time, this namespace is
   /// always derived from the canonical path — `$.address.city` and
   /// `address.city` produce the same `indexNamespace`.
+  ///
+  /// The `$$` prefix marks this as a local-only namespace — index entries are
+  /// never uploaded to the sync folder. Each device rebuilds its secondary
+  /// indexes independently from synced document data.
   String get indexNamespace =>
-      r'$index:'
+      r'$$index:'
       '$namespace:$path';
 
   @override

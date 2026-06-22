@@ -428,7 +428,7 @@ final class KvStoreImpl implements KvStore {
   ///
   /// Unlike [writeBatch], this method does not reject entries whose namespace
   /// begins with `$`. It is used by the Query Layer to write secondary index
-  /// entries (`$index:…`) atomically with the document they index, in a single
+  /// entries (`$$index:…`) atomically with the document they index, in a single
   /// [WriteBatch] that cannot be observed in a partial state — either across a
   /// crash (WAL frame atomicity, review finding H2) or in-process (synchronous
   /// memtable application with no intervening awaits).
@@ -451,8 +451,9 @@ final class KvStoreImpl implements KvStore {
     // the storage engine see a canonical form.
     final extended = WriteBatch();
     for (final e in batch.entries) {
-      // System namespaces ($index:…, $fts:…, etc.) are ASCII by construction
-      // and do not need normalisation. User namespaces are normalised.
+      // System namespaces ($meta, $cache, $$index:…, $$fts:…, $$vec:…, etc.)
+      // are ASCII by construction and do not need normalisation.
+      // User namespaces are normalised.
       final ns = e.namespace.startsWith(r'$')
           ? e.namespace
           : normaliseNamespace(e.namespace);
@@ -473,7 +474,7 @@ final class KvStoreImpl implements KvStore {
   }
 
   /// Returns every distinct namespace string present in storage, including
-  /// system namespaces like `$meta` and `$index:…`.
+  /// system namespaces like `$meta` and `$$index:…`.
   ///
   /// This is an expensive full-merge scan intended only for infrequent
   /// administrative operations such as [IndexManager.removeIndex]. Application

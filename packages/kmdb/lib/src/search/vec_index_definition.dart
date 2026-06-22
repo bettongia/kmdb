@@ -16,8 +16,8 @@
 /// within a named collection.
 ///
 /// Vector indexes store SQ8-quantised BGE Small En v1.5 embeddings in
-/// `$vec:{collection}:{field}` system namespaces. These namespaces are
-/// excluded from sync and cache.
+/// `$$vec:{collection}:{field}` system namespaces. These are local-only
+/// namespaces — never uploaded to the sync folder.
 ///
 /// An [EmbeddingModel] must be supplied to [KmdbDatabase.open] when any
 /// [VecIndexDefinition] is provided. Omitting the model causes `open()` to

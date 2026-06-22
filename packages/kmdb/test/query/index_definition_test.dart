@@ -47,7 +47,7 @@ void main() {
 
     test('indexNamespace format is correct', () {
       final def = IndexDefinition('contacts', 'email');
-      expect(def.indexNamespace, equals(r'$index:contacts:email'));
+      expect(def.indexNamespace, equals(r'$$index:contacts:email'));
     });
   });
 

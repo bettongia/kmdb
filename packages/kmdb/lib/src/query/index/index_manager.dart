@@ -186,7 +186,7 @@ final class IndexManager implements WriteAugmentor {
   /// Removes all stored data for the index on [namespace]/[path].
   ///
   /// This method:
-  /// 1. Enumerates every `$index:{namespace}:{path}:*` sub-namespace in
+  /// 1. Enumerates every `$$index:{namespace}:{path}:*` sub-namespace in
   ///    storage (one sub-namespace per distinct indexed value).
   /// 2. Deletes all entries in each sub-namespace in batches of 200.
   /// 3. Deletes the `$meta` state entry for the index.
@@ -198,7 +198,7 @@ final class IndexManager implements WriteAugmentor {
   /// unaffected.
   Future<void> removeIndex(String namespace, String path) async {
     // Compute the prefix that all sub-namespaces for this index share.
-    // Each sub-namespace has the form: $index:{namespace}:{path}:{hexValue}
+    // Each sub-namespace has the form: $$index:{namespace}:{path}:{hexValue}
     final def = IndexDefinition(namespace, path);
     final subNsPrefix = '${def.indexNamespace}:';
 

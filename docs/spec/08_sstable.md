@@ -17,22 +17,42 @@ of both crash safety and sync safety.
 ## SSTable Naming Convention
 
 SSTable filenames encode origin device, HLC range, and — for consolidation
-output — the coordinator epoch. There are two distinct formats, distinguishable
-by segment count (splitting on `-`):
+output — the coordinator epoch. There are three distinct formats:
 
-### Regular flush output (3 segments)
+### Regular flush output — syncable (3 segments, `.sst`)
 
-Produced by a local memtable flush or by downloading a peer's SSTable:
+Produced by a local memtable flush when the flush contains at least one entry
+from a syncable (non-`$$`-prefixed) namespace. Downloaded peer SSTables also
+use this format:
 
 ```
 {deviceId}-{minHlc}-{maxHlc}.sst
 ```
 
-### Consolidation output (4 segments)
+### Regular flush output — local-only (3 segments, `.local.sst`)
 
-Produced by the cross-device compaction coordinator. The epoch is the
-coordinator's current epoch from the fencing token, enabling stale partial
-output to be identified and deleted without opening any file:
+Produced by a local memtable flush when the flush contains at least one entry
+from a local-only (`$$`-prefixed) namespace. These files are **never uploaded
+to the sync folder**; `SyncEngine.push` identifies them by parsing the filename
+suffix before building the upload list. A single flush may produce both a
+`.sst` and a `.local.sst` file when the memtable contains entries from both
+syncable and local-only namespaces (see §6 flush partitioning):
+
+```
+{deviceId}-{minHlc}-{maxHlc}.local.sst
+```
+
+The `.local` infix is parsed **before** splitting on `-`, because the HLC
+segments and the deviceId also contain no `.` characters and splitting first
+would leave `.local` as a stray segment.
+
+### Consolidation output (4 segments, `.sst`)
+
+Produced by the cross-device compaction coordinator. Consolidation output is
+**always syncable** — local-only SSTables are never uploaded and therefore
+never consolidated. The epoch is the coordinator's current epoch from the
+fencing token, enabling stale partial output to be identified and deleted
+without opening any file:
 
 ```
 {deviceId}-{epoch}-{minHlc}-{maxHlc}.sst
@@ -54,15 +74,16 @@ counter) to guarantee unique filenames even when multiple flushes occur within
 the same physical millisecond. Consolidation files use the 48-bit physical
 component only, since cross-device ordering relies solely on wall-clock time.
 
-No field contains a `-`, so splitting on `-` and counting segments is
-unambiguous.
+No field contains a `-` or `.`, so splitting on `-` and counting segments is
+unambiguous once the extension (`.sst` or `.local.sst`) has been stripped.
 
 ### Examples
 
 ```
-a1b2c3d4-017F8A0A00000000-017F8A0AFFFF0000.sst      ← regular flush
-f9e8d7c6-017F8B0C00000000-017F8B0C3FFF0000.sst      ← regular flush
-a3f2b1c9-7-017F8A090000-017F8A0AFFFF.sst            ← consolidation, epoch 7
+a1b2c3d4-017F8A0A00000000-017F8A0AFFFF0000.sst         ← regular flush (syncable)
+a1b2c3d4-017F8A0A00000000-017F8A0AFFFF0000.local.sst   ← regular flush (local-only)
+f9e8d7c6-017F8B0C00000000-017F8B0C3FFF0000.sst         ← regular flush (syncable)
+a3f2b1c9-7-017F8A090000-017F8A0AFFFF.sst               ← consolidation, epoch 7
 ```
 
 The device ID is a stable per-installation UUID generated on first launch and

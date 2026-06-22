@@ -48,7 +48,8 @@ Each `VersionEdit` is a CBOR map describing one atomic file-set transition:
       "minKey": "0191e4a0000000000000000000000001",
       "maxKey": "0191e4a0000000000000000000000080",
       "entryCount": 128,
-      "walSequence": 2     // WAL file retired by this flush; null for compaction output
+      "walSequence": 2,    // WAL file retired by this flush; null for compaction output
+      "localOnly": true    // OPTIONAL — omitted when false (backward-compatible)
     }
   ],
   "remove": [              // SSTables removed in this transition
@@ -64,8 +65,23 @@ Each `VersionEdit` is a CBOR map describing one atomic file-set transition:
 | :------------ | :--------- | :---------- |
 | `logNumber`   | int        | The WAL file sequence number active when this edit was written. Used by recovery to identify which WAL files still need replay. |
 | `nextSeq`     | int        | The next HLC sequence number at the time of this edit. Restored on recovery so the HLC clock starts above any previously-assigned sequence. |
-| `add`         | array      | SSTables added. Each entry includes level, filename, key bounds, entry count, and the WAL sequence number retired (L0 flushes only; `null` for compaction output). |
+| `add`         | array      | SSTables added. Each entry includes level, filename, key bounds, entry count, the WAL sequence number retired (L0 flushes only; `null` for compaction output), and the optional `localOnly` flag. |
 | `remove`      | array      | SSTables removed (inputs to a compaction that has completed). |
+
+### `localOnly` field on `SstableMeta`
+
+The optional `localOnly` boolean in each `add` entry records whether the SSTable
+contains only `$$`-prefixed (local-only) namespace entries:
+
+- **When `true`**: the file is named with the `.local.sst` suffix and is never
+  uploaded to the sync folder. `SyncEngine.push` identifies local-only files by
+  parsing the filename suffix, so it does not need to consult the Manifest.
+- **When absent** (or `false`): the file is syncable — the default for all files
+  written before this field was introduced.
+
+**Backward compatibility.** All Manifest records written before this field was
+added have no `localOnly` key; `SstableMeta.fromMap` treats an absent key as
+`false`. Existing databases open correctly with no migration.
 
 `add` and `remove` may both be non-empty in the same record (a compaction that
 produces new files and retires old ones is a single atomic edit).

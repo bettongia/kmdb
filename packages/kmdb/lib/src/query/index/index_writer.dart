@@ -28,7 +28,7 @@ import 'index_definition.dart';
 /// dedicated system namespace is allocated:
 ///
 /// ```
-/// $index:{ns}:{path}:{hexEncodedValue}
+/// $$index:{ns}:{path}:{hexEncodedValue}
 /// ```
 ///
 /// Within that namespace, each document that has the given field value is

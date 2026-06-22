@@ -647,22 +647,22 @@ void main() {
 
     test('baseKey produces expected format', () {
       final key = FtsIndexState.baseKey('ns', 'field', 'term', 'docId');
-      expect(key, equals(r'$fts:ns:field:term:docId'));
+      expect(key, equals(r'$$fts:ns:field:term:docId'));
     });
 
     test('overlayKey produces expected format', () {
       final key = FtsIndexState.overlayKey('ns', 'field', 'docId');
-      expect(key, equals(r'$fts:overlay:ns:field:docId'));
+      expect(key, equals(r'$$fts:overlay:ns:field:docId'));
     });
 
     test('corpusKey produces expected format', () {
       final key = FtsIndexState.corpusKey('ns', 'field');
-      expect(key, equals(r'$fts:corpus:ns:field'));
+      expect(key, equals(r'$$fts:corpus:ns:field'));
     });
 
     test('docKey produces expected format', () {
       final key = FtsIndexState.docKey('ns', 'field', 'docId');
-      expect(key, equals(r'$fts:doc:ns:field:docId'));
+      expect(key, equals(r'$$fts:doc:ns:field:docId'));
     });
 
     test('metaKey produces expected format', () {
