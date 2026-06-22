@@ -1,6 +1,6 @@
 # WI-2: Charset detection for vault text extraction
 
-**Status**: Investigated
+**Status**: Implementing
 
 **PR link**: —
 
@@ -177,27 +177,39 @@ for plain-text blobs, and that the detected label is stored in
 
 ## Implementation plan
 
-- [ ] Add `betto_charset_detector` to workspace `pubspec.yaml`
+- [x] Add `betto_charset_detector` to workspace `pubspec.yaml`
       `dependency_overrides` (check pub.dev for the current published version
-      — the proposal references `^0.1.0-dev.2`).
-- [ ] Add `betto_charset_detector` to `packages/kmdb/pubspec.yaml`
-      `dependencies`.
-- [ ] Run `dart pub get` from the workspace root to resolve.
-- [ ] Create `packages/kmdb/lib/src/vault/search/` directory.
-- [ ] Implement `decodeText` in
+      — the proposal references `^0.1.0-dev.2`). Added at `^0.1.0-dev.2`.
+- [x] Add `betto_charset_detector` and `charset` to `packages/kmdb/pubspec.yaml`
+      `dependencies`. (`charset` added as direct dep since it is imported
+      directly in `charset_util.dart` and the test; `charset` also pinned in
+      root `dependency_overrides` at `^2.0.1`.)
+- [x] Run `dart pub get` from the workspace root to resolve.
+- [x] Create `packages/kmdb/lib/src/vault/search/` directory.
+- [x] Implement `decodeText` in
       `packages/kmdb/lib/src/vault/search/charset_util.dart` with licence
       header (year 2026). Keep the implementation free of side effects —
       pure bytes-in, string-out.
-- [ ] Do **not** export `CharsetDecodeResult` or `decodeText` from
+      **Implementation note:** In Dart 3.x, `utf8.decode` already strips the
+      UTF-8 BOM automatically — no explicit post-decode stripping is needed.
+      The original plan's Q1 answer assumed older Dart behaviour. The dead
+      branch was removed per CLAUDE.md's no-dead-code policy.
+- [x] Do **not** export `CharsetDecodeResult` or `decodeText` from
       `packages/kmdb/lib/kmdb.dart` — internal `src/` symbols only.
-- [ ] Write `packages/kmdb/test/vault/search/charset_util_test.dart`
+- [x] Write `packages/kmdb/test/vault/search/charset_util_test.dart`
       covering all rows in the edge-case table above plus a round-trip test
       for each supported IANA label.
-- [ ] Run `make coverage` and confirm >90% on `charset_util.dart`.
-- [ ] Add a `charset_util` note to `docs/spec/20_text_search.md` (one or
+      **Test note:** EUC-KR round-trip tests assert label correctness and
+      non-empty output (not exact string equality) because the `charset`
+      package's `eucKr` codec covers only the KSX 1001 character set and
+      has limited character coverage.
+- [x] Run `make coverage` and confirm >90% on `charset_util.dart`.
+      `charset_util.dart`: 5/5 lines = **100%**. Package overall: **95.3%**.
+- [x] Add a `charset_util` note to `docs/spec/20_text_search.md` (one or
       two sentences; no structural change to the spec).
-- [ ] Run `make pre_commit` — format, analyze, license_check, tests all
-      green.
+- [x] Run `make pre_commit` — format, analyze, license_check, tests all
+      green. (One pre-existing `info` lint in `local_only_namespace_test.dart`,
+      not introduced by this WI.)
 
 ## Review (kmdb-plan-reviewer, 2026-06-20)
 
