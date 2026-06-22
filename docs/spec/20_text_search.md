@@ -312,3 +312,30 @@ await Isolate.run(() => db.syncEngine.sync());
 For first-load scenarios on Flutter, consider displaying a progress indicator
 and awaiting an `onSearchIndexReady` callback before enabling search in the UI.
 The callback fires when all `syncing` indexes transition to `current`.
+
+## Charset Detection for Vault Plain-Text Extraction
+
+When vault search (WI-3) extracts text from `text/plain` blobs for indexing,
+it must determine the character encoding of the raw bytes before decoding them
+to a string. Treating all bytes as UTF-8 would silently produce garbled text
+for files encoded in legacy Western or CJK encodings.
+
+Charset detection is handled by the `decodeText` utility function in
+`packages/kmdb/lib/src/vault/search/charset_util.dart`. It calls
+`betto_charset_detector`'s `detectCharset(Uint8List)` function, which runs a
+three-stage pipeline (BOM inspection → UTF-8 structural validation → candidate
+probe) and returns a lowercase IANA encoding label such as `"utf-8"`,
+`"windows-1252"`, `"shift-jis"`, or `"euc-jp"`. `decodeText` then dispatches
+to the appropriate codec and returns both the detected label and the decoded
+string as a `CharsetDecodeResult` record:
+
+```dart
+/// ({String charset, String text})
+final (:charset, :text) = decodeText(bytes);
+```
+
+The detected label is available for inclusion in a `extract_status.json`
+manifest entry so that indexing metadata records the original encoding. `ascii`
+is never returned as a label — ASCII content passes the UTF-8 structural
+validation stage and is reported as `"utf-8"`. This utility is internal to the
+`kmdb` package and is not exported from `kmdb.dart`.

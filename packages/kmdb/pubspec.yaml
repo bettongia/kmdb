@@ -19,6 +19,8 @@ dependencies:
   meta: any
   betto_lexical:
   betto_inferencing:
+  betto_charset_detector:
+  charset:
   uuid:
   web:
   intl: ^0.20.2
