@@ -170,31 +170,41 @@ final class VecIndexState {
 
   /// The KvStore namespace where SQ8-quantised vectors are stored.
   ///
-  /// Format: `$vec:{ns}:{field}`
+  /// Format: `$$vec:{ns}:{field}`
+  ///
+  /// The `$$` prefix marks this as a local-only namespace — its contents are
+  /// never uploaded to the sync folder. Each device rebuilds its vector index
+  /// independently by running inference on the local document data.
   ///
   /// Within this namespace, the key is the 32-character UUIDv7 docId and the
   /// value is the D-byte SQ8-quantised embedding, where D is the model's
   /// [EmbeddingModel.dimensions].
-  static String vecNamespace(String ns, String field) => '\$vec:$ns:$field';
+  static String vecNamespace(String ns, String field) =>
+      r'$$vec:'
+      '$ns:$field';
 
   /// The KvStore namespace for corpus-level statistics.
   ///
-  /// Format: `$vec:corpus:{ns}:{field}`
+  /// Format: `$$vec:corpus:{ns}:{field}`
   ///
+  /// The `$$` prefix marks this namespace as local-only (never synced).
   /// Contains a single entry keyed by [corpusSentinelKey] with a CBOR map
   /// `{n: int}` — the total number of indexed documents.
   static String corpusNamespace(String ns, String field) =>
-      '\$vec:corpus:$ns:$field';
+      r'$$vec:corpus:'
+      '$ns:$field';
 
   /// The KvStore namespace for truncation markers.
   ///
-  /// Format: `$vec:truncated:{ns}:{field}`
+  /// Format: `$$vec:truncated:{ns}:{field}`
   ///
+  /// The `$$` prefix marks this namespace as local-only (never synced).
   /// A key exists in this namespace when the corresponding document's field
   /// value exceeded 510 usable BERT tokens. The entry value is empty bytes.
   /// Written as a diagnostic signal; not read on the query path.
   static String truncatedNamespace(String ns, String field) =>
-      '\$vec:truncated:$ns:$field';
+      r'$$vec:truncated:'
+      '$ns:$field';
 
   /// Fixed 32-char hex sentinel key for the corpus statistics entry.
   ///

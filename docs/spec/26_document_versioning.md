@@ -185,8 +185,8 @@ incremented via `interceptWrite`). This is the intended behaviour.
 
 ## Sync inclusion
 
-`$ver:` namespaces are **included in sync**, unlike `$fts:` and `$vec:` which
-are explicitly excluded. The sync filter must not exclude `$ver:` prefixes.
+`$ver:` namespaces are **included in sync**, unlike `$$fts:` and `$$vec:` which
+are explicitly excluded (local-only, stored in `.local.sst` files). The sync filter must not exclude `$ver:` prefixes.
 
 Because `$ver:` entries are treated like any user-namespace data by the sync
 engine (they are just entries in an SSTable), version history propagates to all
@@ -312,8 +312,8 @@ After a delete, each residue location drains to zero:
 | `$ver:` put-versions               | retention trim (keep-N while live; age-out once deleted)            |
 | `$ver:` delete-version             | post-delete grace: purged once older than `retentionDays`           |
 | Vault refs held by `$ver:` entries | decremented via post-compaction batch (RQ5); blob GC'd at zero refs |
-| `$index:` entries                  | index tombstones follow the doc; reclaimed by H4                    |
-| `$fts:` / `$vec:` postings         | removed when the live doc is deleted (managers handle delete)       |
+| `$$index:` entries                 | index tombstones follow the doc; reclaimed by H4                    |
+| `$$fts:` / `$$vec:` postings       | removed when the live doc is deleted (managers handle delete)       |
 
 End state: zero entries for the document in every namespace, and any vault blob
 it solely referenced is GC'd.

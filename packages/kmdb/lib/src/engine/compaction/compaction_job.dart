@@ -22,6 +22,7 @@ import '../sstable/sstable_reader.dart';
 import '../sstable/sstable_writer.dart';
 import '../util/hlc.dart';
 import '../util/key_codec.dart';
+import '../util/namespace_codec.dart' show isLocalOnly;
 import 'merge_iterator.dart';
 import 'reclamation_policy.dart';
 
@@ -135,21 +136,23 @@ final class CompactionJob {
   /// every version through unchanged and never drops tombstones.
   final ReclamationPolicyRegistry _policyRegistry;
 
-  /// The number of delete tombstones dropped during [run].
+  /// The number of **syncable** delete tombstones dropped during [run].
   ///
-  /// Incremented inside `flushCollapsed` each time a surviving tombstone
-  /// is eligible for GC (its [ReclamationPolicy.dropTombstone] returns
-  /// `true`). This requires [allLevels] to be `true` and the tombstone's
-  /// HLC to be strictly below [horizon].
+  /// Incremented inside `_flushCollapsed` each time a surviving tombstone in
+  /// a *syncable* (non-`$$`-prefixed) namespace is eligible for GC (its
+  /// [ReclamationPolicy.dropTombstone] returns `true`). This requires
+  /// [allLevels] to be `true` and the tombstone's HLC to be strictly below
+  /// [horizon] (for syncable namespaces).
+  ///
+  /// Local-only (`$$`-prefixed) tombstones are also dropped from the output
+  /// when eligible, but they are **not** counted here. The GC floor in
+  /// `$meta` is advanced by [LsmEngine._compactAll] only when
+  /// `tombstonesDropped > 0`, which correctly means "at least one syncable
+  /// tombstone was GC'd" — a purely local-only drop does not advance the floor.
   ///
   /// Readable after [run] returns. [CompactionJob] is a single-use object;
   /// the count is reset to zero before each [run] call to allow safe re-use
   /// in tests, though production code constructs a fresh job per compaction.
-  ///
-  /// [LsmEngine._compactAll] reads this value to decide whether to advance
-  /// the tombstone GC floor in `$meta` (H4-FU3). A non-zero count means
-  /// the all-levels compaction dropped at least one tombstone, so the floor
-  /// must be advanced to [horizon].
   int tombstonesDropped = 0;
 
   /// Raw value bytes of every `$ver:` version entry trimmed by
@@ -168,18 +171,40 @@ final class CompactionJob {
 
   /// Executes the compaction and returns the [VersionEdit] that was written.
   ///
+  /// ## Two-writer split (local-only namespace segregation)
+  ///
+  /// Entries are routed to one of two writers based on the namespace resolved
+  /// at each group boundary:
+  ///
+  /// - **Syncable writer** — receives entries whose namespace does NOT start
+  ///   with `$$`. Produces `{deviceId}-{minHlc}-{maxHlc}.sst`.
+  /// - **Local-only writer** — receives entries whose namespace starts with
+  ///   `$$` (FTS, vector, secondary indexes). Produces
+  ///   `{deviceId}-{minHlc}-{maxHlc}.local.sst`.
+  ///
+  /// Empty partitions produce no file and no `SstableMeta` entry. The finish
+  /// block writes up to two files and appends a single [VersionEdit] with up
+  /// to two `added` entries — one atomic Manifest record regardless of how
+  /// many partitions were non-empty.
+  ///
+  /// The namespace is resolved once per group boundary (line ~312), not per
+  /// entry, so the routing decision is O(groups), not O(entries).
+  ///
+  /// ## Tombstone GC accounting
+  ///
+  /// [tombstonesDropped] counts only syncable tombstone drops. Local-only
+  /// tombstones are dropped from the output when the [LocalOnlyCollapsePolicy]
+  /// returns `true` (requires [allLevels] = `true`; no horizon check) but are
+  /// not counted. The GC floor in `$meta` advances only when at least one
+  /// syncable tombstone was dropped.
+  ///
   /// Steps:
   /// 1. Open all input SSTables.
   /// 2. Merge their entries (oldest file first → newest wins on duplicate keys).
-  /// 3. Apply the reclamation transform: version collapse (H4 PR1 — keep
-  ///    only the highest-HLC entry per `(namespace, userKey)` group, except
-  ///    in namespaces whose [ReclamationPolicy] retains all versions) and,
-  ///    when the group's surviving entry is a delete tombstone, optionally
-  ///    drop it (H4 PR2 — only when [allLevels] is `true` and the
-  ///    tombstone's HLC is strictly below [horizon]).
-  /// 4. Write merged output to a new SSTable.
-  /// 5. Fsync the output.
-  /// 6. Append a [VersionEdit] to the Manifest.
+  /// 3. Apply the reclamation transform with per-writer routing.
+  /// 4. Write up to two output SSTables (syncable + local-only).
+  /// 5. Fsync all outputs; syncDir.
+  /// 6. Append a single [VersionEdit] to the Manifest.
   ///
   /// The caller is responsible for deleting the input files after the
   /// [VersionEdit] is confirmed durable.
@@ -199,12 +224,23 @@ final class CompactionJob {
     final streams = readers.map((r) => r.scan()).toList();
     final merge = MergeIterator(streams);
 
-    final writer = SstableWriter();
-    Hlc? minHlc;
-    Hlc? maxHlc;
-    var entryCount = 0;
-    Uint8List? minKeyBytes;
-    Uint8List? maxKeyBytes;
+    // ── Per-partition state ──────────────────────────────────────────────────
+    //
+    // Syncable partition (non-$$ namespaces) — uploaded to sync folder.
+    final syncWriter = SstableWriter();
+    Hlc? syncMinHlc;
+    Hlc? syncMaxHlc;
+    var syncEntryCount = 0;
+    Uint8List? syncMinKeyBytes;
+    Uint8List? syncMaxKeyBytes;
+
+    // Local-only partition ($$ namespaces) — never uploaded.
+    final localWriter = SstableWriter();
+    Hlc? localMinHlc;
+    Hlc? localMaxHlc;
+    var localEntryCount = 0;
+    Uint8List? localMinKeyBytes;
+    Uint8List? localMaxKeyBytes;
 
     // Streaming reclamation transform.
     //
@@ -215,44 +251,60 @@ final class CompactionJob {
     // `key.length - 9` (HLC=8B + type=1B).
     //
     // For each contiguous group we resolve the namespace's
-    // [ReclamationPolicy] once:
+    // [ReclamationPolicy] once at group-boundary time:
     //   - collapseVersions=true  → buffer the latest entry; on group change,
     //                              emit the buffered entry — unless that
     //                              entry is a delete tombstone whose
     //                              [ReclamationPolicy.dropTombstone] returns
-    //                              true (H4 PR2: gated by [allLevels] +
-    //                              [horizon]), in which case the group is
-    //                              elided entirely.
+    //                              true, in which case the group is elided.
     //   - collapseVersions=false → buffer the entire group; at group-end call
     //                              policy.filterGroup() to obtain the retained
-    //                              subset. Drop entries not in the survivor set
-    //                              and append their values to
-    //                              [droppedVersionValues] for the post-compaction
-    //                              vault ref-decrement callback (RQ5).
+    //                              subset. Dropped entries' values are appended
+    //                              to [droppedVersionValues] for the vault
+    //                              ref-decrement callback (RQ5).
+    //
+    // The current group's `isLocal` flag (resolved once per group) routes
+    // entries to the appropriate writer without re-decoding the namespace
+    // for every entry.
     Uint8List? groupPrefix;
     MergeEntry? pendingCollapsed;
     // Buffer for collapseVersions=false groups (e.g. $ver: entries).
     List<MergeEntry>? groupBuffer;
     ReclamationPolicy? policy;
+    // Whether the current group belongs to a local-only namespace.
+    // Resolved once per group at the boundary, reused for every entry.
+    bool currentGroupIsLocal = false;
 
-    void emit(Uint8List key, Uint8List value) {
-      writer.add(key, value);
-      entryCount++;
-      final hlc = KeyCodec.decodeHlc(key);
-      if (minHlc == null || hlc < minHlc!) minHlc = hlc;
-      if (maxHlc == null || hlc > maxHlc!) maxHlc = hlc;
-      minKeyBytes ??= key;
-      maxKeyBytes = key;
+    // Routes an accepted entry to the correct partition writer.
+    void emit(Uint8List key, Uint8List value, bool entryIsLocal) {
+      if (entryIsLocal) {
+        localWriter.add(key, value);
+        localEntryCount++;
+        final hlc = KeyCodec.decodeHlc(key);
+        if (localMinHlc == null || hlc < localMinHlc!) localMinHlc = hlc;
+        if (localMaxHlc == null || hlc > localMaxHlc!) localMaxHlc = hlc;
+        localMinKeyBytes ??= key;
+        localMaxKeyBytes = key;
+      } else {
+        syncWriter.add(key, value);
+        syncEntryCount++;
+        final hlc = KeyCodec.decodeHlc(key);
+        if (syncMinHlc == null || hlc < syncMinHlc!) syncMinHlc = hlc;
+        if (syncMaxHlc == null || hlc > syncMaxHlc!) syncMaxHlc = hlc;
+        syncMinKeyBytes ??= key;
+        syncMaxKeyBytes = key;
+      }
     }
 
-    /// Emits [entry] unless it is a tombstone the active [policy] is
-    /// willing to drop given this compaction's [allLevels] and [horizon].
-    /// Used to finalise a collapsed group.
-    ///
-    /// When a tombstone is dropped, [tombstonesDropped] is incremented so
-    /// [LsmEngine._compactAll] can advance the GC floor after the manifest
-    /// commits (H4-FU3).
-    void flushCollapsed(MergeEntry entry, ReclamationPolicy activePolicy) {
+    /// Emits [entry] unless it is a tombstone the active [policy] is willing
+    /// to drop. Tombstone drops in syncable namespaces increment
+    /// [tombstonesDropped]; local-only drops are silent (do not advance the
+    /// GC floor — see [tombstonesDropped] doc).
+    void flushCollapsed(
+      MergeEntry entry,
+      ReclamationPolicy activePolicy,
+      bool entryIsLocal,
+    ) {
       if (KeyCodec.decodeRecordType(entry.key) == RecordType.delete) {
         final canDrop = activePolicy.dropTombstone(
           allLevels: allLevels,
@@ -260,28 +312,30 @@ final class CompactionJob {
           horizon: horizon,
         );
         if (canDrop) {
-          tombstonesDropped++;
-          return;
+          // Count only syncable tombstone drops: these advance the GC floor.
+          // Local-only drops are free but do not affect the sync horizon.
+          if (!entryIsLocal) tombstonesDropped++;
+          return; // elide from output
         }
       }
-      emit(entry.key, entry.value);
+      emit(entry.key, entry.value, entryIsLocal);
     }
 
     /// Flushes the current [groupBuffer] through [policy.filterGroup], emits
     /// survivors, and records dropped entries' values in [droppedVersionValues].
-    void flushGroupBuffer(ReclamationPolicy activePolicy) {
+    void flushGroupBuffer(ReclamationPolicy activePolicy, bool groupIsLocal) {
       final buf = groupBuffer;
       if (buf == null || buf.isEmpty) return;
       groupBuffer = null;
 
       final survivors = activePolicy.filterGroup(buf, nowMs: nowMs);
-      // Emit every survivor.
       for (final s in survivors) {
-        emit(s.key, s.value);
+        emit(s.key, s.value, groupIsLocal);
       }
       // Record dropped entries' values for the post-compaction vault
-      // ref-decrement callback (RQ5). Build a set of survivor keys for O(1)
-      // membership check.
+      // ref-decrement callback (RQ5). $$-namespaced entries never hold vault
+      // URIs, so droppedVersionValues is populated only for syncable entries
+      // (which can only reach here via history-bearing $ver: namespaces).
       if (survivors.length < buf.length) {
         final survivorKeys = survivors.map((s) => s.key).toSet();
         for (final dropped in buf) {
@@ -298,18 +352,19 @@ final class CompactionJob {
           groupPrefix == null || !_keyMatchesPrefix(entry.key, groupPrefix);
 
       if (isNewGroup) {
-        // Flush the previous group (collapsed or buffered) before starting a
-        // new one.
+        // Flush the previous group before starting a new one.
         if (pendingCollapsed != null) {
-          flushCollapsed(pendingCollapsed, policy!);
+          flushCollapsed(pendingCollapsed, policy!, currentGroupIsLocal);
           pendingCollapsed = null;
         }
         if (groupBuffer != null) {
-          flushGroupBuffer(policy!);
+          flushGroupBuffer(policy!, currentGroupIsLocal);
         }
-        // Resolve the policy for this new group's namespace.
+        // Resolve the policy and local-only flag for this new group.
+        // Both are resolved once per group, not per entry.
         final ns = KeyCodec.decodeNamespace(entry.key);
         policy = _policyRegistry.resolve(ns);
+        currentGroupIsLocal = isLocalOnly(ns);
         groupPrefix = Uint8List.sublistView(entry.key, 0, prefixLen);
       }
 
@@ -323,13 +378,15 @@ final class CompactionJob {
     }
     // Flush any remaining group.
     if (pendingCollapsed != null) {
-      flushCollapsed(pendingCollapsed, policy!);
+      flushCollapsed(pendingCollapsed, policy!, currentGroupIsLocal);
     }
     if (groupBuffer != null) {
-      flushGroupBuffer(policy!);
+      flushGroupBuffer(policy!, currentGroupIsLocal);
     }
 
-    if (entryCount == 0) {
+    final totalEntryCount = syncEntryCount + localEntryCount;
+
+    if (totalEntryCount == 0) {
       // All inputs were empty — nothing to write.
       final edit = VersionEdit(
         logNumber: logNumber,
@@ -340,36 +397,71 @@ final class CompactionJob {
       return edit;
     }
 
-    final effectiveMin = minHlc ?? const Hlc(0, 0);
-    final effectiveMax = maxHlc ?? const Hlc(0, 0);
-    final outputFilename = SstableInfo.flushName(
-      deviceId,
-      effectiveMin,
-      effectiveMax,
-    );
-    final outputPath = '$sstDir/$outputFilename';
+    // ── Write non-empty partitions to disk ────────────────────────────────────
+    //
+    // Both files (if present) are written and fsynced before the single
+    // Manifest append. A crash between the two file writes leaves both files
+    // on disk but neither referenced by the Manifest; crash recovery discards
+    // them as orphans. This preserves crash-atomicity via a single VersionEdit.
+    final adds = <SstableMeta>[];
 
-    final outputBytes = writer.finish();
-    await adapter.writeFile(outputPath, outputBytes);
-    await adapter.syncFile(outputPath);
-    // Durably link the output's directory entry before the manifest records it
+    if (syncEntryCount > 0) {
+      final effectiveMin = syncMinHlc ?? const Hlc(0, 0);
+      final effectiveMax = syncMaxHlc ?? const Hlc(0, 0);
+      final filename = SstableInfo.flushName(
+        deviceId,
+        effectiveMin,
+        effectiveMax,
+      );
+      final outputPath = '$sstDir/$filename';
+      await adapter.writeFile(outputPath, syncWriter.finish());
+      await adapter.syncFile(outputPath);
+      adds.add(
+        SstableMeta(
+          level: outputLevel,
+          filename: filename,
+          minKey: syncMinKeyBytes != null ? _toHex(syncMinKeyBytes!) : '',
+          maxKey: syncMaxKeyBytes != null ? _toHex(syncMaxKeyBytes!) : '',
+          entryCount: syncEntryCount,
+          localOnly: false,
+        ),
+      );
+    }
+
+    if (localEntryCount > 0) {
+      final effectiveMin = localMinHlc ?? const Hlc(0, 0);
+      final effectiveMax = localMaxHlc ?? const Hlc(0, 0);
+      final filename = SstableInfo.flushName(
+        deviceId,
+        effectiveMin,
+        effectiveMax,
+        localOnly: true,
+      );
+      final outputPath = '$sstDir/$filename';
+      await adapter.writeFile(outputPath, localWriter.finish());
+      await adapter.syncFile(outputPath);
+      adds.add(
+        SstableMeta(
+          level: outputLevel,
+          filename: filename,
+          minKey: localMinKeyBytes != null ? _toHex(localMinKeyBytes!) : '',
+          maxKey: localMaxKeyBytes != null ? _toHex(localMaxKeyBytes!) : '',
+          entryCount: localEntryCount,
+          localOnly: true,
+        ),
+      );
+    }
+
+    // Durably link all output directory entries before the manifest records them
     // (review finding H1). The manifest append below fsyncs the manifest, so the
     // edit is durable before the engine deletes the input SSTables after run()
     // returns (review finding C2).
     await adapter.syncDir(sstDir);
 
-    final meta = SstableMeta(
-      level: outputLevel,
-      filename: outputFilename,
-      minKey: minKeyBytes != null ? _toHex(minKeyBytes!) : '',
-      maxKey: maxKeyBytes != null ? _toHex(maxKeyBytes!) : '',
-      entryCount: entryCount,
-    );
-
     final edit = VersionEdit(
       logNumber: logNumber,
       nextSeq: nextSeq,
-      added: [meta],
+      added: adds,
       removed: inputs,
     );
     await manifestWriter.append(edit);

@@ -81,7 +81,7 @@ final class KmdbCollection<T> {
   ///
   /// This is the namespace passed as `name` to [KmdbDatabase.collection]. It
   /// serves as the low-level partition key in the storage engine. System
-  /// namespaces (e.g. `$meta`, `$index:…`, `$cache`) are internal and are
+  /// namespaces (e.g. `$meta`, `$$index:…`, `$cache`) are internal and are
   /// never surfaced as user collections.
   final String namespace;
 

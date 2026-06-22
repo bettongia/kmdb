@@ -33,7 +33,7 @@
         │  VecManager   (§22)      │   │  VaultGc · VaultRecovery │
         │  HybridManager (§23)     │   │  VaultStorageAdapter     │
         │                          │   │                          │
-        │  $fts: / $vec: namespaces│   │  vault/ directory tree   │
+        │  $$fts: / $$vec: namespaces│   │  vault/ directory tree   │
         │  in KvStore (no sync)    │   │  $vault: ref counts in   │
         │                          │   │  KvStore (no sync)       │
         └──────────────────────────┘   └──────────────────────────┘

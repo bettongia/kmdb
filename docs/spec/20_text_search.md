@@ -11,13 +11,12 @@ hybrid ranking mode that combines them:
 | `semantic`  | Flat vector index | Cosine similarity          | Conceptual meaning, paraphrases       |
 | `hybrid`    | Both              | Reciprocal Rank Fusion     | General-purpose search                |
 
-Text search indexes are **device-local in intent** — each device independently
-builds and maintains its own indexes against the documents it holds, and a
-device never *relies* on a peer's index. However, their backing namespaces are
-**not excluded from upload**: `$fts:*` and `$vec:*` values ride in uploaded
-SSTables and reach cloud storage like every other system namespace (see
-§20.7 and §12). Their confidentiality in the cloud is provided by value-level
-encryption (§31), not by upload filtering.
+Text search indexes are **device-local** — each device independently builds and
+maintains its own indexes against the documents it holds, and a device never
+relies on a peer's index. Their backing namespaces use the `$$` (double-dollar)
+local-only prefix (`$$fts:*`, `$$vec:*`) so they are **never uploaded to the
+sync folder** (see §20.7 and §12). Each receiving device rebuilds these
+indexes from the synced document data.
 
 See §21 (Lexical Search), §22 (Semantic Search), and §23 (Hybrid Search) for
 the detail of each mode.
@@ -208,44 +207,30 @@ treated as index management; otherwise it is treated as a query.
 
 ## Sync Behaviour
 
-Text search uses the following `$`-prefixed system namespaces:
+Text search uses the following `$$`-prefixed (local-only) system namespaces:
 
 ```
-$fts:          — lexical base index entries (term → tf per document)
-$fts:overlay:  — lexical overlay (recent writes pending compaction)
-$fts:corpus:   — lexical corpus statistics (n, totalTokens)
-$fts:doc:      — lexical per-document forward index (tokenCount)
-$vec:          — semantic vector entries (quantized embeddings)
-$vec:corpus:   — semantic corpus statistics (n)
-$vec:truncated: — semantic truncation markers
+$$fts:          — lexical base index entries (term → tf per document)
+$$fts:overlay:  — lexical overlay (recent writes pending compaction)
+$$fts:corpus:   — lexical corpus statistics (n, totalTokens)
+$$fts:doc:      — lexical per-document forward index (tokenCount)
+$$vec:          — semantic vector entries (quantized embeddings)
+$$vec:corpus:   — semantic corpus statistics (n)
+$$vec:truncated: — semantic truncation markers
 ```
 
-These namespaces are written through the shared `WriteBatch` → memtable →
-SSTable path, so their values **are uploaded** during sync. As §12 records,
-sync is whole-file at the SSTable level: `SyncEngine.push` uploads each local
-SSTable's bytes unchanged and the consolidation coordinator merges whole
-SSTables. There is no upload-time, server-side, or per-entry namespace filter —
-the `syncNamespaces` parameter restricts only which user collections the caller
-intends to replicate and is not consulted in `push`, `pull`, or consolidation.
-Consequently every `$fts:*` and `$vec:*` entry rides in uploaded SSTables and
-reaches cloud storage, alongside `$meta`, `$index:*`, `$ver:*`, and `$vault`.
+These namespaces use the `$$` (double-dollar) local-only prefix, which means
+their entries are **never uploaded to the sync folder**. At flush time the
+storage engine partitions the memtable: `$$`-prefixed entries are written to a
+`.local.sst` file that `SyncEngine.push` identifies and skips when building its
+upload list. Both the upload loop and the high-water mark fold operate on the
+filtered list, so `$$fts:*` and `$$vec:*` entries never affect the HWM either.
+See §6 (Flush Partitioning), §8 (SSTable Naming), and §12 (Sync Protocol) for
+the full mechanism.
 
-Confidentiality of these values in the cloud is provided by **value-level
-encryption** (§31), not by upload filtering: when database encryption is
-enabled, every value written through `ValueCodec` — including all `$fts:*` and
-`$vec:*` entries — is stored as ciphertext in SSTables, so the uploaded bytes
-carry no plaintext index content.
-
-Text search indexes nevertheless remain **device-local in operation**. A device
-does not search a peer's uploaded index entries directly; each device rebuilds
-and maintains its own indexes from the documents it holds (see Post-Sync Index
-Maintenance below), and high-water mark files track SSTables, not index state.
-
-> **Future work.** Upload-time namespace filtering — stripping `$fts:*`,
-> `$vec:*`, and other excluded-namespace entries before upload, or keeping them
-> out of synced SSTables entirely — is not implemented. If it is added, this
-> section and §12 must be updated together to describe the actual filter. Until
-> then, do not document exclusion behaviour the code does not perform.
+A device does not search a peer's index entries; each device rebuilds and
+maintains its own indexes from the documents it holds (see Post-Sync Index
+Maintenance below).
 
 ## Post-Sync Index Maintenance
 

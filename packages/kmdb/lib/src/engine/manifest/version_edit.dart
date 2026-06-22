@@ -35,12 +35,14 @@ final class SstableMeta {
     required this.maxKey,
     required this.entryCount,
     this.walSequence,
+    this.localOnly = false,
   });
 
   /// LSM level this file belongs to (0, 1, or 2).
   final int level;
 
-  /// Bare filename (no directory path), e.g. `a1b2c3d4-….sst`.
+  /// Bare filename (no directory path), e.g. `a1b2c3d4-….sst` or
+  /// `a1b2c3d4-….local.sst` for local-only files.
   final String filename;
 
   /// Hex-encoded minimum internal key in this file.
@@ -58,6 +60,15 @@ final class SstableMeta {
   /// and peer-ingested files.
   final int? walSequence;
 
+  /// Whether this SSTable contains only local-only (`$$`-prefixed) namespaces.
+  ///
+  /// When `true`, this file is named with the `.local.sst` suffix and is
+  /// never uploaded to the sync folder. The sync engine identifies local-only
+  /// files by parsing the filename suffix so no manifest lookup is required
+  /// during push. Absent from the CBOR record means `false` (backward-compatible
+  /// with all existing Manifest files written before this field was added).
+  final bool localOnly;
+
   Map<String, dynamic> toMap() => {
     'level': level,
     'filename': filename,
@@ -65,6 +76,9 @@ final class SstableMeta {
     'maxKey': maxKey,
     'entryCount': entryCount,
     if (walSequence != null) 'walSequence': walSequence,
+    // Write localOnly only when true to keep the CBOR record compact and
+    // maintain backward compatibility with older readers.
+    if (localOnly) 'localOnly': true,
   };
 
   static SstableMeta fromMap(Map<dynamic, dynamic> m) => SstableMeta(
@@ -74,6 +88,8 @@ final class SstableMeta {
     maxKey: m['maxKey'] as String,
     entryCount: _toInt(m['entryCount']),
     walSequence: m['walSequence'] != null ? _toInt(m['walSequence']) : null,
+    // Absent key means false — all existing Manifest records decode to false.
+    localOnly: (m['localOnly'] as bool?) ?? false,
   );
 }
 

@@ -56,10 +56,14 @@ final defaultStopwords = getStopWords(Locale.fromSubtags(languageCode: 'en'));
 ///
 /// | Namespace | Key | Content |
 /// |---|---|---|
-/// | `$fts:{ns}:{field}:{hexTerm}` | `{docId}` (32-char UUID) | CBOR int — term frequency (tf) |
-/// | `$fts:overlay:{ns}:{field}` | `{docId}` (32-char UUID) | CBOR map (term→tf) or tombstone |
-/// | `$fts:doc:{ns}:{field}` | `{docId}` (32-char UUID) | CBOR map `{n, t}` — token count and terms list |
-/// | `$fts:corpus:{ns}:{field}` | fixed 32-char hex sentinel | CBOR map — `{n, totalTokens}` |
+/// | `$$fts:{ns}:{field}:{hexTerm}` | `{docId}` (32-char UUID) | CBOR int — term frequency (tf) |
+/// | `$$fts:overlay:{ns}:{field}` | `{docId}` (32-char UUID) | CBOR map (term→tf) or tombstone |
+/// | `$$fts:doc:{ns}:{field}` | `{docId}` (32-char UUID) | CBOR map `{n, t}` — token count and terms list |
+/// | `$$fts:corpus:{ns}:{field}` | fixed 32-char hex sentinel | CBOR map — `{n, totalTokens}` |
+///
+/// All `$$fts:*` namespaces are **local-only**: they are never uploaded to the
+/// sync folder. Each device rebuilds its FTS index independently from document
+/// data that is synced via the regular (non-`$$`) namespaces.
 ///
 /// The hex term encoding uses `utf8.encode(term).map(hex).join()` — the same
 /// approach as `IndexWriter` for field values.
@@ -310,7 +314,7 @@ final class FtsManager implements WriteAugmentor {
 
     // Update doc info with the new token count but KEEP the old terms list.
     // Compaction uses the old terms to enumerate which base namespaces
-    // (`$fts:{ns}:{field}:{hexTerm}`) need stale entries removed. After
+    // (`$$fts:{ns}:{field}:{hexTerm}`) need stale entries removed. After
     // compaction rewrites the base entries, it updates the terms list.
     _writeDocInfo(
       namespace,
@@ -726,7 +730,7 @@ final class FtsManager implements WriteAugmentor {
     final termDf = <String, int>{};
 
     for (final term in queryTerms) {
-      // Scan the per-term namespace: `$fts:{ns}:{field}:{hexTerm}`.
+      // Scan the per-term namespace: `$$fts:{ns}:{field}:{hexTerm}`.
       // All entries in this namespace have docId as the key (32-char UUID),
       // so no startKey/endKey constraints are needed.
       await for (final entry in _store.scan(
@@ -821,7 +825,7 @@ final class FtsManager implements WriteAugmentor {
       if (decoded is String && decoded == kFtsTombstone) {
         // Remove base entries for this document by looking up the stored terms
         // from the doc info namespace. Base entries use namespace-per-term:
-        // each term has its own namespace `$fts:{ns}:{field}:{hexTerm}`.
+        // each term has its own namespace `$$fts:{ns}:{field}:{hexTerm}`.
         final docInfo = await _readDocInfo(namespace, field, docId);
         for (final term in docInfo.terms) {
           batch.delete(_termNamespace(namespace, field, term), docId);
@@ -990,7 +994,11 @@ final class FtsManager implements WriteAugmentor {
 
   // ── Namespace helpers ─────────────────────────────────────────────────────
 
-  /// Per-term namespace: `$fts:{ns}:{field}:{hexTerm}`.
+  /// Per-term namespace: `$$fts:{ns}:{field}:{hexTerm}`.
+  ///
+  /// The `$$` prefix marks this as a local-only namespace — its contents are
+  /// never uploaded to the sync folder. Each device rebuilds its FTS index
+  /// independently from document data.
   ///
   /// The term is UTF-8 encoded and hex-stringified (same approach as
   /// `IndexWriter` for field values). Within this namespace, the key is the
@@ -1000,7 +1008,8 @@ final class FtsManager implements WriteAugmentor {
   /// satisfying the KvStore key constraint.
   static String _termNamespace(String ns, String field, String term) {
     final hexTerm = _termToHex(term);
-    return '\$fts:$ns:$field:$hexTerm';
+    return r'$$fts:'
+        '$ns:$field:$hexTerm';
   }
 
   /// Encodes [term] as a lowercase hex string of its UTF-8 bytes.
@@ -1009,27 +1018,33 @@ final class FtsManager implements WriteAugmentor {
     return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
   }
 
-  /// Overlay namespace: `$fts:overlay:{ns}:{field}`.
+  /// Overlay namespace: `$$fts:overlay:{ns}:{field}`.
   ///
+  /// The `$$` prefix marks this namespace as local-only (never synced).
   /// Keys are document IDs (32-char UUID). Values are CBOR-encoded term→tf
   /// maps (updates) or the [kFtsTombstone] string (deletes).
   static String _overlayNamespace(String ns, String field) =>
-      '\$fts:overlay:$ns:$field';
+      r'$$fts:overlay:'
+      '$ns:$field';
 
-  /// Per-document info namespace: `$fts:doc:{ns}:{field}`.
+  /// Per-document info namespace: `$$fts:doc:{ns}:{field}`.
   ///
+  /// The `$$` prefix marks this namespace as local-only (never synced).
   /// Keys are document IDs (32-char UUID). Values are CBOR maps:
   /// `{"n": tokenCount, "t": ["term1", "term2", ...]}`.
   /// The terms list enables [compact] to enumerate base namespaces for cleanup.
   static String _docNamespace(String ns, String field) =>
-      '\$fts:doc:$ns:$field';
+      r'$$fts:doc:'
+      '$ns:$field';
 
-  /// Corpus statistics namespace: `$fts:corpus:{ns}:{field}`.
+  /// Corpus statistics namespace: `$$fts:corpus:{ns}:{field}`.
   ///
+  /// The `$$` prefix marks this namespace as local-only (never synced).
   /// Contains a single entry keyed by [_corpusKey] with the CBOR-encoded
   /// corpus statistics map `{n, totalTokens}`.
   static String _corpusNamespace(String ns, String field) =>
-      '\$fts:corpus:$ns:$field';
+      r'$$fts:corpus:'
+      '$ns:$field';
 
   /// Fixed 32-char hex key within [_corpusNamespace] for the corpus stats entry.
   ///
@@ -1042,7 +1057,7 @@ final class FtsManager implements WriteAugmentor {
 
   /// Writes one base entry per unique term into its own term namespace.
   ///
-  /// Each base entry: namespace = `$fts:{ns}:{field}:{hexTerm}`, key = docId.
+  /// Each base entry: namespace = `$$fts:{ns}:{field}:{hexTerm}`, key = docId.
   void _writeBaseEntries(
     FtsIndexDefinition def,
     String namespace,
