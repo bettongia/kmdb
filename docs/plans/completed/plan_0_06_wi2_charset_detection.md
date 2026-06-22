@@ -1,8 +1,8 @@
 # WI-2: Charset detection for vault text extraction
 
-**Status**: Implementing
+**Status**: Complete
 
-**PR link**: —
+**PR link**: https://github.com/bettongia/kmdb/pull/51
 
 ## Problem statement
 
@@ -293,4 +293,24 @@ to `Investigated`.
 
 ## Summary
 
-_(to be completed after implementation)_
+- Added `betto_charset_detector ^0.1.0-dev.2` (detection) and `charset ^2.0.1`
+  (legacy codec decoding) as direct dependencies of `packages/kmdb`; both
+  pinned in root `dependency_overrides`.
+- Implemented `decodeText(Uint8List) → CharsetDecodeResult` in
+  `packages/kmdb/lib/src/vault/search/charset_util.dart` (new file).
+  `CharsetDecodeResult` is `({String charset, String text})` — internal only,
+  not exported from `kmdb.dart`. Pure bytes-in, string-out; no side effects.
+- Two-branch decode dispatch: `'utf-8'` → `dart:convert`'s `utf8.decode`;
+  all other labels → `Charset.getByName(label)!.decode(bytes)`.
+- **Q1 finding:** In Dart 3.x, `utf8.decode` already strips the UTF-8 BOM
+  automatically. The plan's Q1 answer assumed older Dart behaviour; the
+  previously planned explicit post-decode strip guard would have been dead code
+  and was not included.
+- 39 tests in `packages/kmdb/test/vault/search/charset_util_test.dart`
+  covering all plan edge-case table rows, BOM-stripping semantics, dispatch
+  paths, `iso-8859-1` → `latin1` fallback, return-type contract, and
+  per-IANA-label round-trips. EUC-KR tests assert label and non-empty text
+  (not exact equality) due to the `charset` package's limited KSX 1001 coverage.
+- 100% line coverage on `charset_util.dart`; 95.3% overall package coverage;
+  2047/2047 tests passing; `make pre_commit` green.
+- Brief charset detection section added to `docs/spec/20_text_search.md`.
