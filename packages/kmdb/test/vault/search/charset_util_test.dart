@@ -226,8 +226,10 @@ void main() {
 
     test('Dart 3.x utf8.decode already strips the UTF-8 BOM', () {
       // In Dart 3.x, dart:convert's utf8.decode strips the UTF-8 BOM
-      // (0xEF 0xBB 0xBF) from the result. decodeText adds a defensive guard
-      // for forward compatibility should this behaviour change.
+      // (0xEF 0xBB 0xBF) from the result, so decodeText relies on that
+      // behaviour and does not strip the BOM itself. This test pins the
+      // assumption: if a future Dart release stopped stripping the BOM,
+      // decodeText would need an explicit strip and this test would fail.
       final bytes = Uint8List.fromList([0xEF, 0xBB, 0xBF, 0x41]); // BOM + A
       final decoded = utf8.decode(bytes);
       // In Dart 3.x, the BOM is stripped.
