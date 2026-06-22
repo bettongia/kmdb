@@ -152,7 +152,7 @@ void main() {
   // ── Phase 1: SstableMeta.localOnly CBOR round-trip ────────────────────────
 
   group('SstableMeta.localOnly CBOR round-trip', () {
-    SstableMeta _meta(String filename, {bool localOnly = false}) => SstableMeta(
+    SstableMeta makeMeta(String filename, {bool localOnly = false}) => SstableMeta(
       level: 0,
       filename: filename,
       minKey: '0' * 32,
@@ -165,7 +165,7 @@ void main() {
       final edit = VersionEdit(
         logNumber: 1,
         nextSeq: 100,
-        added: [_meta('dev-0001-0002.local.sst', localOnly: true)],
+        added: [makeMeta('dev-0001-0002.local.sst', localOnly: true)],
       );
       final decoded = VersionEdit.fromCbor(edit.toCbor());
       expect(decoded.added.length, equals(1));
@@ -176,7 +176,7 @@ void main() {
       final edit = VersionEdit(
         logNumber: 1,
         nextSeq: 100,
-        added: [_meta('dev-0001-0002.sst', localOnly: false)],
+        added: [makeMeta('dev-0001-0002.sst', localOnly: false)],
       );
       final decoded = VersionEdit.fromCbor(edit.toCbor());
       expect(decoded.added.first.localOnly, isFalse);
@@ -206,8 +206,8 @@ void main() {
     test('localOnly=true is written compactly (key absent when false)', () {
       // Inspect the raw toCbor/toMap output: the 'localOnly' key must be
       // present in the map when true but absent when false.
-      final trueMeta = _meta('dev-0001.local.sst', localOnly: true);
-      final falseMeta = _meta('dev-0001.sst', localOnly: false);
+      final trueMeta = makeMeta('dev-0001.local.sst', localOnly: true);
+      final falseMeta = makeMeta('dev-0001.sst', localOnly: false);
 
       final trueMap = trueMeta.toMap();
       final falseMap = falseMeta.toMap();
