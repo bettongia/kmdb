@@ -41,9 +41,13 @@ import 'vec_index_state.dart';
 ///
 /// | Namespace | Key | Content |
 /// |---|---|---|
-/// | `$vec:{ns}:{field}` | `{docId}` (32-char UUID) | D-byte SQ8 vector |
-/// | `$vec:corpus:{ns}:{field}` | corpus sentinel | CBOR map — `{n}` |
-/// | `$vec:truncated:{ns}:{field}` | `{docId}` (32-char UUID) | empty bytes |
+/// | `$$vec:{ns}:{field}` | `{docId}` (32-char UUID) | D-byte SQ8 vector |
+/// | `$$vec:corpus:{ns}:{field}` | corpus sentinel | CBOR map — `{n}` |
+/// | `$$vec:truncated:{ns}:{field}` | `{docId}` (32-char UUID) | empty bytes |
+///
+/// All `$$vec:*` namespaces are **local-only**: they are never uploaded to the
+/// sync folder. Each device rebuilds its vector index independently by running
+/// inference on document data that is synced via the regular namespaces.
 ///
 /// where `D = model.dimensions` (384 for BGE Small En v1.5, 1024 for BGE-M3,
 /// etc.). The byte length of each stored SQ8 vector equals the model dimension
@@ -409,7 +413,7 @@ final class VecManager implements WriteAugmentor {
     );
   }
 
-  /// Rebuilds all stale `$vec:` indexes in the foreground.
+  /// Rebuilds all stale `$$vec:` indexes in the foreground.
   ///
   /// Iterates every declared [VecIndexDefinition] and calls [ensureBuilt] for
   /// any field whose current status is [VecIndexStatus.stale] or
@@ -530,7 +534,7 @@ final class VecManager implements WriteAugmentor {
   /// Searches [namespace] for documents semantically similar to [query].
   ///
   /// Embeds [query] using the configured [EmbeddingModel], then performs a
-  /// brute-force flat scan of the `$vec:{namespace}:{field}` namespaces,
+  /// brute-force flat scan of the `$$vec:{namespace}:{field}` namespaces,
   /// dequantising each stored vector and computing its dot product with the
   /// query vector (dot product of L2-normalised vectors = cosine similarity).
   ///

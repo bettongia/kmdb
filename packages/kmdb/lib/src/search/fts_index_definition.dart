@@ -16,8 +16,8 @@
 /// a named collection.
 ///
 /// FTS indexes use the BM25 ranking function over a tokenised inverted index
-/// stored in `$fts:{collection}:{field}` system namespaces. These namespaces
-/// are excluded from sync and cache.
+/// stored in `$$fts:{collection}:{field}` system namespaces. These are
+/// local-only namespaces — never uploaded to the sync folder.
 ///
 /// ## BM25 tuning
 ///

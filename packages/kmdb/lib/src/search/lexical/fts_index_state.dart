@@ -145,40 +145,52 @@ final class FtsIndexState {
 
   /// Key for a base-index posting entry.
   ///
-  /// Format: `$fts:{ns}:{field}:{term}:{docId}`
+  /// Format: `$$fts:{ns}:{field}:{term}:{docId}`
+  ///
+  /// The `$$` prefix marks this as a local-only namespace — its contents are
+  /// never uploaded to the sync folder. Each device rebuilds its FTS index
+  /// independently from document data.
   ///
   /// One entry per (term, document) pair. The value is the term frequency
   /// (number of times the term appears in the document field) encoded as a
   /// CBOR integer.
   static String baseKey(String ns, String field, String term, String docId) =>
-      '\$fts:$ns:$field:$term:$docId';
+      r'$$fts:'
+      '$ns:$field:$term:$docId';
 
   /// Key for an overlay entry (tracks updates/deletes since last compaction).
   ///
-  /// Format: `$fts:overlay:{ns}:{field}:{docId}`
+  /// Format: `$$fts:overlay:{ns}:{field}:{docId}`
   ///
+  /// The `$$` prefix marks this namespace as local-only (never synced).
   /// The value is a CBOR map of `{term: tf}` for the current document state,
   /// or the sentinel value [kFtsTombstone] to indicate a deletion.
   static String overlayKey(String ns, String field, String docId) =>
-      '\$fts:overlay:$ns:$field:$docId';
+      r'$$fts:overlay:'
+      '$ns:$field:$docId';
 
   /// Key for corpus-level aggregate statistics.
   ///
-  /// Format: `$fts:corpus:{ns}:{field}`
+  /// Format: `$$fts:corpus:{ns}:{field}`
   ///
+  /// The `$$` prefix marks this namespace as local-only (never synced).
   /// The value is a CBOR map with keys:
   /// - `n` (int) — total number of indexed documents
   /// - `totalTokens` (int) — sum of field lengths across all documents
-  static String corpusKey(String ns, String field) => '\$fts:corpus:$ns:$field';
+  static String corpusKey(String ns, String field) =>
+      r'$$fts:corpus:'
+      '$ns:$field';
 
   /// Key for per-document token count (field length).
   ///
-  /// Format: `$fts:doc:{ns}:{field}:{docId}`
+  /// Format: `$$fts:doc:{ns}:{field}:{docId}`
   ///
+  /// The `$$` prefix marks this namespace as local-only (never synced).
   /// Stores the number of tokens in the field for [docId]. Used to adjust
   /// corpus stats correctly during updates and deletes.
   static String docKey(String ns, String field, String docId) =>
-      '\$fts:doc:$ns:$field:$docId';
+      r'$$fts:doc:'
+      '$ns:$field:$docId';
 
   /// Key for the persisted [FtsIndexState] CBOR blob in `$meta`.
   ///

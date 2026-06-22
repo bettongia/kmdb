@@ -639,6 +639,65 @@ contention test that exercises the lease protocol.
 
 ---
 
+### RC-19 — Two-file flush crash-recovery fault injection
+
+- **Area:** storage engine / crash safety
+- **Validates:** when `LsmEngine.flush()` produces two files (one syncable, one
+  `.local.sst`) and the process is killed after the first file is written but
+  before the Manifest is updated, crash recovery on next `open()` correctly
+  deletes the orphaned file and replays the WAL from scratch, with no data loss
+  and no corruption of the local-only partition.
+- **Why not automated:** requires `FaultyStorageAdapter` fault injection at the
+  exact point between the second `SstableWriter.close()` and the `Manifest.append`
+  call. While `FaultyStorageAdapter` exists in the test suite, constructing a
+  precise mid-flush fault point for the two-file case requires a test harness
+  change beyond what was in scope for WI-0.
+- **Applies when:** the two-writer flush path is modified; before any release that
+  ships WI-0 (v0.06+).
+- **Steps:**
+  1. Configure `FaultyStorageAdapter` to fail after the second SSTable write but
+     before the Manifest append.
+  2. Open a database and write documents to both a syncable namespace and a `$$`
+     namespace until a flush is triggered.
+  3. Confirm the fault fires; both SSTable files may or may not be on disk.
+  4. Re-open the database; crash recovery should delete orphan SSTables and
+     replay the WAL.
+  5. Read back documents from both namespaces; confirm all data is present and
+     correct.
+- **Expected result:** no data loss, no stale orphan files, clean re-open.
+- **Related:** `docs/plans/completed/plan_0_06_wi0_local_only_namespaces.md`,
+  RC-4 (Linux real-OS power-loss), `docs/reviews/code-review-2026-05-22.md` §8.
+
+---
+
+### RC-20 — Multi-device sync: `$$` namespace isolation
+
+- **Area:** sync protocol / multi-device
+- **Validates:** after a push/pull cycle, device B has no `$$fts:`, `$$vec:`, or
+  `$$index:` entries in its KV store, and device B independently rebuilds its
+  local derived indexes from the synced document data.
+- **Why not automated:** requires a two-device `kmdb_harness` test run with a
+  real or simulated cloud sync folder (Google Drive or a local mock). The
+  `kmdb_harness` multi-device integration suite is a separate setup and was out
+  of scope for WI-0.
+- **Applies when:** WI-0 ships; before any release that includes local-only
+  namespace segregation (v0.06+); after any change to `SyncEngine.push` or the
+  `.local.sst` exclusion predicate.
+- **Steps:**
+  1. Device A: open a database, write documents, trigger FTS/vec/index writes
+     (confirm `$$fts:`, `$$vec:`, `$$index:` entries are present).
+  2. Device A: push to the sync folder.
+  3. Device B: pull from the sync folder.
+  4. Device B: enumerate all KV namespaces; confirm none start with `$$`.
+  5. Device B: open a collection with FTS and secondary indexes; trigger a search
+     and an index query; confirm both work (indexes are rebuilt on demand).
+- **Expected result:** device B receives no `$$`-prefixed data; all derived
+  indexes are rebuilt locally from the synced document SSTables.
+- **Related:** `docs/plans/completed/plan_0_06_wi0_local_only_namespaces.md`,
+  `packages/kmdb_harness/`, RC-9 (real-service sync soak).
+
+---
+
 ## Release log
 
 | Version      | Date         | Tester | Checks run  | Result      | Notes              |

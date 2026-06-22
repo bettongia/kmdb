@@ -462,21 +462,21 @@ void main() {
     test('vecNamespace returns expected format', () {
       expect(
         VecIndexState.vecNamespace('articles', 'body'),
-        equals(r'$vec:articles:body'),
+        equals(r'$$vec:articles:body'),
       );
     });
 
     test('corpusNamespace returns expected format', () {
       expect(
         VecIndexState.corpusNamespace('articles', 'body'),
-        equals(r'$vec:corpus:articles:body'),
+        equals(r'$$vec:corpus:articles:body'),
       );
     });
 
     test('truncatedNamespace returns expected format', () {
       expect(
         VecIndexState.truncatedNamespace('articles', 'body'),
-        equals(r'$vec:truncated:articles:body'),
+        equals(r'$$vec:truncated:articles:body'),
       );
     });
 

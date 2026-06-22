@@ -21,7 +21,7 @@ import 'index_writer.dart';
 /// Uses the **namespace-per-value** storage scheme implemented by
 /// [IndexWriter]: all document keys for a given field value are stored within
 /// a dedicated system namespace
-/// `$index:{ns}:{path}:{hexEncodedValue}` with their 32-character document
+/// `$$index:{ns}:{path}:{hexEncodedValue}` with their 32-character document
 /// keys as the entry keys.
 ///
 /// An equality lookup is therefore a full scan of that namespace — no key

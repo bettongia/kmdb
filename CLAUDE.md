@@ -382,20 +382,19 @@ for the namespace, debounced at 50ms.
 
 Defined at `KmdbDatabase.open()` time. Lazy build on first query. 4 lifecycle
 states: `undefined` → `building` → `current` (or `stale` if writes arrived
-during build). Index entries stored in `$index:{ns}:{path}` system namespaces.
-All index writes are in the same `WriteBatch` as the document write — always
-consistent. Dot-path syntax supports nested fields (`address.city`) and array
-fan-out (`tags[]`).
+during build). Index entries stored in `$$index:{ns}:{path}` system namespaces
+(local-only, never synced). All index writes are in the same `WriteBatch` as the
+document write — always consistent. Dot-path syntax supports nested fields
+(`address.city`) and array fan-out (`tags[]`).
 
 ### Text Search (§20–23)
 
-Three modes: **lexical** (BM25 inverted index, `$fts:` namespaces), **semantic**
-(BGE Small En v1.5 embeddings, SQ8 quantization, `$vec:` namespaces), and
-**hybrid** (Reciprocal Rank Fusion combining both). `$fts:*` and `$vec:*`
-namespaces are written to SSTables and reach the cloud via whole-file upload
-(no upload-time namespace filter — see §12, §20.7); their values are protected
-by value-level encryption (§31) when encryption is enabled. Managed via
-`FtsManager` and
+Three modes: **lexical** (BM25 inverted index, `$$fts:` namespaces), **semantic**
+(BGE Small En v1.5 embeddings, SQ8 quantization, `$$vec:` namespaces), and
+**hybrid** (Reciprocal Rank Fusion combining both). All `$$fts:*`, `$$vec:*`, and
+`$$index:*` namespaces are **local-only** — they are stored in `.local.sst` files
+and never uploaded to the sync folder. Each device rebuilds these derived indexes
+independently from the synced document data. Managed via `FtsManager` and
 `VecManager`; queried via `KmdbCollection.search()`. English-language only; web
 browser excluded. See §20 for shared types and CLI, §21–23 for each mode.
 

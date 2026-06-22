@@ -286,6 +286,88 @@ void main() {
         expect(remoteFiles, isNot(contains(peerFilename)));
       },
     );
+
+    // ── Local-only SSTable exclusion (WI-0) ─────────────────────────────────
+
+    test('push does not upload .local.sst files', () async {
+      // Place a .local.sst file in the local sst/ directory — as if flush had
+      // produced it from a $$-prefixed namespace. push() must not upload it.
+      final localFilename = SstableInfo.flushName(
+        'dev00001',
+        const Hlc(2000, 0),
+        const Hlc(2001, 0),
+        localOnly: true,
+      );
+      await localAdapter.writeFile(
+        '$_dbDir/sst/$localFilename',
+        _buildSst(basePhysical: 2000),
+      );
+
+      final engine = _makeEngine(store, cloudAdapter, localAdapter, 'dev00001');
+      await engine.push();
+
+      // The remote sstables dir must NOT contain the .local.sst file.
+      final remoteFiles = await cloudAdapter.list(
+        '$_syncRoot/sstables',
+        extension: '.sst',
+      );
+      expect(
+        remoteFiles,
+        isNot(contains(localFilename)),
+        reason: '.local.sst files must never be uploaded to the sync folder',
+      );
+    });
+
+    test(
+      'HWM is computed only from syncable SSTables: .local.sst does not advance HWM',
+      () async {
+        // Write a syncable SSTable with a low max HLC (1000 ms).
+        final syncFilename = SstableInfo.flushName(
+          'dev00001',
+          const Hlc(1000, 0),
+          const Hlc(1001, 0),
+        );
+        await localAdapter.writeFile(
+          '$_dbDir/sst/$syncFilename',
+          _buildSst(basePhysical: 1000),
+        );
+
+        // Write a .local.sst SSTable with a higher max HLC (9999 ms).
+        // If this file were included in HWM computation, the HWM would jump
+        // to Hlc(9999, …) — use that to detect the bug.
+        final localFilename = SstableInfo.flushName(
+          'dev00001',
+          const Hlc(9999, 0),
+          const Hlc(9999, 9),
+          localOnly: true,
+        );
+        await localAdapter.writeFile(
+          '$_dbDir/sst/$localFilename',
+          _buildSst(basePhysical: 9999),
+        );
+
+        final engine = _makeEngine(
+          store,
+          cloudAdapter,
+          localAdapter,
+          'dev00001',
+        );
+        await engine.push();
+
+        final hwm = await HighwaterMark.load(
+          '$_syncRoot/highwater/dev00001.hwm',
+          cloudAdapter,
+        );
+        expect(hwm, isNotNull);
+        // HWM must not exceed the max HLC of the syncable SSTable (1001 ms).
+        // If it were Hlc(9999, 9) the .local.sst file was erroneously included.
+        expect(
+          hwm!.currentHlc.physicalMs,
+          lessThanOrEqualTo(1001),
+          reason: '.local.sst HLC must not contribute to the high-water mark',
+        );
+      },
+    );
   });
 
   // ── pull ──────────────────────────────────────────────────────────────────────

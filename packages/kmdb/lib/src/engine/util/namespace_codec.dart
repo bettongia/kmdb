@@ -118,3 +118,31 @@ String bytesToNamespace(List<int> bytes) => utf8.decode(bytes);
 /// await store.put(ns, key, value);
 /// ```
 String normaliseNamespace(String namespace) => unorm.nfc(namespace);
+
+/// Returns `true` if [namespace] is a local-only derived-data namespace.
+///
+/// The `$$` (double-dollar) prefix marks namespaces whose contents are
+/// device-local derived data that should never be synced to other devices.
+/// The three built-in local-only namespace classes are:
+///
+/// - `$$fts:*` — BM25 inverted-index entries (lexical full-text search)
+/// - `$$vec:*` — SQ8-quantized embedding vectors (semantic search)
+/// - `$$index:*` — secondary index entries
+///
+/// At flush time the memtable is partitioned into two SSTables: one for
+/// syncable namespaces and one for local-only namespaces. The sync engine
+/// skips files whose filename ends in `.local.sst` (the naming convention
+/// for local-only SSTables). Compaction preserves this partition.
+///
+/// The `$$` prefix is a strict superset of the `$` prefix: every check that
+/// guards on `ns.startsWith(r'$')` (system-namespace guards in `KvStore`,
+/// `CacheLayer`, `KmdbDatabase`, and `IndexDefinition`) already covers
+/// `$$`-prefixed namespaces, so no new wiring is required at those call sites.
+///
+/// Example:
+/// ```dart
+/// isLocalOnly(r'$$fts:articles:body:68656c6c6f'); // true
+/// isLocalOnly(r'$meta');                            // false
+/// isLocalOnly('users');                             // false
+/// ```
+bool isLocalOnly(String namespace) => namespace.startsWith(r'$$');

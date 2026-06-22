@@ -15,7 +15,7 @@ about indexes — they are a pure application-level concern using the same
 > The compound-key layout described below (`[encodedValue][0x00][documentKey]`)
 > is the target design for range-predicate index acceleration and is **not yet
 > implemented**. The current implementation uses one namespace per distinct
-> value (`$index:{ns}:{path}:{hexEncodedValue}`, key = docKey UUIDv7), which
+> value (`$$index:{ns}:{path}:{hexEncodedValue}`, key = docKey UUIDv7), which
 > supports equality lookups only. The compound-key layout requires the storage
 > engine to support variable-length user keys — a prerequisite tracked in
 > [`docs/proposals/range_predicate_index_scans.md`](../proposals/range_predicate_index_scans.md).
@@ -48,8 +48,8 @@ When a dot-path ends with `[]`, one index entry is written per array element:
 // Index path: "tags[]"
 // Document: { tags: ['dart', 'flutter'] }
 // Index entries written:
-//   $index:contacts:tags[] → "dart\x00{docKey}"  → []
-//   $index:contacts:tags[] → "flutter\x00{docKey}" → []
+//   $$index:contacts:tags[] → "dart\x00{docKey}"  → []
+//   $$index:contacts:tags[] → "flutter\x00{docKey}" → []
 ```
 
 ## Dot-Path Syntax
@@ -229,8 +229,9 @@ Index state and index entries are **device-local** and are **never synced**:
   system namespace prefixed with `$`. The sync engine filters out all
   `$`-prefixed namespaces during SSTable upload, so index state never leaves the
   device.
-- `$index:*` namespaces (where index entries are stored) are also `$`-prefixed
-  and are therefore excluded from sync by the same rule.
+- `$$index:*` namespaces (where index entries are stored) use the `$$`
+  (double-dollar) local-only prefix. At flush time these entries are written to
+  a `.local.sst` file that `SyncEngine.push` never uploads (see §8, §6, §12).
 
 When a device receives SSTables via `pull` or `sync`, documents arrive in user
 namespaces and are indexed locally on the next query that uses the index:
@@ -241,7 +242,7 @@ namespaces and are indexed locally on the next query that uses the index:
 - If incoming SSTables contain tombstones that delete every document in an
   indexed collection, the CLI's post-pull cleanup (`purgeOrphanedIndexes`)
   detects this and cascades the same cleanup as `collections delete`: it purges
-  `$index:*` entries, removes the index definitions from `local/config.json`,
+  `$$index:*` entries, removes the index definitions from `local/config.json`,
   and unregisters the now-empty collection from `$meta`.
 
 This design keeps index management simple and deterministic: each device

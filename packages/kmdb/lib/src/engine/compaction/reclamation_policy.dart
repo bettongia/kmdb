@@ -100,8 +100,8 @@ abstract interface class ReclamationPolicy {
 /// highest-HLC entry, and drop a surviving delete tombstone iff the
 /// compaction covers all levels and the tombstone's HLC is below the sync
 /// horizon. Applied to all user namespaces and to KMDB system namespaces
-/// that hold current-state only (`$meta`, `$cache`, `$index:`, `$fts:`,
-/// `$vec:`, `$sync`, …).
+/// that hold current-state only (`$meta`, `$cache`, `$$index:`, `$$fts:`,
+/// `$$vec:`, `$sync`, …).
 final class CollapseToNewestPolicy implements ReclamationPolicy {
   /// Creates the default collapse-to-newest policy.
   const CollapseToNewestPolicy();
@@ -117,6 +117,52 @@ final class CollapseToNewestPolicy implements ReclamationPolicy {
   }) {
     if (!allLevels) return false;
     return tombstoneHlc.compareTo(horizon) < 0;
+  }
+
+  /// Not called for `collapseVersions=true` namespaces — returns entries
+  /// unchanged for completeness.
+  @override
+  List<MergeEntry> filterGroup(
+    List<MergeEntry> entries, {
+    required int nowMs,
+  }) => entries;
+}
+
+/// Collapse policy for local-only (`$$`-prefixed) namespaces.
+///
+/// Like [CollapseToNewestPolicy] in all respects except [dropTombstone]:
+/// because local-only namespaces contain device-local derived data (FTS
+/// indexes, vector indexes, secondary indexes) that is never synced, the
+/// *sync horizon* check is meaningless. A `$$`-namespace tombstone may be
+/// dropped in a full all-levels compaction without waiting for any peer
+/// to acknowledge the delete.
+///
+/// The `allLevels` safety gate is **not** relaxed — dropping a local-only
+/// tombstone in a partial compaction would resurrect a deleted key from an
+/// un-compacted lower level, which is a correctness violation. Only full
+/// all-levels compactions (`_compactAll`) may drop these tombstones.
+///
+/// Tombstones dropped under this policy are elided from the output SSTable
+/// but are **not** counted in `CompactionJob.tombstonesDropped` — that
+/// counter drives the GC-floor advance in `$meta`, which is relevant only
+/// for syncable namespaces. Local-only drops do not advance the floor.
+final class LocalOnlyCollapsePolicy implements ReclamationPolicy {
+  /// Creates the local-only collapse policy.
+  const LocalOnlyCollapsePolicy();
+
+  @override
+  bool get collapseVersions => true;
+
+  @override
+  bool dropTombstone({
+    required bool allLevels,
+    required Hlc tombstoneHlc,
+    required Hlc horizon,
+  }) {
+    // For local-only namespaces the horizon check is irrelevant — no peer
+    // device will ever see these entries. The only safety gate is allLevels:
+    // partial compactions must never drop tombstones regardless of namespace.
+    return allLevels;
   }
 
   /// Not called for `collapseVersions=true` namespaces — returns entries
@@ -216,17 +262,22 @@ final class ReclamationPolicyRegistry {
   /// Resolution order:
   /// 1. Exact match in [_versionPolicies] (per-namespace version policies,
   ///    set when versioning is configured).
-  /// 2. Prefix match in [_retainAllPrefixes] → [RetainAllVersionsPolicy].
-  /// 3. Default → [CollapseToNewestPolicy].
+  /// 2. Local-only namespaces (`$$`-prefix) → [LocalOnlyCollapsePolicy].
+  ///    Horizon check is skipped; allLevels gate is retained.
+  /// 3. Prefix match in [_retainAllPrefixes] → [RetainAllVersionsPolicy].
+  /// 4. Default → [CollapseToNewestPolicy].
   ReclamationPolicy resolve(String namespace) {
     // 1. Exact match for versioned namespaces.
     final exact = _versionPolicies[namespace];
     if (exact != null) return exact;
-    // 2. Prefix match.
+    // 2. Local-only namespaces skip the sync-horizon tombstone check because
+    //    their data never reaches other devices.
+    if (namespace.startsWith(r'$$')) return const LocalOnlyCollapsePolicy();
+    // 3. Prefix match.
     for (final prefix in _retainAllPrefixes) {
       if (namespace.startsWith(prefix)) return const RetainAllVersionsPolicy();
     }
-    // 3. Default.
+    // 4. Default.
     return const CollapseToNewestPolicy();
   }
 }

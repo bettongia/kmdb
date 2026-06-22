@@ -630,7 +630,7 @@ final class LsmEngine {
   }
 
   /// Returns all distinct namespace strings currently present in storage
-  /// (including system namespaces such as `$meta` and `$index:*`).
+  /// (including system namespaces such as `$meta` and `$$index:*`).
   ///
   /// Only namespaces that have at least one live (non-tombstoned) entry are
   /// returned. Tombstone-only namespaces are excluded.
@@ -715,14 +715,30 @@ final class LsmEngine {
     }
   }
 
-  /// Flushes the active memtable to a new L0 SSTable and rotates the WAL.
+  /// Flushes the active memtable to L0 SSTables and rotates the WAL.
+  ///
+  /// ## Two-writer split (local-only namespace segregation)
+  ///
+  /// The memtable is partitioned into two writers at flush time:
+  ///
+  /// - **Syncable writer** — receives entries whose namespace does NOT start
+  ///   with `$$`. Produces `{deviceId}-{minHlc}-{maxHlc}.sst`.
+  /// - **Local-only writer** — receives entries whose namespace starts with
+  ///   `$$` (derived data: FTS, vector, secondary indexes). Produces
+  ///   `{deviceId}-{minHlc}-{maxHlc}.local.sst`.
+  ///
+  /// If either partition is empty, its writer is discarded — no file is
+  /// created and no `SstableMeta` entry is added for the empty partition.
+  /// A single atomic [VersionEdit] is appended with up to two `SstableMeta`
+  /// entries, ensuring the Manifest transition is crash-safe regardless of
+  /// which partitions were non-empty.
   ///
   /// Steps:
   /// 1. Freeze the active memtable; start a new one.
   /// 2. Rotate the WAL (closes the current file, increments sequence). The new
   ///    active WAL's sequence becomes the boundary recovery replays from.
-  /// 3. Write the frozen memtable to an SSTable file.
-  /// 4. Append a [VersionEdit] to the Manifest.
+  /// 3. Partition and write up to two SSTable files.
+  /// 4. Append a single [VersionEdit] to the Manifest (up to two `added`).
   /// 5. Discard the frozen memtable.
   /// 6. Run compaction if triggered.
   Future<void> flush() async {
@@ -733,66 +749,135 @@ final class LsmEngine {
     _active = Memtable();
 
     // 2. Rotate WAL. The retired file is kept until its SSTable is confirmed
-    // in the Manifest, then deleted in step 6 below.
+    // in the Manifest, then deleted in step 5 below.
     final hlc = _clock.now();
     await _walWriter.rotate();
 
-    // 3. Write SSTable from frozen memtable.
-    final writer = SstableWriter();
-    Hlc? minHlc;
-    Hlc? maxHlc;
-    var entryCount = 0;
-    Uint8List? minKeyBytes;
-    Uint8List? maxKeyBytes;
+    // 3. Partition the frozen memtable into syncable and local-only entries.
+    //    Each partition tracks its own HLC range, key bounds, and entry count
+    //    so the resulting SstableMeta records are fully accurate.
+    final syncWriter = SstableWriter();
+    Hlc? syncMinHlc;
+    Hlc? syncMaxHlc;
+    var syncEntryCount = 0;
+    Uint8List? syncMinKeyBytes;
+    Uint8List? syncMaxKeyBytes;
+
+    final localWriter = SstableWriter();
+    Hlc? localMinHlc;
+    Hlc? localMaxHlc;
+    var localEntryCount = 0;
+    Uint8List? localMinKeyBytes;
+    Uint8List? localMaxKeyBytes;
 
     for (final entry in _frozen!.entries) {
-      writer.add(entry.key, entry.value);
-      entryCount++;
       final entryHlc = KeyCodec.decodeHlc(entry.key);
-      if (minHlc == null || entryHlc < minHlc) minHlc = entryHlc;
-      if (maxHlc == null || entryHlc > maxHlc) maxHlc = entryHlc;
-      minKeyBytes ??= entry.key;
-      maxKeyBytes = entry.key;
+      final ns = KeyCodec.decodeNamespace(entry.key);
+
+      if (isLocalOnly(ns)) {
+        // Entry belongs to a $$-prefixed local-only namespace.
+        localWriter.add(entry.key, entry.value);
+        localEntryCount++;
+        if (localMinHlc == null || entryHlc < localMinHlc) {
+          localMinHlc = entryHlc;
+        }
+        if (localMaxHlc == null || entryHlc > localMaxHlc) {
+          localMaxHlc = entryHlc;
+        }
+        localMinKeyBytes ??= entry.key;
+        localMaxKeyBytes = entry.key;
+      } else {
+        // Entry belongs to a syncable namespace.
+        syncWriter.add(entry.key, entry.value);
+        syncEntryCount++;
+        if (syncMinHlc == null || entryHlc < syncMinHlc) syncMinHlc = entryHlc;
+        if (syncMaxHlc == null || entryHlc > syncMaxHlc) syncMaxHlc = entryHlc;
+        syncMinKeyBytes ??= entry.key;
+        syncMaxKeyBytes = entry.key;
+      }
     }
 
-    final effectiveMin = minHlc ?? hlc;
-    final effectiveMax = maxHlc ?? hlc;
-    final filename = SstableInfo.flushName(
-      _deviceId,
-      effectiveMin,
-      effectiveMax,
-    );
-    final sstPath = '$_sstDir/$filename';
+    // Write non-empty partitions to disk and accumulate SstableMeta entries.
+    // Both files (if present) are fsynced before the single Manifest append so
+    // that a crash between the two file writes leaves both files on disk but
+    // neither referenced by the Manifest — crash recovery discards them as
+    // orphans. This preserves the crash-atomicity guarantee of a single
+    // VersionEdit (review finding C2).
+    final adds = <SstableMeta>[];
 
-    final sstBytes = writer.finish();
-    await _adapter.writeFile(sstPath, sstBytes);
-    await _adapter.syncFile(sstPath);
-    // Durably link the new SSTable's directory entry before the manifest records
-    // it; on Linux the fsync above does not persist the name (review finding H1).
+    if (syncEntryCount > 0) {
+      final effectiveMin = syncMinHlc ?? hlc;
+      final effectiveMax = syncMaxHlc ?? hlc;
+      final filename = SstableInfo.flushName(
+        _deviceId,
+        effectiveMin,
+        effectiveMax,
+      );
+      final sstPath = '$_sstDir/$filename';
+      await _adapter.writeFile(sstPath, syncWriter.finish());
+      await _adapter.syncFile(sstPath);
+      adds.add(
+        SstableMeta(
+          level: 0,
+          filename: filename,
+          minKey: syncMinKeyBytes != null ? _bytesToHex(syncMinKeyBytes) : '',
+          maxKey: syncMaxKeyBytes != null ? _bytesToHex(syncMaxKeyBytes) : '',
+          entryCount: syncEntryCount,
+          walSequence: _walWriter.activeSequence - 1, // the now-retired WAL
+          localOnly: false,
+        ),
+      );
+    }
+
+    if (localEntryCount > 0) {
+      final effectiveMin = localMinHlc ?? hlc;
+      final effectiveMax = localMaxHlc ?? hlc;
+      final filename = SstableInfo.flushName(
+        _deviceId,
+        effectiveMin,
+        effectiveMax,
+        localOnly: true,
+      );
+      final sstPath = '$_sstDir/$filename';
+      await _adapter.writeFile(sstPath, localWriter.finish());
+      await _adapter.syncFile(sstPath);
+      adds.add(
+        SstableMeta(
+          level: 0,
+          filename: filename,
+          minKey: localMinKeyBytes != null ? _bytesToHex(localMinKeyBytes) : '',
+          maxKey: localMaxKeyBytes != null ? _bytesToHex(localMaxKeyBytes) : '',
+          entryCount: localEntryCount,
+          // walSequence only on the syncable file; local-only files do not
+          // retire a separate WAL (both partitions share the same retired WAL
+          // from step 2 above). Recording walSequence on the local-only file
+          // would be redundant and could confuse crash recovery.
+          localOnly: true,
+        ),
+      );
+    }
+
+    // Durably link all new SSTable directory entries before the manifest records
+    // them; on Linux the fsyncs above do not persist the names (review H1).
     await _adapter.syncDir(_sstDir);
 
-    // 4. Append VersionEdit to Manifest (append() now fsyncs the manifest, so
-    // the edit is durable before the retired WAL is deleted below — review
-    // finding C2). The new SSTable is on disk and linked, so this ordering makes
-    // the flush atomic with respect to a crash.
-    final meta = SstableMeta(
-      level: 0,
-      filename: filename,
-      minKey: minKeyBytes != null ? _bytesToHex(minKeyBytes) : '',
-      maxKey: maxKeyBytes != null ? _bytesToHex(maxKeyBytes) : '',
-      entryCount: entryCount,
-      walSequence: _walWriter.activeSequence - 1, // the now-retired WAL
-    );
+    // 4. Append a single VersionEdit to the Manifest — one atomic write covers
+    // up to two SstableMeta entries. The fsyncs above guarantee both files are
+    // durable before this point (review finding C2). An empty `adds` list means
+    // the memtable had zero entries (guarded by the early return above, so this
+    // is only reachable in tests that bypass the guard).
     await _manifestWriter.append(
       VersionEdit(
         logNumber: _walWriter.activeSequence,
         nextSeq: hlc.encoded,
-        added: [meta],
+        added: adds,
       ),
     );
 
-    // Update level 0 list with the full SstableMeta (already constructed above).
-    (_levels[0] ??= []).add(meta);
+    // Update level 0 list with the produced SstableMeta objects.
+    for (final meta in adds) {
+      (_levels[0] ??= []).add(meta);
+    }
 
     // 5. Discard frozen memtable.
     _frozen = null;
@@ -1381,8 +1466,8 @@ final class LsmEngine {
 
           // Record the rename for the VersionEdit. The new SstableMeta copies
           // all diagnostic fields from the source — the renamed file is
-          // byte-identical, so minKey/maxKey/entryCount/walSequence are
-          // unchanged. Only the filename is updated.
+          // byte-identical, so minKey/maxKey/entryCount/walSequence/localOnly
+          // are unchanged. Only the filename is updated.
           removed.add(SstableRef(level: level, filename: oldMeta.filename));
           final newMeta = SstableMeta(
             level: level,
@@ -1391,6 +1476,7 @@ final class LsmEngine {
             maxKey: oldMeta.maxKey,
             entryCount: oldMeta.entryCount,
             walSequence: oldMeta.walSequence,
+            localOnly: oldMeta.localOnly,
           );
           added.add(newMeta);
           newMetas.add(newMeta);

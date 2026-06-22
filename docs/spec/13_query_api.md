@@ -228,9 +228,9 @@ side-effects — are committed atomically. Built-in augmentors:
 
 | Augmentor | What it adds to the batch |
 | --------- | ------------------------- |
-| `IndexManager` | Secondary index entries (`$index:{ns}:{path}:…` namespaces) |
-| `FtsManager` | BM25 posting lists (`$fts:…` namespaces) |
-| `VecManager` | SQ8 vector entries (`$vec:…` namespaces) |
+| `IndexManager` | Secondary index entries (`$$index:{ns}:{path}:…` namespaces — local-only) |
+| `FtsManager` | BM25 posting lists (`$$fts:…` namespaces — local-only) |
+| `VecManager` | SQ8 vector entries (`$$vec:…` namespaces — local-only) |
 | `VaultRefInterceptor` | Vault blob reference counts (`$vault` namespace) |
 
 Application code can supply additional augmentors via the `WriteAugmentor`

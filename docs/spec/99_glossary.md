@@ -1,10 +1,29 @@
 # Glossary
 
+`$$` (double-dollar prefix)
+
+: The local-only namespace prefix. Any namespace whose name starts with `$$`
+  contains device-local derived data that is **never uploaded to the sync
+  folder**. The three built-in local-only namespace classes are `$$fts:*`
+  (BM25 inverted-index entries), `$$vec:*` (SQ8-quantized embedding vectors),
+  and `$$index:*` (secondary index entries). At flush time, entries in
+  `$$`-prefixed namespaces are written to a `.local.sst` file; `SyncEngine.push`
+  identifies and skips these files by parsing the filename suffix. See §6, §8,
+  §12. Implemented by `isLocalOnly`.
+
+`isLocalOnly`
+
+: A free function in `namespace_codec.dart` that returns `true` when a namespace
+  starts with `$$`. The single source of truth for the local-only predicate;
+  used at flush time (memtable partitioning in `LsmEngine`), at compaction time
+  (writer routing and `LocalOnlyCollapsePolicy` resolution in `CompactionJob`),
+  and implicitly at sync time (via the `.local.sst` filename suffix). See `$$`.
+
 avgdl
 
 : Average document length (token count) across all documents in the indexed
   collection. Computed as `totalTokens / n` at query time from corpus stats
-  stored in `$fts:corpus:{ns}:{field}`. Used in the BM25 denominator for
+  stored in `$$fts:corpus:{ns}:{field}`. Used in the BM25 denominator for
   length normalisation.
 
 BM25
@@ -61,7 +80,7 @@ Corpus stats
 
 : Per-`(namespace, field)` statistics maintained by the FTS system: `n`
   (total indexed documents) and `totalTokens` (sum of all document token
-  counts). Stored under `$fts:corpus:{ns}:{field}`. Used to compute `avgdl`
+  counts). Stored under `$$fts:corpus:{ns}:{field}`. Used to compute `avgdl`
   at query time and `IDF` in BM25 scoring.
 
 CRC32C
@@ -138,7 +157,7 @@ Inverted index
 
 : A data structure mapping from terms to the documents that contain them.
   KMDB's lexical search index (§21) stores one KV namespace per term
-  (`$fts:{ns}:{field}:{hexTerm}`), with document IDs as keys and term
+  (`$$fts:{ns}:{field}:{hexTerm}`), with document IDs as keys and term
   frequency as values.
 
 ISS pattern (Identity–Size–Secondary)
@@ -189,7 +208,7 @@ Memtable
 
 Overlay (FTS)
 
-: A per-`(namespace, field)` KV namespace (`$fts:overlay:{ns}:{field}`) that
+: A per-`(namespace, field)` KV namespace (`$$fts:overlay:{ns}:{field}`) that
   stores the authoritative current term→tf map (or TOMBSTONE) for documents
   that have been updated or deleted since the last FTS compaction. Query time
   filters base index results through the overlay for correctness. See §21.

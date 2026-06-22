@@ -427,26 +427,40 @@ namespace filtering. The `_syncNamespaces` field is resolved and exposed by
 
 A consequence is that every value written through the shared
 `WriteBatch` → memtable → SSTable path rides in uploaded SSTables and reaches
-cloud storage. This includes all system namespaces that persist data through
-that path: `$meta`, `$index:*` (secondary indexes), `$fts:*` (lexical search),
-`$vec:*` (semantic search), `$ver:*` (document versions), and `$vault`
-(vault references). None of these are excluded from upload by the sync layer.
-(The session object cache and the materialised-view `$cache` namespace are not
-in scope here: the session cache is in-memory only, and the materialised-view
-cache is not yet implemented, so neither produces SSTable content to upload.)
+cloud storage, **unless** it belongs to a local-only (`$$`-prefixed) namespace.
 
-Confidentiality of system-namespace values in the cloud is therefore provided
-by **value-level encryption** (§31), not by upload filtering. When database
-encryption is enabled, every value written through `ValueCodec` — user
-collections, indexes, and all other system namespaces — is stored as ciphertext
+**Local-only namespace exclusion (WI-0).** At flush time the memtable is
+partitioned into two SSTables (see §6 *Flush Partitioning*): entries from
+`$$`-prefixed namespaces go into a `.local.sst` file; all other entries go
+into a `.sst` file. The `.local.sst` suffix is load-bearing:
+`SyncEngine.push` builds its upload list (`ownLocalFiles`) by listing the
+local `sst/` directory and filtering via `SstableInfo.parse(filename).localOnly`.
+Both the upload loop and the HWM fold iterate `ownLocalFiles`, so excluding
+local-only files from that list satisfies both requirements in one place:
+
+```dart
+final ownLocalFiles = localFiles
+    .where((f) {
+      if (safeDeviceId(f) != _deviceId) return false;
+      return !SstableInfo.parse(f).localOnly; // exclude .local.sst files
+    })
+    .toSet();
+```
+
+The `$$`-prefixed namespaces excluded from upload are:
+`$$fts:*` (lexical search), `$$vec:*` (semantic search), and
+`$$index:*` (secondary indexes). Each receiving device rebuilds these
+derived indexes independently from the synced document data.
+
+Syncable system namespaces that **are** uploaded: `$meta`, `$ver:*`
+(document versions), and `$vault` (vault references).
+
+**Confidentiality.** Syncable system-namespace values in the cloud are
+protected by **value-level encryption** (§31), not by upload filtering.
+When database encryption is enabled, every value written through `ValueCodec`
+— user collections and syncable system namespaces — is stored as ciphertext
 in SSTables, so the bytes uploaded to cloud storage carry no plaintext document
 content.
-
-> **Future work.** Upload-time namespace filtering (so that an SSTable's
-> excluded-namespace entries are stripped before upload, or never reach a synced
-> SSTable) is not implemented. If it is added, this section must be updated to
-> describe the actual filter and which namespaces it excludes. Until then, do
-> not document filtering behaviour that the code does not perform.
 
 ## Cross-Device Compaction Coordinator
 
