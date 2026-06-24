@@ -21,6 +21,13 @@ indexes from the synced document data.
 See §21 (Lexical Search), §22 (Semantic Search), and §23 (Hybrid Search) for
 the detail of each mode.
 
+Text search also extends to vault blobs via **Vault Search** (§32). Vault
+search applies the same BM25 and semantic modes to the text extracted from
+vault-stored binary objects (PDF, plain text, DOCX, etc.), making file
+attachment content searchable through `KmdbCollection.searchVault()`. The
+vault search indexes use the same `$$` local-only namespace convention and are
+never uploaded to the sync folder.
+
 ## Scope
 
 ### Supported

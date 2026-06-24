@@ -698,6 +698,43 @@ contention test that exercises the lease protocol.
 
 ---
 
+### RC-21 — Vault search isolate crash recovery
+
+- **Area:** vault search / durability
+- **Validates:** that `VaultSearchManager._recover()` correctly rebuilds the KV
+  extraction state from filesystem artifacts when the process is killed at each
+  phase of the indexing pipeline (after `extracting` is written, after
+  `text.txt` is written, after `chunks_v1.json` is written, after
+  `vectors_{modelId}_sq8.bin` is written).
+- **Why not automated:** requires killing the process (SIGKILL) at precise
+  points between filesystem writes — not reproducible in a single-process
+  Dart test without a dedicated fault-injection harness for subprocess
+  interruption. The `FaultyStorageAdapter` covers LSM crash-safety but not
+  the vault search isolate's multi-phase filesystem writes.
+- **Applies when:** WI-3 vault search ships; before any release that includes
+  `VaultSearchManager`, `VaultIndexingIsolate`, or changes to the
+  `$$vault:extract:` recovery sequence (v0.06+).
+- **Prerequisites:** a native-platform machine (Linux or macOS); the `kmdb_cli`
+  binary built with `dart compile exe`; a small corpus of `text/plain` blobs.
+- **Steps:**
+  1. Open a database with `vaultSearch: VaultSearchConfig()` and ingest several
+     text blobs.
+  2. Kill the process with `kill -9` immediately after the `extracting` status
+     is written (use OS-level process monitoring or a debug `sleep` in code).
+  3. Re-open the database; verify recovery resets the killed blob to `pending`
+     and re-indexes it successfully.
+  4. Repeat by killing after each subsequent filesystem artifact is written
+     (`text.txt`, `chunks_v1.json`, `vectors_*_sq8.bin`).
+  5. After each recovery, run `kmdb <db> vault status` and confirm all blobs
+     reach `indexed` with no `failed` entries.
+- **Expected result:** all blobs are fully indexed after recovery in every
+  kill scenario; no orphan `extract/` directories or stale `extracting` entries
+  remain.
+- **Related:** `docs/plans/plan_0_06_wi3_vault_search_core.md`, §32 (Vault
+  Search — Startup Recovery), `docs/reviews/code-review-2026-05-22.md` §8.
+
+---
+
 ## Release log
 
 | Version      | Date         | Tester | Checks run  | Result      | Notes              |

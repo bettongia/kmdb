@@ -319,6 +319,56 @@ Wrapped DEK
   KEK: passphrase-derived and recovery-derived). The term "wrapped" follows the
   NIST key wrapping convention. See §31.
 
+VaultSearchConfig
+
+: Configuration record passed to `KmdbDatabase.open(vaultSearch: ...)` to
+  enable vault search. Parameters: `extractors` (list of `VaultTextExtractor`
+  implementations, default empty — `PlainTextExtractor` is always available),
+  `chunkSize` (target window size in words, default 300), and `chunkOverlap`
+  (overlap between consecutive windows in words, default 50). See §32.
+
+VaultSearchManager
+
+: Internal orchestrator for the vault search lifecycle. Created by
+  `KmdbDatabase.open()` when a `VaultSearchConfig` is provided. Manages the
+  queue of blobs awaiting extraction, spawns the `VaultIndexingIsolate`,
+  calls the embedding model on the main isolate, and coordinates writes to
+  `VaultBm25Writer` and `VaultVecWriter`. Performs startup recovery for blobs
+  stuck in the `extracting` state after a crash. Not part of the public API.
+  See §32.
+
+VaultTextExtractor
+
+: A strategy interface for extracting plain UTF-8 text from a vault blob of a
+  specific media type. The built-in implementation is `PlainTextExtractor` for
+  `text/plain` and `text/*` blobs; it uses charset detection (WI-2) to decode
+  non-UTF-8 content. Custom extractors are registered via
+  `VaultSearchConfig.extractors`. See §32.
+
+`$$vault:fts:`
+
+: The `$$`-prefixed local-only namespace used to store BM25 inverted-index
+  entries for vault blobs. Full form: `$$vault:fts:{sha256}:{hexTerm}` (per-chunk
+  term frequency) and `$$vault:fts:corpus:{sha256}` (corpus statistics: chunk
+  count and total token count). Never uploaded to the sync folder. See §32 and
+  the `$$` (double-dollar prefix) entry.
+
+`$$vault:vec:idx:`
+
+: The `$$`-prefixed local-only namespace used to store SQ8-quantised embedding
+  vectors for vault blob chunks. Full form: `$$vault:vec:idx:{sha256}:{chunkKey}`.
+  One namespace per blob enables range-delete of all chunk vectors at GC time.
+  Never uploaded to the sync folder. See §32.
+
+chunk (vault)
+
+: A fixed-size, overlapping window of words extracted from a vault blob during
+  text indexing. Produced by `VaultChunker`. Default window size: 300 words
+  with 50-word overlap. Each chunk carries its word offset and character offset
+  into the original text, its token list (shared between BM25 and embedding),
+  and its text content. Chunk windows prevent query terms that straddle a chunk
+  boundary from being missed. See §32.
+
 XXH64
 
 : A non-cryptographic 64-bit hash function used for checksums throughout KMDB

@@ -134,6 +134,14 @@ export 'src/vault/local_directory_vault_adapter_stub.dart'
     if (dart.library.io) 'src/vault/local_directory_vault_adapter.dart'
     show LocalDirectoryVaultAdapter;
 
+// ── Vault search (WI-3) ───────────────────────────────────────────────────────
+export 'src/vault/search/vault_search_config.dart' show VaultSearchConfig;
+export 'src/vault/search/vault_text_extractor.dart' show VaultTextExtractor;
+export 'src/vault/search/plain_text_extractor.dart' show PlainTextExtractor;
+export 'src/vault/search/vault_search_hit.dart'
+    show VaultSearchResult, VaultSearchHit, VaultChunkContext;
+export 'src/vault/search/vault_indexing_status.dart' show VaultIndexingStatus;
+
 // ── Encryption (Phase 12) ─────────────────────────────────────────────────────
 export 'src/encryption/dek_cache.dart' show DekCache, InMemoryDekCache;
 export 'src/encryption/encryption_blob.dart' show EncryptionBlob;
