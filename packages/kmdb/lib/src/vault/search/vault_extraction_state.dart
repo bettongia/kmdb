@@ -25,6 +25,10 @@
 /// from files (→ `indexed`), otherwise it is reset to `pending`.
 library;
 
+import 'dart:typed_data';
+
+import 'package:cbor/cbor.dart';
+
 /// The lifecycle status of a single vault blob's text extraction and indexing.
 enum VaultExtractionStatus {
   /// The blob has been ingested but not yet extracted or indexed.
@@ -225,8 +229,64 @@ final class VaultExtractionState {
         error: error,
       );
 
+  /// Encodes this state as CBOR bytes for storage in `$$vault:extract:{sha256}`.
+  ///
+  /// Uses bare CBOR (no [ValueCodec] wrapper) consistent with the other vault
+  /// search index entries ([VaultBm25Writer], [VaultVecWriter]).
+  Uint8List encode() => Uint8List.fromList(cbor.encode(_mapToCbor(toMap())));
+
+  /// Decodes a [VaultExtractionState] from CBOR bytes and [sha256].
+  ///
+  /// Throws [FormatException] if [bytes] cannot be decoded or the map is
+  /// missing the required `status` field.
+  factory VaultExtractionState.decode(Uint8List bytes, String sha256) {
+    final CborValue decoded;
+    try {
+      decoded = cbor.decode(bytes);
+    } catch (e) {
+      throw FormatException('VaultExtractionState: invalid CBOR: $e');
+    }
+    if (decoded is! CborMap) {
+      throw const FormatException(
+        'VaultExtractionState: expected CBOR map at top level',
+      );
+    }
+    final map = _cborToMap(decoded);
+    return VaultExtractionState.fromMap(map, sha256);
+  }
+
   @override
   String toString() =>
       'VaultExtractionState(sha256: ${sha256.substring(0, 8)}..., '
       'status: ${status.name}, chunkCount: $chunkCount)';
 }
+
+// ── CBOR helpers (file-private) ───────────────────────────────────────────────
+
+/// Recursively converts a [Map<String, dynamic>] (as returned by
+/// [VaultExtractionState.toMap]) to a [CborMap].
+CborMap _mapToCbor(Map<String, dynamic> map) => CborMap({
+  for (final e in map.entries) CborString(e.key): _valueToCbor(e.value),
+});
+
+CborValue _valueToCbor(dynamic value) => switch (value) {
+  final String s => CborString(s),
+  final int i => CborSmallInt(i),
+  final bool b => CborBool(b),
+  final Map<String, dynamic> m => _mapToCbor(m),
+  _ => const CborNull(),
+};
+
+/// Recursively converts a decoded [CborMap] to [Map<String, dynamic>].
+Map<String, dynamic> _cborToMap(CborMap map) => {
+  for (final e in map.entries)
+    (e.key as CborString).toString(): _cborToValue(e.value),
+};
+
+dynamic _cborToValue(CborValue value) => switch (value) {
+  CborString() => value.toString(),
+  CborInt() => value.toObject(),
+  CborBool() => value.value,
+  CborMap() => _cborToMap(value),
+  _ => null,
+};

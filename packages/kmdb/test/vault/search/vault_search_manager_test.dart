@@ -206,8 +206,7 @@ Future<VaultExtractionState?> _readState(
   final ns = '$kVaultExtractPrefix$sha256';
   final bytes = await kvStore.get(ns, kVaultCorpusSentinelKey);
   if (bytes == null) return null;
-  final map = json.decode(utf8.decode(bytes)) as Map<String, dynamic>;
-  return VaultExtractionState.fromMap(map, sha256);
+  return VaultExtractionState.decode(bytes, sha256);
 }
 
 /// Polls until [sha256] reaches a terminal indexing status or [timeout] elapses.
@@ -639,9 +638,7 @@ void main() {
           WriteBatch()..put(
             '$kVaultExtractPrefix$sha256',
             kVaultCorpusSentinelKey,
-            Uint8List.fromList(
-              utf8.encode(json.encode(extractingState.toMap())),
-            ),
+            extractingState.encode(),
           ),
         );
 
@@ -746,7 +743,7 @@ void main() {
         WriteBatch()..put(
           '$kVaultExtractPrefix$sha256',
           kVaultCorpusSentinelKey,
-          Uint8List.fromList(utf8.encode(json.encode(indexedState.toMap()))),
+          indexedState.encode(),
         ),
       );
 
@@ -808,8 +805,7 @@ void main() {
         );
         if (bytes != null) {
           try {
-            final map = json.decode(utf8.decode(bytes)) as Map<String, dynamic>;
-            final s = VaultExtractionState.fromMap(map, sha256);
+            final s = VaultExtractionState.decode(bytes, sha256);
             if (s.status == VaultExtractionStatus.indexed ||
                 s.status == VaultExtractionStatus.failed) {
               finalState = s;
@@ -884,9 +880,7 @@ void main() {
         // Seed `extracting` state directly — simulates the pre-flight write
         // in Step 0 of _processNextItem, before text.txt was written.
         final extractState = VaultExtractionState.extracting(sha256);
-        final stateBytes = Uint8List.fromList(
-          utf8.encode(json.encode(extractState.toMap())),
-        );
+        final stateBytes = extractState.encode();
         await kvStore.writeBatchInternal(
           WriteBatch()..put(
             '$kVaultExtractPrefix$sha256',
@@ -926,9 +920,7 @@ void main() {
 
         // Write extracting status manually (overriding whatever state is there).
         final extractState = VaultExtractionState.extracting(sha256);
-        final stateBytes = Uint8List.fromList(
-          utf8.encode(json.encode(extractState.toMap())),
-        );
+        final stateBytes = extractState.encode();
         await kvStore.writeBatchInternal(
           WriteBatch()..put(
             '$kVaultExtractPrefix$sha256',
@@ -998,9 +990,7 @@ void main() {
     test('failed state is left unchanged by recover()', () async {
       final sha256 = 'ee' * 32;
       final failedState = VaultExtractionState.failed(sha256, 'prior error');
-      final stateBytes = Uint8List.fromList(
-        utf8.encode(json.encode(failedState.toMap())),
-      );
+      final stateBytes = failedState.encode();
       await kvStore.writeBatchInternal(
         WriteBatch()..put(
           '$kVaultExtractPrefix$sha256',
@@ -1024,9 +1014,7 @@ void main() {
     test('unsupported state is left unchanged by recover()', () async {
       final sha256 = 'ff' * 32;
       final unsupState = VaultExtractionState.unsupported(sha256);
-      final stateBytes = Uint8List.fromList(
-        utf8.encode(json.encode(unsupState.toMap())),
-      );
+      final stateBytes = unsupState.encode();
       await kvStore.writeBatchInternal(
         WriteBatch()..put(
           '$kVaultExtractPrefix$sha256',
@@ -1175,9 +1163,7 @@ void main() {
         // survives the crash (simulates the pre-flight write in Step 0 of
         // _processNextItem that completed before the crash). ────────────────
         final extractingState = VaultExtractionState.extracting(sha256);
-        final stateBytes = Uint8List.fromList(
-          utf8.encode(json.encode(extractingState.toMap())),
-        );
+        final stateBytes = extractingState.encode();
         await crashKvStore.writeBatchInternal(
           WriteBatch()..put(
             '$kVaultExtractPrefix$sha256',
@@ -1303,11 +1289,7 @@ void main() {
           WriteBatch()..put(
             '$kVaultExtractPrefix$sha256',
             kVaultCorpusSentinelKey,
-            Uint8List.fromList(
-              utf8.encode(
-                json.encode(VaultExtractionState.pending(sha256).toMap()),
-              ),
-            ),
+            VaultExtractionState.pending(sha256).encode(),
           ),
         );
 
@@ -1335,13 +1317,7 @@ void main() {
         WriteBatch()..put(
           '$kVaultExtractPrefix$sha256',
           kVaultCorpusSentinelKey,
-          Uint8List.fromList(
-            utf8.encode(
-              json.encode(
-                VaultExtractionState.failed(sha256, 'prior error').toMap(),
-              ),
-            ),
-          ),
+          VaultExtractionState.failed(sha256, 'prior error').encode(),
         ),
       );
 
@@ -1390,11 +1366,7 @@ void main() {
         WriteBatch()..put(
           '$kVaultExtractPrefix$sha256',
           kVaultCorpusSentinelKey,
-          Uint8List.fromList(
-            utf8.encode(
-              json.encode(VaultExtractionState.pending(sha256).toMap()),
-            ),
-          ),
+          VaultExtractionState.pending(sha256).encode(),
         ),
       );
 
@@ -1413,11 +1385,7 @@ void main() {
         WriteBatch()..put(
           '$kVaultExtractPrefix$sha256',
           kVaultCorpusSentinelKey,
-          Uint8List.fromList(
-            utf8.encode(
-              json.encode(VaultExtractionState.failed(sha256, 'err').toMap()),
-            ),
-          ),
+          VaultExtractionState.failed(sha256, 'err').encode(),
         ),
       );
 
@@ -1436,11 +1404,7 @@ void main() {
         WriteBatch()..put(
           '$kVaultExtractPrefix$sha256',
           kVaultCorpusSentinelKey,
-          Uint8List.fromList(
-            utf8.encode(
-              json.encode(VaultExtractionState.unsupported(sha256).toMap()),
-            ),
-          ),
+          VaultExtractionState.unsupported(sha256).encode(),
         ),
       );
 

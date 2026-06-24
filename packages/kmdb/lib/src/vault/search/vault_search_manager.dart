@@ -207,8 +207,7 @@ final class VaultSearchManager {
       }
 
       try {
-        final map = json.decode(utf8.decode(bytes)) as Map<String, dynamic>;
-        final state = VaultExtractionState.fromMap(map, sha256);
+        final state = VaultExtractionState.decode(bytes, sha256);
 
         switch (state.status) {
           case VaultExtractionStatus.extracting:
@@ -290,8 +289,7 @@ final class VaultSearchManager {
         continue;
       }
       try {
-        final map = json.decode(utf8.decode(bytes)) as Map<String, dynamic>;
-        final state = VaultExtractionState.fromMap(map, sha256);
+        final state = VaultExtractionState.decode(bytes, sha256);
         switch (state.status) {
           case VaultExtractionStatus.indexed:
             indexed++;
@@ -358,8 +356,7 @@ final class VaultSearchManager {
         needsReset = true;
       } else {
         try {
-          final map = json.decode(utf8.decode(bytes)) as Map<String, dynamic>;
-          final state = VaultExtractionState.fromMap(map, sha256);
+          final state = VaultExtractionState.decode(bytes, sha256);
           // Reset indexed and extracting blobs; leave failed/unsupported/pending
           // as-is (failed can be retried with reindex, pending already queued).
           needsReset =
@@ -789,7 +786,7 @@ final class VaultSearchManager {
     VaultExtractionState state,
     WriteBatch batch,
   ) {
-    final encoded = Uint8List.fromList(utf8.encode(json.encode(state.toMap())));
+    final encoded = state.encode();
     batch.put('$kVaultExtractPrefix$sha256', kVaultCorpusSentinelKey, encoded);
   }
 
