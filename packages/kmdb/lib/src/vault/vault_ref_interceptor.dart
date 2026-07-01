@@ -22,6 +22,7 @@ import 'vault_gc.dart';
 import 'vault_recovery.dart' show kVaultNamespace;
 import 'vault_ref.dart';
 import 'vault_ref_count.dart';
+import 'search/vault_namespaces.dart';
 
 /// Intercepts document writes to maintain vault object reference counts.
 ///
@@ -49,10 +50,34 @@ import 'vault_ref_count.dart';
 /// encrypt every `ValueCodec` call site uniformly, because `$vault` entries
 /// ride in synced SSTables).
 ///
+/// ## `$vault:docref:` document-reference index
+///
+/// In addition to ref counts, this interceptor also maintains the
+/// `$vault:docref:{sha256}` / `{docId}` index (RQ-4). This index maps each
+/// vault blob to the documents that reference it — enabling [VaultSearchManager]
+/// to quickly locate candidate documents during `searchVault()` queries.
+///
+/// For each SHA-256 added in [newDoc], a `$vault:docref:{sha256}` / `{docId}`
+/// entry is written with the first dot-notation field path in [newDoc] that
+/// holds the vault URI for that sha256.
+///
+/// **First-field-path-wins**: when the same blob is referenced from more than
+/// one field in the same document, only the first path found by the DFS scan
+/// is recorded. A future upgrade (v2) may store all paths in a CBOR list.
+///
+/// Because `$vault:docref:` has a single `$` prefix it syncs normally (unlike
+/// `$$vault:*` which is local-only). Docref entries are encrypted when
+/// encryption is active, consistent with all other `$vault` entries.
+///
+/// Note: [decrementVersionRefs] does NOT delete docref entries — docref tracks
+/// *live document* references, and a trimmed `$ver:` history entry does not
+/// change which live documents currently reference a blob.
+///
 /// Implements [WriteAugmentor] so it integrates with the formal write pipeline
-/// without requiring special-casing in [KmdbCollection]. The [namespace] and
-/// [docKey] parameters are accepted but unused — vault URI diffing is
-/// purely document-content-based.
+/// without requiring special-casing in [KmdbCollection]. The [namespace]
+/// parameter is accepted but unused — vault URI diffing is
+/// purely document-content-based. The [docKey] parameter IS used for
+/// the docref index (`{docId}` key segment).
 final class VaultRefInterceptor implements WriteAugmentor {
   /// Creates a [VaultRefInterceptor].
   const VaultRefInterceptor({
@@ -73,9 +98,10 @@ final class VaultRefInterceptor implements WriteAugmentor {
 
   // ── Public API ─────────────────────────────────────────────────────────────
 
-  /// Intercepts a document write, adjusting vault ref counts in [batch].
+  /// Intercepts a document write, adjusting vault ref counts and docref
+  /// index entries in [batch].
   ///
-  /// Diffs [oldDoc] vs [newDoc] vault URIs:
+  /// **Ref counts:** diffs [oldDoc] vs [newDoc] vault URIs:
   /// - URIs added in [newDoc] have their ref count incremented.
   /// - URIs removed in [newDoc] have their ref count decremented.
   /// - Unchanged URIs are not touched.
@@ -84,10 +110,15 @@ final class VaultRefInterceptor implements WriteAugmentor {
   /// `tombstone.json`). When a previously-zero ref count is restored,
   /// [VaultGc.onRefRestored] is called (removes `tombstone.json`).
   ///
+  /// **Docref index (`$vault:docref:{sha256}` / `{docId}`):** also diffs
+  /// the path-aware vault URI maps to add/delete entries for newly added and
+  /// removed sha256s. See class-level doc for design notes.
+  ///
   /// [oldDoc] may be `null` for new inserts. [newDoc] may be `null` for
-  /// deletes. The [namespace] and [docKey] parameters are accepted to satisfy
-  /// the [WriteAugmentor] interface but are not used — vault URI diffing is
-  /// purely document-content-based.
+  /// deletes. The [namespace] parameter is accepted to satisfy the
+  /// [WriteAugmentor] interface but is not used — vault URI diffing is
+  /// purely document-content-based. The [docKey] parameter IS used as the
+  /// `{docId}` key segment for the docref index.
   @override
   Future<void> interceptWrite({
     required WriteBatch batch,
@@ -110,6 +141,38 @@ final class VaultRefInterceptor implements WriteAugmentor {
     for (final sha256 in removed) {
       await _decrement(sha256, batch);
     }
+
+    // ── Docref index maintenance ──────────────────────────────────────────
+    // Compute path-aware maps to diff added/removed docref entries.
+    // This is a separate scan from ref-count diffing (path information is
+    // needed here but discarded by _extractVaultUris).
+    final oldPaths = _scanVaultUrisWithPaths(oldDoc);
+    final newPaths = _scanVaultUrisWithPaths(newDoc);
+
+    final oldSha256s = oldPaths.keys.toSet();
+    final newSha256s = newPaths.keys.toSet();
+
+    // sha256s newly added in newDoc → write a docref entry.
+    // The field path is stored as a CBOR map `{"p": fieldPath}` so it can be
+    // encoded via ValueCodec (which requires a Map<String, dynamic>) and
+    // encrypted uniformly with other $vault entries.
+    for (final sha256 in newSha256s.difference(oldSha256s)) {
+      final fieldPath = newPaths[sha256]!;
+      batch.put(
+        '$kVaultDocRefPrefix$sha256',
+        docKey,
+        await ValueCodec.encode({'p': fieldPath}, encryption: encryption),
+      );
+    }
+
+    // sha256s removed from newDoc → delete the docref entry for this docId.
+    for (final sha256 in oldSha256s.difference(newSha256s)) {
+      batch.delete('$kVaultDocRefPrefix$sha256', docKey);
+    }
+
+    // sha256s present in both: docKey→path mapping is unchanged; leave as-is.
+    // (If the field path itself changed but the sha256 is still referenced,
+    // that change is not tracked in v1 — first-field-path-wins is documented.)
   }
 
   // ── Public helpers ─────────────────────────────────────────────────────────
@@ -172,6 +235,53 @@ final class VaultRefInterceptor implements WriteAugmentor {
     } else if (value is List<dynamic>) {
       for (final item in value) {
         _scanForVaultUris(item, result);
+      }
+    }
+  }
+
+  /// Scans [doc] recursively for vault URIs, returning a map from SHA-256 to
+  /// the **first** dot-notation field path that contains that sha256.
+  ///
+  /// This is a path-aware counterpart to [_extractVaultUris]. The first-wins
+  /// rule means: when the same sha256 appears in multiple fields of the same
+  /// document, only the first field path found by the DFS traversal is stored.
+  /// This is a documented v1 limitation — a future version may store all paths
+  /// in a CBOR list.
+  ///
+  /// Returns an empty map if [doc] is null.
+  Map<String, String> _scanVaultUrisWithPaths(Map<String, dynamic>? doc) {
+    if (doc == null) return const {};
+    final result = <String, String>{};
+    _scanForVaultUrisWithPaths(doc, '', result);
+    return result;
+  }
+
+  /// Recursively scans [value] for vault URI strings, recording the first
+  /// field path for each sha256 in [result].
+  ///
+  /// [currentPath] is the dot-notation prefix accumulated from parent nodes.
+  void _scanForVaultUrisWithPaths(
+    dynamic value,
+    String currentPath,
+    Map<String, String> result,
+  ) {
+    if (value is String) {
+      if (VaultRef.isVaultUri(value)) {
+        final sha256 = VaultRef(value).sha256;
+        // First-wins: only record if this sha256 has not been seen yet.
+        result.putIfAbsent(sha256, () => currentPath);
+      }
+    } else if (value is Map<String, dynamic>) {
+      for (final entry in value.entries) {
+        final childPath = currentPath.isEmpty
+            ? entry.key
+            : '$currentPath.${entry.key}';
+        _scanForVaultUrisWithPaths(entry.value, childPath, result);
+      }
+    } else if (value is List<dynamic>) {
+      for (var i = 0; i < value.length; i++) {
+        final childPath = currentPath.isEmpty ? '[$i]' : '$currentPath[$i]';
+        _scanForVaultUrisWithPaths(value[i], childPath, result);
       }
     }
   }

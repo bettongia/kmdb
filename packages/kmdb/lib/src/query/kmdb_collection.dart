@@ -21,6 +21,8 @@ import '../engine/util/key_codec.dart';
 import '../search/hybrid/hybrid_manager.dart';
 import '../search/search_mode.dart';
 import '../search/search_result.dart';
+import '../vault/search/vault_search_hit.dart';
+import '../vault/search/vault_searcher.dart';
 import '../vault/vault_ref.dart';
 import '../vault/vault_store.dart';
 import '../versioning/version_entry.dart';
@@ -662,6 +664,73 @@ final class KmdbCollection<T> {
       ),
       hits: const [],
     );
+  }
+
+  /// Searches vault blob content for [query] within this collection.
+  ///
+  /// Returns a [VaultSearchResult] containing ranked [VaultSearchHit]s whose
+  /// matched text is from vault blobs referenced by documents in this collection.
+  /// Results are limited to blobs that have been **downloaded and indexed** on
+  /// this device — blobs that are stubs (not yet hydrated) are silently absent
+  /// from results.
+  ///
+  /// Before calling this method, check [KmdbDatabase.vaultIndexingStatus]
+  /// and inspect [VaultIndexingStatus.stub] to determine whether results may
+  /// be silently incomplete, and surface an appropriate warning to the user.
+  ///
+  /// ## Parameters
+  ///
+  /// - [query]: the search query string.
+  /// - [mode]: controls which index leg(s) to use. Defaults to [SearchMode.auto].
+  ///   - `auto` — lexical-only if no embedding model is configured; hybrid
+  ///     (RRF) if a model is available.
+  ///   - `lexical` — BM25 over chunk tokens only.
+  ///   - `semantic` — cosine similarity over chunk embeddings. Falls back to
+  ///     lexical if no model is configured, with `vault:semantic` in
+  ///     `SearchMetadata.skipped`.
+  /// - [limit]: maximum number of hits to return (default 10).
+  /// - [offset]: number of hits to skip for pagination (default 0).
+  ///
+  /// Returns an empty [VaultSearchResult] if vault search is not configured
+  /// on this database, or if the query is empty.
+  ///
+  /// ## Example
+  ///
+  /// ```dart
+  /// final result = await articles.searchVault('quarterly revenue');
+  /// for (final hit in result.hits) {
+  ///   print('${hit.rank}. [${hit.score.toStringAsFixed(3)}] ${hit.id}');
+  ///   print('  field: ${hit.chunkContext.fieldPath}');
+  ///   print('  snippet: ${hit.chunkContext.snippet}');
+  /// }
+  /// ```
+  Future<VaultSearchResult<T>> searchVault(
+    String query, {
+    SearchMode mode = SearchMode.auto,
+    int limit = 10,
+    int offset = 0,
+  }) async {
+    final vaultSearchManager = _db.vaultSearchManager;
+    if (vaultSearchManager == null) {
+      // Vault search not configured for this database — return empty result.
+      return VaultSearchResult<T>(
+        metadata: SearchMetadata(
+          query: query,
+          searched: const [],
+          skipped: const [],
+          total: 0,
+        ),
+        hits: const [],
+      );
+    }
+
+    final searcher = VaultSearcher<T>(
+      manager: vaultSearchManager,
+      namespace: namespace,
+      fetchDoc: (id) => get(id),
+    );
+
+    return searcher.search(query, mode: mode, limit: limit, offset: offset);
   }
 
   // ── Internal ───────────────────────────────────────────────────────────────

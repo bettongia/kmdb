@@ -100,6 +100,17 @@ class VaultStore {
   /// time. When `null`, calling [getBytes] on a stub throws [StateError].
   VaultStorageAdapter? syncAdapter;
 
+  /// Optional callback fired after a **new** blob is successfully ingested.
+  ///
+  /// The callback receives the SHA-256 hex string and detected MIME media type
+  /// of the newly ingested blob. It is called **only** for new ingests — if the
+  /// blob was already in the vault (deduplication path), the callback is not
+  /// fired (the blob was already indexed or queued on first ingest).
+  ///
+  /// Set by [VaultSearchManager.attach] to queue blobs for extraction and
+  /// indexing. When `null`, the hook is a no-op.
+  void Function(String sha256, String mediaType)? onAfterIngest;
+
   // ── Internal access (for VaultRecovery and VaultGc) ───────────────────────
 
   /// Exposes the storage adapter to vault subsystem collaborators.
@@ -281,6 +292,11 @@ class VaultStore {
     );
     await _writeManifest(sha256, manifest);
 
+    // Notify the vault search manager (if attached) about the new blob.
+    // The callback is non-blocking — the manager queues the blob for async
+    // extraction and indexing. The ingest() result is returned first.
+    onAfterIngest?.call(sha256, mediaType);
+
     return _makeRef(sha256);
   }
 
@@ -391,6 +407,31 @@ class VaultStore {
 
     // Remove from VAULT_OFFLINE pin list if present.
     await _removeFromVaultOffline(sha256);
+  }
+
+  /// Deletes the `extract/` subdirectory for [sha256], including all vault
+  /// search extraction artefacts.
+  ///
+  /// The extract directory contains:
+  /// - `text.txt` — UTF-8 extracted text used for BM25 indexing and snippets.
+  /// - `chunks_v1.json` — chunk byte-offset metadata.
+  /// - `vectors_{modelId}_sq8.bin` — SQ8-quantised vector data (semantic mode).
+  /// - `extract_status.json` — indexing status sentinel.
+  ///
+  /// This method is called by [VaultGc] during the sweep phase, before
+  /// [deleteHashDir], so that a crash between the two leaves the hash directory
+  /// still tombstoned and eligible for retry on the next sweep.
+  ///
+  /// If the extract directory does not exist (vault search was never configured
+  /// for this blob), this is a no-op.
+  Future<void> deleteExtractDir(String sha256) async {
+    final extractDir = '${hashDir(sha256)}/extract';
+    // Enumerate all files in the extract directory. listFiles returns an empty
+    // list if the directory does not exist, so this is always safe to call.
+    final files = await _adapter.listFiles(extractDir);
+    for (final filename in files) {
+      await _adapter.deleteFile('$extractDir/$filename');
+    }
   }
 
   // ── Stub creation (for sync) ───────────────────────────────────────────────

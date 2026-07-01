@@ -528,3 +528,26 @@ KVLT archive export (`vault export`) decrypts blobs to plaintext before packing
 them into the archive. KVLT import re-encrypts blobs if the destination database
 has encryption active. This ensures KVLT archives are always portable plaintext
 containers and not silently tied to a specific DEK.
+
+## Vault Search Integration
+
+When the database is opened with `vaultSearch: VaultSearchConfig(...)`, the
+`VaultSearchManager` is attached at open time and manages text extraction and
+indexing for vault blobs. This creates an `extract/` subdirectory alongside
+each blob's `manifest.json` and `blob` files:
+
+```
+{local-db-dir}/vault/blobs/sha256/{2-char}/{62-char}/
+  manifest.json
+  blob                            ← absent for stubs
+  extract/                        ← created by VaultSearchManager (not synced)
+    text.txt
+    chunks_v1.json
+    vectors_{modelId}_sq8.bin     ← absent in lexical-only mode
+    extract_status.json
+```
+
+The `extract/` directory is **not synced** (it lives inside the local database
+directory, not the sync folder). Other devices rebuild their own `extract/`
+directories independently when they pull and hydrate the same blobs. See §32
+(Vault Search) for the full specification.

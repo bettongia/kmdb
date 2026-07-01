@@ -41,6 +41,9 @@ import 'package:kmdb_cli/src/commands/update_command.dart';
 import 'package:kmdb_cli/src/commands/util_command.dart';
 import 'package:kmdb_cli/src/commands/vault/vault_command.dart';
 import 'package:kmdb_cli/src/commands/vault/vault_get_command.dart';
+import 'package:kmdb_cli/src/commands/vault/vault_reindex_command.dart';
+import 'package:kmdb_cli/src/commands/vault/vault_search_command.dart';
+import 'package:kmdb_cli/src/commands/vault/vault_status_command.dart';
 import 'package:kmdb_cli/src/commands/verify_command.dart';
 import 'package:test/test.dart';
 
@@ -76,6 +79,9 @@ void main() {
     const UtilCommand(),
     const VaultCommand(),
     const VaultGetCommand(),
+    const VaultReindexCommand(),
+    const VaultSearchCommand(),
+    const VaultStatusCommand(),
     const VerifyCommand(),
   ];
 
