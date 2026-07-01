@@ -152,14 +152,15 @@ void main() {
   // ── Phase 1: SstableMeta.localOnly CBOR round-trip ────────────────────────
 
   group('SstableMeta.localOnly CBOR round-trip', () {
-    SstableMeta makeMeta(String filename, {bool localOnly = false}) => SstableMeta(
-      level: 0,
-      filename: filename,
-      minKey: '0' * 32,
-      maxKey: 'f' * 32,
-      entryCount: 10,
-      localOnly: localOnly,
-    );
+    SstableMeta makeMeta(String filename, {bool localOnly = false}) =>
+        SstableMeta(
+          level: 0,
+          filename: filename,
+          minKey: '0' * 32,
+          maxKey: 'f' * 32,
+          entryCount: 10,
+          localOnly: localOnly,
+        );
 
     test('localOnly=true round-trips through toCbor/fromCbor', () {
       final edit = VersionEdit(

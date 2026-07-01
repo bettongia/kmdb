@@ -34,6 +34,9 @@ import '../sync/consolidation_config.dart';
 import '../sync/sync_context.dart';
 import '../sync/sync_engine.dart';
 import '../sync/sync_storage_adapter.dart';
+import '../vault/search/vault_indexing_status.dart';
+import '../vault/search/vault_search_config.dart';
+import '../vault/search/vault_search_manager.dart';
 import '../vault/vault_gc.dart';
 import '../vault/vault_recovery.dart';
 import '../vault/vault_ref_interceptor.dart';
@@ -147,6 +150,7 @@ final class KmdbDatabase {
     EncryptionProvider? encryption,
     VaultStore? vaultStore,
     VaultGc? vaultGc,
+    this._vaultSearchManager,
     Map<String, VersionConfig>? versionConfigs,
   }) : _store = store,
        _encryption = encryption,
@@ -213,6 +217,7 @@ final class KmdbDatabase {
   final List<VecIndexDefinition> _vecIndexes;
   final EmbeddingModel? _embeddingModel;
   final VaultStore? _vaultStore;
+  final VaultSearchManager? _vaultSearchManager;
   final VaultRefInterceptor? _vaultRefInterceptor;
 
   /// The version write augmentor, always registered. Emits `$ver:` entries for
@@ -301,6 +306,20 @@ final class KmdbDatabase {
     EmbeddingModel? embeddingModel,
     void Function()? onSearchIndexReady,
     VaultStore? vaultStore,
+
+    /// Vault content search configuration.
+    ///
+    /// When non-null and [vaultStore] is also non-null, vault blob text
+    /// extraction, chunking, and indexing are activated. Vault blobs are
+    /// automatically queued for indexing on ingest and during startup recovery.
+    ///
+    /// When `null` (the default), vault search is disabled — vault ref counts
+    /// and GC still run if [vaultStore] is supplied, but content is not indexed.
+    ///
+    /// Semantic vault search reuses the [embeddingModel] supplied to [open];
+    /// there is no separate per-vault-search model. When [embeddingModel] is
+    /// `null`, vault search runs in lexical-only mode.
+    VaultSearchConfig? vaultSearch,
     List<CollectionSchema> schemas = const [],
     void Function(String collection, int storedVersion, int supportedVersion)?
     onSchemaVersionMismatch,
@@ -442,6 +461,25 @@ final class KmdbDatabase {
       );
     }
 
+    // Initialise VaultSearchManager if vault search is configured.
+    // Requires both vaultStore (for blob access) and vaultSearch config.
+    // The embeddingModel is borrowed (not owned) — KmdbDatabase disposes it.
+    VaultSearchManager? vaultSearchManager;
+    if (vaultStore != null && vaultSearch != null) {
+      vaultSearchManager = VaultSearchManager(
+        config: vaultSearch,
+        kvStore: store,
+        vaultStore: vaultStore,
+        embeddingModel: embeddingModel,
+        encryption: encryption,
+      );
+      // Register the ingest hook before recovery so newly hydrated blobs
+      // that arrive during recovery are automatically queued.
+      vaultSearchManager.attach();
+      // Run recovery: repair interrupted indexing and enqueue missed blobs.
+      await vaultSearchManager.recover();
+    }
+
     // Initialise SchemaManager: register caller-supplied schemas (persisting
     // them via LWW), then load any schemas synced from other devices.
     final schemaManager = SchemaManager(
@@ -546,6 +584,7 @@ final class KmdbDatabase {
       encryption: encryption,
       vaultStore: vaultStore,
       vaultGc: vaultGc,
+      vaultSearchManager: vaultSearchManager,
       versionConfigs: mergedVersionConfigs,
     );
   }
@@ -916,6 +955,10 @@ final class KmdbDatabase {
   /// equivalent is called after all other cleanup so that native ORT resources
   /// are released. After [close] returns, this instance must not be used again.
   Future<void> close({bool flush = true}) async {
+    // Gracefully shut down the vault search isolate (drains in-flight work)
+    // before closing the store — the isolate sends results back that need
+    // to be committed via the store.
+    await _vaultSearchManager?.close();
     await _cache.close(flush: flush);
     // Release native embedding model resources (no-op when embeddingModel is
     // null or when the implementation's dispose() is a no-op).
@@ -974,6 +1017,93 @@ final class KmdbDatabase {
     final vec = _vecManager;
     if (vec == null) return 0;
     return vec.reindex();
+  }
+
+  // ── Vault search ────────────────────────────────────────────────────────────
+
+  /// The vault search manager.
+  ///
+  /// Non-null when both [vaultStore] and `vaultSearch` were supplied to [open].
+  /// Used by [KmdbCollection.searchVault] and the vault search public API.
+  VaultSearchManager? get vaultSearchManager => _vaultSearchManager;
+
+  /// Returns a point-in-time snapshot of vault content indexing progress.
+  ///
+  /// The returned [VaultIndexingStatus] contains counts for each status bucket:
+  /// `total`, `indexed`, `pending`, `extracting`, `failed`, `unsupported`, and
+  /// `stub` (blobs known to exist but not yet downloaded on this device).
+  ///
+  /// Use [VaultIndexingStatus.isSearchComplete] to determine whether search
+  /// results may be silently incomplete due to unhydrated stub blobs.
+  ///
+  /// Returns all-zero counts if vault search is not configured.
+  ///
+  /// Example:
+  /// ```dart
+  /// final status = await db.vaultIndexingStatus();
+  /// if (!status.isSearchComplete) {
+  ///   print('Warning: ${status.stub} blobs not yet downloaded');
+  /// }
+  /// print('${status.indexed}/${status.total} blobs indexed');
+  /// ```
+  Future<VaultIndexingStatus> vaultIndexingStatus() async {
+    final manager = _vaultSearchManager;
+    if (manager == null) {
+      return const VaultIndexingStatus(
+        total: 0,
+        indexed: 0,
+        pending: 0,
+        extracting: 0,
+        failed: 0,
+        unsupported: 0,
+        stub: 0,
+      );
+    }
+    return manager.vaultIndexingStatus();
+  }
+
+  /// Returns a broadcast stream that emits [VaultIndexingStatus] updates as
+  /// vault blobs are extracted and indexed.
+  ///
+  /// Callers should cancel their subscription when they are done with it to
+  /// avoid memory leaks. The stream completes when [close] is called.
+  ///
+  /// Returns an empty stream if vault search is not configured.
+  ///
+  /// Example:
+  /// ```dart
+  /// db.watchVaultIndexingStatus().listen((status) {
+  ///   print('${status.indexed}/${status.total} indexed');
+  ///   if (status.isComplete) print('Indexing complete');
+  /// });
+  /// ```
+  Stream<VaultIndexingStatus> watchVaultIndexingStatus() {
+    final manager = _vaultSearchManager;
+    if (manager == null) return const Stream.empty();
+    return manager.watchVaultIndexingStatus();
+  }
+
+  /// Resets all indexed vault blobs to `pending` and re-queues them for
+  /// extraction and indexing.
+  ///
+  /// Use this after a planned model upgrade to force re-indexing with the new
+  /// embedding model. On the next call to [vaultIndexingStatus] or
+  /// [KmdbCollection.searchVault], the indexing pipeline will re-extract and
+  /// re-embed all blobs.
+  ///
+  /// Returns the number of blobs queued. Returns `0` if vault search is not
+  /// configured, or if there are no indexed blobs to reset.
+  ///
+  /// Example:
+  /// ```dart
+  /// // After upgrading to a new embedding model:
+  /// final count = await db.reindexVault();
+  /// print('Queued $count blob(s) for re-indexing');
+  /// ```
+  Future<int> reindexVault() async {
+    final manager = _vaultSearchManager;
+    if (manager == null) return 0;
+    return manager.reindexVault();
   }
 
   // ── Internal (used by KmdbCollection) ─────────────────────────────────────

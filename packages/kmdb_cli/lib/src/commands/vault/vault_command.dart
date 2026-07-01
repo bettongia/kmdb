@@ -14,11 +14,18 @@
 
 import '../command.dart';
 import 'vault_get_command.dart';
+import 'vault_reindex_command.dart';
+import 'vault_search_command.dart';
+import 'vault_status_command.dart';
 
 /// Container command that groups all `vault` sub-commands.
 ///
 /// Dispatches to sub-commands based on the first positional argument:
+///
 /// - `vault get <uri>` — fetch a vault object and write to stdout or file.
+/// - `vault search <query> --collection <name>` — search vault blob content.
+/// - `vault reindex` — queue all vault blobs for re-extraction and indexing.
+/// - `vault status` — display vault search indexing status.
 ///
 /// Requires [CommandContext.vaultStore] to be non-null; reports an error if
 /// the database was opened without a vault store.
@@ -27,7 +34,12 @@ import 'vault_get_command.dart';
 final class VaultCommand extends CliCommand {
   const VaultCommand();
 
-  static const _subCommands = <String, CliCommand>{'get': VaultGetCommand()};
+  static const _subCommands = <String, CliCommand>{
+    'get': VaultGetCommand(),
+    'search': VaultSearchCommand(),
+    'reindex': VaultReindexCommand(),
+    'status': VaultStatusCommand(),
+  };
 
   @override
   String get name => 'vault';
@@ -35,7 +47,7 @@ final class VaultCommand extends CliCommand {
   @override
   String get description =>
       'Vault object operations. '
-      'Sub-commands: get. '
+      'Sub-commands: get, search, reindex, status. '
       'Use "vault help" for details.';
 
   @override
