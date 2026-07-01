@@ -96,12 +96,27 @@ is committed, then set up an isolated workspace per `docs/plans/README.md`:
 4. **Update the plan status** to `Implementing` in the plan file **inside the
    worktree**, and edit that copy of the plan from here on.
 
+## Task Tracking — Mandatory Throughout
+
+**Update the plan's checklist and your TodoWrite tasks continuously as you
+work, not in bulk at the end.** Check each item off the moment it is done.
+This is not optional: work on plans is frequently interrupted and restarted,
+and a stale checklist forces the next session to re-derive completed work.
+Specifically:
+
+- Check off each plan implementation-step checkbox **immediately** after you
+  verify it works (tests pass, analyzer clean).
+- Keep the plan's **Status** field current (`Implementing` while in progress).
+- If you pause mid-step, leave a note in the plan (a brief "in-progress" comment
+  under the open checkbox) so a restart can see exactly where work stopped.
+- Never batch-update the checklist at the end of a session — that defeats the
+  resumption safety net.
+
 ## Implementation Execution
 
 Work through the plan's **Implementation plan** section systematically. Track
 your progress with the TodoWrite tool and by checking off the plan's own
-checklist items as you complete them — this lets you resume cleanly after an
-interruption.
+checklist items as you complete them per the rule above.
 
 1. **Follow the plan's steps in order** unless there is a clear technical reason
    to deviate; if you deviate, record why in the plan.
@@ -150,12 +165,13 @@ interruption.
 When all implementation steps are done and tests pass:
 
 1. Run the full suite once more: `make test`.
-2. **Hand off to the kmdb-qa agent for sign-off.** This is the final review
-   step before committing: kmdb-qa reads the plan, checks your implementation
+2. **Hand off to the kmdb-qa agent for sign-off. This step is MANDATORY and
+   must never be skipped.** kmdb-qa reads the plan, checks your implementation
    against it and against the quality gates (spec alignment, doc comments, test
    coverage/adequacy, code health), and coordinates any spec corrections with
-   the kmdb-architect agent. Resolve every blocking item it raises. Do not
-   proceed until kmdb-qa signs off.
+   the kmdb-architect agent. Resolve every blocking item it raises. **Do not
+   commit, push, or open a PR until kmdb-qa has explicitly signed off.** If you
+   are about to skip this step for any reason, stop and ask the user instead.
 3. **Delegate the pre-commit gate to the kmdb-pre-commit agent** to confirm the
    codebase is committable (it runs `make pre_commit`: format_check, analyze,
    license_check, and the scoped `pre_commit_test`). Resolve anything it
