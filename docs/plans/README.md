@@ -20,16 +20,25 @@ Implementation work on a plan should follow the guidance provided in
 2. Update the plan file as you go, especially the status field and task lists.
    Use the version of the plan file in the worktree.
 3. Use check lists in the implementation plan and check off work as you go. That
-   way we can continue work effectively after an interruption.
+   way we can continue work effectively after an interruption. **Each checklist
+   item must be checked off immediately when it is done — do not batch-update at
+   the end of a session.** If work is paused mid-step, leave a brief in-progress
+   note under the open checkbox so a restarted session knows exactly where to
+   resume.
 4. All implementation work must include writing tests (and ensuring they pass)
    and updating documentation (Code docs, user and spec docs etc) as
    appropriate. If the work introduces a test that cannot run in the automated
    suite (a real cloud service, real-OS durability/`fsync`, cross-process or
    multi-host concurrency, etc.), add an entry describing it to the release
    checklist at `docs/spec/28_release_checklist.md` so it is run at release time.
-5. When the plan has been completely implemented, make sure the status is
-   updated to "Complete" and move the plan into the `plans/completed` directory.
-6. When you complete the implementation work, submit the changes as a pull
+5. When all implementation steps are done, **hand off to the `kmdb-qa` agent
+   for sign-off before committing or opening a PR.** This step is mandatory and
+   must never be skipped. Only after kmdb-qa has explicitly signed off, run the
+   `kmdb-pre-commit` agent to confirm the mechanical gate passes.
+6. When the plan has been completely implemented and signed off, make sure the
+   status is updated to "Complete" and move the plan into the
+   `plans/completed` directory.
+7. When you complete the implementation work, submit the changes as a pull
    request.
 
 **Spec section numbering:** Spec files in `docs/spec/` are numbered sequentially
@@ -90,6 +99,15 @@ feel free to update the plan document as appropriate.
 ## Implementation plan
 
 {Checklists and notes for the implementation work}
+
+**Final step — QA sign-off and pre-commit:**
+
+- [ ] Run `make coverage` — confirm >95% on all new files.
+- [ ] Hand off to the **`kmdb-qa` agent** for sign-off (spec alignment, doc
+      comments, test coverage/adequacy, code health). Resolve every blocking
+      item before proceeding. Do not open a PR until sign-off is received.
+- [ ] Run `make pre_commit` — format, analyze, license_check, tests all green.
+- [ ] Verify licence headers on all new files (2026).
 
 ## Summary
 
