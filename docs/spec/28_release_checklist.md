@@ -705,15 +705,26 @@ contention test that exercises the lease protocol.
   extraction state from filesystem artifacts when the process is killed at each
   phase of the indexing pipeline (after `extracting` is written, after
   `text.txt` is written, after `chunks_v1.json` is written, after
-  `vectors_{modelId}_sq8.bin` is written).
+  `vectors_{modelId}_sq8.bin` is written). **Since WI-10, these writes/reads
+  also go through `VaultSearchManager.writeExtractArtifact` /
+  `readExtractArtifact`, so on a database opened with an `EncryptionConfig`
+  the real-OS kill test also exercises a process kill mid-encrypted-write
+  (partial ciphertext on disk) and confirms recovery still self-heals to
+  `pending` rather than hanging or crashing `KmdbDatabase.open()` on the next
+  start.** The crash points themselves are unchanged by WI-10 — only the
+  bytes written at them differ — so no new RC entry is needed; this scope
+  note is sufficient.
 - **Why not automated:** requires killing the process (SIGKILL) at precise
   points between filesystem writes — not reproducible in a single-process
   Dart test without a dedicated fault-injection harness for subprocess
-  interruption. The `FaultyStorageAdapter` covers LSM crash-safety but not
-  the vault search isolate's multi-phase filesystem writes.
+  interruption. The `FaultyStorageAdapter` covers LSM crash-safety (including
+  the encrypted-artifact crash-injection tests added in
+  `vault_search_manager_test.dart` for WI-10) but not the vault search
+  isolate's multi-phase filesystem writes under a real OS kill.
 - **Applies when:** WI-3 vault search ships; before any release that includes
   `VaultSearchManager`, `VaultIndexingIsolate`, or changes to the
-  `$$vault:extract:` recovery sequence (v0.06+).
+  `$$vault:extract:` recovery sequence (v0.06+). Re-verify after WI-10
+  (`extract/` artifact encryption) ships, with an `EncryptionConfig` configured.
 - **Prerequisites:** a native-platform machine (Linux or macOS); the `kmdb_cli`
   binary built with `dart compile exe`; a small corpus of `text/plain` blobs.
 - **Steps:**

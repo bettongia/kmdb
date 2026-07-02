@@ -62,18 +62,43 @@ Each indexed blob gains an `extract/` subdirectory alongside its `blob` and
     text.txt                        ← UTF-8 decoded full text
     chunks_v1.json                  ← JSON array of chunk objects
     vectors_{modelId}_sq8.bin       ← raw SQ8 binary (absent for lexical-only)
-    extract_status.json             ← human-readable status snapshot
 ```
+
+There is no fourth `extract_status.json` file — extraction status is
+persisted **solely** in the LSM `$$vault:extract:` namespace, which is the
+single authoritative source of truth for extraction status (there is no
+secondary filesystem copy).
 
 The `extract/` subdirectory is created and managed exclusively by
 `VaultSearchManager`. It is **not** synced (it lives inside the local database
 directory, not the sync folder). Other devices rebuild the `extract/` directory
 independently when they pull and hydrate the same blobs.
 
-The LSM `$$vault:extract:` namespace is the **authoritative source** for
-extraction status. The `extract_status.json` file is a secondary human-readable
-copy written for debugging convenience and as an additional recovery
-cross-reference.
+#### Encryption (WI-10)
+
+When the database has an `EncryptionProvider` configured (§31), each of the
+three files above is encrypted with the DEK before being written, via
+`VaultSearchManager.writeExtractArtifact` / `readExtractArtifact`. Because
+`extract/` files have no accompanying manifest to record an `encrypted` flag
+(unlike vault blobs — see §24 _Encryption_), each file is prefixed with a
+single self-describing `EncryptionFlag` byte (the same enum §31 defines for
+the `ValueCodec` wire format, applied here to whole files):
+
+```
+[EncryptionFlag.none  (0x00)] plaintext body follows verbatim
+[EncryptionFlag.aesGcm (0x01)] nonce(12B) || AES-256-GCM ciphertext || tag(16B)
+```
+
+This makes every artifact independently readable regardless of the database's
+current encryption state or when the file was written — the property needed
+for a database whose encryption is toggled on after some blobs are already
+indexed: pre-existing plaintext (`0x00`) artifacts remain readable without a
+migration step, while newly indexed or reindexed blobs (via
+`VaultSearchManager.reindexVault()`) write encrypted (`0x01`) artifacts. Both
+flag states can coexist across blobs in the same database indefinitely. See
+§31's "Vault `extract/` filesystem artifacts" gap entry for the full
+confidentiality discussion, including read-site failure policy (self-healing
+on startup recovery vs. propagating out of `searchVault()` at query time).
 
 ## Lifecycle State Machine
 

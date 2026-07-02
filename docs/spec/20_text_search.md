@@ -341,8 +341,11 @@ string as a `CharsetDecodeResult` record:
 final (:charset, :text) = decodeText(bytes);
 ```
 
-The detected label is available for inclusion in a `extract_status.json`
-manifest entry so that indexing metadata records the original encoding. `ascii`
-is never returned as a label — ASCII content passes the UTF-8 structural
-validation stage and is reported as `"utf-8"`. This utility is internal to the
-`kmdb` package and is not exported from `kmdb.dart`.
+The detected label is recorded in the `charset` field of the
+`$$vault:extract:{sha256}` KV entry (`VaultExtractionState.charset`, see §32)
+so that indexing metadata records the original encoding. There is no
+filesystem `extract_status.json` manifest — extraction status and metadata are
+persisted solely in that KV entry. `ascii` is never returned as a label —
+ASCII content passes the UTF-8 structural validation stage and is reported as
+`"utf-8"`. This utility is internal to the `kmdb` package and is not exported
+from `kmdb.dart`.
