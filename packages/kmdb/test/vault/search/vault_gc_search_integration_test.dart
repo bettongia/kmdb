@@ -282,6 +282,13 @@ Future<void> _seedVaultSearchEntries(
 
 /// Seeds the `extract/` filesystem directory with dummy artefacts to verify
 /// that [VaultGc.sweep] deletes them.
+///
+/// Only the three artefacts that [VaultSearchManager] actually writes are
+/// seeded (`text.txt`, `chunks_v1.json`) — there is no fourth
+/// `extract_status.json` file; extraction status lives solely in the
+/// `$$vault:extract:{sha256}` KV entry (see §32). [VaultGc.sweep] deletes the
+/// whole `extract/` directory regardless of its contents, so the dummy
+/// content here need not match the real flag-byte-prefixed wire format.
 Future<void> _seedExtractDir(
   MemoryStorageAdapter adapter,
   VaultStore vaultStore, {
@@ -295,10 +302,6 @@ Future<void> _seedExtractDir(
   await adapter.writeFile(
     '$extractDir/chunks_v1.json',
     _bytes('[{"start":0,"end":33,"wordCount":7}]'),
-  );
-  await adapter.writeFile(
-    '$extractDir/extract_status.json',
-    _bytes('{"status":"indexed","chunkCount":1}'),
   );
 }
 

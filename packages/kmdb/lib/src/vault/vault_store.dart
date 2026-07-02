@@ -416,7 +416,13 @@ class VaultStore {
   /// - `text.txt` — UTF-8 extracted text used for BM25 indexing and snippets.
   /// - `chunks_v1.json` — chunk byte-offset metadata.
   /// - `vectors_{modelId}_sq8.bin` — SQ8-quantised vector data (semantic mode).
-  /// - `extract_status.json` — indexing status sentinel.
+  ///
+  /// There is no fourth `extract_status.json` file — indexing status lives
+  /// solely in the `$$vault:extract:{sha256}` KV entry (see §32). When
+  /// database encryption is active, the three files above are individually
+  /// encrypted and self-describing via a leading `EncryptionFlag` byte (see
+  /// §31, WI-10) — this method deletes them by filename regardless of their
+  /// encryption state.
   ///
   /// This method is called by [VaultGc] during the sweep phase, before
   /// [deleteHashDir], so that a crash between the two leaves the hash directory

@@ -22,8 +22,13 @@ import 'dart:typed_data';
 
 import 'package:betto_inferencing/betto_inferencing.dart' show EmbeddingModel;
 import 'package:kmdb/src/encoding/value_codec.dart';
+import 'package:kmdb/src/encryption/encryption_error.dart';
+import 'package:kmdb/src/encryption/encryption_flag.dart';
+import 'package:kmdb/src/encryption/encryption_provider.dart';
+import 'package:kmdb/src/encryption/key_derivation.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store_impl.dart';
+import 'package:kmdb/src/engine/platform/storage_adapter_interface.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
 import 'package:kmdb/src/search/search_mode.dart';
 import 'package:kmdb/src/vault/media_type_detector.dart';
@@ -236,6 +241,25 @@ Future<void> _seedDocref(
   await kvStore.writeBatchInternal(batch);
 }
 
+/// Writes [bytes] to [path] as a plaintext `extract/` artifact — i.e. with
+/// the leading [EncryptionFlag.none] byte prefix that
+/// [VaultSearchManager.readExtractArtifact] expects (WI-10).
+///
+/// Tests that manually seed filesystem artifacts (bypassing
+/// [VaultSearchManager.writeExtractArtifact]) must use this helper rather
+/// than [StorageAdapter.writeFile] directly, otherwise the artifact's first
+/// byte (arbitrary content) will not parse as a valid [EncryptionFlag].
+Future<void> _writePlaintextArtifact(
+  StorageAdapter adapter,
+  String path,
+  Uint8List bytes,
+) {
+  final payload = Uint8List(1 + bytes.length)
+    ..[0] = EncryptionFlag.none.byte
+    ..setAll(1, bytes);
+  return adapter.writeFile(path, payload);
+}
+
 /// Writes extract artifacts (text.txt, chunks_v1.json) for [sha256].
 ///
 /// Used to ensure [VaultSearcher._buildChunkContext] can read snippets.
@@ -247,11 +271,13 @@ Future<void> _seedExtractArtifacts(
 ) async {
   final extractDir = '${vaultStore.hashDir(sha256)}/extract';
   await vaultStore.adapter.createDirectory(extractDir);
-  await vaultStore.adapter.writeFile(
+  await _writePlaintextArtifact(
+    vaultStore.adapter,
     '$extractDir/text.txt',
     Uint8List.fromList(utf8.encode(text)),
   );
-  await vaultStore.adapter.writeFile(
+  await _writePlaintextArtifact(
+    vaultStore.adapter,
     '$extractDir/chunks_v1.json',
     Uint8List.fromList(utf8.encode(json.encode(chunks))),
   );
@@ -1106,13 +1132,19 @@ void main() {
         await _seedDocref(kvStore, sha256, _docId1, 'file');
 
         // Write invalid JSON in chunks_v1.json to trigger the catch block.
+        // Both files carry the plaintext flag-byte prefix (WI-10) so
+        // readExtractArtifact() successfully decodes them as plaintext; the
+        // JSON parse failure (not a decryption failure) is what triggers the
+        // graceful-degradation catch(_) in _buildChunkContext.
         final extractDir = '${vaultStore.hashDir(sha256)}/extract';
         await vaultStore.adapter.createDirectory(extractDir);
-        await vaultStore.adapter.writeFile(
+        await _writePlaintextArtifact(
+          vaultStore.adapter,
           '$extractDir/text.txt',
           Uint8List.fromList(utf8.encode('snippet text')),
         );
-        await vaultStore.adapter.writeFile(
+        await _writePlaintextArtifact(
+          vaultStore.adapter,
           '$extractDir/chunks_v1.json',
           Uint8List.fromList(utf8.encode('not valid json')), // triggers catch
         );
@@ -1165,5 +1197,133 @@ void main() {
         expect(result.hits.first.chunkContext.totalChunks, equals(0));
       },
     );
+  });
+
+  // ── Encrypted extract/ artifacts (WI-10) ──────────────────────────────────
+
+  group('encrypted extract/ artifacts', () {
+    late Uint8List dek;
+    late AesGcmEncryptionProvider provider;
+    late VaultSearchManager encManager;
+
+    setUp(() async {
+      dek = await KeyDerivation.generateDek();
+      provider = AesGcmEncryptionProvider(dek);
+      encManager = VaultSearchManager(
+        config: VaultSearchConfig(),
+        kvStore: kvStore,
+        vaultStore: vaultStore,
+        encryption: provider,
+      );
+    });
+
+    tearDown(() async => encManager.close());
+
+    test(
+      'searchVault() against an encrypted database returns correct '
+      'snippets and BM25 scores (length-normalisation read also decrypts)',
+      () async {
+        final sha256 = _sha256('a');
+        await _seedVaultBlob(vaultStore, sha256);
+        await _seedBm25(kvStore, sha256, [
+          {'snippet': 2},
+        ]);
+        await _seedDocref(kvStore, sha256, _docId1, 'attachment');
+
+        // Write ENCRYPTED extract artifacts via the manager's codec.
+        const text = 'This is the encrypted snippet text for testing.';
+        final textBytes = utf8.encode(text);
+        final extractDir = '${vaultStore.hashDir(sha256)}/extract';
+        await vaultStore.adapter.createDirectory(extractDir);
+        await encManager.writeExtractArtifact(
+          '$extractDir/text.txt',
+          Uint8List.fromList(textBytes),
+        );
+        final chunksJson = json.encode([
+          {
+            'index': 0,
+            'byteStart': 0,
+            'byteEnd': textBytes.length,
+            'wordCount': 8,
+          },
+        ]);
+        await encManager.writeExtractArtifact(
+          '$extractDir/chunks_v1.json',
+          Uint8List.fromList(utf8.encode(chunksJson)),
+        );
+
+        // Sanity-check the artifacts are genuinely encrypted on disk.
+        final rawText = (vaultStore.adapter as MemoryStorageAdapter)
+            .files['$extractDir/text.txt']!;
+        expect(rawText[0], equals(EncryptionFlag.aesGcm.byte));
+
+        final searcher = _makeSearcher<Map<String, dynamic>>(
+          encManager,
+          fetchDoc: (_) async => {'doc': true},
+        );
+
+        final result = await searcher.search(
+          'snippet',
+          mode: SearchMode.lexical,
+        );
+
+        expect(result.hits, hasLength(1));
+        expect(result.hits.first.score, greaterThan(0.0));
+        expect(result.hits.first.chunkContext.snippet, equals(text));
+        expect(result.hits.first.chunkContext.totalChunks, equals(1));
+      },
+    );
+
+    test('searchVault() against a corrupted encrypted artifact propagates the '
+        'decryption error rather than silently dropping the hit', () async {
+      final sha256 = _sha256('a');
+      await _seedVaultBlob(vaultStore, sha256);
+      await _seedBm25(kvStore, sha256, [
+        {'snippet': 2},
+      ]);
+      await _seedDocref(kvStore, sha256, _docId1, 'attachment');
+
+      const text = 'Encrypted text that will be corrupted after writing.';
+      final textBytes = utf8.encode(text);
+      final extractDir = '${vaultStore.hashDir(sha256)}/extract';
+      await vaultStore.adapter.createDirectory(extractDir);
+      await encManager.writeExtractArtifact(
+        '$extractDir/text.txt',
+        Uint8List.fromList(textBytes),
+      );
+      final chunksJson = json.encode([
+        {
+          'index': 0,
+          'byteStart': 0,
+          'byteEnd': textBytes.length,
+          'wordCount': 8,
+        },
+      ]);
+      await encManager.writeExtractArtifact(
+        '$extractDir/chunks_v1.json',
+        Uint8List.fromList(utf8.encode(chunksJson)),
+      );
+
+      // Corrupt text.txt in place — flip the last byte of the GCM tag so
+      // decryption fails with a bad-credentials authentication error.
+      final memAdapter = vaultStore.adapter as MemoryStorageAdapter;
+      final textPath = '$extractDir/text.txt';
+      final raw = memAdapter.files[textPath]!;
+      final corrupted = Uint8List.fromList(raw);
+      corrupted[corrupted.length - 1] ^= 0xFF;
+      await memAdapter.writeFile(textPath, corrupted);
+
+      final searcher = _makeSearcher<Map<String, dynamic>>(
+        encManager,
+        fetchDoc: (_) async => {'doc': true},
+      );
+
+      // The decrypt failure must propagate out of search() — not be
+      // swallowed into a placeholder snippet or a dropped hit (Q3(b)).
+      await expectLater(
+        searcher.search('snippet', mode: SearchMode.lexical),
+        throwsA(isA<EncryptionError>()),
+      );
+    });
   });
 }

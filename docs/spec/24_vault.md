@@ -544,10 +544,15 @@ each blob's `manifest.json` and `blob` files:
     text.txt
     chunks_v1.json
     vectors_{modelId}_sq8.bin     ← absent in lexical-only mode
-    extract_status.json
 ```
+
+There is no fourth `extract_status.json` file — extraction status is
+persisted solely in the LSM `$$vault:extract:` namespace (see §32).
 
 The `extract/` directory is **not synced** (it lives inside the local database
 directory, not the sync folder). Other devices rebuild their own `extract/`
-directories independently when they pull and hydrate the same blobs. See §32
-(Vault Search) for the full specification.
+directories independently when they pull and hydrate the same blobs. When an
+`EncryptionProvider` is configured, each of the three files is encrypted with
+the DEK and prefixed with a self-describing `EncryptionFlag` byte (WI-10) —
+see §31 and §32 for the full flag-byte format and toggle-on/mixed-state
+behaviour.

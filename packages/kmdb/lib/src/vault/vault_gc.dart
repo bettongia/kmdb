@@ -243,8 +243,10 @@ final class VaultGc {
     }
 
     // Step 2: Delete the extract/ subdirectory (text.txt, chunks_v1.json,
-    // vectors_{modelId}_sq8.bin, extract_status.json). No-op if the directory
-    // does not exist (vault search was never run on this blob).
+    // vectors_{modelId}_sq8.bin — no fourth extract_status.json file exists;
+    // extraction status lives solely in the $$vault:extract: KV entry, see
+    // §32). No-op if the directory does not exist (vault search was never
+    // run on this blob).
     await store.deleteExtractDir(sha256);
 
     // Step 3: Delete the main blob directory (blob, manifest, tombstone).

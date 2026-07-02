@@ -43,8 +43,12 @@ import 'dart:async';
 import 'dart:convert' show json, utf8;
 import 'dart:typed_data';
 
+import 'package:kmdb/src/encryption/encryption_flag.dart';
+import 'package:kmdb/src/encryption/encryption_provider.dart';
+import 'package:kmdb/src/encryption/key_derivation.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store_impl.dart';
+import 'package:kmdb/src/engine/platform/storage_adapter_interface.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
 import 'package:kmdb/src/vault/media_type_detector.dart';
 import 'package:kmdb/src/vault/search/vault_bm25_writer.dart';
@@ -91,6 +95,75 @@ final class _AlwaysPlainDetector implements MediaTypeDetector {
   Iterable<String> detect(Uint8List bytes, {String? fileName}) => [
     'text/plain',
   ];
+}
+
+/// A [StorageAdapter] that delegates to a wrapped [MemoryStorageAdapter] but
+/// throws [StorageException] for any `writeFile` call whose path contains
+/// [failPathSubstring].
+///
+/// Used to exercise `_processNextItem`'s "Filesystem write error" catch
+/// block (`vault_search_manager.dart`), which has no other way to be
+/// triggered from an in-memory test — [MemoryStorageAdapter.writeFile] never
+/// fails on its own.
+final class _ThrowingWriteAdapter implements StorageAdapter {
+  _ThrowingWriteAdapter(this._delegate, {required this.failPathSubstring});
+
+  final MemoryStorageAdapter _delegate;
+
+  /// `writeFile` calls whose path contains this substring throw.
+  final String failPathSubstring;
+
+  @override
+  Future<void> writeFile(String path, Uint8List bytes) {
+    if (path.contains(failPathSubstring)) {
+      throw const StorageException('Simulated write failure');
+    }
+    return _delegate.writeFile(path, bytes);
+  }
+
+  @override
+  Future<Uint8List> readFile(String path) => _delegate.readFile(path);
+
+  @override
+  Future<Uint8List> readFileRange(String path, int offset, int length) =>
+      _delegate.readFileRange(path, offset, length);
+
+  @override
+  Future<void> appendFile(String path, Uint8List bytes) =>
+      _delegate.appendFile(path, bytes);
+
+  @override
+  Future<void> syncFile(String path) => _delegate.syncFile(path);
+
+  @override
+  Future<void> syncDir(String dirPath) => _delegate.syncDir(dirPath);
+
+  @override
+  Future<void> deleteFile(String path) => _delegate.deleteFile(path);
+
+  @override
+  Future<bool> fileExists(String path) => _delegate.fileExists(path);
+
+  @override
+  Future<List<String>> listFiles(String dirPath, {String? extension}) =>
+      _delegate.listFiles(dirPath, extension: extension);
+
+  @override
+  Future<int> fileSize(String path) => _delegate.fileSize(path);
+
+  @override
+  Future<void> renameFile(String from, String to) =>
+      _delegate.renameFile(from, to);
+
+  @override
+  Future<void> createDirectory(String dirPath) =>
+      _delegate.createDirectory(dirPath);
+
+  @override
+  Future<void> acquireLock(String lockPath) => _delegate.acquireLock(lockPath);
+
+  @override
+  Future<void> releaseLock(String lockPath) => _delegate.releaseLock(lockPath);
 }
 
 /// A [VaultStore] subclass for testing, backed by [MemoryStorageAdapter].
@@ -238,6 +311,27 @@ Future<VaultExtractionState> _awaitTerminal(
 Future<String> _ingest(_TestVaultStore store, Uint8List content) async {
   final ref = await store.ingest(bytes: content, hlcTimestamp: _hlc);
   return ref.sha256;
+}
+
+/// Writes [bytes] to [path] as a plaintext `extract/` artifact — i.e. with
+/// the leading [EncryptionFlag.none] byte prefix that [readExtractArtifact]
+/// expects (WI-10).
+///
+/// Tests that manually seed filesystem artifacts to simulate a mid-crash
+/// state (bypassing [VaultSearchManager.writeExtractArtifact]) must use this
+/// helper rather than [StorageAdapter.writeFile] directly, otherwise the
+/// artifact's first byte (arbitrary content) will not parse as a valid
+/// [EncryptionFlag] and recovery will fall back to a full re-extraction
+/// instead of exercising the file-rebuild path under test.
+Future<void> _writePlaintextArtifact(
+  MemoryStorageAdapter adapter,
+  String path,
+  Uint8List bytes,
+) {
+  final payload = Uint8List(1 + bytes.length)
+    ..[0] = EncryptionFlag.none.byte
+    ..setAll(1, bytes);
+  return adapter.writeFile(path, payload);
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -534,8 +628,15 @@ void main() {
         isTrue,
         reason: 'text.txt should exist at $textPath',
       );
-      final stored = utf8.decode(adapter.files[textPath]!);
+      // Without encryption, the file carries the leading EncryptionFlag.none
+      // byte (WI-10) followed by the plaintext body verbatim.
+      final raw = adapter.files[textPath]!;
+      expect(raw[0], equals(EncryptionFlag.none.byte));
+      final stored = utf8.decode(raw.sublist(1));
       expect(stored, equals(text));
+      // readExtractArtifact() must also decode it back to the original text.
+      final decoded = await manager.readExtractArtifact(textPath);
+      expect(utf8.decode(decoded), equals(text));
     });
   });
 
@@ -643,9 +744,14 @@ void main() {
         );
 
         // Write filesystem artifacts: text.txt, chunks_v1.json, and vec file.
+        // Use _writePlaintextArtifact so each file carries the leading
+        // EncryptionFlag.none byte that readExtractArtifact() expects — this
+        // exercises the real "rebuild from files" recovery branch rather than
+        // falling back to a full re-extraction on an unparseable flag byte.
         final extractDir = '${vaultStore.hashDir(sha256)}/extract';
         await adapter.createDirectory(extractDir);
-        await adapter.writeFile(
+        await _writePlaintextArtifact(
+          adapter,
           '$extractDir/text.txt',
           Uint8List.fromList(
             utf8.encode('vector recovery test from file content'),
@@ -654,13 +760,14 @@ void main() {
         final chunksJson = json.encode([
           {'index': 0, 'byteStart': 0, 'byteEnd': 39, 'wordCount': 6},
         ]);
-        await adapter.writeFile(
+        await _writePlaintextArtifact(
+          adapter,
           '$extractDir/chunks_v1.json',
           Uint8List.fromList(utf8.encode(chunksJson)),
         );
         // Write a minimal vec file (8 bytes per chunk for fake-model-v1 with 8 dims).
         final vecPath = '$extractDir/vectors_fake-model-v1_sq8.bin';
-        await adapter.writeFile(vecPath, Uint8List(8));
+        await _writePlaintextArtifact(adapter, vecPath, Uint8List(8));
 
         // Run recovery.
         final manager = VaultSearchManager(
@@ -686,6 +793,74 @@ void main() {
         );
       },
     );
+
+    test('recovery re-embeds from text.txt when the vec file is missing '
+        '(re-embed fallback branch)', () async {
+      // Same crash window as the "vec file load path" test above, but the
+      // vec file itself was never written (crash landed one step earlier —
+      // between chunks_v1.json and the vector file). Recovery must fall
+      // back to re-embedding from the decrypted text rather than failing.
+      final model = _FakeEmbeddingModel();
+      final sha256 = await _ingest(
+        vaultStore,
+        Uint8List.fromList(
+          utf8.encode('vector recovery re-embed fallback test content'),
+        ),
+      );
+
+      final extractingState = VaultExtractionState.extracting(sha256);
+      await kvStore.writeBatchInternal(
+        WriteBatch()..put(
+          '$kVaultExtractPrefix$sha256',
+          kVaultCorpusSentinelKey,
+          extractingState.encode(),
+        ),
+      );
+
+      final extractDir = '${vaultStore.hashDir(sha256)}/extract';
+      await adapter.createDirectory(extractDir);
+      await _writePlaintextArtifact(
+        adapter,
+        '$extractDir/text.txt',
+        Uint8List.fromList(
+          utf8.encode('vector recovery re-embed fallback test content'),
+        ),
+      );
+      final chunksJson = json.encode([
+        {'index': 0, 'byteStart': 0, 'byteEnd': 47, 'wordCount': 7},
+      ]);
+      await _writePlaintextArtifact(
+        adapter,
+        '$extractDir/chunks_v1.json',
+        Uint8List.fromList(utf8.encode(chunksJson)),
+      );
+      // Deliberately no vectors_*.bin file — forces the re-embed branch.
+
+      final manager = VaultSearchManager(
+        config: VaultSearchConfig(
+          chunkSize: 50,
+          chunkOverlap: 5,
+          extractors: [_FixedTextExtractor()],
+        ),
+        kvStore: kvStore,
+        vaultStore: vaultStore,
+        embeddingModel: model,
+      );
+      addTearDown(manager.close);
+      await manager.recover();
+
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+
+      final state = await _readState(kvStore, sha256);
+      expect(
+        state?.status,
+        equals(VaultExtractionStatus.indexed),
+        reason:
+            'Recovery must re-embed and succeed when the vec file is '
+            'missing',
+      );
+      expect(state?.modelVersion, equals('fake-model-v1'));
+    });
   });
 
   // ── Error path coverage ───────────────────────────────────────────────────
@@ -929,10 +1104,13 @@ void main() {
           ),
         );
 
-        // Write filesystem artifacts as if steps 4–5 completed but step 6 did not.
+        // Write filesystem artifacts as if steps 4–5 completed but step 6 did
+        // not. Use _writePlaintextArtifact so the flag-byte prefix is present
+        // (WI-10), exercising the real file-rebuild recovery branch.
         final extractDir = '${vaultStore.hashDir(sha256)}/extract';
         await adapter.createDirectory(extractDir);
-        await adapter.writeFile(
+        await _writePlaintextArtifact(
+          adapter,
           '$extractDir/text.txt',
           Uint8List.fromList(
             utf8.encode('Recovery test content paragraph here'),
@@ -941,7 +1119,8 @@ void main() {
         final chunksJson = json.encode([
           {'index': 0, 'byteStart': 0, 'byteEnd': 36, 'wordCount': 5},
         ]);
-        await adapter.writeFile(
+        await _writePlaintextArtifact(
+          adapter,
           '$extractDir/chunks_v1.json',
           Uint8List.fromList(utf8.encode(chunksJson)),
         );
@@ -1033,6 +1212,98 @@ void main() {
         equals(VaultExtractionStatus.unsupported),
         reason: 'Unsupported state should be preserved — do not retry',
       );
+    });
+
+    test('extracting state + corrupted ENCRYPTED text.txt → resets to pending '
+        '(no crash) and self-heals via re-extraction', () async {
+      // Simulate a crash between the filesystem writes (Steps 4-5) and the
+      // final WriteBatch commit (Step 6), where the artifacts on disk are
+      // encrypted but text.txt has been corrupted (e.g. a torn write or
+      // bit-rot) so its GCM authentication tag no longer matches. Recovery
+      // must not throw — it self-heals to `pending` and re-queues the blob
+      // for full re-extraction (WI-10, Q3(a)).
+      final dek = await KeyDerivation.generateDek();
+      final provider = AesGcmEncryptionProvider(dek);
+      final content = Uint8List.fromList(
+        utf8.encode('corrupted encrypted artifact recovery test'),
+      );
+      final sha256 = await _ingest(vaultStore, content);
+
+      // Seed `extracting` state directly (pre-flight marker).
+      final extractState = VaultExtractionState.extracting(sha256);
+      await kvStore.writeBatchInternal(
+        WriteBatch()..put(
+          '$kVaultExtractPrefix$sha256',
+          kVaultCorpusSentinelKey,
+          extractState.encode(),
+        ),
+      );
+
+      // Write encrypted artifacts via a manager configured with the DEK.
+      final writerManager = VaultSearchManager(
+        config: VaultSearchConfig(
+          chunkSize: 50,
+          chunkOverlap: 5,
+          extractors: [_FixedTextExtractor()],
+        ),
+        kvStore: kvStore,
+        vaultStore: vaultStore,
+        encryption: provider,
+      );
+      final extractDir = '${vaultStore.hashDir(sha256)}/extract';
+      await adapter.createDirectory(extractDir);
+      await writerManager.writeExtractArtifact('$extractDir/text.txt', content);
+      final chunksJson = json.encode([
+        {'index': 0, 'byteStart': 0, 'byteEnd': content.length},
+      ]);
+      await writerManager.writeExtractArtifact(
+        '$extractDir/chunks_v1.json',
+        Uint8List.fromList(utf8.encode(chunksJson)),
+      );
+      await writerManager.close();
+
+      // Corrupt text.txt on disk — flip the last byte of the GCM tag.
+      final textPath = '$extractDir/text.txt';
+      final raw = await adapter.readFile(textPath);
+      final corrupted = Uint8List.fromList(raw);
+      corrupted[corrupted.length - 1] ^= 0xFF;
+      await adapter.writeFile(textPath, corrupted);
+
+      // Run recovery with the SAME (correct) provider — the corruption is
+      // in the ciphertext, not a key mismatch, so decrypt still fails.
+      final recoveryManager = VaultSearchManager(
+        config: VaultSearchConfig(
+          chunkSize: 50,
+          chunkOverlap: 5,
+          extractors: [_FixedTextExtractor()],
+        ),
+        kvStore: kvStore,
+        vaultStore: vaultStore,
+        encryption: provider,
+      );
+      addTearDown(recoveryManager.close);
+
+      // Must not throw — recover() catches the EncryptionError internally.
+      await expectLater(recoveryManager.recover(), completes);
+
+      // Immediately after recover() returns, the synchronous portion of
+      // the self-heal (the pending-status write) has completed, but the
+      // async re-queue/re-extraction it kicks off has not yet run — so the
+      // state observed here is the `pending` reset itself (mirrors the
+      // "extracting state + no files → resets to pending" test above).
+      final resetState = await _readState(kvStore, sha256);
+      expect(
+        resetState?.status,
+        equals(VaultExtractionStatus.pending),
+        reason:
+            'Corrupted encrypted artifact must reset the blob to pending '
+            'rather than leaving it stuck in extracting or throwing',
+      );
+
+      // The self-heal re-queue eventually completes a fresh, successful
+      // re-extraction (since the underlying blob bytes are intact).
+      final finalState = await _awaitTerminal(kvStore, sha256);
+      expect(finalState.status, equals(VaultExtractionStatus.indexed));
     });
   });
 
@@ -1176,10 +1447,16 @@ void main() {
         await crashKvStore.flush();
 
         // ── Step B: Write filesystem artifacts to the vault adapter (these
-        // survive independently of the LSM crash). ─────────────────────────
+        // survive independently of the LSM crash). Use _writePlaintextArtifact
+        // so the flag-byte prefix is present (WI-10), exercising the real
+        // file-rebuild recovery branch rather than a full re-extraction. ────
         final extractDir = '${crashVaultStore.hashDir(sha256)}/extract';
         await vaultAdapter.createDirectory(extractDir);
-        await vaultAdapter.writeFile('$extractDir/text.txt', content);
+        await _writePlaintextArtifact(
+          vaultAdapter,
+          '$extractDir/text.txt',
+          content,
+        );
         final chunksJson = json.encode([
           {
             'index': 0,
@@ -1188,7 +1465,8 @@ void main() {
             'wordCount': 5,
           },
         ]);
-        await vaultAdapter.writeFile(
+        await _writePlaintextArtifact(
+          vaultAdapter,
           '$extractDir/chunks_v1.json',
           Uint8List.fromList(utf8.encode(chunksJson)),
         );
@@ -1255,6 +1533,245 @@ void main() {
           corpusBytes,
           isNotNull,
           reason: 'BM25 corpus sentinel must be present after crash recovery',
+        );
+      },
+    );
+
+    test(
+      'crash after ENCRYPTED filesystem artifacts written but before '
+      'WriteBatch commit → recover() rebuilds index from decrypted files',
+      () async {
+        // Same crash window as the plaintext test above, but with an
+        // EncryptionProvider configured — verifies that the write path
+        // (writeExtractArtifact) and the recovery read path
+        // (readExtractArtifact) correctly round-trip encrypted artifacts
+        // across a crash, and that the pending-vs-rebuild recovery decision
+        // is unaffected by encryption being active (WI-10).
+        final dek = await KeyDerivation.generateDek();
+        final provider = AesGcmEncryptionProvider(dek);
+
+        final lsmAdapter = FaultyStorageAdapter();
+        final vaultAdapter = MemoryStorageAdapter();
+
+        final (crashKvStore, _) = await KvStoreImpl.open(
+          _dbDir,
+          lsmAdapter,
+          config: KvStoreConfig.forTesting(),
+          deviceId: _deviceId,
+        );
+
+        final crashVaultStore = _TestVaultStore(vaultAdapter);
+        _TestVaultStore._seq = 200; // avoid collision with other tests.
+
+        final content = Uint8List.fromList(
+          utf8.encode('encrypted fault injection crash test content'),
+        );
+        final ref = await crashVaultStore.ingest(
+          bytes: content,
+          hlcTimestamp: _hlc,
+        );
+        final sha256 = ref.sha256;
+
+        // Step A: `extracting` pre-flight marker, flushed so it survives.
+        final extractingState = VaultExtractionState.extracting(sha256);
+        await crashKvStore.writeBatchInternal(
+          WriteBatch()..put(
+            '$kVaultExtractPrefix$sha256',
+            kVaultCorpusSentinelKey,
+            extractingState.encode(),
+          ),
+        );
+        await crashKvStore.flush();
+
+        // Step B: Write ENCRYPTED filesystem artifacts via a manager
+        // configured with the DEK — mirrors _processNextItem's Steps 4–5.
+        final writerManager = VaultSearchManager(
+          config: VaultSearchConfig(
+            chunkSize: 50,
+            chunkOverlap: 5,
+            extractors: [_FixedTextExtractor()],
+          ),
+          kvStore: crashKvStore,
+          vaultStore: crashVaultStore,
+          encryption: provider,
+        );
+        final extractDir = '${crashVaultStore.hashDir(sha256)}/extract';
+        await vaultAdapter.createDirectory(extractDir);
+        await writerManager.writeExtractArtifact(
+          '$extractDir/text.txt',
+          content,
+        );
+        final chunksJson = json.encode([
+          {
+            'index': 0,
+            'byteStart': 0,
+            'byteEnd': content.length,
+            'wordCount': 6,
+          },
+        ]);
+        await writerManager.writeExtractArtifact(
+          '$extractDir/chunks_v1.json',
+          Uint8List.fromList(utf8.encode(chunksJson)),
+        );
+        await writerManager.close();
+
+        // Verify the artifacts are genuinely encrypted on disk (flag byte +
+        // no plaintext leakage).
+        final rawText = vaultAdapter.files['$extractDir/text.txt']!;
+        expect(rawText[0], equals(EncryptionFlag.aesGcm.byte));
+        expect(
+          utf8.decode(rawText, allowMalformed: true),
+          isNot(contains('encrypted fault injection crash test content')),
+        );
+
+        // Step C: Simulate crash — final WriteBatch never committed.
+        lsmAdapter.crash();
+        await crashKvStore.close(flush: false);
+
+        // Step D: Reopen the KvStore from the post-crash adapter.
+        final (recoveredKvStore, _) = await KvStoreImpl.open(
+          _dbDir,
+          lsmAdapter,
+          config: KvStoreConfig.forTesting(),
+          deviceId: _deviceId,
+        );
+        addTearDown(() => recoveredKvStore.close());
+
+        final preRecoveryState = await _readState(recoveredKvStore, sha256);
+        expect(
+          preRecoveryState?.status,
+          equals(VaultExtractionStatus.extracting),
+          reason:
+              'extracting state written before crash must survive the crash',
+        );
+
+        // Step E: Run recover() with the SAME EncryptionProvider (correct
+        // DEK) configured — the manager must decrypt the artifacts and
+        // rebuild the WriteBatch from them.
+        final manager = VaultSearchManager(
+          config: VaultSearchConfig(
+            chunkSize: 50,
+            chunkOverlap: 5,
+            extractors: [_FixedTextExtractor()],
+          ),
+          kvStore: recoveredKvStore,
+          vaultStore: crashVaultStore,
+          encryption: provider,
+        );
+        addTearDown(manager.close);
+        await manager.recover();
+
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+
+        // Step F: Verify the index was rebuilt from the decrypted artifacts.
+        final recoveredState = await _readState(recoveredKvStore, sha256);
+        expect(
+          recoveredState?.status,
+          equals(VaultExtractionStatus.indexed),
+          reason:
+              'recover() must rebuild the index from encrypted filesystem '
+              'artifacts after a crash at the WriteBatch commit step',
+        );
+
+        final corpusNs = VaultBm25Writer.corpusNamespace(sha256);
+        final corpusBytes = await recoveredKvStore.get(
+          corpusNs,
+          kVaultCorpusSentinelKey,
+        );
+        expect(
+          corpusBytes,
+          isNotNull,
+          reason: 'BM25 corpus sentinel must be present after crash recovery',
+        );
+      },
+    );
+
+    test(
+      'crash recovery with encrypted artifacts but NO EncryptionProvider on '
+      'reopen → readExtractArtifact throws, recover() self-heals to pending',
+      () async {
+        // Models a misconfiguration/self-heal scenario distinct from the
+        // "wrong DEK" case (which cannot occur per Q3 — the DEK is validated
+        // once at KmdbDatabase.open()): a database that WAS encrypted when
+        // the artifacts were written, but recover() runs without a provider.
+        // Per Q3(a), this must self-heal (reset to pending), not crash open().
+        final dek = await KeyDerivation.generateDek();
+        final provider = AesGcmEncryptionProvider(dek);
+
+        // Use a distinct dbDir — the outer setUp() already holds the LOCK
+        // file for _dbDir on the shared MemoryStorageAdapter lock registry
+        // (which is static across instances, unlike FaultyStorageAdapter's).
+        final adapterForVault = MemoryStorageAdapter();
+        final (localKvStore, _) = await KvStoreImpl.open(
+          '$_dbDir-no-provider',
+          adapterForVault,
+          config: KvStoreConfig.forTesting(),
+          deviceId: _deviceId,
+        );
+        addTearDown(() => localKvStore.close());
+
+        final localVaultStore = _TestVaultStore(adapterForVault);
+        _TestVaultStore._seq = 300;
+
+        final content = Uint8List.fromList(
+          utf8.encode('no provider on reopen recovery test content'),
+        );
+        final ref = await localVaultStore.ingest(
+          bytes: content,
+          hlcTimestamp: _hlc,
+        );
+        final sha256 = ref.sha256;
+
+        // Seed `extracting` state.
+        await localKvStore.writeBatchInternal(
+          WriteBatch()..put(
+            '$kVaultExtractPrefix$sha256',
+            kVaultCorpusSentinelKey,
+            VaultExtractionState.extracting(sha256).encode(),
+          ),
+        );
+
+        // Write ENCRYPTED artifacts via a manager with the provider.
+        final writerManager = VaultSearchManager(
+          config: VaultSearchConfig(chunkSize: 50, chunkOverlap: 5),
+          kvStore: localKvStore,
+          vaultStore: localVaultStore,
+          encryption: provider,
+        );
+        final extractDir = '${localVaultStore.hashDir(sha256)}/extract';
+        await adapterForVault.createDirectory(extractDir);
+        await writerManager.writeExtractArtifact(
+          '$extractDir/text.txt',
+          content,
+        );
+        final chunksJson = json.encode([
+          {'index': 0, 'byteStart': 0, 'byteEnd': content.length},
+        ]);
+        await writerManager.writeExtractArtifact(
+          '$extractDir/chunks_v1.json',
+          Uint8List.fromList(utf8.encode(chunksJson)),
+        );
+        await writerManager.close();
+
+        // Run recovery WITHOUT an EncryptionProvider — readExtractArtifact
+        // will throw StateError for the encrypted artifacts, which the
+        // recovery catch(_) must translate into a pending reset + re-queue.
+        final noProviderManager = _makeManager(localKvStore, localVaultStore);
+        addTearDown(noProviderManager.close);
+        await noProviderManager.recover();
+
+        // Self-heal: state resets to pending and (since recover() enqueues
+        // internally) the blob is re-processed by the lexical-only manager,
+        // eventually landing on `indexed` again — the crucial assertion is
+        // that recover() does not throw/crash KmdbDatabase.open().
+        final state = await _awaitTerminal(localKvStore, sha256);
+        expect(
+          state.status,
+          equals(VaultExtractionStatus.indexed),
+          reason:
+              'recover() must self-heal (not crash) when an encrypted '
+              'artifact cannot be decrypted, by falling back to full '
+              're-extraction',
         );
       },
     );
@@ -1477,6 +1994,54 @@ void main() {
       // blob that genuinely fails all extractors.
       // This test exercises the code path that queueBlob works after attach.
       expect(state.status, isNotNull);
+    });
+
+    test('filesystem write error (writeExtractArtifact failure) marks blob as '
+        'failed', () async {
+      // Wrap the VaultStore's adapter so the text.txt write fails,
+      // exercising _processNextItem's "Filesystem write error" catch
+      // block (which now wraps writeExtractArtifact calls, WI-10).
+      final mem = MemoryStorageAdapter();
+      final throwingAdapter = _ThrowingWriteAdapter(
+        mem,
+        failPathSubstring: '/extract/text.txt',
+      );
+      final failingVaultStore = VaultStore(
+        dbDir: '/db',
+        adapter: throwingAdapter,
+        detector: const _AlwaysPlainDetector(),
+      );
+
+      final ref = await failingVaultStore.ingest(
+        bytes: Uint8List.fromList(
+          utf8.encode('filesystem write failure test content'),
+        ),
+        hlcTimestamp: _hlc,
+      );
+      final sha256 = ref.sha256;
+
+      final manager = VaultSearchManager(
+        config: VaultSearchConfig(
+          chunkSize: 50,
+          chunkOverlap: 5,
+          extractors: [_FixedTextExtractor()],
+        ),
+        kvStore: kvStore,
+        vaultStore: failingVaultStore,
+      );
+      addTearDown(manager.close);
+
+      await manager.queueBlob(sha256, 'text/plain');
+      final state = await _awaitTerminal(kvStore, sha256);
+
+      expect(
+        state.status,
+        equals(VaultExtractionStatus.failed),
+        reason:
+            'A writeExtractArtifact failure must mark the blob failed, '
+            'not crash the indexing pipeline',
+      );
+      expect(state.error, contains('Filesystem write error'));
     });
   });
 

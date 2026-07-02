@@ -26,6 +26,7 @@ import 'dart:typed_data';
 import 'package:betto_lexical/betto_lexical.dart' show createDefaultTokenizer;
 
 import '../../encoding/value_codec.dart';
+import '../../encryption/encryption_error.dart';
 import '../../search/lexical/fts_manager.dart' show defaultStopwords;
 import '../../search/lexical/pipeline.dart' show preprocess;
 import '../../search/search_mode.dart';
@@ -80,7 +81,8 @@ final class VaultSearcher<T> {
     required VaultSearchManager manager,
     required String namespace,
     required Future<T?> Function(String id) fetchDoc,
-  }) : _kvStore = manager.kvStore,
+  }) : _manager = manager,
+       _kvStore = manager.kvStore,
        _vaultStore = manager.vaultStore,
        _embeddingModel = manager.embeddingModel,
        // _namespace and _fetchDoc stored for future use and documentation.
@@ -89,6 +91,14 @@ final class VaultSearcher<T> {
        // ignore: prefer_initializing_formals
        _fetchDoc = fetchDoc;
 
+  /// The owning [VaultSearchManager], retained solely so `extract/`
+  /// filesystem artifact reads can go through
+  /// [VaultSearchManager.readExtractArtifact] (WI-10) — the encapsulated
+  /// seam for decrypting artifacts written with an `EncryptionProvider`.
+  /// Dart privacy is per-file, not per-directory, so this field cannot be
+  /// replaced by direct access to the manager's private `_encryption` field
+  /// even though both classes live under `lib/src/vault/search/`.
+  final VaultSearchManager _manager;
   final KvStoreImpl _kvStore;
   final VaultStore _vaultStore;
   final Object? _embeddingModel; // EmbeddingModel? — kept as Object? to avoid
@@ -371,19 +381,32 @@ final class VaultSearcher<T> {
   /// Returns a map from chunk index to word count. Returns an empty map if
   /// the file does not exist or cannot be parsed (graceful degradation — the
   /// caller falls back to avgdl for any missing entry).
+  ///
+  /// Decryption failures ([EncryptionError], [StateError] for a missing
+  /// [EncryptionProvider], or [ArgumentError] for an unrecognised flag byte)
+  /// are **not** treated as graceful-degradation cases — they are rethrown
+  /// and propagate out of [search] (WI-10, §31, Q3(b)): unlike a missing or
+  /// malformed legacy artifact, a decrypt failure indicates genuine on-disk
+  /// corruption the caller should learn about.
   Future<Map<int, int>> _loadChunkWordCounts(String sha256) async {
     final extractDir = '${_vaultStore.hashDir(sha256)}/extract';
     final chunksPath = '$extractDir/chunks_v1.json';
     try {
       final adapter = _vaultStore.adapter;
       if (!await adapter.fileExists(chunksPath)) return {};
-      final bytes = await adapter.readFile(chunksPath);
+      final bytes = await _manager.readExtractArtifact(chunksPath);
       final list = json.decode(utf8.decode(bytes)) as List;
       return {
         for (final entry in list.cast<Map<String, dynamic>>())
           (entry['index'] as num).toInt():
               (entry['wordCount'] as num?)?.toInt() ?? 0,
       };
+    } on EncryptionError {
+      rethrow;
+    } on StateError {
+      rethrow;
+    } on ArgumentError {
+      rethrow;
     } catch (_) {
       return {};
     }
@@ -594,7 +617,16 @@ final class VaultSearcher<T> {
   /// the snippet text. Returns a [VaultChunkContext] with `chunkIndex: 0` and
   /// the full text of the first chunk.
   ///
-  /// Returns a placeholder context if the extract artifacts are missing.
+  /// Returns a placeholder context if the extract artifacts are missing or
+  /// cannot be parsed (e.g. a malformed legacy `chunks_v1.json`).
+  ///
+  /// Decryption failures ([EncryptionError], [StateError] for a missing
+  /// [EncryptionProvider], or [ArgumentError] for an unrecognised flag byte)
+  /// are **not** treated as graceful-degradation cases — they are rethrown
+  /// and propagate out of [search] (WI-10, §31, Q3(b)): unlike a missing or
+  /// malformed legacy artifact, a decrypt failure indicates genuine on-disk
+  /// corruption the caller should learn about, not a routine condition to
+  /// mask as an empty snippet.
   Future<VaultChunkContext> _buildChunkContext(
     String sha256,
     String fieldPath,
@@ -610,7 +642,7 @@ final class VaultSearcher<T> {
         return _placeholderContext(sha256, fieldPath);
       }
 
-      final chunksBytes = await adapter.readFile(chunksPath);
+      final chunksBytes = await _manager.readExtractArtifact(chunksPath);
       final chunksList = json.decode(utf8.decode(chunksBytes)) as List;
 
       if (chunksList.isEmpty) {
@@ -626,7 +658,7 @@ final class VaultSearcher<T> {
       final byteStart = (firstChunk['byteStart'] as int?) ?? 0;
       final byteEnd = (firstChunk['byteEnd'] as int?) ?? 0;
 
-      final textBytes = await adapter.readFile(textPath);
+      final textBytes = await _manager.readExtractArtifact(textPath);
       // clamp returns num; calling toInt() ensures we get a proper int for
       // Uint8List.sublistView which requires int arguments.
       final safeEnd = byteEnd.clamp(0, textBytes.length).toInt();
@@ -642,6 +674,12 @@ final class VaultSearcher<T> {
         snippet: snippet,
         fieldPath: fieldPath,
       );
+    } on EncryptionError {
+      rethrow;
+    } on StateError {
+      rethrow;
+    } on ArgumentError {
+      rethrow;
     } catch (_) {
       return _placeholderContext(sha256, fieldPath);
     }
