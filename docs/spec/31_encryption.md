@@ -478,6 +478,12 @@ sync:
   `ValueCodec.encode` (see _Provider Threading_).
 - **Vault blob bytes** — the `VaultStore` encrypts blob payloads with the DEK
   before writing them to disk and to the cloud (see _Vault Encryption_).
+- **Vault `extract/` filesystem artifacts (WI-10, gap 6 below)** — `text.txt`,
+  `chunks_v1.json`, and `vectors_*.bin` are encrypted with the DEK when
+  written *after* an `EncryptionProvider` is configured. This protection is
+  **per-file, not database-wide**: artifacts written before encryption was
+  provisioned remain plaintext until the owning blob is reindexed (see gap 6
+  for the full toggle-on/mixed-state behaviour).
 
 > **Note on namespace _names_ vs. _values_.** Encryption protects the _value_
 > bytes of a KV slot. It does **not** protect the _key_ of the slot, of which
@@ -557,15 +563,53 @@ cloud sync, containing `mediaType`, `size`, `hlcTimestamp`, `sha256`, and
   **not** otherwise acknowledged. They leak the original filename, content type,
   and size of every stored blob to anyone with sync or disk access.
 
-#### 6. Vault `extract/` filesystem artifacts will be plaintext
+#### 6. Vault `extract/` filesystem artifacts (resolved — WI-10)
 
-When vault search (roadmap WI-3) is implemented, the extraction pipeline will
-write `text.txt`, `vectors_*.bin`, `chunks_v1.json`, and `extract_status.json`
-alongside the encrypted blob. These artifacts will be **plaintext** — in
-particular `text.txt` contains the **full extracted plaintext** of the blob,
-which entirely defeats blob encryption for any indexed document. Encrypting
-these artifacts is planned as a separate work item (WI-10) and is not yet in
-place.
+Vault search (WI-3) writes three per-blob filesystem artifacts alongside each
+encrypted blob's `extract/` subdirectory: `text.txt` (full extracted text),
+`chunks_v1.json` (chunk byte-offset metadata), and `vectors_{modelId}_sq8.bin`
+(SQ8-quantised embedding vectors, semantic mode only). No fourth
+`extract_status.json` file is ever written — extraction status is persisted
+solely to the `$$vault:extract:{sha256}` KV entry (see gap 1's sibling
+discussion of unencrypted KV _values_, which is a separate, still-open defect
+tracked as v0.08 Gap 1).
+
+WI-10 encrypts these three files when a database `EncryptionProvider` is
+configured, using `VaultSearchManager.writeExtractArtifact` /
+`readExtractArtifact`. Because `extract/` files have no accompanying manifest
+(unlike vault blobs, which use `manifest.json`'s `encrypted` field), each file
+is **self-describing**: it is prefixed with a single `EncryptionFlag` byte —
+the same enum used by the `ValueCodec` wire format (see _Wire Format_ above),
+applied here to whole files:
+
+```
+[EncryptionFlag.none  (0x00)] plaintext body follows verbatim
+[EncryptionFlag.aesGcm (0x01)] nonce(12B) || AES-256-GCM ciphertext || tag(16B)
+```
+
+This makes every artifact independently readable regardless of the database's
+*current* encryption state or *when* the file was written, which matters for
+the toggle-on transition: a database that already has plaintext `extract/`
+artifacts from before encryption was provisioned keeps those files readable
+(flag byte `0x00`) without any migration step. Newly indexed or re-indexed
+blobs (via `VaultSearchManager.reindexVault()`) are written with the encrypted
+flag (`0x01`) once a provider is configured. Both flag states can coexist
+across blobs in the same database indefinitely — there is no requirement to
+reindex old blobs, though doing so is recommended to close the plaintext gap
+for previously-indexed content.
+
+These files are read/written whole-file only — an AES-GCM-encrypted artifact
+cannot be range-read, since the entire ciphertext is required to verify the
+authentication tag before any plaintext is released.
+
+A decrypt failure is handled differently depending on the read site: startup
+recovery (`VaultSearchManager.recover()`) treats it identically to any other
+filesystem read failure — the blob resets to `pending` and is re-queued for a
+full re-extraction (self-healing, no crash). `KmdbCollection.searchVault()`
+snippet/BM25-length reads propagate the failure instead of silently dropping
+the hit or returning an empty snippet, since a decrypt failure at query time
+(the DEK having already been validated once at `KmdbDatabase.open()`)
+indicates genuine on-disk corruption the caller should learn about.
 
 #### 7. SSTable filenames and WAL structure are plaintext
 
@@ -588,9 +632,11 @@ Encryption gives a strong guarantee about **document value confidentiality**
 against a cloud provider or a passphrase-less device thief. It gives **no
 guarantee** about metadata: search vocabulary, indexed values, filenames, blob
 manifests, operational `$meta`, document existence, timing, and creation
-timestamps all remain observable. Gaps 1 and 6 are additionally **content**
-leaks (tokenised terms and extracted plaintext respectively) that are tracked as
-defects/work items rather than accepted trade-offs.
+timestamps all remain observable. Gap 1 is additionally a **content** leak
+(tokenised terms) that is tracked as a defect/work item rather than an
+accepted trade-off. Gap 6 (vault `extract/` filesystem artifacts, including
+the full extracted plaintext in `text.txt`) was the other content-leak gap in
+this category — it is now resolved by WI-10.
 
 ## Crash Safety
 

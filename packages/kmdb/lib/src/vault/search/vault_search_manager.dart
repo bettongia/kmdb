@@ -44,6 +44,7 @@ import 'package:betto_inferencing/betto_inferencing.dart' show EmbeddingModel;
 // Dart does not permit `this._fieldName` in named constructor parameters when
 // the field is private. The initialiser list pattern is unavoidable here.
 
+import '../../encryption/encryption_flag.dart';
 import '../../encryption/encryption_provider.dart';
 import '../../engine/kvstore/kv_store.dart';
 import '../../engine/kvstore/kv_store_impl.dart';
@@ -94,8 +95,10 @@ final class VaultSearchManager {
   /// [vaultStore] provides blob bytes and filesystem path helpers.
   /// [embeddingModel] is the borrowed (not owned) database-level model —
   /// pass `null` for lexical-only mode.
-  /// [encryption] is passed through for encrypted databases (currently unused
-  /// in this layer; LSM encryption is handled by the KvStore).
+  /// [encryption] is passed through for encrypted databases; it is used to
+  /// encrypt/decrypt the `extract/` filesystem artifacts (see
+  /// [writeExtractArtifact] / [readExtractArtifact]). LSM-level encryption
+  /// (KV values) is handled separately by the KvStore.
   VaultSearchManager({
     required VaultSearchConfig config,
     required KvStoreImpl kvStore,
@@ -116,8 +119,9 @@ final class VaultSearchManager {
   /// [VaultSearchManager] must NEVER call [EmbeddingModel.dispose] on this.
   final EmbeddingModel? _embeddingModel;
 
-  // Kept for potential future use (e.g. per-entry encryption in docref).
-  // ignore: unused_field
+  /// Optional encryption provider for the database's DEK, used to encrypt and
+  /// decrypt the `extract/` filesystem artifacts via [writeExtractArtifact]
+  /// and [readExtractArtifact]. `null` for a plaintext database.
   final EncryptionProvider? _encryption;
 
   // ── Indexing queue and isolate ─────────────────────────────────────────────
@@ -158,6 +162,95 @@ final class VaultSearchManager {
 
   /// Returns the active search config.
   VaultSearchConfig get config => _config;
+
+  /// Writes [plaintext] to [path] as an `extract/` filesystem artifact,
+  /// encrypting it first when the database has an [EncryptionProvider]
+  /// configured (§31).
+  ///
+  /// Every artifact is prefixed with a single [EncryptionFlag] byte so it is
+  /// self-describing regardless of when it was written or the database's
+  /// current encryption state (this mirrors the outermost byte of the
+  /// [ValueCodec] wire format, applied here to whole files):
+  ///
+  /// ```
+  /// [EncryptionFlag.none.byte]   → plaintext body follows verbatim
+  /// [EncryptionFlag.aesGcm.byte] → nonce(12B) || AES-256-GCM ciphertext || tag(16B)
+  /// ```
+  ///
+  /// When no [EncryptionProvider] is configured, [plaintext] is written
+  /// unencrypted (byte-identical to the pre-encryption format save for the
+  /// leading [EncryptionFlag.none] byte). This lets encryption be toggled on
+  /// for a database that already has plaintext artifacts: old files keep
+  /// their `none` flag and remain readable, while newly (re)indexed blobs are
+  /// written with the `aesGcm` flag once a provider is configured — see
+  /// [reindexVault] for the migration path.
+  ///
+  /// These artifacts are read/written whole-file only. An AES-GCM-encrypted
+  /// artifact cannot be range-read — the entire ciphertext is required to
+  /// verify the authentication tag before any plaintext can be released — so
+  /// callers must not attempt to layer [readFileRange]-style partial reads on
+  /// top of this format.
+  Future<void> writeExtractArtifact(String path, Uint8List plaintext) async {
+    final enc = _encryption;
+    final Uint8List payload;
+    if (enc != null) {
+      final ciphertext = await enc.encrypt(plaintext);
+      payload = Uint8List(1 + ciphertext.length)
+        ..[0] = EncryptionFlag.aesGcm.byte
+        ..setAll(1, ciphertext);
+    } else {
+      payload = Uint8List(1 + plaintext.length)
+        ..[0] = EncryptionFlag.none.byte
+        ..setAll(1, plaintext);
+    }
+    await _vaultStore.adapter.writeFile(path, payload);
+  }
+
+  /// Reads and, if necessary, decrypts an `extract/` filesystem artifact
+  /// previously written by [writeExtractArtifact].
+  ///
+  /// Parses the leading [EncryptionFlag] byte to determine whether the
+  /// remaining bytes are plaintext ([EncryptionFlag.none]) or
+  /// AES-256-GCM ciphertext ([EncryptionFlag.aesGcm]), independent of the
+  /// database's current encryption state.
+  ///
+  /// Throws:
+  /// - [FormatException] if the file at [path] is empty (there is no flag
+  ///   byte to parse).
+  /// - [ArgumentError] (via [EncryptionFlag.fromByte]) if the leading byte is
+  ///   not a recognised [EncryptionFlag] — indicates data from a future KMDB
+  ///   version or on-disk corruption.
+  /// - [StateError] if the artifact is encrypted ([EncryptionFlag.aesGcm])
+  ///   but no [EncryptionProvider] is configured on this manager — mirrors
+  ///   [VaultStore.getBytes]'s behaviour for encrypted blobs with no
+  ///   provider.
+  /// - [EncryptionError] if decryption fails (bad key or tampered/corrupted
+  ///   ciphertext).
+  ///
+  /// See [writeExtractArtifact] for the wire format and the whole-file-only
+  /// constraint.
+  Future<Uint8List> readExtractArtifact(String path) async {
+    final raw = await _vaultStore.adapter.readFile(path);
+    if (raw.isEmpty) {
+      throw FormatException('Extract artifact at "$path" is empty');
+    }
+    final flag = EncryptionFlag.fromByte(raw[0]);
+    final body = Uint8List.sublistView(raw, 1);
+    switch (flag) {
+      case EncryptionFlag.none:
+        return body;
+      case EncryptionFlag.aesGcm:
+        final enc = _encryption;
+        if (enc == null) {
+          throw StateError(
+            'Extract artifact at "$path" is encrypted but no '
+            'EncryptionProvider is configured. Open the database with an '
+            'EncryptionConfig.',
+          );
+        }
+        return enc.decrypt(body);
+    }
+  }
 
   /// Registers [VaultStore.onAfterIngest] so newly ingested blobs are
   /// automatically queued for extraction and indexing.
@@ -537,7 +630,7 @@ final class VaultSearchManager {
       await _vaultStore.adapter.createDirectory(extractDir);
 
       // Step 4: text.txt
-      await _vaultStore.adapter.writeFile(
+      await writeExtractArtifact(
         '$extractDir/text.txt',
         Uint8List.fromList(utf8.encode(result.extractedText!)),
       );
@@ -556,7 +649,7 @@ final class VaultSearchManager {
             )
             .toList(),
       );
-      await _vaultStore.adapter.writeFile(
+      await writeExtractArtifact(
         '$extractDir/chunks_v1.json',
         Uint8List.fromList(utf8.encode(chunksJson)),
       );
@@ -571,7 +664,7 @@ final class VaultSearchManager {
           final sq8 = VaultVecWriter.quantiseSq8(embeddings[i]);
           packed.setAll(i * dims, sq8);
         }
-        await _vaultStore.adapter.writeFile(vecPath, packed);
+        await writeExtractArtifact(vecPath, packed);
       }
     } catch (e) {
       await _writeExtractStatusToKv(
@@ -620,6 +713,14 @@ final class VaultSearchManager {
   ///
   /// If filesystem artifacts are present and complete, rebuilds the
   /// [WriteBatch] from them and commits. Otherwise resets to `pending`.
+  ///
+  /// Reads go through [readExtractArtifact], so a decrypt failure
+  /// (`EncryptionError`, `FormatException`, `ArgumentError`, or `StateError`
+  /// — e.g. corrupted ciphertext or a missing [EncryptionProvider]) is
+  /// treated the same as any other filesystem read failure: the surrounding
+  /// `catch (_)` below resets the blob to `pending` and re-queues it for a
+  /// full re-extraction. This is a deliberately self-healing policy (§31,
+  /// Q3(a)) — no widening of the catch clause is needed.
   Future<void> _recoverExtractingBlob(
     String sha256,
     VaultExtractionState state,
@@ -644,14 +745,14 @@ final class VaultSearchManager {
 
     // Artifacts are complete — rebuild WriteBatch from files.
     try {
-      final chunksBytes = await _vaultStore.adapter.readFile(chunksPath);
+      final chunksBytes = await readExtractArtifact(chunksPath);
       final chunksList = json.decode(utf8.decode(chunksBytes)) as List;
       final chunks = chunksList
           .cast<Map<String, dynamic>>()
           .map(VaultChunk.fromJson)
           .toList();
 
-      final textBytes = await _vaultStore.adapter.readFile(textPath);
+      final textBytes = await readExtractArtifact(textPath);
       final text = utf8.decode(textBytes);
 
       // Re-tokenise chunks from the extracted text.
@@ -671,7 +772,7 @@ final class VaultSearchManager {
         final vecPath = '$extractDir/vectors_${safeModelId}_sq8.bin';
         if (await _vaultStore.adapter.fileExists(vecPath)) {
           // Reload from the packed SQ8 file.
-          final vecBytes = await _vaultStore.adapter.readFile(vecPath);
+          final vecBytes = await readExtractArtifact(vecPath);
           final dims = vecBytes.length ~/ chunks.length;
           embeddings = List.generate(chunks.length, (i) {
             final sq8 = Uint8List.sublistView(

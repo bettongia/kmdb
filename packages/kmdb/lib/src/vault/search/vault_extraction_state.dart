@@ -47,15 +47,16 @@ enum VaultExtractionStatus {
   /// Extraction and indexing completed successfully.
   ///
   /// All filesystem artifacts (`text.txt`, `chunks_v1.json`,
-  /// `vectors_{modelId}_sq8.bin`, `extract_status.json`) and all LSM entries
-  /// (`$$vault:fts:`, `$$vault:vec:idx`, `$$vault:extract:`) are present and
-  /// consistent.
+  /// `vectors_{modelId}_sq8.bin` — there is no fourth `extract_status.json`
+  /// file) and all LSM entries (`$$vault:fts:`, `$$vault:vec:idx`,
+  /// `$$vault:extract:`) are present and consistent.
   indexed,
 
   /// Extraction or indexing failed with an error.
   ///
   /// The error message is stored in the `error` field of the
-  /// `$$vault:extract:{sha256}` entry and in `extract_status.json`.
+  /// `$$vault:extract:{sha256}` entry — the sole persisted copy of
+  /// extraction status (there is no filesystem mirror).
   failed,
 
   /// No extractor supports this blob's media type.
@@ -77,14 +78,15 @@ enum VaultExtractionStatus {
 /// A snapshot of a vault blob's extraction and indexing state.
 ///
 /// Stored as a CBOR map in the `$$vault:extract:{sha256}` KV namespace
-/// (keyed by [kVaultCorpusSentinelKey]) and mirrored in the filesystem
-/// `extract/extract_status.json` file alongside the blob.
+/// (keyed by [kVaultCorpusSentinelKey]). This is the **only** persisted copy
+/// of extraction status — there is no filesystem mirror (no
+/// `extract_status.json` file is ever written; only `text.txt`,
+/// `chunks_v1.json`, and `vectors_*.bin` exist on disk, see §32).
 ///
 /// ## Crash recovery
 ///
-/// The LSM entry is the authoritative source used by [VaultSearchManager]
-/// during startup recovery. The filesystem file is a secondary copy written
-/// for human-readability and as an additional recovery cross-reference.
+/// The LSM entry is the sole authoritative source used by
+/// [VaultSearchManager] during startup recovery.
 ///
 /// ## Design note
 ///
