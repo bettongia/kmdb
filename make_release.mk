@@ -4,10 +4,19 @@
 _UNAME_S := $(shell uname -s)
 _UNAME_M := $(shell uname -m)
 
+# The root Makefile includes this file unconditionally, so this $(error ...)
+# fires for *every* `make` invocation on an unrecognised OS — not just when a
+# release target actually runs. Git Bash's `uname -s` on Windows reports a
+# kernel string like `MINGW64_NT-10.0-26100` (version suffix varies by
+# build), so Windows needs a substring match rather than exact `ifeq`.
 ifeq ($(_UNAME_S),Darwin)
   RELEASE_OS := macos
 else ifeq ($(_UNAME_S),Linux)
   RELEASE_OS := linux
+else ifneq (,$(findstring MINGW,$(_UNAME_S)))
+  RELEASE_OS := windows
+else ifneq (,$(findstring MSYS,$(_UNAME_S)))
+  RELEASE_OS := windows
 else
   $(error Unsupported OS for release targets: $(_UNAME_S))
 endif

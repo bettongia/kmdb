@@ -156,7 +156,10 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.pub-cache
-          key: ${{ runner.os }}-flutter-pub-${{ hashFiles('packages/kmdb_icloud/pubspec.lock', 'packages/kmdb_icloud/example/pubspec.lock') }}
+          key:
+            ${{ runner.os }}-flutter-pub-${{
+            hashFiles('packages/kmdb_icloud/pubspec.lock',
+            'packages/kmdb_icloud/example/pubspec.lock') }}
           restore-keys: |
             ${{ runner.os }}-flutter-pub-
 
@@ -186,7 +189,9 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.pub-cache
-          key: ${{ runner.os }}-flutter-pub-${{ hashFiles('packages/kmdb_flutter/pubspec.lock') }}
+          key:
+            ${{ runner.os }}-flutter-pub-${{
+            hashFiles('packages/kmdb_flutter/pubspec.lock') }}
           restore-keys: |
             ${{ runner.os }}-flutter-pub-
 
@@ -222,19 +227,17 @@ jobs:
           CHROME_EXECUTABLE: chrome
 
   # ── GitHub Pages deployment ────────────────────────────────────────────────
-  #
-  # Uncomment when the GitHub repo is public and Pages is enabled in repo
-  # Settings → Pages → Source: GitHub Actions.
 
-  # deployment:
-  #   runs-on: ubuntu-latest
-  #   needs: build
-  #
-  #   environment:
-  #     name: github-pages
-  #     url: ${{ steps.deployment.outputs.page_url }}
-  #
-  #   steps:
-  #     - name: Deploy to GitHub Pages
-  #       id: deployment
-  #       uses: actions/deploy-pages@v5
+  deployment:
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push'
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
