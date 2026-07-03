@@ -1,6 +1,6 @@
 # WI-5: Language detection (`betto_lang_detector`)
 
-**Status**: Open
+**Status**: Investigated
 
 **PR link**: — (implemented in a separate repository; see note below)
 
@@ -59,11 +59,10 @@ field. This plan builds the package only — no `kmdb` wiring.
 
 ## Open questions
 
-- [ ] **Q1 — Package name.** Confirm `betto_lang_detector` (roadmap) over
-      `betto_lang_id` (proposal). *Recommendation: `betto_lang_detector` — it's
-      the name the roadmap work item already carries and what the user
-      referenced when commissioning this plan.*
-- [ ] **Q2 — N-gram training corpus source.** The n-gram profile generator
+- [x] **Q1 — Package name.** Confirmed: `betto_lang_detector` (roadmap name),
+      superseding `betto_lang_id` (proposal's working name). Used throughout
+      this plan already — no text changes needed.
+- [x] **Q2 — N-gram training corpus source.** The n-gram profile generator
       (§"N-gram profile data" below) needs a per-language text corpus. Two
       candidates, both needing a live check before `tool/generate_ngram_profiles.dart`
       is written:
@@ -83,7 +82,12 @@ field. This plan builds the package only — no `kmdb` wiring.
       coverage".* The implementer must fetch and inspect the actual file
       layout before finalizing `tool/generate_ngram_profiles.dart` — this plan
       fixes the *algorithm* and *data shape*, not the exact download URL.
-- [ ] **Q3 — Initial language coverage: 58 languages, matching `betto_lexical`.**
+
+      **Decision: UDHR**, per recommendation. Leipzig Corpora Collection
+      remains the documented fallback for any of the 58 target languages UDHR
+      turns out not to cover — resolve per-language during Phase 2 if that
+      happens; it does not change the algorithm or data shape either way.
+- [x] **Q3 — Initial language coverage: 58 languages, matching `betto_lexical`.**
       §"Language coverage" below proposes detecting exactly the 58 language
       codes `betto_lexical`'s `Stopwords` enum already covers (stopwords-iso
       set), so `LanguageDetector.detect()` output composes directly with
@@ -91,7 +95,9 @@ field. This plan builds the package only — no `kmdb` wiring.
       code mismatch. *Recommendation: accept — confirm no objection before
       implementation, since each additional language means one more n-gram
       profile to generate and validate.*
-- [ ] **Q4 — Confidence formula acceptable as a heuristic, not a probability.**
+
+      **Decision: accepted**, per recommendation.
+- [x] **Q4 — Confidence formula acceptable as a heuristic, not a probability.**
       §"Confidence scoring" below defines `confidence` as a linear rescaling of
       the Cavnar-Trenkle out-of-place distance across the *candidate set being
       compared* (not a calibrated probability). This means the same input text
@@ -99,6 +105,11 @@ field. This plan builds the package only — no `kmdb` wiring.
       intentional (documented as a feature, not a bug — narrower `restrictTo`
       should produce sharper confidence) but is a real design choice worth a
       second pair of eyes. *Recommendation: accept.*
+
+      **Decision: accepted**, per recommendation.
+
+All open questions are resolved — this plan is ready to move to
+`Investigated` status via the `kmdb-plan-reviewer` agent.
 
 ## Investigation
 
@@ -274,32 +285,50 @@ betto_lang_detector/
     example.dart
   docs/
     plans/
-      README.md                      # copy verbatim from betto_lexical or betto_charset_detector
+      README.md                      # standard file — see note below
       plan_lang_detector.md           # this plan, copied in
     roadmap/
-      README.md                      # copy verbatim from betto_lexical
+      README.md                      # standard file — see note below
     spec/
       README.md                      # short technical spec — script table + n-gram algorithm summary
     reviews/
-      README.md                      # copy verbatim from betto_lexical
-    template/                        # copy verbatim from betto_lexical (site build assets)
+      README.md                      # standard file — see note below
+    template/                        # standard file — see note below (site build assets)
   header_template.txt                # see below
   addlicense_config.txt              # see below
   Makefile                           # see below
-  site.mk                            # copy verbatim from betto_lexical (unchanged — generic)
+  site.mk                            # standard file — see note below (unchanged — generic)
   analysis_options.yaml              # see below
   pubspec.yaml                       # see §"Package identity"
   CLAUDE.md                          # see below
-  AUTHORS                            # copy from any sibling betto_* package, update name/email
-  CONTRIBUTING.md                    # copy verbatim from betto_charset_detector
-  LICENSE                            # copy verbatim (Apache 2.0) from any sibling betto_* package
+  AUTHORS                            # standard file — see note below, then update name/email
+  CONTRIBUTING.md                    # standard file — see note below
+  LICENSE                            # standard file — see note below (Apache 2.0)
   CHANGELOG.md                       # start with `## 0.1.0-dev.1` + feature bullets, see betto_charset_detector's for style
   README.md                          # package overview + usage example, see betto_charset_detector's for style
-  .gitignore                         # copy verbatim from betto_charset_detector
+  .gitignore                         # standard file — see note below
 ```
 
-This mirrors `betto_charset_detector` (simple pure-Dart detector, single
-public entry point) crossed with `betto_lexical`'s codegen pattern
+**Provisioning the standard files:** don't hand-copy these from sibling repos.
+The Bettongia Claude Code plugin ships a **`project-layout` skill**
+specifically for this: it checks a maintained `skeleton/` directory against
+the project root and copies in whichever standard files (`LICENSE`,
+`CONTRIBUTING.md`, `.gitignore`, `AUTHORS`, `site.mk`, `docs/plans/README.md`,
+`docs/roadmap/README.md`, `docs/reviews/README.md`, `docs/template/*`, and a
+`Makefile`) are missing, without touching anything that already exists. Run it
+against the new repo in Phase 0 (see the Implementation plan below) instead of
+copying files by hand. If the skeleton's `Makefile` differs from the one
+embedded below (which was captured verbatim from `betto_lexical`'s actual git
+repository during this plan's research, not reconstructed from the published
+package — its `coverage.log` recipe (`dart test --coverage-path=...`) hasn't
+been independently verified to work, flagged in Reviewer notes below), prefer
+the skeleton's version and adapt the two `generate_*` targets into it. Only
+`header_template.txt`, `addlicense_config.txt`, `analysis_options.yaml`,
+`pubspec.yaml`, and `CLAUDE.md` are genuinely package-specific and need the
+content authored below.
+
+This package mirrors `betto_charset_detector` (simple pure-Dart detector,
+single public entry point) crossed with `betto_lexical`'s codegen pattern
 (`tool/loader.dart` using `betto_builder_tools` + `code_builder` to produce
 `.g.dart` data files) — both already-published sibling packages, inspected
 directly as part of this investigation (see below).
@@ -775,12 +804,20 @@ one; compare `betto_lexical`'s and `betto_charset_detector`'s single-file
       as of this plan's writing — `git ls-remote` returned no refs).
 - [ ] Scaffold the package: `dart create --template=package betto_lang_detector`
       or manual layout matching §"Repository layout" above.
-- [ ] Add all scaffold files from §"Scaffold file contents" (`header_template.txt`,
-      `addlicense_config.txt`, `Makefile`, `analysis_options.yaml`,
-      `pubspec.yaml`). Copy `site.mk`, `LICENSE`, `CONTRIBUTING.md`,
-      `.gitignore`, `docs/plans/README.md`, `docs/roadmap/README.md`,
-      `docs/reviews/README.md`, `docs/template/*` verbatim from
-      `betto_lexical` or `betto_charset_detector` (both public on GitHub).
+- [ ] Run the Bettongia **`project-layout`** skill/agent against the new repo
+      root to provision the standard files (`LICENSE`, `CONTRIBUTING.md`,
+      `.gitignore`, `AUTHORS`, `site.mk`, `docs/plans/README.md`,
+      `docs/roadmap/README.md`, `docs/reviews/README.md`, `docs/template/*`,
+      `Makefile`) — see the "Provisioning the standard files" note under
+      §"Repository layout" above. It only fills in what's missing, so it's
+      safe to run even after the previous step.
+- [ ] Add the package-specific scaffold files from §"Scaffold file contents"
+      that `project-layout` doesn't cover: `header_template.txt`,
+      `addlicense_config.txt`, `analysis_options.yaml`, `pubspec.yaml`. If
+      `project-layout` didn't provide a `Makefile` (or provided one without
+      the `generate_scripts`/`generate_ngram_profiles` targets), add/extend it
+      per §"Scaffold file contents" — reconcile with the note there about the
+      unverified `coverage.log` recipe.
 - [ ] Copy this plan file into `docs/plans/plan_lang_detector.md` in the new
       repo.
 - [ ] Write `CLAUDE.md` per §"Scaffold file contents" above.
@@ -867,6 +904,96 @@ one; compare `betto_lexical`'s and `betto_charset_detector`'s single-file
       `docs/roadmap/0_06.md` WI-5's status to `Complete` with a link to this
       plan and the published package, so WI-6 (which depends on this package)
       can proceed.
+
+## Reviewer notes (kmdb-plan-reviewer, 2026-07-03)
+
+Reviewed and promoted to **Investigated**. All four open questions are resolved
+(Q1–Q4, decisions recorded above). The algorithm (two-stage script + Cavnar-Trenkle
+n-gram), public API, data structures, script partition of the 58 languages, the
+shared-extractor invariant, confidence formula, and test matrix are pinned down to
+a mechanically implementable level. The 58-code coverage list was verified to match
+`betto_lexical`'s `Stopwords` set **exactly** (all 58 `lib/src/stopwords/*.g.dart`
+files), and the `pubspec.yaml` (`sdk: ^3.12.0`, `dev_dependencies` versions,
+`topics`) matches the sibling packages inspected in the pub cache.
+
+None of the items below is a user-facing design decision — they are corrections and
+clarifications to apply **during implementation** so reconstructed scaffold errors
+and loose prose aren't propagated. They do not gate `Investigated`.
+
+**Scaffold corrections (verified against `betto_charset_detector` / `betto_lexical`):**
+
+1. **Makefile `coverage` recipe is likely broken as embedded.**
+   `dart test --coverage-path=coverage/lcov.info` is not a standard `dart test`
+   flag (the real flag is `--coverage=<dir>`, which writes the `coverage`
+   package's JSON hitmaps — **not** lcov), so the subsequent
+   `genhtml coverage/lcov.info` would have no lcov to consume. The lcov step needs
+   `dart pub global run coverage:format_coverage --lcov --in=... --out=coverage/lcov.info --report-on=lib`
+   between them (this is what `make prepare`'s `dart pub global activate coverage`
+   is for). **Action:** copy the canonical `betto_lexical` `Makefile` from GitHub
+   verbatim and only swap `generate_stopwords` → the two `generate_*` targets,
+   rather than hand-transcribing the block embedded here. The embedded Makefile is
+   illustrative; the real sibling Makefile is authoritative (it is excluded from
+   the published pub package, so it could not be diffed during this review).
+
+2. **Generated `.g.dart` files are NOT header-exempt — they carry a license block.**
+   The plan's `header_template.txt` note says generated files are "exempt ...
+   matching `betto_lexical`'s convention," but `betto_lexical`'s actual
+   `stopwords.g.dart` (and every per-language `part` file) begins with a full
+   Apache block-comment header plus a `// DO NOT EDIT THIS FILE: Generated by
+   tool/...` line. The real convention is: the **codegen tool emits the header
+   itself**, and `addlicense` ignores `**/*.g.dart` only so it doesn't try to
+   staple a second line-comment header on top. **Action:** `generate_scripts.dart`
+   and `generate_ngram_profiles.dart` must emit the Apache header + "DO NOT EDIT"
+   comment into their `.g.dart` output (mirroring `tool/loader.dart`), even though
+   `addlicense` skips them.
+
+3. **`format_check` omits `example/`.** `format:` formats `lib/ test/ tool/
+   example/` but `format_check:` only checks `lib/ test/ tool/`, so `example/`
+   formatting drift would pass CI. Add `example/` to `format_check` (harmless, and
+   `example/` is a hand-written Dart dir subject to the same lint/format rules).
+
+**Clarity nits (resolve while implementing; each has an unambiguous intended reading):**
+
+4. **kana-presence helper visibility.** Repository layout names it `_hasKana(text)`
+   in `script_filter.dart`, but `composite_backend.dart` (a different file) calls
+   `hasKana(text)`. A leading underscore makes it library-private = file-private in
+   Dart, so it can't be called across files. Make it a library-level (no-underscore)
+   helper, or expose the shared single-pass primitive described in `_scriptStage`
+   step 1 (which returns dominant-script tally **and** the kana boolean together, so
+   `dominantScript` and the kana check don't scan `text.runes` twice).
+
+5. **`dominantScript` skip-list uses long names where the table returns ISO codes.**
+   The codegen maps everything through `PropertyValueAliases.txt` to 4-letter ISO
+   codes, so `scriptOfRune` returns e.g. `Zyyy`/`Zinh`, not `"Common"`/`"Inherited"`.
+   The step-2 prose ("skip runes that resolve to null, Common, or Inherited") must be
+   read as "skip the ISO codes for Common (`Zyyy`) and Inherited (`Zinh`)." Keep the
+   skip check keyed on the ISO codes actually present in `script_ranges.g.dart`.
+
+6. **N-gram extraction word regex has two slightly different phrasings**
+   (`\p{L}[\p{L}\p{M}]*` vs "split on everything not `\p{L}`/`\p{M}`") — they differ
+   only for a token that begins with a combining mark (vanishingly rare). Either is
+   acceptable **because the same `extractRankedNgrams` is shared by codegen and
+   runtime** (the plan's critical invariant), so profiles and queries stay consistent
+   regardless of which reading is implemented. Pick one and document it in the
+   extractor doc comment. Also confirm the frequency ranking counts *all* occurrences
+   of each distinct n-gram aggregated across the whole input (standard Cavnar-Trenkle),
+   and specify the alphabetical tie-break as `String.compareTo` (UTF-16 code-unit order).
+
+**Largest bounded residual (acceptable, not a blocker):** the UDHR → 58-code corpus
+curation in `generate_ngram_profiles.dart` (Q2) still requires per-language data
+wrangling the plan cannot fully pin (UDHR file layout/encoding, which translation
+maps to ambiguous codes like `no`/`zh`, per-language Leipzig fallback). This is
+correctly scoped as **codegen-time data curation that produces a committed
+`.g.dart` artifact and does not touch the runtime API or algorithm**, and it is
+empirically validated by the manual held-out accuracy spot-check in Phase 3. It is
+the one place with meaningful discretion, but it is appropriately bounded and
+cannot silently corrupt the runtime contract.
+
+**Optional (non-blocking):** `NgramBackend` scoring does `indexOf` into a
+`List<String>` profile per query-n-gram × per-candidate-language. Fine for the
+"coarse, error-tolerant" role, but building a lazy `Map<String,int>` (n-gram→rank)
+per profile on first use would cut scoring from O(300·|S|·300) to O(300·|S|) if a
+hot path ever needs it. Not required.
 
 ## Summary
 
