@@ -92,7 +92,19 @@ final class StorageAdapterNative implements StorageAdapter {
   Future<void> syncFile(String path) async {
     RandomAccessFile? raf;
     try {
-      raf = await File(path).open();
+      final file = File(path);
+      // A plain read-mode handle (the default `open()` mode) is sufficient
+      // for `flush` on POSIX, but Windows' `FlushFileBuffers` requires the
+      // handle to have been opened with write access, or it fails with an
+      // access-denied error surfaced here as a generic "flush failed"
+      // `FileSystemException`. `FileMode.append` grants write access without
+      // truncating existing content — but it also auto-creates a missing
+      // file, which `syncFile` must not do, so existence is checked first to
+      // preserve the "missing file" failure contract.
+      if (!await file.exists()) {
+        throw StorageException('File not found', path: path);
+      }
+      raf = await file.open(mode: FileMode.append);
       await raf.flush();
     } on FileSystemException catch (e) {
       throw StorageException(e.message, path: path);
