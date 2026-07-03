@@ -876,11 +876,20 @@ void main() {
           deviceId: 'devaaaaa',
         );
 
-        // Use a tiny eviction threshold so device B's stale HWM is immediately
-        // evictable. We control "now" via a manual HWM timestamp rather than
-        // the clock, so we use a threshold that is effectively always true for
-        // the stale HWM we write below.
-        final shortEviction = const Duration(milliseconds: 1);
+        // Use a short-but-not-vanishing eviction threshold so device B's
+        // ancient (2020) stale HWM is reliably evictable while device A's
+        // *own* HWM — written moments ago by real wall-clock pushes earlier
+        // in this test — is not spuriously treated as stale too. A 1ms
+        // threshold looked "effectively always true" for the manually-dated
+        // stale HWM, but it also raced against the real elapsed wall-clock
+        // time between A's own pushes and B's later eviction check: under
+        // CI load (or with coverage instrumentation) more than 1ms can
+        // elapse between those steps, which would incorrectly exclude A from
+        // the live-peer set and make the re-admission check see no live
+        // peers at all — silently skipping the intended full re-sync. 30s is
+        // comfortably longer than this test can run yet far shorter than the
+        // multi-year gap to the manually-dated stale HWMs below.
+        final shortEviction = const Duration(seconds: 30);
 
         final engineA = SyncEngine(
           store: storeA,
