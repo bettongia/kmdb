@@ -1,0 +1,13 @@
+# Force binary handling for checked-in binary fixtures/assets, regardless of
+# git's own NUL-byte heuristic. Without this, `core.autocrlf` on Windows
+# checkouts can silently rewrite LF -> CRLF in a binary file that git
+# mis-detects as text (most likely for small, hand-crafted fixtures with no
+# NUL byte in their first ~8000 bytes) — corrupting exact byte offsets that
+# formats like PDF depend on (xref tables). This was the root cause of a
+# Windows-only PdfTextExtractor test failure on the minimal, hand-constructed
+# `zero_pages_synthetic.pdf` fixture (packages/kmdb_extractor_pdf/test/fixtures/):
+# every other PDF fixture is large/complex enough to contain a NUL byte early
+# on and was therefore auto-detected as binary regardless.
+*.pdf binary
+*.png binary
+*.ico binary
