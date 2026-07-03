@@ -31,6 +31,7 @@ demodb/
 dist/
 todo.txt
 *.log
+logs/
 
 api-docs/
 spike/
