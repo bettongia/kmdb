@@ -221,14 +221,28 @@ Each `VaultChunk` carries:
 
 Text is extracted from blobs by `VaultTextExtractor` implementations:
 
-| Extractor            | Media types           | Notes                              |
-| :------------------- | :-------------------- | :--------------------------------- |
-| `PlainTextExtractor` | `text/plain`, `text/*`| Charset-detected UTF-8 decode (WI-2)|
+| Extractor            | Media types            | Notes                                |
+| :------------------- | :---------------------- | :------------------------------------ |
+| `PlainTextExtractor` | `text/plain`, `text/*`  | Charset-detected UTF-8 decode (WI-2)  |
+| `PdfTextExtractor`   | `application/pdf`       | `kmdb_extractor_pdf` package (WI-8), wraps `betto_pdfium`. Configurable `scannedPageRatio` gate discards predominantly-scanned/image-only documents (returns `""`, still `indexed`). Pages joined with `"\n\n"`. |
 
-Additional extractors (PDF, DOCX, HTML) are out of scope for v1 and can be
+Additional extractors (DOCX, HTML) are out of scope for v1 and can be
 registered via `VaultSearchConfig.extractors`. The first extractor whose
 `supportedMediaTypes` set contains the blob's media type is used; if none
 match, the blob is marked `unsupported`.
+
+`PdfTextExtractor` ships in the optional `kmdb_extractor_pdf` package (not a
+core `kmdb` dependency) — see its `README.md` for installation and platform
+support notes:
+
+```dart
+import 'package:kmdb_extractor_pdf/kmdb_extractor_pdf.dart';
+
+final db = await KmdbDatabase.open(
+  // ...
+  vaultSearch: VaultSearchConfig(extractors: [PdfTextExtractor()]),
+);
+```
 
 Charset detection uses the `decodeText` utility function from WI-2 (`charset_util.dart`),
 which applies the `betto_charset_detector` heuristic and records the detected
