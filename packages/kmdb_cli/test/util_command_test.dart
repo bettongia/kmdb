@@ -209,7 +209,7 @@ void main() {
         final sstDir = io.Directory('${tmpDir.path}/sst');
         final files = sstDir.listSync().whereType<io.File>().toList();
         expect(files, isNotEmpty);
-        final filename = files.first.path.split('/').last;
+        final filename = files.first.uri.pathSegments.last;
 
         final out = StringBuffer();
         final ctx = _ctx(db, out: out);
@@ -240,7 +240,7 @@ void main() {
       final sstDir = io.Directory('${tmpDir.path}/sst');
       final files = sstDir.listSync().whereType<io.File>().toList();
       expect(files, isNotEmpty);
-      final filename = files.first.path.split('/').last;
+      final filename = files.first.uri.pathSegments.last;
 
       final out = StringBuffer();
       final ctx = _ctx(db, out: out);
@@ -260,7 +260,7 @@ void main() {
       final sstDir = io.Directory('${tmpDir.path}/sst');
       final files = sstDir.listSync().whereType<io.File>().toList();
       expect(files, isNotEmpty);
-      final filename = files.first.path.split('/').last;
+      final filename = files.first.uri.pathSegments.last;
 
       final out = StringBuffer();
       final ctx = _ctx(db, out: out);
@@ -302,7 +302,7 @@ void main() {
       final sstDir = io.Directory('${tmpDir.path}/sst');
       final files = sstDir.listSync().whereType<io.File>().toList();
       expect(files, isNotEmpty);
-      final filename = files.first.path.split('/').last;
+      final filename = files.first.uri.pathSegments.last;
 
       final out = StringBuffer();
       final ctx = _ctx(db, out: out);
@@ -426,7 +426,7 @@ void main() {
             .where((f) => f.path.endsWith('.log'))
             .toList();
         expect(walFiles, isNotEmpty);
-        final filename = walFiles.first.path.split('/').last;
+        final filename = walFiles.first.uri.pathSegments.last;
 
         final out = StringBuffer();
         final ctx = _ctx(db, out: out);
@@ -461,7 +461,7 @@ void main() {
           .where((f) => f.path.endsWith('.log'))
           .toList();
       expect(walFiles, isNotEmpty);
-      final filename = walFiles.first.path.split('/').last;
+      final filename = walFiles.first.uri.pathSegments.last;
 
       final out = StringBuffer();
       final ctx = _ctx(db, out: out);
@@ -508,7 +508,7 @@ void main() {
           .where((f) => f.path.endsWith('.log'))
           .toList();
       expect(walFiles, isNotEmpty);
-      final filename = walFiles.first.path.split('/').last;
+      final filename = walFiles.first.uri.pathSegments.last;
 
       final out = StringBuffer();
       final ctx = _ctx(db, out: out);
@@ -530,7 +530,7 @@ void main() {
           .where((f) => f.path.endsWith('.log'))
           .toList();
       expect(walFiles, isNotEmpty);
-      final filename = walFiles.first.path.split('/').last;
+      final filename = walFiles.first.uri.pathSegments.last;
 
       final out = StringBuffer();
       final ctx = _ctx(db, out: out);

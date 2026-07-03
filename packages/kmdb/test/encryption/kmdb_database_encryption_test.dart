@@ -245,7 +245,7 @@ void main() {
         await db1.close();
 
         final wrongConfig = EncryptionConfig(passphrase: 'wrong-passphrase');
-        expect(
+        await expectLater(
           () async => _reopen(adapter, encryptionConfig: wrongConfig),
           throwsA(
             isA<EncryptionError>().having(
@@ -255,6 +255,20 @@ void main() {
             ),
           ),
         );
+
+        // The failed open must not leak the store it partially opened before
+        // the bootstrap threw — that store already holds the exclusive LOCK,
+        // so a leaked lock would surface here as a LockException on retry
+        // with the correct passphrase (regression test for the resource leak
+        // that caused Windows CI temp-dir cleanup failures: a partial open
+        // failing after KvStoreImpl.open() but before KmdbDatabase.open()
+        // returns left the lock — and, on Windows, real file handles — held
+        // for the caller's process lifetime).
+        final (db2, _) = await _reopen(
+          adapter,
+          encryptionConfig: result.config,
+        );
+        await db2.close();
       },
       timeout: const Timeout(Duration(seconds: 120)),
     );

@@ -188,12 +188,25 @@ final class LocalDirectoryAdapter implements SyncStorageAdapter {
     return true;
   }
 
+  /// Monotonic counter mixed into [_writeViaTempRename]'s temp filename.
+  ///
+  /// A microsecond timestamp alone is not a reliable uniqueness source under
+  /// concurrent contention: multiple `compareAndSwap` calls issued in the
+  /// same event-loop turn can observe the same
+  /// `DateTime.now().microsecondsSinceEpoch` value (timer resolution varies
+  /// by platform), which previously let two concurrent writers race to
+  /// create/write the *same* temp filename — silently corrupting whichever
+  /// wrote last on POSIX, or failing outright with a Windows sharing
+  /// violation ("being used by another process").
+  static int _tmpCounter = 0;
+
   /// Writes [bytes] to [file] via a temp-file rename. Returns `true` on
   /// success; swallows rename errors (another concurrent writer won) and
   /// returns `false`.
   Future<bool> _writeViaTempRename(File file, Uint8List bytes) async {
     final tmpPath =
-        '${file.path}.cas-tmp-${DateTime.now().microsecondsSinceEpoch}';
+        '${file.path}.cas-tmp-${DateTime.now().microsecondsSinceEpoch}'
+        '-${_tmpCounter++}';
     final tmp = File(tmpPath);
     await tmp.writeAsBytes(bytes, flush: true);
     try {
@@ -218,15 +231,25 @@ final class LocalDirectoryAdapter implements SyncStorageAdapter {
     String expectedEtag,
   ) async {
     if (!file.existsSync()) return false;
-    // Open for append (write access required for an exclusive fcntl write lock
-    // on POSIX). We do not write via this fd — it is used only to hold the
-    // advisory lock while we read via a separate file reference.
-    final raf = await file.open(mode: FileMode.writeOnlyAppend);
+    // Open with `FileMode.append` (read/write, no truncation) rather than
+    // write-only: the locked ETag re-read below must go through *this same*
+    // handle. `RandomAccessFile.lock` maps to `flock`/`fcntl` advisory locks
+    // on POSIX (cooperative — a plain read via an unrelated handle is
+    // unaffected) but to `LockFileEx` on Windows, which is a *mandatory*
+    // lock — any other handle, even from the same process, that touches the
+    // locked byte range is denied access. Reading the ETag via a separate
+    // `file.readAsBytes()` call (a second, unrelated handle) therefore
+    // deadlocked against our own lock on Windows. A handle always retains
+    // access to byte ranges it holds the lock on, so reading through `raf`
+    // itself works on every platform.
+    final raf = await file.open(mode: FileMode.append);
     try {
       await raf.lock(FileLock.blockingExclusive);
       // Re-read ETag inside the lock so any write that completed before we
       // acquired the lock is visible.
-      final lockedBytes = await file.readAsBytes();
+      final length = await raf.length();
+      await raf.setPosition(0);
+      final lockedBytes = await raf.read(length);
       final lockedEtag = XxHash64.toHex(XxHash64.digest(lockedBytes));
       if (lockedEtag != expectedEtag) return false;
       return _writeViaTempRename(file, newBytes);

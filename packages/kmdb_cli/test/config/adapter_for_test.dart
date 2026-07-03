@@ -151,11 +151,12 @@ void main() {
         credFile.writeAsStringSync(_validCredentialsJson());
 
         // Confirm the credentials are stored under {dbDir}/local/, which is
-        // the CLI-only, non-synced subdirectory.
-        expect(
-          credFile.path,
-          contains([dbDir.path, 'local'].join(Platform.pathSeparator)),
-        );
+        // the CLI-only, non-synced subdirectory. Compared against
+        // `localDir.path` directly (rather than rejoining with
+        // `Platform.pathSeparator`) since `localDir` and `credFile` were both
+        // built with a literal `/` above — on Windows, joining with `\`
+        // would produce a separator that never appears in either path.
+        expect(credFile.path, contains(localDir.path));
         // The credentials file must NOT be at the database root (which is
         // the sync root for SSTable uploads).
         expect(

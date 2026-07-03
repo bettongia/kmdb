@@ -379,214 +379,238 @@ final class KmdbDatabase {
       deviceId: deviceId,
     );
 
-    // ── Encryption bootstrap ─────────────────────────────────────────────────
-    // Runs immediately after KvStoreImpl.open() and before any value-decoding
-    // collaborator is constructed. Reads the enc:blob (plaintext CBOR) from
-    // $meta to determine the 4-state outcome. The resulting EncryptionProvider?
-    // is threaded into every collaborator below.
-    //
-    // The bootstrap never routes through ValueCodec (MetaStore.getRawByName uses
-    // raw CBOR), keeping the read path non-circular: the DEK is available before
-    // any encrypted value needs to be decoded.
-    final encryption = await _runEncryptionBootstrap(
-      store,
-      encryptionConfig,
-      path,
-    );
+    // Everything below can throw before a KmdbDatabase is fully constructed
+    // (most commonly EncryptionError from the bootstrap on a bad passphrase
+    // or recovery code). `store` has already acquired the exclusive LOCK file
+    // and other handles at this point, so any such failure must close it
+    // before propagating — otherwise the lock (and, on Windows, the open file
+    // handles themselves) leaks for the lifetime of the caller's process.
+    try {
+      // ── Encryption bootstrap ───────────────────────────────────────────────
+      // Runs immediately after KvStoreImpl.open() and before any value-decoding
+      // collaborator is constructed. Reads the enc:blob (plaintext CBOR) from
+      // $meta to determine the 4-state outcome. The resulting EncryptionProvider?
+      // is threaded into every collaborator below.
+      //
+      // The bootstrap never routes through ValueCodec (MetaStore.getRawByName uses
+      // raw CBOR), keeping the read path non-circular: the DEK is available before
+      // any encrypted value needs to be decoded.
+      final encryption = await _runEncryptionBootstrap(
+        store,
+        encryptionConfig,
+        path,
+      );
 
-    final cache = CacheLayer(store: store);
+      final cache = CacheLayer(store: store);
 
-    final indexManager = IndexManager(
-      store: store,
-      definitions: indexes,
-      onIndexReady: onIndexReady,
-      encryption: encryption,
-    );
-
-    // Report any indexes whose build was interrupted by an unclean shutdown.
-    if (openResult.hadUnclosedSession && onIndexRebuildRequired != null) {
-      final interrupted = await indexManager.checkInterruptedBuilds();
-      if (interrupted.isNotEmpty) {
-        final events = interrupted
-            .map((e) => IndexRebuildEvent(namespace: e.namespace, path: e.path))
-            .toList();
-        await onIndexRebuildRequired(events);
-      }
-    }
-
-    // Initialise FTS manager if any FTS indexes are configured.
-    final ftsManager = ftsIndexes.isNotEmpty
-        ? FtsManager(store, ftsIndexes, encryption: encryption)
-        : null;
-
-    // Recover from any unclean shutdown during a delta sync (transitions
-    // any index left in `syncing` state to `stale`).
-    await ftsManager?.checkAndTransitionOnOpen();
-
-    // Initialise VecManager if any vector indexes are configured.
-    final vecManager = (vecIndexes.isNotEmpty && embeddingModel != null)
-        ? VecManager(store, vecIndexes, embeddingModel, encryption: encryption)
-        : null;
-
-    // Recover from any unclean sync shutdown for vector indexes.
-    await vecManager?.checkAndTransitionOnOpen();
-
-    // Wire the encryption provider into the VaultStore (if any) so that
-    // blobs written after this point are encrypted and reads are decrypted.
-    // This must happen before VaultRecovery, because recovery may read blobs
-    // to verify SHA-256 content addresses (decryption is required first).
-    if (vaultStore != null) {
-      vaultStore.encryption = encryption;
-    }
-
-    // Run vault recovery if a VaultStore is supplied. This sweeps the staging
-    // directory and removes any incomplete or orphaned hash directories left
-    // by a prior crash (§24 crash table). Runs after LSM recovery because it
-    // uses the already-opened KvStore to validate ref counts.
-    // Thread the encryption provider so that encrypted $vault ref count entries
-    // are decoded correctly during the recovery sweep and subsequent GC sweeps
-    // (Q6 decision: all ValueCodec call sites encrypt uniformly).
-    VaultGc? vaultGc;
-    if (vaultStore != null) {
-      final recovery = VaultRecovery(
-        store: vaultStore,
-        kvStore: store,
+      final indexManager = IndexManager(
+        store: store,
+        definitions: indexes,
+        onIndexReady: onIndexReady,
         encryption: encryption,
       );
-      await recovery.recover();
-      vaultGc = VaultGc(
-        store: vaultStore,
-        kvStore: store,
-        encryption: encryption,
-      );
-    }
 
-    // Initialise VaultSearchManager if vault search is configured.
-    // Requires both vaultStore (for blob access) and vaultSearch config.
-    // The embeddingModel is borrowed (not owned) — KmdbDatabase disposes it.
-    VaultSearchManager? vaultSearchManager;
-    if (vaultStore != null && vaultSearch != null) {
-      vaultSearchManager = VaultSearchManager(
-        config: vaultSearch,
-        kvStore: store,
-        vaultStore: vaultStore,
-        embeddingModel: embeddingModel,
-        encryption: encryption,
-      );
-      // Register the ingest hook before recovery so newly hydrated blobs
-      // that arrive during recovery are automatically queued.
-      vaultSearchManager.attach();
-      // Run recovery: repair interrupted indexing and enqueue missed blobs.
-      await vaultSearchManager.recover();
-    }
-
-    // Initialise SchemaManager: register caller-supplied schemas (persisting
-    // them via LWW), then load any schemas synced from other devices.
-    final schemaManager = SchemaManager(
-      onSchemaVersionMismatch: onSchemaVersionMismatch,
-    );
-    final metaStore = store.meta;
-    for (final schema in schemas) {
-      await schemaManager.register(schema, metaStore);
-    }
-    await schemaManager.load(metaStore);
-
-    // Persist versioning configs to $meta so they propagate via sync.
-    // Load the merged config set: caller-supplied configs override any
-    // previously persisted configs from other devices.
-    final configStore = VersionConfigStore(metaStore);
-    final mergedVersionConfigs = <String, VersionConfig>{};
-    // Load any configs persisted from prior opens (including those synced from
-    // other devices). We use the registered user namespaces as the scan set.
-    final knownNamespaces = await store.listNamespaces();
-    for (final ns in knownNamespaces) {
-      final persisted = await configStore.get(ns, encryption: encryption);
-      // Only include explicitly-set configs (skip defaults — they are implicit).
-      if (persisted != VersionConfig.defaults) {
-        mergedVersionConfigs[ns] = persisted;
-      }
-    }
-    // Caller-supplied configs take precedence and are persisted.
-    for (final entry in versionConfigs.entries) {
-      await configStore.put(entry.key, entry.value, encryption: encryption);
-      mergedVersionConfigs[entry.key] = entry.value;
-    }
-
-    // Wire the version registry provider into the engine so _compactAll builds
-    // a VersionRetentionPolicy per $ver: prefix (Phase 3, RQ2).
-    store.setVersionRegistryProvider(() async {
-      // Re-read configs at compaction time: they may have changed via sync
-      // since the database was opened. Build a map from $ver:{ns} →
-      // VersionRetentionPolicy for all non-disabled collections.
-      final versionPolicies = <String, ReclamationPolicy>{};
-      for (final ns in await store.listNamespaces()) {
-        final cfg = await configStore.get(ns, encryption: encryption);
-        if (!cfg.isDisabled) {
-          versionPolicies[versionNamespace(ns)] = VersionRetentionPolicy(cfg);
+      // Report any indexes whose build was interrupted by an unclean shutdown.
+      if (openResult.hadUnclosedSession && onIndexRebuildRequired != null) {
+        final interrupted = await indexManager.checkInterruptedBuilds();
+        if (interrupted.isNotEmpty) {
+          final events = interrupted
+              .map(
+                (e) => IndexRebuildEvent(namespace: e.namespace, path: e.path),
+              )
+              .toList();
+          await onIndexRebuildRequired(events);
         }
       }
-      return ReclamationPolicyRegistry.withVersionPolicies(versionPolicies);
-    });
 
-    // Wire the version drop callback into the engine so compaction-time $ver:
-    // trims can decrement vault ref counts (RQ5).
-    final vaultRefInterceptor = (vaultStore != null && vaultGc != null)
-        ? VaultRefInterceptor(
-            kvStore: store,
-            gc: vaultGc,
-            encryption: encryption,
-          )
-        : null;
-    store.setVersionDropCallback(
-      vaultRefInterceptor != null
-          ? (droppedValues) async {
-              // Decode each dropped VersionEntry and release vault refs for
-              // any vault URIs contained in the stored encodedValue.
-              // This mirrors the H4-FU3 tombstonesDropped callback pattern.
-              final batch = WriteBatch();
-              for (final bytes in droppedValues) {
-                try {
-                  // VersionEntry.decode is async when encryption is active
-                  // because the inner ValueCodec.decode is async.
-                  final entry = await VersionEntry.decode(
-                    bytes,
-                    encryption: encryption,
-                  );
-                  if (entry.encodedValue != null) {
-                    await vaultRefInterceptor.decrementVersionRefs(
-                      entry.encodedValue!,
-                      batch,
+      // Initialise FTS manager if any FTS indexes are configured.
+      final ftsManager = ftsIndexes.isNotEmpty
+          ? FtsManager(store, ftsIndexes, encryption: encryption)
+          : null;
+
+      // Recover from any unclean shutdown during a delta sync (transitions
+      // any index left in `syncing` state to `stale`).
+      await ftsManager?.checkAndTransitionOnOpen();
+
+      // Initialise VecManager if any vector indexes are configured.
+      final vecManager = (vecIndexes.isNotEmpty && embeddingModel != null)
+          ? VecManager(
+              store,
+              vecIndexes,
+              embeddingModel,
+              encryption: encryption,
+            )
+          : null;
+
+      // Recover from any unclean sync shutdown for vector indexes.
+      await vecManager?.checkAndTransitionOnOpen();
+
+      // Wire the encryption provider into the VaultStore (if any) so that
+      // blobs written after this point are encrypted and reads are decrypted.
+      // This must happen before VaultRecovery, because recovery may read blobs
+      // to verify SHA-256 content addresses (decryption is required first).
+      if (vaultStore != null) {
+        vaultStore.encryption = encryption;
+      }
+
+      // Run vault recovery if a VaultStore is supplied. This sweeps the staging
+      // directory and removes any incomplete or orphaned hash directories left
+      // by a prior crash (§24 crash table). Runs after LSM recovery because it
+      // uses the already-opened KvStore to validate ref counts.
+      // Thread the encryption provider so that encrypted $vault ref count entries
+      // are decoded correctly during the recovery sweep and subsequent GC sweeps
+      // (Q6 decision: all ValueCodec call sites encrypt uniformly).
+      VaultGc? vaultGc;
+      if (vaultStore != null) {
+        final recovery = VaultRecovery(
+          store: vaultStore,
+          kvStore: store,
+          encryption: encryption,
+        );
+        await recovery.recover();
+        vaultGc = VaultGc(
+          store: vaultStore,
+          kvStore: store,
+          encryption: encryption,
+        );
+      }
+
+      // Initialise VaultSearchManager if vault search is configured.
+      // Requires both vaultStore (for blob access) and vaultSearch config.
+      // The embeddingModel is borrowed (not owned) — KmdbDatabase disposes it.
+      VaultSearchManager? vaultSearchManager;
+      if (vaultStore != null && vaultSearch != null) {
+        vaultSearchManager = VaultSearchManager(
+          config: vaultSearch,
+          kvStore: store,
+          vaultStore: vaultStore,
+          embeddingModel: embeddingModel,
+          encryption: encryption,
+        );
+        // Register the ingest hook before recovery so newly hydrated blobs
+        // that arrive during recovery are automatically queued.
+        vaultSearchManager.attach();
+        // Run recovery: repair interrupted indexing and enqueue missed blobs.
+        await vaultSearchManager.recover();
+      }
+
+      // Initialise SchemaManager: register caller-supplied schemas (persisting
+      // them via LWW), then load any schemas synced from other devices.
+      final schemaManager = SchemaManager(
+        onSchemaVersionMismatch: onSchemaVersionMismatch,
+      );
+      final metaStore = store.meta;
+      for (final schema in schemas) {
+        await schemaManager.register(schema, metaStore);
+      }
+      await schemaManager.load(metaStore);
+
+      // Persist versioning configs to $meta so they propagate via sync.
+      // Load the merged config set: caller-supplied configs override any
+      // previously persisted configs from other devices.
+      final configStore = VersionConfigStore(metaStore);
+      final mergedVersionConfigs = <String, VersionConfig>{};
+      // Load any configs persisted from prior opens (including those synced from
+      // other devices). We use the registered user namespaces as the scan set.
+      final knownNamespaces = await store.listNamespaces();
+      for (final ns in knownNamespaces) {
+        final persisted = await configStore.get(ns, encryption: encryption);
+        // Only include explicitly-set configs (skip defaults — they are implicit).
+        if (persisted != VersionConfig.defaults) {
+          mergedVersionConfigs[ns] = persisted;
+        }
+      }
+      // Caller-supplied configs take precedence and are persisted.
+      for (final entry in versionConfigs.entries) {
+        await configStore.put(entry.key, entry.value, encryption: encryption);
+        mergedVersionConfigs[entry.key] = entry.value;
+      }
+
+      // Wire the version registry provider into the engine so _compactAll builds
+      // a VersionRetentionPolicy per $ver: prefix (Phase 3, RQ2).
+      store.setVersionRegistryProvider(() async {
+        // Re-read configs at compaction time: they may have changed via sync
+        // since the database was opened. Build a map from $ver:{ns} →
+        // VersionRetentionPolicy for all non-disabled collections.
+        final versionPolicies = <String, ReclamationPolicy>{};
+        for (final ns in await store.listNamespaces()) {
+          final cfg = await configStore.get(ns, encryption: encryption);
+          if (!cfg.isDisabled) {
+            versionPolicies[versionNamespace(ns)] = VersionRetentionPolicy(cfg);
+          }
+        }
+        return ReclamationPolicyRegistry.withVersionPolicies(versionPolicies);
+      });
+
+      // Wire the version drop callback into the engine so compaction-time $ver:
+      // trims can decrement vault ref counts (RQ5).
+      final vaultRefInterceptor = (vaultStore != null && vaultGc != null)
+          ? VaultRefInterceptor(
+              kvStore: store,
+              gc: vaultGc,
+              encryption: encryption,
+            )
+          : null;
+      store.setVersionDropCallback(
+        vaultRefInterceptor != null
+            ? (droppedValues) async {
+                // Decode each dropped VersionEntry and release vault refs for
+                // any vault URIs contained in the stored encodedValue.
+                // This mirrors the H4-FU3 tombstonesDropped callback pattern.
+                final batch = WriteBatch();
+                for (final bytes in droppedValues) {
+                  try {
+                    // VersionEntry.decode is async when encryption is active
+                    // because the inner ValueCodec.decode is async.
+                    final entry = await VersionEntry.decode(
+                      bytes,
+                      encryption: encryption,
                     );
+                    if (entry.encodedValue != null) {
+                      await vaultRefInterceptor.decrementVersionRefs(
+                        entry.encodedValue!,
+                        batch,
+                      );
+                    }
+                  } catch (_) {
+                    // Skip undecodable entries; the fail-safe posture (retain on
+                    // uncertainty) means a missed decrement over-counts — safe.
+                    continue;
                   }
-                } catch (_) {
-                  // Skip undecodable entries; the fail-safe posture (retain on
-                  // uncertainty) means a missed decrement over-counts — safe.
-                  continue;
+                }
+                if (!batch.isEmpty) {
+                  await store.writeBatch(batch);
                 }
               }
-              if (!batch.isEmpty) {
-                await store.writeBatch(batch);
-              }
-            }
-          : null,
-    );
+            : null,
+      );
 
-    return KmdbDatabase._(
-      cache: cache,
-      store: store,
-      indexManager: indexManager,
-      schemaManager: schemaManager,
-      ftsManager: ftsManager,
-      vecManager: vecManager,
-      ftsIndexes: ftsIndexes,
-      vecIndexes: vecIndexes,
-      embeddingModel: embeddingModel,
-      encryption: encryption,
-      vaultStore: vaultStore,
-      vaultGc: vaultGc,
-      vaultSearchManager: vaultSearchManager,
-      versionConfigs: mergedVersionConfigs,
-    );
+      return KmdbDatabase._(
+        cache: cache,
+        store: store,
+        indexManager: indexManager,
+        schemaManager: schemaManager,
+        ftsManager: ftsManager,
+        vecManager: vecManager,
+        ftsIndexes: ftsIndexes,
+        vecIndexes: vecIndexes,
+        embeddingModel: embeddingModel,
+        encryption: encryption,
+        vaultStore: vaultStore,
+        vaultGc: vaultGc,
+        vaultSearchManager: vaultSearchManager,
+        versionConfigs: mergedVersionConfigs,
+      );
+    } catch (e) {
+      // Best-effort cleanup — the original error is what the caller needs to
+      // see, so a secondary failure while closing is swallowed.
+      try {
+        await store.close();
+      } catch (_) {
+        // Ignore.
+      }
+      rethrow;
+    }
   }
 
   // ── Encryption bootstrap ────────────────────────────────────────────────────
