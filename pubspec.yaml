@@ -13,6 +13,7 @@ workspace:
   - packages/kmdb_cli
   - packages/kmdb_harness
   - packages/kmdb_google_drive
+  - packages/kmdb_extractor_pdf
   # kmdb_icloud and kmdb_icloud/example are Flutter plugins and are NOT part of
   # the Dart workspace.  They depend on `flutter: sdk: flutter`, which requires
   # the Flutter SDK — something Dart-only CI runners (Linux, Windows) do not
@@ -39,6 +40,7 @@ dependency_overrides:
   betto_inferencing: ^0.1.0-dev.1
   betto_charset_detector: ^0.1.0-dev.2
   charset: ^2.0.1
+  betto_pdfium: ^0.1.0-dev.3
 
 melos:
   # Disable generation of IntelliJ/Android Studio run configurations. Melos's

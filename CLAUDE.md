@@ -127,6 +127,8 @@ packages/
   kmdb_flutter/        — Flutter add-on: FlutterSecureDekCache (DEK session cache via
                          flutter_secure_storage) + cryptography_flutter registration
                          for native AES-256-GCM / Argon2id (Flutter hosts only, optional, opt-in)
+  kmdb_extractor_pdf/  — PdfTextExtractor: VaultTextExtractor for application/pdf
+                         blobs, wraps betto_pdfium (native only, optional, opt-in)
 
 External Bettongia packages — all published to pub.dev, pinned in
 `pubspec.yaml` `dependency_overrides`:
@@ -145,10 +147,15 @@ External Bettongia packages — all published to pub.dev, pinned in
                               used by FTS (https://github.com/bettongia/lexical)
   betto_inferencing         — ONNX Runtime inference and embedding models for dense
                               text retrieval (https://github.com/bettongia/inferencing)
+  betto_pdfium              — PDFium FFI/WASM wrapper: PdfDocument.extractPlainText(),
+                              consumed by kmdb_extractor_pdf
+                              (https://github.com/bettongia/pdfium)
 
 iOS companion (consumer Flutter app only — not in this workspace):
   betto_onnxrt_ios          — Flutter plugin; SPM-links ORT XCFramework so
                               betto_onnxrt works on iOS (Flutter ≥ 3.27.0)
+  betto_pdfium_ios          — Flutter plugin; SPM-links the PDFium xcframework so
+                              betto_pdfium/kmdb_extractor_pdf work on iOS
 
 Downstream consumer (separate repo, not pulled in here):
   kmdb_ui              — Flutter desktop/browser UI (https://github.com/bettongia/kmdb-ui)
