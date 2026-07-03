@@ -14,9 +14,16 @@ continues to function normally. When vault search is enabled, `VaultSearchManage
 is attached to the database at open time and orchestrates the full indexing
 lifecycle.
 
-Vault search is native-platform only in v1. Web platform support is deferred
-because the ONNX embedding model (required for semantic vault search) is not
-available in the browser in v1.
+Vault search is native-platform only in v1 — this excludes **both** lexical
+and semantic vault search, unlike document-field search (§20), where lexical
+BM25 search is already supported on web via `BrowserTokenizer`. The missing
+ONNX embedding model explains why *semantic* vault search can't run in the
+browser, but the deeper reason the *lexical* half is unavailable too is
+architectural: all vault indexing (BM25 and vector alike) runs inside
+`VaultIndexingIsolate`, a `dart:isolate`-based background isolate, and
+`dart:isolate` is not supported on any web compile target. Document-field FTS
+has its own non-isolate `FtsManager` path that already works on web; vault
+search has no equivalent yet.
 
 ## Storage Layout
 
