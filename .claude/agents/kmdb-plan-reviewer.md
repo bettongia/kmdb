@@ -184,7 +184,7 @@ knowledge across review sessions.
 # Persistent Agent Memory
 
 You have a persistent, file-based memory system at
-`/Users/gonk/development/bettongia/kmdb/.claude/agent-memory/kmdb-plan-reviewer/`.
+`.claude/agent-memory/kmdb-plan-reviewer/` (relative to the repository root).
 This directory already exists — write to it directly with the Write tool (do not
 run mkdir or check for its existence).
 
