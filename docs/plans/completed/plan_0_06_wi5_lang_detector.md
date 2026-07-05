@@ -1,6 +1,8 @@
 # WI-5: Language detection (`betto_lang_detector`)
 
-**Status**: Investigated
+**Status**: Complete
+
+**Package published:** [betto_lang_detector 0.1.0-dev.1](https://pub.dev/packages/betto_lang_detector) on pub.dev, [bettongia/lang_detector](https://github.com/bettongia/lang_detector) on GitHub (tag `0.1.0-dev.1`).
 
 **PR link**: — (implemented in a separate repository; see note below)
 
@@ -307,6 +309,9 @@ betto_lang_detector/
   CHANGELOG.md                       # start with `## 0.1.0-dev.1` + feature bullets, see betto_charset_detector's for style
   README.md                          # package overview + usage example, see betto_charset_detector's for style
   .gitignore                         # standard file — see note below
+  .github/
+    workflows/
+      cicd.yml                       # see below — mirrors betto_charset_detector's workflow
 ```
 
 **Provisioning the standard files:** don't hand-copy these from sibling repos.
@@ -479,6 +484,87 @@ cicd_macos:
 
 (Adapted from `betto_lexical`'s `Makefile` — `generate_stopwords` replaced with
 the two generator targets this package needs.)
+
+#### `.github/workflows/cicd.yml`
+
+Copied verbatim from `betto_charset_detector`'s actual repository (inspected
+directly — `/Users/gonk/development/bettongia/charset_detector/.github/workflows/cicd.yml`).
+No package-specific changes are needed: it drives `make cicd` (which the
+Makefile above already defines as an alias for `default`), so it picks up
+this package's `generate_scripts`/`generate_ngram_profiles` targets for free
+as part of `default`'s dependency chain — nothing in this file needs to know
+about them.
+
+```yaml
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y lcov
+
+      - name: Install Pandoc
+        uses: pandoc/actions/setup@v1
+
+      - name: Install addlicense
+        run: |
+          go install github.com/google/addlicense@latest
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+
+      - run: make cicd
+
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: "./site"
+
+  deployment:
+    runs-on: ubuntu-latest
+    needs: build
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
+```
+
+**Prerequisite the user must set up (not something the workflow file itself
+can do):** the GitHub repo's Pages settings must have the source set to
+"GitHub Actions" (Settings → Pages → Build and deployment → Source) before the
+`deployment` job's first run will succeed — otherwise `actions/deploy-pages`
+fails with no `github-pages` environment configured. Flag this to the user
+rather than attempting to configure repo settings from the agent (out of scope
+per the push/publish hand-off boundary — this is a GitHub repo-settings change,
+not a code change).
+
+Note this workflow already uses `actions/checkout@v6` and current-major
+`actions/upload-pages-artifact@v5` / `actions/deploy-pages@v5` — no version
+bump needed, consistent with the "avoid deprecated Node.js action versions"
+guidance `kmdb`'s own CI follows.
 
 #### `analysis_options.yaml`
 
@@ -800,8 +886,16 @@ one; compare `betto_lexical`'s and `betto_charset_detector`'s single-file
 
 **Phase 0 — repository bootstrap**
 
-- [ ] Create the `bettongia/lang_detector` GitHub repository (confirmed empty
-      as of this plan's writing — `git ls-remote` returned no refs).
+- [x] Repository created: local git repo initialised at
+      `/Users/gonk/development/bettongia/lang_detector`, with the
+      `bettongia/lang_detector` GitHub remote already set up by the user.
+      **For this repo specifically, confirm with the user before any
+      `git push` and let them drive PR creation** — pushing/PRs are normally
+      fine for an agent to do unprompted, but the user wants tighter control
+      here since it's a brand-new repo about to go public. This is scoped to
+      this repo, not a general rule. Publishing to pub.dev, by contrast, is
+      never the agent's job, on any package — see the note at the top of
+      "Final step" below.
 - [ ] Scaffold the package: `dart create --template=package betto_lang_detector`
       or manual layout matching §"Repository layout" above.
 - [ ] Run the Bettongia **`project-layout`** skill/agent against the new repo
@@ -818,6 +912,11 @@ one; compare `betto_lexical`'s and `betto_charset_detector`'s single-file
       the `generate_scripts`/`generate_ngram_profiles` targets), add/extend it
       per §"Scaffold file contents" — reconcile with the note there about the
       unverified `coverage.log` recipe.
+- [ ] Add `.github/workflows/cicd.yml` per §"Scaffold file contents" above
+      (copied verbatim from `betto_charset_detector`'s repo — no changes
+      needed). Remind the user to set the GitHub repo's Pages source to
+      "GitHub Actions" before the first push exercises the `deployment` job —
+      this is a repo-settings change, not something the agent should do.
 - [ ] Copy this plan file into `docs/plans/plan_lang_detector.md` in the new
       repo.
 - [ ] Write `CLAUDE.md` per §"Scaffold file contents" above.
@@ -893,17 +992,29 @@ one; compare `betto_lexical`'s and `betto_charset_detector`'s single-file
 **Final step — sign-off (adapted for the standalone repo; no `kmdb-qa` /
 `kmdb-pre-commit` agents exist there):**
 
+> **Hand-off boundary.** Publishing to pub.dev is never the agent's job, on
+> this or any package — the user always does that themselves. `dart pub
+> publish --dry-run` is fine (and a good pre-flight check) since it doesn't
+> publish anything; only the real, non-dry-run publish is off-limits.
+> Pushing/PRs to GitHub are normally fine for an agent, but for *this specific
+> repo* (new, about to go public) the user wants to drive push/PR themselves
+> — confirm with them before pushing rather than pushing unprompted.
+
 - [ ] Self-review the diff against this plan's API surface and algorithm
       sections — confirm no undocumented deviation.
 - [ ] `make pre_commit` green (format, analyze, license_check, tests).
 - [ ] `make coverage` >90%.
 - [ ] Update this plan's Status to `Complete`, move it to
-      `docs/plans/completed/`, and fill in the Summary section.
-- [ ] Publish to pub.dev as `0.1.0-dev.1` (`dart pub publish --dry-run` first).
-- [ ] Once published, return to the `kmdb` repo and update
-      `docs/roadmap/0_06.md` WI-5's status to `Complete` with a link to this
-      plan and the published package, so WI-6 (which depends on this package)
-      can proceed.
+      `docs/plans/completed/`, and fill in the Summary section. Commit locally;
+      confirm with the user before pushing (see hand-off boundary above).
+- [ ] Optionally run `dart pub publish --dry-run` as a final packaging sanity
+      check. **Do not run the real `dart pub publish`** — hand off to the user
+      to review and publish `0.1.0-dev.1` themselves.
+- [ ] Tell the user implementation is complete and ready for them to push to
+      GitHub and publish. Do not update `kmdb`'s `docs/roadmap/0_06.md` WI-5
+      status to `Complete` until the user confirms the package is actually
+      published — the roadmap should reflect reality, not a
+      ready-but-not-yet-shipped state.
 
 ## Reviewer notes (kmdb-plan-reviewer, 2026-07-03)
 
@@ -997,4 +1108,26 @@ hot path ever needs it. Not required.
 
 ## Summary
 
-{To be completed once implemented.}
+Implemented in a new, standalone repository ([bettongia/lang_detector](https://github.com/bettongia/lang_detector)),
+per this plan's own portability note — not in the `kmdb` workspace. The
+authoritative implementation record, including the full checklist,
+implementation notes, and a final summary, is
+[docs/plans/completed/plan_lang_detector.md](https://github.com/bettongia/lang_detector/blob/main/docs/plans/completed/plan_lang_detector.md)
+in that repository. In short:
+
+- All four phases (script pre-filter, n-gram model, composite backend +
+  public API, package finish) implemented as designed, with two real
+  inconsistencies found and fixed along the way (documented in the other
+  repo's plan): a self-contradiction in this plan's own `_ngramStage`
+  algorithm text, and a false alarm from the plan review about the
+  Makefile's coverage flag (it was actually correct).
+- 74 tests, **100% line coverage**, `make pre_commit` and
+  `dart pub publish --dry-run` both clean.
+- Manual accuracy spot-check: 15/20 on short held-out sentences, resolving
+  to near-perfect with slightly longer input, except a documented
+  Russian/Ukrainian/Bulgarian confusion (a known-hard case for character
+  n-gram methods among closely-related Cyrillic languages, not a defect).
+- Published as `betto_lang_detector 0.1.0-dev.1` on pub.dev; a `0.1.0-dev.2`
+  version bump is in progress in the new repo.
+- WI-6 (language-aware BM25 tokenizer routing) can now proceed against the
+  published package.
