@@ -107,6 +107,22 @@ final class MemoryStorageAdapter implements StorageAdapter {
   }
 
   @override
+  Future<List<String>> listFilesRecursive(String dirPath) async {
+    // Normalise: ensure dirPath ends with '/' for prefix matching, same as
+    // listFiles above.
+    final prefix = dirPath.endsWith('/') ? dirPath : '$dirPath/';
+    final results = <String>[];
+    for (final path in files.keys) {
+      if (!path.startsWith(prefix)) continue;
+      // Unlike listFiles, do not filter out remainders containing '/' — this
+      // is the recursive variant, so nested paths are exactly what callers
+      // want. The prefix strip already guarantees no leading separator.
+      results.add(path.substring(prefix.length));
+    }
+    return results;
+  }
+
+  @override
   Future<int> fileSize(String path) async {
     final data = files[path];
     if (data == null) throw StorageException('File not found', path: path);

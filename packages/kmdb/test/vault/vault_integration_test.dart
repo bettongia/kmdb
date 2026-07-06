@@ -15,12 +15,16 @@
 import 'dart:typed_data';
 
 import 'package:kmdb/src/encoding/value_codec.dart';
+import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
 import 'package:kmdb/src/query/kmdb_codec.dart';
 import 'package:kmdb/src/query/kmdb_database.dart';
 import 'package:kmdb/src/vault/media_type_detector.dart';
 import 'package:kmdb/src/vault/vault_gc.dart';
 import 'package:kmdb/src/vault/vault_ref.dart';
+import 'package:kmdb/src/vault/vault_ref_count.dart';
+import 'package:kmdb/src/vault/vault_recovery.dart'
+    show kVaultNamespace, kVaultRefCountSentinelKey;
 import 'package:kmdb/src/vault/vault_store.dart';
 import 'package:test/test.dart';
 
@@ -312,6 +316,159 @@ void main() {
       );
     });
 
+    // Bug 1 regression coverage: these three scenarios exercise the ref-count
+    // scheme's edge cases against the *real* KvStoreImpl (via the public
+    // KmdbCollection API, or — where the scenario is inherently unreachable
+    // through well-formed public-API usage — via the real VaultRefInterceptor
+    // against the real store), proving the namespace-per-blob fix
+    // (`$vault:{sha256}` / kVaultRefCountSentinelKey) holds under real
+    // KeyCodec validation, not just against an in-memory test double that
+    // never exercises KeyCodec at all.
+    group(
+      'multi-reference (two documents referencing the same blob)',
+      tags: 'e2e',
+      () {
+        test(
+          'ref count reaches 2, then drops as each document is removed',
+          () async {
+            final collection = db.collection(
+              name: 'attachments',
+              codec: const _AttachmentCodec(),
+            );
+            final ref = await vaultStore.ingest(
+              bytes: _utf8('shared blob'),
+              hlcTimestamp: 't1',
+            );
+
+            final docA = await collection.insert(
+              _Attachment(id: '', name: 'a', file: ref),
+            );
+            final docB = await collection.insert(
+              _Attachment(id: '', name: 'b', file: ref),
+            );
+
+            final afterBothInserts = await VaultRefCount.read(
+              db.store,
+              ref.sha256,
+            );
+            expect(afterBothInserts, isA<RefCountValue>());
+            expect((afterBothInserts as RefCountValue).count, equals(2));
+
+            // Deleting the first document must not tombstone the blob — the
+            // second document still references it.
+            await collection.delete(docA.id);
+            expect(await vaultStore.isTombstoned(ref.sha256), isFalse);
+            final afterOneDelete = await VaultRefCount.read(
+              db.store,
+              ref.sha256,
+            );
+            expect((afterOneDelete as RefCountValue).count, equals(1));
+
+            // Deleting the second (last) reference tombstones the blob.
+            await collection.delete(docB.id);
+            expect(await vaultStore.isTombstoned(ref.sha256), isTrue);
+          },
+        );
+      },
+    );
+
+    group('decrement below zero guard', tags: 'e2e', () {
+      test('a defensive extra decrement clamps to zero instead of going '
+          'negative', () async {
+        // This scenario is not reachable through well-formed public-API
+        // usage (a document's own ref-count arithmetic is always balanced
+        // by construction), so it drives VaultRefInterceptor directly
+        // against the real db.store — proving the *real* KvStoreImpl
+        // clamps defensively rather than throwing or corrupting the entry,
+        // which is the guarantee _decrement's `current > 0 ? current - 1 :
+        // 0` clamp provides.
+        final ref = await vaultStore.ingest(
+          bytes: _utf8('below-zero-guard'),
+          hlcTimestamp: 't1',
+        );
+        final interceptor = db.vaultRefInterceptor!;
+
+        // Increment once (ref count 0 → 1).
+        final incBatch = WriteBatch();
+        await interceptor.interceptWrite(
+          batch: incBatch,
+          namespace: 'test',
+          docKey: '01900000000070809000000000000099', // 32-char UUIDv7
+          oldDoc: null,
+          newDoc: {'file': ref.uri},
+        );
+        // The interceptor writes to the `$vault:{sha256}` system namespace —
+        // the public writeBatch() rejects `$`-prefixed namespaces
+        // (KvStoreImpl._normaliseAndGuardNamespace), so use writeBatchInternal
+        // like the Query Layer itself does when committing an interceptor's
+        // batch alongside the document write.
+        await db.store.writeBatchInternal(incBatch);
+
+        // Decrement twice in a row (simulating a corrupt double-decrement)
+        // — the second decrement must clamp at zero, not go negative.
+        for (var i = 0; i < 2; i++) {
+          final decBatch = WriteBatch();
+          await interceptor.interceptWrite(
+            batch: decBatch,
+            namespace: 'test',
+            docKey: '01900000000070809000000000000099', // 32-char UUIDv7
+            oldDoc: {'file': ref.uri},
+            newDoc: null,
+          );
+          await db.store.writeBatchInternal(decBatch);
+        }
+
+        // Absence of the entry is the authoritative "zero references"
+        // signal (see VaultRefCount's doc comment) — the clamp guarantees
+        // this, never a negative count.
+        final result = await VaultRefCount.read(db.store, ref.sha256);
+        expect(result, isA<RefCountAbsent>());
+        expect(await vaultStore.isTombstoned(ref.sha256), isTrue);
+      });
+    });
+
+    group(
+      'undecodable-entry fail-safe (RefCountUndecodable → retain)',
+      tags: 'e2e',
+      () {
+        test(
+          r'a corrupt $vault:{sha256} entry is retained by GC, not deleted',
+          () async {
+            final ref = await vaultStore.ingest(
+              bytes: _utf8('undecodable-guard'),
+              hlcTimestamp: 't1',
+            );
+            // Directly corrupt the ref-count entry — simulates a truncated/
+            // garbage byte pattern (e.g. from a future or older codec) that
+            // ValueCodec.decode cannot parse. The `$vault:{sha256}` namespace
+            // is a system namespace, so writeBatchInternal is required (the
+            // public put()/writeBatch() reject `$`-prefixed namespaces).
+            final corruptBatch = WriteBatch();
+            corruptBatch.put(
+              '$kVaultNamespace:${ref.sha256}',
+              kVaultRefCountSentinelKey,
+              Uint8List.fromList([0xFF, 0xFF, 0xFF]),
+            );
+            await db.store.writeBatchInternal(corruptBatch);
+            await vaultStore.writeTombstone(ref.sha256);
+
+            final result = await VaultRefCount.read(db.store, ref.sha256);
+            expect(result, isA<RefCountUndecodable>());
+
+            final gcResult = await VaultGc(
+              store: vaultStore,
+              kvStore: db.store,
+            ).sweep();
+            expect(gcResult.retainedUndecodable, equals(1));
+            expect(gcResult.deleted, isZero);
+            // Fail-safe: the object must survive — never deleted on an
+            // uncertain (undecodable) reference count.
+            expect(await vaultStore.exists(ref.sha256), isTrue);
+          },
+        );
+      },
+    );
+
     group('without vault store configured', tags: 'e2e', () {
       late KmdbDatabase dbNoVault;
 
@@ -352,14 +509,21 @@ void main() {
   //
   // These tests are NOT tagged e2e. They exercise the vault-URI wiring path in
   // KmdbCollection.decodeDoc() (lines 685-717) by storing documents with vault
-  // URI strings via db.store.put() (bypassing VaultRefInterceptor) and reading
-  // them back via the collection API.
+  // URI strings via db.store.put() (bypassing VaultRefInterceptor's ref-count
+  // bookkeeping) and reading them back via the collection API.
   //
-  // Background: VaultRefInterceptor stores ref counts under sha256 (64-char hex)
-  // keys, but the LSM engine requires 32-char hex (UUIDv7) keys — inserting via
-  // KmdbCollection.insert() with vault URIs therefore fails. Bypassing the
-  // interceptor via db.store.put() lets us test the decode wiring path in
-  // isolation.
+  // Design note: writing through the public KmdbCollection.insert()/put() API
+  // with a real kmdb-vault:// URI field now works correctly (see the 'insert
+  // document with vault ref' group above, and vault_write_interception_test.dart
+  // / vault_ref_count_test.dart for the ref-count mechanics themselves) — the
+  // $vault ref-count key-length bug that used to make that path throw a
+  // FormatException has been fixed (ref counts are now stored under the
+  // namespace-per-blob scheme `$vault:{sha256}`, not `(namespace: '$vault',
+  // key: sha256)`; see vault_ref_count.dart). These tests still bypass the
+  // interceptor deliberately, not out of necessity: they use synthetic sha256
+  // values with no corresponding ingested blob, purely to isolate the
+  // decode-side wiring logic (list/nested-map recursion) from ref-count
+  // bookkeeping and vault I/O.
   group('vault URI wiring in collection.get()', () {
     // Fresh vault-configured DB for these tests (not the shared 'e2e' setUp).
     late KmdbDatabase vaultDb;

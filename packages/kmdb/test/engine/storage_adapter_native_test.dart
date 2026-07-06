@@ -233,6 +233,62 @@ void main() {
     });
   });
 
+  group('listFilesRecursive', () {
+    test('returns nested file paths relative to dirPath', () async {
+      final sub = '${tempDir.path}/vault';
+      final deep = '$sub/ab/cdef';
+      await adapter.createDirectory(deep);
+      await adapter.writeFile('$deep/manifest.json', Uint8List(0));
+      final paths = await adapter.listFilesRecursive(sub);
+      expect(paths, equals(['ab/cdef/manifest.json']));
+    });
+
+    test('returned paths have no leading path separator', () async {
+      // Regression test for the bug this plan fixes: a leading separator
+      // would make _collectSubdirsInto's `path.indexOf('/')` /
+      // `slash > 0` guard silently skip every entry.
+      final sub = '${tempDir.path}/vault';
+      final deep = '$sub/ab/cdef';
+      await adapter.createDirectory(deep);
+      await adapter.writeFile('$deep/manifest.json', Uint8List(0));
+      final paths = await adapter.listFilesRecursive(sub);
+      for (final path in paths) {
+        expect(path.startsWith('/'), isFalse);
+      }
+    });
+
+    test('includes files at every depth, not just direct children', () async {
+      final sub = '${tempDir.path}/vault';
+      await adapter.createDirectory(sub);
+      await adapter.writeFile('$sub/top.txt', Uint8List(0));
+      await adapter.createDirectory('$sub/ab');
+      await adapter.writeFile('$sub/ab/mid.txt', Uint8List(0));
+      await adapter.createDirectory('$sub/ab/cdef');
+      await adapter.writeFile('$sub/ab/cdef/deep.txt', Uint8List(0));
+      final paths = await adapter.listFilesRecursive(sub);
+      expect(paths, containsAll(['top.txt', 'ab/mid.txt', 'ab/cdef/deep.txt']));
+    });
+
+    test('excludes directory entries, only files are returned', () async {
+      final sub = '${tempDir.path}/vault';
+      await adapter.createDirectory('$sub/ab/cdef');
+      await adapter.writeFile('$sub/ab/cdef/manifest.json', Uint8List(0));
+      final paths = await adapter.listFilesRecursive(sub);
+      // An empty directory entry for `ab` or `ab/cdef` must not appear.
+      expect(paths, equals(['ab/cdef/manifest.json']));
+    });
+
+    test('empty list for missing directory', () async {
+      expect(await adapter.listFilesRecursive(p('nonexistent')), isEmpty);
+    });
+
+    test('empty list for empty directory', () async {
+      final sub = '${tempDir.path}/empty';
+      await adapter.createDirectory(sub);
+      expect(await adapter.listFilesRecursive(sub), isEmpty);
+    });
+  });
+
   group('renameFile', () {
     test('moves content to new path', () async {
       await adapter.writeFile(p('tmp'), Uint8List.fromList([42]));

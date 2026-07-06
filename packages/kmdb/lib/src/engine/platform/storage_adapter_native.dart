@@ -164,6 +164,35 @@ final class StorageAdapterNative implements StorageAdapter {
   }
 
   @override
+  Future<List<String>> listFilesRecursive(String dirPath) async {
+    final dir = Directory(dirPath);
+    if (!await dir.exists()) return [];
+    // `Directory.list(recursive: true)` yields entity paths prefixed by
+    // `dirPath` (e.g. `{dirPath}/ab/cd/manifest.json`), but every vault path
+    // is built with a literal `/` separator regardless of platform (see
+    // `VaultStore.blobsDir`/`hashDir`), while dart:io emits the platform's
+    // native separator (`\` on Windows). Normalize both sides to `/` before
+    // relativising so the returned paths are always e.g. `ab/cd/manifest.json`
+    // — no leading separator. A leading separator would make
+    // `_collectSubdirsInto`'s `path.indexOf('/')` / `slash > 0` guard
+    // silently skip every entry, re-creating the exact silent-empty failure
+    // this method exists to fix.
+    final normalizedDir = dirPath.replaceAll('\\', '/');
+    final prefix = normalizedDir.endsWith('/')
+        ? normalizedDir
+        : '$normalizedDir/';
+    final paths = <String>[];
+    await for (final entity in dir.list(recursive: true, followLinks: false)) {
+      if (entity is! File) continue;
+      final normalized = entity.path.replaceAll('\\', '/');
+      // Every entity yielded by `dir.list()` is necessarily nested under
+      // `dirPath`, so `normalized` is guaranteed to start with `prefix`.
+      paths.add(normalized.substring(prefix.length));
+    }
+    return paths;
+  }
+
+  @override
   Future<int> fileSize(String path) async {
     try {
       return await File(path).length();

@@ -15,7 +15,7 @@
 import '../encoding/value_codec.dart';
 import '../encryption/encryption_provider.dart';
 import '../engine/kvstore/kv_store.dart';
-import 'vault_recovery.dart' show kVaultNamespace;
+import 'vault_recovery.dart' show kVaultNamespace, kVaultRefCountSentinelKey;
 
 /// The outcome of reading a `$vault:{sha256}` reference count from the KV store.
 ///
@@ -78,6 +78,16 @@ final class RefCountUndecodable extends RefCountReadResult {
 /// parser, and it returns a [RefCountReadResult] that forces each caller to
 /// handle the undecodable case explicitly.
 ///
+/// ## Storage shape: namespace-per-blob, not key-per-blob
+///
+/// The entry lives at `(namespace: '$kVaultNamespace:{sha256}', key:
+/// [kVaultRefCountSentinelKey])`, **not** `(namespace: kVaultNamespace, key:
+/// sha256)`. A 64-character SHA-256 hex digest cannot be a KV *key* — every
+/// key passes through `KeyCodec.keyToBytes`, which requires exactly 32
+/// UUIDv7-structured hex characters — so the hash lives in the namespace
+/// instead, which has no such constraint. See [kVaultRefCountSentinelKey]'s
+/// doc comment for the full rationale.
+///
 /// ## The fail-safe contract
 ///
 /// A vault object may only be deleted on a **positive determination of zero
@@ -115,7 +125,10 @@ final class VaultRefCount {
     String sha256, {
     EncryptionProvider? encryption,
   }) async {
-    final bytes = await kvStore.get(kVaultNamespace, sha256);
+    final bytes = await kvStore.get(
+      '$kVaultNamespace:$sha256',
+      kVaultRefCountSentinelKey,
+    );
     if (bytes == null) return const RefCountAbsent();
 
     final Map<String, dynamic> decoded;

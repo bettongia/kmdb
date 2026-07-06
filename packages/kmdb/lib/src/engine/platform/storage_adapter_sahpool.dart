@@ -347,6 +347,27 @@ final class StorageAdapterSahPool implements StorageAdapter {
     return const [];
   }
 
+  /// Not supported on web.
+  ///
+  /// There is no first-party web vault story today: the vault *sync* adapter
+  /// (`LocalDirectoryVaultAdapter`, a different interface) already throws
+  /// [UnsupportedError] on web, and vault search is native-only. A real
+  /// recursive OPFS `FileSystemDirectoryHandle` walk would require a new
+  /// Worker op and cannot be exercised in the automated suite (needs Chrome),
+  /// so this follows the codebase's existing precedent: fail loudly rather
+  /// than silently returning `[]`, which would recreate the exact bug this
+  /// method exists to fix on the platforms that do support it. A follow-up
+  /// plan can add a real implementation if/when local vault-on-web storage
+  /// becomes an actual product requirement.
+  @override
+  Future<List<String>> listFilesRecursive(String dirPath) {
+    throw UnsupportedError(
+      'StorageAdapterSahPool.listFilesRecursive is not supported on web — '
+      'there is no first-party web vault story today (see '
+      'docs/plans/plan_vault_ref_key_and_recursive_listing.md).',
+    );
+  }
+
   @override
   Future<int> fileSize(String path) async {
     final result = await _send({'op': 'getSize', 'path': path});

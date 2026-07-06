@@ -22,7 +22,8 @@ import 'package:kmdb/src/engine/util/hlc.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
 import 'package:kmdb/src/vault/media_type_detector.dart';
 import 'package:kmdb/src/vault/vault_gc.dart';
-import 'package:kmdb/src/vault/vault_recovery.dart' show kVaultNamespace;
+import 'package:kmdb/src/vault/vault_recovery.dart'
+    show kVaultNamespace, kVaultRefCountSentinelKey;
 import 'package:kmdb/src/vault/vault_ref_interceptor.dart';
 import 'package:kmdb/src/vault/vault_store.dart';
 import 'package:test/test.dart';
@@ -161,9 +162,9 @@ class _TrackingKvStore implements KvStore {
   @override
   Future<bool> createNamespace(String ns) async => false;
 
-  /// Reads the ref count for [sha256] from the `$vault` namespace.
+  /// Reads the ref count for [sha256] from the `$vault:{sha256}` namespace.
   Future<int> readRefCount(String sha256) async {
-    final bytes = _data[kVaultNamespace]?[sha256];
+    final bytes = _data['$kVaultNamespace:$sha256']?[kVaultRefCountSentinelKey];
     if (bytes == null) return 0;
     final decoded = await ValueCodec.decode(bytes);
     final v = decoded['refCount'];
@@ -457,6 +458,56 @@ void main() {
           expect(await vaultStore.isHydrated(ref.sha256), isTrue);
         },
       );
+
+      test('removing one of two references decrements without deleting the '
+          'ref-count entry (multi-reference)', () async {
+        // Exercises _decrement's still-positive branch (batch.put with the
+        // decremented count) — distinct from the to-zero branch (batch.delete)
+        // covered by the tests above. Two different documents reference the
+        // same blob; deleting one must leave the entry present at count 1,
+        // not delete it.
+        final ref = await vaultStore.ingest(
+          bytes: _bytes('shared-by-two-docs'),
+          hlcTimestamp: 't1',
+        );
+
+        final batchA = WriteBatch();
+        await interceptor.interceptWrite(
+          batch: batchA,
+          namespace: 'test',
+          docKey: 'dockeya',
+          oldDoc: null,
+          newDoc: {'file': ref.uri},
+        );
+        await kvStore.writeBatch(batchA);
+
+        final batchB = WriteBatch();
+        await interceptor.interceptWrite(
+          batch: batchB,
+          namespace: 'test',
+          docKey: 'dockeyb',
+          oldDoc: null,
+          newDoc: {'file': ref.uri},
+        );
+        await kvStore.writeBatch(batchB);
+
+        expect(await kvStore.readRefCount(ref.sha256), equals(2));
+
+        // Delete the first document's reference — count drops to 1, but
+        // the entry must still exist (not deleted, not tombstoned).
+        final deleteBatchA = WriteBatch();
+        await interceptor.interceptWrite(
+          batch: deleteBatchA,
+          namespace: 'test',
+          docKey: 'dockeya',
+          oldDoc: {'file': ref.uri},
+          newDoc: null,
+        );
+        await kvStore.writeBatch(deleteBatchA);
+
+        expect(await kvStore.readRefCount(ref.sha256), equals(1));
+        expect(await vaultStore.isTombstoned(ref.sha256), isFalse);
+      });
     });
 
     group('no vault uris', () {
@@ -470,7 +521,12 @@ void main() {
           newDoc: {'name': 'Bob', 'age': 31},
         );
         await kvStore.writeBatch(batch);
-        expect(kvStore._data[kVaultNamespace] ?? {}, isEmpty);
+        // No vault URIs means _increment/_decrement are never called, so no
+        // `$vault:{sha256}` ref-count namespace should have been written.
+        expect(
+          kvStore._data.keys.where((ns) => ns.startsWith('$kVaultNamespace:')),
+          isEmpty,
+        );
       });
     });
 

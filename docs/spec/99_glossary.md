@@ -345,6 +345,17 @@ VaultTextExtractor
   non-UTF-8 content. Custom extractors are registered via
   `VaultSearchConfig.extractors`. See §32.
 
+`$vault:{sha256}`
+
+: The per-blob system namespace holding a vault object's reference count,
+  keyed by a single fixed sentinel (`kVaultRefCountSentinelKey`, a
+  UUIDv7-shaped constant) rather than by the sha256 itself — every KV key,
+  regardless of namespace, must pass `KeyCodec.keyToBytes`'s 32-char UUIDv7
+  validation, which a 64-character SHA-256 hex digest cannot satisfy. This
+  mirrors the `$vault:docref:{sha256}` and `$$vault:fts:corpus:{sha256}` /
+  `$$vault:extract:{sha256}` sentinel-key patterns. Synced (single `$`
+  prefix, unlike the local-only `$$vault:*` search namespaces below). See §24.
+
 `$$vault:fts:`
 
 : The `$$`-prefixed local-only namespace used to store BM25 inverted-index

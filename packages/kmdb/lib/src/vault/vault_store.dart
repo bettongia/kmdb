@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/// @docImport 'vault_gc.dart';
 /// @docImport 'vault_recovery.dart';
 library;
 
@@ -517,9 +518,6 @@ class VaultStore {
   /// Returns bare directory names (e.g. `"ab"`, `"ff"`), not full paths.
   /// Used by the GC sweep and crash recovery to enumerate all known hashes.
   Future<List<String>> listPrefixDirs() async {
-    // The memory adapter's listFiles excludes paths with '/' in the remainder,
-    // so this works as a directory listing for direct children.
-    // We detect "directories" as path prefixes that appear in any stored file path.
     return _listSubdirs(blobsDir);
   }
 
@@ -582,31 +580,15 @@ class VaultStore {
   /// Lists immediate subdirectory names under [parentPath] by inspecting
   /// path prefixes in the underlying storage adapter.
   ///
-  /// The [MemoryStorageAdapter] stores paths flat, so we simulate a directory
-  /// listing by scanning for known files and extracting the first path segment
-  /// after [parentPath].
+  /// Delegates to [_listSubdirsFromFiles], which derives subdirectory names
+  /// from a real recursive file scan (see [listFilesRecursive]).
   Future<List<String>> _listSubdirs(String parentPath) async {
-    // List all files under parentPath with no extension filter, then extract
-    // intermediate path components to build a directory list.
     final prefix = parentPath.endsWith('/') ? parentPath : '$parentPath/';
-    // We need to discover all immediate subdirs. The StorageAdapter.listFiles
-    // only returns direct children (no '/' in remainder), but we need one level
-    // deeper. We call listFiles on known children by checking for specific
-    // sentinel filenames; however, a simpler approach is to expose a
-    // listSubdirectories capability.
-    //
-    // Since StorageAdapter doesn't have listDirectories, we use a convention:
-    // enumerate by calling listFiles with 'manifest.json' and extracting the
-    // first segment of the relative path. This works because every known hash
-    // directory contains a manifest.json.
-    //
-    // For the native adapter, we use a different approach via a dedicated
-    // "list subdirs" scan (see _listSubdirsFromFiles).
     return _listSubdirsFromFiles(prefix);
   }
 
-  /// Extracts unique immediate subdirectory names from all manifest.json paths
-  /// under [prefix].
+  /// Extracts unique immediate subdirectory names from all file paths under
+  /// [prefix].
   ///
   /// For example, if `prefix` = `vault/blobs/sha256/` and files exist at:
   ///   `vault/blobs/sha256/ab/cdef.../manifest.json`
@@ -614,67 +596,26 @@ class VaultStore {
   ///
   /// This method returns `['ab', 'cd']`.
   Future<List<String>> _listSubdirsFromFiles(String prefix) async {
-    // Scan all files under `{prefix}**/manifest.json` by listing files at
-    // each candidate level. Since we cannot do recursive listing directly,
-    // we query for 'manifest.json' within each potential subdirectory.
-    //
-    // Strategy: ask the adapter for all files under prefix that end with
-    // 'manifest.json', then derive the immediate subdirectory from each path.
-    //
-    // The MemoryStorageAdapter.listFiles only returns direct children, so we
-    // need to decompose the path. Since we know the directory structure is
-    // exactly 2 levels deep (prefix/dir/manifest.json for listPrefixDirs or
-    // prefix/dir2/manifest.json for listSuffixDirs), we can iterate candidates.
-    //
-    // This implementation does a best-effort scan using the storage adapter.
-    // For native, file paths are traversed via the file system.
-    // For memory (tests), all paths are in a flat map and we scan by prefix.
-
     final dirs = <String>{};
-
-    // The memory adapter's files map is not exposed, so we use a workaround:
-    // we list files at the parent level to find any that have a '/' in them
-    // when checked with a looser filter. However, the MemoryStorageAdapter
-    // explicitly excludes paths with '/' in the remainder.
-    //
-    // To bridge this gap, we use the 'extension' trick: we look for 'manifest.json'
-    // files, which requires allowing non-extension matching.
-    // The simplest robust approach for both memory and native is to keep track
-    // of all known hashes in an in-memory set populated during ingest and
-    // loaded from manifest files on open.
-    //
-    // However, to keep things simple, the VaultStore exposes this directly to
-    // VaultRecovery and VaultGc, which can use the _adapter.files property
-    // in tests or the filesystem in production. We delegate to a protected
-    // method that can be overridden.
-
-    // This default implementation scans via the file enumeration convention:
-    // it calls listFiles with the manifest.json sentinel in each prefix subdir.
-    // A concrete override in tests or a dedicated VaultAdapter would do better.
-
-    // In the absence of a recursive listing API, we return the set of known
-    // hashes from memory (populated by ingest). For recovery, we use the
-    // MemoryStorageAdapter's flat key set through the adapter protocol.
-    //
-    // To keep this implementation correct for tests, we expose a protected
-    // method for tests to override.
     await _collectSubdirsInto(prefix, dirs);
     return dirs.toList();
   }
 
-  /// Extension point for subdirectory enumeration.
+  /// Populates [dirs] with the immediate subdirectory names found under
+  /// [prefix], derived from a real recursive listing.
   ///
-  /// Default: scans the adapter for all paths under [prefix] and extracts the
-  /// first path segment from each. Works for [MemoryStorageAdapter] (all paths
-  /// are flat keys) but requires an override for native I/O.
-  ///
-  /// This is a protected method — subclasses or test utilities may override it
-  /// to provide more efficient directory enumeration.
+  /// Calls [listFilesRecursive], which now delegates to
+  /// [StorageAdapter.listFilesRecursive] — a genuine filesystem/prefix-map
+  /// walk on every backend (see §24 for the recovery/GC enumeration story).
   Future<void> _collectSubdirsInto(String prefix, Set<String> dirs) async {
-    // Delegate to the subclass hook.
     final entries = await listFilesRecursive(prefix);
     for (final path in entries) {
-      // path is relative to prefix (e.g. "ab/cdef.../manifest.json")
+      // path is relative to prefix (e.g. "ab/cdef.../manifest.json") with no
+      // leading separator — StorageAdapter.listFilesRecursive implementations
+      // are required to strip both the prefix and its trailing separator, so
+      // `indexOf('/')` correctly finds the boundary of the first segment. A
+      // leading separator here would make `slash > 0` false for every entry,
+      // silently skipping all of them.
       final slash = path.indexOf('/');
       if (slash > 0) {
         dirs.add(path.substring(0, slash));
@@ -684,28 +625,14 @@ class VaultStore {
 
   /// Lists all file paths (relative to [dirPath]) anywhere under [dirPath].
   ///
-  /// Used for subdirectory enumeration. The default implementation asks the
-  /// [StorageAdapter] by trying each candidate file name, which works for the
-  /// [MemoryStorageAdapter] flat key store.
-  ///
-  /// Override in a subclass or test double to provide native filesystem
-  /// traversal.
-  Future<List<String>> listFilesRecursive(String dirPath) async {
-    // The MemoryStorageAdapter stores all paths as flat keys. We scan by
-    // prefix match. Since the adapter's listFiles excludes paths with '/',
-    // we need direct map access — but the adapter interface doesn't expose it.
-    //
-    // Instead, use a practical workaround: call listFiles with a sentinel
-    // filename extension. But for manifest.json (no extension), this fails.
-    //
-    // The cleanest solution: expose listFilesDeep to the interface.
-    // As a stopgap for v1, fall back to an empty list (recovery/GC will need
-    // a subclass or native adapter that can enumerate).
-    //
-    // For tests using MemoryStorageAdapter, the VaultRecovery and VaultGc
-    // tests will use VaultStoreTestHelper which overrides this.
-    return const [];
-  }
+  /// Delegates to [StorageAdapter.listFilesRecursive], which every production
+  /// backend (native, memory) implements as a real recursive scan; the
+  /// sahpool/web adapter throws [UnsupportedError] (there is no first-party
+  /// web vault story today). This is the primitive that makes blob
+  /// enumeration for [VaultGc.sweep], [VaultRecovery], and vault search work
+  /// on a real database — see §24.
+  Future<List<String>> listFilesRecursive(String dirPath) =>
+      _adapter.listFilesRecursive(dirPath);
 
   // ── Test-visible hash helpers ─────────────────────────────────────────────
 

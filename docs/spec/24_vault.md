@@ -189,20 +189,37 @@ after the standard LSM crash recovery (§17):
 
 ### Reference Counting
 
-The `$vault` system namespace maintains a reference count for each vault URI.
+Each vault object has a reference count, maintained in a **per-blob system
+namespace** `$vault:{sha256}` under a single fixed key
+(`kVaultRefCountSentinelKey`, a constant UUIDv7-shaped hex string):
+
+```
+namespace: $vault:{sha256}
+key:       kVaultRefCountSentinelKey
+value:     { "refCount": N }             (ValueCodec-encoded)
+```
+
+This mirrors the same "a sha256 doesn't fit in a 32-char key" pattern already
+used by the docref index (`$vault:docref:{sha256}` → key = `docId`) and the
+vault search corpus/extract entries (`$$vault:fts:corpus:{sha256}` /
+`$$vault:extract:{sha256}` → key = a fixed sentinel). The sha256 lives in the
+**namespace** — which has no length or structural constraint beyond a ≤255
+UTF-8 byte limit — rather than the **key**, because every KV key (regardless
+of namespace) passes through `KeyCodec.keyToBytes`, which requires exactly 32
+hex characters with UUIDv7 structure (§4). A full 64-character SHA-256 digest
+cannot satisfy that, so a flat `(namespace: '$vault', key: sha256)` scheme
+throws on every write; the namespace-per-blob scheme sidesteps the constraint
+entirely while preserving the full 256-bit hash losslessly.
+
 The Query Layer intercepts every `put`/`delete` via `writeBatchInternal`,
 diffs the old and new document's vault URIs, and adjusts counters atomically
 in the same `WriteBatch`. The counter and the document land in the same WAL
 record and are replayed together on crash recovery.
 
-```
-$vault:{sha256}  →  integer reference count
-```
-
-When the count reaches zero, the vault subsystem deletes the `$vault:{sha256}`
-entry entirely (so that *absence of the entry is an authoritative "zero
-references" signal*) and creates `tombstone.json` alongside `manifest.json` in
-the hash directory.
+When the count reaches zero, the vault subsystem deletes the
+`$vault:{sha256}` entry entirely (so that *absence of the entry is an
+authoritative "zero references" signal*) and creates `tombstone.json`
+alongside `manifest.json` in the hash directory.
 
 ### Fail-safe ref-count rule
 
@@ -247,6 +264,33 @@ happen in the same `WriteBatch` for atomicity.
 
 `tombstone.json` is also uploaded to the sync vault, giving peer devices a
 signal that this object is a GC candidate on their side too.
+
+### Blob Enumeration
+
+`VaultGc.sweep`, `VaultRecovery`, and vault search (`VaultSearcher`,
+`VaultSearchManager`) all need to enumerate every known blob hash. This is a
+full recursive scan of `vault/blobs/sha256/` — two levels of sharded
+subdirectory (`{prefix}/{suffix}/`) under which each hash directory's files
+live — backed by a single primitive on `StorageAdapter`:
+
+```
+Future<List<String>> listFilesRecursive(String dirPath)
+```
+
+Paths are returned relative to `dirPath` with **no leading separator** (e.g.
+`ab/cdef.../manifest.json`), files only (no directory entries), symlinks not
+followed, and `[]` when `dirPath` does not exist (matching `listFiles`'s
+existing not-found contract). `VaultStore.listFilesRecursive` delegates to
+this adapter method, which every production backend must implement as a
+genuine recursive scan:
+
+- **Native:** `Directory(dirPath).list(recursive: true)` filtered to `File`
+  entries, relativised by stripping the `dirPath` prefix and its trailing
+  separator.
+- **Memory** (test adapter): a prefix scan over the flat in-memory path map.
+- **Sahpool/OPFS (web):** throws `UnsupportedError` — there is no first-party
+  web vault story today (`LocalDirectoryVaultAdapter`, the vault *sync*
+  adapter, already throws `UnsupportedError` on web for the same reason).
 
 ### Pin behaviour
 

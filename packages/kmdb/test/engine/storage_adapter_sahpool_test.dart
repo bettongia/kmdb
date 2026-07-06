@@ -290,6 +290,21 @@ void main() {
     });
   });
 
+  // ── listFilesRecursive ──────────────────────────────────────────────────────
+
+  group('listFilesRecursive', () {
+    test('throws UnsupportedError — no first-party web vault story today', () {
+      // Per the plan's B2 resolution: failing loudly here (rather than
+      // silently returning []) mirrors LocalDirectoryVaultAdapter's existing
+      // web stub and avoids re-creating the exact silent-empty bug this
+      // method exists to fix on platforms that do support it.
+      expect(
+        () => adapter.listFilesRecursive(_dir('unsupported')),
+        throwsA(isA<UnsupportedError>()),
+      );
+    });
+  });
+
   // ── renameFile ───────────────────────────────────────────────────────────────
 
   group('renameFile', () {
