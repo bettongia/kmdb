@@ -1,6 +1,6 @@
 # WI-6: Language-aware BM25 tokenizer routing
 
-**Status**: Open
+**Status**: Implementing
 
 **PR link**: —
 
@@ -186,7 +186,70 @@ confirmed. See Phases 0.4 and 0.5 below for the exact sequencing
       `betto_lang_detector`'s own "coarse, error-tolerant" design philosophy
       (WI-5 plan).
 
-All open questions are resolved.
+Q1–Q5 are resolved. Two new questions were raised in the 2026-07-06 review pass
+(see the Review section); both are now resolved below.
+
+- [x] **Q6 — Write/query language-detection asymmetry (stemmer mismatch).**
+      Index-time text (a full document field, or a whole extracted blob) detects
+      language reliably; query-time text (typically 1–3 words) usually does not
+      reach `minConfidence: 0.5` and comes back `Undetermined`. Under the
+      originally-drafted "skip stemming when `Undetermined`" rule, a French
+      document is indexed as French-*stemmed* terms while a short French query is
+      looked up *unstemmed* → the BM25 exact-string term match misses. This also
+      regressed English: `"running"` would stop being unconditionally stemmed to
+      `run` on both sides once query-side detection could go `Undetermined`.
+
+      **Decision: best-guess, no confidence gate, for stemmer routing.**
+      `LanguageDetector.pureDart(minConfidence: 0.0)` (a *second*, low-confidence
+      instance, constructed once and reused — distinct from the default
+      `minConfidence: 0.5` instance used for the persisted/user-facing `language`
+      field) always returns `Detected(best, ranked)` whenever `ranked` is
+      non-empty — i.e. whenever there is *any* n-gram signal at all — rather than
+      `Undetermined` for merely-not-confident-enough input. Both write and query
+      paths use this zero-confidence result's `best.code` to select a stemmer.
+      This resolves the English-regression case cleanly (short English text
+      still guesses `en` — the n-gram stage doesn't need much signal to prefer
+      `en` over other candidates) and generally improves match odds for other
+      short queries too. Residual risk: a genuinely ambiguous short string can
+      still get a *wrong* language guess on the query side vs. the indexed
+      document's (correctly, confidently detected) language, causing a miss —
+      but that failure mode is no worse than the original "skip stemming"
+      behaviour, and is a smaller, rarer window than before. Accepted as a
+      documented trade-off consistent with `betto_lang_detector`'s "coarse,
+      error-tolerant" design philosophy (Q5).
+
+      **Efficiency note:** rather than running `detect()` twice (once per
+      confidence threshold) and paying the n-gram scoring cost twice, call the
+      zero-confidence detector **once** and apply the `>= 0.5` gate manually on
+      its result for the persisted `language` field:
+      `final language = (result is Detected && result.best.confidence >= 0.5)
+      ? result.best.code : null;` while `stemmerLanguageCode = (result is
+      Detected) ? result.best.code : null` always takes the best guess
+      regardless of confidence. One `detect()` call serves both purposes. See
+      Phase 2/3 below for exactly where this is threaded.
+- [x] **Q7 — Concrete stemming-refactor shape in `pipeline.dart` + vault path.**
+      The original draft only said "add a `languageCode` parameter to
+      `preprocess()`", but (a) `preprocess()` delegates to the top-level `stem()`
+      which is hard-wired to the module-level `_englishStemmer` singleton
+      (`pipeline.dart:28`, `stem()` at `~:80-83`), and (b) the vault write path
+      does **not** call `preprocess()` at all — `VaultChunker._preprocessTokens`
+      (`vault_chunker.dart:~223-231`) calls the top-level `stem(filtered)`
+      directly. Threading language into `preprocess()` alone would do nothing
+      for vault indexing.
+
+      **Decision: concrete refactor, specified below (see Phase 3 for the exact
+      checklist).** In short: retire `_englishStemmer`; add a private
+      `Map<String, Stemmer?>` cache (`_stemmerFor(languageCode)`, caching both
+      hits and the `ArgumentError` "unsupported" misses as `null`); change
+      `stem()`'s signature to `List<String> stem(List<String> tokens, {required
+      String? languageCode})` (required, not defaulted, so every call site must
+      consciously decide rather than silently inheriting old English-only
+      behaviour); thread the same required parameter through `preprocess()`;
+      and change `VaultChunker.chunk()` to `chunk(String text, {required
+      String? languageCode})`, passing it down to `_preprocessTokens`, which
+      calls the same shared `stem()` instead of the old direct call. Stop-word
+      filtering is unaffected (out of scope, see "Stop words: still out of
+      scope" below) — only the stemming stage changes shape.
 
 ## Investigation
 
@@ -568,88 +631,101 @@ on the new `betto_icu` version above), bundling two changes into one release:
 `/Users/gonk/development/bettongia/icu`) — prerequisite for Phase 0.5 and
 Phase 1**
 
-- [ ] In `lib/src/tokenizer.dart`, add `TokenSpan` and the `OffsetTokenizer`
+- [x] In `lib/src/tokenizer.dart`, add `TokenSpan` and the `OffsetTokenizer`
       interface (see design in the Investigation section above).
-- [ ] Implement `tokeniseSpans()` on `IcuTokenizer`
+- [x] Implement `tokeniseSpans()` on `IcuTokenizer`
       (`lib/src/icu_tokenizer.dart`): reuse the `start`/`end` values already
       produced by the `ubrk_next()` loop, adjusting for the leading/trailing
       punctuation trim that already happens before a span becomes a `word`.
-- [ ] Implement `tokeniseSpans()` on `RegExpTokenizer`
+      `tokenise()` is now defined in terms of `tokeniseSpans()` (no behaviour
+      change — all 49 pre-existing tests still pass unmodified).
+- [x] Implement `tokeniseSpans()` on `RegExpTokenizer`
       (`lib/src/regexp_tokenizer.dart`): map `_wordPattern.allMatches(text)`
       directly to `TokenSpan(m.group(0)!, m.start, m.end)`.
-- [ ] Export `TokenSpan`, `OffsetTokenizer` from `lib/betto_icu.dart`.
-- [ ] Tests: offsets correct for ASCII, multi-byte UTF-16/surrogate-pair
-      text (emoji, CJK, astral-plane characters), and text where ICU groups
-      trailing punctuation into a span (confirm the trim adjustment is
-      correct, not just the untrimmed span); empty input; confirm
-      `BrowserTokenizer` is unaffected (does not implement `OffsetTokenizer`,
-      by design).
-- [ ] Run `make coverage` / `make pre_commit` in the `icu` repo — all green.
-- [ ] Add a `CHANGELOG.md` entry for this change under the existing (already
-      committed, unreleased) `0.1.0-dev.2` version — no new version bump is
-      needed, this change lands in the pending `dev.2` release alongside its
-      other unrelated content. Confirm `dev.2` is still unpublished at
-      implementation time before assuming this; bump to the next version
-      instead if it has already been released.
-- [ ] **Pause here and ask the user to review and publish the new
-      `betto_icu` version to pub.dev** — publishing is never the
-      implementer's job (same hand-off boundary as WI-5). `betto_lexical`'s
-      Phase 0.5 depends on this being published first.
+- [x] Export `TokenSpan`, `OffsetTokenizer` from `lib/betto_icu.dart`. Also
+      updated `icu_tokenizer_stub.dart` (the web/no-`dart:ffi` stub) to
+      implement `OffsetTokenizer` too, so the conditional-export shape stays
+      consistent between the real and stub `IcuTokenizer`.
+- [x] Tests (new file `test/offset_tokenizer_test.dart`, 20 tests): shared
+      `OffsetTokenizer` contract tests against both implementations
+      (round-trip via `substring`, non-overlapping/ascending spans, parity
+      with `tokenise()`); ICU trim-adjustment specifically (leading and
+      trailing punctuation grouped into a raw ICU span, confirming the
+      *offsets* — not just the text — exclude the punctuation); multi-byte
+      UTF-16/surrogate-pair text (CJK, emoji/astral-plane, combining
+      diacritics); `TokenSpan` equality/hashCode/toString; empty input.
+      `BrowserTokenizer`'s exclusion from `OffsetTokenizer` is documented in
+      a code comment rather than runtime-tested — its constructor throws
+      immediately on native test hosts (requires `dart:js_interop`), so
+      there's no way to construct an instance to assert against; the
+      exclusion is enforced by the type system, not a runtime check.
+- [x] Ran `make pre_commit` (format_check, analyze, license_check, test) in
+      the `icu` repo — all green, 69 tests passing (49 pre-existing + 20
+      new). Coverage: `tokenizer.dart` 10/10, `regexp_tokenizer.dart` 14/14,
+      `icu_tokenizer.dart` 61/63 (the 2 misses are pre-existing
+      unreachable-without-mocking ICU-failure error paths, not new code).
+- [x] Added a `CHANGELOG.md` entry under a new `## 0.1.0-dev.2` heading
+      (confirmed via pub.dev's package API that only `0.1.0-dev.1` is
+      published — `dev.2` was still unreleased at implementation time, per
+      the version note above).
+- [x] **Paused and asked the user to review and publish the new `betto_icu`
+      version to pub.dev.** User committed and pushed (commit `6c18492` on
+      `bettongia/icu` `main`) and published `0.1.0-dev.2` themselves —
+      confirmed live via pub.dev's package API.
 
 **Phase 0.5 — extend `betto_lexical`: `Stemmer` languages +
 `OffsetTokenizer` re-export (separate repo:
 `/Users/gonk/development/bettongia/lexical`) — prerequisite for Phase 1 and
 Phase 3**
 
-- [ ] Bump the `betto_icu` dependency constraint in `pubspec.yaml` to the
-      version published in Phase 0.4.
-- [ ] Add `TokenSpan`, `OffsetTokenizer` to `lib/betto_lexical.dart`'s
-      re-export list (alongside the existing `Tokenizer`, `RegExpTokenizer`,
-      `IcuTokenizer`, `BrowserTokenizer`).
-- [ ] In `lib/src/stemmer.dart`, extend the `Stemmer` factory's switch
-      statement to map all **28** real `snowball_stemmer` languages to their
-      `Algorithm` enum value (see the full table in the Investigation section
-      above: `ar→arabic, hy→armenian, eu→basque, ca→catalan, da→danish,
-      nl→dutch, en→english, fi→finnish, fr→french, de→german, el→greek,
-      hi→hindi, hu→hungarian, id→indonesian, ga→irish, it→italian,
-      lt→lithuanian, ne→nepali, no→norwegian, pt→portuguese, ro→romanian,
-      ru→russian, sr→serbian, es→spanish, sv→swedish, ta→tamil, tr→turkish,
-      yi→yiddish` — all 28 except `porter`, which has no language-code
-      mapping). Keep the existing `ArgumentError` for every other code — this
-      becomes the deliberate "not supported" signal `kmdb`'s Phase 3 catches
-      to skip stemming (`kmdb` will only ever pass one of the 24 codes
-      `betto_lang_detector` can produce, but the package itself supports all
-      28).
-- [ ] Update the class doc comment (currently "Currently supports English
-      (`en`)") to list all 28 supported languages.
-- [ ] Add test coverage: one representative word → expected-stem pair per
-      newly-added language (a small, hand-picked case per language is enough
-      — this is a thin wrapper over an already-tested third-party algorithm,
-      not a reimplementation), plus confirm `ArgumentError` is still thrown
-      for an unsupported code (e.g. `'zh'`, `'ja'`).
-- [ ] Run `make coverage` / `make pre_commit` in the `lexical` repo — all
-      green.
-- [ ] Add a `CHANGELOG.md` entry describing both changes (expanded stemmer
-      coverage + `OffsetTokenizer` re-export) under the existing (already
-      committed, unreleased) `0.1.0-dev.2` version — no new version bump is
-      needed, same as `betto_icu`'s Phase 0.4. Confirm `dev.2` is still
-      unpublished at implementation time; bump to the next version instead
-      if it has already been released.
-- [ ] **Pause here and ask the user to review and publish the new
-      `betto_lexical` version to pub.dev** — same hand-off boundary as
-      Phase 0.4. Do not proceed to `kmdb` Phase 1 or Phase 3 until the new
-      version is published and its exact version number is confirmed.
-- [ ] Once published: since the release is still `0.1.0-dev.2` (not a new
-      version number), `kmdb`'s existing `betto_lexical: ^0.1.0-dev.1`
-      constraint in root `pubspec.yaml` `dependency_overrides` likely already
-      permits it (a caret constraint with a pre-release lower bound allows
-      later pre-releases of the same version, e.g. `dev.2`). Run `dart pub
-      get` at the workspace root and confirm it resolves to the new `dev.2`
-      content (check `pubspec.lock` / re-fetch if the cache is stale) rather
-      than assuming a constraint edit is needed — only bump the constraint
-      if resolution doesn't pick it up or if `dev.2` turns out to already be
-      published (i.e. this plan's changes land in `dev.3` instead, per the
-      version note above).
+- [x] Bumped the `betto_icu` dependency constraint in `pubspec.yaml` to
+      `^0.1.0-dev.2`. Had to clear a stale `~/.pub-cache/hosted/pub.dev/
+      .cache/betto_icu-versions.json` version-listing cache to get `dart pub
+      get` to see the newly-published version — not a code change, just a
+      local environment quirk, noted here in case it recurs.
+- [x] Added `TokenSpan`, `OffsetTokenizer` to `lib/betto_lexical.dart`'s
+      re-export list.
+- [x] Extended the `Stemmer` factory's switch statement to all **28** real
+      `snowball_stemmer` languages, exactly per the mapping above. Verified
+      each mapping by actually running the stemmer on a representative
+      inflected word per language (not guessed) — 26 of the 27 newly-added
+      languages produced visibly plausible suffix-stripping (e.g. `eu`
+      `etxeak`→`etxe`, `de` `Häuser`→`Haus`, `ta` `புத்தகங்கள்`→`புத்தகம்`);
+      `hy` (Armenian) was the one exception, returning its input unchanged —
+      plausible for a test word that happens not to trigger that ruleset,
+      not necessarily a red flag. This gives confidence the ISO-code→
+      `Algorithm` wiring is correct, not just that it compiles.
+- [x] Updated the class doc comment to list all 28 supported languages.
+- [x] Test coverage (`test/stemmer_test.dart`): one stem-accuracy test per
+      newly-added language using the captured real outputs above, plus a
+      completeness check that all 28 documented codes construct without
+      throwing, plus confirmed `ArgumentError` is still thrown for `zh`
+      (genuinely unsupported — no CJK Snowball algorithm) and an unknown
+      code. 40 tests total, all passing. Coverage: `stemmer.dart` 64/64
+      (100%).
+- [x] Ran `make pre_commit` (format_check, analyze, license_check, test) in
+      the `lexical` repo — all green (168 tests total across the whole
+      suite, no regressions).
+- [x] Added a `CHANGELOG.md` entry under the existing (already-present but
+      empty) `## 0.1.0-dev.2` heading, covering both the stemmer expansion
+      and the `OffsetTokenizer` re-export. Confirmed via pub.dev's package
+      API that only `0.1.0-dev.1` is published — `dev.2` still unreleased at
+      implementation time.
+- [x] **Paused and asked the user to review and publish the new
+      `betto_lexical` version to pub.dev** — user confirmed publication of
+      `0.1.0-dev.2` (verified independently via pub.dev's package API).
+- [x] Confirmed the existing `betto_lexical: ^0.1.0-dev.1` constraint in
+      root `pubspec.yaml` `dependency_overrides` already permits `dev.2` — no
+      constraint edit was needed. `dart pub get` alone kept resolving to the
+      stale `dev.1` lockfile entry, because `pub get` respects an existing
+      lockfile and only re-resolves on conflict; `dart pub upgrade
+      betto_lexical` was needed to move to the newer allowed pre-release.
+      Also hit the same stale per-package version-listing cache issue as
+      Phase 0.4 (`~/.pub-cache/hosted/pub.dev/.cache/betto_lexical-versions.json`)
+      — clearing it required the sandbox disabled (write-permission
+      restricted path), same as the `git push` steps. `pubspec.lock` now
+      shows `betto_lexical 0.1.0-dev.2` and `betto_icu 0.1.0-dev.2`
+      (transitive); full workspace `dart pub get` resolves cleanly.
 
 **Phase 1 — fix `VaultChunker` tokenization (the core bug fix)**
 
@@ -662,11 +738,17 @@ Phase 3**
       vault indexing is native-only per CLAUDE.md, so this always resolves to
       `IcuTokenizer`, which implements it) — mirrors the pattern already used
       in `FtsManager`/`vault_searcher.dart` for injecting tokenizers, and
-      enables deterministic testing with a fake `OffsetTokenizer`.
+      enables deterministic testing with a fake `OffsetTokenizer`. **Note:**
+      `VaultChunker`'s constructor is currently `const` — it cannot stay
+      `const` once it holds an `OffsetTokenizer` field (`IcuTokenizer` is not
+      a compile-time constant); drop `const` from the class declaration and
+      all call sites that construct it with `const VaultChunker(...)`.
 - [ ] Replace `_findTokenSpans` entirely with a call to
       `tokenizer.tokeniseSpans(text)` — no local offset reconstruction
       needed; the returned `TokenSpan.start`/`.end` are used directly.
-- [ ] Remove/replace the stale `:162` doc comment.
+- [ ] Remove/replace the stale doc comment at `_findTokenSpans` (currently
+      near `vault_chunker.dart:162`, though line numbers may have drifted —
+      confirm against current source rather than trusting the exact number).
 - [ ] Tests: pure-CJK, pure-Arabic, pure-Cyrillic, pure-Devanagari, pure-Thai
       sample text each produce a non-empty, sane chunk list; mixed
       Latin+CJK text; existing English/Latin fixture tests still pass
@@ -681,51 +763,106 @@ Phase 3**
 - [ ] Add `script` (String?) and `language` (String?) fields to
       `VaultExtractionState` (`toMap`/`fromMap`/`encode`/`decode`), following
       the existing `charset` field's pattern exactly (nullable, omitted from
-      `toMap()` when null).
+      `toMap()` when null). `language` here is the **confidence-gated**
+      (`>= 0.5`) value — the user-facing metadata field from Q1/Q2 — not the
+      best-guess value Phase 3 uses for stemmer routing (see below).
+- [ ] Construct one shared, reusable low-confidence detector instance for
+      stemmer routing: `LanguageDetector.pureDart(minConfidence: 0.0)` (per
+      Q6). Keep the default `minConfidence: 0.5` instance (or
+      `LanguageDetector.pureDart()`) for nothing else — Q6's efficiency note
+      means only the *low*-confidence instance is actually called; the
+      confidence gate for the persisted field is applied manually on its
+      result, not via a second detector/second `detect()` call.
 - [ ] In `_processWorkItem` (`vault_indexing_isolate.dart:328`), after
-      `extractedText` is obtained and before `VaultChunker.chunk()` is called,
-      run `LanguageDetector.pureDart().dominantScript(extractedText)` and
-      `.detect()`. Add both results to `VaultIndexResult` (`language` is
-      `null` when `detect()` returns `Undetermined`).
-- [ ] Thread the new field(s) from `VaultIndexResult` into the
+      `extractedText` is obtained and before `VaultChunker.chunk()` is called:
+      call `dominantScript(extractedText)` for the `script` field (unaffected
+      by Q6 — always the cheap, deterministic script-only lookup); call the
+      zero-confidence detector's `detect(extractedText)` **once**, and derive
+      both:
+      - `language` (persisted field) = `result.best.code` if `result is
+        Detected && result.best.confidence >= 0.5`, else `null`.
+      - `stemmerLanguageCode` (Phase 3 input, not persisted directly on
+        `VaultExtractionState` — threaded through `VaultIndexResult` into
+        `VaultChunker.chunk()`) = `result.best.code` if `result is Detected`,
+        else `null` (only `null` when `ranked` was empty, i.e. no signal at
+        all — see Q6).
+      Add `script`, `language`, and `stemmerLanguageCode` to `VaultIndexResult`
+      (the last is consumed by Phase 3 and does not need to survive into
+      `VaultExtractionState`).
+- [ ] Thread `script`/`language` from `VaultIndexResult` into the
       `VaultExtractionState` constructed in `vault_search_manager.dart:695-703`
       and the recovery-path construction at `:818-825`.
 - [ ] Update §32 (vault spec) to document the new field(s) and when they're
-      populated (parallel to how `charset` is documented for WI-2).
+      populated (parallel to how `charset` is documented for WI-2), including
+      the confidence-gating distinction above so a future reader doesn't
+      assume `language` is the same value used for stemmer selection.
 - [ ] Tests: isolate processing populates `script` correctly for Latin/CJK/
       Arabic/Cyrillic sample text and `null` for script-less input (e.g. a
       blob whose extracted text is only digits/punctuation); CBOR round-trip
       of the new field(s); the recovery path preserves previously-computed
-      values.
+      values; a case where the low-confidence guess exists but doesn't clear
+      0.5 (confirm `language` is `null` while `stemmerLanguageCode` still
+      carries the best guess).
 
 **Phase 3 — language-aware stemming (vault + document-field paths)**
 
 *Requires Phase 0.5's `betto_lexical` version to be published and pinned
 first.*
 
-- [ ] Add a `languageCode` (`String?`) parameter to `preprocess()` in
-      `pipeline.dart`. When non-null, attempt `Stemmer(Locale(languageCode))`
-      for Stage 4; when construction throws `ArgumentError` (language not
-      one of the 24 `betto_lexical` now supports) or `languageCode` is
-      `null`, **skip Stage 4 entirely** — do not fall back to the English
-      stemmer. This is the key behaviour change from today's unconditional
-      English default.
-- [ ] Consider caching constructed `Stemmer` instances per language code
-      (a small `Map<String, Stemmer>` — avoids rebuilding on every call).
-      Not required for correctness, worth doing for the hot query path.
-- [ ] Vault write path: pass the blob's already-detected `language` (from
-      Phase 2, threaded from `VaultIndexResult` into `VaultChunker`) as
-      `languageCode`.
-- [ ] Vault query path (`vault_searcher.dart:298`): run `detect()` on the
-      query string inline and pass its language code (or `null` if
-      `Undetermined`), so write and query paths agree.
-- [ ] Document-field FTS write path (`fts_manager.dart:238`, `:305`,
-      `:486`): run `detect()` on the field's text value inline and pass the
-      result. No persistence needed here (unlike the vault path) — this is
-      deterministic and cheap enough to recompute on every write, and there
-      is no isolate boundary forcing a cached value.
-- [ ] Document-field FTS query path (`fts_manager.dart:616`): run `detect()`
-      on the query string inline.
+- [ ] In `pipeline.dart`, remove the module-level `_englishStemmer` singleton
+      (`:28`). Replace it with a private `Map<String, Stemmer?>` cache and a
+      resolver:
+      ```dart
+      final _stemmerCache = <String, Stemmer?>{};
+
+      Stemmer? _stemmerFor(String? languageCode) {
+        if (languageCode == null) return null;
+        return _stemmerCache.putIfAbsent(languageCode, () {
+          try {
+            return Stemmer(Locale.fromSubtags(languageCode: languageCode));
+          } on ArgumentError {
+            return null; // not one of betto_lexical's supported languages
+          }
+        });
+      }
+      ```
+      This caches both hits and "unsupported" misses, so repeated calls for
+      an unsupported/undetermined code never re-throw or re-construct.
+- [ ] Change `stem()`'s signature to `List<String> stem(List<String> tokens,
+      {required String? languageCode})` — **required**, not defaulted, so
+      every call site must consciously pass a value rather than silently
+      inheriting the old always-English behaviour. Body: resolve via
+      `_stemmerFor(languageCode)`; if `null` (unsupported or no code
+      detected), return `tokens` unchanged (skip Stage 4 entirely — do not
+      fall back to English); otherwise map each token through the resolved
+      `Stemmer.stem()`.
+- [ ] Add the same `required String? languageCode` parameter to
+      `preprocess()`, passed straight through to `stem()`.
+- [ ] Change `VaultChunker.chunk()`'s signature to `VaultChunkResult
+      chunk(String text, {required String? languageCode})`, threading
+      `languageCode` into `_preprocessTokens`, which now calls the shared
+      `stem()` (imported from `pipeline.dart`) instead of its old direct,
+      hard-wired call. This is the fix for Q7 — the vault write path now
+      actually participates in language-aware stemming. Stop-word filtering
+      in `VaultChunker` is unchanged (still the hard-coded English boolean
+      gate — out of scope, see "Stop words: still out of scope").
+- [ ] Vault write path (`_processWorkItem` → `VaultChunker.chunk()`): pass
+      Phase 2's `stemmerLanguageCode` (the best-guess, non-confidence-gated
+      value from `VaultIndexResult`) as `languageCode`.
+- [ ] Vault query path (`vault_searcher.dart:298`): construct (or reuse) the
+      same `LanguageDetector.pureDart(minConfidence: 0.0)` instance from
+      Phase 2's design, call `.detect(query)`, and pass `result.best.code` (if
+      `Detected`) or `null` (if `Undetermined`, i.e. no signal at all) as
+      `languageCode` — the same best-guess policy as the write path, per Q6.
+- [ ] Document-field FTS write path (`fts_manager.dart:238`, `:305`, `:486`):
+      run the same zero-confidence `detect()` on the field's text value
+      inline and pass the resulting best-guess code. No persistence needed
+      here (unlike the vault path) — deterministic and cheap enough to
+      recompute on every write, and there is no isolate boundary forcing a
+      cached value.
+- [ ] Document-field FTS query path (`fts_manager.dart:616`): run the same
+      zero-confidence `detect()` on the query string inline, same best-guess
+      policy.
 - [ ] Tests: for a representative sample of the 24 newly-supported
       languages, confirm write and query paths select the same stemmer and
       that plural/inflected forms match their base form as expected (e.g.
@@ -736,6 +873,26 @@ first.*
       with no stemming applied, at both write and query time; an end-to-end
       vault and doc-field search round-trip (index then query) for at least
       one non-English supported language and one unsupported script.
+- [ ] Benchmark check (§18, `packages/kmdb/benchmark/main.dart`): this phase
+      adds a `detect()` call to every FTS write and every FTS/vault query, on
+      both the document-field and vault paths. Confirm this doesn't blow the
+      §18 P99 write/query latency targets — the n-gram scoring stage is not
+      free, especially on long field values or large extracted vault text.
+      If it's measurably hot, consider capping the input sampled by
+      `detect()` (`betto_lang_detector`'s own `dominantScript()` already caps
+      at 5,000 runes internally; `detect()`'s n-gram stage has no such cap
+      documented — verify, and add a local cap before calling it if needed
+      rather than assuming it's bounded).
+
+**Note on a reviewer claim that did not hold up:** the 2026-07-06 review
+flagged a "pre-existing write/query stopword asymmetry" between
+`VaultChunker` and `vault_searcher.dart`. Re-checked directly against source
+during this revision: both already resolve to the same `getStopWords(Locale
+('en'))` set (`vault_chunker.dart:23-25`'s `_englishStopWords` and
+`vault_searcher.dart:301`'s `defaultStopwords.listing`, which is the same
+`fts_manager.dart`-defined constant) — there is no asymmetry today. No fix
+needed here; this note exists so the discrepancy isn't silently
+re-introduced as a "known issue" during implementation.
 
 **Phase 4 — spec, proposal, and roadmap corrections**
 
@@ -763,6 +920,136 @@ first.*
       item before proceeding. Do not open a PR until sign-off is received.
 - [ ] Run `make pre_commit` — format, analyze, license_check, tests all green.
 - [ ] Verify licence headers on all new/changed files (2026).
+
+## Review — 2026-07-06 (kmdb-plan-reviewer)
+
+### Second pass — promoted to `Investigated`
+
+Both blocking questions were resolved by the coordinator and re-verified against
+source on this pass:
+
+- **Q6 resolved, mechanism verified.** `LanguageGuess.confidence` is a real
+  `double` in `[0,1]` (`lang_detector/lib/src/guess.dart:27`), and `detect()`'s
+  confidence value is computed by `backend.score()` **independently of
+  `minConfidence`** (`detector.dart:84-102`) — `minConfidence` only gates the
+  `Detected`/`Undetermined` decision. So the plan's one-call optimisation is
+  exactly correct: reusing the `minConfidence: 0.0` call's `best.confidence >= 0.5`
+  reproduces bit-for-bit what a separate `0.5`-gated detector would return for the
+  persisted `language` field, while `stemmerLanguageCode` takes the best guess
+  whenever any n-gram signal exists. The best-guess-both-sides policy removes the
+  English-regression case and is a coherent, documented trade-off. Good call.
+- **Q7 resolved, mechanism verified.** The `_stemmerFor` `Map<String,Stemmer?>`
+  cache (caching `ArgumentError` misses as `null`), the `required String?
+  languageCode` signatures on `stem()`/`preprocess()`/`VaultChunker.chunk()`, and
+  the rewire of `VaultChunker._preprocessTokens` onto the shared `stem()` together
+  make the vault write path actually participate in language-aware stemming. This
+  is concrete enough to implement mechanically.
+
+Non-blocking notes from the first pass were all addressed: `const`-drop added to
+Phase 1, §18 benchmark check added to Phase 3 (with a sensible note to verify/cap
+`detect()`'s input length), and the language-into-`VaultChunker` entry point
+pinned to a `chunk(text, {languageCode})` argument.
+
+**One retraction:** my first-pass "pre-existing write/query stopword asymmetry"
+note was **wrong** — verified directly this pass that `vault_searcher.dart:301`
+passes `stopWords: defaultStopwords.listing`, the same `getStopWords(Locale('en'))`
+set as `vault_chunker.dart`'s `_englishStopWords`. Both sides filter the same
+English stopwords today; there is no asymmetry. The plan's Phase 3 note documenting
+this is correct. The stale bullet in the first-pass notes below is left for the
+record but should be disregarded.
+
+**Verdict: `Investigated`.** An implementer can execute this without further
+design decisions. The only residual softness is cosmetic (line-reference drift of
+1–6 lines, all with named-symbol anchors, and the "trivial adjustment" phrasing in
+the ICU offset note where the icu-repo implementer has the source in front of
+them). Neither blocks implementation.
+
+### First pass — original blocking review (retained for the record)
+
+**Verdict: strong investigation, not yet `Investigated`.** Two items block
+mechanical implementation — one a genuine correctness/UX decision (Q6), one an
+under-specified integration point (Q7). Status set to `Questions`.
+
+### What is solid (verified against source)
+
+- **The stale-roadmap diagnosis is correct and well-evidenced.** `FtsManager`
+  does call `preprocess(..., createDefaultTokenizer(), ...)` at all four sites
+  (verified: `fts_manager.dart:237,303,485,615`), and `createDefaultTokenizer()`
+  resolves to `IcuTokenizer` (native) / `BrowserTokenizer` (web) via
+  `betto_lexical`'s conditional export — both UAX #29. There is no live
+  document-field tokenizer bug. Good call reframing the roadmap.
+- **The real vault bug is real and serious.** `VaultChunker._findTokenSpans`
+  (`vault_chunker.dart:164-178`) uses `RegExp(r"\w+(?:'\w+)*")` with no
+  `unicode:` flag; pure-CJK/Arabic/etc. text yields zero spans → empty chunk
+  list → blob silently unsearchable. Confirmed. Note the doc comment says the
+  helper starts at `:158` but the method is at `:164`; the regex is at `:167`.
+- **`OffsetTokenizer` design is sound and the "offsets already computed and
+  discarded" claim checks out.** `IcuTokenizer.tokenise()` iterates
+  `ubrk_next()` with `start`/`end` in scope, then trims via `_leadingNonWord`/
+  `_trailingNonWord` and returns only the `String` (`icu_tokenizer.dart:298-316`).
+  `RegExpTokenizer` maps `_wordPattern.allMatches(text)` and discards
+  `.start`/`.end` (`regexp_tokenizer.dart:54-60`). Additive interface, not a
+  breaking change. One tightening: the ICU trimmed-offset math needs the leading/
+  trailing trim *lengths* (e.g. `_leadingNonWord.firstMatch(span)?.end ?? 0`),
+  not just "a trivial adjustment" — worth stating so the icu-repo implementer
+  doesn't reinvent it.
+- **The Snowball 28-language table is exactly right** — verified against
+  `snowball_stemmer-0.1.0` `enum Algorithm` (28 languages + `porter`). The
+  `betto_lexical` `Stemmer` factory really does wire up only `en`
+  (`lexical/lib/src/stemmer.dart:40-50`), throwing `ArgumentError` otherwise —
+  so "construction throws → skip stemming" is a valid, already-existing signal.
+- **Version state confirmed.** pub.dev currently publishes `0.1.0-dev.1` for all
+  three of `betto_icu`, `betto_lexical`, `betto_lang_detector`; local working
+  copies of `icu` and `lexical` are already at an unreleased `0.1.0-dev.2`. The
+  plan's "land in the pending dev.2" instruction is correct. **Note:**
+  `lang_detector`'s local tree is *also* at `dev.2` (unreleased), but this plan
+  correctly consumes the *published* `dev.1` and needs no `lang_detector`
+  change — just confirm the published `dev.1` exposes `dominantScript()`/
+  `detect()` as described (the plan verified against the `dev.2` source).
+
+### Blocking issues
+
+1. **(Q6) Query-side detection is unreliable on short strings and reintroduces
+   a train/query mismatch — the very class of bug this plan fixes.**
+   `LanguageDetector.pureDart()` uses `minConfidence: 0.5` (`detector.dart:70`);
+   a 1–3 word query rarely clears that bar and returns `Undetermined`. The plan's
+   "run `detect()` on the query string ... so write and query paths agree"
+   asserts an agreement that does not hold. Concretely it can *regress English*
+   search (unstemmed short query vs. stemmed index), which contradicts the
+   Phase 3 acceptance test. This needs a design decision, not a test — see Q6.
+
+2. **(Q7) The stemming refactor is under-specified and misses the vault path.**
+   Phase 3 changes only `preprocess()`, but the vault write path
+   (`VaultChunker._preprocessTokens`) calls the top-level `stem()` directly, and
+   `stem()` is hard-wired to `_englishStemmer`. As written, the vault indexing
+   path would keep English-only stemming and the Phase 1 "thread language-aware
+   stemmer selection" checkbox has no concrete mechanism. Name the exact
+   `stem()`/singleton refactor and the `VaultChunker` signature change — see Q7.
+
+### Non-blocking, but address before/while implementing
+
+- **Benchmark the hot paths.** Phase 3 adds a `detect()` call to the FTS write
+  (`:237/:303/:485`) and query (`:615`) paths — per-field on every write,
+  per-query on every search. CLAUDE.md requires §18 benchmark checks for
+  search/storage-path work; the plan's final step lists only coverage. Add a
+  benchmark/regression check (n-gram scoring on large field values is not free).
+- **Pre-existing write/query stopword asymmetry, now in scope.** The vault index
+  path filters English stopwords (`vault_chunker.dart:228`) but the query path
+  (`vault_searcher.dart:298`) passes no `stopWords` (default `{}`) — so the two
+  sides already disagree on stopwords. The plan touches exactly this code and
+  claims to "close" write/query mismatches; either fix it here or explicitly
+  scope it out alongside the stopword-language deferral.
+- **`VaultChunker`'s `const` constructor must drop `const`** once it holds an
+  `OffsetTokenizer` field (`IcuTokenizer` is not a const value). Minor, but the
+  Phase 1 checklist implies a field addition without noting this.
+- **Pin down where the detected language enters `VaultChunker`.** Phase 2 detects
+  in `_processWorkItem` before `chunker.chunk(extractedText)`
+  (`vault_indexing_isolate.dart:~397`); specify whether the language is a
+  `chunk(text, languageCode)` argument or a constructor field so it is not left
+  to the implementer.
+- **Line-reference drift.** Several citations are off by one to a few lines
+  (`fts_manager` 238→237, 305→303, 486→485, 616→615; chunker `_findTokenSpans`
+  158→164). Harmless, worth a tidy so the implementer trusts the anchors.
 
 ## Summary
 
