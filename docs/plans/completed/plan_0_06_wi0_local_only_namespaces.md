@@ -15,7 +15,7 @@ of vector data per sync cycle that serves no purpose on the receiving device.
 
 This plan implements the `$$` (double-dollar) local-only namespace convention
 described in
-[Technical Proposal: Local-Only Namespace Segregation](../proposals/local_only_namespaces.md).
+[Technical Proposal: Local-Only Namespace Segregation](../../proposals/implemented/local_only_namespaces.md).
 The mechanism: at flush time, the memtable is partitioned into two SSTables (one
 syncable, one local-only) tracked by a `localOnly` flag in the Manifest; the
 sync engine skips local-only files at upload; compaction preserves the
