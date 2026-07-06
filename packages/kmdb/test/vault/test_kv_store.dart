@@ -24,19 +24,27 @@ import 'package:kmdb/src/vault/vault_recovery.dart';
 /// A minimal in-memory [KvStore] for vault tests.
 ///
 /// Only [get] is wired through to an internal map; all write methods are
-/// no-ops. Use [setRefCount] to seed a properly-encoded `$vault` reference
-/// count entry, or [setRawRefCount] to inject deliberately malformed bytes
-/// for fail-safe testing (review finding H3).
+/// no-ops. Use [setRefCount] to seed a properly-encoded `$vault:{sha256}`
+/// reference count entry, or [setRawRefCount] to inject deliberately
+/// malformed bytes for fail-safe testing (review finding H3).
+///
+/// Storage shape matches production: `(namespace: '$vault:{sha256}', key:
+/// kVaultRefCountSentinelKey)`, not `(namespace: '$vault', key: sha256)` — see
+/// [kVaultRefCountSentinelKey]'s doc comment for why.
 class TestKvStore implements KvStore {
   /// In-memory store: namespace → key → bytes.
   final Map<String, Map<String, Uint8List>> _data = {};
+
+  /// The per-blob namespace for [sha256]'s ref-count entry.
+  static String _refNamespace(String sha256) => '$kVaultNamespace:$sha256';
 
   /// Seeds a properly-encoded `$vault:{sha256}` entry with `refCount: count`.
   ///
   /// Uses the Phase 12 two-byte prefix format that [VaultRefInterceptor]
   /// produces: `[EncryptionFlag.none=0x00][CompressionFlag.none=0x00][CBOR map]`.
   void setRefCount(String sha256, int count) {
-    _data[kVaultNamespace] ??= {};
+    final ns = _refNamespace(sha256);
+    _data[ns] ??= {};
     final keyBytes = utf8.encode('refCount');
     final builder = BytesBuilder();
     builder.addByte(0x00); // EncryptionFlag.none (Phase 12 outer byte)
@@ -54,21 +62,22 @@ class TestKvStore implements KvStore {
       builder.addByte((count >> 8) & 0xFF);
       builder.addByte(count & 0xFF);
     }
-    _data[kVaultNamespace]![sha256] = builder.toBytes();
+    _data[ns]![kVaultRefCountSentinelKey] = builder.toBytes();
   }
 
-  /// Injects raw (possibly malformed) bytes for [sha256] under `$vault`.
+  /// Injects raw (possibly malformed) bytes for [sha256] under `$vault:{sha256}`.
   ///
   /// Used to simulate a corrupt/undecodable ref-count entry that callers
   /// must treat as "referenced" (retain), never as "no reference" (delete).
   void setRawRefCount(String sha256, Uint8List bytes) {
-    _data[kVaultNamespace] ??= {};
-    _data[kVaultNamespace]![sha256] = bytes;
+    final ns = _refNamespace(sha256);
+    _data[ns] ??= {};
+    _data[ns]![kVaultRefCountSentinelKey] = bytes;
   }
 
-  /// Removes any existing entry for [sha256] under `$vault`.
+  /// Removes any existing entry for [sha256] under `$vault:{sha256}`.
   void clearRefCount(String sha256) {
-    _data[kVaultNamespace]?.remove(sha256);
+    _data[_refNamespace(sha256)]?.remove(kVaultRefCountSentinelKey);
   }
 
   @override

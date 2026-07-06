@@ -177,4 +177,36 @@ void main() {
       await adapter.acquireLock('/db/LOCK');
     });
   });
+
+  // Exercises the real, non-overridden FaultyStorageAdapter.listFilesRecursive
+  // implementation directly. This is the fault-injection harness the plan's
+  // VaultGc/VaultRecovery tests exercise, so its own listFilesRecursive must
+  // be genuinely tested, not merely assumed correct because it's a real scan.
+  group('FaultyStorageAdapter — listFilesRecursive', () {
+    test('includes files nested arbitrarily deep', () async {
+      await adapter.writeFile('/db/vault/ab/cdef/manifest.json', _b(''));
+      final paths = await adapter.listFilesRecursive('/db/vault');
+      expect(paths, equals(['ab/cdef/manifest.json']));
+    });
+
+    test('returned paths have no leading path separator', () async {
+      await adapter.writeFile('/db/vault/ab/cdef/manifest.json', _b(''));
+      final paths = await adapter.listFilesRecursive('/db/vault');
+      for (final path in paths) {
+        expect(path.startsWith('/'), isFalse);
+      }
+    });
+
+    test('reflects only live (non-crashed) content', () async {
+      await adapter.writeFile('/db/vault/ab/cdef/manifest.json', _b(''));
+      // The write is un-synced, so a crash discards it — listFilesRecursive
+      // must reflect the live view, consistent with listFiles/fileExists.
+      adapter.crash();
+      expect(await adapter.listFilesRecursive('/db/vault'), isEmpty);
+    });
+
+    test('empty list for missing directory', () async {
+      expect(await adapter.listFilesRecursive('/db/nonexistent'), isEmpty);
+    });
+  });
 }

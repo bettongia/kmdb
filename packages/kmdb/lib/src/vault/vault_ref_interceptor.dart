@@ -19,7 +19,7 @@ import '../encryption/encryption_provider.dart';
 import '../engine/kvstore/kv_store.dart';
 import '../query/write_augmentor.dart';
 import 'vault_gc.dart';
-import 'vault_recovery.dart' show kVaultNamespace;
+import 'vault_recovery.dart' show kVaultNamespace, kVaultRefCountSentinelKey;
 import 'vault_ref.dart';
 import 'vault_ref_count.dart';
 import 'search/vault_namespaces.dart';
@@ -316,9 +316,13 @@ final class VaultRefInterceptor implements WriteAugmentor {
   Future<void> _increment(String sha256, WriteBatch batch) async {
     final current = await _readRefCount(sha256);
     final next = current + 1;
+    // See VaultRefCount's doc comment: the ref count lives at
+    // (namespace: '$vault:{sha256}', key: kVaultRefCountSentinelKey), not
+    // (namespace: '$vault', key: sha256) — a 64-char sha256 cannot pass
+    // KeyCodec.keyToBytes as a KV key.
     batch.put(
-      kVaultNamespace,
-      sha256,
+      '$kVaultNamespace:$sha256',
+      kVaultRefCountSentinelKey,
       await ValueCodec.encode({'refCount': next}, encryption: encryption),
     );
 
@@ -342,12 +346,12 @@ final class VaultRefInterceptor implements WriteAugmentor {
     if (next == 0) {
       // Remove the ref count entry entirely when it reaches zero so GC and
       // recovery can use absence-of-entry as a reliable zero signal.
-      batch.delete(kVaultNamespace, sha256);
+      batch.delete('$kVaultNamespace:$sha256', kVaultRefCountSentinelKey);
       await gc.onZeroRefs(sha256);
     } else {
       batch.put(
-        kVaultNamespace,
-        sha256,
+        '$kVaultNamespace:$sha256',
+        kVaultRefCountSentinelKey,
         await ValueCodec.encode({'refCount': next}, encryption: encryption),
       );
     }

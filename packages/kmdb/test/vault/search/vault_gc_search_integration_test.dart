@@ -47,7 +47,8 @@ import 'package:kmdb/src/vault/media_type_detector.dart';
 import 'package:kmdb/src/vault/search/vault_bm25_writer.dart';
 import 'package:kmdb/src/vault/search/vault_namespaces.dart';
 import 'package:kmdb/src/vault/vault_gc.dart';
-import 'package:kmdb/src/vault/vault_recovery.dart' show kVaultNamespace;
+import 'package:kmdb/src/vault/vault_recovery.dart'
+    show kVaultNamespace, kVaultRefCountSentinelKey;
 import 'package:kmdb/src/vault/vault_store.dart';
 
 // ── Test doubles ──────────────────────────────────────────────────────────────
@@ -88,9 +89,10 @@ final class _TestVaultStore extends VaultStore {
   }
 }
 
-/// An in-memory [KvStore] that stores `$vault` ref-count entries using SHA-256
-/// hex strings as keys (which are incompatible with the LSM engine's UUIDv7
-/// key codec).
+/// An in-memory [KvStore] that stores `$vault:{sha256}` ref-count entries
+/// under [kVaultRefCountSentinelKey] — the namespace-per-blob scheme
+/// (matching production; see [kVaultRefCountSentinelKey]'s doc comment for
+/// why the sha256 lives in the namespace, not the key).
 ///
 /// Used as the [VaultGc.kvStore] so that ref-count reads work correctly in
 /// tests. A separate real [KvStoreImpl] is passed as [VaultGc.searchStore] to
@@ -101,9 +103,12 @@ final class _TestVaultStore extends VaultStore {
 final class _RefCountKvStore implements KvStore {
   final Map<String, Map<String, Uint8List>> _data = {};
 
+  static String _refNamespace(String sha256) => '$kVaultNamespace:$sha256';
+
   /// Seeds a `$vault:{sha256}` ref-count entry encoding `{refCount: count}`.
   void setRefCount(String sha256, int count) {
-    _data[kVaultNamespace] ??= {};
+    final ns = _refNamespace(sha256);
+    _data[ns] ??= {};
     // Match the ValueCodec.encode format used by VaultRefInterceptor:
     // [0x00 encryption flag][0x00 compression flag][CBOR map {refCount: N}].
     final keyBytes = utf8.encode('refCount');
@@ -123,12 +128,12 @@ final class _RefCountKvStore implements KvStore {
       builder.addByte((count >> 8) & 0xFF);
       builder.addByte(count & 0xFF);
     }
-    _data[kVaultNamespace]![sha256] = builder.toBytes();
+    _data[ns]![kVaultRefCountSentinelKey] = builder.toBytes();
   }
 
   /// Removes the ref-count entry for [sha256] (simulates decrement to zero).
   void clearRefCount(String sha256) {
-    _data[kVaultNamespace]?.remove(sha256);
+    _data[_refNamespace(sha256)]?.remove(kVaultRefCountSentinelKey);
   }
 
   @override

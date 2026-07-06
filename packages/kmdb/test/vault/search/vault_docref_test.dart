@@ -28,7 +28,8 @@ import 'package:kmdb/src/engine/util/hlc.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
 import 'package:kmdb/src/vault/media_type_detector.dart';
 import 'package:kmdb/src/vault/vault_gc.dart';
-import 'package:kmdb/src/vault/vault_recovery.dart' show kVaultNamespace;
+import 'package:kmdb/src/vault/vault_recovery.dart'
+    show kVaultNamespace, kVaultRefCountSentinelKey;
 import 'package:kmdb/src/vault/vault_ref_interceptor.dart';
 import 'package:kmdb/src/vault/vault_store.dart';
 import 'package:kmdb/src/vault/search/vault_namespaces.dart';
@@ -172,7 +173,7 @@ final class _MemKvStore implements KvStore {
 
   /// Reads the ref count from `$vault:{sha256}`.
   Future<int> readRefCount(String sha256) async {
-    final bytes = _data[kVaultNamespace]?[sha256];
+    final bytes = _data['$kVaultNamespace:$sha256']?[kVaultRefCountSentinelKey];
     if (bytes == null) return 0;
     final decoded = await ValueCodec.decode(bytes);
     final v = decoded['refCount'];
@@ -476,7 +477,9 @@ void main() {
       // be present in the batch (not yet in the store).
       final docrefNs = '$kVaultDocRefPrefix${ref.sha256}';
       final refCountEntry = batch.entries.any(
-        (e) => e.namespace == kVaultNamespace && e.key == ref.sha256,
+        (e) =>
+            e.namespace == '$kVaultNamespace:${ref.sha256}' &&
+            e.key == kVaultRefCountSentinelKey,
       );
       final docrefEntry = batch.entries.any(
         (e) => e.namespace == docrefNs && e.key == _docId,

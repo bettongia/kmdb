@@ -16,6 +16,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
+import 'package:kmdb/src/engine/util/key_codec.dart';
 import 'package:kmdb/src/vault/media_type_detector.dart';
 import 'package:kmdb/src/vault/vault_manifest.dart';
 import 'package:kmdb/src/vault/vault_recovery.dart';
@@ -343,6 +344,37 @@ void main() {
         );
         expect(r.retainedUndecodable, equals(0));
       });
+    });
+  });
+
+  group('kVaultRefCountSentinelKey', () {
+    // This is the load-bearing guarantee the entire Bug 1 fix rests on: the
+    // sentinel key itself must pass through KeyCodec.keyToBytes (the exact
+    // validation that made the old flat `(namespace: '$vault', key: sha256)`
+    // scheme throw FormatException on every write). A non-conforming sentinel
+    // would silently reintroduce the bug this constant exists to fix.
+    test('KeyCodec.keyToBytes does not throw', () {
+      expect(
+        () => KeyCodec.keyToBytes(kVaultRefCountSentinelKey),
+        returnsNormally,
+      );
+    });
+
+    test('is 32 hex characters', () {
+      expect(kVaultRefCountSentinelKey.length, equals(32));
+    });
+
+    test('has the UUIDv7 version nibble (\'7\') at index 12', () {
+      expect(kVaultRefCountSentinelKey[12], equals('7'));
+    });
+
+    test('has a valid UUIDv7 variant nibble at index 16', () {
+      expect({
+        '8',
+        '9',
+        'a',
+        'b',
+      }, contains(kVaultRefCountSentinelKey[16].toLowerCase()));
     });
   });
 }

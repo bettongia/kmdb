@@ -149,6 +149,10 @@ final class _ThrowingWriteAdapter implements StorageAdapter {
       _delegate.listFiles(dirPath, extension: extension);
 
   @override
+  Future<List<String>> listFilesRecursive(String dirPath) =>
+      _delegate.listFilesRecursive(dirPath);
+
+  @override
   Future<int> fileSize(String path) => _delegate.fileSize(path);
 
   @override

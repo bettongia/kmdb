@@ -67,6 +67,18 @@ abstract interface class StorageAdapter {
   /// or does not exist.
   Future<List<String>> listFiles(String dirPath, {String? extension});
 
+  /// Recursively lists all files under [dirPath], returning paths relative to
+  /// [dirPath] (no leading path separator, e.g. `'ab/cd/manifest.json'`).
+  ///
+  /// Only files are returned — directory entries are omitted. Symlinks are
+  /// not followed. Returns an empty list if [dirPath] does not exist,
+  /// matching [listFiles]'s not-found behavior.
+  ///
+  /// This is the primitive backing `VaultStore.listFilesRecursive`
+  /// (`VaultGc.sweep`, `VaultRecovery`, and vault search enumeration all
+  /// depend on it transitively) — see §24 of the spec.
+  Future<List<String>> listFilesRecursive(String dirPath);
+
   /// Returns the size in bytes of the file at [path].
   ///
   /// Throws [StorageException] if the file does not exist.

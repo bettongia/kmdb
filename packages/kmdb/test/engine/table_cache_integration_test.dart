@@ -97,6 +97,10 @@ final class _CountingAdapter implements StorageAdapter {
       _inner.listFiles(dirPath, extension: extension);
 
   @override
+  Future<List<String>> listFilesRecursive(String dirPath) =>
+      _inner.listFilesRecursive(dirPath);
+
+  @override
   Future<Uint8List> readFile(String path) => _inner.readFile(path);
 
   @override

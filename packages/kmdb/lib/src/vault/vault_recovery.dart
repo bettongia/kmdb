@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/// @docImport '../engine/util/key_codec.dart';
+/// @docImport 'search/vault_namespaces.dart';
+library;
+
 import '../encryption/encryption_provider.dart';
 import '../engine/kvstore/kv_store.dart';
 import 'vault_ref_count.dart';
@@ -257,5 +261,47 @@ final class VaultRecoveryResult {
 
 /// The `$vault` system namespace key prefix for reference counts.
 ///
-/// Vault ref count entries are stored as `$vault:{sha256}` in the KV store.
+/// The full ref-count entry for a blob lives in the **namespace**
+/// `$vault:{sha256}` under the fixed key [kVaultRefCountSentinelKey] — see
+/// that constant's doc comment for why the sha256 cannot be the KV *key*
+/// directly. This constant is the bare `$vault` prefix (exported publicly as
+/// `kmdb.dart`'s `kVaultNamespace`); callers build the per-blob namespace as
+/// `'$kVaultNamespace:$sha256'`.
 const String kVaultNamespace = r'$vault';
+
+/// The fixed KV key under which a blob's `$vault:{sha256}` ref-count entry is
+/// stored.
+///
+/// ## Why a per-blob namespace, not a per-blob key
+///
+/// A SHA-256 hex digest is 64 characters, but [KeyCodec.keyToBytes] requires
+/// exactly 32 hex characters with UUIDv7 structure (version nibble `'7'` at
+/// index 12, variant nibble in `{8,9,a,b}` at index 16) — every KV key passes
+/// through this validation on every read/write. Storing the ref count as
+/// `(namespace: '$vault', key: sha256)` therefore throws a [FormatException]
+/// on every write, which is exactly the bug this constant's introduction
+/// fixes. The corrected scheme moves the sha256 into the **namespace**
+/// instead — `(namespace: '$vault:{sha256}', key: kVaultRefCountSentinelKey)`
+/// — mirroring the identical pattern already used by
+/// `kVaultDocRefPrefix`/`kVaultFtsCorpusPrefix`/`kVaultExtractPrefix` in
+/// `vault_namespaces.dart`. Namespace strings have no 32-char/UUIDv7
+/// constraint (only a ≤255 UTF-8 byte limit), so this preserves the full
+/// 256-bit hash losslessly with zero collision risk.
+///
+/// ## Why this constant, not the search-layer sentinel
+///
+/// A dedicated constant is defined here (rather than reusing the
+/// search-layer `kVaultCorpusSentinelKey` from `vault_namespaces.dart`) so
+/// that vault reference counting does not couple to FTS/search semantics for
+/// no reason — the two subsystems are independent and should stay that way,
+/// even though their sentinel *values* happen to be identical hex strings.
+///
+/// ## Why this specific value is safe
+///
+/// The value must itself pass [KeyCodec.keyToBytes] on every read/write,
+/// since it is a real KV key. It is UUIDv7-shaped: index 12 is `'7'`
+/// (version) and index 16 is `'9'` (a valid variant nibble). A test asserts
+/// `KeyCodec.keyToBytes(kVaultRefCountSentinelKey)` does not throw — this is
+/// the load-bearing guarantee the whole fix rests on; a non-conforming
+/// sentinel would silently reintroduce the exact bug being fixed here.
+const String kVaultRefCountSentinelKey = '01900000000070009000000000000000';

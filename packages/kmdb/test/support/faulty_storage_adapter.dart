@@ -195,6 +195,23 @@ final class FaultyStorageAdapter implements StorageAdapter {
   }
 
   @override
+  Future<List<String>> listFilesRecursive(String dirPath) async {
+    // Real prefix-scan implementation (not a forwarding stub) — this adapter
+    // owns its own flat `_live` map rather than wrapping an inner adapter.
+    // Mirrors MemoryStorageAdapter.listFilesRecursive, but scans `_live` (the
+    // possibly-volatile view), consistent with `listFiles` above.
+    final prefix = dirPath.endsWith('/') ? dirPath : '$dirPath/';
+    final results = <String>[];
+    for (final path in _live.keys) {
+      if (!path.startsWith(prefix)) continue;
+      // Unlike listFiles, nested paths are not filtered out — recursive
+      // listing is expected to surface every file under dirPath.
+      results.add(path.substring(prefix.length));
+    }
+    return results;
+  }
+
+  @override
   Future<int> fileSize(String path) async {
     final data = _live[path];
     if (data == null) throw StorageException('File not found', path: path);

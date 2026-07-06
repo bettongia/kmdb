@@ -19,24 +19,28 @@ import 'package:kmdb/src/engine/compaction/reclamation_policy.dart'
     show ReclamationPolicyRegistry;
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/util/hlc.dart';
-import 'package:kmdb/src/vault/vault_recovery.dart' show kVaultNamespace;
+import 'package:kmdb/src/vault/vault_recovery.dart'
+    show kVaultNamespace, kVaultRefCountSentinelKey;
 import 'package:kmdb/src/vault/vault_ref_count.dart';
 import 'package:test/test.dart';
 
 // ── Test double ─────────────────────────────────────────────────────────────
 
 /// A minimal in-memory [KvStore] that returns whatever raw bytes are stashed
-/// under `$vault:{sha256}`. Only [get] is functional; everything else is a
-/// no-op, so malformed values can be injected directly.
+/// under the `$vault:{sha256}` namespace (keyed by [kVaultRefCountSentinelKey],
+/// matching production storage). Only [get] is functional; everything else is
+/// a no-op, so malformed values can be injected directly.
 class _FakeKvStore implements KvStore {
   final Map<String, Uint8List> _vault = {};
 
-  /// Stores the exact [bytes] for [sha256] under the `$vault` namespace.
-  void setRaw(String sha256, Uint8List bytes) => _vault[sha256] = bytes;
+  /// Stores the exact [bytes] for [sha256] under the `$vault:{sha256}`
+  /// namespace.
+  void setRaw(String sha256, Uint8List bytes) =>
+      _vault['$kVaultNamespace:$sha256'] = bytes;
 
   @override
   Future<Uint8List?> get(String namespace, String key) async =>
-      namespace == kVaultNamespace ? _vault[key] : null;
+      key == kVaultRefCountSentinelKey ? _vault[namespace] : null;
 
   @override
   Future<void> put(String namespace, String key, Uint8List value) async {}

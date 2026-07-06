@@ -193,6 +193,51 @@ void main() {
     });
   });
 
+  // Exercises the *real*, non-overridden `MemoryStorageAdapter.listFilesRecursive`
+  // default directly — a ~30-strong set of test doubles across the suite
+  // override this method on VaultStore subclasses, so without a test like this
+  // the new real implementation could ship entirely unexercised (plan concern:
+  // "Memory-adapter real-default coverage").
+  group('listFilesRecursive', () {
+    test('includes files nested arbitrarily deep', () async {
+      await adapter.writeFile('/db/vault/ab/cdef/manifest.json', Uint8List(0));
+      final paths = await adapter.listFilesRecursive('/db/vault');
+      expect(paths, equals(['ab/cdef/manifest.json']));
+    });
+
+    test('returned paths have no leading path separator', () async {
+      await adapter.writeFile('/db/vault/ab/cdef/manifest.json', Uint8List(0));
+      final paths = await adapter.listFilesRecursive('/db/vault');
+      for (final path in paths) {
+        expect(path.startsWith('/'), isFalse);
+      }
+    });
+
+    test('includes files at every depth, not just direct children', () async {
+      await adapter.writeFile('/db/vault/top.txt', Uint8List(0));
+      await adapter.writeFile('/db/vault/ab/mid.txt', Uint8List(0));
+      await adapter.writeFile('/db/vault/ab/cdef/deep.txt', Uint8List(0));
+      final paths = await adapter.listFilesRecursive('/db/vault');
+      expect(paths, containsAll(['top.txt', 'ab/mid.txt', 'ab/cdef/deep.txt']));
+    });
+
+    test('empty list for missing directory', () async {
+      expect(await adapter.listFilesRecursive('/db/nonexistent'), isEmpty);
+    });
+
+    test('works with and without trailing slash on dirPath', () async {
+      await adapter.writeFile('/db/vault/ab/manifest.json', Uint8List(0));
+      expect(
+        await adapter.listFilesRecursive('/db/vault'),
+        equals(['ab/manifest.json']),
+      );
+      expect(
+        await adapter.listFilesRecursive('/db/vault/'),
+        equals(['ab/manifest.json']),
+      );
+    });
+  });
+
   group('renameFile', () {
     test('moves content to new path', () async {
       await adapter.writeFile('/db/tmp', Uint8List.fromList([42]));
