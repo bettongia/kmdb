@@ -1,8 +1,8 @@
 # Fix `$vault` Ref-Count Key Scheme and `VaultStore.listFilesRecursive` Stopgap
 
-**Status**: Implementing
+**Status**: Complete
 
-**PR link**: —
+**PR link**: #55
 
 ## Problem statement
 
