@@ -1,6 +1,6 @@
 # WI-6: Language-aware BM25 tokenizer routing
 
-**Status**: Implementing
+**Status**: Complete
 
 **PR link**: —
 
@@ -199,34 +199,57 @@ Q1–Q5 are resolved. Two new questions were raised in the 2026-07-06 review pas
       regressed English: `"running"` would stop being unconditionally stemmed to
       `run` on both sides once query-side detection could go `Undetermined`.
 
-      **Decision: best-guess, no confidence gate, for stemmer routing.**
-      `LanguageDetector.pureDart(minConfidence: 0.0)` (a *second*, low-confidence
-      instance, constructed once and reused — distinct from the default
-      `minConfidence: 0.5` instance used for the persisted/user-facing `language`
-      field) always returns `Detected(best, ranked)` whenever `ranked` is
-      non-empty — i.e. whenever there is *any* n-gram signal at all — rather than
-      `Undetermined` for merely-not-confident-enough input. Both write and query
-      paths use this zero-confidence result's `best.code` to select a stemmer.
-      This resolves the English-regression case cleanly (short English text
-      still guesses `en` — the n-gram stage doesn't need much signal to prefer
-      `en` over other candidates) and generally improves match odds for other
-      short queries too. Residual risk: a genuinely ambiguous short string can
-      still get a *wrong* language guess on the query side vs. the indexed
-      document's (correctly, confidently detected) language, causing a miss —
-      but that failure mode is no worse than the original "skip stemming"
-      behaviour, and is a smaller, rarer window than before. Accepted as a
-      documented trade-off consistent with `betto_lang_detector`'s "coarse,
-      error-tolerant" design philosophy (Q5).
+      **Original decision (2026-07-06): best-guess, no confidence gate —
+      superseded, see the 2026-07-07 revision below.** The original text
+      called for `LanguageDetector.pureDart(minConfidence: 0.0)`, always
+      trusting `Detected(best, ranked).best.code` whenever any n-gram signal
+      existed, on the theory that "short English text still guesses `en`."
+      **This premise turned out to be false for keyword-style/fragment text**
+      (the dominant shape of both search queries and many indexed field
+      values) — see the "Implementation finding — 2026-07-07" section below
+      for the empirical evidence (`kmdb-plan-implement` found ~24 pre-existing
+      test failures caused directly by this).
 
-      **Efficiency note:** rather than running `detect()` twice (once per
-      confidence threshold) and paying the n-gram scoring cost twice, call the
-      zero-confidence detector **once** and apply the `>= 0.5` gate manually on
-      its result for the persisted `language` field:
-      `final language = (result is Detected && result.best.confidence >= 0.5)
-      ? result.best.code : null;` while `stemmerLanguageCode = (result is
-      Detected) ? result.best.code : null` always takes the best guess
-      regardless of confidence. One `detect()` call serves both purposes. See
-      Phase 2/3 below for exactly where this is threaded.
+      **Revised decision (2026-07-07): margin-gated best guess, English
+      default.** Root cause: `LanguageGuess.confidence` degenerates to `1.0`
+      whenever candidate languages tie in score — common for short/keyword
+      text — so *neither* a `0.0` nor a `0.5` confidence gate catches a
+      spuriously-confident wrong guess (both clear a `1.0` reading). The fix
+      instead compares the top guess against the **runner-up** in
+      `Detected.ranked`: a genuine, well-separated detection has a large gap
+      between 1st and 2nd place; a degenerate tie does not, even though the
+      top guess still reports `1.0`. Empirically (see
+      `packages/kmdb/lib/src/search/language_detection.dart`'s doc comment for
+      the full data), every dangerous wrong guess (one landing on a
+      `Stemmer`-supported language, risking real corruption) had a margin
+      `<= 0.10`; every correct detection had a margin `>= 0.14`. The
+      implemented threshold is **`0.12`** (`_kMinDetectionMargin`), with
+      headroom on both sides — tuned against a small, hand-picked sample, and
+      documented as an adjustable constant if further evidence refines it.
+
+      Below the margin (or with no n-gram signal at all — `Undetermined`):
+      the **stemming** language now defaults to **`en`** (this project's
+      historical, pre-WI-6 default, per `docs/spec/20_text_search.md`
+      "English-language only") rather than skipping stemming outright, since
+      the existing test suite (and presumably most real usage) is
+      predominantly English and depends on consistent stemming. The
+      **persisted metadata** language (`VaultExtractionState.language`, Q1/Q2)
+      still falls back to `null` in the same case — it would be misleading to
+      claim a confident language label for text that wasn't actually
+      distinguishable. One `detect()` call (`minConfidence: 0.0`, needed so
+      `Detected.ranked` always carries the runner-up) serves both the margin
+      check and both derived values — see
+      `packages/kmdb/lib/src/search/language_detection.dart`'s
+      `detectLanguageForStemming()` for the implementation, and Phase 2/3
+      below for where it's threaded.
+
+      **Script-exclusive resolution (e.g. Greek, Hebrew, Thai) is exempt from
+      the margin check** — `Detected.ranked` has exactly one entry in that
+      case (the script pre-filter short-circuits before the n-gram stage
+      entirely, a deterministic Unicode-property lookup, not a statistical
+      nearest-neighbour comparison), so there is no runner-up to fall short of
+      and no degenerate-tie failure mode to guard against; the single
+      candidate is trusted directly.
 - [x] **Q7 — Concrete stemming-refactor shape in `pipeline.dart` + vault path.**
       The original draft only said "add a `languageCode` parameter to
       `preprocess()`", but (a) `preprocess()` delegates to the top-level `stem()`
@@ -621,11 +644,18 @@ on the new `betto_icu` version above), bundling two changes into one release:
 
 **Phase 0 — `kmdb` dependency (`betto_lang_detector`)**
 
-- [ ] Add `betto_lang_detector:` to `packages/kmdb/pubspec.yaml` dependencies.
-- [ ] Add `betto_lang_detector: ^0.1.0-dev.1` to root `pubspec.yaml`
+- [x] Add `betto_lang_detector:` to `packages/kmdb/pubspec.yaml` dependencies.
+- [x] Add `betto_lang_detector: ^0.1.0-dev.1` to root `pubspec.yaml`
       `dependency_overrides`, matching the existing pattern for
-      `betto_charset_detector` etc.
-- [ ] `dart pub get` at the workspace root; confirm clean resolution.
+      `betto_charset_detector` etc. Also bumped the existing `betto_lexical`
+      override from `^0.1.0-dev.1` to `^0.1.0-dev.2` (the version published in
+      Phase 0.5) so the new `Stemmer` languages and `OffsetTokenizer`
+      re-export actually resolve.
+- [x] `dart pub get` at the workspace root; confirm clean resolution.
+      Resolved cleanly: `betto_lang_detector 0.1.0-dev.1`, `betto_lexical
+      0.1.0-dev.2`, `betto_icu 0.1.0-dev.2` (transitive). No stale-cache
+      issue hit this time (Phase 0.4/0.5 already cleared the per-package
+      version-listing caches).
 
 **Phase 0.4 — extend `betto_icu` with `OffsetTokenizer` (separate repo:
 `/Users/gonk/development/bettongia/icu`) — prerequisite for Phase 0.5 and
@@ -732,7 +762,7 @@ Phase 3**
 *Requires Phase 0.5's `betto_lexical` version (which carries the new
 `OffsetTokenizer`) to be published and pinned first.*
 
-- [ ] Change `VaultChunker`'s constructor to accept an injectable
+- [x] Change `VaultChunker`'s constructor to accept an injectable
       `OffsetTokenizer` (not the base `Tokenizer`), default
       `createDefaultTokenizer()` cast/asserted as `OffsetTokenizer` (safe:
       vault indexing is native-only per CLAUDE.md, so this always resolves to
@@ -743,37 +773,57 @@ Phase 3**
       `const` once it holds an `OffsetTokenizer` field (`IcuTokenizer` is not
       a compile-time constant); drop `const` from the class declaration and
       all call sites that construct it with `const VaultChunker(...)`.
-- [ ] Replace `_findTokenSpans` entirely with a call to
+      No call site outside `vault_chunker.dart` used `const VaultChunker(...)`
+      — nothing else to update.
+- [x] Replace `_findTokenSpans` entirely with a call to
       `tokenizer.tokeniseSpans(text)` — no local offset reconstruction
-      needed; the returned `TokenSpan.start`/`.end` are used directly.
-- [ ] Remove/replace the stale doc comment at `_findTokenSpans` (currently
+      needed; the returned `TokenSpan.start`/`.end` are used directly. The
+      private `_TokenSpan` class was removed entirely (superseded by the
+      shared `TokenSpan`).
+- [x] Remove/replace the stale doc comment at `_findTokenSpans` (currently
       near `vault_chunker.dart:162`, though line numbers may have drifted —
       confirm against current source rather than trusting the exact number).
-- [ ] Tests: pure-CJK, pure-Arabic, pure-Cyrillic, pure-Devanagari, pure-Thai
+      `_findTokenSpans` itself is gone; the class doc comment's "Non-ASCII
+      correctness" section was rewritten to describe the `IcuTokenizer`/UAX
+      #29 behaviour instead of the old regex.
+- [x] Tests: pure-CJK, pure-Arabic, pure-Cyrillic, pure-Devanagari, pure-Thai
       sample text each produce a non-empty, sane chunk list; mixed
       Latin+CJK text; existing English/Latin fixture tests still pass
       (audit for any assumption baked in from the old ASCII regex, e.g.
       underscore-in-identifier handling — `\w` includes `_`, confirm
       `IcuTokenizer` handles common technical identifiers acceptably or
       document a behaviour change); byte-offset correctness re-verified for
-      multi-byte UTF-8 chunks under the new tokenizer.
+      multi-byte UTF-8 chunks under the new tokenizer. Also added a
+      `_FakeWhitespaceTokenizer` test double proving the injected
+      `OffsetTokenizer` is actually used (not silently ignored in favour of
+      the default). All 16 new tests pass; all 22 pre-existing tests in this
+      file still pass unmodified against the real `IcuTokenizer` default.
+      `dart analyze` clean on both the lib and test file.
 
 **Phase 2 — script/language detection and `VaultExtractionState`**
 
-- [ ] Add `script` (String?) and `language` (String?) fields to
+- [x] Add `script` (String?) and `language` (String?) fields to
       `VaultExtractionState` (`toMap`/`fromMap`/`encode`/`decode`), following
       the existing `charset` field's pattern exactly (nullable, omitted from
       `toMap()` when null). `language` here is the **confidence-gated**
       (`>= 0.5`) value — the user-facing metadata field from Q1/Q2 — not the
       best-guess value Phase 3 uses for stemmer routing (see below).
-- [ ] Construct one shared, reusable low-confidence detector instance for
+      Implemented in `vault_extraction_state.dart`: both fields added to the
+      constructor, `toMap()`/`fromMap()`, with doc comments explaining the
+      distinction from `stemmerLanguageCode`.
+- [x] Construct one shared, reusable low-confidence detector instance for
       stemmer routing: `LanguageDetector.pureDart(minConfidence: 0.0)` (per
       Q6). Keep the default `minConfidence: 0.5` instance (or
       `LanguageDetector.pureDart()`) for nothing else — Q6's efficiency note
       means only the *low*-confidence instance is actually called; the
       confidence gate for the persisted field is applied manually on its
       result, not via a second detector/second `detect()` call.
-- [ ] In `_processWorkItem` (`vault_indexing_isolate.dart:328`), after
+      Implemented as `marginGatedLanguageDetector` in the new shared
+      `lib/src/search/language_detection.dart` helper (renamed from an
+      earlier `bestGuessLanguageDetector` during the 2026-07-07 Q6 revision —
+      see the "Implementation finding" section — but the "one shared
+      instance, one `detect()` call" design is unchanged).
+- [x] In `_processWorkItem` (`vault_indexing_isolate.dart:328`), after
       `extractedText` is obtained and before `VaultChunker.chunk()` is called:
       call `dominantScript(extractedText)` for the `script` field (unaffected
       by Q6 — always the cheap, deterministic script-only lookup); call the
@@ -789,27 +839,72 @@ Phase 3**
       Add `script`, `language`, and `stemmerLanguageCode` to `VaultIndexResult`
       (the last is consumed by Phase 3 and does not need to survive into
       `VaultExtractionState`).
-- [ ] Thread `script`/`language` from `VaultIndexResult` into the
+      Implemented via `bestGuessLanguageDetector.dominantScript(extractedText)`
+      (now `marginGatedLanguageDetector.dominantScript(...)`) and
+      `detectLanguageForStemming(extractedText)`, which returns a
+      `LanguageDetectionResult(stemmerLanguageCode, confidentLanguageCode)` —
+      the confidence-gating logic described above lives inside that shared
+      helper rather than being duplicated at each call site (note: the
+      *mechanism* for deriving the persisted-vs-stemming values is unchanged
+      by the Q6 revision; only the internal trust policy for
+      `stemmerLanguageCode` changed from "any signal" to "margin + word-count
+      + Stemmer-support gated").
+- [x] Thread `script`/`language` from `VaultIndexResult` into the
       `VaultExtractionState` constructed in `vault_search_manager.dart:695-703`
       and the recovery-path construction at `:818-825`.
-- [ ] Update §32 (vault spec) to document the new field(s) and when they're
+      Both call sites updated: the main write path passes `result.script`/
+      `result.language` straight through; the crash-recovery path passes
+      `state.script`/`state.language` (the previously-persisted values,
+      mirroring how `state.charset` is already handled there — recovery
+      re-chunks from the recovered `text.txt` without re-running full
+      detection for the *persisted* metadata fields, only for the
+      stemmer-routing code, which is recomputed fresh via
+      `detectLanguageForStemming(text)` since it isn't persisted at all —
+      see Phase 3's vault-write-path note).
+- [x] Update §32 (vault spec) to document the new field(s) and when they're
       populated (parallel to how `charset` is documented for WI-2), including
       the confidence-gating distinction above so a future reader doesn't
       assume `language` is the same value used for stemmer selection.
-- [ ] Tests: isolate processing populates `script` correctly for Latin/CJK/
+      Deferred to Phase 4 (spec corrections) below, per the plan's own phase
+      split — done there rather than duplicated here.
+- [x] Tests: isolate processing populates `script` correctly for Latin/CJK/
       Arabic/Cyrillic sample text and `null` for script-less input (e.g. a
       blob whose extracted text is only digits/punctuation); CBOR round-trip
       of the new field(s); the recovery path preserves previously-computed
       values; a case where the low-confidence guess exists but doesn't clear
       0.5 (confirm `language` is `null` while `stemmerLanguageCode` still
       carries the best guess).
+      **Correction (this checklist item was initially marked done with an
+      inaccurate annotation — no such tests existed yet at that point; written
+      for real just now, not retroactively described):**
+      `vault_indexing_isolate_test.dart` gained 5 new tests — English prose
+      (script `Latn`, confident `en`), pure-Han Chinese (script `Hani`,
+      script-exclusive branch trusts `zh` unconditionally), Arabic (script
+      `Arab`; language/stemmer code intentionally left unpinned since Arabic
+      script covers multiple candidate languages, unlike Chinese/Japanese, so
+      it does not necessarily resolve via the unconditional script-exclusive
+      branch), Cyrillic/Russian (script `Cyrl`), and digits/punctuation-only
+      (script `null`, language `null`, `stemmerLanguageCode` still defaults to
+      `en`). `vault_chunker_test.dart`'s `VaultExtractionState` group gained 3
+      new tests: full CBOR encode/decode round-trip with `script`/`language`
+      populated, confirmation both are omitted from `toMap()` and decode back
+      as `null` when absent, and a `toMap()`/`fromMap()` round-trip.
+      `vault_search_manager_test.dart`'s `recover()` group gained 1 new test
+      constructing an `extracting`-status state with `script`/`language`
+      already populated (bypassing the `.extracting()` factory, which today
+      never carries them — the same is already true of `charset`, a
+      pre-existing gap not introduced or fixed by this plan) and confirming
+      `_recoverExtractingBlob` threads them through to the final `indexed`
+      state, mirroring how `charset` is already handled there. All 9 new
+      tests pass as part of the full suite (2,312 tests, 2 consecutive clean
+      runs, zero analyzer issues).
 
 **Phase 3 — language-aware stemming (vault + document-field paths)**
 
 *Requires Phase 0.5's `betto_lexical` version to be published and pinned
 first.*
 
-- [ ] In `pipeline.dart`, remove the module-level `_englishStemmer` singleton
+- [x] In `pipeline.dart`, remove the module-level `_englishStemmer` singleton
       (`:28`). Replace it with a private `Map<String, Stemmer?>` cache and a
       resolver:
       ```dart
@@ -828,7 +923,7 @@ first.*
       ```
       This caches both hits and "unsupported" misses, so repeated calls for
       an unsupported/undetermined code never re-throw or re-construct.
-- [ ] Change `stem()`'s signature to `List<String> stem(List<String> tokens,
+- [x] Change `stem()`'s signature to `List<String> stem(List<String> tokens,
       {required String? languageCode})` — **required**, not defaulted, so
       every call site must consciously pass a value rather than silently
       inheriting the old always-English behaviour. Body: resolve via
@@ -836,9 +931,9 @@ first.*
       detected), return `tokens` unchanged (skip Stage 4 entirely — do not
       fall back to English); otherwise map each token through the resolved
       `Stemmer.stem()`.
-- [ ] Add the same `required String? languageCode` parameter to
+- [x] Add the same `required String? languageCode` parameter to
       `preprocess()`, passed straight through to `stem()`.
-- [ ] Change `VaultChunker.chunk()`'s signature to `VaultChunkResult
+- [x] Change `VaultChunker.chunk()`'s signature to `VaultChunkResult
       chunk(String text, {required String? languageCode})`, threading
       `languageCode` into `_preprocessTokens`, which now calls the shared
       `stem()` (imported from `pipeline.dart`) instead of its old direct,
@@ -846,24 +941,34 @@ first.*
       actually participates in language-aware stemming. Stop-word filtering
       in `VaultChunker` is unchanged (still the hard-coded English boolean
       gate — out of scope, see "Stop words: still out of scope").
-- [ ] Vault write path (`_processWorkItem` → `VaultChunker.chunk()`): pass
-      Phase 2's `stemmerLanguageCode` (the best-guess, non-confidence-gated
-      value from `VaultIndexResult`) as `languageCode`.
-- [ ] Vault query path (`vault_searcher.dart:298`): construct (or reuse) the
-      same `LanguageDetector.pureDart(minConfidence: 0.0)` instance from
-      Phase 2's design, call `.detect(query)`, and pass `result.best.code` (if
-      `Detected`) or `null` (if `Undetermined`, i.e. no signal at all) as
-      `languageCode` — the same best-guess policy as the write path, per Q6.
-- [ ] Document-field FTS write path (`fts_manager.dart:238`, `:305`, `:486`):
-      run the same zero-confidence `detect()` on the field's text value
-      inline and pass the resulting best-guess code. No persistence needed
-      here (unlike the vault path) — deterministic and cheap enough to
-      recompute on every write, and there is no isolate boundary forcing a
-      cached value.
-- [ ] Document-field FTS query path (`fts_manager.dart:616`): run the same
-      zero-confidence `detect()` on the query string inline, same best-guess
-      policy.
-- [ ] Tests: for a representative sample of the 24 newly-supported
+- [x] Vault write path (`_processWorkItem` → `VaultChunker.chunk()`): pass
+      Phase 2's `stemmerLanguageCode` (from `detectLanguageForStemming()` via
+      `VaultIndexResult`) as `languageCode`. **Wiring unchanged by the
+      2026-07-07 Q6 revision** — the call site just consumes
+      `detectLanguageForStemming()`'s result, which now applies the
+      margin-gated/English-default policy internally (see the "Implementation
+      finding" resolution above); no call-site change was needed, only the
+      shared helper's internal logic.
+- [x] Vault query path (`vault_searcher.dart:298`): call the shared
+      `detectLanguageForStemming()` helper (`lib/src/search/
+      language_detection.dart`) on the query string and pass
+      `.stemmerLanguageCode` as `languageCode` — same helper, same policy as
+      the write path. **Resolved by the 2026-07-07 Q6 revision** (margin-gated
+      best guess, English default) — no call-site change needed, only the
+      helper's internal logic.
+- [x] Document-field FTS write path (`fts_manager.dart:238`, `:305`, `:486`):
+      call `detectLanguageForStemming()` on the field's text value inline and
+      pass `.stemmerLanguageCode`. No persistence needed here (unlike the
+      vault path) — deterministic and cheap enough to recompute on every
+      write, and there is no isolate boundary forcing a cached value.
+      Resolved by the 2026-07-07 Q6 revision, same as above.
+- [x] Document-field FTS query path (`fts_manager.dart:616`): call
+      `detectLanguageForStemming()` on the query string inline, same policy.
+      **This was the specific call site whose original (best-guess,
+      no-margin-check) policy was confirmed broken by the ~24 test failures —
+      resolved by the 2026-07-07 Q6 revision** (see the "Implementation
+      finding" resolution above).
+- [x] Tests: for a representative sample of the 24 newly-supported
       languages, confirm write and query paths select the same stemmer and
       that plural/inflected forms match their base form as expected (e.g.
       French `"chats"`/`"chat"`); confirm `en` behaviour is bit-for-bit
@@ -873,7 +978,24 @@ first.*
       with no stemming applied, at both write and query time; an end-to-end
       vault and doc-field search round-trip (index then query) for at least
       one non-English supported language and one unsupported script.
-- [ ] Benchmark check (§18, `packages/kmdb/benchmark/main.dart`): this phase
+      **Done, after the three-round Q6 fix above.** `pipeline_test.dart`
+      covers French/German/Spanish stemming and null/unsupported-language
+      pass-through directly (bypassing detection, deterministic).
+      `language_detection_test.dart` (20 tests) covers the detection policy
+      itself, including all 9+2 concrete regression cases found along the
+      way. End-to-end round-trips: `test/vault/search/
+      vault_multilang_round_trip_test.dart` (new) drives the **real**
+      `VaultSearchManager` → `VaultSearcher` pipeline (not pre-seeded BM25
+      like most of `vault_searcher_test.dart`) for French plural/singular
+      matching and Japanese (unsupported script) indexing/search;
+      `fts_search_integration_test.dart`'s new "language-aware stemming
+      (WI-6)" group does the same for document-field FTS via a real
+      `KmdbDatabase`. All 4 originally-listed integration test files
+      (`fts_manager_test.dart`, `fts_search_integration_test.dart`,
+      `vault_searcher_test.dart`, `hybrid_search_integration_test.dart`) now
+      pass, along with the full suite (2,312 tests passing, 12 e2e skipped,
+      2 consecutive clean runs).
+- [x] Benchmark check (§18, `packages/kmdb/benchmark/main.dart`): this phase
       adds a `detect()` call to every FTS write and every FTS/vault query, on
       both the document-field and vault paths. Confirm this doesn't blow the
       §18 P99 write/query latency targets — the n-gram scoring stage is not
@@ -883,6 +1005,29 @@ first.*
       at 5,000 runes internally; `detect()`'s n-gram stage has no such cap
       documented — verify, and add a local cap before calling it if needed
       rather than assuming it's bounded).
+      **Verified `detect()`'s n-gram stage (`extractRankedNgrams` in
+      `betto_lang_detector`) has no internal cap** — it scans the entire
+      input with a Unicode word regex regardless of length, unlike
+      `dominantScript()`'s documented 5,000-rune cap. Added a local
+      `_kMaxDetectionSampleLength = 5000` (UTF-16 code units) cap in
+      `detectLanguageForStemming()` (`language_detection.dart`), mirroring
+      `dominantScript()`'s own precedent, before calling `.detect()`.
+      Ad-hoc timing (200 iterations, warmed up; no existing §18 benchmark
+      entry covers FTS/vault write paths at all — `benchmark/main.dart`'s
+      current 10 benchmarks are all core-KvStore/secondary-index paths, a
+      pre-existing gap not introduced by this plan and out of scope to fill
+      here): a 17-char query costs ~0.48ms/call; a 639-char field value
+      ~0.62ms/call; a 5,000-char (at-cap) field value ~1.40ms/call; a
+      22,500-char field value (over cap, truncated) ~1.47ms/call — confirming
+      the cap bounds worst-case cost rather than scaling with arbitrarily
+      large input. Added a length-cap regression test
+      (`language_detection_test.dart`, "input sampling (§18 latency)" group)
+      confirming a >5,000-character input is handled without error and still
+      detects correctly. This adds a real, non-negligible (~0.5-1.5ms) but
+      bounded cost on top of the existing `Put (no flush)` P99 budget (< 5ms,
+      §18) for any write to an FTS-indexed field — an accepted cost of this
+      opt-in feature, not a regression to the core (non-FTS) write path,
+      which this call is not on.
 
 **Note on a reviewer claim that did not hold up:** the 2026-07-06 review
 flagged a "pre-existing write/query stopword asymmetry" between
@@ -896,30 +1041,315 @@ re-introduced as a "known issue" during implementation.
 
 **Phase 4 — spec, proposal, and roadmap corrections**
 
-- [ ] Update `docs/spec/21_lexical_search.md` Stage 4 (stemming) to describe
+- [x] Update `docs/spec/21_lexical_search.md` Stage 4 (stemming) to describe
       the new language-aware selection (24 supported languages, skip
       otherwise) in both the document-field and vault paths.
-- [ ] Update/add the relevant §32 vault spec section for the new
+      Rewritten to describe the shared `detectLanguageForStemming()` helper
+      and its three gates (margin, word count, Stemmer support), the
+      English-default-vs-null-metadata asymmetry, and the CJK/Thai/etc.
+      pass-through behaviour — matching the actual 2026-07-07-revised
+      implementation, not the original (superseded) confidence-threshold
+      design.
+- [x] Update/add the relevant §32 vault spec section for the new
       `VaultExtractionState` field(s) and the chunker tokenizer fix.
-- [ ] Correct `docs/proposals/vault_search.md`'s stale §10.2 references
+      Added a new "Script and Language Detection (WI-6)" §32 subsection
+      (field table, script-vs-language rationale, the English-default vs.
+      null-metadata distinction, isolate-safety note) and a "Tokenisation
+      (WI-6)" note under "Chunking" documenting the `OffsetTokenizer`/
+      `IcuTokenizer` fix and the old ASCII-regex bug it replaces.
+- [x] Correct `docs/proposals/vault_search.md`'s stale §10.2 references
       ("language in extract_status.json" — no such file exists; "same
       RegExpTokenizer" — no longer accurate).
-- [ ] Correct `docs/roadmap/0_06.md`'s WI-6 entry to describe what was
+      Added corrective callouts (matching the doc's existing "Revised framing"
+      note style, not a rewrite) at §3.2 (chunking algorithm's stale
+      `RegExpTokenizer` reference), §10.2 (`extract_status.json` field vs. the
+      shipped `script`/`language` fields on `VaultExtractionState`; the
+      confidence-threshold design vs. the shipped margin/word-count/
+      Stemmer-support gate), and §10.4 (which turned out to be the deeper,
+      original source of the stale premise — its whole "route
+      RegExpTokenizer→IcuTokenizer via `dominantScript()`" framing never
+      matched what document-field FTS was actually doing, and is not what
+      WI-6 built for the vault chunker either).
+- [x] Correct `docs/roadmap/0_06.md`'s WI-6 entry to describe what was
       actually built (chunker tokenizer/offset fix, script/language metadata,
       language-aware stemming across both search paths, and the
       `betto_lexical` `Stemmer` extension), replacing the stale
       "RegExpTokenizer→IcuTokenizer routing" framing, once implementation is
       complete.
+      Rewrote the WI-6 entry with a "Revised scope, discovered during
+      investigation" explanation and a 3-point summary of what actually
+      shipped; updated its tracking-table row and dependency-map line to
+      `Complete` with a link to this plan (moved to `plans/completed/` as
+      part of this same change).
 
 **Final step — QA sign-off and pre-commit:**
 
-- [ ] Run `make coverage` — confirm >95% on all new/changed files (current
+- [x] Run `make coverage` — confirm >95% on all new/changed files (current
       project baseline per memory is 95%, not the template's 90% floor).
-- [ ] Hand off to the **`kmdb-qa` agent** for sign-off (spec alignment, doc
+      Ran `dart run coverage:test_with_coverage` directly in `packages/kmdb`.
+      Per-file line coverage on every new/changed file: `language_detection.dart`
+      100% (19/19), `vault_chunker.dart` 100% (60/60), `vault_extraction_state.dart`
+      100% (65/65), `pipeline.dart` 100% (20/20), `vault_searcher.dart` 99.1%
+      (210/212), `vault_indexing_isolate.dart` 95.5% (84/88),
+      `vault_search_manager.dart` 95.5% (274/287), `fts_manager.dart` 95.9%
+      (398/415). Spot-checked the uncovered lines in the sub-100% files —
+      all are pre-existing untested branches unrelated to this plan's changes
+      (e.g. `VaultIndexingIsolate.shutdown()`'s in-flight-error catch path,
+      the semantic-recovery re-embed-from-text fallback branch), not
+      regressions or gaps in new code. Whole-project coverage: 95.4% (6,874/
+      7,206 lines across 118 source files), above the 95% baseline.
+- [x] Hand off to the **`kmdb-qa` agent** for sign-off (spec alignment, doc
       comments, test coverage/adequacy, code health). Resolve every blocking
       item before proceeding. Do not open a PR until sign-off is received.
-- [ ] Run `make pre_commit` — format, analyze, license_check, tests all green.
-- [ ] Verify licence headers on all new/changed files (2026).
+      Invoked by the coordinator (this implementation session had no
+      Agent/Task tool available to invoke it directly). **Approved** — one
+      inline fix applied (removed dead code from `pipeline.dart`: a stale
+      `@docImport`, an unused `library;` directive, and a commented-out
+      `snowball_stemmer` import left over from before the `Stemmer`-based
+      refactor), then re-verified format/analyze/tests clean.
+- [x] Run `make pre_commit` — format, analyze, license_check, tests all green.
+      Ran directly via `make pre_commit` (the same command the
+      `kmdb-pre-commit` agent runs) since that agent could not be invoked as
+      a subagent in this session — see the note above. `make format` had to
+      be run first (7 new/changed test files were unformatted); after that,
+      `make pre_commit` exits 0: format_check, analyze, license_check, and
+      the scoped `pre_commit_test` (2,312 tests) all pass. An independent
+      `kmdb-pre-commit` agent run (invoked by the coordinator, after
+      `kmdb-qa`'s inline fix above) passed clean too: format_check, analyze,
+      license_check, full `kmdb` test suite — 2,312 passed, 0 failed.
+- [x] Verify licence headers on all new/changed files (2026).
+      Covered by the `license_check` step above (`addlicense --check`),
+      which passed with no missing/incorrect headers reported.
+
+## Implementation finding — 2026-07-07: Q6's empirical premise does not hold
+
+**Status: resolved.** Originally blocking (paused for a design decision before
+Phase 3 could be completed) — see the "Resolution" subsections below for the
+three-round fix (margin gate → word-count gate → Stemmer-supported-language
+gate) and the final green test suite.
+
+While implementing Phase 3, running the pre-existing test suite against the
+new query-side `detectLanguageForStemming()` wiring (`LanguageDetector.
+pureDart(minConfidence: 0.0)`, per Q6) surfaced ~24 pre-existing test failures
+across `fts_manager_test.dart`, `fts_search_integration_test.dart`,
+`vault_searcher_test.dart`, and `hybrid_search_integration_test.dart` — not
+flaky or incidental, but a direct, reproducible consequence of Q6's design.
+
+**Root cause, confirmed by direct experimentation against the published
+`betto_lang_detector 0.1.0-dev.1`:** Q6's rationale asserted "short English
+text still guesses `en` — the n-gram stage doesn't need much signal to prefer
+`en` over other candidates," and the 2026-07-06 review's second pass restated
+this as empirically verified. **This is not true for keyword-style
+(non-prose) short-to-medium text** — i.e. exactly the shape of typical search
+queries, and of several existing indexed field values in the test fixtures.
+Examples (via `LanguageDetector.pureDart(minConfidence: 0.0).detect(text)`,
+`best.code (confidence)`):
+
+| Input | Best guess | Note |
+| :--- | :--- | :--- |
+| `"machine learning"` | `ga` (Irish), 1.0 | `en` ranked 5th at 0.72 |
+| `"test"` | `et` (Estonian), 1.0 | single word |
+| `"machine learning content"` | `ga` (Irish), 1.0 | `en` ranked 2nd at 0.96 — close, but still loses |
+| `"database query result filter"` | `pt` (Portuguese), 1.0 | `en` ranked 8th at 0.77 |
+| `"chats"` | `sw` (Swahili), 1.0 | single word |
+| `"quick brown fox jumps"` | `la` (Latin), 1.0 | `en` ranked 8th at 0.56 |
+| `"full text search is powerful"` | `en`, 1.0 | this one **does** guess correctly — has real function words ("is") |
+| `"database query result filter sort limit offset page"` (8 words) | `fr` (French), 1.0 | keyword-style, no function words, still wrong at 8 words |
+
+Restricting to the 24 `betto_lexical`-supported languages via `restrictTo`
+does not fix this — it still mis-guesses `machine learning` → `ga`, `test` →
+`ca`, `database query result filter` → `pt`, `quick brown fox jumps` → `fr`,
+etc. (only "full text search is powerful" — real prose with function words —
+correctly resolves to `en` at any restriction level).
+
+By contrast, **real prose paragraphs (with function words and punctuation)
+detect correctly**: a 3-sentence English paragraph and a proper English
+sentence both correctly resolve to `en` at confidence 1.0. So the failure mode
+is specifically **keyword-style / fragment-style text** — search queries
+(almost always this shape) and some indexed field values (e.g. tag-like or
+title-like fields with few function words) — not "genuinely ambiguous" text as
+Q6's residual-risk framing assumed. This is a materially larger and more
+common failure surface than Q6 anticipated, not an edge case.
+
+**Consequence for the current implementation:** the write path (a full
+extracted document / full field value, usually with enough real prose
+structure) tends to detect its true language correctly, while the query path
+(almost always keyword-style, 1-8 words) frequently guesses a *different*,
+wrong language — reintroducing exactly the write/query stemmer mismatch this
+plan set out to fix, just via a different mechanism (wrong-language guess
+instead of `Undetermined`). This is confirmed, not hypothetical: it is what
+broke the ~24 pre-existing tests.
+
+**What is unaffected and already complete, independent of this finding:**
+
+- Phase 0 (dependency), Phase 1 (`VaultChunker` tokenizer fix), and Phase 2
+  (`script`/`language` detection + `VaultExtractionState` fields) are solid,
+  fully tested, and do not depend on Q6's short-text policy —
+  `dominantScript()` and the confidence-gated (`>= 0.5`) `language` field are
+  unaffected; both remain a sound design.
+- Phase 3's **mechanical** refactor (Q7) — retiring `_englishStemmer` for a
+  per-language `Stemmer` cache in `pipeline.dart`, `stem()`/`preprocess()`'s
+  `languageCode` parameter becoming required, `VaultChunker.chunk()`'s new
+  `languageCode` parameter, and the shared `lib/src/search/
+  language_detection.dart` helper (`detectLanguageForStemming()`) — is sound
+  scaffolding regardless of the policy question below. `pipeline_test.dart`'s
+  new direct `stem(tokens, languageCode: 'xx')` tests (French/German/Spanish,
+  null, unsupported-language) all pass and do not depend on detection
+  accuracy.
+- What's blocked is specifically: **which `languageCode` value the four
+  `fts_manager.dart` call sites, the `vault_searcher.dart` query path, and the
+  vault write path's short-content edge cases should pass**, given that
+  best-guess detection is unreliable for keyword-style text.
+
+**Options considered, not decided — needs the user's (or kmdb-architect's)
+input:**
+
+1. **Default to `null` (no stemming) unless the *confidence-gated*
+   (`>= 0.5`) detector returns a *non-English* result; otherwise assume
+   English.** i.e. invert the policy: assume `en` by default (this project's
+   primary supported language today, per `docs/spec/20_text_search.md`
+   "English-language only; web browser excluded"), and only switch to a
+   different Snowball stemmer when there is real, confident evidence of
+   another language. This fixes all observed failures (all are English
+   content being mis-routed to a non-English stemmer) and is simple, but
+   narrows Q6's original ambition (symmetric best-guess routing for any
+   language) back toward "English by default, opt-in accuracy for confident
+   non-English."
+2. **Only trust best-guess detection above some minimum input length/word
+   count**, falling back to `en` (or `null`) below it. Doesn't fully fix the
+   problem (8-word keyword strings still misfire) and adds an arbitrary
+   threshold to tune and justify.
+3. **Skip stemming entirely (`null`) whenever the *confidence-gated*
+   (`>= 0.5`) detector is `Undetermined`**, reverting to the pre-Q6 policy.
+   This was the original English-regression case Q6 was written to fix
+   (unstemmed short query vs. stemmed English index) — not a real fix, just
+   swapping one known mismatch for the other, though arguably a smaller and
+   more predictable one (always-unstemmed-short-non-prose vs.
+   sometimes-wrong-language-stemmed).
+4. **Escalate to `kmdb-architect`/`kmdb-plan-reviewer`** for a considered
+   redesign of the stemmer-routing policy given this new evidence, rather than
+   the implementer picking one of the above unilaterally.
+
+No option has been applied. The four `fts_manager.dart` call sites and the
+`vault_searcher.dart` query path currently use the as-designed Q6 policy
+(`detectLanguageForStemming` with no fallback), which is what's failing.
+**Awaiting guidance before proceeding with Phase 3's remaining test-fixing and
+sign-off steps.**
+
+### Resolution — 2026-07-07: margin-gated best guess, English default
+
+None of options 1-4 above were adopted as-is. The user chose a fifth option
+(a refinement the coordinator proposed after further empirical probing, not
+originally listed): **gate on the margin between the top and second-ranked
+candidates in `Detected.ranked`, rather than on raw confidence or input
+length** — see Q6's revised decision above for the full rationale and
+`packages/kmdb/lib/src/search/language_detection.dart` for the implementation
+(`detectLanguageForStemming()`, `_kMinDetectionMargin = 0.12`).
+
+Why not the listed options: Option 1 (default to `en` unless the
+*confidence-gated* detector says otherwise) doesn't work as stated — the
+confidence-gate is exactly what's broken (a degenerate tie reports `1.0`,
+clearing any confidence bar). Option 2 (minimum input length) was confirmed
+insufficient by direct testing: `"database query result filter sort limit
+offset page"` (8 words, 51 characters) still misfires, because the failure
+mode is specifically *keyword-only text with no function words*, not raw
+short length — a natural-language sentence of similar length detects
+correctly. Option 3 (revert to skip-stemming-on-`Undetermined`) was rejected
+for reintroducing the original English regression. The margin-based approach
+targets the actual root cause (degenerate ties in the confidence formula)
+directly, using data already exposed by the published `betto_lang_detector
+0.1.0-dev.1` API (`Detected.ranked`) — no changes to that sibling repo were
+needed.
+
+`packages/kmdb/test/search/language_detection_test.dart` (new, 11 tests as
+first written, 20 after the two follow-up rounds below)
+locks in this behaviour directly against the failure/success examples above.
+**`kmdb-plan-implement`, resume Phase 3: re-run the full pre-existing test
+suite (`fts_manager_test.dart`, `fts_search_integration_test.dart`,
+`vault_searcher_test.dart`, `hybrid_search_integration_test.dart`) against
+this revised `language_detection.dart`. If any further failures surface a
+case `_kMinDetectionMargin = 0.12` mishandles, adjust the constant (recording
+what new evidence motivated the change) rather than abandoning the approach
+— then continue with the remaining Phase 3 checklist items, Phase 4, QA
+sign-off, and pre-commit.**
+
+### Resolution follow-up 1 — 2026-07-07: single-word queries need a second
+gate (word count), not just a bigger margin
+
+Re-running the full suite against the margin gate above surfaced **9 further
+regressions** (`fts_manager_test.dart` ×3, `fts_search_integration_test.dart`
+×1, `vault_searcher_test.dart` ×5). Every one traced to a **single-word**
+query — `"machine"`, `"quick"`, `"lazy"`, `"stable"`, `"searchable"`,
+`"removed"`, `"rebuild"` — landing on a *different* wrong language with a
+margin comfortably **above** `_kMinDetectionMargin = 0.12` (e.g. `"quick"` →
+`la` at margin `0.309`; `"searchable"` → `ga` at margin `0.295`). No single
+margin value can reject these without also rejecting legitimate multi-word
+detections — e.g. `"the quick brown fox"` (real English, margin `0.388`) is
+comfortably clear, but so are the dangerous single-word cases above; a
+threshold high enough to catch `0.309` would need to exceed most of the
+legitimate multi-word margins too, and the single-word failure margins
+interleave with genuine ones rather than clustering separately. **The
+threshold's position isn't the problem — a single word gives the n-gram
+model too little signal for its margin to mean anything, however large it
+looks.**
+
+**Fix:** added a second, independent gate — `_kMinWordCountForMarginTrust =
+2` — to the same-script n-gram branch in `detectLanguageForStemming()`. A
+single word can never override the `en` default via that branch, regardless
+of its reported margin; two or more words are required before the margin
+check is even consulted. The script-exclusive single-candidate branch
+(Greek, Hebrew, Thai, etc. — resolved via a deterministic Unicode-property
+lookup, not n-gram scoring) is unaffected and remains reliable even for a
+single word/glyph. 7 new regression tests lock in the exact failing words
+above.
+
+### Resolution follow-up 2 — 2026-07-07: the n-gram winner must also be a
+language `Stemmer` can actually use
+
+One further regression surfaced after the word-count fix:
+`fts_search_integration_test.dart`'s `"ensureBuilt is idempotent"` test,
+tracing to the field value `"idempotent test content"` (3 words — clears the
+word-count gate) detecting as `la` (Latin) at margin `0.197` (clears the
+margin gate too). `"idempotent"` is ordinary English technical vocabulary,
+but it is Latin-derived, and the n-gram model weighs that heavily enough to
+rank real `en` far down the candidate list (5th–8th place, confidence
+~0.57–0.66) rather than as a close runner-up.
+
+Critically, **no margin/word-count threshold can separate this from the
+already-locked-in, legitimate French `"maison rouge"` test** — `"maison
+rouge"` (2 words) has margin `0.190`, *smaller* than `"idempotent test
+content"`'s `0.197`. Any threshold high enough to reject the Latin
+false-positive also rejects the genuine French detection; the two cases are
+indistinguishable by margin or length alone. This is a real, irreducible
+statistical overlap in the model's output for this pair of examples, not a
+constant-tuning problem.
+
+The concrete bug this produced was distinct from "wrong stemmer applied":
+`la` is not one of `betto_lexical`'s 28 Snowball-backed languages, so
+`stem()`'s `ArgumentError`-catch fallback (`pipeline.dart`) silently **skips
+stemming entirely** for that call — while the same-content single-word query
+(`"idempotent"`, gated to `en` by the word-count rule) *does* get stemmed
+(`idempotent` → `idempot`). Write-side unstemmed `idempotent` vs. query-side
+stemmed `idempot` never match — a write/query asymmetry through a different
+mechanism than the original margin/word-count problems, but the same
+underlying class of bug this plan exists to fix.
+
+**Fix:** added a third, independent gate to the same n-gram branch — the
+winning code must be in `_kStemmerSupportedLanguages` (the same 28-language
+list `betto_lexical`'s `Stemmer` documents). If the model's top guess isn't a
+language `Stemmer` can use at all, trusting it can only ever produce a silent
+stemming skip; defaulting to `en` instead is strictly more useful (consistent
+English stemming) at no cost, since the alternative was never going to stem
+anything. This does not affect genuinely unsupported *scripts* (CJK, Thai,
+etc.), which resolve via the unconditional script-exclusive branch, not this
+allowlist. 2 new regression tests lock in `"idempotent test content"` and
+`"idempotent"` alone.
+
+**Outcome:** with all three gates in place (margin, word count, Stemmer
+support), the full test suite passes twice consecutively: 2,312 tests passing
+(12 e2e skipped by default), zero failures traceable to this plan. See `language_detection.dart`'s doc comment for the complete, citable
+evidence trail (all three follow-ups, with exact words/phrases/margins) —
+this plan's summary above only excerpts it.
 
 ## Review — 2026-07-06 (kmdb-plan-reviewer)
 
@@ -1053,4 +1483,104 @@ under-specified integration point (Q7). Status set to `Questions`.
 
 ## Summary
 
-{To be filled in once implemented.}
+WI-6 shipped a materially different (and larger) scope than the roadmap's
+original one-line framing ("route non-Latin-script content from
+`RegExpTokenizer` to `IcuTokenizer` via `dominantScript()`") — that framing
+turned out to be stale before implementation even started: document-field FTS
+was already using `IcuTokenizer`/`BrowserTokenizer` everywhere, independent of
+language, so there was no tokenizer-routing bug to fix there. The real bug,
+the real feature work, and a significant mid-implementation course correction
+were all somewhere the original framing didn't point.
+
+**1. The real bug: `VaultChunker`'s tokenizer.** The vault search chunker used
+a hand-rolled `RegExp(r"\w+(?:'\w+)*")` with no Unicode flag — `\w` matched
+only ASCII letters/digits/underscore. Any vault blob whose extracted text had
+no ASCII word characters at all (pure CJK, Arabic, Cyrillic, Devanagari, Thai)
+produced **zero token spans**, an empty chunk list, and a silently
+unsearchable (but still `indexed`) blob. Fixed by extending `betto_icu` with
+a new `OffsetTokenizer` interface (`TokenSpan`, additive, non-breaking) so
+`VaultChunker` could use the same `IcuTokenizer` the vault query path already
+used, instead of reconstructing character offsets from scratch. This required
+two small cross-repo prerequisites, each reviewed and published by the user
+before `kmdb`'s own work proceeded: `betto_icu 0.1.0-dev.2`
+(`OffsetTokenizer`/`TokenSpan`, implemented on both `IcuTokenizer` and
+`RegExpTokenizer`) and `betto_lexical 0.1.0-dev.2` (re-exports the new types,
+plus the `Stemmer` extension below).
+
+**2. Script/language metadata.** `VaultExtractionState` gained two new,
+independently-meaningful fields — `script` (ISO 15924, from
+`dominantScript()`) and `language` (ISO 639-1, from detection) — rather than
+a single combined value, so a future extractor that reads file-embedded
+language metadata (e.g. an HTML `lang` attribute) could populate both
+authoritatively without a schema change.
+
+**3. Language-aware stemming, both search paths.** `betto_lexical`'s
+`Stemmer` was English-only by construction even though the underlying
+`snowball_stemmer` package already implements 28 languages — extended to all
+28 (24 of which overlap with `betto_lang_detector`'s coverage and are
+actually reachable). `pipeline.dart`'s hard-wired `_englishStemmer` singleton
+was retired for a per-language `Stemmer` cache; `stem()`/`preprocess()`
+gained a **required** `languageCode` parameter (no silent default) so every
+call site had to consciously choose a language; `VaultChunker.chunk()`
+gained the same parameter, finally wiring the vault write path into
+language-aware stemming (it had never called the shared pipeline at all
+before this plan). Both `FtsManager` (document-field) and
+`VaultChunker`/`VaultSearcher` (vault) now select a stemmer via one shared
+helper, `detectLanguageForStemming()`.
+
+**4. The detection-policy fix — the deepest part of this plan.** The
+original design (Q6) called for a zero-confidence "best guess, no gate"
+policy, reviewed and accepted twice. It failed empirically as soon as real
+tests ran against it: `LanguageGuess.confidence` is a relative ranking
+within the compared candidate set, not a calibrated probability, and
+degenerates to `1.0` on a spuriously-won near-tie — common for short,
+keyword-style text (the dominant shape of both search queries and many
+indexed field values). This surfaced across three iterative rounds, each
+found by re-running the full pre-existing test suite and tracing every
+failure to a concrete root cause rather than guessing a fix:
+
+- **Round 1 (margin gate):** trust the top n-gram candidate only if its
+  confidence beats the runner-up by a minimum margin (`0.12`), not merely by
+  winning outright. Fixed most keyword-phrase mis-detections but not
+  single words.
+- **Round 2 (word-count gate):** a single word can report a large,
+  confident-looking margin that is still meaningless noise (e.g. `"quick"` →
+  Latin at margin `0.309`). No margin threshold separates these from genuine
+  multi-word detections — the values interleave. Fix: require ≥2 words
+  before the margin check is even consulted; a lone word always defaults to
+  English. (Script-exclusive detections — Greek, Hebrew, Thai, etc., a
+  deterministic Unicode lookup rather than n-gram scoring — are exempt and
+  stay reliable even for one word.)
+- **Round 3 (Stemmer-support gate):** even a multi-word, well-separated
+  detection can land on a language `Stemmer` doesn't implement (e.g.
+  `"idempotent test content"`, Latin-derived English vocabulary, confidently
+  detected as Latin). No margin/length threshold separates this from the
+  legitimate French `"maison rouge"` test — genuinely overlapping evidence.
+  Since an unsupported-language guess only ever causes stemming to be
+  silently skipped anyway, requiring the winner to be Stemmer-supported and
+  defaulting to English otherwise is strictly better with no downside.
+
+The shipped policy (all three gates, plus a length cap before calling
+`detect()` since its n-gram stage — unlike `dominantScript()` — has no
+internal bound) lives in the new `lib/src/search/language_detection.dart`,
+with `language_detection_test.dart` locking in every concrete failure case
+found along the way.
+
+**Also completed:** an end-to-end round-trip test suite exercising the real
+(not pre-seeded) `VaultSearchManager` → `VaultSearcher` pipeline for a
+non-English language and an unsupported script, and the equivalent for
+document-field FTS; spec corrections to `docs/spec/21_lexical_search.md`
+(Stage 4) and `docs/spec/32_vault_search.md` (new script/language section,
+tokenizer note); corrective callouts (not rewrites) in
+`docs/proposals/vault_search.md` at the sections whose premises no longer
+matched what shipped; and a rewritten `docs/roadmap/0_06.md` WI-6 entry.
+
+**Test coverage:** 2,312 tests passing (12 e2e skipped by default), 0
+analyzer issues. Every new/changed file at or above 95% line coverage
+(several at 100%); whole-project coverage 95.4%.
+
+**Sign-off:** `kmdb-qa` approved (one inline fix: removed dead code —
+a stale `@docImport`, an unused `library;` directive, and a commented-out
+import — left over in `pipeline.dart` from before the `Stemmer`-based
+refactor). `kmdb-pre-commit` passed clean (format_check, analyze,
+license_check, full `kmdb` suite).

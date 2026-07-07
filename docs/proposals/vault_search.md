@@ -145,8 +145,14 @@ same chunk boundaries for snippet extraction.
 
 ### 3.2 Chunking algorithm
 
-1. Tokenise extracted text into words using the same `RegExpTokenizer` already
-   used by the lexical pipeline (§21).
+1. Tokenise extracted text into words using an `OffsetTokenizer` (`IcuTokenizer`
+   by default; injectable for tests). **Implementation note (WI-6):** the
+   originally-shipped chunker instead used a hand-rolled `\w+`-based `RegExp`
+   with no Unicode flag, producing zero token spans (and a silently
+   unsearchable, but still `indexed`, blob) for any text with no ASCII
+   letters/digits — see §32's "Tokenisation (WI-6)" note for the fix and
+   §21 Stage 1 for the shared `IcuTokenizer`/UAX #29 tokenizer this now
+   matches.
 2. Slide a window of `chunkSize` words with `chunkOverlap` words of overlap
    across the full token sequence.
 3. For each window, record the byte start/end offsets in the original text so
@@ -543,6 +549,29 @@ package — it can be added as a direct dependency of `kmdb` alongside
 
 ### 10.2 Language detection
 
+> **Implementation note (WI-6, 2026-07-07).** Two details below are stale
+> relative to what was actually built — noted here rather than rewritten, since
+> this section otherwise remains an accurate design sketch of the two-stage
+> (script pre-filter + n-gram) approach that `betto_lang_detector` (WI-5)
+> actually implements:
+>
+> - **"a `\"language\"` field in `extract_status.json`"** — no
+>   `extract_status.json` file exists in the shipped implementation.
+>   `VaultExtractionState` (persisted solely in the `$$vault:extract:{sha256}`
+>   KV namespace — see §32) carries `script` (ISO 15924) and `language` (ISO
+>   639-1) as two separate fields, not a single combined value; see §32's
+>   "Script and Language Detection" section for the shipped field shapes and
+>   why they are separate.
+> - **Confidence threshold, not used as designed.** The sketched
+>   `minConfidence`/`Undetermined` API below matches `betto_lang_detector`'s
+>   actual public shape, but the shipped stemmer-routing consumer
+>   (`detectLanguageForStemming()` in `kmdb`) does **not** trust raw
+>   `LanguageGuess.confidence` at any threshold — it degenerates to `1.0` on a
+>   spuriously-won tie, which is common for short/keyword-style text. The
+>   actual policy gates on the *margin* between the top two ranked
+>   candidates, a minimum word count, and Stemmer-language support — see
+>   §21 Stage 4.
+
 With the multilingual embedding model (§10.3) handling the semantic path, language
 detection is no longer load-bearing for embedding routing. Its remaining role is
 narrower:
@@ -734,6 +763,25 @@ is shared across all languages, **query-side language detection is not required*
 for semantic retrieval.
 
 ### 10.4 Language-aware BM25 tokenization
+
+> **Implementation note (WI-6, 2026-07-07).** This section's premise turned
+> out to be stale on investigation — not just its `extract_status.json`
+> reference, but its central claim. `docs/spec/21_lexical_search.md`'s
+> document-field FTS pipeline was *already* using `createDefaultTokenizer()`
+> (which resolves to `IcuTokenizer` on native, `BrowserTokenizer` on web) at
+> every read/write site, independent of language, well before WI-6 — there
+> was never a live `RegExpTokenizer`-in-production bug to route away from
+> there. The **real, live bug WI-6 found and fixed** was different and
+> narrower: `VaultChunker` (the *vault* search chunker, not the document-field
+> pipeline this section describes) used its own hand-rolled ASCII-only
+> `RegExp(r"\w+(?:'\w+)*")` — no Unicode flag — which matched **zero** tokens
+> for any text with no ASCII letters/digits, silently producing an
+> unsearchable (but still `indexed`) blob. The fix was to give `VaultChunker`
+> an injectable `OffsetTokenizer` (defaulting to `IcuTokenizer`) directly,
+> not a `dominantScript()`-driven *routing* decision between two tokenizers as
+> sketched below — see §32's "Tokenisation (WI-6)" note and §21 Stage 1 for
+> what was actually shipped. `dominantScript()`/`detectLanguageForStemming()`
+> are used for **stemming selection** (§21 Stage 4), not tokenizer routing.
 
 The lexical (BM25) pipeline in §21 uses `RegExpTokenizer`, which splits on
 Unicode word boundaries. This is adequate for space-delimited languages but

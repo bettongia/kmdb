@@ -1146,6 +1146,61 @@ void main() {
       },
     );
 
+    test('extracting state + text.txt + chunks.json → recovery preserves '
+        'previously-computed script/language fields (WI-6)', () async {
+      // Same crash window as the previous test, but the pre-flight
+      // `extracting` marker also carries script/language (as it would if a
+      // future revision persisted them earlier than the final commit).
+      // _recoverExtractingBlob threads state.script/state.language straight
+      // into the recovered final state (mirroring how state.charset is
+      // already handled) — this test locks that in directly, independent
+      // of whether today's pre-flight marker actually populates them.
+      final sha256 = await _ingest(
+        vaultStore,
+        Uint8List.fromList(utf8.encode('Bonjour le monde aujourd hui')),
+      );
+
+      final extractState = VaultExtractionState(
+        sha256: sha256,
+        status: VaultExtractionStatus.extracting,
+        script: 'Latn',
+        language: 'fr',
+      );
+      await kvStore.writeBatchInternal(
+        WriteBatch()..put(
+          '$kVaultExtractPrefix$sha256',
+          kVaultCorpusSentinelKey,
+          extractState.encode(),
+        ),
+      );
+
+      final extractDir = '${vaultStore.hashDir(sha256)}/extract';
+      await adapter.createDirectory(extractDir);
+      await _writePlaintextArtifact(
+        adapter,
+        '$extractDir/text.txt',
+        Uint8List.fromList(utf8.encode('Bonjour le monde aujourd hui')),
+      );
+      final chunksJson = json.encode([
+        {'index': 0, 'byteStart': 0, 'byteEnd': 29, 'wordCount': 5},
+      ]);
+      await _writePlaintextArtifact(
+        adapter,
+        '$extractDir/chunks_v1.json',
+        Uint8List.fromList(utf8.encode(chunksJson)),
+      );
+
+      final manager = _makeManager(kvStore, vaultStore);
+      addTearDown(manager.close);
+      await manager.recover();
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+
+      final state = await _readState(kvStore, sha256);
+      expect(state?.status, equals(VaultExtractionStatus.indexed));
+      expect(state?.script, equals('Latn'));
+      expect(state?.language, equals('fr'));
+    });
+
     test(
       r'blob in $vault with no extract entry is detected and enqueued',
       () async {

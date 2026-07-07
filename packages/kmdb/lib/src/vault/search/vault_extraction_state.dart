@@ -106,6 +106,8 @@ final class VaultExtractionState {
     this.extractedAt,
     this.error,
     this.charset,
+    this.script,
+    this.language,
   });
 
   /// The sha256 of the vault blob this state belongs to.
@@ -151,6 +153,39 @@ final class VaultExtractionState {
   /// `null` before extraction or for non-text blobs.
   final String? charset;
 
+  /// The dominant ISO 15924 script code of the extracted text (e.g.
+  /// `"Latn"`, `"Cyrl"`, `"Hani"`), from `dominantScript()`.
+  ///
+  /// A cheap, deterministic Unicode-property lookup over the whole extracted
+  /// text — computed regardless of [language]'s confidence gate. `null`
+  /// before extraction or for script-less input (e.g. digits/punctuation
+  /// only). See WI-6 (`docs/spec/32_vault_search.md`) for the design
+  /// rationale behind storing [script] and [language] as separate fields.
+  final String? script;
+
+  /// The detected ISO 639-1 language code of the extracted text (e.g.
+  /// `"en"`, `"fr"`), from `detectLanguageForStemming()`
+  /// (`lib/src/search/language_detection.dart`).
+  ///
+  /// This is the **trust-gated** value (`confidentLanguageCode` —
+  /// `LanguageDetectionResult`'s field of the same purpose) — user-facing
+  /// metadata, distinct from `stemmerLanguageCode`, the value used
+  /// internally to select a BM25 stemmer (see WI-6 Q6, revised 2026-07-07).
+  /// As of that revision both fields are derived from the same margin +
+  /// word-count + Stemmer-support gate (not a standalone `>= 0.5` raw-
+  /// confidence check, which was found unreliable — see
+  /// `language_detection.dart`'s doc comment): `null` before extraction, when
+  /// detection wasn't trustworthy enough to clear that gate, or for
+  /// non-text blobs. Script-exclusive detections (CJK, Thai, etc. — a
+  /// deterministic Unicode-property lookup, not an n-gram comparison) are
+  /// trusted unconditionally and populate this field even for single-word
+  /// text; same-script (e.g. Latin-vs-Latin) detections additionally require
+  /// at least 2 words of signal, so a single non-English word (however
+  /// distinctive) will not populate this field either — a known, accepted
+  /// conservative trade-off (see the WI-6 plan's "Implementation finding"
+  /// section for the full rationale).
+  final String? language;
+
   /// Encodes this state as a CBOR-serialisable [Map].
   ///
   /// Only non-null fields are included (except [status] and [modelVersion],
@@ -164,6 +199,8 @@ final class VaultExtractionState {
     if (extractedAt != null) 'extractedAt': extractedAt,
     if (error != null) 'error': error,
     if (charset != null) 'charset': charset,
+    if (script != null) 'script': script,
+    if (language != null) 'language': language,
   };
 
   /// Decodes a [VaultExtractionState] from a CBOR-decoded [Map] and [sha256].
@@ -200,6 +237,8 @@ final class VaultExtractionState {
       extractedAt: map['extractedAt'] as String?,
       error: map['error'] as String?,
       charset: map['charset'] as String?,
+      script: map['script'] as String?,
+      language: map['language'] as String?,
     );
   }
 

@@ -57,6 +57,7 @@ import 'dart:typed_data';
 
 import 'package:meta/meta.dart';
 
+import '../../search/language_detection.dart';
 import '../vault_manifest.dart';
 import 'plain_text_extractor.dart';
 import 'vault_chunker.dart';
@@ -104,6 +105,9 @@ final class VaultIndexResult {
     required this.chunks,
     required this.termFrequencies,
     required this.charset,
+    this.script,
+    this.language,
+    this.stemmerLanguageCode,
     this.error,
   });
 
@@ -125,6 +129,31 @@ final class VaultIndexResult {
 
   /// IANA charset label detected during extraction, or `null` if unavailable.
   final String? charset;
+
+  /// Dominant ISO 15924 script code of [extractedText] (e.g. `"Latn"`,
+  /// `"Hani"`), from `dominantScript()`. `null` if unavailable or script-less
+  /// input. Persisted onto [VaultExtractionState.script].
+  final String? script;
+
+  /// Margin-gated ISO 639-1 language code of [extractedText], from
+  /// [detectLanguageForStemming]. `null` if the top guess wasn't separated
+  /// from the runner-up by enough of a margin to trust (see
+  /// `language_detection.dart`'s doc comment for the rationale — raw
+  /// confidence alone is not reliable). Persisted onto
+  /// [VaultExtractionState.language] — user-facing metadata, distinct from
+  /// [stemmerLanguageCode] (which defaults to `'en'` instead of `null`).
+  final String? language;
+
+  /// Margin-gated ISO 639-1 language code of [extractedText], from
+  /// [detectLanguageForStemming]. Whenever this field is populated at all
+  /// (i.e. extraction succeeded — see [isSuccess]), it is never `null`: it
+  /// defaults to `'en'` when detection isn't trustworthy enough (see
+  /// `language_detection.dart`) rather than skipping stemming outright.
+  ///
+  /// Used to select a BM25 stemmer for this blob's chunks (WI-6 Q6) — NOT
+  /// persisted directly onto [VaultExtractionState]; it is consumed
+  /// immediately by [VaultChunker.chunk] in the same isolate call.
+  final String? stemmerLanguageCode;
 
   /// Error message if extraction failed; `null` on success.
   final String? error;
@@ -392,13 +421,28 @@ Future<VaultIndexResult> _processWorkItem(
     );
   }
 
-  // Chunk the extracted text.
+  // Script/language detection (WI-6). Both are pure-Dart, FFI-free — safe to
+  // call inside this isolate. dominantScript() is the cheap, deterministic
+  // script-only lookup; detectLanguageForStemming() runs the margin-gated
+  // detector once and derives both the persisted (confidence-gated) language
+  // and the margin-gated code used below to select a BM25 stemmer (Q6, revised
+  // 2026-07-07 — see language_detection.dart for the margin-vs-confidence
+  // rationale).
+  final script = marginGatedLanguageDetector.dominantScript(extractedText);
+  final languageDetection = detectLanguageForStemming(extractedText);
+
+  // Chunk the extracted text, using the margin-gated language code (which
+  // defaults to 'en' rather than null when detection isn't trustworthy) to
+  // select a stemmer — see Q6/Q7.
   final config = VaultSearchConfig(
     chunkSize: item.chunkSize,
     chunkOverlap: item.chunkOverlap,
   );
   final chunker = VaultChunker(config);
-  final chunkResult = chunker.chunk(extractedText);
+  final chunkResult = chunker.chunk(
+    extractedText,
+    languageCode: languageDetection.stemmerLanguageCode,
+  );
 
   // Convert VaultChunk records to plain Maps for cross-isolate transfer.
   final chunkMaps = chunkResult.chunks
@@ -418,5 +462,8 @@ Future<VaultIndexResult> _processWorkItem(
     chunks: chunkMaps,
     termFrequencies: chunkResult.termFrequencies,
     charset: charset,
+    script: script,
+    language: languageDetection.confidentLanguageCode,
+    stemmerLanguageCode: languageDetection.stemmerLanguageCode,
   );
 }
