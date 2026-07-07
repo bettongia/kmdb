@@ -32,8 +32,8 @@ dependency_overrides:
   uuid: ^4.5.3
   cbor: ^6.5.1
   web: ^1.1.0
-  betto_common: ^0.1.0-dev.1
-  betto_schema: ^0.1.0-dev.1
+  betto_common: ^0.1.0-dev.2
+  betto_schema: ^0.1.0-dev.2
   betto_zstd: ^0.1.0-dev.3
   betto_mediatype_detector: ^0.1.0-dev.1
   betto_lexical: ^0.1.0-dev.2
