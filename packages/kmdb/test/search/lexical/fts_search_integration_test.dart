@@ -638,4 +638,50 @@ void main() {
       },
     );
   });
+
+  // ── WI-6: language-aware stemming round-trip ──────────────────────────────
+
+  group('language-aware stemming (WI-6)', () {
+    test(
+      'French plural field value matches a singular French query term',
+      () async {
+        final db = await _openDb();
+        final col = db.collection(name: 'docs', codec: _codec);
+
+        // Real French prose (not a bare keyword fragment) so
+        // detectLanguageForStemming() confidently selects `fr` on both the
+        // write and query paths — see language_detection.dart's doc comment
+        // for why short keyword-only fragments would not reliably do so.
+        await col.insert({
+          'body':
+              'Les chats noirs dorment paisiblement sur les tapis rouges de '
+              'la maison.',
+        });
+
+        // Query with the singular form of the indexed plural ("chats").
+        // The French Snowball stemmer reduces both to the same root — this
+        // only matches if both paths selected the French stemmer.
+        final result = await col.search('chat', fields: ['body']);
+        expect(result.hits, isNotEmpty);
+      },
+    );
+
+    test('unsupported-script (Japanese) field value is indexed and searchable '
+        'without error, with stemming skipped rather than corrupting the '
+        'index', () async {
+      final db = await _openDb();
+      final col = db.collection(name: 'docs', codec: _codec);
+
+      // Pure Japanese text: IcuTokenizer/BrowserTokenizer already handle
+      // this correctly (document-field FTS never had the WI-6 tokenizer
+      // bug — only the vault path did). Neither `ja` nor `zh` has a
+      // Snowball algorithm, so stemming is skipped on both sides; tokens
+      // must match verbatim (post-tokenisation) for a hit.
+      const text = 'これは日本語のテキストです。検索のためのテストです。';
+      await col.insert({'body': text});
+
+      final result = await col.search(text, fields: ['body']);
+      expect(result.hits, isNotEmpty);
+    });
+  });
 }

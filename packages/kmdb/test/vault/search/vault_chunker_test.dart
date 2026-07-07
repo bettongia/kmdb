@@ -14,11 +14,42 @@
 
 import 'dart:convert' show utf8;
 
+import 'package:betto_lexical/betto_lexical.dart'
+    show OffsetTokenizer, TokenSpan;
 import 'package:kmdb/src/vault/search/vault_chunk.dart';
 import 'package:kmdb/src/vault/search/vault_chunker.dart';
 import 'package:kmdb/src/vault/search/vault_extraction_state.dart';
 import 'package:kmdb/src/vault/search/vault_search_config.dart';
 import 'package:test/test.dart';
+
+/// A minimal, fully deterministic [OffsetTokenizer] test double: splits on
+/// ASCII whitespace only. Used to verify that [VaultChunker] actually uses
+/// its injected tokenizer rather than always falling back to the default.
+final class _FakeWhitespaceTokenizer implements OffsetTokenizer {
+  @override
+  List<String> tokenise(String text) =>
+      tokeniseSpans(text).map((s) => s.text).toList();
+
+  @override
+  List<TokenSpan> tokeniseSpans(String text) {
+    final spans = <TokenSpan>[];
+    var start = -1;
+    for (var i = 0; i < text.length; i++) {
+      if (text[i] == ' ') {
+        if (start >= 0) {
+          spans.add(TokenSpan(text.substring(start, i), start, i));
+          start = -1;
+        }
+      } else if (start < 0) {
+        start = i;
+      }
+    }
+    if (start >= 0) {
+      spans.add(TokenSpan(text.substring(start), start, text.length));
+    }
+    return spans;
+  }
+}
 
 void main() {
   group('VaultChunker', () {
@@ -27,16 +58,37 @@ void main() {
           VaultSearchConfig(chunkSize: chunkSize, chunkOverlap: chunkOverlap),
         );
 
+    // ── Tokenizer injection ─────────────────────────────────────────────────
+
+    test('an injected OffsetTokenizer is used instead of the default', () {
+      final chunker = VaultChunker(
+        VaultSearchConfig(chunkSize: 10, chunkOverlap: 0),
+        tokenizer: _FakeWhitespaceTokenizer(),
+      );
+      // The fake splits only on ASCII spaces, so "max_retry_count" stays a
+      // single token (unlike IcuTokenizer's default word-break rules, which
+      // may split on the underscore — see the "underscore-containing
+      // technical identifier" test below using the real default tokenizer).
+      // 3 space-separated tokens: "max_retry_count", "is", "set".
+      final result = chunker.chunk(
+        'max_retry_count is set',
+        languageCode: 'en',
+      );
+      expect(result.chunks, hasLength(1));
+      expect(result.chunks.first.wordCount, 3);
+      expect(result.termFrequencies.first.keys, isNot(contains('is')));
+    });
+
     // ── Empty input ─────────────────────────────────────────────────────────
 
     test('empty text returns empty result', () {
-      final result = chunker().chunk('');
+      final result = chunker().chunk('', languageCode: 'en');
       expect(result.chunks, isEmpty);
       expect(result.termFrequencies, isEmpty);
     });
 
     test('text with only punctuation returns empty result', () {
-      final result = chunker().chunk('... --- !!');
+      final result = chunker().chunk('... --- !!', languageCode: 'en');
       expect(result.chunks, isEmpty);
       expect(result.termFrequencies, isEmpty);
     });
@@ -45,7 +97,10 @@ void main() {
 
     test('text shorter than chunkSize → single chunk covering full text', () {
       final text = 'hello world foo';
-      final result = chunker(chunkSize: 10, chunkOverlap: 2).chunk(text);
+      final result = chunker(
+        chunkSize: 10,
+        chunkOverlap: 2,
+      ).chunk(text, languageCode: 'en');
       expect(result.chunks, hasLength(1));
       final chunk = result.chunks[0];
       expect(chunk.index, 0);
@@ -57,7 +112,10 @@ void main() {
     test('text exactly chunkSize words → single chunk', () {
       // 5 words, chunkSize = 5
       final text = 'alpha bravo charlie delta echo';
-      final result = chunker(chunkSize: 5, chunkOverlap: 1).chunk(text);
+      final result = chunker(
+        chunkSize: 5,
+        chunkOverlap: 1,
+      ).chunk(text, languageCode: 'en');
       expect(result.chunks, hasLength(1));
       expect(result.chunks[0].wordCount, 5);
     });
@@ -70,7 +128,10 @@ void main() {
       // Window 1: tokens[3..7] (words 3-7)
       // Window 2: tokens[6..9] (words 6-9, only 4 words in last window)
       final text = 'one two three four five six seven eight nine ten';
-      final result = chunker(chunkSize: 5, chunkOverlap: 2).chunk(text);
+      final result = chunker(
+        chunkSize: 5,
+        chunkOverlap: 2,
+      ).chunk(text, languageCode: 'en');
 
       expect(result.chunks, hasLength(3));
       expect(result.termFrequencies, hasLength(3));
@@ -92,7 +153,10 @@ void main() {
 
     test('byte offsets correctly recover chunk text from UTF-8 bytes', () {
       final text = 'hello world foo bar baz qux quux';
-      final result = chunker(chunkSize: 3, chunkOverlap: 1).chunk(text);
+      final result = chunker(
+        chunkSize: 3,
+        chunkOverlap: 1,
+      ).chunk(text, languageCode: 'en');
       final textBytes = utf8.encode(text);
 
       for (final chunk in result.chunks) {
@@ -115,7 +179,10 @@ void main() {
       // "café résumé" — each accented char is 2 UTF-8 bytes.
       // "日本語テスト" — each CJK char is 3 UTF-8 bytes.
       final text = 'café résumé naïve jalapeño lorem ipsum dolor sit amet';
-      final result = chunker(chunkSize: 3, chunkOverlap: 1).chunk(text);
+      final result = chunker(
+        chunkSize: 3,
+        chunkOverlap: 1,
+      ).chunk(text, languageCode: 'en');
       final textBytes = utf8.encode(text);
 
       expect(result.chunks, isNotEmpty);
@@ -139,7 +206,10 @@ void main() {
       // Each emoji is a surrogate pair in Dart strings (2 code units) but
       // 4 bytes in UTF-8.
       final text = '🎉 hello world 🚀 foo bar baz 🌟 qux';
-      final result = chunker(chunkSize: 3, chunkOverlap: 1).chunk(text);
+      final result = chunker(
+        chunkSize: 3,
+        chunkOverlap: 1,
+      ).chunk(text, languageCode: 'en');
       final textBytes = utf8.encode(text);
 
       expect(result.chunks, isNotEmpty);
@@ -152,17 +222,136 @@ void main() {
       }
     });
 
+    // ── Non-Latin scripts (WI-6: IcuTokenizer via OffsetTokenizer) ──────────
+    //
+    // Regression coverage for the bug this plan fixes: the old hand-rolled
+    // `RegExp(r"\w+(?:'\w+)*")` (no `unicode: true`) matched zero spans for
+    // text with no ASCII letters/digits, silently producing an empty chunk
+    // list (blob unsearchable). The default tokenizer is now IcuTokenizer
+    // (UAX #29-conformant via OffsetTokenizer), so these must all produce a
+    // non-empty, sane chunk list.
+
+    test('pure-CJK (Chinese) text produces a non-empty chunk list', () {
+      const text = '这是一个测试文档包含多个词语用于测试分块功能是否正常工作';
+      final result = chunker(
+        chunkSize: 5,
+        chunkOverlap: 1,
+      ).chunk(text, languageCode: 'en');
+      expect(result.chunks, isNotEmpty);
+      expect(result.termFrequencies.length, result.chunks.length);
+      for (final chunk in result.chunks) {
+        expect(chunk.wordCount, greaterThan(0));
+      }
+    });
+
+    test('pure-Arabic text produces a non-empty chunk list', () {
+      const text = 'هذا نص عربي للاختبار يحتوي على عدة كلمات مختلفة للتحقق';
+      final result = chunker(
+        chunkSize: 5,
+        chunkOverlap: 1,
+      ).chunk(text, languageCode: 'en');
+      expect(result.chunks, isNotEmpty);
+      expect(result.termFrequencies.length, result.chunks.length);
+      for (final chunk in result.chunks) {
+        expect(chunk.wordCount, greaterThan(0));
+      }
+    });
+
+    test('pure-Cyrillic (Russian) text produces a non-empty chunk list', () {
+      const text = 'Это русский текст для тестирования содержит несколько слов';
+      final result = chunker(
+        chunkSize: 5,
+        chunkOverlap: 1,
+      ).chunk(text, languageCode: 'en');
+      expect(result.chunks, isNotEmpty);
+      expect(result.termFrequencies.length, result.chunks.length);
+      for (final chunk in result.chunks) {
+        expect(chunk.wordCount, greaterThan(0));
+      }
+    });
+
+    test('pure-Devanagari (Hindi) text produces a non-empty chunk list', () {
+      const text = 'यह हिंदी पाठ परीक्षण के लिए है इसमें कई शब्द हैं';
+      final result = chunker(
+        chunkSize: 5,
+        chunkOverlap: 1,
+      ).chunk(text, languageCode: 'en');
+      expect(result.chunks, isNotEmpty);
+      expect(result.termFrequencies.length, result.chunks.length);
+      for (final chunk in result.chunks) {
+        expect(chunk.wordCount, greaterThan(0));
+      }
+    });
+
+    test('pure-Thai text produces a non-empty chunk list', () {
+      // Thai has no inter-word spaces; ICU's dictionary-based segmentation
+      // handles this. We only assert non-empty — the exact word count
+      // depends on ICU's Thai dictionary, not something this test should
+      // pin down.
+      const text = 'นี่คือข้อความภาษาไทยสำหรับการทดสอบระบบแบ่งส่วน';
+      final result = chunker(
+        chunkSize: 5,
+        chunkOverlap: 1,
+      ).chunk(text, languageCode: 'en');
+      expect(result.chunks, isNotEmpty);
+      expect(result.termFrequencies.length, result.chunks.length);
+    });
+
+    test('mixed Latin+CJK text tokenises both scripts', () {
+      const text = 'Hello 你好 world 世界 this is 测试 mixed script text';
+      final result = chunker(
+        chunkSize: 3,
+        chunkOverlap: 1,
+      ).chunk(text, languageCode: 'en');
+      expect(result.chunks, isNotEmpty);
+      // Byte offsets must be valid and round-trip via UTF-8.
+      final textBytes = utf8.encode(text);
+      for (final chunk in result.chunks) {
+        expect(chunk.byteStart, greaterThanOrEqualTo(0));
+        expect(chunk.byteEnd, lessThanOrEqualTo(textBytes.length));
+        expect(chunk.byteStart, lessThan(chunk.byteEnd));
+        expect(
+          () => utf8.decode(textBytes.sublist(chunk.byteStart, chunk.byteEnd)),
+          returnsNormally,
+        );
+      }
+    });
+
+    test('underscore-containing technical identifier is tokenised sanely under '
+        'IcuTokenizer (behaviour change from the old \\w regex)', () {
+      // The old ASCII regex (`\w+`, which includes `_`) treated
+      // "max_retry_count" as a single token. IcuTokenizer's UAX #29 word
+      // segmentation treats `_` as a non-word connector, so it may split
+      // on underscores. Either way, the pipeline must not error and must
+      // produce at least one non-empty token — exact tokenisation of
+      // underscored identifiers is documented here as a known, accepted
+      // behaviour change rather than pinned to one exact split.
+      const text = 'error in max_retry_count handler';
+      final result = chunker(
+        chunkSize: 5,
+        chunkOverlap: 1,
+      ).chunk(text, languageCode: 'en');
+      expect(result.chunks, isNotEmpty);
+      expect(result.chunks.first.wordCount, greaterThan(0));
+    });
+
     // ── Term frequency maps ─────────────────────────────────────────────────
 
     test('termFrequencies length matches chunks length', () {
       final text = 'alpha bravo charlie delta echo foxtrot golf hotel';
-      final result = chunker(chunkSize: 4, chunkOverlap: 1).chunk(text);
+      final result = chunker(
+        chunkSize: 4,
+        chunkOverlap: 1,
+      ).chunk(text, languageCode: 'en');
       expect(result.termFrequencies.length, result.chunks.length);
     });
 
     test('termFrequencies are non-empty for non-stop-word chunks', () {
       final text = 'database query result filter sort limit offset page';
-      final result = chunker(chunkSize: 4, chunkOverlap: 1).chunk(text);
+      final result = chunker(
+        chunkSize: 4,
+        chunkOverlap: 1,
+      ).chunk(text, languageCode: 'en');
       // At least some chunks should have non-empty TF maps (words that survive
       // stop-word filtering and stemming).
       final nonEmpty = result.termFrequencies
@@ -174,7 +363,10 @@ void main() {
     test('all-stop-word chunk produces empty TF map', () {
       // Common English stop words only.
       final text = 'the a is are was were be been being';
-      final result = chunker(chunkSize: 5, chunkOverlap: 1).chunk(text);
+      final result = chunker(
+        chunkSize: 5,
+        chunkOverlap: 1,
+      ).chunk(text, languageCode: 'en');
       // Stop-word-only text should yield empty TF maps after filtering.
       for (final tf in result.termFrequencies) {
         // After stemming, "be" → "be", "been" → "been", "being" → "be" —
@@ -300,6 +492,54 @@ void main() {
         VaultExtractionStatus.fromName('pending'),
         equals(VaultExtractionStatus.pending),
       );
+    });
+
+    // ── WI-6: script/language CBOR round-trip ────────────────────────────────
+
+    test('script and language survive a CBOR encode/decode round-trip', () {
+      final state = VaultExtractionState(
+        sha256: sha256,
+        status: VaultExtractionStatus.indexed,
+        chunkCount: 2,
+        charset: 'utf-8',
+        script: 'Latn',
+        language: 'en',
+      );
+      final decoded = VaultExtractionState.decode(state.encode(), sha256);
+      expect(decoded.script, equals('Latn'));
+      expect(decoded.language, equals('en'));
+      expect(decoded.charset, equals('utf-8'));
+    });
+
+    test(
+      'null script/language are omitted from toMap() and decode back as null',
+      () {
+        final state = VaultExtractionState(
+          sha256: sha256,
+          status: VaultExtractionStatus.indexed,
+          chunkCount: 1,
+        );
+        final map = state.toMap();
+        expect(map, isNot(contains('script')));
+        expect(map, isNot(contains('language')));
+
+        final decoded = VaultExtractionState.decode(state.encode(), sha256);
+        expect(decoded.script, isNull);
+        expect(decoded.language, isNull);
+      },
+    );
+
+    test('toMap()/fromMap() round-trip preserves script and language '
+        'independently of other fields', () {
+      final state = VaultExtractionState(
+        sha256: sha256,
+        status: VaultExtractionStatus.indexed,
+        script: 'Cyrl',
+        language: 'ru',
+      );
+      final decoded = VaultExtractionState.fromMap(state.toMap(), sha256);
+      expect(decoded.script, equals('Cyrl'));
+      expect(decoded.language, equals('ru'));
     });
   });
 }

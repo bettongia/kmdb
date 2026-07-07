@@ -60,12 +60,53 @@ stemming.
 
 ### Stage 4 — Stemming
 
-Words are reduced to their base form using the Snowball algorithm
-(`snowball_stemmer` Dart package) so that a search for `investigating` finds
-`investigate`.
+Words are reduced to their base form using a Snowball algorithm
+(`snowball_stemmer` Dart package, wrapped by `betto_lexical`'s `Stemmer`) so
+that a search for `investigating` finds `investigate`.
 
 Examples: `investigates` → `investig`, `occurring` → `occur`, `disturbing` →
 `disturb`.
+
+**Language-aware selection (WI-6).** `Stemmer` implements 28 languages;
+`FtsManager` selects which one to apply per field write/query by running a
+shared language-detection helper
+(`detectLanguageForStemming()`, `lib/src/search/language_detection.dart`) over
+the field value or query string. Detection is a **best guess with three
+stacked reliability gates**, not a raw confidence threshold — a naive
+confidence check (even a `0.0` floor) turned out to be unreliable for
+short/keyword-style text: `betto_lang_detector`'s confidence score is a
+relative ranking within the compared candidate set, not a calibrated
+probability, and it can report `1.0` for a spuriously-won, essentially
+meaningless tie. The three gates are:
+
+1. **Margin** — the winning candidate's confidence must exceed the runner-up's
+   by a minimum margin, not merely win outright.
+2. **Word count** — a single word never overrides the English default via
+   this margin check, regardless of how large its reported margin looks; at
+   least two words are required. (Script-exclusive scripts — Greek, Hebrew,
+   Thai, etc., resolved via a deterministic Unicode-property lookup rather
+   than character n-gram comparison — are exempt from this gate and remain
+   reliable even for a single word or glyph.)
+3. **Stemmer support** — the winning language must be one of the 28
+   `Stemmer` actually implements; a guess landing on an unsupported language
+   would only ever cause stemming to be silently skipped, so defaulting to
+   English instead is strictly more useful.
+
+When none of the gates are cleared, the field/query defaults to English
+stemming (this project's historical default) rather than skipping stemming
+outright — this is a deliberate asymmetry from the confidence-gated language
+used for vault metadata (§32), which defaults to unknown/`null` instead, since
+it would be misleading to report a specific language without real confidence.
+Of the 28 languages `Stemmer` supports, 24 overlap with
+`betto_lang_detector`'s coverage and are reachable via this detection path;
+the remaining 4 (`ne`, `sr`, `ta`, `yi`) are wired up for completeness but
+never selected today. Content in a script no Snowball algorithm covers (CJK,
+Thai, Hebrew, Bengali, etc.) always passes through Stage 4 unchanged — no
+stemming applied, not a fallback to English.
+
+Both the document-field path (this section) and the vault search path (§32)
+share the same `detectLanguageForStemming()` helper, so write and query paths
+always agree on which stemmer (if any) to apply.
 
 ## Index Structure
 

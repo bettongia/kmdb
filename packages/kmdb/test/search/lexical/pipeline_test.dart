@@ -105,31 +105,79 @@ void main() {
 
   group('stem', () {
     test('empty list returns empty list', () {
-      expect(stem([]), isEmpty);
+      expect(stem([], languageCode: 'en'), isEmpty);
     });
 
     test('investigates → investig', () {
-      expect(stem(['investigates']), equals(['investig']));
+      expect(stem(['investigates'], languageCode: 'en'), equals(['investig']));
     });
 
     test('occurring → occur', () {
-      expect(stem(['occurring']), equals(['occur']));
+      expect(stem(['occurring'], languageCode: 'en'), equals(['occur']));
     });
 
     test('disturbing → disturb', () {
-      expect(stem(['disturbing']), equals(['disturb']));
+      expect(stem(['disturbing'], languageCode: 'en'), equals(['disturb']));
     });
 
     test('multiple tokens are each stemmed', () {
-      final result = stem(['running', 'jumps', 'foxes']);
+      final result = stem(['running', 'jumps', 'foxes'], languageCode: 'en');
       // Snowball English: running→run, jumps→jump, foxes→fox
       expect(result, equals(['run', 'jump', 'fox']));
     });
 
     test('already-stemmed word is stable (idempotent)', () {
-      final once = stem(['run']);
-      final twice = stem(once);
+      final once = stem(['run'], languageCode: 'en');
+      final twice = stem(once, languageCode: 'en');
       expect(once, equals(twice));
+    });
+
+    // ── WI-6: language-aware stemming ───────────────────────────────────────
+
+    test('French: chats/chiens → chat/chien', () {
+      expect(
+        stem(['chats', 'chiens'], languageCode: 'fr'),
+        equals(['chat', 'chien']),
+      );
+    });
+
+    test('German: Häuser → Haus', () {
+      expect(stem(['Häuser'], languageCode: 'de'), equals(['Haus']));
+    });
+
+    test('Spanish: gatos → gat', () {
+      expect(stem(['gatos'], languageCode: 'es'), equals(['gat']));
+    });
+
+    test('null languageCode skips stemming entirely (tokens unchanged)', () {
+      expect(
+        stem(['running', 'jumps'], languageCode: null),
+        equals(['running', 'jumps']),
+      );
+    });
+
+    test('unsupported languageCode (no Snowball algorithm) skips stemming '
+        'entirely rather than falling back to English', () {
+      // 'ja' (Japanese) has no Snowball algorithm in betto_lexical's
+      // Stemmer — this must not throw and must not silently apply the
+      // English stemmer.
+      expect(
+        stem(['running', 'jumps'], languageCode: 'ja'),
+        equals(['running', 'jumps']),
+      );
+    });
+
+    test('repeated calls with an unsupported languageCode do not re-throw '
+        '(cached ArgumentError miss)', () {
+      expect(() => stem(['a'], languageCode: 'zh'), returnsNormally);
+      expect(() => stem(['b'], languageCode: 'zh'), returnsNormally);
+    });
+
+    test('en behaviour is unaffected by other cached languages', () {
+      // Prime the cache with a non-English language, then confirm English
+      // stemming still works correctly (cache keyed correctly per language).
+      stem(['chats'], languageCode: 'fr');
+      expect(stem(['running'], languageCode: 'en'), equals(['run']));
     });
   });
 
@@ -137,12 +185,16 @@ void main() {
 
   group('preprocess', () {
     test('empty string returns empty list', () {
-      expect(preprocess('', tokenizer), isEmpty);
+      expect(preprocess('', tokenizer, languageCode: 'en'), isEmpty);
     });
 
     test('stop-word filtering disabled by default', () {
       // 'the' and 'is' should survive without stopWords option.
-      final result = preprocess('the dog is running', tokenizer);
+      final result = preprocess(
+        'the dog is running',
+        tokenizer,
+        languageCode: 'en',
+      );
       // 'the' → stem('the') = 'the'; 'is' → stem('is') = 'is'
       expect(result, contains('the'));
       expect(result, contains('is'));
@@ -153,6 +205,7 @@ void main() {
         'the dog is running',
         tokenizer,
         stopWords: defaultStopwords.listing,
+        languageCode: 'en',
       );
       // 'the' and 'is' removed; 'dog' and 'run' remain.
       expect(result, isNot(contains('the')));
@@ -168,6 +221,7 @@ void main() {
           'The quick brown fox jumps over the lazy dog',
           tokenizer,
           stopWords: defaultStopwords.listing,
+          languageCode: 'en',
         );
         // 'the', 'over' are stop words; remaining: quick→quick, brown→brown,
         // fox→fox, jumps→jump, lazy→lazi, dog→dog
@@ -183,14 +237,18 @@ void main() {
     test('technical identifiers survive pipeline (mTLS)', () {
       // 'mTLS' → normalise → 'mtls' → stem → 'mtl' (acceptable) or 'mtls'
       // The key requirement is: no error and the token is present.
-      final result = preprocess('mTLS protocol', tokenizer);
+      final result = preprocess('mTLS protocol', tokenizer, languageCode: 'en');
       expect(result.length, greaterThan(0));
     });
 
     test('hex identifier survives pipeline (0x8004210B)', () {
       // RegExpTokenizer strips non-word chars; '0x8004210B' → '0x8004210B'
       // (one token). The pipeline must not panic.
-      final result = preprocess('error code 0x8004210B', tokenizer);
+      final result = preprocess(
+        'error code 0x8004210B',
+        tokenizer,
+        languageCode: 'en',
+      );
       expect(result.length, greaterThan(0));
     });
 
@@ -199,6 +257,7 @@ void main() {
         'the and is',
         tokenizer,
         stopWords: defaultStopwords.listing,
+        languageCode: 'en',
       );
       expect(result, isEmpty);
     });
@@ -209,13 +268,43 @@ void main() {
         text,
         tokenizer,
         stopWords: defaultStopwords.listing,
+        languageCode: 'en',
       );
       final queried = preprocess(
         text,
         tokenizer,
         stopWords: defaultStopwords.listing,
+        languageCode: 'en',
       );
       expect(indexed, equals(queried));
     });
+
+    // ── WI-6: language-aware stemming ───────────────────────────────────────
+
+    test('French text is stemmed with the French Snowball algorithm', () {
+      final result = preprocess(
+        'Les chats et les chiens',
+        tokenizer,
+        languageCode: 'fr',
+      );
+      expect(result, containsAll(['chat', 'chien']));
+    });
+
+    test('null languageCode leaves tokens unstemmed', () {
+      final result = preprocess('running jumps', tokenizer, languageCode: null);
+      expect(result, equals(['running', 'jumps']));
+    });
+
+    test(
+      'unsupported languageCode leaves tokens unstemmed (no English fallback)',
+      () {
+        final result = preprocess(
+          'running jumps',
+          tokenizer,
+          languageCode: 'ja',
+        );
+        expect(result, equals(['running', 'jumps']));
+      },
+    );
   });
 }

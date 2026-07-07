@@ -27,6 +27,7 @@ import 'package:betto_lexical/betto_lexical.dart' show createDefaultTokenizer;
 
 import '../../encoding/value_codec.dart';
 import '../../encryption/encryption_error.dart';
+import '../../search/language_detection.dart';
 import '../../search/lexical/fts_manager.dart' show defaultStopwords;
 import '../../search/lexical/pipeline.dart' show preprocess;
 import '../../search/search_mode.dart';
@@ -295,10 +296,20 @@ final class VaultSearcher<T> {
     // Tokenise the query using the same pipeline as indexing (preprocess
     // applies: tokenise → normalise → stop-word filter → stem). This ensures
     // query terms are directly comparable to indexed terms.
+    //
+    // Language-aware stemming (WI-6, Q6, revised 2026-07-07): run the same
+    // margin-gated detection as the write path (VaultIndexingIsolate) so both
+    // sides select the same stemmer as reliably as possible. Raw confidence
+    // alone is unreliable for short, keyword-style queries (it degenerates to
+    // 1.0 on ties); detectLanguageForStemming() instead gates on the margin
+    // between the top two candidates and defaults to English otherwise — see
+    // `language_detection.dart` for the full rationale.
+    final languageDetection = detectLanguageForStemming(query);
     final queryTerms = preprocess(
       query,
       createDefaultTokenizer(),
       stopWords: defaultStopwords.listing,
+      languageCode: languageDetection.stemmerLanguageCode,
     ).toSet().toList();
 
     if (queryTerms.isEmpty) return [];
