@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'package:betto_lexical/betto_lexical.dart' show getStopWords;
+import 'package:betto_lexical/betto_lexical.dart'
+    show OffsetTokenizer, createDefaultTokenizer, getStopWords;
 import 'package:intl/locale.dart' show Locale;
 
 import '../../search/lexical/pipeline.dart';
@@ -45,7 +46,7 @@ final class VaultChunkResult {
 
 /// Splits extracted vault text into overlapping word-count chunks.
 ///
-/// Uses a word-boundary regex to find token spans (including their character
+/// Uses an [OffsetTokenizer] to find token spans (including their character
 /// positions in the source string), groups them into sliding windows of
 /// [VaultSearchConfig.chunkSize] words with [VaultSearchConfig.chunkOverlap]
 /// words of overlap between adjacent chunks, and applies the BM25 preprocessing
@@ -56,8 +57,8 @@ final class VaultChunkResult {
 ///
 /// ## Algorithm
 ///
-/// 1. Scan [text] with a word-boundary regex to find all word token spans
-///    (position-aware). This avoids running the tokenizer twice.
+/// 1. Scan [text] with the injected [OffsetTokenizer] to find all word token
+///    spans (position-aware). This avoids running the tokenizer twice.
 /// 2. Group token spans into windows: window `[i]` covers raw tokens
 ///    `[i * step, i * step + chunkSize)` where `step = chunkSize - chunkOverlap`.
 /// 3. Compute the UTF-8 byte span of each window using a pre-built
@@ -73,22 +74,43 @@ final class VaultChunkResult {
 ///
 /// ## Non-ASCII correctness
 ///
-/// The regex operates on Dart `String` (UTF-16 code units). Byte offsets are
-/// computed from character-index positions via a pre-built offset table that
-/// correctly handles multi-byte UTF-8 characters (CJK, emoji, accented
-/// letters).
+/// The default tokenizer (`IcuTokenizer`, via [createDefaultTokenizer]) is
+/// UAX #29-conformant, so word boundaries are correct for non-Latin scripts
+/// (CJK, Arabic, Cyrillic, Devanagari, Thai, etc.), unlike a hand-rolled ASCII
+/// regex. Byte offsets are computed from character-index positions via a
+/// pre-built offset table that correctly handles multi-byte UTF-8 characters
+/// (CJK, emoji, accented letters).
 final class VaultChunker {
   /// Creates a [VaultChunker] from the given [config].
-  const VaultChunker(this._config);
+  ///
+  /// [tokenizer] defaults to [createDefaultTokenizer]'s result cast to
+  /// [OffsetTokenizer] — safe because vault indexing is native-only (per
+  /// CLAUDE.md), where [createDefaultTokenizer] always resolves to
+  /// `IcuTokenizer`, which implements [OffsetTokenizer]. A fake
+  /// [OffsetTokenizer] may be injected for deterministic testing.
+  ///
+  /// Not `const` — an injected or default [OffsetTokenizer] (`IcuTokenizer`
+  /// holds native FFI resources) is not a compile-time constant.
+  VaultChunker(this._config, {OffsetTokenizer? tokenizer})
+    : _tokenizer = tokenizer ?? createDefaultTokenizer() as OffsetTokenizer;
 
   final VaultSearchConfig _config;
+  final OffsetTokenizer _tokenizer;
 
   /// Splits [text] into overlapping chunks according to [_config].
   ///
   /// [text] must be a valid UTF-8 string (as returned by a
   /// [VaultTextExtractor]). Returns an empty [VaultChunkResult] for empty
   /// input or text with no word tokens.
-  VaultChunkResult chunk(String text) {
+  ///
+  /// [languageCode] is the ISO 639-1 language code used to select a BM25
+  /// stemmer for this text's tokens (see [stem] in `pipeline.dart`) —
+  /// required (not defaulted), so every caller must consciously supply a
+  /// value (typically the best-guess code from [detectLanguageForStemming]),
+  /// rather than silently inheriting the old English-only behaviour. Pass
+  /// `null` when no language could be determined; stemming is then skipped
+  /// entirely for this call, not downgraded to English.
+  VaultChunkResult chunk(String text, {required String? languageCode}) {
     if (text.isEmpty) {
       return const VaultChunkResult(chunks: [], termFrequencies: []);
     }
@@ -99,8 +121,11 @@ final class VaultChunker {
     // Guaranteed > 0 because VaultSearchConfig asserts chunkOverlap < chunkSize.
     final step = chunkSize - chunkOverlap;
 
-    // Step 1: Find all word tokens and their character positions.
-    final tokenSpans = _findTokenSpans(text);
+    // Step 1: Find all word tokens and their character positions, using the
+    // shared OffsetTokenizer (e.g. IcuTokenizer) instead of a hand-rolled
+    // ASCII-only regex — this is what makes non-Latin-script vault text
+    // searchable at all (see class doc).
+    final tokenSpans = _tokenizer.tokeniseSpans(text);
     if (tokenSpans.isEmpty) {
       return const VaultChunkResult(chunks: [], termFrequencies: []);
     }
@@ -119,11 +144,11 @@ final class VaultChunker {
       final windowSpans = tokenSpans.sublist(windowStart, windowEnd);
 
       // Step 3: Compute byte offsets from character positions.
-      final firstCharStart = windowSpans.first.charStart;
-      final lastCharEnd = windowSpans.last.charEnd;
+      final firstCharStart = windowSpans.first.start;
+      final lastCharEnd = windowSpans.last.end;
 
       final byteStart = charToByte[firstCharStart];
-      // charEnd is exclusive, so charToByte[lastCharEnd] is the byte at
+      // end is exclusive, so charToByte[lastCharEnd] is the byte at
       // the start of the character AFTER the last token character, which is
       // exactly the exclusive upper bound for this chunk's byte range.
       final byteEnd = lastCharEnd < text.length
@@ -131,8 +156,8 @@ final class VaultChunker {
           : textByteLen;
 
       // Step 4: Preprocess raw token strings for BM25.
-      final rawTokens = windowSpans.map((s) => s.rawToken).toList();
-      final preprocessed = _preprocessTokens(rawTokens);
+      final rawTokens = windowSpans.map((s) => s.text).toList();
+      final preprocessed = _preprocessTokens(rawTokens, languageCode);
       final tf = _termFrequencies(preprocessed);
 
       chunks.add(
@@ -154,28 +179,6 @@ final class VaultChunker {
   }
 
   // ── Internal helpers ────────────────────────────────────────────────────────
-
-  /// Finds all word tokens in [text] with their character positions.
-  ///
-  /// Uses a word-boundary [RegExp] that matches sequences of word characters
-  /// (letters, digits, underscore) and common contractions (apostrophe +
-  /// word-chars). This is consistent with the RegExpTokenizer used elsewhere
-  /// in the FTS pipeline.
-  List<_TokenSpan> _findTokenSpans(String text) {
-    // Matches word tokens: word characters optionally followed by an apostrophe
-    // and more word characters (e.g. "don't", "O'Brien").
-    final re = RegExp(r"\w+(?:'\w+)*");
-    final matches = re.allMatches(text);
-    return matches
-        .map(
-          (m) => _TokenSpan(
-            rawToken: m.group(0)!,
-            charStart: m.start,
-            charEnd: m.end,
-          ),
-        )
-        .toList();
-  }
 
   /// Builds a character-index → UTF-8-byte-offset lookup table for [text].
   ///
@@ -217,17 +220,25 @@ final class VaultChunker {
 
   /// Applies the BM25 preprocessing pipeline to a list of raw token strings.
   ///
-  /// Pipeline: lowercase → English stop-word filter → Snowball stem.
-  /// This mirrors [preprocess] in `pipeline.dart` but takes pre-extracted
-  /// token strings (with known positions) rather than re-tokenising the text.
-  List<String> _preprocessTokens(List<String> rawTokens) {
+  /// Pipeline: lowercase → English stop-word filter → language-aware Snowball
+  /// stem (WI-6; see [stem] in `pipeline.dart`). This mirrors [preprocess] in
+  /// `pipeline.dart` but takes pre-extracted token strings (with known
+  /// positions) rather than re-tokenising the text.
+  ///
+  /// Stop-word filtering is unaffected by [languageCode] — it remains the
+  /// hard-coded English stop-word set (out of scope for WI-6; see the plan's
+  /// "Stop words: still out of scope" note). Only the stemming stage is
+  /// language-aware.
+  List<String> _preprocessTokens(List<String> rawTokens, String? languageCode) {
     if (rawTokens.isEmpty) return const [];
     // Lowercase (mirrors tokeniseAndNormalise without the tokeniser step).
     final lowered = rawTokens.map((t) => t.toLowerCase()).toList();
     // Stop-word filter using English defaults (same set as FtsManager).
     final filtered = filterStopWords(lowered, _englishStopWords);
-    // Snowball English stemmer.
-    return stem(filtered);
+    // Language-aware Snowball stemmer — shared with the document-field FTS
+    // pipeline (pipeline.dart's stem()). Skips stemming entirely when
+    // languageCode is null or unsupported by betto_lexical's Stemmer.
+    return stem(filtered, languageCode: languageCode);
   }
 
   /// Computes term frequencies from a list of preprocessed tokens.
@@ -241,25 +252,4 @@ final class VaultChunker {
     }
     return tf;
   }
-}
-
-/// A word token with its character positions in the source string.
-///
-/// Used internally by [VaultChunker] to track token spans before grouping
-/// them into chunk windows.
-final class _TokenSpan {
-  const _TokenSpan({
-    required this.rawToken,
-    required this.charStart,
-    required this.charEnd,
-  });
-
-  /// The raw (un-preprocessed) token string, as found in the source text.
-  final String rawToken;
-
-  /// Inclusive character index of the first character of this token.
-  final int charStart;
-
-  /// Exclusive character index immediately after the last character of this token.
-  final int charEnd;
 }

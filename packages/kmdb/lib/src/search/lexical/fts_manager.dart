@@ -31,6 +31,7 @@ import '../../engine/kvstore/kv_store.dart';
 import '../../engine/kvstore/kv_store_impl.dart';
 import '../../query/write_augmentor.dart';
 import '../fts_index_definition.dart';
+import '../language_detection.dart';
 import '../search_result.dart';
 import '../sync_delta.dart';
 import 'fts_index_state.dart';
@@ -234,10 +235,17 @@ final class FtsManager implements WriteAugmentor {
     final stopWords = def.stopWords
         ? defaultStopwords.listing
         : const <String>{};
+    // Language-aware stemming (WI-6, Q6, revised 2026-07-07): margin-gated
+    // detection — cheap and deterministic enough to recompute on every write,
+    // with no persistence needed (unlike the vault path's isolate boundary).
+    final languageCode = detectLanguageForStemming(
+      fieldValue,
+    ).stemmerLanguageCode;
     final tokens = preprocess(
       fieldValue,
       createDefaultTokenizer(),
       stopWords: stopWords,
+      languageCode: languageCode,
     );
     if (tokens.isEmpty) return;
 
@@ -300,10 +308,14 @@ final class FtsManager implements WriteAugmentor {
       return;
     }
 
+    final newLanguageCode = detectLanguageForStemming(
+      newFieldValue,
+    ).stemmerLanguageCode;
     final newTokens = preprocess(
       newFieldValue,
       createDefaultTokenizer(),
       stopWords: stopWords,
+      languageCode: newLanguageCode,
     );
     final newTf = _termFrequencies(newTokens);
     final newTokenCount = newTokens.length;
@@ -482,10 +494,14 @@ final class FtsManager implements WriteAugmentor {
         final fieldValue = _extractFieldValue(doc, field);
         if (fieldValue == null) continue;
 
+        final buildLanguageCode = detectLanguageForStemming(
+          fieldValue,
+        ).stemmerLanguageCode;
         final tokens = preprocess(
           fieldValue,
           createDefaultTokenizer(),
           stopWords: stopWords,
+          languageCode: buildLanguageCode,
         );
         if (tokens.isEmpty) continue;
 
@@ -612,10 +628,18 @@ final class FtsManager implements WriteAugmentor {
     final stopWords = firstDef.stopWords
         ? defaultStopwords.listing
         : const <String>{};
+    // Language-aware stemming (WI-6, Q6, revised 2026-07-07): margin-gated
+    // detection — same policy as the write path above, so short/keyword-style
+    // queries reliably default to English rather than a spuriously-confident
+    // wrong-language guess (see `language_detection.dart`).
+    final queryLanguageCode = detectLanguageForStemming(
+      query,
+    ).stemmerLanguageCode;
     final queryTerms = preprocess(
       query,
       createDefaultTokenizer(),
       stopWords: stopWords,
+      languageCode: queryLanguageCode,
     ).toSet().toList();
 
     if (queryTerms.isEmpty) {

@@ -108,6 +108,75 @@ void main() {
       expect(result.charset, equals('utf-8'));
     });
 
+    // ── WI-6: script/language detection ─────────────────────────────────────
+
+    test('English prose → script Latn, confident language en', () async {
+      final text =
+          'The quick brown fox jumps over the lazy dog near the riverbank.';
+      final item = _workItem(bytes: Uint8List.fromList(utf8.encode(text)));
+
+      final result = await isolate.sendWork(item);
+      expect(result.isSuccess, isTrue);
+      expect(result.script, equals('Latn'));
+      expect(result.language, equals('en'));
+      expect(result.stemmerLanguageCode, equals('en'));
+    });
+
+    test('pure-Han (Chinese) text → script Hani, script-exclusive language '
+        'trusted unconditionally', () async {
+      const text = '这是一个测试文档包含多个词语';
+      final item = _workItem(bytes: Uint8List.fromList(utf8.encode(text)));
+
+      final result = await isolate.sendWork(item);
+      expect(result.isSuccess, isTrue);
+      expect(result.script, equals('Hani'));
+      // Chinese resolves via the script pre-filter's script-exclusive
+      // branch (a single ranked candidate), which is trusted
+      // unconditionally regardless of word count or margin — see
+      // language_detection.dart's doc comment.
+      expect(result.language, equals('zh'));
+      expect(result.stemmerLanguageCode, equals('zh'));
+    });
+
+    test('Arabic text → script Arab', () async {
+      const text =
+          'هذا نص عربي طويل يحتوي على عدة كلمات مختلفة للتحقق من اكتشاف اللغة';
+      final item = _workItem(bytes: Uint8List.fromList(utf8.encode(text)));
+
+      final result = await isolate.sendWork(item);
+      expect(result.isSuccess, isTrue);
+      expect(result.script, equals('Arab'));
+      // Unlike Chinese/Japanese, Arabic script covers multiple candidate
+      // languages (ar, fa, ur, ps, ...), so this does NOT necessarily
+      // resolve via the script-exclusive branch — script population is
+      // unconditional and reliable either way, which is what this test
+      // asserts; the language/stemmer code is not pinned here.
+    });
+
+    test('Cyrillic (Russian) text → script Cyrl', () async {
+      const text =
+          'Это длинный русский текст для тестирования определения '
+          'языка компьютерной программы сегодня';
+      final item = _workItem(bytes: Uint8List.fromList(utf8.encode(text)));
+
+      final result = await isolate.sendWork(item);
+      expect(result.isSuccess, isTrue);
+      expect(result.script, equals('Cyrl'));
+    });
+
+    test('digits/punctuation-only text → script null, language null, '
+        'stemmerLanguageCode still defaults to en', () async {
+      final item = _workItem(
+        bytes: Uint8List.fromList(utf8.encode('12345 !@#\$% 67890')),
+      );
+
+      final result = await isolate.sendWork(item);
+      expect(result.isSuccess, isTrue);
+      expect(result.script, isNull);
+      expect(result.language, isNull);
+      expect(result.stemmerLanguageCode, equals('en'));
+    });
+
     test('empty text/plain blob → empty chunks, indexed', () async {
       final item = _workItem(bytes: Uint8List(0));
 

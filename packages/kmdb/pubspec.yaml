@@ -20,6 +20,7 @@ dependencies:
   betto_lexical:
   betto_inferencing:
   betto_charset_detector:
+  betto_lang_detector:
   charset:
   uuid:
   web:

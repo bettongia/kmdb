@@ -48,6 +48,7 @@ import '../../encryption/encryption_flag.dart';
 import '../../encryption/encryption_provider.dart';
 import '../../engine/kvstore/kv_store.dart';
 import '../../engine/kvstore/kv_store_impl.dart';
+import '../../search/language_detection.dart';
 import '../vault_store.dart';
 import 'vault_bm25_writer.dart';
 import 'vault_chunk.dart';
@@ -700,6 +701,8 @@ final class VaultSearchManager {
       chunkSize: _config.chunkSize,
       chunkOverlap: _config.chunkOverlap,
       charset: result.charset,
+      script: result.script,
+      language: result.language,
     );
     _writeExtractStatusToBatch(sha256, finalState, batch);
     await _kvStore.writeBatchInternal(batch);
@@ -755,13 +758,23 @@ final class VaultSearchManager {
       final textBytes = await readExtractArtifact(textPath);
       final text = utf8.decode(textBytes);
 
-      // Re-tokenise chunks from the extracted text.
+      // Re-tokenise chunks from the extracted text. The stemmer-routing
+      // language code is not persisted on VaultExtractionState (WI-6 Q6/Q7 —
+      // only the confidence-gated `language` metadata field is), so it is
+      // recomputed here from the recovered text using the same best-guess
+      // policy the original indexing pass used — cheap and deterministic
+      // (pure Dart, no FFI), and consistent with the write path in
+      // _processWorkItem.
       final recoveryConfig = VaultSearchConfig(
         chunkSize: state.chunkSize ?? _config.chunkSize,
         chunkOverlap: state.chunkOverlap ?? _config.chunkOverlap,
       );
       final chunker = VaultChunker(recoveryConfig);
-      final chunkResult = chunker.chunk(text);
+      final languageDetection = detectLanguageForStemming(text);
+      final chunkResult = chunker.chunk(
+        text,
+        languageCode: languageDetection.stemmerLanguageCode,
+      );
 
       // Re-embed or reload vectors if model is available.
       final model = _embeddingModel;
@@ -823,6 +836,8 @@ final class VaultSearchManager {
         chunkSize: state.chunkSize ?? _config.chunkSize,
         chunkOverlap: state.chunkOverlap ?? _config.chunkOverlap,
         charset: state.charset,
+        script: state.script,
+        language: state.language,
       );
       _writeExtractStatusToBatch(sha256, finalState, batch);
       await _kvStore.writeBatchInternal(batch);

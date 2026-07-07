@@ -217,6 +217,20 @@ Each `VaultChunk` carries:
 - `tokenIds`: the pre-tokenised term list (shared with BM25 indexing and
   passed to the embedding model).
 
+**Tokenisation (WI-6).** `VaultChunker` finds word-token spans using an
+`OffsetTokenizer` — `IcuTokenizer` by default, the same UAX #29-conformant
+tokenizer the document-field FTS path uses (§21) — rather than a hand-rolled
+ASCII-only regex. Prior to WI-6, the chunker used `RegExp(r"\w+(?:'\w+)*")`
+without a Unicode flag, so `\w` matched only ASCII letters/digits/underscore;
+any blob whose extracted text contained no ASCII word characters at all (a
+pure-CJK, Arabic, Cyrillic, Devanagari, or Thai document) produced zero token
+spans, an empty chunk list, and a silently-unsearchable (but still `indexed`)
+blob. `IcuTokenizer` correctly segments all of these scripts. `VaultChunker`'s
+constructor accepts an injectable `OffsetTokenizer` for deterministic testing;
+the default resolves via `createDefaultTokenizer()` cast to `OffsetTokenizer`,
+safe because vault indexing is native-only (per the project's platform
+scope), where that always resolves to `IcuTokenizer`.
+
 ## Text Extraction
 
 Text is extracted from blobs by `VaultTextExtractor` implementations:
@@ -247,6 +261,44 @@ final db = await KmdbDatabase.open(
 Charset detection uses the `decodeText` utility function from WI-2 (`charset_util.dart`),
 which applies the `betto_charset_detector` heuristic and records the detected
 IANA label in the extraction state.
+
+## Script and Language Detection (WI-6)
+
+After text extraction and before chunking, the vault indexing isolate records
+two further, independently-meaningful fields on `VaultExtractionState`:
+
+| Field      | Type      | Source                        | Populated when |
+| :--------- | :-------- | :----------------------------- | :-------------- |
+| `script`   | `String?` | `dominantScript()` (ISO 15924) | Extraction succeeded and the text has any scripted letters (e.g. `"Latn"`, `"Cyrl"`, `"Hani"`); `null` for script-less text (digits/punctuation only) |
+| `language` | `String?` | `detectLanguageForStemming()` (ISO 639-1) | Detection cleared the same margin/word-count/Stemmer-support gate described in §21's Stage 4; `null` otherwise |
+
+`script` and `language` are stored as **separate fields** rather than a single
+combined value, even though `dominantScript()` is a cheap, deterministic
+Unicode-property lookup and `detectLanguageForStemming()` additionally runs a
+character n-gram model — a script code (ISO 15924) and a language code (ISO
+639) answer different questions (e.g. Japanese and Chinese text can both
+report `script: "Hani"` while resolving to different `language` values). This
+also happens to align with two subtags of a BCP-47 language tag
+(`language-script`, e.g. `zh-Hant`), leaving room for a future extractor that
+reads file-embedded language metadata (e.g. an HTML `lang` attribute or a PDF
+`/Lang` catalog entry) to populate both fields **authoritatively** without a
+schema change — not implemented today, as no current `VaultTextExtractor`
+surfaces such metadata.
+
+`language` here is the **same gated value** used to persist
+`VaultExtractionState.language` and the vault write path's stemmer selection
+is a *separately-defaulting* view of the identical detection result — see
+§21's Stage 4 for the full gating rationale (margin, word count, Stemmer
+support) and why the stemming selector defaults to English when the gate
+isn't cleared while this persisted `language` field defaults to `null`
+instead (misleading to claim a specific language without real confidence, but
+harmless — indeed necessary for consistency — to default *stemming* to
+English, this project's historical default).
+
+Detection runs entirely within the vault indexing isolate — both
+`dominantScript()` and `detectLanguageForStemming()` are pure Dart with no
+FFI or native state (unlike `IcuTokenizer`/ONNX Runtime), so there is no
+isolate-affinity concern.
 
 ## Sync Exclusion
 
