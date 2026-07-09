@@ -14,6 +14,8 @@ workspace:
   - packages/kmdb_harness
   - packages/kmdb_google_drive
   - packages/kmdb_extractor_pdf
+  - packages/kmdb_extractor_html
+  - packages/kmdb_extractor_markdown
   # kmdb_icloud and kmdb_icloud/example are Flutter plugins and are NOT part of
   # the Dart workspace.  They depend on `flutter: sdk: flutter`, which requires
   # the Flutter SDK — something Dart-only CI runners (Linux, Windows) do not
