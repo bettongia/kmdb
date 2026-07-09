@@ -687,6 +687,33 @@ betto_lang_id/
 
 ### 10.3 Multilingual embedding model
 
+> **Implementation note (WI-4, 2026-07-09).** Implemented largely as sketched
+> below, with three notable refinements found during investigation and
+> implementation — see
+> [plan_0_06_wi4_multilingual_embedding_model.md](../plans/plan_0_06_wi4_multilingual_embedding_model.md)
+> for the full write-up. **(1)** `bge-m3` turned out to be a bigger jump than
+> "1024 dims, needs a re-index" alone suggests: its fp32 ONNX export exceeds
+> ONNX's 2 GB single-protobuf-file limit and ships as a graph file plus a
+> separate `model.onnx_data` weights file — a structurally different,
+> multi-file asset layout `ModelSpec`/`ModelDownloader` don't support today.
+> `bge-m3` therefore stays deferred as a later upgrade path, and this WI
+> registers only `multilingual-e5-small`. **(2)** The tokenizer was not
+> hand-ported from `transformers.js` as this section originally assumed — a
+> Phase 0 spike found the pub.dev package `dart_sentencepiece_tokenizer`
+> didn't apply HuggingFace's Precompiled-charsmap normalizer (breaking
+> XLM-R-family tokenization), triggering a hard gate that produced a
+> dedicated follow-on plan,
+> [plan_0_06_wi11_xlmr_tokenizer.md](../plans/completed/plan_0_06_wi11_xlmr_tokenizer.md)
+> (WI-11), which hand-ported the SentencePiece/Unigram tokenizer described
+> below directly into `betto_inferencing` and gated it on byte-exact parity
+> against HuggingFace's `AutoTokenizer`. **(3)** The E5 input prefixes (below)
+> are applied by `OnnxEmbeddingModel.embed()` itself, keyed off an
+> `EmbeddingKind` parameter (`document`/`query`) rather than by `kmdb`
+> constructing prefix strings directly — `kmdb`'s job is only to state which
+> side of retrieval it is on (see §22 "EmbeddingKind and query/document
+> prefixes" in the spec for the full mechanism, and this plan's Phase 3 for
+> the `kmdb`-side call sites that pass it through).
+
 Adopting a single multilingual model is what actually delivers broad-language
 support. Two benefits over a per-language routing approach:
 

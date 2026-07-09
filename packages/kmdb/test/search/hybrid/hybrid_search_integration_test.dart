@@ -34,7 +34,10 @@ final class _DeterministicEmbeddingModel implements EmbeddingModel {
   int get dimensions => 384;
 
   @override
-  Future<(Float32List, bool)> embed(String text) async {
+  Future<(Float32List, bool)> embed(
+    String text, {
+    EmbeddingKind kind = EmbeddingKind.document,
+  }) async {
     final lower = text.toLowerCase();
     final v = Float32List(dimensions);
 

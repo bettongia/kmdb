@@ -20,7 +20,8 @@ import 'dart:convert' show json, utf8;
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import 'package:betto_inferencing/betto_inferencing.dart' show EmbeddingModel;
+import 'package:betto_inferencing/betto_inferencing.dart'
+    show EmbeddingKind, EmbeddingModel;
 import 'package:kmdb/src/encoding/value_codec.dart';
 import 'package:kmdb/src/encryption/encryption_error.dart';
 import 'package:kmdb/src/encryption/encryption_flag.dart';
@@ -92,6 +93,18 @@ final class _FakeEmbeddingModel implements EmbeddingModel {
   /// No current test sets this; retained for symmetry with the manager fake.
   bool shouldThrow = false;
 
+  /// The [EmbeddingKind] values seen across all [embed] calls, in call order.
+  ///
+  /// [VaultSearcher._scoreSemantic] calls [embed] through an `as dynamic`
+  /// cast (the `_embeddingModel` field is deliberately typed `Object?` to
+  /// avoid pulling `betto_inferencing`'s model class into that file's type
+  /// graph). A dynamic call means a mis-named or dropped `kind:` argument at
+  /// that call site would fail — or silently default — at *runtime*, not at
+  /// compile time. This field lets tests assert the real value crossed that
+  /// seam correctly, which is the only thing that actually guards against a
+  /// silent regression there.
+  final List<EmbeddingKind> kindsSeen = [];
+
   @override
   final int dimensions = 8;
 
@@ -99,7 +112,11 @@ final class _FakeEmbeddingModel implements EmbeddingModel {
   String get modelId => 'fake-model-v1';
 
   @override
-  Future<(Float32List, bool)> embed(String text) async {
+  Future<(Float32List, bool)> embed(
+    String text, {
+    EmbeddingKind kind = EmbeddingKind.document,
+  }) async {
+    kindsSeen.add(kind);
     if (shouldThrow) throw Exception('inference failure');
     final seed = text.codeUnits.fold(0, (a, b) => a ^ b);
     final rng = math.Random(seed);
@@ -936,6 +953,37 @@ void main() {
       expect(result.hits, isNotEmpty);
       expect(result.metadata.searched, contains('vault:semantic'));
       expect(result.hits.first.fieldScores.containsKey('vault:cosine'), isTrue);
+    });
+
+    test('semantic mode embeds the query with EmbeddingKind.query across the '
+        '`as dynamic` call', () async {
+      // Regression test for the WI-4 Phase 3 seam: _scoreSemantic calls
+      // embed() through `_embeddingModel as dynamic` because the field is
+      // typed Object? to avoid pulling betto_inferencing's model class
+      // into this file's type graph. Passing `kind:` through a dynamic
+      // call is NOT statically checked against EmbeddingModel.embed()'s
+      // signature — a typo'd or dropped `kind:` argument there would fail
+      // (or silently fall back to the `document` default) only at
+      // runtime. This test is what actually catches that regression.
+      final sha256 = _sha256('a');
+      await _seedVaultBlob(vaultStore, sha256, content: 'semantic content');
+      await _seedDocref(kvStore, sha256, _docId1, 'attachment');
+
+      final (embedding, _) = await model.embed('semantic content');
+      await _seedVec(kvStore, sha256, [embedding]);
+
+      // The setup embed() call above recorded one `document` entry (the
+      // default) — clear it so only the searcher's own call is observed.
+      model.kindsSeen.clear();
+
+      final searcher = _makeSearcher<Map<String, dynamic>>(
+        semanticManager,
+        fetchDoc: (_) async => {'doc': true},
+      );
+
+      await searcher.search('semantic content', mode: SearchMode.semantic);
+
+      expect(model.kindsSeen, equals([EmbeddingKind.query]));
     });
 
     test('semantic mode returns empty when no vec entries', () async {

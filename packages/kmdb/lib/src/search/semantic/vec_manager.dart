@@ -22,7 +22,8 @@ import '../../encryption/encryption_provider.dart';
 import '../../engine/kvstore/kv_store.dart';
 import '../../engine/kvstore/kv_store_impl.dart';
 import '../../query/write_augmentor.dart';
-import 'package:betto_inferencing/betto_inferencing.dart' show EmbeddingModel;
+import 'package:betto_inferencing/betto_inferencing.dart'
+    show EmbeddingKind, EmbeddingModel;
 import '../search_result.dart';
 import '../sync_delta.dart';
 import '../vec_index_definition.dart';
@@ -249,7 +250,10 @@ final class VecManager implements WriteAugmentor {
     final fieldValue = _extractFieldValue(doc, def.field);
     if (fieldValue == null) return; // field absent — nothing to index
 
-    final (embedding, truncated) = await _embed(fieldValue);
+    final (embedding, truncated) = await _embed(
+      fieldValue,
+      kind: EmbeddingKind.document,
+    );
     final quantised = _quantise(embedding);
 
     batch.put(
@@ -306,7 +310,10 @@ final class VecManager implements WriteAugmentor {
       return;
     }
 
-    final (embedding, truncated) = await _embed(fieldValue);
+    final (embedding, truncated) = await _embed(
+      fieldValue,
+      kind: EmbeddingKind.document,
+    );
     final quantised = _quantise(embedding);
 
     // Overwrite the vector atomically — no read-before-write needed.
@@ -377,7 +384,10 @@ final class VecManager implements WriteAugmentor {
       final fieldValue = _extractFieldValue(doc, field);
       if (fieldValue == null) continue;
 
-      final (embedding, truncated) = await _embed(fieldValue);
+      final (embedding, truncated) = await _embed(
+        fieldValue,
+        kind: EmbeddingKind.document,
+      );
       final quantised = _quantise(embedding);
 
       final batch = WriteBatch();
@@ -581,7 +591,7 @@ final class VecManager implements WriteAugmentor {
     }
 
     // Embed the query string once; reused for all fields.
-    final (queryEmbedding, _) = await _embed(query);
+    final (queryEmbedding, _) = await _embed(query, kind: EmbeddingKind.query);
 
     // Per-document per-field cosine scores.
     // Structure: docId → {field: cosine}
@@ -842,9 +852,18 @@ final class VecManager implements WriteAugmentor {
   ///
   /// Wrapping as [StateError] ensures the calling [interceptWrite] propagates
   /// an error that prevents the WriteBatch from being committed.
-  Future<(Float32List, bool)> _embed(String text) async {
+  ///
+  /// [kind] distinguishes index-time ("document") text from query-time
+  /// ("query") text — some models (e.g. `multilingual-e5-small`) prepend a
+  /// different instruction prefix for each, so passing the wrong [kind]
+  /// silently degrades retrieval quality rather than erroring. Models with no
+  /// prefix configuration (e.g. `bge-small-en-v1.5`) are unaffected either way.
+  Future<(Float32List, bool)> _embed(
+    String text, {
+    EmbeddingKind kind = EmbeddingKind.document,
+  }) async {
     try {
-      return await _model.embed(text);
+      return await _model.embed(text, kind: kind);
     } catch (e) {
       throw StateError('Embedding inference failed: $e');
     }

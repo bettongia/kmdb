@@ -34,8 +34,10 @@ final class _FakeEmbeddingModel implements EmbeddingModel {
   int get dimensions => 384;
 
   @override
-  Future<(Float32List, bool)> embed(String text) async =>
-      (Float32List(dimensions), false);
+  Future<(Float32List, bool)> embed(
+    String text, {
+    EmbeddingKind kind = EmbeddingKind.document,
+  }) async => (Float32List(dimensions), false);
 
   @override
   void dispose() {}

@@ -37,7 +37,7 @@ dependency_overrides:
   betto_zstd: ^0.1.0-dev.3
   betto_mediatype_detector: ^0.1.0-dev.1
   betto_lexical: ^0.1.0-dev.2
-  betto_inferencing: ^0.1.0-dev.1
+  betto_inferencing: ^0.1.0-dev.3
   betto_charset_detector: ^0.1.0-dev.2
   charset: ^2.0.1
   betto_pdfium: ^0.1.0-dev.3

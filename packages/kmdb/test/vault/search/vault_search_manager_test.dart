@@ -55,7 +55,8 @@ import 'package:kmdb/src/vault/search/vault_bm25_writer.dart';
 import 'package:kmdb/src/vault/search/vault_extraction_state.dart';
 import 'package:kmdb/src/vault/search/vault_indexing_status.dart';
 import 'package:kmdb/src/vault/search/vault_namespaces.dart';
-import 'package:betto_inferencing/betto_inferencing.dart' show EmbeddingModel;
+import 'package:betto_inferencing/betto_inferencing.dart'
+    show EmbeddingKind, EmbeddingModel;
 import 'package:kmdb/src/vault/search/vault_search_config.dart';
 import 'package:kmdb/src/vault/search/vault_search_manager.dart';
 import 'package:kmdb/src/vault/search/vault_text_extractor.dart';
@@ -209,6 +210,11 @@ final class _FakeEmbeddingModel implements EmbeddingModel {
   /// When true, [embed] throws [Exception('inference failure')].
   bool shouldThrow;
 
+  /// The [EmbeddingKind] values seen across all [embed] calls, in call order.
+  /// Lets tests assert that [VaultSearchManager]'s index-time embed calls
+  /// consistently pass [EmbeddingKind.document].
+  final List<EmbeddingKind> kindsSeen = [];
+
   @override
   String get modelId => 'fake-model-v1';
 
@@ -216,7 +222,11 @@ final class _FakeEmbeddingModel implements EmbeddingModel {
   int get dimensions => 8; // tiny for speed.
 
   @override
-  Future<(Float32List, bool)> embed(String text) async {
+  Future<(Float32List, bool)> embed(
+    String text, {
+    EmbeddingKind kind = EmbeddingKind.document,
+  }) async {
+    kindsSeen.add(kind);
     if (shouldThrow) throw Exception('inference failure');
     // Return a deterministic unit vector derived from text content.
     final seed = text.codeUnits.fold(0, (a, b) => a ^ b);
@@ -693,6 +703,12 @@ void main() {
         isNotEmpty,
         reason: r'$$vault:vec:idx: namespace must have entries after indexing',
       );
+
+      // Index-time chunk embedding must pass EmbeddingKind.document — a
+      // dropped or wrong kind here would silently mis-embed indexed content
+      // for models with a mandatory passage:/query: prefix (e.g. E5).
+      expect(model.kindsSeen, isNotEmpty);
+      expect(model.kindsSeen, everyElement(equals(EmbeddingKind.document)));
     });
 
     test('embedding error marks blob as failed', () async {
@@ -864,6 +880,11 @@ void main() {
             'missing',
       );
       expect(state?.modelVersion, equals('fake-model-v1'));
+
+      // The re-embed fallback branch (chunks re-embedded from text.txt
+      // because the vec file is missing) must pass EmbeddingKind.document.
+      expect(model.kindsSeen, isNotEmpty);
+      expect(model.kindsSeen, everyElement(equals(EmbeddingKind.document)));
     });
   });
 
