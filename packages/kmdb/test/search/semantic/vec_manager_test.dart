@@ -28,6 +28,11 @@ final class _FakeEmbeddingModel implements EmbeddingModel {
   bool embedCalled = false;
   bool shouldThrow = false;
 
+  /// The [EmbeddingKind] passed to the most recent [embed] call, or `null` if
+  /// [embed] has not been called yet. Lets tests assert that [VecManager]
+  /// passes `document` at index time and `query` at query time.
+  EmbeddingKind? lastKind;
+
   @override
   String get modelId => 'fake-model-v1';
 
@@ -35,8 +40,12 @@ final class _FakeEmbeddingModel implements EmbeddingModel {
   int get dimensions => 384;
 
   @override
-  Future<(Float32List, bool)> embed(String text) async {
+  Future<(Float32List, bool)> embed(
+    String text, {
+    EmbeddingKind kind = EmbeddingKind.document,
+  }) async {
     embedCalled = true;
+    lastKind = kind;
     if (shouldThrow) throw Exception('inference failure');
     if (text.isEmpty) {
       return (Float32List(dimensions), false);
@@ -115,7 +124,8 @@ void main() {
     test(
       'stores a 384-byte quantised vector under the correct namespace',
       () async {
-        final db = await _openDb();
+        final model = _FakeEmbeddingModel();
+        final db = await _openDb(model: model);
         final store = db.store;
         final col = db.collection(name: 'docs', codec: _codec);
 
@@ -131,6 +141,8 @@ void main() {
         );
         expect(bytes, isNotNull);
         expect(bytes!.length, equals(384));
+        // Index-time embedding must pass EmbeddingKind.document.
+        expect(model.lastKind, equals(EmbeddingKind.document));
 
         await db.close();
       },
@@ -295,7 +307,8 @@ void main() {
     test(
       'overwrites vector on update — new bytes differ from original',
       () async {
-        final db = await _openDb();
+        final model = _FakeEmbeddingModel();
+        final db = await _openDb(model: model);
         final store = db.store;
         final col = db.collection(name: 'docs', codec: _codec);
 
@@ -317,6 +330,8 @@ void main() {
 
         expect(after, isNotNull);
         expect(after, isNot(equals(before)));
+        // Update-time re-embedding must also pass EmbeddingKind.document.
+        expect(model.lastKind, equals(EmbeddingKind.document));
 
         await db.close();
       },
@@ -752,8 +767,10 @@ final class _ConfigurableIdEmbeddingModel implements EmbeddingModel {
   int get dimensions => 384;
 
   @override
-  Future<(Float32List, bool)> embed(String text) async =>
-      (Float32List(dimensions), false);
+  Future<(Float32List, bool)> embed(
+    String text, {
+    EmbeddingKind kind = EmbeddingKind.document,
+  }) async => (Float32List(dimensions), false);
 
   @override
   void dispose() {}
@@ -791,8 +808,10 @@ final class _TrackingEmbeddingModel implements EmbeddingModel {
   int get dimensions => 384;
 
   @override
-  Future<(Float32List, bool)> embed(String text) async =>
-      (Float32List(dimensions), false);
+  Future<(Float32List, bool)> embed(
+    String text, {
+    EmbeddingKind kind = EmbeddingKind.document,
+  }) async => (Float32List(dimensions), false);
 
   @override
   void dispose() => _onDispose();

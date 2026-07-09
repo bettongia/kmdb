@@ -23,6 +23,7 @@ import 'dart:convert' show json, utf8;
 import 'dart:math' show log;
 import 'dart:typed_data';
 
+import 'package:betto_inferencing/betto_inferencing.dart' show EmbeddingKind;
 import 'package:betto_lexical/betto_lexical.dart' show createDefaultTokenizer;
 
 import '../../encoding/value_codec.dart';
@@ -103,8 +104,10 @@ final class VaultSearcher<T> {
   final KvStoreImpl _kvStore;
   final VaultStore _vaultStore;
   final Object? _embeddingModel; // EmbeddingModel? — kept as Object? to avoid
-  // pulling in betto_inferencing's generated type into this file's type graph.
-  // Cast is done inline only when calling embed().
+  // pulling in betto_inferencing's generated model *class* into this file's
+  // type graph. Cast is done inline only when calling embed(). Importing the
+  // EmbeddingKind enum above is deliberately fine — it is a lightweight enum
+  // with no ORT/FFI weight, not the model class this seam is built to avoid.
 
   /// The collection namespace. Not used in query logic directly — candidate
   /// sha256 resolution uses [_fetchDoc] to scope results to this collection.
@@ -440,8 +443,15 @@ final class VaultSearcher<T> {
 
     // Embed query on main isolate (ORT session is thread-affine — RQ-5).
     // Cast is safe: the constructor receives EmbeddingModel? from the manager.
+    //
+    // `kind: EmbeddingKind.query` crosses this dynamic call by name only — it
+    // is not statically checked against EmbeddingModel.embed()'s signature, so
+    // a typo'd or dropped argument here would fail at runtime (or silently
+    // fall back to the `document` default), not at compile time. See the
+    // dedicated dynamic-dispatch test for this file.
     final model = _embeddingModel as dynamic;
-    final (Float32List queryVec, _) = await (model.embed(query) as Future);
+    final (Float32List queryVec, _) =
+        await (model.embed(query, kind: EmbeddingKind.query) as Future);
 
     final scores = <String, double>{};
 

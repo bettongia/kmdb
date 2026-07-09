@@ -92,7 +92,8 @@ export 'src/query/query_plan.dart' show QueryPlan, FilterPlan, ScanStrategy;
 export 'src/search/search_mode.dart' show SearchMode;
 export 'src/search/search_result.dart'
     show SearchResult, SearchMetadata, SearchHit;
-export 'package:betto_inferencing/betto_inferencing.dart' show EmbeddingModel;
+export 'package:betto_inferencing/betto_inferencing.dart'
+    show EmbeddingModel, EmbeddingKind;
 export 'src/search/fts_index_definition.dart' show FtsIndexDefinition;
 export 'src/search/vec_index_definition.dart' show VecIndexDefinition;
 export 'src/search/sync_delta.dart' show SyncDelta, DeltaChangeType, DeltaEntry;

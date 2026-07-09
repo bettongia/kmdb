@@ -74,14 +74,20 @@ consumer Flutter app that targets iOS additionally adds `betto_onnxrt_ios`
 ## Embedding Model
 
 **Default model:** [BGE Small En v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5)
+— English-only. For cross-lingual semantic search, use
+[`multilingual-e5-small`](https://huggingface.co/intfloat/multilingual-e5-small)
+(WI-4) instead; both share the same 384-dimensional output, so switching models
+requires no SQ8/index-format change (only a full `reindex()`, since the vector
+spaces themselves differ — see Model Lifecycle and Identity below).
 
-| Property    | Value                              |
-| :---------- | :--------------------------------- |
-| Format      | ONNX                               |
-| Size        | ~127 MB                            |
-| Dimensions  | 384                                |
-| Token limit | 512 (510 usable after [CLS]/[SEP]) |
-| Output      | L2-normalized float32 vectors      |
+| Property    | BGE Small En v1.5                  | `multilingual-e5-small`                      |
+| :---------- | :---------------------------------- | :-------------------------------------------- |
+| Format      | ONNX                                | ONNX                                          |
+| Size        | ~127 MB                             | ~470 MB (~3.7× larger — see Model Catalog)    |
+| Dimensions  | 384                                 | 384                                           |
+| Languages   | English only                        | ~100 languages (XLM-RoBERTa vocabulary)       |
+| Token limit | 512 (510 usable after [CLS]/[SEP])  | 512 (510 usable after `<s>`/`</s>`)            |
+| Output      | L2-normalized float32 vectors       | L2-normalized float32 vectors                 |
 
 ### Model Catalog
 
@@ -91,34 +97,58 @@ entry is a `ModelSpec` (from `betto_onnxrt`) with a generic shape:
 
 - `id` — stable catalog identifier (e.g. `'bge-small-en-v1.5'`)
 - `files` — `Map<String, ModelFile>` with keys `'onnx'` and `'vocab'`
-- `meta` — `Map<String, Object?>` with key `'dimensions'` (the embedding vector
-  length, read by `OnnxEmbeddingModel` as `spec.meta['dimensions'] as int`)
+- `meta` — `Map<String, Object?>`:
+  - `'dimensions'` — the embedding vector length, read by `OnnxEmbeddingModel`
+    as `spec.meta['dimensions'] as int`.
+  - `'tokenizerFamily'` — selects which `ModelTokenizer` implementation
+    `OnnxEmbeddingModel.load()` constructs (`'bert'` → `BertTokenizer`,
+    `'xlmr'` → `XlmRobertaTokenizer`). Set explicitly on every real entry so a
+    future third tokenizer family can't be silently misresolved by a
+    `ModelSpec` that forgot the key.
+  - `'queryPrefix'` / `'documentPrefix'` — optional. When present,
+    `OnnxEmbeddingModel.embed()` prepends the matching string based on the
+    caller's `EmbeddingKind` before tokenization (see EmbeddingKind and
+    Query/Document Prefixes below). Absent for models with no
+    passage/query convention (e.g. `bge-small-en-v1.5`), in which case the
+    prefix step is a no-op regardless of `EmbeddingKind`.
 
 Validation state (whether a model is production-ready) is tracked separately in
 `ModelCatalog._validated` because `betto_onnxrt`'s generic `ModelSpec` has no
 validation concept.
 
-| Model ID            | Dimensions | Status       |
-| :------------------ | :--------- | :----------- |
-| `bge-small-en-v1.5` | 384        | Validated    |
-| `bge-m3-v1.0`       | 1024       | Unvalidated† |
+| Model ID                 | Dimensions | Tokenizer                | Status    |
+| :------------------------ | :--------- | :------------------------ | :-------- |
+| `bge-small-en-v1.5`       | 384        | `BertTokenizer` (WordPiece) | Validated |
+| `multilingual-e5-small`   | 384        | `XlmRobertaTokenizer` (SentencePiece/Unigram) | Validated |
 
-† Registered in the catalog but not yet tested end-to-end. Using an unvalidated
-model ID throws `UnsupportedError`. BGE-M3 support is deferred to v0.08.
+`bge-m3-v1.0` (1024-dim, BGE-M3) is **not** currently registered. An earlier
+placeholder entry with non-verifiable (all-zero) checksums was removed rather
+than left as a broken stub (WI-4); BGE-M3 remains a later upgrade path per the
+roadmap, to be re-added with real checksums and a full validation pass when
+that work is picked up. A permanent `placeholder-model` catalog entry
+(deliberately, permanently unvalidated, non-resolvable URLs) exists solely as
+an internal test fixture for catalog-gating tests — it is not a real model and
+is never user-selectable.
 
 `ModelCatalog.lookup(id)` throws `ArgumentError` for unknown IDs and
 `UnsupportedError` for unvalidated ones. `ModelCatalog.isKnown(id)` returns
 `true` for any registered ID regardless of validation status.
-`ModelCatalog.defaultModelId` is `'bge-small-en-v1.5'`.
+`ModelCatalog.defaultModelId` is `'bge-small-en-v1.5'` — `kmdb` does not change
+its default when a second model is registered; applications that want
+`multilingual-e5-small` select it explicitly via `EmbeddingModelConfig`.
 
 ### Model acquisition (download-on-demand)
 
-The `bge_small.onnx` binary (~133 MB) is **not bundled** in the repository.
-It is downloaded on first use via `ModelDownloader` from `betto_onnxrt`.
-Supporting tokenizer assets (`vocab.txt`, `tokenizer_config.json`,
-`tokenizer.json`, `special_tokens_map.json`, `config.json`) are included in
-`assets/models/bge-small-en/` in the `betto_inferencing` package and are loaded
-directly by `BertTokenizer` without any network access.
+Neither the ONNX model binary nor its tokenizer assets are bundled in the
+repository — **both** files named in a `ModelSpec.files` map (keys `'onnx'`
+and `'vocab'`) are downloaded on first use via `ModelDownloader` from
+`betto_onnxrt` and cached locally; there is no local, network-free asset
+directory shipped with `betto_inferencing`. For `bge-small-en-v1.5` this is
+`model.onnx` (~127 MB) and `vocab.txt`; for `multilingual-e5-small` it is
+`model.onnx` (~470 MB — see the Embedding Model table above for why this is
+meaningfully larger) and `tokenizer.json` (consumed by `XlmRobertaTokenizer`'s
+SentencePiece/Unigram tokenizer rather than `BertTokenizer`'s WordPiece
+vocabulary).
 
 `OnnxEmbeddingModel.load()` requires either `modelPath` or `cacheDir`.
 Calling it without either throws `ArgumentError` synchronously. The
@@ -184,32 +214,76 @@ The CLI surface is `kmdb <db> reindex`.
 
 ## Tokenisation Pipeline
 
-Producing an embedding from a field value requires four stages:
+Producing an embedding from a field value requires four stages, with the
+subword-splitting stage selected per-model via `ModelSpec.meta['tokenizerFamily']`
+(see Model Catalog):
 
 ```
 field value
-  → word segmentation  (Tokenizer — shared with §21 lexical pipeline)
-  → WordPiece subword splitting  (BertTokenizer, 30k-entry vocabulary)
+  → optional query:/passage: prefix  (EmbeddingKind — see below; no-op if the
+                                       model has no prefix convention)
+  → word segmentation  (Tokenizer — shared with §21 lexical pipeline, BERT
+                         family only; XLM-R tokenizes the prefixed string
+                         directly via SentencePiece/Unigram)
+  → subword splitting   (ModelTokenizer — BertTokenizer's WordPiece for
+                          bge-small-en-v1.5, XlmRobertaTokenizer's
+                          SentencePiece/Unigram for multilingual-e5-small)
   → ONNX model inference
   → mean pool + L2 normalise
-  → 384-dim float32 vector
+  → D-dim float32 vector  (D = EmbeddingModel.dimensions; 384 for both
+                            currently-registered models)
 ```
 
-`BertTokenizer` accepts a `Tokenizer` in its constructor; `RegExpTokenizer` is
-the default. `IcuTokenizer` (ICU FFI, UAX #29) can be substituted. Both produce
-equivalent results for English-language text. The word segmentation step is the
-only part shared with the lexical pipeline — the output of BERT tokenization
-(numeric subword IDs consumed by the model) is entirely different from the
-stemmed whole-word tokens used by the inverted index.
+`OnnxEmbeddingModel.load()` selects the `ModelTokenizer` implementation for the
+loaded `ModelSpec` via its `tokenizerFamily` key: `'bert'` constructs a
+`BertTokenizer`, `'xlmr'` a `XlmRobertaTokenizer`. `BertTokenizer` accepts a
+`Tokenizer` in its constructor; `RegExpTokenizer` is the default, and
+`IcuTokenizer` (ICU FFI, UAX #29) can be substituted — both produce equivalent
+results for English-language text. The word segmentation step is the only part
+shared with the lexical pipeline for BERT-family models — the output of BERT
+tokenization (numeric subword IDs consumed by the model) is entirely different
+from the stemmed whole-word tokens used by the inverted index.
+`XlmRobertaTokenizer` tokenizes directly from raw (prefixed) text using its own
+SentencePiece/Unigram vocabulary and does not go through the shared `Tokenizer`
+word-segmentation step at all.
 
-The same pipeline is applied to query strings at search time.
+The same pipeline is applied to query strings at search time, with `kind:
+EmbeddingKind.query` instead of the indexing-time default,
+`EmbeddingKind.document`.
+
+### `EmbeddingKind` and query/document prefixes
+
+`EmbeddingModel.embed(String text, {EmbeddingKind kind = EmbeddingKind.document})`
+takes an `EmbeddingKind` (`document` or `query`) alongside the text. Some
+models — `multilingual-e5-small` among them — require a fixed textual prefix
+(`"passage: "` for indexed text, `"query: "` for query text) per their model
+card; omitting it, or using the wrong one, does not error but silently
+degrades retrieval quality. `OnnxEmbeddingModel.embed()` looks up
+`ModelSpec.meta['documentPrefix']`/`['queryPrefix']` and prepends the one
+matching `kind` before tokenization. Models with neither key present (e.g.
+`bge-small-en-v1.5`) have no prefix step — `kind` is accepted but has no
+observable effect, so behaviour for those models is unchanged from before
+`EmbeddingKind` existed.
+
+Every `kmdb`-side caller that generates an embedding states which side of
+retrieval it is on explicitly, rather than relying on the `document` default:
+`VecManager` passes `EmbeddingKind.document` from its insert/update/rebuild
+paths and `EmbeddingKind.query` from its query path; `VaultSearchManager`
+passes `EmbeddingKind.document` from its (chunk) indexing paths; `VaultSearcher`
+passes `EmbeddingKind.query` from its semantic scoring path. `kmdb` itself
+never constructs a query/document prefix string — doing so would leak an
+E5-specific implementation detail into model-agnostic code; the model alone
+decides, via its own `ModelSpec.meta`, whether and how `EmbeddingKind`
+translates into a prefix.
 
 ## Token Limit and Truncation
 
-BGE Small En v1.5 accepts at most 510 usable tokens (512 minus `[CLS]` and
-`[SEP]`). At roughly 1.3 subword tokens per word this covers approximately
-350–400 words — sufficient for the document field values in scope (titles,
-descriptions, abstracts).
+Both currently-registered models accept at most 510 usable tokens out of a
+512-token context window (512 minus the two reserved sequence-boundary tokens
+— `[CLS]`/`[SEP]` for BGE Small En v1.5, `<s>`/`</s>` for
+`multilingual-e5-small`). At roughly 1.3 subword tokens per word this covers
+approximately 350–400 words — sufficient for the document field values in
+scope (titles, descriptions, abstracts).
 
 If a field value exceeds the token limit, the first 510 tokens are embedded and
 the remainder is discarded. A `$$vec:truncated:` marker key is written for that
@@ -230,8 +304,10 @@ $vec:corpus:{ns}:{field}            →  { n: int }
 $vec:truncated:{ns}:{field}:{docId} →  (empty — key presence = truncation marker)
 ```
 
-where `D = EmbeddingModel.dimensions` (384 for BGE Small En v1.5, 1024 for
-BGE-M3, etc.). The byte length equals the model dimension (1 byte per component).
+where `D = EmbeddingModel.dimensions` (384 for both currently-registered
+models, BGE Small En v1.5 and `multilingual-e5-small`; a future
+higher-dimensional model such as BGE-M3, 1024-dim, would use its own `D`). The
+byte length equals the model dimension (1 byte per component).
 
 **Vector entry** — the SQ8-quantized embedding for a single `(document, field)`
 pair. `D` bytes per entry (4× reduction from float32's `4×D` bytes).
@@ -246,9 +322,10 @@ query path.
 
 ## SQ8 Quantization
 
-BGE Small En v1.5 outputs L2-normalized vectors, so individual dimension values
-lie within $[-1, 1]$. This fixed range allows symmetric quantization without
-per-vector or per-dimension calibration:
+Both currently-registered models output L2-normalized vectors (per the
+Tokenisation Pipeline's mean-pool + L2-normalise step), so individual
+dimension values lie within $[-1, 1]$. This fixed range allows symmetric
+quantization without per-vector or per-dimension calibration:
 
 $$u = \text{clamp}\!\left(\text{round}\!\left(\frac{f + 1.0}{2.0} \times 255\right), 0, 255\right)$$
 
@@ -268,7 +345,8 @@ the semantic index always consistent.
 
 ### Insert
 
-1. Run inference on the field value; quantize the result to SQ8.
+1. Run inference on the field value with `kind: EmbeddingKind.document`;
+   quantize the result to SQ8.
 2. In the `WriteBatch`:
    - `PUT $$vec:{ns}:{field}:{docId}` → quantized vector.
    - If truncated: `PUT $$vec:truncated:{ns}:{field}:{docId}` → empty.
@@ -276,7 +354,8 @@ the semantic index always consistent.
 
 ### Update
 
-1. Run inference on the new field value; quantize the result.
+1. Run inference on the new field value with `kind: EmbeddingKind.document`;
+   quantize the result.
 2. In the `WriteBatch`:
    - `PUT $$vec:{ns}:{field}:{docId}` → new quantized vector (atomically replaces
      the previous entry).
@@ -302,7 +381,10 @@ At kmdb's expected scale (<50k documents), a brute-force flat scan is faster and
 more battery-efficient than maintaining a graph-based approximate nearest
 neighbour index (HNSW, IVF-Flat, etc.):
 
-1. Run inference on the query string using the same pipeline as indexing.
+1. Run inference on the query string using the same pipeline as indexing, but
+   with `kind: EmbeddingKind.query` — for models with a
+   `queryPrefix`/`documentPrefix` distinction, this produces a different
+   embedding than indexing the same literal string would.
 2. If a `filter` was provided, resolve the set of matching docIds using
    secondary indexes (§16) if available, or a full namespace scan with in-memory
    filter evaluation otherwise. This produces a `candidateIds` set.
@@ -335,9 +417,10 @@ replacing tokenisation.
 
 For each entry in the delta:
 
-- **Added / updated** — fetch the current document value, run inference to
-  produce a `D`-dim embedding, quantize to SQ8, and write using the same insert
-  / update path as §22 Write Behaviour.
+- **Added / updated** — fetch the current document value, run inference (with
+  `kind: EmbeddingKind.document`, matching the local write path) to produce a
+  `D`-dim embedding, quantize to SQ8, and write using the same insert / update
+  path as §22 Write Behaviour.
 - **Deleted** — write DELETE entries and decrement corpus stats as per the
   delete path in §22 Write Behaviour. No inference is required.
 

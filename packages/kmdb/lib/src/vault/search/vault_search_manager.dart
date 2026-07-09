@@ -38,7 +38,8 @@ import 'dart:async';
 import 'dart:convert' show json, utf8;
 import 'dart:typed_data';
 
-import 'package:betto_inferencing/betto_inferencing.dart' show EmbeddingModel;
+import 'package:betto_inferencing/betto_inferencing.dart'
+    show EmbeddingKind, EmbeddingModel;
 
 // ignore_for_file: prefer_initializing_formals
 // Dart does not permit `this._fieldName` in named constructor parameters when
@@ -607,7 +608,10 @@ final class VaultSearchManager {
             final slice = Uint8List.fromList(
               textUtf8.sublist(c.byteStart, c.byteEnd),
             );
-            final (embedding, _) = await model.embed(utf8.decode(slice));
+            final (embedding, _) = await model.embed(
+              utf8.decode(slice),
+              kind: EmbeddingKind.document,
+            );
             return embedding;
           }),
         );
@@ -802,7 +806,10 @@ final class VaultSearchManager {
               final slice = Uint8List.fromList(
                 textBytes.sublist(c.byteStart, c.byteEnd),
               );
-              final (embedding, _) = await model.embed(utf8.decode(slice));
+              final (embedding, _) = await model.embed(
+                utf8.decode(slice),
+                kind: EmbeddingKind.document,
+              );
               return embedding;
             }),
           );

@@ -26,6 +26,11 @@ import 'package:test/test.dart';
 /// documents and negative for "dissimilar" ones, based on keywords in
 /// the text. This lets the integration tests assert ranking order.
 final class _ClusteredEmbeddingModel implements EmbeddingModel {
+  /// The [EmbeddingKind] values seen across all [embed] calls, in call order.
+  /// Lets tests assert that document indexing and query search each reach
+  /// this model with the expected [EmbeddingKind].
+  final List<EmbeddingKind> kindsSeen = [];
+
   @override
   String get modelId => 'clustered-model-v1';
 
@@ -33,7 +38,11 @@ final class _ClusteredEmbeddingModel implements EmbeddingModel {
   int get dimensions => 384;
 
   @override
-  Future<(Float32List, bool)> embed(String text) async {
+  Future<(Float32List, bool)> embed(
+    String text, {
+    EmbeddingKind kind = EmbeddingKind.document,
+  }) async {
+    kindsSeen.add(kind);
     final lower = text.toLowerCase();
     // Assign a base direction that reflects the semantic "cluster".
     final v = Float32List(dimensions);
@@ -64,6 +73,56 @@ final class _ClusteredEmbeddingModel implements EmbeddingModel {
       }
     }
 
+    return (v, false);
+  }
+
+  @override
+  void dispose() {}
+}
+
+/// A fake embedding model that simulates a mandatory prefix by biasing the
+/// output vector differently depending on [EmbeddingKind] — mirroring how a
+/// real model like `multilingual-e5-small` would produce a different vector
+/// for `"passage: hello"` versus `"query: hello"` even though the
+/// *unprefixed* input text is identical.
+///
+/// Used to prove that [VecManager] actually threads [EmbeddingKind] through
+/// to the model rather than embedding every call the same way (which would
+/// make index-time and query-time text indistinguishable regardless of what
+/// the model does with that information).
+final class _PrefixSimulatingEmbeddingModel implements EmbeddingModel {
+  /// The [EmbeddingKind] values seen across all [embed] calls, in call order.
+  final List<EmbeddingKind> kindsSeen = [];
+
+  @override
+  String get modelId => 'prefix-simulating-model-v1';
+
+  @override
+  int get dimensions => 4;
+
+  @override
+  Future<(Float32List, bool)> embed(
+    String text, {
+    EmbeddingKind kind = EmbeddingKind.document,
+  }) async {
+    kindsSeen.add(kind);
+    final seed = text.codeUnits.fold(0, (a, b) => a ^ b);
+    final v = Float32List(dimensions);
+    // Base direction from text content, offset differently per EmbeddingKind
+    // — simulating the effect of a "passage: "/"query: " prefix without
+    // needing real tokenization/inference.
+    final kindOffset = kind == EmbeddingKind.query ? 0.5 : -0.5;
+    for (var i = 0; i < dimensions; i++) {
+      v[i] = ((seed ^ i) % 7).toDouble() + kindOffset;
+    }
+    var norm = 0.0;
+    for (final x in v) {
+      norm += x * x;
+    }
+    norm = math.sqrt(norm);
+    for (var i = 0; i < v.length; i++) {
+      v[i] /= norm;
+    }
     return (v, false);
   }
 
@@ -520,6 +579,122 @@ void main() {
 
       expect(result.hits, isNotEmpty);
       expect(result.hits.first.fieldScores, contains('body:cosine'));
+
+      await db.close();
+    });
+  });
+
+  // ── EmbeddingKind wiring (WI-4 Phase 3) ─────────────────────────────────────
+
+  group('EmbeddingKind wiring', () {
+    test('indexing passes EmbeddingKind.document, querying passes '
+        'EmbeddingKind.query', () async {
+      final model = _ClusteredEmbeddingModel();
+      final db = await _openDb(model: model);
+      final col = db.collection(name: 'articles', codec: _codec);
+
+      await col.insert({'body': 'relational database storage engine'});
+      // The vector index is lazily built on first query (spec §22) — a plain
+      // insert before the index has ever been built does not call embed() at
+      // all (interceptWrite skips `undefined`/`stale` indexes). So no embed
+      // calls have happened yet.
+      expect(model.kindsSeen, isEmpty);
+
+      await col.search(
+        'database storage system',
+        fields: ['body'],
+        mode: SearchMode.semantic,
+      );
+      // ensureBuilt's full-namespace scan embeds the one existing document
+      // with EmbeddingKind.document, then the query is embedded last with
+      // EmbeddingKind.query.
+      expect(
+        model.kindsSeen,
+        equals([EmbeddingKind.document, EmbeddingKind.query]),
+      );
+
+      await db.close();
+    });
+
+    test(
+      'reindex() re-embeds existing documents with EmbeddingKind.document',
+      () async {
+        final model = _ClusteredEmbeddingModel();
+        final db = await _openDb(model: model);
+        final col = db.collection(name: 'articles', codec: _codec);
+        await col.insert({'body': 'relational database storage engine'});
+        model.kindsSeen.clear();
+
+        await db.reindex();
+
+        expect(model.kindsSeen, everyElement(equals(EmbeddingKind.document)));
+        expect(model.kindsSeen, isNotEmpty);
+
+        await db.close();
+      },
+    );
+
+    test('a model that varies its output by EmbeddingKind (simulating a '
+        'passage:/query: prefix) yields different vectors for identical '
+        'index-time and query-time text', () async {
+      final model = _PrefixSimulatingEmbeddingModel();
+      final db = await _openDb(model: model);
+      final col = db.collection(name: 'articles', codec: _codec);
+
+      // Same literal text on both sides — any scoring difference must come
+      // from EmbeddingKind reaching the model, not from different input.
+      const sharedText = 'hello world';
+      await col.insert({'body': sharedText});
+
+      final result = await col.search(
+        sharedText,
+        fields: ['body'],
+        mode: SearchMode.semantic,
+      );
+
+      expect(result.hits, hasLength(1));
+      // A model that actually applies a passage:/query: style prefix would
+      // never produce a perfect (cosine == 1.0) self-match for identical
+      // unprefixed text, because the document and query vectors differ.
+      final score = result.hits.first.fieldScores['body:cosine']!;
+      expect(score, isNot(closeTo(1.0, 1e-9)));
+      expect(
+        model.kindsSeen,
+        equals([EmbeddingKind.document, EmbeddingKind.query]),
+      );
+
+      await db.close();
+    });
+
+    test('a model that ignores EmbeddingKind (e.g. bge-small-en-v1.5, no '
+        'prefix keys) is byte-for-byte unchanged: identical index-time and '
+        'query-time text yields a perfect self-match', () async {
+      // Any of the plain fakes used elsewhere in this file (which do not
+      // branch on `kind` at all) stands in for a no-prefix model like
+      // bge-small-en-v1.5 — the default `kind` parameter is a no-op for
+      // them, so behaviour is identical to before EmbeddingKind existed.
+      final db = await _openDb();
+      final col = db.collection(name: 'articles', codec: _codec);
+
+      const sharedText = 'relational database storage engine';
+      await col.insert({'body': sharedText});
+
+      final result = await col.search(
+        sharedText,
+        fields: ['body'],
+        mode: SearchMode.semantic,
+      );
+
+      expect(result.hits, hasLength(1));
+      // Not an exact 1.0: the stored document vector is SQ8-quantised
+      // (spec §22, ≈0.004 max per-element error) while the query vector
+      // stays full-precision float32, so a small quantisation gap is
+      // expected even for byte-identical input text. The tolerance here is
+      // well inside that quantisation noise floor and far tighter than the
+      // `_PrefixSimulatingEmbeddingModel` test's deliberately-different
+      // vectors above, which is the actual behaviour being distinguished.
+      final score = result.hits.first.fieldScores['body:cosine']!;
+      expect(score, closeTo(1.0, 0.01));
 
       await db.close();
     });
