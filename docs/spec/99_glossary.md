@@ -109,10 +109,20 @@ DekCache
 Embedding
 
 : A dense vector representation of a text string produced by a neural language
-  model (BGE Small En v1.5 in KMDB). Captures semantic meaning — similar
-  concepts produce similar vectors, enabling cosine similarity search. KMDB
-  embeddings are 384-dimensional float32 vectors, quantized to SQ8 for
+  model — BGE Small En v1.5 (English-only) or `multilingual-e5-small`
+  (~100 languages) in KMDB. Captures semantic meaning — similar concepts
+  produce similar vectors, enabling cosine similarity search. Both currently
+  registered models are 384-dimensional; embeddings are quantized to SQ8 for
   storage. See §22.
+
+EmbeddingKind
+
+: An enum (`document` / `query`) passed to `EmbeddingModel.embed()` to select
+  which of a model's `queryPrefix`/`documentPrefix` (if any) to prepend before
+  embedding. `multilingual-e5-small` requires a mandatory `"passage: "` /
+  `"query: "` prefix distinguishing indexed text from query text; BGE Small
+  En v1.5 defines neither prefix, so `EmbeddingKind` is a no-op for it. See
+  §22.
 
 enc:blob
 
