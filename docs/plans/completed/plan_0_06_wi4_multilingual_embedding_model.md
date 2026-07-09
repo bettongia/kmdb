@@ -1,6 +1,7 @@
 # WI-4: Multilingual embedding model
 
-**Status**: Implementing (Phase 0 spike complete — hit the Q6 hard gate;
+**Status**: Complete (2026-07-09). All three phases shipped, reviewed, and
+merged: Phase 0 (spike) — hit the Q6 hard gate;
 Branch B. The follow-on tokenizer-port design plan,
 [WI-11](../roadmap/0_06.md#wi-11-xlm-r-sentencepiece-tokenizer-lands-in-betto_inferencing)
 — [plan_0_06_wi11_xlmr_tokenizer.md](completed/plan_0_06_wi11_xlmr_tokenizer.md) — is now
@@ -51,9 +52,24 @@ agent-launch tool available to invoke `kmdb-qa`/`kmdb-pre-commit` itself).
 `dependency_overrides` bumped to match (`dart pub get` resolves cleanly at
 `0.1.0-dev.3`). Phase 3's precondition is now satisfied.
 
+**Phase 3 complete (2026-07-09, branch
+`20260709_plan_0_06_wi4_multilingual_embedding_model_phase3`,
+[kmdb#57](https://github.com/bettongia/kmdb/pull/57)).** `EmbeddingKind`
+threaded through `vec_manager.dart`, `vault_searcher.dart`, and
+`vault_search_manager.dart` — query-time call sites pass
+`EmbeddingKind.query`, index-time call sites pass `EmbeddingKind.document`.
+The riskiest change (the `kind:` argument crossing `vault_searcher.dart`'s
+deliberate `as dynamic` seam) is covered by a dedicated runtime regression
+test. `bge-small-en-v1.5` behavior confirmed unchanged (no prefix keys
+registered, so the prefix step is a no-op). `docs/spec/22_semantic_search.md`,
+`docs/roadmap/0_06.md`, and `docs/proposals/vault_search.md` §10.3 updated.
+`kmdb` 2317/2317 tests, `kmdb_cli` 1051/1051, coverage 94.8%, `kmdb-qa`
+sign-off clean, `make pre_commit` clean. Squash-merged, CI green. This
+closes out WI-4 in full.
+
 **PR links**: [inferencing#2](https://github.com/bettongia/inferencing/pull/2)
 (Phase 1), [inferencing#3](https://github.com/bettongia/inferencing/pull/3)
-(Phase 2)
+(Phase 2), [kmdb#57](https://github.com/bettongia/kmdb/pull/57) (Phase 3)
 
 ## Problem statement
 

@@ -690,7 +690,7 @@ betto_lang_id/
 > **Implementation note (WI-4, 2026-07-09).** Implemented largely as sketched
 > below, with three notable refinements found during investigation and
 > implementation — see
-> [plan_0_06_wi4_multilingual_embedding_model.md](../plans/plan_0_06_wi4_multilingual_embedding_model.md)
+> [plan_0_06_wi4_multilingual_embedding_model.md](../plans/completed/plan_0_06_wi4_multilingual_embedding_model.md)
 > for the full write-up. **(1)** `bge-m3` turned out to be a bigger jump than
 > "1024 dims, needs a re-index" alone suggests: its fp32 ONNX export exceeds
 > ONNX's 2 GB single-protobuf-file limit and ships as a graph file plus a
