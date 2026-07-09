@@ -129,6 +129,11 @@ packages/
                          for native AES-256-GCM / Argon2id (Flutter hosts only, optional, opt-in)
   kmdb_extractor_pdf/  — PdfTextExtractor: VaultTextExtractor for application/pdf
                          blobs, wraps betto_pdfium (native only, optional, opt-in)
+  kmdb_extractor_html/ — HtmlTextExtractor: VaultTextExtractor for text/html
+                         blobs, wraps the html package (pure Dart, optional, opt-in)
+  kmdb_extractor_markdown/ — MarkdownTextExtractor: VaultTextExtractor for
+                         text/markdown blobs, wraps the markdown package
+                         (pure Dart, optional, opt-in)
 
 External Bettongia packages — all published to pub.dev, pinned in
 `pubspec.yaml` `dependency_overrides`:
@@ -200,8 +205,12 @@ melos format
 # Coverage (writes site/coverage/lcov.info and per-package summaries)
 make coverage
 
-# Build docs site (requires pandoc)
-make site
+# Build docs site (requires pandoc) — `site` itself is not a real make
+# target (it names the already-checked-in site/ directory, so `make site`
+# silently no-ops); the actual targets are `doc_site` (HTML site + coverage)
+# and `doc_site_html` (HTML site only, used by CI after coverage has already
+# run separately).
+make doc_site
 
 # Run performance benchmarks (§18 P99 targets)
 cd packages/kmdb && dart run benchmark/main.dart

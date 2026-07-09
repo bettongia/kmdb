@@ -27,10 +27,20 @@ import '../vault_manifest.dart';
 ///
 /// - [PlainTextExtractor] — handles `text/plain` via charset detection (WI-2).
 ///
-/// ## Extension points
+/// ## Optional extension packages (not core `kmdb` dependencies)
 ///
-/// Future WIs will add PDF and HTML extractors. They may be provided by
-/// the library user via [VaultSearchConfig.extractors].
+/// - `kmdb_extractor_pdf`'s `PdfTextExtractor` — `application/pdf` (WI-8),
+///   wraps `betto_pdfium`.
+/// - `kmdb_extractor_html`'s `HtmlTextExtractor` — `text/html` (WI-9), wraps
+///   the `html` package with a custom node walk.
+/// - `kmdb_extractor_markdown`'s `MarkdownTextExtractor` — `text/markdown`
+///   (WI-9), wraps the `markdown` package with a custom AST walk.
+///
+/// These ship as separate optional packages (following the
+/// `kmdb_extractor_<name>` convention) rather than as core `kmdb`
+/// dependencies, and are registered by the library user via
+/// [VaultSearchConfig.extractors]. DOCX remains a candidate for a future
+/// extension package.
 ///
 /// ## Contract
 ///

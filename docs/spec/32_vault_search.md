@@ -235,26 +235,38 @@ scope), where that always resolves to `IcuTokenizer`.
 
 Text is extracted from blobs by `VaultTextExtractor` implementations:
 
-| Extractor            | Media types            | Notes                                |
-| :------------------- | :---------------------- | :------------------------------------ |
-| `PlainTextExtractor` | `text/plain`, `text/*`  | Charset-detected UTF-8 decode (WI-2)  |
-| `PdfTextExtractor`   | `application/pdf`       | `kmdb_extractor_pdf` package (WI-8), wraps `betto_pdfium`. Configurable `scannedPageRatio` gate discards predominantly-scanned/image-only documents (returns `""`, still `indexed`). Pages joined with `"\n\n"`. |
+| Extractor               | Media types        | Notes                                |
+| :---------------------- | :------------------ | :------------------------------------ |
+| `PlainTextExtractor`    | `text/plain`        | Charset-detected UTF-8 decode (WI-2)  |
+| `PdfTextExtractor`      | `application/pdf`   | `kmdb_extractor_pdf` package (WI-8), wraps `betto_pdfium`. Configurable `scannedPageRatio` gate discards predominantly-scanned/image-only documents (returns `""`, still `indexed`). Pages joined with `"\n\n"`. |
+| `HtmlTextExtractor`     | `text/html`         | `kmdb_extractor_html` package (WI-9), wraps the `html` package. Custom node walk (not `Element.text`, which fuses adjacent block text and leaks `<script>`/`<style>` source) skips non-prose subtrees and inserts boundary whitespace around block/inline elements. No charset side-channel — see its `README.md`. |
+| `MarkdownTextExtractor` | `text/markdown`     | `kmdb_extractor_markdown` package (WI-9), wraps the `markdown` package via `Document(encodeHtml: false, extensionSet: ExtensionSet.gitHubWeb)` (not the bare default, which HTML-escapes AST text and lacks table support). Custom AST walk (not `Node.textContent`) drops fenced/indented code block content (kept: inline code), keeps link text and image alt text while dropping URLs. |
 
-Additional extractors (DOCX, HTML) are out of scope for v1 and can be
-registered via `VaultSearchConfig.extractors`. The first extractor whose
-`supportedMediaTypes` set contains the blob's media type is used; if none
-match, the blob is marked `unsupported`.
+DOCX remains out of scope for v1 and can be added following the same
+`kmdb_extractor_<name>` convention via `VaultSearchConfig.extractors`. The
+first extractor whose `supportedMediaTypes` set contains the blob's media
+type is used; if none match, the blob is marked `unsupported`.
 
-`PdfTextExtractor` ships in the optional `kmdb_extractor_pdf` package (not a
-core `kmdb` dependency) — see its `README.md` for installation and platform
+`PdfTextExtractor`, `HtmlTextExtractor`, and `MarkdownTextExtractor` each
+ship in their own optional package (`kmdb_extractor_pdf`,
+`kmdb_extractor_html`, `kmdb_extractor_markdown` — none are a core `kmdb`
+dependency) — see each package's `README.md` for installation and platform
 support notes:
 
 ```dart
 import 'package:kmdb_extractor_pdf/kmdb_extractor_pdf.dart';
+import 'package:kmdb_extractor_html/kmdb_extractor_html.dart';
+import 'package:kmdb_extractor_markdown/kmdb_extractor_markdown.dart';
 
 final db = await KmdbDatabase.open(
   // ...
-  vaultSearch: VaultSearchConfig(extractors: [PdfTextExtractor()]),
+  vaultSearch: VaultSearchConfig(
+    extractors: [
+      PdfTextExtractor(),
+      HtmlTextExtractor(),
+      MarkdownTextExtractor(),
+    ],
+  ),
 );
 ```
 

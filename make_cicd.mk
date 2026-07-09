@@ -30,7 +30,8 @@ cicd_linux_base:
 	dart format --output=none --set-exit-if-changed \
 		packages/kmdb packages/kmdb_cli packages/kmdb_harness \
 		packages/kmdb_google_drive packages/kmdb_flutter \
-		packages/kmdb_extractor_pdf
+		packages/kmdb_extractor_pdf packages/kmdb_extractor_html \
+		packages/kmdb_extractor_markdown
 	melos run analyze
 	cat addlicense_config.txt | xargs addlicense --check
 	melos coverage
