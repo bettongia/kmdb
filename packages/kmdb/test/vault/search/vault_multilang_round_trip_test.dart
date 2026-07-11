@@ -103,7 +103,7 @@ Future<VaultExtractionState?> _readState(
   final ns = '$kVaultExtractPrefix$sha256';
   final bytes = await kvStore.get(ns, kVaultCorpusSentinelKey);
   if (bytes == null) return null;
-  return VaultExtractionState.decode(bytes, sha256);
+  return await VaultExtractionState.decode(bytes, sha256);
 }
 
 /// Polls until [sha256] reaches a terminal indexing status or [timeout]

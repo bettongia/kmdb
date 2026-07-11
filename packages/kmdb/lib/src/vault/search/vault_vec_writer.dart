@@ -40,6 +40,17 @@ import 'vault_namespaces.dart' show kVaultVecIdxPrefix, kVaultChunkKey;
 /// rebuilds its vault vector index independently by re-running the embedding
 /// model.
 ///
+/// ## Encryption layering
+///
+/// The "Value" column above describes the *raw* SQ8 bytes this class
+/// produces — [VaultVecWriter] itself is `static const` and deliberately
+/// unaware of encryption. [VaultSearchManager] wraps every entry with
+/// [EncryptionEnvelope] before committing (Encryption confidentiality
+/// reconciliation plan, Gap 1), so the on-disk bytes carry an outer
+/// [EncryptionFlag] prefix and are longer than `D` bytes when encrypted.
+/// Readers ([VaultSearcher]) must call
+/// [VaultSearchManager.unwrapIndexValue] before [dequantise].
+///
 /// ## SQ8 quantisation
 ///
 /// SQ8 encodes each float32 component as a uint8:

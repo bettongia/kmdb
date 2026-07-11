@@ -1,6 +1,6 @@
 # Encryption confidentiality reconciliation
 
-**Status**: Investigated
+**Status**: Implementing
 
 **PR link**: —
 
@@ -619,11 +619,15 @@ flagged for that write site):
 Per Phase 0's B7 split: `ValueCodec` for map-shaped values, the new
 `EncryptionEnvelope` helper for scalars/raw bytes.
 
-- [ ] Add `EncryptionEnvelope.wrap`/`unwrap` under `lib/src/encryption/`
+- [x] Add `EncryptionEnvelope.wrap`/`unwrap` under `lib/src/encryption/`
       (see Phase 0/B7); refactor `VaultSearchManager.writeExtractArtifact`/
       `readExtractArtifact` (WI-10) to use it instead of their inlined
-      copy of the same pattern.
-- [ ] `FtsManager`: `_writeDocInfo`, `_writeCorpusStats`, `_writeOverlayEntry`
+      copy of the same pattern. Done:
+      `packages/kmdb/lib/src/encryption/encryption_envelope.dart` +
+      refactor; regression-tested by the pre-existing
+      `vault_extract_artifact_codec_test.dart` (unchanged, all 8 pass) plus
+      a new dedicated `encryption_envelope_test.dart` (12 tests).
+- [x] `FtsManager`: `_writeDocInfo`, `_writeCorpusStats`, `_writeOverlayEntry`
       (and their read counterparts `_readDocInfoFromBytes`,
       `_readCorpusStats`, `_decodeOverlayBytes`) → `ValueCodec.encode/decode
       (encryption: _encryption)` (map-shaped). `_writeBaseEntries`/
@@ -631,13 +635,29 @@ Per Phase 0's B7 split: `ValueCodec` for map-shaped values, the new
       `EncryptionEnvelope.wrap/unwrap` (scalar), with `_decodeCborInt`
       updated to match. Convert the static/sync decode helpers to async
       instance methods as needed either way, since both primitives are async.
-- [ ] `VecManager`: `_writeCorpusN`/`_readCorpusN` (`{n}`) →
+      **Implementation note (deviation, recorded per the workflow policy):**
+      `_writeOverlayEntry` and `_writeTombstone` share one namespace/key
+      slot, and a reader cannot know in advance which shape (map vs.
+      tombstone string) a given entry holds — mixing `ValueCodec` (which adds
+      an extra `CompressionFlag` byte) and `EncryptionEnvelope` across that
+      shared slot makes the plaintext framing ambiguous on read. Resolved by
+      keeping both writers' existing raw-CBOR encoding (unchanged,
+      self-describing via `CborString`/`CborMap` type-tagging) and applying
+      only the outer `EncryptionEnvelope` layer uniformly to the overlay
+      namespace — see the doc comment on `_writeOverlayEntry` in
+      `fts_manager.dart` for the full rationale. `_writeDocInfo`/
+      `_writeCorpusStats` are unaffected (their namespaces are not shared
+      with any other shape) and route through `ValueCodec` exactly as
+      specified.
+- [x] `VecManager`: `_writeCorpusN`/`_readCorpusN` (`{n}`) →
       `ValueCodec.encode/decode` (map-shaped). The raw SQ8 vector bytes →
       `EncryptionEnvelope.wrap/unwrap` (scalar — deliberately **not**
       `ValueCodec`, to avoid a CBOR-map wrapper interfering with the
       fixed-length corruption guard). Move the length-corruption guard
       (`entry.value.length != expectedByteLen`) to run after decryption.
-- [ ] `VaultSearchManager`: pre-wrap/unwrap values for `VaultBm25Writer`/
+      Done — the guard now runs on the unwrapped bytes in `_scoreField`'s
+      both read paths (targeted lookup and full scan).
+- [x] `VaultSearchManager`: pre-wrap/unwrap values for `VaultBm25Writer`/
       `VaultVecWriter` at the call site (using the provider it already
       holds) before/after `writeBatchInternal`/scan reads, rather than
       threading the provider into the (currently `const`) writer classes.
@@ -646,17 +666,48 @@ Per Phase 0's B7 split: `ValueCodec` for map-shaped values, the new
       route through `ValueCodec` (map-shaped); `_encodeCborInt` (per-chunk
       TF) → `EncryptionEnvelope` (scalar). `VaultVecWriter`'s raw SQ8 bytes
       → `EncryptionEnvelope` (scalar, same reasoning as `VecManager`).
-- [ ] `VaultExtractionState.encode()`/`decode()`: already built from/to a
+      **Implementation note (deviation, recorded per the workflow policy):**
+      implemented via a `_wrapWriterEntries` helper that runs the writer
+      against a throwaway `WriteBatch` and re-emits every entry (including
+      the corpus sentinel) wrapped uniformly with `EncryptionEnvelope`,
+      rather than splitting the corpus sentinel out through `ValueCodec` as
+      literally specified — since `VaultBm25Writer`/`VaultVecWriter` never
+      construct a `Map<String, dynamic>` in the first place (they build raw
+      CBOR directly, by design, per this same checklist item's "keep the
+      writers unaware of encryption" constraint), routing just the corpus
+      sentinel through `ValueCodec` would mean decoding the writer's raw
+      CBOR and re-encoding it as a `Map` purely for wire-format uniformity,
+      with no confidentiality benefit (identical AES-GCM strength either
+      way). See `_wrapWriterEntries`'s doc comment in
+      `vault_search_manager.dart` for the full rationale — this parallels
+      the `FtsManager` overlay-namespace deviation above. `VaultSearcher`'s
+      read paths (`unwrapIndexValue`, exposed on `VaultSearchManager` since
+      Dart privacy is per-file) were updated to match.
+- [x] `VaultExtractionState.encode()`/`decode()`: already built from/to a
       `Map<String, dynamic>` (`toMap()`) — route through `ValueCodec`
       directly (map-shaped), called from `VaultSearchManager.
-      _writeExtractStatusToBatch` and its read counterpart.
-- [ ] Correct the incorrect "never needs encryption at this layer" doc comment
+      _writeExtractStatusToBatch` and its read counterpart. Done — `encode`/
+      `decode` now take an optional `EncryptionProvider?` and are
+      `Future`-returning (`decode` is a `static` method, not a `factory`
+      constructor, since Dart forbids async factory constructors); the
+      now-unused hand-rolled CBOR helpers (`_mapToCbor`/`_valueToCbor`/
+      `_cborToMap`/`_cborToValue`) were deleted rather than left dead.
+- [x] Correct the incorrect "never needs encryption at this layer" doc comment
       in `vault_bm25_writer.dart` (171–177), and the equivalent claim in
-      `vault_extraction_state.dart`'s `encode()` doc comment.
-- [ ] Add `$$vault:vec:idx:` to the set of namespaces §31 lists as
+      `vault_extraction_state.dart`'s `encode()` doc comment. Done, plus an
+      added "Encryption layering" doc section on both `VaultBm25Writer` and
+      `VaultVecWriter` clarifying the raw-vs-wrapped byte distinction.
+- [x] Add `$$vault:vec:idx:` to the set of namespaces §31 lists as
       value-encrypted; correct the WI-3 "no KV namespace" claim in 0_06.md and
-      §24.
-- [ ] Tests: round-trip encrypted write/read for each modified write site
+      §24. Done: `docs/roadmap/0_06.md`'s false "vault chunk vectors have no
+      KV namespace" claim corrected; §31's gap 1 section extended to name
+      the vault-search writers/namespaces (including `$$vault:vec:idx:`) and
+      records a Phase 1 progress note (full "resolved" rewrite is Phase 5's
+      job, once all four gaps have landed). §24 was checked and does not
+      contain the false claim (only 0_06.md did) — no change needed there;
+      §24's "see §32" pointer to the already-accurate
+      `docs/spec/32_vault_search.md` namespace table was verified correct.
+- [x] Tests: round-trip encrypted write/read for each modified write site
       (both primitives); confirm a **freshly created** unencrypted database
       round-trips correctly through the new framing and produces identical
       query results (**not** "byte-for-byte unchanged" — under this design
@@ -669,19 +720,53 @@ Per Phase 0's B7 split: `ValueCodec` for map-shaped values, the new
       encryption on (search correctness, not just storage format); confirm
       `writeExtractArtifact`/`readExtractArtifact` behave identically
       before/after the `EncryptionEnvelope` refactor (regression test, not
-      just new coverage).
+      just new coverage). Done — `vec_manager_test.dart`'s "384-byte" test
+      updated to the new `384 + 1` on-disk length with an explanatory
+      comment (the concrete instance of the byte-format-change note above);
+      full `test/vault/`, `test/search/`, and `test/encryption/` suites pass
+      (2,329 tests across the whole `kmdb` package, 12 e2e skipped).
 
 **Phase 1 close-out (see the workflow policy above):**
 
-- [ ] Verify every task/step checkbox above is checked off — do not proceed
+- [x] Verify every task/step checkbox above is checked off — do not proceed
       to commit with any left unchecked.
-- [ ] Run `make pre_commit` (format, analyze, license_check, scoped tests).
-- [ ] Hand off to `kmdb-qa` for sign-off on Phase 1's diff specifically
+- [x] Run `make pre_commit` (format, analyze, license_check, scoped tests).
+      Green: format_check, analyze (zero issues across the whole workspace),
+      license_check, and `melos pre_commit_test` (2,329 tests, 12 e2e
+      skipped) all passed.
+- [x] Hand off to `kmdb-qa` for sign-off on Phase 1's diff specifically
       (`EncryptionEnvelope`, `FtsManager`, `VecManager`,
       `VaultSearchManager`/writers, `VaultExtractionState`, and the
       `writeExtractArtifact`/`readExtractArtifact` refactor). Resolve every
       blocking item before committing.
-- [ ] Commit Phase 1 on the plan's branch.
+      **Signed off (2026-07-11), run by the coordinator session (this
+      `kmdb-plan-implement` session has no Agent/Task tool — see
+      `.claude/agent-memory/kmdb-plan-implement/feedback_no_agent_tool.md`).
+      No blocking issues.** Both documented deviations (`FtsManager`'s
+      overlay/tombstone uniform `EncryptionEnvelope` wrapping;
+      `VaultSearchManager`'s `_wrapWriterEntries` helper) were independently
+      judged sound engineering matching the plan's real intent (one
+      confidentiality primitive per shared namespace), not deviations
+      needing correction. The `VecManager` SQ8 post-decryption corruption
+      guard was verified correct in both the targeted-lookup and full-scan
+      read paths. All dimensions passed: fidelity, spec alignment, doc
+      comments, test coverage/pass status, formatting, analysis, code
+      quality. Two **non-blocking** notes for a later phase/follow-up (not
+      addressed in Phase 1): (a) no test currently seeds a
+      genuinely-corrupted *encrypted* SQ8 vector and asserts it's skipped at
+      query time (unit-level `EncryptionEnvelope` coverage is strong, but
+      there's no full encrypted-index-search integration test for this
+      corruption path); (b) Phase 5's eventual §31 "gap resolved" rewrite
+      should route through `kmdb-architect` rather than being authored
+      inline — already the plan's stated approach, reconfirmed.
+- [x] Commit Phase 1 on the plan's branch.
+      **`kmdb-pre-commit`: PASS (2026-07-11, coordinator session).**
+      format_check clean (456 files), analyze clean (0 issues across all 7
+      packages), license_check clean (both new files' headers verified
+      byte-for-byte against `header_template.txt`), `pre_commit_test` 2,329
+      passed / 0 failed / 12 skipped (expected e2e skips). One transient
+      sandbox note (Dart telemetry config write on first run, unrelated to
+      this plan's code) — re-run was clean.
 
 ### Phase 2 — Gap 3: encrypt MetaStore values
 

@@ -320,10 +320,22 @@ final class VaultSearcher<T> {
     final scores = <String, double>{};
 
     for (final sha256 in candidateSha256s) {
-      // Read corpus sentinel for this blob.
+      // Read corpus sentinel for this blob. Written via EncryptionEnvelope
+      // (Encryption confidentiality reconciliation plan, Phase 1) — unwrap
+      // before decoding the raw CBOR `{n, totalTokens}` payload. A malformed
+      // or undecryptable sentinel is treated as "no corpus" (matches the
+      // pre-existing `decodeCorpus(null)` graceful-degradation behaviour).
       final corpusNs = VaultBm25Writer.corpusNamespace(sha256);
       final corpusBytes = await _kvStore.get(corpusNs, kVaultCorpusSentinelKey);
-      final corpus = VaultBm25Writer.decodeCorpus(corpusBytes);
+      Uint8List? unwrappedCorpusBytes;
+      if (corpusBytes != null) {
+        try {
+          unwrappedCorpusBytes = await _manager.unwrapIndexValue(corpusBytes);
+        } catch (_) {
+          unwrappedCorpusBytes = null;
+        }
+      }
+      final corpus = VaultBm25Writer.decodeCorpus(unwrappedCorpusBytes);
       if (corpus == null || corpus.n == 0) continue;
 
       final n = corpus.n; // total chunks in this blob.
@@ -343,7 +355,13 @@ final class VaultSearcher<T> {
         final chunkTfs = <int, int>{}; // chunkIndex → tf
 
         await for (final entry in _kvStore.scan(termNs)) {
-          final tf = VaultBm25Writer.decodeTf(entry.value);
+          Uint8List? unwrapped;
+          try {
+            unwrapped = await _manager.unwrapIndexValue(entry.value);
+          } catch (_) {
+            continue; // corrupt or undecryptable entry — skip
+          }
+          final tf = VaultBm25Writer.decodeTf(unwrapped);
           if (tf > 0) {
             // kVaultChunkKey format: 17-char fixed prefix + 15-char hex index.
             // Extract the last 15 chars as the chunk index.
@@ -460,7 +478,16 @@ final class VaultSearcher<T> {
     for (final sha256 in candidateSha256s) {
       final ns = VaultVecWriter.vecNamespace(sha256);
       await for (final entry in _kvStore.scan(ns)) {
-        final chunkVec = VaultVecWriter.dequantise(entry.value);
+        // Written via EncryptionEnvelope (Phase 1) — unwrap before
+        // dequantising. A corrupt or undecryptable entry is skipped, same
+        // treatment as a dimension mismatch below.
+        final Uint8List unwrapped;
+        try {
+          unwrapped = await _manager.unwrapIndexValue(entry.value);
+        } catch (_) {
+          continue;
+        }
+        final chunkVec = VaultVecWriter.dequantise(unwrapped);
         if (chunkVec.length != queryVec.length) continue;
 
         final similarity = _dotProduct(queryVec, chunkVec);

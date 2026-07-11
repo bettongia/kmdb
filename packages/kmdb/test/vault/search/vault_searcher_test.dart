@@ -23,6 +23,7 @@ import 'dart:typed_data';
 import 'package:betto_inferencing/betto_inferencing.dart'
     show EmbeddingKind, EmbeddingModel;
 import 'package:kmdb/src/encoding/value_codec.dart';
+import 'package:kmdb/src/encryption/encryption_envelope.dart';
 import 'package:kmdb/src/encryption/encryption_error.dart';
 import 'package:kmdb/src/encryption/encryption_flag.dart';
 import 'package:kmdb/src/encryption/encryption_provider.dart';
@@ -224,22 +225,37 @@ Future<void> _seedVaultBlob(
 ///
 /// Each element of [termFrequencies] is a term-frequency map for one chunk.
 /// Also writes the corpus sentinel with `n` = chunk count.
+///
+/// [VaultBm25Writer.write] itself produces raw, un-encrypted CBOR bytes (it
+/// is deliberately kept unaware of encryption — see
+/// [VaultSearchManager]'s `_wrapWriterEntries`). [VaultSearcher] now always
+/// expects every entry to carry an outer [EncryptionEnvelope] flag byte
+/// (Encryption confidentiality reconciliation plan, Phase 1), so this helper
+/// re-wraps the writer's raw entries the same way `_wrapWriterEntries` does
+/// in production, using [encryption] (`null` — plaintext-flagged — by
+/// default, matching most callers in this file).
 Future<void> _seedBm25(
   KvStoreImpl kvStore,
   String sha256,
-  List<Map<String, int>> termFrequencies,
-) async {
+  List<Map<String, int>> termFrequencies, {
+  EncryptionProvider? encryption,
+}) async {
   final totalTokens = termFrequencies.fold<int>(
     0,
     (sum, tf) => sum + tf.values.fold<int>(0, (s, v) => s + v),
   );
-  final batch = WriteBatch();
+  final raw = WriteBatch();
   const VaultBm25Writer().write(
     sha256: sha256,
     termFrequencies: termFrequencies,
     totalTokens: totalTokens,
-    batch: batch,
+    batch: raw,
   );
+  final batch = WriteBatch();
+  for (final entry in raw.entries) {
+    final wrapped = await EncryptionEnvelope.wrap(entry.value!, encryption);
+    batch.put(entry.namespace, entry.key, wrapped);
+  }
   await kvStore.writeBatchInternal(batch);
 }
 
@@ -304,17 +320,27 @@ Future<void> _seedExtractArtifacts(
 ///
 /// Quantises each Float32List embedding and writes it to the
 /// `$$vault:vec:idx:{sha256}` namespace keyed by chunk index.
+///
+/// See [_seedBm25]'s doc comment: re-wraps [VaultVecWriter.write]'s raw
+/// output with [EncryptionEnvelope], matching production's
+/// `_wrapWriterEntries`.
 Future<void> _seedVec(
   KvStoreImpl kvStore,
   String sha256,
-  List<Float32List> embeddings,
-) async {
-  final batch = WriteBatch();
+  List<Float32List> embeddings, {
+  EncryptionProvider? encryption,
+}) async {
+  final raw = WriteBatch();
   const VaultVecWriter().write(
     sha256: sha256,
     embeddings: embeddings,
-    batch: batch,
+    batch: raw,
   );
+  final batch = WriteBatch();
+  for (final entry in raw.entries) {
+    final wrapped = await EncryptionEnvelope.wrap(entry.value!, encryption);
+    batch.put(entry.namespace, entry.key, wrapped);
+  }
   await kvStore.writeBatchInternal(batch);
 }
 

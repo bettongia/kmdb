@@ -45,6 +45,7 @@ import 'package:betto_inferencing/betto_inferencing.dart'
 // Dart does not permit `this._fieldName` in named constructor parameters when
 // the field is private. The initialiser list pattern is unavoidable here.
 
+import '../../encryption/encryption_envelope.dart';
 import '../../encryption/encryption_flag.dart';
 import '../../encryption/encryption_provider.dart';
 import '../../engine/kvstore/kv_store.dart';
@@ -165,6 +166,19 @@ final class VaultSearchManager {
   /// Returns the active search config.
   VaultSearchConfig get config => _config;
 
+  /// Unwraps a raw KV value written via [_wrapWriterEntries] (the
+  /// [EncryptionEnvelope]-based wrapping applied to every
+  /// [VaultBm25Writer]/[VaultVecWriter] entry — Gap 1 of the Encryption
+  /// confidentiality reconciliation plan).
+  ///
+  /// Exposed for [VaultSearcher], which reads `$$vault:fts:`/
+  /// `$$vault:vec:idx:` entries directly at query time but cannot access the
+  /// private [_encryption] field itself — Dart privacy is per-file, not
+  /// per-directory, even though both classes live under
+  /// `lib/src/vault/search/` (mirrors the [readExtractArtifact] seam above).
+  Future<Uint8List> unwrapIndexValue(Uint8List bytes) =>
+      EncryptionEnvelope.unwrap(bytes, _encryption);
+
   /// Writes [plaintext] to [path] as an `extract/` filesystem artifact,
   /// encrypting it first when the database has an [EncryptionProvider]
   /// configured (§31).
@@ -179,13 +193,17 @@ final class VaultSearchManager {
   /// [EncryptionFlag.aesGcm.byte] → nonce(12B) || AES-256-GCM ciphertext || tag(16B)
   /// ```
   ///
-  /// When no [EncryptionProvider] is configured, [plaintext] is written
-  /// unencrypted (byte-identical to the pre-encryption format save for the
-  /// leading [EncryptionFlag.none] byte). This lets encryption be toggled on
-  /// for a database that already has plaintext artifacts: old files keep
-  /// their `none` flag and remain readable, while newly (re)indexed blobs are
-  /// written with the `aesGcm` flag once a provider is configured — see
-  /// [reindexVault] for the migration path.
+  /// Delegates to [EncryptionEnvelope.wrap] (this class was the original
+  /// inline implementation of that pattern before it was factored out into a
+  /// shared helper — see `docs/plans/completed/` "Encryption confidentiality
+  /// reconciliation" plan). When no [EncryptionProvider] is configured,
+  /// [plaintext] is written unencrypted (byte-identical to the
+  /// pre-encryption format save for the leading [EncryptionFlag.none] byte).
+  /// This lets encryption be toggled on for a database that already has
+  /// plaintext artifacts: old files keep their `none` flag and remain
+  /// readable, while newly (re)indexed blobs are written with the `aesGcm`
+  /// flag once a provider is configured — see [reindexVault] for the
+  /// migration path.
   ///
   /// These artifacts are read/written whole-file only. An AES-GCM-encrypted
   /// artifact cannot be range-read — the entire ciphertext is required to
@@ -193,28 +211,18 @@ final class VaultSearchManager {
   /// callers must not attempt to layer [readFileRange]-style partial reads on
   /// top of this format.
   Future<void> writeExtractArtifact(String path, Uint8List plaintext) async {
-    final enc = _encryption;
-    final Uint8List payload;
-    if (enc != null) {
-      final ciphertext = await enc.encrypt(plaintext);
-      payload = Uint8List(1 + ciphertext.length)
-        ..[0] = EncryptionFlag.aesGcm.byte
-        ..setAll(1, ciphertext);
-    } else {
-      payload = Uint8List(1 + plaintext.length)
-        ..[0] = EncryptionFlag.none.byte
-        ..setAll(1, plaintext);
-    }
+    final payload = await EncryptionEnvelope.wrap(plaintext, _encryption);
     await _vaultStore.adapter.writeFile(path, payload);
   }
 
   /// Reads and, if necessary, decrypts an `extract/` filesystem artifact
   /// previously written by [writeExtractArtifact].
   ///
-  /// Parses the leading [EncryptionFlag] byte to determine whether the
-  /// remaining bytes are plaintext ([EncryptionFlag.none]) or
-  /// AES-256-GCM ciphertext ([EncryptionFlag.aesGcm]), independent of the
-  /// database's current encryption state.
+  /// Delegates to [EncryptionEnvelope.unwrap], which parses the leading
+  /// [EncryptionFlag] byte to determine whether the remaining bytes are
+  /// plaintext ([EncryptionFlag.none]) or AES-256-GCM ciphertext
+  /// ([EncryptionFlag.aesGcm]), independent of the database's current
+  /// encryption state.
   ///
   /// Throws:
   /// - [FormatException] if the file at [path] is empty (there is no flag
@@ -236,22 +244,7 @@ final class VaultSearchManager {
     if (raw.isEmpty) {
       throw FormatException('Extract artifact at "$path" is empty');
     }
-    final flag = EncryptionFlag.fromByte(raw[0]);
-    final body = Uint8List.sublistView(raw, 1);
-    switch (flag) {
-      case EncryptionFlag.none:
-        return body;
-      case EncryptionFlag.aesGcm:
-        final enc = _encryption;
-        if (enc == null) {
-          throw StateError(
-            'Extract artifact at "$path" is encrypted but no '
-            'EncryptionProvider is configured. Open the database with an '
-            'EncryptionConfig.',
-          );
-        }
-        return enc.decrypt(body);
-    }
+    return EncryptionEnvelope.unwrap(raw, _encryption);
   }
 
   /// Registers [VaultStore.onAfterIngest] so newly ingested blobs are
@@ -302,7 +295,11 @@ final class VaultSearchManager {
       }
 
       try {
-        final state = VaultExtractionState.decode(bytes, sha256);
+        final state = await VaultExtractionState.decode(
+          bytes,
+          sha256,
+          encryption: _encryption,
+        );
 
         switch (state.status) {
           case VaultExtractionStatus.extracting:
@@ -384,7 +381,11 @@ final class VaultSearchManager {
         continue;
       }
       try {
-        final state = VaultExtractionState.decode(bytes, sha256);
+        final state = await VaultExtractionState.decode(
+          bytes,
+          sha256,
+          encryption: _encryption,
+        );
         switch (state.status) {
           case VaultExtractionStatus.indexed:
             indexed++;
@@ -451,7 +452,11 @@ final class VaultSearchManager {
         needsReset = true;
       } else {
         try {
-          final state = VaultExtractionState.decode(bytes, sha256);
+          final state = await VaultExtractionState.decode(
+            bytes,
+            sha256,
+            encryption: _encryption,
+          );
           // Reset indexed and extracting blobs; leave failed/unsupported/pending
           // as-is (failed can be retried with reindex, pending already queued).
           needsReset =
@@ -687,14 +692,21 @@ final class VaultSearchManager {
     );
 
     final batch = WriteBatch();
-    _bm25Writer.write(
-      sha256: sha256,
-      termFrequencies: result.termFrequencies,
-      totalTokens: totalTokens,
-      batch: batch,
+    await _wrapWriterEntries(
+      (b) => _bm25Writer.write(
+        sha256: sha256,
+        termFrequencies: result.termFrequencies,
+        totalTokens: totalTokens,
+        batch: b,
+      ),
+      batch,
     );
     if (embeddings.isNotEmpty) {
-      _vecWriter.write(sha256: sha256, embeddings: embeddings, batch: batch);
+      await _wrapWriterEntries(
+        (b) =>
+            _vecWriter.write(sha256: sha256, embeddings: embeddings, batch: b),
+        batch,
+      );
     }
 
     final finalState = VaultExtractionState(
@@ -708,7 +720,7 @@ final class VaultSearchManager {
       script: result.script,
       language: result.language,
     );
-    _writeExtractStatusToBatch(sha256, finalState, batch);
+    await _writeExtractStatusToBatch(sha256, finalState, batch);
     await _kvStore.writeBatchInternal(batch);
 
     await _emitStatus();
@@ -826,14 +838,24 @@ final class VaultSearchManager {
       );
 
       final batch = WriteBatch();
-      _bm25Writer.write(
-        sha256: sha256,
-        termFrequencies: chunkResult.termFrequencies,
-        totalTokens: totalTokens,
-        batch: batch,
+      await _wrapWriterEntries(
+        (b) => _bm25Writer.write(
+          sha256: sha256,
+          termFrequencies: chunkResult.termFrequencies,
+          totalTokens: totalTokens,
+          batch: b,
+        ),
+        batch,
       );
       if (embeddings.isNotEmpty) {
-        _vecWriter.write(sha256: sha256, embeddings: embeddings, batch: batch);
+        await _wrapWriterEntries(
+          (b) => _vecWriter.write(
+            sha256: sha256,
+            embeddings: embeddings,
+            batch: b,
+          ),
+          batch,
+        );
       }
       final finalState = VaultExtractionState(
         sha256: sha256,
@@ -846,7 +868,7 @@ final class VaultSearchManager {
         script: state.script,
         language: state.language,
       );
-      _writeExtractStatusToBatch(sha256, finalState, batch);
+      await _writeExtractStatusToBatch(sha256, finalState, batch);
       await _kvStore.writeBatchInternal(batch);
     } catch (_) {
       // Recovery failed — reset to pending.
@@ -887,6 +909,52 @@ final class VaultSearchManager {
 
   // ── Internal: filesystem and LSM write helpers ─────────────────────────────
 
+  /// Runs [writerFn] (a [VaultBm25Writer.write] or [VaultVecWriter.write]
+  /// call) against a throwaway [WriteBatch] to capture its raw (unencrypted)
+  /// entries, then re-emits each entry into [target] wrapped with
+  /// [EncryptionEnvelope].
+  ///
+  /// [VaultBm25Writer] and [VaultVecWriter] are deliberately kept fully
+  /// synchronous and unaware of encryption ([static] `const`, no
+  /// [EncryptionProvider] field — Encryption confidentiality reconciliation
+  /// plan, Phase 1 checklist), so [VaultSearchManager] — which already holds
+  /// the provider it uses for [writeExtractArtifact]/[readExtractArtifact] —
+  /// applies encryption at this call site instead. Every value the two
+  /// writers produce (per-chunk term-frequency ints, the BM25 corpus
+  /// sentinel, and per-chunk SQ8 vectors) is treated uniformly as an opaque
+  /// byte blob via [EncryptionEnvelope] rather than splitting the corpus
+  /// sentinel out through [ValueCodec] (a literal reading of Phase 0/B7's
+  /// per-value-shape categorisation) — since the writers never construct a
+  /// `Map<String, dynamic>` in the first place (they build raw CBOR
+  /// directly), routing the corpus sentinel through `ValueCodec` here would
+  /// require decoding the writer's raw CBOR bytes and re-encoding them as a
+  /// `Map` purely for wire-format uniformity, with no confidentiality
+  /// benefit (the AES-GCM strength is identical either way) — a documented,
+  /// narrow deviation found during implementation, paralleling the same
+  /// reasoning applied to `FtsManager`'s overlay namespace. See the plan's
+  /// Phase 1 checklist for the recorded rationale.
+  ///
+  /// Using a throwaway batch (rather than letting the writer's raw entries
+  /// land in [target] and rewriting them in place) also means the
+  /// unencrypted bytes are never committed to the WAL/memtable even
+  /// transiently — they exist only in the discarded [WriteBatch] local to
+  /// this method.
+  Future<void> _wrapWriterEntries(
+    void Function(WriteBatch) writerFn,
+    WriteBatch target,
+  ) async {
+    final raw = WriteBatch();
+    writerFn(raw);
+    for (final entry in raw.entries) {
+      if (entry.isDelete) {
+        target.delete(entry.namespace, entry.key);
+        continue;
+      }
+      final wrapped = await EncryptionEnvelope.wrap(entry.value!, _encryption);
+      target.put(entry.namespace, entry.key, wrapped);
+    }
+  }
+
   /// Writes [state] as a [WriteBatch] entry in the `$$vault:extract` namespace.
   ///
   /// Used for `pending`, `extracting`, `failed`, and `unsupported` states
@@ -896,7 +964,7 @@ final class VaultSearchManager {
     VaultExtractionState state,
   ) async {
     final batch = WriteBatch();
-    _writeExtractStatusToBatch(sha256, state, batch);
+    await _writeExtractStatusToBatch(sha256, state, batch);
     await _kvStore.writeBatchInternal(batch);
   }
 
@@ -904,12 +972,12 @@ final class VaultSearchManager {
   ///
   /// The key is [kVaultCorpusSentinelKey] — a fixed, non-colliding hex key
   /// (mirrors [FtsManager]'s corpus sentinel pattern).
-  void _writeExtractStatusToBatch(
+  Future<void> _writeExtractStatusToBatch(
     String sha256,
     VaultExtractionState state,
     WriteBatch batch,
-  ) {
-    final encoded = state.encode();
+  ) async {
+    final encoded = await state.encode(encryption: _encryption);
     batch.put('$kVaultExtractPrefix$sha256', kVaultCorpusSentinelKey, encoded);
   }
 

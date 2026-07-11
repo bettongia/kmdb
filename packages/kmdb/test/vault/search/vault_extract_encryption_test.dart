@@ -115,13 +115,18 @@ Future<VaultExtractionState> _awaitTerminal(
   KvStoreImpl kvStore,
   String sha256, {
   Duration timeout = const Duration(seconds: 5),
+  EncryptionProvider? encryption,
 }) async {
   final deadline = DateTime.now().add(timeout);
   while (DateTime.now().isBefore(deadline)) {
     final ns = '$kVaultExtractPrefix$sha256';
     final bytes = await kvStore.get(ns, kVaultCorpusSentinelKey);
     if (bytes != null) {
-      final state = VaultExtractionState.decode(bytes, sha256);
+      final state = await VaultExtractionState.decode(
+        bytes,
+        sha256,
+        encryption: encryption,
+      );
       if (state.status == VaultExtractionStatus.indexed ||
           state.status == VaultExtractionStatus.failed ||
           state.status == VaultExtractionStatus.unsupported) {
@@ -221,7 +226,7 @@ void main() {
     );
     final sha2 = ref2.sha256;
     await managerEnc.queueBlob(sha2, 'text/plain');
-    await _awaitTerminal(kvStore, sha2);
+    await _awaitTerminal(kvStore, sha2, encryption: provider);
 
     // Verify blob 2's text.txt is encrypted (EncryptionFlag.aesGcm).
     final extractDir2 = '${vaultStore.hashDir(sha2)}/extract';
@@ -275,8 +280,11 @@ void main() {
     final resetCount = await managerEnc.reindexVault();
     expect(resetCount, equals(2)); // both indexed blobs are reset.
 
-    await _awaitTerminal(kvStore, sha1);
-    await _awaitTerminal(kvStore, sha2);
+    // Both blobs are re-processed through managerEnc during reindexVault(),
+    // so their extraction state is now encrypted regardless of which
+    // manager originally wrote it.
+    await _awaitTerminal(kvStore, sha1, encryption: provider);
+    await _awaitTerminal(kvStore, sha2, encryption: provider);
 
     final rawText1AfterReindex = adapter.files['$extractDir1/text.txt']!;
     expect(

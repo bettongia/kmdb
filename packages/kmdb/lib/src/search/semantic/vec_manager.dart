@@ -15,9 +15,8 @@
 import 'dart:math' show min, max;
 import 'dart:typed_data';
 
-import 'package:cbor/cbor.dart';
-
 import '../../encoding/value_codec.dart';
+import '../../encryption/encryption_envelope.dart';
 import '../../encryption/encryption_provider.dart';
 import '../../engine/kvstore/kv_store.dart';
 import '../../engine/kvstore/kv_store_impl.dart';
@@ -255,12 +254,9 @@ final class VecManager implements WriteAugmentor {
       kind: EmbeddingKind.document,
     );
     final quantised = _quantise(embedding);
+    final wrapped = await EncryptionEnvelope.wrap(quantised, _encryption);
 
-    batch.put(
-      VecIndexState.vecNamespace(namespace, def.field),
-      docId,
-      quantised,
-    );
+    batch.put(VecIndexState.vecNamespace(namespace, def.field), docId, wrapped);
 
     if (truncated) {
       batch.put(
@@ -272,7 +268,7 @@ final class VecManager implements WriteAugmentor {
 
     // Increment corpus document count.
     final n = await _readCorpusN(namespace, def.field);
-    _writeCorpusN(namespace, def.field, n + 1, batch);
+    await _writeCorpusN(namespace, def.field, n + 1, batch);
   }
 
   Future<void> _interceptDelete(
@@ -288,7 +284,7 @@ final class VecManager implements WriteAugmentor {
     // Decrement corpus document count (floor at 0).
     final n = await _readCorpusN(namespace, def.field);
     if (n > 0) {
-      _writeCorpusN(namespace, def.field, n - 1, batch);
+      await _writeCorpusN(namespace, def.field, n - 1, batch);
     }
   }
 
@@ -315,13 +311,10 @@ final class VecManager implements WriteAugmentor {
       kind: EmbeddingKind.document,
     );
     final quantised = _quantise(embedding);
+    final wrapped = await EncryptionEnvelope.wrap(quantised, _encryption);
 
     // Overwrite the vector atomically — no read-before-write needed.
-    batch.put(
-      VecIndexState.vecNamespace(namespace, def.field),
-      docId,
-      quantised,
-    );
+    batch.put(VecIndexState.vecNamespace(namespace, def.field), docId, wrapped);
 
     // Adjust truncation marker: remove stale marker and add new one if needed.
     batch.delete(VecIndexState.truncatedNamespace(namespace, def.field), docId);
@@ -389,9 +382,10 @@ final class VecManager implements WriteAugmentor {
         kind: EmbeddingKind.document,
       );
       final quantised = _quantise(embedding);
+      final wrapped = await EncryptionEnvelope.wrap(quantised, _encryption);
 
       final batch = WriteBatch();
-      batch.put(VecIndexState.vecNamespace(namespace, field), docId, quantised);
+      batch.put(VecIndexState.vecNamespace(namespace, field), docId, wrapped);
       if (truncated) {
         batch.put(
           VecIndexState.truncatedNamespace(namespace, field),
@@ -407,7 +401,7 @@ final class VecManager implements WriteAugmentor {
 
     // Write final corpus count and mark index current.
     final corpusBatch = WriteBatch();
-    _writeCorpusN(namespace, field, count, corpusBatch);
+    await _writeCorpusN(namespace, field, count, corpusBatch);
     await _store.writeBatchInternal(corpusBatch);
 
     // Stamp the model identity so future opens can detect model changes.
@@ -682,7 +676,12 @@ final class VecManager implements WriteAugmentor {
 
     // The expected byte length of an SQ8 entry equals the model's dimension
     // (1 byte per component). Entries with a different length indicate a
-    // model mismatch or corruption and are silently skipped.
+    // model mismatch or corruption and are silently skipped. This check must
+    // run on the *unwrapped* (decrypted, if encrypted) bytes: the on-disk
+    // length varies with [EncryptionEnvelope]'s framing (plaintext:
+    // `1 + expectedByteLen`; AES-GCM: `1 + 12 + expectedByteLen + 16`), so
+    // comparing the raw stored length against `expectedByteLen` would reject
+    // every entry in an encrypted database.
     final expectedByteLen = _model.dimensions;
 
     if (candidateIds != null) {
@@ -692,8 +691,15 @@ final class VecManager implements WriteAugmentor {
           VecIndexState.vecNamespace(namespace, field),
           docId,
         );
-        if (bytes == null || bytes.length != expectedByteLen) continue;
-        final deq = _dequantise(bytes);
+        if (bytes == null) continue;
+        final Uint8List unwrapped;
+        try {
+          unwrapped = await EncryptionEnvelope.unwrap(bytes, _encryption);
+        } catch (_) {
+          continue; // corrupt or undecryptable entry — skip
+        }
+        if (unwrapped.length != expectedByteLen) continue;
+        final deq = _dequantise(unwrapped);
         scores[docId] = _dotProduct(queryEmbedding, deq);
       }
     } else {
@@ -701,8 +707,14 @@ final class VecManager implements WriteAugmentor {
       await for (final entry in _store.scan(
         VecIndexState.vecNamespace(namespace, field),
       )) {
-        if (entry.value.length != expectedByteLen) continue; // skip corrupt
-        final deq = _dequantise(entry.value);
+        final Uint8List unwrapped;
+        try {
+          unwrapped = await EncryptionEnvelope.unwrap(entry.value, _encryption);
+        } catch (_) {
+          continue; // corrupt or undecryptable entry — skip
+        }
+        if (unwrapped.length != expectedByteLen) continue; // skip corrupt
+        final deq = _dequantise(unwrapped);
         scores[entry.key] = _dotProduct(queryEmbedding, deq);
       }
     }
@@ -718,6 +730,8 @@ final class VecManager implements WriteAugmentor {
 
   // ── Corpus helpers ────────────────────────────────────────────────────────
 
+  /// `Map`-shaped (`{n}`), so it is routed through [ValueCodec] directly
+  /// (Encryption confidentiality reconciliation plan, Phase 0/B7).
   Future<int> _readCorpusN(String namespace, String field) async {
     final bytes = await _store.get(
       VecIndexState.corpusNamespace(namespace, field),
@@ -725,19 +739,21 @@ final class VecManager implements WriteAugmentor {
     );
     if (bytes == null || bytes.isEmpty) return 0;
     try {
-      final decoded = cbor.decode(bytes);
-      if (decoded is CborMap) {
-        final map = decoded.toObject() as Map<dynamic, dynamic>;
-        return (map['n'] as num?)?.toInt() ?? 0;
-      }
+      final map = await ValueCodec.decode(bytes, encryption: _encryption);
+      return (map['n'] as num?)?.toInt() ?? 0;
     } catch (_) {}
     return 0;
   }
 
-  void _writeCorpusN(String namespace, String field, int n, WriteBatch batch) {
-    final encoded = Uint8List.fromList(
-      cbor.encode(CborMap({CborString('n'): CborSmallInt(n)})),
-    );
+  /// `Map`-shaped (`{n}`), so it is routed through [ValueCodec] directly
+  /// (Phase 0/B7).
+  Future<void> _writeCorpusN(
+    String namespace,
+    String field,
+    int n,
+    WriteBatch batch,
+  ) async {
+    final encoded = await ValueCodec.encode({'n': n}, encryption: _encryption);
     batch.put(
       VecIndexState.corpusNamespace(namespace, field),
       VecIndexState.corpusSentinelKey,

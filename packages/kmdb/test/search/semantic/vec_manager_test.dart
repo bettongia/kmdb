@@ -140,7 +140,12 @@ void main() {
           id,
         );
         expect(bytes, isNotNull);
-        expect(bytes!.length, equals(384));
+        // 384 quantised SQ8 bytes + a 1-byte EncryptionFlag prefix
+        // (Encryption confidentiality reconciliation plan, Phase 1 — every
+        // stored value is now flag-prefixed, even in an unencrypted database;
+        // see EncryptionEnvelope). This is a deliberate on-disk format
+        // change, not "byte-for-byte unchanged" from the pre-plan format.
+        expect(bytes!.length, equals(384 + 1));
         // Index-time embedding must pass EmbeddingKind.document.
         expect(model.lastKind, equals(EmbeddingKind.document));
 

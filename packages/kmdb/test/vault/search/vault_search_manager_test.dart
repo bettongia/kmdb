@@ -286,14 +286,24 @@ VaultSearchManager _makeManager(
 }
 
 /// Reads the extraction state for [sha256] from the KvStore.
+///
+/// [encryption] must match the provider (if any) used by the
+/// [VaultSearchManager] that wrote the state — [VaultExtractionState] is now
+/// encrypted when a provider is configured (Encryption confidentiality
+/// reconciliation plan, Gap 1).
 Future<VaultExtractionState?> _readState(
   KvStoreImpl kvStore,
-  String sha256,
-) async {
+  String sha256, {
+  EncryptionProvider? encryption,
+}) async {
   final ns = '$kVaultExtractPrefix$sha256';
   final bytes = await kvStore.get(ns, kVaultCorpusSentinelKey);
   if (bytes == null) return null;
-  return VaultExtractionState.decode(bytes, sha256);
+  return await VaultExtractionState.decode(
+    bytes,
+    sha256,
+    encryption: encryption,
+  );
 }
 
 /// Polls until [sha256] reaches a terminal indexing status or [timeout] elapses.
@@ -304,10 +314,11 @@ Future<VaultExtractionState> _awaitTerminal(
   KvStoreImpl kvStore,
   String sha256, {
   Duration timeout = const Duration(seconds: 5),
+  EncryptionProvider? encryption,
 }) async {
   final deadline = DateTime.now().add(timeout);
   while (DateTime.now().isBefore(deadline)) {
-    final state = await _readState(kvStore, sha256);
+    final state = await _readState(kvStore, sha256, encryption: encryption);
     if (state != null &&
         (state.status == VaultExtractionStatus.indexed ||
             state.status == VaultExtractionStatus.failed ||
@@ -620,7 +631,12 @@ void main() {
         isNotNull,
         reason: 'Corpus sentinel should be present',
       );
-      final corpus = VaultBm25Writer.decodeCorpus(corpusBytes);
+      // Written via EncryptionEnvelope (Phase 1) — unwrap before decoding the
+      // raw CBOR payload (`manager` has no encryption configured here, so
+      // this is a no-op plaintext unwrap, but it still peels the leading
+      // EncryptionFlag byte the raw decodeCorpus() helper does not expect).
+      final unwrapped = await manager.unwrapIndexValue(corpusBytes!);
+      final corpus = VaultBm25Writer.decodeCorpus(unwrapped);
       expect(corpus?.n, equals(state!.chunkCount));
     });
 
@@ -759,7 +775,7 @@ void main() {
           WriteBatch()..put(
             '$kVaultExtractPrefix$sha256',
             kVaultCorpusSentinelKey,
-            extractingState.encode(),
+            await extractingState.encode(),
           ),
         );
 
@@ -833,7 +849,7 @@ void main() {
         WriteBatch()..put(
           '$kVaultExtractPrefix$sha256',
           kVaultCorpusSentinelKey,
-          extractingState.encode(),
+          await extractingState.encode(),
         ),
       );
 
@@ -943,7 +959,7 @@ void main() {
         WriteBatch()..put(
           '$kVaultExtractPrefix$sha256',
           kVaultCorpusSentinelKey,
-          indexedState.encode(),
+          await indexedState.encode(),
         ),
       );
 
@@ -1005,7 +1021,7 @@ void main() {
         );
         if (bytes != null) {
           try {
-            final s = VaultExtractionState.decode(bytes, sha256);
+            final s = await VaultExtractionState.decode(bytes, sha256);
             if (s.status == VaultExtractionStatus.indexed ||
                 s.status == VaultExtractionStatus.failed) {
               finalState = s;
@@ -1080,7 +1096,7 @@ void main() {
         // Seed `extracting` state directly — simulates the pre-flight write
         // in Step 0 of _processNextItem, before text.txt was written.
         final extractState = VaultExtractionState.extracting(sha256);
-        final stateBytes = extractState.encode();
+        final stateBytes = await extractState.encode();
         await kvStore.writeBatchInternal(
           WriteBatch()..put(
             '$kVaultExtractPrefix$sha256',
@@ -1120,7 +1136,7 @@ void main() {
 
         // Write extracting status manually (overriding whatever state is there).
         final extractState = VaultExtractionState.extracting(sha256);
-        final stateBytes = extractState.encode();
+        final stateBytes = await extractState.encode();
         await kvStore.writeBatchInternal(
           WriteBatch()..put(
             '$kVaultExtractPrefix$sha256',
@@ -1191,7 +1207,7 @@ void main() {
         WriteBatch()..put(
           '$kVaultExtractPrefix$sha256',
           kVaultCorpusSentinelKey,
-          extractState.encode(),
+          await extractState.encode(),
         ),
       );
 
@@ -1249,7 +1265,7 @@ void main() {
     test('failed state is left unchanged by recover()', () async {
       final sha256 = 'ee' * 32;
       final failedState = VaultExtractionState.failed(sha256, 'prior error');
-      final stateBytes = failedState.encode();
+      final stateBytes = await failedState.encode();
       await kvStore.writeBatchInternal(
         WriteBatch()..put(
           '$kVaultExtractPrefix$sha256',
@@ -1273,7 +1289,7 @@ void main() {
     test('unsupported state is left unchanged by recover()', () async {
       final sha256 = 'ff' * 32;
       final unsupState = VaultExtractionState.unsupported(sha256);
-      final stateBytes = unsupState.encode();
+      final stateBytes = await unsupState.encode();
       await kvStore.writeBatchInternal(
         WriteBatch()..put(
           '$kVaultExtractPrefix$sha256',
@@ -1315,7 +1331,7 @@ void main() {
         WriteBatch()..put(
           '$kVaultExtractPrefix$sha256',
           kVaultCorpusSentinelKey,
-          extractState.encode(),
+          await extractState.encode(),
         ),
       );
 
@@ -1371,7 +1387,14 @@ void main() {
       // async re-queue/re-extraction it kicks off has not yet run — so the
       // state observed here is the `pending` reset itself (mirrors the
       // "extracting state + no files → resets to pending" test above).
-      final resetState = await _readState(kvStore, sha256);
+      // recoveryManager (and its self-heal write) is configured with
+      // `encryption: provider`, so the pending-reset state it writes must be
+      // read back with the same provider.
+      final resetState = await _readState(
+        kvStore,
+        sha256,
+        encryption: provider,
+      );
       expect(
         resetState?.status,
         equals(VaultExtractionStatus.pending),
@@ -1381,8 +1404,14 @@ void main() {
       );
 
       // The self-heal re-queue eventually completes a fresh, successful
-      // re-extraction (since the underlying blob bytes are intact).
-      final finalState = await _awaitTerminal(kvStore, sha256);
+      // re-extraction (since the underlying blob bytes are intact). The
+      // re-extraction runs through `recoveryManager`, which has
+      // `encryption: provider` configured.
+      final finalState = await _awaitTerminal(
+        kvStore,
+        sha256,
+        encryption: provider,
+      );
       expect(finalState.status, equals(VaultExtractionStatus.indexed));
     });
   });
@@ -1514,7 +1543,7 @@ void main() {
         // survives the crash (simulates the pre-flight write in Step 0 of
         // _processNextItem that completed before the crash). ────────────────
         final extractingState = VaultExtractionState.extracting(sha256);
-        final stateBytes = extractingState.encode();
+        final stateBytes = await extractingState.encode();
         await crashKvStore.writeBatchInternal(
           WriteBatch()..put(
             '$kVaultExtractPrefix$sha256',
@@ -1658,7 +1687,7 @@ void main() {
           WriteBatch()..put(
             '$kVaultExtractPrefix$sha256',
             kVaultCorpusSentinelKey,
-            extractingState.encode(),
+            await extractingState.encode(),
           ),
         );
         await crashKvStore.flush();
@@ -1744,7 +1773,14 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 300));
 
         // Step F: Verify the index was rebuilt from the decrypted artifacts.
-        final recoveredState = await _readState(recoveredKvStore, sha256);
+        // recover() writes the final state through `manager`, which has
+        // `encryption: provider` configured, so it must be read back with
+        // the same provider.
+        final recoveredState = await _readState(
+          recoveredKvStore,
+          sha256,
+          encryption: provider,
+        );
         expect(
           recoveredState?.status,
           equals(VaultExtractionStatus.indexed),
@@ -1807,7 +1843,7 @@ void main() {
           WriteBatch()..put(
             '$kVaultExtractPrefix$sha256',
             kVaultCorpusSentinelKey,
-            VaultExtractionState.extracting(sha256).encode(),
+            await VaultExtractionState.extracting(sha256).encode(),
           ),
         );
 
@@ -1886,7 +1922,7 @@ void main() {
           WriteBatch()..put(
             '$kVaultExtractPrefix$sha256',
             kVaultCorpusSentinelKey,
-            VaultExtractionState.pending(sha256).encode(),
+            await VaultExtractionState.pending(sha256).encode(),
           ),
         );
 
@@ -1914,7 +1950,7 @@ void main() {
         WriteBatch()..put(
           '$kVaultExtractPrefix$sha256',
           kVaultCorpusSentinelKey,
-          VaultExtractionState.failed(sha256, 'prior error').encode(),
+          await VaultExtractionState.failed(sha256, 'prior error').encode(),
         ),
       );
 
@@ -1963,7 +1999,7 @@ void main() {
         WriteBatch()..put(
           '$kVaultExtractPrefix$sha256',
           kVaultCorpusSentinelKey,
-          VaultExtractionState.pending(sha256).encode(),
+          await VaultExtractionState.pending(sha256).encode(),
         ),
       );
 
@@ -1982,7 +2018,7 @@ void main() {
         WriteBatch()..put(
           '$kVaultExtractPrefix$sha256',
           kVaultCorpusSentinelKey,
-          VaultExtractionState.failed(sha256, 'err').encode(),
+          await VaultExtractionState.failed(sha256, 'err').encode(),
         ),
       );
 
@@ -2001,7 +2037,7 @@ void main() {
         WriteBatch()..put(
           '$kVaultExtractPrefix$sha256',
           kVaultCorpusSentinelKey,
-          VaultExtractionState.unsupported(sha256).encode(),
+          await VaultExtractionState.unsupported(sha256).encode(),
         ),
       );
 

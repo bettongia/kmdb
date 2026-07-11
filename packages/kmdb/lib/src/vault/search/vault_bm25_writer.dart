@@ -40,6 +40,17 @@ import 'vault_namespaces.dart';
 /// and guarantees they are never uploaded to the sync folder. Each device
 /// rebuilds its vault FTS index independently from the synced document data.
 ///
+/// ## Encryption layering
+///
+/// The "Value" column above describes the *raw* CBOR bytes this class
+/// produces — [VaultBm25Writer] itself is `static const` and deliberately
+/// unaware of encryption. [VaultSearchManager] wraps every entry with
+/// [EncryptionEnvelope] before committing (Encryption confidentiality
+/// reconciliation plan, Gap 1), so the on-disk bytes carry an outer
+/// [EncryptionFlag] prefix this table does not show. Readers
+/// ([VaultSearcher]) must call [VaultSearchManager.unwrapIndexValue] before
+/// [decodeTf]/[decodeCorpus].
+///
 /// ## DF at query time
 ///
 /// Document frequency (DF) is **not** stored in the corpus sentinel. It is
@@ -168,13 +179,22 @@ final class VaultBm25Writer {
 
   // ── CBOR helpers ────────────────────────────────────────────────────────────
 
-  /// Encodes an integer as minimal CBOR.
+  /// Encodes an integer as minimal, un-encrypted CBOR.
   ///
   /// Uses the same bare-CBOR approach as [FtsManager._encodeCborInt]: no
-  /// [ValueCodec] wrapper here because these are internal index entries that
-  /// never need compression or encryption at this layer (encryption happens at
-  /// the KvStore level for the whole SSTable). The bare-CBOR approach avoids
-  /// double-encoding overhead.
+  /// [ValueCodec]/[EncryptionEnvelope] wrapper here — this class is
+  /// deliberately kept synchronous and unaware of encryption (`static
+  /// const`, no [EncryptionProvider] field). The correction to the previous
+  /// version of this doc comment (Encryption confidentiality reconciliation
+  /// plan, Gap 1): these values are **not** exempt from encryption — they
+  /// were unencrypted plaintext prior to this plan (a real Gap 1 leak of
+  /// tokenised terms), and are now encrypted by [VaultSearchManager], which
+  /// wraps every entry this writer produces with [EncryptionEnvelope] before
+  /// committing (see [VaultSearchManager.writeExtractArtifact]'s sibling
+  /// `_wrapWriterEntries` helper) — not "at the KvStore level for the whole
+  /// SSTable" as previously (incorrectly) stated. `$$vault:fts:` is
+  /// local-only (never synced), so this closes a local-disk-at-rest gap, not
+  /// a cloud-provider one — see §31's threat model.
   static Uint8List _encodeCborInt(int value) =>
       Uint8List.fromList(cbor.encode(CborSmallInt(value)));
 

@@ -512,6 +512,18 @@ This is a code defect to be fixed by routing the FTS and Vec write paths through
 `ValueCodec`. Until it is fixed, `$$fts:doc:` values in particular **leak the
 full tokenised term list of every document** to anyone with local SSTable access.
 
+The same defect extends to the vault-search writers (`VaultBm25Writer`,
+`VaultVecWriter`, `VaultExtractionState`), which serialise `$$vault:fts:`,
+`$$vault:vec:idx:{sha256}`, and `$$vault:extract:{sha256}` the same
+unencrypted way — including `$$vault:vec:idx:`, the per-chunk SQ8 vector
+index missed by the original WI-3 audit (see `docs/roadmap/0_06.md`'s
+correction). **Progress note (Encryption confidentiality reconciliation
+plan, Phase 1 — in progress, see `docs/roadmap/0_08.md`):** the FTS, Vec, and
+vault-search write paths (via `EncryptionEnvelope` for scalar/opaque values
+and `ValueCodec` for the remaining map-shaped ones) now encrypt these values
+when a provider is configured; this section is updated to mark the gap
+resolved once all four gaps in that plan have landed.
+
 #### 2. FTS namespace names embed search terms (architectural limitation)
 
 The lexical index uses a namespace-per-term layout,
