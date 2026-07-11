@@ -4,6 +4,82 @@
 
 **PR link**: —
 
+## Overview
+
+This plan closes the four "Encryption confidentiality reconciliation" gaps
+tracked in `docs/roadmap/0_08.md`. All four are already documented as known
+limitations in §31's (`docs/spec/31_encryption.md`) "Threat Model &
+Confidentiality Boundaries" section — this plan closes them, it does not
+discover them for the first time.
+
+**The four gaps:**
+
+1. **Gap 1** — `FtsManager`, `VecManager`, and the three vault-search writers
+   write index values as raw CBOR instead of going through an encryption
+   primitive, leaving tokenised terms and embedding vectors unencrypted on
+   local disk.
+2. **Gap 2** — FTS/index/vault namespace names embed the term/value in
+   plaintext hex, letting an attacker with local SSTable access enumerate the
+   full search vocabulary even after Gap 1 is fixed. Closed with DEK-derived
+   HMAC namespace tokens.
+3. **Gap 3** — `MetaStore` (`$meta`) writes raw CBOR directly to the engine,
+   leaking the namespace registry (collection names), device ID, and
+   generation counters to the cloud (`$meta` rides syncable SSTables).
+4. **Gap 4** — vault `manifest.json`'s `originalName` field is plaintext JSON
+   that syncs to the cloud verbatim.
+
+**Threat model (corrected during review — see Review, Pass 1):** Gap 1 and
+Gap 2 only protect against *local disk theft* — every namespace they touch is
+`$$`-prefixed and therefore local-only (never synced, per WI-0). Gap 3 and
+Gap 4 are the only two gaps in this plan that protect against a
+*cloud-provider* reading your data. This distinction shaped the phase
+ordering below and a deliberate, user-confirmed decision to keep Gap 2 in
+scope despite it being the largest, riskiest, and least cloud-relevant piece
+of work here (see Open questions, Q8).
+
+**Key design decisions:**
+
+- **Two encryption primitives, chosen per value shape.** `ValueCodec`
+  (existing, `Map<String, dynamic>`-only) for values that are genuinely CBOR
+  maps; a new `EncryptionEnvelope.wrap`/`unwrap` helper (factored out of
+  WI-10's existing inlined pattern) for everything else — scalars, lists, and
+  raw byte blobs, which turns out to be *most* of the values in scope,
+  including every single `MetaStore` value. This split emerged during review
+  (Pass 3) after the original plan assumed `ValueCodec` applied everywhere.
+- **A database-level format-version gate, not a per-value check**, detects
+  legacy (pre-this-plan) databases at `open()` and refuses them cleanly. A
+  per-value "does this look like a valid flag byte" check was tried and
+  rejected during review (Pass 4/5) — it silently misparses common legacy
+  values, because CBOR encodes small integers 0/1 as bytes that collide with
+  the two valid encryption flag bytes.
+- **Breaking format change, no migration path.** Existing databases must be
+  recreated once this lands — consistent with the original Phase 12
+  encryption precedent. Documented in §31 and the release checklist.
+
+**Phases** (ordered by mechanical complexity, not severity — see
+Implementation plan for the full rationale): Phase 0 sets up the shared
+`EncryptionEnvelope` primitive and resolves all open questions; Phase 1
+closes Gap 1; Phase 2 closes Gap 3; Phase 3 closes Gap 4; Phase 4 closes
+Gap 2; Phase 5 updates docs/spec.
+
+**Workflow (see Implementation plan for the full policy):** one branch/
+worktree for the whole plan, but each of Phases 1–5 gets its own
+checklist-verify → pre-commit → `kmdb-qa` sign-off → commit sequence rather
+than one review at the very end — the same reasoning that made this plan's
+own review take five focused passes instead of one. One PR at the end,
+multiple commits, merged (not squashed) into `main`. A dedicated
+`kmdb-architect` spec-alignment pass runs once, after Phase 5, to confirm
+§31/§24/§99/the roadmap describe the complete implemented state.
+
+All open questions (Q1–Q8) are resolved. This plan reached `Investigated`
+after five review passes with the `kmdb-plan-reviewer` agent — see Review for
+the full history of what each pass found and how it was fixed. Each pass
+surfaced a genuine, code-grounded defect (a wrong threat model, an
+unspecified async design, an impossible migration scenario, a
+`ValueCodec`-can't-take-bytes mismatch, a CBOR/flag-byte collision, and a
+new-vs-legacy database discrimination gap) — none were bikeshedding, and all
+are closed with concrete resolutions in the sections below.
+
 ## Problem statement
 
 §31 (`docs/spec/31_encryption.md`) already contains an honest, current "Threat
@@ -169,23 +245,23 @@ are all Complete and directly relevant:
       format-version mismatch at `open()`.** Trigger is a code/format-version
       upgrade of an already-encrypted database (persisted `tokenMode`
       discriminator mismatch), mirroring WI-1's model-identity invalidation —
-      **not** a runtime encryption toggle (impossible, see B5). Detection runs
-      after Phase 2's `MetaStore` provider binding, since the index state is
-      itself encrypted. Gap 2 migration trigger: what actually causes a
-      rebuild?** (carried over from 0_08.md, **reframed per plan review** —
-      the original framing was an impossible scenario.) Encryption cannot be toggled on an
-      existing database — `KmdbDatabase.open()` throws
-      `cannotProvisionNonEmptyDatabase` when user namespaces already exist
-      (`kmdb_database.dart:651–658`); a database is either born encrypted or
-      never encrypted. So "toggle encryption on an existing DB → rebuild" is
-      not a real trigger and must not appear in tests. **The real trigger is a
-      software/format-version upgrade of an already-encrypted database**: a DB
-      whose `$$fts:`/`$$vec:`/`$$index:` were built by pre-Gap-2 code (hex
-      tokens) is reopened under Gap-2 code (HMAC tokens); the persisted
-      `tokenMode` discriminator mismatches, and `open()` rebuilds — exactly
-      analogous to WI-1's model-identity invalidation (`$meta` model version
-      mismatch → automatic `$$vec:` rebuild), which is a persisted-format-
-      version mismatch, not a user action.
+      **not** a runtime encryption toggle (impossible, see Review Pass 1/B5).
+      Detection runs after Phase 2's `MetaStore` provider binding, since the
+      index state is itself encrypted. Gap 2 migration trigger: what actually
+      causes a rebuild?** (carried over from 0_08.md, **reframed per plan
+      review** — the original framing was an impossible scenario.) Encryption
+      cannot be toggled on an existing database — `KmdbDatabase.open()`
+      throws `cannotProvisionNonEmptyDatabase` when user namespaces already
+      exist (`kmdb_database.dart:651–658`); a database is either born
+      encrypted or never encrypted. So "toggle encryption on an existing DB →
+      rebuild" is not a real trigger and must not appear in tests. **The real
+      trigger is a software/format-version upgrade of an already-encrypted
+      database**: a DB whose `$$fts:`/`$$vec:`/`$$index:` were built by
+      pre-Gap-2 code (hex tokens) is reopened under Gap-2 code (HMAC tokens);
+      the persisted `tokenMode` discriminator mismatches, and `open()`
+      rebuilds — exactly analogous to WI-1's model-identity invalidation
+      (`$meta` model version mismatch → automatic `$$vec:` rebuild), which is
+      a persisted-format-version mismatch, not a user action.
       **Recommendation: rebuild automatically on this version-mismatch
       detection at `open()`**, consistent with WI-1. Store the discriminator
       (`tokenMode: hex | hmac`) alongside the existing `field`/`status` in
@@ -421,6 +497,42 @@ is deliberately sequenced last regardless of its cloud-relevance ranking. Each
 phase should land as its own reviewable unit of work (commit/PR-sized), but
 this is one tracked plan.
 
+**Branch, commit, and review workflow (given the stakes of this plan —
+crash-recovery-critical paths and a breaking, unmigrated format change —
+review at a finer grain than usual).** All work happens on one dated
+branch/worktree per the standard `kmdb-plan-implement` process. Each of
+Phases 1–5 below (Phase 0 is design-only and is already fully resolved — see
+its checkboxes — so it has no commit of its own) ends with its own
+**checklist-verify → pre-commit → QA sign-off → commit** sequence, spelled
+out at the end of that phase's checklist. This mirrors why this plan itself
+needed five review passes to reach `Investigated`: a focused reviewer working
+on one bounded slice catches things a single end-of-everything pass misses,
+because by then the slice is buried under later, larger changes. The same
+logic applies at implementation time.
+
+- **One commit per phase.** Each phase's commit should be self-contained and
+  buildable/testable on its own (this is also why the phases are already
+  ordered by dependency — Phase 4 depends on Phase 2's provider binding, for
+  example, so it must come after).
+- **Do not commit with unchecked boxes.** Every task/step under a phase must
+  be checked off in the plan file (in the worktree copy) *before* that
+  phase's commit — the checklist is the source of truth for what shipped in
+  that commit, not an after-the-fact summary. Per `docs/plans/README.md`,
+  check items off immediately as they're done, not in a batch at the end.
+- **Per-phase `kmdb-qa` sign-off**, not deferred to one pass at the end of
+  all five phases — catches issues while the diff is still small enough to
+  review thoroughly (see the rationale above).
+- **One PR, multiple commits, merged (not squashed) to `main`** at the end —
+  the commit history should mirror the plan's phase structure for future
+  `git bisect`/review, not collapse it.
+- **A dedicated `kmdb-architect` spec-alignment pass at the very end**, after
+  Phase 5's spec/doc updates land, confirming §31/§24/§99/the roadmap
+  accurately describe the *complete* implemented state (all four gaps, not
+  just Phase 5's own diff in isolation) — complementary to `kmdb-qa`'s
+  code-quality lens, and consistent with `kmdb-architect` being the
+  authoritative agent for `docs/spec/` per CLAUDE.md. See the Final step
+  section below.
+
 ### Phase 0 — Resolve open questions, and the shared encryption primitive (B7)
 
 - [x] Resolve Q1 by reading `KmdbDatabase.open()`'s exact bootstrap sequence
@@ -558,6 +670,18 @@ Per Phase 0's B7 split: `ValueCodec` for map-shaped values, the new
       `writeExtractArtifact`/`readExtractArtifact` behave identically
       before/after the `EncryptionEnvelope` refactor (regression test, not
       just new coverage).
+
+**Phase 1 close-out (see the workflow policy above):**
+
+- [ ] Verify every task/step checkbox above is checked off — do not proceed
+      to commit with any left unchecked.
+- [ ] Run `make pre_commit` (format, analyze, license_check, scoped tests).
+- [ ] Hand off to `kmdb-qa` for sign-off on Phase 1's diff specifically
+      (`EncryptionEnvelope`, `FtsManager`, `VecManager`,
+      `VaultSearchManager`/writers, `VaultExtractionState`, and the
+      `writeExtractArtifact`/`readExtractArtifact` refactor). Resolve every
+      blocking item before committing.
+- [ ] Commit Phase 1 on the plan's branch.
 
 ### Phase 2 — Gap 3: encrypt MetaStore values
 
@@ -735,6 +859,19 @@ Implementation:
       `FaultyStorageAdapter` fault-injection harness, not just the in-memory
       test adapter.
 
+**Phase 2 close-out (see the workflow policy above):**
+
+- [ ] Verify every task/step checkbox above is checked off — do not proceed
+      to commit with any left unchecked.
+- [ ] Run `make pre_commit` (format, analyze, license_check, scoped tests).
+- [ ] Hand off to `kmdb-qa` for sign-off on Phase 2's diff specifically —
+      this is the phase with the most architectural risk (the late-bound
+      provider, the `enc:blob` carve-out, and the format-version gate), so
+      give the QA pass particular attention to the B8/B9 marker logic and
+      the crash-recovery fault-injection results, not just test coverage
+      numbers. Resolve every blocking item before committing.
+- [ ] Commit Phase 2 on the plan's branch.
+
 ### Phase 3 — Gap 4: vault manifest `originalName`
 
 - [ ] Implement the Q6-resolved fix (encrypt `originalName` in place,
@@ -750,6 +887,16 @@ Implementation:
 - [ ] Tests: manifest round-trip with encryption on/off; confirm dedup
       (`sha256`-keyed) and sync-routing logic (which reads `mediaType`/`size`
       without decrypting) are unaffected.
+
+**Phase 3 close-out (see the workflow policy above):**
+
+- [ ] Verify every task/step checkbox above is checked off — do not proceed
+      to commit with any left unchecked.
+- [ ] Run `make pre_commit` (format, analyze, license_check, scoped tests).
+- [ ] Hand off to `kmdb-qa` for sign-off on Phase 3's diff specifically
+      (`VaultManifest`, its read sites, and the §31 acknowledgment). Resolve
+      every blocking item before committing.
+- [ ] Commit Phase 3 on the plan's branch.
 
 ### Phase 4 — Gap 2: HMAC-keyed namespace tokens
 
@@ -789,6 +936,19 @@ Implementation:
       indefinitely (a distinct database, not a toggled state); query-time
       namespace reconstruction matches write-time for every mode.
 
+**Phase 4 close-out (see the workflow policy above):**
+
+- [ ] Verify every task/step checkbox above is checked off — do not proceed
+      to commit with any left unchecked.
+- [ ] Run `make pre_commit` (format, analyze, license_check, scoped tests).
+- [ ] Hand off to `kmdb-qa` for sign-off on Phase 4's diff specifically —
+      this is the largest, least mechanical phase (new HMAC/HKDF primitive,
+      `tokenMode` rebuild-on-upgrade behaviour), so give it particular
+      attention: token determinism, domain separation, and the rebuild path
+      actually exercised end-to-end, not just unit-tested in isolation.
+      Resolve every blocking item before committing.
+- [ ] Commit Phase 4 on the plan's branch.
+
 ### Phase 5 — Spec, roadmap, and glossary updates
 
 **Note:** §31 already contains an honest "Threat Model & Confidentiality
@@ -817,11 +977,26 @@ from scratch.
       readers.
 - [ ] Run `make site` after spec edits.
 
-**Final step — QA sign-off and pre-commit:**
+**Phase 5 close-out (see the workflow policy above):**
 
-- [ ] Run `make coverage` — confirm >95% on all new/changed files, and that
-      the overall project minimum (CLAUDE.md: 90%, current baseline: 95%) is
-      maintained.
+- [ ] Verify every task/step checkbox above is checked off — do not proceed
+      to commit with any left unchecked.
+- [ ] Run `make pre_commit` (format, analyze, license_check, scoped tests;
+      also run `make doc_site`/`make site` since this phase touches spec
+      files — see CLAUDE.md's note that `make site` itself is not a real
+      target).
+- [ ] Hand off to `kmdb-qa` for sign-off on Phase 5's diff specifically (doc
+      accuracy against what Phases 1–4 actually shipped, not just prose
+      quality). Resolve every blocking item before committing.
+- [ ] Commit Phase 5 on the plan's branch.
+
+**Final step — whole-PR checks, spec alignment, and pre-commit.** Everything
+above is per-phase. These checks need the complete picture (all five phases
+landed) and run once, after Phase 5's commit, before opening the PR:
+
+- [ ] Run `make coverage` — confirm >95% on all new/changed files across all
+      five phases, and that the overall project minimum (CLAUDE.md: 90%,
+      current baseline: 95%) is maintained.
 - [ ] Run the §18 performance benchmarks (`packages/kmdb/benchmark/main.dart`)
       before/after — value encryption on every FTS/Vec write adds AES-GCM
       overhead to a hot path; confirm no P99 regression outside acceptable
@@ -833,16 +1008,37 @@ from scratch.
       converges correctly with Gap 3/4's now-encrypted synced values. Only
       encrypted databases pay the AES-GCM cost on any of these paths —
       encryption remains opt-in throughout.
-- [ ] Hand off to the **`kmdb-qa` agent** for sign-off (spec alignment, doc
-      comments, test coverage/adequacy, code health, and specifically: does
-      §31 now accurately describe what's implemented?). Resolve every
-      blocking item before proceeding. Do not open a PR until sign-off is
-      received.
-- [ ] Run `make pre_commit` — format, analyze, license_check, tests all
-      green.
+- [ ] Hand off to the **`kmdb-architect` agent** for a dedicated
+      spec-alignment pass: confirm §31, §24, §99, and `docs/roadmap/0_08.md`
+      now accurately describe the *complete* implemented state across all
+      four gaps — not just that Phase 5's own diff reads well in isolation.
+      This is a different, complementary check to `kmdb-qa`'s per-phase
+      code-quality sign-offs above; `kmdb-architect` is the authoritative
+      agent for `docs/spec/` per CLAUDE.md, and this plan's whole premise is
+      a spec/code divergence, so an explicit final alignment check matters
+      more here than on a typical plan. Resolve every discrepancy it finds
+      before proceeding.
+- [ ] Hand off to the **`kmdb-qa` agent** for a final whole-PR sign-off —
+      this pass is about aggregate/cross-phase concerns (does the PR as a
+      whole make sense, is overall coverage adequate, do the five commits
+      tell a coherent story) rather than re-reviewing each phase's code in
+      detail, since that already happened per-phase above. Do not open a PR
+      until sign-off is received.
+- [ ] Run `make pre_commit` one final time on the complete branch — format,
+      analyze, license_check, tests all green.
 - [ ] Verify licence headers on all new files (2026).
+- [ ] Open the PR from the branch with its five phase commits intact; merge
+      (do not squash) once approved, per the workflow policy above.
 
-## Reviewer feedback (2026-07-10, kmdb-plan-reviewer)
+## Review
+
+This plan went through five review passes with the `kmdb-plan-reviewer`
+agent before reaching `Investigated`. Each pass is recorded below in full —
+what the reviewer found, and how the plan (Overview, Problem statement, Open
+questions, and Implementation plan above) was changed in response. Every pass
+surfaced a genuine, code-grounded defect; none were bikeshedding.
+
+### Pass 1 (kmdb-plan-reviewer, 2026-07-10)
 
 Overall: the Investigation is genuinely strong — the file:line grounding is
 accurate against `main`, the four gaps are real, and the Q1/Q6 resolutions are
@@ -850,16 +1046,16 @@ sound. But the **problem statement's threat model is wrong**, and that error
 propagates into the phase priority, the migration story, and several test
 bullets. This is not ready for `Investigated`. The specific blockers:
 
-### B1 (blocking) — The problem statement mischaracterises the threat; §31 is already honest
-
-The problem statement opens by quoting §31 as promising that "cloud storage
-never sees plaintext document content in any form, including system-namespace
-values," and calls this "false as implemented." **That quote does not exist in
-the current §31.** The current spec (`docs/spec/31_encryption.md:279`) says
-"*disk* storage never sees plaintext," and §31 already contains a full,
-honest "Threat Model & Confidentiality Boundaries" section (lines 437–639) that
-enumerates all four of this plan's gaps as *known, documented* gaps 1–5 with
-the correct threat framing. The plan is arguing against a stale spec.
+**B1 (blocking) — The problem statement mischaracterises the threat; §31 is
+already honest.** The problem statement opens by quoting §31 as promising
+that "cloud storage never sees plaintext document content in any form,
+including system-namespace values," and calls this "false as implemented."
+**That quote does not exist in the current §31.** The current spec
+(`docs/spec/31_encryption.md:279`) says "*disk* storage never sees
+plaintext," and §31 already contains a full, honest "Threat Model &
+Confidentiality Boundaries" section (lines 437–639) that enumerates all four
+of this plan's gaps as *known, documented* gaps 1–5 with the correct threat
+framing. The plan is arguing against a stale spec.
 
 More importantly, the framing throughout Gap 1/Gap 2 ("leaking … to cloud
 storage in plaintext", "uploaded to cloud storage as plaintext SSTable
@@ -886,18 +1082,17 @@ Action: rewrite the problem statement to (a) stop claiming §31 is "false" — i
 is currently accurate and honest — and frame the work as *closing the gaps §31
 already documents*; (b) state the per-gap threat model above.
 
-### B2 (blocking) — Phase priority is asserted without stating the axis, and is questionable for cloud confidentiality
+**B2 (blocking) — Phase priority is asserted without stating the axis, and is
+questionable for cloud confidentiality.** "Gap 1 highest priority" is
+defensible only on a *content-severity* axis (Gap 1 leaks tokenised terms —
+actual content — per §31's own summary). On a *cloud-confidentiality* axis it
+is the **lowest** priority, because it never reaches the cloud. The plan
+states a priority without stating which axis it is optimising, and the two
+axes disagree. Make the axis explicit. If the driving concern is the cloud
+provider (the headline motivation of §31 encryption), then **Gaps 3 and 4
+should lead**, not Gap 1. See Q8.
 
-"Gap 1 highest priority" is defensible only on a *content-severity* axis (Gap 1
-leaks tokenised terms — actual content — per §31's own summary). On a
-*cloud-confidentiality* axis it is the **lowest** priority, because it never
-reaches the cloud. The plan states a priority without stating which axis it is
-optimising, and the two axes disagree. Make the axis explicit. If the driving
-concern is the cloud provider (the headline motivation of §31 encryption), then
-**Gaps 3 and 4 should lead**, not Gap 1. See Q8.
-
-### B3 (blocking) — Gap 3's async ripple through `MetaStore` is unspecified
-
+**B3 (blocking) — Gap 3's async ripple through `MetaStore` is unspecified.**
 The plan correctly flags the "static helper must become async" wrinkle for
 `FtsManager`, but says nothing about the same problem in `MetaStore`, which is
 worse. `ValueCodec.encode`/`decode` are `Future`-returning
@@ -910,23 +1105,22 @@ boundary, or (b) pre-encrypting the values in the callers before batch
 assembly. That is a real design decision, not a mechanical edit, and it blocks
 `Investigated`. Phase 2 must specify the chosen approach.
 
-### B4 (should-fix) — Gap 3 introduces the first engine→encoding-layer dependency; specify the mechanism
-
-`MetaStore` lives at the engine layer and currently imports only
-`encryption_blob.dart` (for the raw `enc:blob`). No file under `lib/src/engine/`
-imports `ValueCodec` (`lib/src/encoding/value_codec.dart`) — encryption is
-threaded *above* the KvStore boundary everywhere else (`KmdbCollection`,
-`IndexManager`, `VersionManager`, `VaultRefInterceptor`). Routing `MetaStore`
-through `ValueCodec` makes it the first engine→encoding importer. That may be
+**B4 (should-fix) — Gap 3 introduces the first engine→encoding-layer
+dependency; specify the mechanism.** `MetaStore` lives at the engine layer and
+currently imports only `encryption_blob.dart` (for the raw `enc:blob`). No
+file under `lib/src/engine/` imports `ValueCodec`
+(`lib/src/encoding/value_codec.dart`) — encryption is threaded *above* the
+KvStore boundary everywhere else (`KmdbCollection`, `IndexManager`,
+`VersionManager`, `VaultRefInterceptor`). Routing `MetaStore` through
+`ValueCodec` makes it the first engine→encoding importer. That may be
 acceptable (MetaStore is already a boundary-bypassing special case), but the
 plan should decide deliberately between calling `ValueCodec.encode` vs. calling
 `EncryptionProvider.encrypt` directly with a hand-rolled flag envelope — the
 former keeps wire-format consistency (preferred; do not hand-roll per
 CLAUDE.md), the latter avoids the layer dependency. State the choice.
 
-### B5 (blocking) — Q5's migration trigger is an impossible scenario; reframe it
-
-Encryption **cannot be retrofitted onto a non-empty database** —
+**B5 (blocking) — Q5's migration trigger is an impossible scenario; reframe
+it.** Encryption **cannot be retrofitted onto a non-empty database** —
 `KmdbDatabase.open()` throws `cannotProvisionNonEmptyDatabase` when user
 namespaces already exist (`kmdb_database.dart:651–658`). A database is either
 born encrypted or never encrypted; there is no runtime toggle. Therefore:
@@ -947,7 +1141,7 @@ WI-1 model-identity precedent the plan cites is exactly right for *that* — it 
 a persisted-format-version mismatch, not a user action. Reframe Q5 and every
 "toggle" test bullet accordingly.
 
-### Coupling check (as requested): does resolving Q1/Q6 disturb the rest?
+**Coupling check (as requested): does resolving Q1/Q6 disturb the rest?**
 
 - **Q1 → Q5 (sequencing):** with Gap 3 landed, the `index:{ns}:{path}` state
   that houses Q5's `tokenMode` discriminator is now itself encrypted. `open()`
@@ -964,17 +1158,16 @@ a persisted-format-version mismatch, not a user action. Reframe Q5 and every
   reinforced by the local-only reframing (there is no value-level confidentiality
   benefit either way). Resolvable now; does not need to wait on Q5.
 
-### Are the remaining open questions the right ones?
+**Are the remaining open questions the right ones?** Mostly yes. Q2 and Q4 are
+well-posed and their recommendations are sound (Q4's HKDF sub-key via the
+existing `key_derivation.dart:109` machinery is the right call — do not widen
+`AesGcmEncryptionProvider.dek` exposure). Q7 is correctly scoped out. The gap
+in the question set is **Q8** (added above): the plan never asks whether the
+largest, riskiest, beta-blocking change (Gap 2) is warranted for a threat that
+turns out to be local-disk-only. That decision was made under an incorrect
+(cloud) threat model and should be re-confirmed.
 
-Mostly yes. Q2 and Q4 are well-posed and their recommendations are sound (Q4's
-HKDF sub-key via the existing `key_derivation.dart:109` machinery is the right
-call — do not widen `AesGcmEncryptionProvider.dek` exposure). Q7 is correctly
-scoped out. The gap in the question set is **Q8** (added above): the plan never
-asks whether the largest, riskiest, beta-blocking change (Gap 2) is warranted
-for a threat that turns out to be local-disk-only. That decision was made under
-an incorrect (cloud) threat model and should be re-confirmed.
-
-### Smaller notes
+**Smaller notes:**
 
 - Phase 5 largely proposes to *add* acknowledgments (manifest fields, `$meta`,
   threat model) that §31 **already contains** (gaps 4/5 at lines 539–564, the
@@ -990,20 +1183,17 @@ an incorrect (cloud) threat model and should be re-confirmed.
   by Gap 1/2 (only Gap 3's `$meta` and Gap 4's manifest touch synced state) —
   worth stating so the harness expectations are scoped correctly.
 
-### Status call
+**Status call:** Staying at **Questions**. Q1/Q6 are resolved, but B1/B3/B5
+are design/framing gaps a Sonnet implementer could not resolve without making
+significant decisions, and Q8 is a genuine user decision opened by the
+corrected threat model. Address B1–B5, resolve Q2–Q5 + Q8, then this is a
+strong candidate for `Investigated` — the underlying investigation work is
+already most of the way there.
 
-Staying at **Questions**. Q1/Q6 are resolved, but B1/B3/B5 are design/framing
-gaps a Sonnet implementer could not resolve without making significant
-decisions, and Q8 is a genuine user decision opened by the corrected threat
-model. Address B1–B5, resolve Q2–Q5 + Q8, then this is a strong candidate for
-`Investigated` — the underlying investigation work is already most of the way
-there.
+**Response (coordinator, 2026-07-10):**
 
-### Response to review (2026-07-10)
-
-- **Q8 resolved by the user**: Gap 2 stays in this plan (see Q8, updated
-  above) — the local-disk-only threat model was reviewed and the risk
-  accepted explicitly.
+- **Q8 resolved by the user**: Gap 2 stays in this plan — the local-disk-only
+  threat model was reviewed and the risk accepted explicitly.
 - **B1**: problem statement rewritten — no longer claims §31 is false; states
   the per-gap threat model (Gap 1/2 local-disk-only, Gap 3/4 cloud-facing)
   up front.
@@ -1012,8 +1202,10 @@ there.
   disagreement between axes.
 - **B3**: Phase 2 now specifies the chosen design — pre-encrypt at call sites
   before `WriteBatch` assembly, keeping the batch-append helpers synchronous.
-- **B4**: Phase 2 now specifies `ValueCodec.encode`/`decode` (not a hand-rolled
-  envelope) as the chosen mechanism, with rationale.
+  (Later shown to be factually wrong and corrected in Pass 2/B6.)
+- **B4**: Phase 2 now specifies `ValueCodec.encode`/`decode` (not a
+  hand-rolled envelope) as the chosen mechanism, with rationale. (Later
+  superseded in Pass 3/B7.)
 - **B5**: Q5 reframed around the real trigger (format-version mismatch on an
   already-encrypted database, not a runtime toggle); Phase 4's and Phase 1's
   test bullets rewritten to remove the impossible "toggle encryption on an
@@ -1025,10 +1217,10 @@ there.
   Gap 3/4 only (the only phases touching synced state), per the corrected
   threat model.
 
-## Reviewer feedback — second pass (2026-07-10)
+### Pass 2 (kmdb-plan-reviewer, 2026-07-10)
 
 B1, B2, B4, B5, and Q8 are resolved cleanly — verified against the actual plan
-text, not just the "Response to review" subsection. The problem statement now
+text, not just the coordinator's response summary. The problem statement now
 carries the correct per-gap threat model, the ordering axis is stated and its
 disagreement acknowledged, Q5 is reframed around the real (version-mismatch)
 trigger with the toggle language purged from the test bullets, and Q8's
@@ -1038,14 +1230,13 @@ Gap-2-stays decision is recorded with the risk accepted knowingly. Good.
 the B6 correction below (in-helper encryption is a natural fit since the helpers
 are already async).
 
-### B6 (new, blocking) — Phase 2's chosen B3 design rests on a factual error about `MetaStore` and is unimplementable as written
-
-Phase 2's "Design decisions specified up front" block asserts that
-`appendGenerationCounterBump`, `appendNamespaceRegistration`, and
-`appendDirtyFlag` "are synchronous helpers invoked during batch assembly" and
-prescribes "pre-encrypt values in the callers before batch assembly … the
-batch-append helpers stay synchronous and simply accept already-encrypted
-bytes." That is not what the code does:
+**B6 (new, blocking) — Phase 2's chosen B3 design rests on a factual error
+about `MetaStore` and is unimplementable as written.** Phase 2's "Design
+decisions specified up front" block asserts that `appendGenerationCounterBump`,
+`appendNamespaceRegistration`, and `appendDirtyFlag` "are synchronous helpers
+invoked during batch assembly" and prescribes "pre-encrypt values in the
+callers before batch assembly … the batch-append helpers stay synchronous and
+simply accept already-encrypted bytes." That is not what the code does:
 
 - `appendGenerationCounterBump` (`meta_store.dart:99`) is **already
   `Future<int>`** and computes its value **internally**: it does
@@ -1072,7 +1263,6 @@ Two consequences:
    which already `cbor.decode`) are async too — decrypt-in-place is mechanical.
    There is **no `WriteBatch`-API async ripple** for these, contrary to the
    block's framing.
-
 2. **The prescribed design is the wrong one and is unimplementable for the two
    helpers that matter.** Correct approach: **encrypt/decrypt inside the
    existing async helpers** (`appendGenerationCounterBump`,
@@ -1094,17 +1284,32 @@ helpers. Until this is corrected, an implementer would hit the contradiction at
 the first helper and have to redesign on the fly — which is exactly the bar
 `Investigated` is meant to clear.
 
-### Status call (second pass)
+**Status call:** Still **Questions**, but the gap is now narrow and fully
+specified: fix B6 (a factual correction to one design block, with the
+corrected approach spelled out above) and formally check off the remaining
+recommendation-accept questions (Q2, Q3, Q4, Q5, Q7 — all have sound
+recommendations and no unresolved sub-decisions once B6 lands). No further
+investigation is needed; this is an editing pass, not a research pass. Once
+B6 is corrected in Phase 2, this plan clears the implementation-readiness bar
+and can move to `Investigated`.
 
-Still **Questions**, but the gap is now narrow and fully specified: fix B6 (a
-factual correction to one design block, with the corrected approach spelled out
-above) and formally check off the remaining recommendation-accept questions
-(Q2, Q3, Q4, Q5, Q7 — all have sound recommendations and no unresolved
-sub-decisions once B6 lands). No further investigation is needed; this is an
-editing pass, not a research pass. Once B6 is corrected in Phase 2, this plan
-clears the implementation-readiness bar and can move to `Investigated`.
+**Response (coordinator, 2026-07-10):** Verified B6 directly against
+`meta_store.dart` before writing the fix — confirmed
+`appendGenerationCounterBump` (line 99) and `appendNamespaceRegistration`
+(line 210) are already `Future`-returning with internal read-modify-write,
+and `appendDirtyFlag` (line 233)/`appendTombstoneFloorAdvance` (line 334) are
+the only genuinely-sync `void` methods, with the latter having zero
+production callers. Rewrote Phase 2's B3 block: encrypt-in-place inside the
+already-async helpers; converted `appendDirtyFlag` to `Future<void>` and
+encrypted it too; left `appendTombstoneFloorAdvance` synchronous/unencrypted
+as dead code. While rewriting, independently found and fixed a second bug:
+the plan's blanket "route `getRawByName`/`putRawByName` through encryption"
+instruction would have silently broken the `enc:blob` exemption (Q2), since
+`getEncryptionBlob`/`putEncryptionBlob` call those same two methods
+internally — fixed by routing them to `_engine.get`/`_engine.put` directly
+instead.
 
-## Reviewer feedback — third pass (2026-07-10)
+### Pass 3 (kmdb-plan-reviewer, 2026-07-10)
 
 B6 is resolved correctly (verified: `appendTombstoneFloorAdvance` has zero
 production callers — only `meta_store_test.dart:368`; the live path is
@@ -1120,12 +1325,13 @@ coordinator.
 But enumerating the `getRawByName`/`putRawByName` callers to check the
 `enc:blob` fix surfaced a larger, still-unresolved problem that revises B4.
 
-### B7 (new, blocking) — `ValueCodec` is `Map`-only; most values in Gaps 1 and 3 are not maps, so "route through `ValueCodec`" is not mechanically applicable and B4's dichotomy is false
-
-`ValueCodec.encode` accepts only `Map<String, dynamic>`
-(`value_codec.dart:92`) and `decode` returns only `Map<String, dynamic>`
-(`:140`). There is **no raw-bytes entry point.** But the majority of the values
-this plan puts in scope are scalars or opaque byte blobs, not maps:
+**B7 (new, blocking) — `ValueCodec` is `Map`-only; most values in Gaps 1 and 3
+are not maps, so "route through `ValueCodec`" is not mechanically applicable
+and B4's dichotomy is false.** `ValueCodec.encode` accepts only
+`Map<String, dynamic>` (`value_codec.dart:92`) and `decode` returns only
+`Map<String, dynamic>` (`:140`). There is **no raw-bytes entry point.** But
+the majority of the values this plan puts in scope are scalars or opaque byte
+blobs, not maps:
 
 - **Gap 3 / `$meta`:** generation counter (`_encodeUint64`, a `uint64`),
   `device_id` (raw `codeUnits`), `dirty` (`[1]`), `gc:tombstoneFloor` (an
@@ -1183,16 +1389,16 @@ error at the first `ValueCodec.encode(counter)` and has to invent the mechanism
 — a significant design decision, which is exactly the bar `Investigated` must
 clear. Revise B4 accordingly (it is no longer a simple "yes, ValueCodec").
 
-### B8 (should-address before implementation) — breaking on-disk format change for existing databases has no stated migration stance
-
-Routing existing `$meta`, index-state, schema, and version-config values
-through *any* framed encoding (encrypted or the `EncryptionFlag.none`/
-`ValueCodec` unencrypted framing, which still prepends flag/compression bytes)
-changes their on-disk bytes. A database created by today's code stores these as
-bare CBOR with no leading flag byte; after this change the read path expects a
-frame. This affects **every existing database, not just encrypted ones**, and
-several of these values are authoritative and *not* rebuildable — `device_id`
-in particular (a changed device identity breaks sync continuity), plus the
+**B8 (should-address before implementation) — breaking on-disk format change
+for existing databases has no stated migration stance.** Routing existing
+`$meta`, index-state, schema, and version-config values through *any* framed
+encoding (encrypted or the `EncryptionFlag.none`/`ValueCodec` unencrypted
+framing, which still prepends flag/compression bytes) changes their on-disk
+bytes. A database created by today's code stores these as bare CBOR with no
+leading flag byte; after this change the read path expects a frame. This
+affects **every existing database, not just encrypted ones**, and several of
+these values are authoritative and *not* rebuildable — `device_id` in
+particular (a changed device identity breaks sync continuity), plus the
 `namespaces` registry and generation counters.
 
 The self-describing `EncryptionFlag`-byte scheme does not save you here: a
@@ -1215,39 +1421,40 @@ This is "should-address" rather than hard-blocking only because the recommended
 answer is a one-paragraph policy statement plus a clean-failure test; but it
 must not be left implicit.
 
-### Status call (third pass)
+**Status call:** Still **Questions**. B6 and the `enc:blob` fix are correct.
+B7 is a genuine blocker — the plan's core encryption mechanism ("route
+through `ValueCodec`") is not applicable to most of its own write sites, and
+the correct split (plus factoring WI-10's envelope into a shared helper) is
+an unmade design decision. B8 needs a one-paragraph migration stance and a
+clean-failure guarantee. Once B7 is specified into Phase 1/Phase 2 (revising
+B4) and B8's stance is recorded, and Q2–Q5/Q7 are checked off, this reaches
+`Investigated`. The investigation remains strong; these are
+mechanism-specification gaps, not research gaps.
 
-Still **Questions**. B6 and the `enc:blob` fix are correct. B7 is a genuine
-blocker — the plan's core encryption mechanism ("route through `ValueCodec`")
-is not applicable to most of its own write sites, and the correct split (plus
-factoring WI-10's envelope into a shared helper) is an unmade design decision.
-B8 needs a one-paragraph migration stance and a clean-failure guarantee. Once
-B7 is specified into Phase 1/Phase 2 (revising B4) and B8's stance is recorded,
-and Q2–Q5/Q7 are checked off, this reaches `Investigated`. The investigation
-remains strong; these are mechanism-specification gaps, not research gaps.
+**Response (coordinator, 2026-07-10):**
 
-### Response to review — third pass (2026-07-10)
-
-- **B7**: added a new "Phase 0 — B7" design block specifying the
-  per-value-shape split (map-shaped → `ValueCodec`; scalar/opaque-byte-blob →
-  a new shared `EncryptionEnvelope.wrap`/`unwrap` helper factored out of
-  WI-10's inlined pattern in `writeExtractArtifact`/`readExtractArtifact`,
-  which are refactored to use it). Verified each write site's actual shape
-  against the code (not assumed) — categorised in the Phase 0 block. Phase 1
-  and Phase 2's bullets are rewritten to name the mechanism per value.
-  Phase 2's B4 block is marked superseded: since every Gap 3 `$meta` value
-  turned out to be scalar/list/blob-shaped, `MetaStore` ends up needing
-  `EncryptionEnvelope` only, not `ValueCodec` — so it never becomes an
-  engine→encoding-layer importer, dissolving the original B4 question rather
-  than answering it as first framed.
+- **B7**: read the actual write sites (`fts_manager.dart`, `vec_manager.dart`,
+  `vault_bm25_writer.dart`, `vault_extraction_state.dart`) before writing the
+  fix, to categorise each value's real shape rather than guess. Added a new
+  "Phase 0 — B7" design block specifying the per-value-shape split
+  (map-shaped → `ValueCodec`; scalar/opaque-byte-blob → a new shared
+  `EncryptionEnvelope.wrap`/`unwrap` helper factored out of WI-10's inlined
+  pattern in `writeExtractArtifact`/`readExtractArtifact`, which are
+  refactored to use it). Phase 1 and Phase 2's bullets rewritten to name the
+  mechanism per value. Phase 2's B4 block is marked superseded: since every
+  Gap 3 `$meta` value turned out to be scalar/list/blob-shaped, `MetaStore`
+  ends up needing `EncryptionEnvelope` only, not `ValueCodec` — so it never
+  becomes an engine→encoding-layer importer, dissolving the original B4
+  question rather than answering it as first framed.
 - **B8**: added an explicit "B8 — migration stance" checklist item to Phase
   2 — pre-v1-beta breaking format change, no migration path (matches the
   Phase 12 precedent), existing databases must be recreated, with a required
   clean-failure test for legacy unframed values (`device_id` specifically
   called out as the highest-risk silent-misparse case). Added a Phase 5
-  bullet to record this in §31 and the release checklist.
+  bullet to record this in §31 and the release checklist. (Later shown to be
+  unsound and corrected in Pass 4/B9.)
 
-## Reviewer feedback — fourth pass (2026-07-10)
+### Pass 4 (kmdb-plan-reviewer, 2026-07-10)
 
 B7 is resolved well — the per-value-shape categorisation was done against the
 actual write sites, the `ValueCodec`-vs-`EncryptionEnvelope` split is correct,
@@ -1257,14 +1464,13 @@ before/after regression test) is exactly right. The B4-dissolves-via-B7
 reasoning is sound: since every Gap 3 value is scalar/list/blob-shaped,
 `MetaStore` needs only `EncryptionEnvelope` and never becomes an
 engine→encoding importer. Good work, and good instinct verifying shapes in the
-code rather than trusting my summary.
+code rather than trusting the reviewer's summary.
 
 Two things remain — one a real blocker, one a small consistency fix.
 
-### `EncryptionEnvelope` `encryption == null` case — your instinct is correct
-
-Yes: `wrap(bytes, null)` should emit `[EncryptionFlag.none (0x00)][bytes]` — a
-flag-prefixed *plaintext* value — mirroring both WI-10's
+**`EncryptionEnvelope` `encryption == null` case — the coordinator's instinct
+is correct.** `wrap(bytes, null)` should emit `[EncryptionFlag.none (0x00)]
+[bytes]` — a flag-prefixed *plaintext* value — mirroring both WI-10's
 `writeExtractArtifact` and `ValueCodec.encode(..., encryption: null)` (which
 always writes `[encFlag=0x00][compressionFlag][cbor]`). Keeping the flag byte
 even when plaintext is what makes the two primitives wire-consistent and is the
@@ -1277,21 +1483,21 @@ when `_encryption == null` → throw, matching WI-10's `StateError`). These are
 edge-case specifications, not design decisions, so they don't block — but name
 them so the implementer doesn't have to infer them.
 
-### B9 (new, blocking) — B8's clean-failure guarantee does not hold; a legacy CBOR byte *can* collide with a valid `EncryptionFlag`
-
-B8 says the read path will "fail cleanly on a legacy unframed value rather than
-misparse its first CBOR byte as a flag — confirm `EncryptionFlag.fromByte`
-throws." **It won't throw for the most common case.** Verified:
-`EncryptionFlag` is `none(0x00)` / `aesGcm(0x01)`, and `fromByte` throws only
-for bytes *other than* `0x00`/`0x01` (`encryption_flag.dart:61–64`). But by
-CBOR (RFC 8949 §3), an unsigned integer 0–23 encodes as a **single byte equal
-to the value** — so a legacy bare-CBOR generation counter of value `0` is
-exactly the byte `0x00`, and value `1` is exactly `0x01`. Those are precisely
-the two valid flag bytes. `fromByte` will **not** throw; it will happily parse
-the counter as an `EncryptionFlag.none` (value 0) or `aesGcm` (value 1) frame
-and silently return the wrong bytes. Generation counters of 0 and 1 are the
-*most common values in the store* (every freshly-registered namespace starts
-there), and the `dirty` flag (raw `[0x01]`) collides too.
+**B9 (new, blocking) — B8's clean-failure guarantee does not hold; a legacy
+CBOR byte *can* collide with a valid `EncryptionFlag`.** B8 says the read path
+will "fail cleanly on a legacy unframed value rather than misparse its first
+CBOR byte as a flag — confirm `EncryptionFlag.fromByte` throws." **It won't
+throw for the most common case.** Verified: `EncryptionFlag` is `none(0x00)` /
+`aesGcm(0x01)`, and `fromByte` throws only for bytes *other than* `0x00`/`0x01`
+(`encryption_flag.dart:61–64`). But by CBOR (RFC 8949 §3), an unsigned integer
+0–23 encodes as a **single byte equal to the value** — so a legacy bare-CBOR
+generation counter of value `0` is exactly the byte `0x00`, and value `1` is
+exactly `0x01`. Those are precisely the two valid flag bytes. `fromByte` will
+**not** throw; it will happily parse the counter as an `EncryptionFlag.none`
+(value 0) or `aesGcm` (value 1) frame and silently return the wrong bytes.
+Generation counters of 0 and 1 are the *most common values in the store*
+(every freshly-registered namespace starts there), and the `dirty` flag (raw
+`[0x01]`) collides too.
 
 The device_id case the plan singles out actually fails *safe* — device IDs are
 ASCII hex, first byte `0x30`–`0x66`, never a valid flag, so `fromByte` throws as
@@ -1314,8 +1520,7 @@ item and its test accordingly: the regression test should assert that opening a
 legacy-format database fails cleanly *at open*, and should include a
 counter-valued-0/1 case, not just device_id.
 
-### Minor — the "byte-for-byte unchanged" test in Phase 1 now contradicts B8
-
+**Minor — the "byte-for-byte unchanged" test in Phase 1 now contradicts B8.**
 Phase 1's test bullet still says "confirm unencrypted-database behavior is
 byte-for-byte unchanged (encryption is opt-in)." Under the chosen design that is
 false: for the modified write sites, an unencrypted database's values move from
@@ -1327,10 +1532,9 @@ the new framing and produces identical query results* — not that its bytes mat
 the pre-plan format. (Leaving the old wording would send the implementer chasing
 a test that cannot pass.)
 
-### Status call (fourth pass): still **Questions**
-
-Genuinely close. B1–B8 are resolved and the design is now coherent and
-well-specified. The remaining blocker is narrow and concrete:
+**Status call:** Still **Questions**. Genuinely close. B1–B8 are resolved and
+the design is now coherent and well-specified. The remaining blocker is
+narrow and concrete:
 
 - **B9 (blocking):** replace B8's per-value flag-validation clean-failure
   mechanism with a database-level format-version gate at `open()`; a
@@ -1347,7 +1551,7 @@ clears `Investigated` — no further review round should be needed. The minor it
 can ride along in the same edit. The investigation and design are otherwise
 implementation-ready.
 
-### Response to review — fourth pass (2026-07-10)
+**Response (coordinator, 2026-07-10):**
 
 - **`EncryptionEnvelope` edge cases**: spelled out explicitly in the Phase
   0/B7 block — `wrap(bytes, null)` → `[0x00][bytes]` (flag-prefixed
@@ -1362,14 +1566,15 @@ implementation-ready.
   covers Gap 1's `$$fts:`/`$$vec:`/`$$vault:*` namespaces). Absence of the
   marker means a legacy database; `open()` refuses cleanly rather than
   attempting any per-value read. Test requirement updated to include a
-  counter=0/1 case specifically, not just `device_id`.
+  counter=0/1 case specifically, not just `device_id`. (The marker's
+  new-vs-legacy discrimination itself had one more gap, closed in Pass 5.)
 - **Minor**: Phase 1's "byte-for-byte unchanged" test bullet reworded to
   what's actually true — a freshly created unencrypted database round-trips
   correctly through the new framing and produces identical query results;
   the old bytes-match-pre-plan-format claim is false under this design and
   removed.
 
-## Reviewer feedback — fifth pass (2026-07-10): promoting to Investigated
+### Pass 5 (kmdb-plan-reviewer, 2026-07-10): promoting to Investigated
 
 B9's fix is sound: the `$meta` format-version marker on a raw path (no
 chicken-and-egg), checked at `open()` before any framed read across `$meta`
@@ -1378,18 +1583,18 @@ enforceable mechanism, and the counter=0/1 test requirement targets the exact
 collision case. The `EncryptionEnvelope` edge cases and the Phase 1 test
 rewording are both correct.
 
-I found and closed one remaining soundness gap **in the B9 marker mechanism
+One remaining soundness gap was found and closed **in the B9 marker mechanism
 itself**: the rule was stated as "absence of marker ⇒ legacy ⇒ refuse," but a
-brand-new database also has no marker until `open()` writes it. Taken literally
-that breaks new-database creation; the natural "fix" (write the marker whenever
-missing) would silently re-admit legacy databases and defeat the entire gate —
-reintroducing the very silent-corruption risk B9 exists to prevent. I added the
-explicit three-way discrimination to the Phase 2 B8/B9 item: marker written once
-at creation (detected by the §17 "no `CURRENT`/manifest" brand-new signal);
-absent-with-persisted-state ⇒ legacy ⇒ refuse; absent-and-empty ⇒ new ⇒ write
-and proceed — mirroring the existing `cannotProvisionNonEmptyDatabase`
-empty-vs-populated check. Plus a complementary test that an empty database opens
-and writes the marker.
+brand-new database also has no marker until `open()` writes it. Taken
+literally that breaks new-database creation; the natural "fix" (write the
+marker whenever missing) would silently re-admit legacy databases and defeat
+the entire gate — reintroducing the very silent-corruption risk B9 exists to
+prevent. The explicit three-way discrimination was added to the Phase 2
+B8/B9 item: marker written once at creation (detected by the §17 "no
+`CURRENT`/manifest" brand-new signal); absent-with-persisted-state ⇒ legacy ⇒
+refuse; absent-and-empty ⇒ new ⇒ write and proceed — mirroring the existing
+`cannotProvisionNonEmptyDatabase` empty-vs-populated check. Plus a
+complementary test that an empty database opens and writes the marker.
 
 The five remaining open questions (Q2–Q5, Q7) are resolved and recorded: Q2
 (enc:blob unchanged, enforced by the direct-path fix), Q3 (leave `$$index:`
