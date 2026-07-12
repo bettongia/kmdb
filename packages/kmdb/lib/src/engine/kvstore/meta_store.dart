@@ -17,6 +17,8 @@ import 'dart:typed_data';
 import 'package:cbor/cbor.dart';
 
 import '../../encryption/encryption_blob.dart';
+import '../../encryption/encryption_envelope.dart';
+import '../../encryption/encryption_provider.dart';
 import '../util/hlc.dart';
 import '../util/xxhash.dart';
 import 'kv_store.dart';
@@ -46,11 +48,34 @@ import 'lsm_engine.dart';
 /// as deterministic 32-character hex strings via a two-seed XXH64 hash, which
 /// matches the 16-byte key format the LSM engine requires. Collision probability
 /// across the ~100 distinct names `$meta` will ever hold is negligible.
+///
+/// ## Encryption (Gap 3, Encryption confidentiality reconciliation plan)
+///
+/// `MetaStore` is constructed at the engine layer, below the point where
+/// `KmdbDatabase.open()` derives the database's [EncryptionProvider] (the
+/// bootstrap reads `enc:blob`, which must itself stay unencrypted — see
+/// [getEncryptionBlob]). [encryption] is therefore a late-bound, mutable
+/// field rather than a constructor parameter: `KmdbDatabase.open()` assigns
+/// it immediately after the encryption bootstrap resolves and before
+/// constructing any other collaborator, so every `$meta` write from that
+/// point on (including the very first one) is encrypted when a provider is
+/// configured. Every value below except [kEncryptionBlobName]
+/// (`enc:blob`, exempt by design — see [getEncryptionBlob]/
+/// [putEncryptionBlob]) and [kFormatVersionMarkerName] (exempt for the same
+/// non-circularity reason — see [getFormatVersionMarker]) is wrapped with
+/// [EncryptionEnvelope] before being written. None of these values are
+/// `Map<String, dynamic>`-shaped (they are scalars, an `Hlc`, or opaque
+/// state blobs from other collaborators), so [EncryptionEnvelope] applies
+/// uniformly rather than `ValueCodec` (Phase 0/B7).
 final class MetaStore {
   /// Creates a [MetaStore] that reads and writes through [engine].
-  const MetaStore(this._engine);
+  MetaStore(this._engine);
 
   final LsmEngine _engine;
+
+  /// The database's [EncryptionProvider], or `null` for a plaintext
+  /// database. Late-bound and mutable — see the class doc comment for why.
+  EncryptionProvider? encryption;
 
   /// The system namespace for all meta values.
   static const String kNamespace = r'$meta';
@@ -64,8 +89,10 @@ final class MetaStore {
   /// whether to evict stale entries.
   Future<int> getGenerationCounter(String userNamespace) async {
     final bytes = await _engine.get(kNamespace, _genKey(userNamespace));
-    if (bytes == null || bytes.length < 8) return 0;
-    return ByteData.sublistView(bytes).getUint64(0, Endian.big);
+    if (bytes == null) return 0;
+    final unwrapped = await EncryptionEnvelope.unwrap(bytes, encryption);
+    if (unwrapped.length < 8) return 0;
+    return ByteData.sublistView(unwrapped).getUint64(0, Endian.big);
   }
 
   /// Increments and persists the generation counter for [userNamespace].
@@ -81,7 +108,11 @@ final class MetaStore {
   Future<int> incrementGenerationCounter(String userNamespace) async {
     final current = await getGenerationCounter(userNamespace);
     final next = current + 1;
-    await _engine.put(kNamespace, _genKey(userNamespace), _encodeUint64(next));
+    final wrapped = await EncryptionEnvelope.wrap(
+      _encodeUint64(next),
+      encryption,
+    );
+    await _engine.put(kNamespace, _genKey(userNamespace), wrapped);
     return next;
   }
 
@@ -96,13 +127,22 @@ final class MetaStore {
   ///
   /// Returns the new counter value (the value that will be written when [batch]
   /// is committed).
+  ///
+  /// Encrypts in place (per Phase 2/B3) — this method is already
+  /// `Future`-returning with an internal read-modify-write, so wrapping the
+  /// computed value before the `batch.put` call is a contained, mechanical
+  /// addition with no `WriteBatch`-API ripple.
   Future<int> appendGenerationCounterBump(
     String userNamespace,
     WriteBatch batch,
   ) async {
     final current = await getGenerationCounter(userNamespace);
     final next = current + 1;
-    batch.put(kNamespace, _genKey(userNamespace), _encodeUint64(next));
+    final wrapped = await EncryptionEnvelope.wrap(
+      _encodeUint64(next),
+      encryption,
+    );
+    batch.put(kNamespace, _genKey(userNamespace), wrapped);
     return next;
   }
 
@@ -122,39 +162,65 @@ final class MetaStore {
   /// either the process was killed or the machine lost power after at least one
   /// write. Secondary indexes for any namespace written in that session may be
   /// stale.
+  ///
+  /// This is a **presence check only** — it deliberately does not unwrap the
+  /// stored bytes through [EncryptionEnvelope]. [KvStoreImpl.open] calls this
+  /// method before [encryption] can be assigned (`KmdbDatabase.open()`'s
+  /// encryption bootstrap runs strictly after [KvStoreImpl.open] returns), so
+  /// a dirty flag written by an *encrypted* previous session would otherwise
+  /// be unreadable at exactly the point this method needs to read it. Since
+  /// [setDirty] always writes a fixed sentinel and [clearDirty] deletes the
+  /// key outright (never zeroes it), presence — encrypted or not — is
+  /// sufficient to answer the question; no decryption is needed.
   Future<bool> getDirtyFlag() async {
     final bytes = await _engine.get(kNamespace, _nameToKey('dirty'));
-    return bytes != null && bytes.isNotEmpty && bytes[0] != 0;
+    return bytes != null && bytes.isNotEmpty;
   }
 
   /// Writes the dirty-open flag to `$meta`.
   ///
   /// Called by [KvStoreImpl] on the first user write after open (§17, step 8).
   /// The flag is written lazily so read-only sessions never mark the database
-  /// dirty.
-  Future<void> setDirty() =>
-      _engine.put(kNamespace, _nameToKey('dirty'), Uint8List.fromList([1]));
+  /// dirty. By the time any write reaches this method, `KmdbDatabase.open()`
+  /// has already returned and [encryption] is assigned, so this write is
+  /// always encrypted when a provider is configured.
+  Future<void> setDirty() async {
+    final wrapped = await EncryptionEnvelope.wrap(
+      Uint8List.fromList([1]),
+      encryption,
+    );
+    await _engine.put(kNamespace, _nameToKey('dirty'), wrapped);
+  }
 
   /// Deletes the dirty-open flag. Called by [KvStoreImpl.close].
   Future<void> clearDirty() => _engine.delete(kNamespace, _nameToKey('dirty'));
 
   // ── Device ID ──────────────────────────────────────────────────────────────
 
+  /// Returns the `$meta` key under which [device_id] is stored.
+  ///
+  /// Exposed for tests that need to read the raw (possibly encrypted) bytes
+  /// directly — mirrors [genKey].
+  static String get deviceIdKey => _nameToKey('device_id');
+
   /// Returns the stored 8-character device ID, or `null` if not yet set.
   Future<String?> getDeviceId() async {
     final bytes = await _engine.get(kNamespace, _nameToKey('device_id'));
     if (bytes == null) return null;
-    return String.fromCharCodes(bytes);
+    final unwrapped = await EncryptionEnvelope.unwrap(bytes, encryption);
+    return String.fromCharCodes(unwrapped);
   }
 
   /// Stores [deviceId] persistently in `$meta`.
   ///
   /// [deviceId] must be an 8-character lowercase hex string.
-  Future<void> putDeviceId(String deviceId) => _engine.put(
-    kNamespace,
-    _nameToKey('device_id'),
-    Uint8List.fromList(deviceId.codeUnits),
-  );
+  Future<void> putDeviceId(String deviceId) async {
+    final wrapped = await EncryptionEnvelope.wrap(
+      Uint8List.fromList(deviceId.codeUnits),
+      encryption,
+    );
+    await _engine.put(kNamespace, _nameToKey('device_id'), wrapped);
+  }
 
   // ── Namespace registry ─────────────────────────────────────────────────────
 
@@ -163,11 +229,15 @@ final class MetaStore {
   /// Returns the sorted list of user-visible namespaces that have been written
   /// to, as stored in `$meta`. Returns an empty list if none have been
   /// registered yet.
+  ///
+  /// The stored value is a CBOR **list** of strings, not a map, so it is
+  /// wrapped with [EncryptionEnvelope] rather than `ValueCodec` (Phase 0/B7).
   Future<List<String>> getNamespaces() async {
     final bytes = await _engine.get(kNamespace, _nameToKey(_kNamespacesKey));
-    if (bytes == null || bytes.isEmpty) return [];
-    // Stored as a CBOR array of strings.
-    final decoded = cbor.decode(bytes);
+    if (bytes == null) return [];
+    final unwrapped = await EncryptionEnvelope.unwrap(bytes, encryption);
+    if (unwrapped.isEmpty) return [];
+    final decoded = cbor.decode(unwrapped);
     if (decoded is! CborList) return [];
     return decoded
         .map((e) => e is CborString ? e.toString() : null)
@@ -189,11 +259,11 @@ final class MetaStore {
     if (current.contains(userNamespace)) return;
     final updated = [...current, userNamespace]..sort();
     final encoded = cbor.encode(CborList(updated.map(CborString.new).toList()));
-    await _engine.put(
-      kNamespace,
-      _nameToKey(_kNamespacesKey),
+    final wrapped = await EncryptionEnvelope.wrap(
       Uint8List.fromList(encoded),
+      encryption,
     );
+    await _engine.put(kNamespace, _nameToKey(_kNamespacesKey), wrapped);
   }
 
   /// Appends a namespace registration for [userNamespace] to [batch], if the
@@ -207,6 +277,9 @@ final class MetaStore {
   ///
   /// Returns `true` if a put was appended (the namespace was not already
   /// registered), `false` if the namespace was already present (no-op).
+  ///
+  /// Encrypts in place (per Phase 2/B3) — see [appendGenerationCounterBump]'s
+  /// doc comment for the same rationale.
   Future<bool> appendNamespaceRegistration(
     String userNamespace,
     WriteBatch batch,
@@ -215,11 +288,11 @@ final class MetaStore {
     if (current.contains(userNamespace)) return false;
     final updated = [...current, userNamespace]..sort();
     final encoded = cbor.encode(CborList(updated.map(CborString.new).toList()));
-    batch.put(
-      kNamespace,
-      _nameToKey(_kNamespacesKey),
+    final wrapped = await EncryptionEnvelope.wrap(
       Uint8List.fromList(encoded),
+      encryption,
     );
+    batch.put(kNamespace, _nameToKey(_kNamespacesKey), wrapped);
     return true;
   }
 
@@ -230,8 +303,18 @@ final class MetaStore {
   /// write — ensuring that a crash during the very first write of a session
   /// leaves the dirty flag set (so the next open detects the interrupted
   /// session) rather than absent (which would hide the interrupted session).
-  void appendDirtyFlag(WriteBatch batch) {
-    batch.put(kNamespace, _nameToKey('dirty'), Uint8List.fromList([1]));
+  ///
+  /// Converted to `Future<void>` (from a synchronous `void`) so the value can
+  /// be encrypted in place (Phase 2/B3) — its sole caller (`KvStoreImpl`'s
+  /// batch-build function) already sits in an `async` function awaiting
+  /// sibling meta calls, so adding one more `await` is a contained,
+  /// mechanical change with no `WriteBatch`-API ripple.
+  Future<void> appendDirtyFlag(WriteBatch batch) async {
+    final wrapped = await EncryptionEnvelope.wrap(
+      Uint8List.fromList([1]),
+      encryption,
+    );
+    batch.put(kNamespace, _nameToKey('dirty'), wrapped);
   }
 
   /// Removes [userNamespace] from the persisted set of known namespaces and
@@ -249,11 +332,11 @@ final class MetaStore {
     // Write the updated namespace list without [userNamespace].
     final updated = current.where((ns) => ns != userNamespace).toList()..sort();
     final encoded = cbor.encode(CborList(updated.map(CborString.new).toList()));
-    await _engine.put(
-      kNamespace,
-      _nameToKey(_kNamespacesKey),
+    final wrapped = await EncryptionEnvelope.wrap(
       Uint8List.fromList(encoded),
+      encryption,
     );
+    await _engine.put(kNamespace, _nameToKey(_kNamespacesKey), wrapped);
 
     // Remove the generation counter for this namespace.
     await _engine.delete(kNamespace, _genKey(userNamespace));
@@ -299,8 +382,10 @@ final class MetaStore {
       kNamespace,
       _nameToKey('gc:tombstoneFloor'),
     );
-    if (bytes == null || bytes.length < 8) return const Hlc(0, 0);
-    final encoded = ByteData.sublistView(bytes).getUint64(0, Endian.big);
+    if (bytes == null) return const Hlc(0, 0);
+    final unwrapped = await EncryptionEnvelope.unwrap(bytes, encryption);
+    if (unwrapped.length < 8) return const Hlc(0, 0);
+    final encoded = ByteData.sublistView(unwrapped).getUint64(0, Endian.big);
     return Hlc.fromEncoded(encoded);
   }
 
@@ -313,12 +398,17 @@ final class MetaStore {
   ///
   /// This is the standalone variant — issues a direct [LsmEngine.put]. Use
   /// [appendTombstoneFloorAdvance] when the write must be part of a
-  /// [WriteBatch] for atomicity.
-  Future<void> setTombstoneFloor(Hlc floor) => _engine.put(
-    kNamespace,
-    _nameToKey('gc:tombstoneFloor'),
-    _encodeUint64(floor.encoded),
-  );
+  /// [WriteBatch] for atomicity. Only this standalone variant is exercised in
+  /// production (`LsmEngine._compactAll`/`KvStoreImpl.resetTombstoneFloor`
+  /// call it directly) — see [appendTombstoneFloorAdvance]'s doc comment for
+  /// why the batch-aware variant is intentionally left unencrypted (B3).
+  Future<void> setTombstoneFloor(Hlc floor) async {
+    final wrapped = await EncryptionEnvelope.wrap(
+      _encodeUint64(floor.encoded),
+      encryption,
+    );
+    await _engine.put(kNamespace, _nameToKey('gc:tombstoneFloor'), wrapped);
+  }
 
   /// Appends a tombstone floor advance write for [floor] to [batch].
   ///
@@ -331,6 +421,25 @@ final class MetaStore {
   /// floor write is a *separate* `$meta` put after the compaction manifest
   /// commits. This method is provided for completeness and future use; the
   /// [LsmEngine._compactAll] path calls [setTombstoneFloor] directly.
+  ///
+  /// **Left synchronous and unencrypted (Phase 2/B3 decision).** This method
+  /// has no production call site today — `meta_store_test.dart` is its only
+  /// caller. Wiring encryption into unused code would violate CLAUDE.md's
+  /// "do not leave dead or unreachable code behind" principle in spirit; if
+  /// this method gains a real caller, encrypt it then, following the same
+  /// pattern as [setTombstoneFloor].
+  ///
+  /// **Read/write asymmetry warning:** because this method writes raw,
+  /// unwrapped bytes while [getTombstoneFloor] now always unwraps through
+  /// [EncryptionEnvelope], a value written by this method and later read via
+  /// [getTombstoneFloor] on an encrypted database would misparse (the raw
+  /// `Hlc`-encoded bytes have no leading [EncryptionFlag], so
+  /// `EncryptionFlag.fromByte` would either throw or, in the unlucky case
+  /// where the first byte happens to equal `0x00`/`0x01`, silently
+  /// misinterpret it — the exact class of bug B9 exists to prevent
+  /// elsewhere). If this method is ever wired up for real, it must call
+  /// [EncryptionEnvelope.wrap] before `batch.put`, exactly as
+  /// [setTombstoneFloor] does, not just have `encryption` added.
   void appendTombstoneFloorAdvance(Hlc floor, WriteBatch batch) {
     batch.put(
       kNamespace,
@@ -351,15 +460,30 @@ final class MetaStore {
   /// Reads the raw bytes stored under the symbolic [name] in `$meta`.
   ///
   /// Used by the Query Layer to persist and retrieve index state without
-  /// accessing the engine's private fields directly.
-  Future<Uint8List?> getRawByName(String name) =>
-      _engine.get(kNamespace, _nameToKey(name));
+  /// accessing the engine's private fields directly. Every current consumer
+  /// (`IndexManager`, `FtsIndexState`, `VecIndexState`, `SchemaManager`,
+  /// `VersionManager`) stores an opaque state blob, so the value is wrapped
+  /// with [EncryptionEnvelope] here (Phase 0/B7) — callers do not need to
+  /// know or care whether encryption is active.
+  ///
+  /// **Not** used for [kEncryptionBlobName] (`enc:blob`) — see
+  /// [getEncryptionBlob], which reads via [LsmEngine.get] directly instead,
+  /// to keep the `enc:blob` bootstrap read genuinely raw and unaffected by
+  /// this method's encryption wrapping (Q2).
+  Future<Uint8List?> getRawByName(String name) async {
+    final bytes = await _engine.get(kNamespace, _nameToKey(name));
+    if (bytes == null) return null;
+    return EncryptionEnvelope.unwrap(bytes, encryption);
+  }
 
   /// Writes [bytes] under the symbolic [name] in `$meta`.
   ///
-  /// Used by the Query Layer to persist index state atomically.
-  Future<void> putRawByName(String name, Uint8List bytes) =>
-      _engine.put(kNamespace, _nameToKey(name), bytes);
+  /// Used by the Query Layer to persist index state atomically. See
+  /// [getRawByName]'s doc comment for the encryption/`enc:blob` details.
+  Future<void> putRawByName(String name, Uint8List bytes) async {
+    final wrapped = await EncryptionEnvelope.wrap(bytes, encryption);
+    await _engine.put(kNamespace, _nameToKey(name), wrapped);
+  }
 
   /// Deletes the entry stored under the symbolic [name] in `$meta`.
   ///
@@ -374,30 +498,93 @@ final class MetaStore {
   /// The symbolic name under which the encryption metadata blob is stored.
   static const String kEncryptionBlobName = 'enc:blob';
 
+  /// Returns the `$meta` key under which `enc:blob` is stored.
+  ///
+  /// Exposed for tests that need to read the raw bytes directly and confirm
+  /// they are never [EncryptionEnvelope]-wrapped (Q2) — mirrors [genKey]/
+  /// [deviceIdKey].
+  static String get encryptionBlobKey => _nameToKey(kEncryptionBlobName);
+
   /// Reads the [EncryptionBlob] from `$meta`, or `null` if it has not been
   /// written (i.e., the database is not encrypted).
   ///
   /// The blob is stored as raw CBOR — it is **not** routed through
-  /// [ValueCodec] — so that the bootstrap can read it before the DEK is
-  /// available (non-circular by design).
+  /// [ValueCodec] or [EncryptionEnvelope] — so that the bootstrap can read it
+  /// before the DEK is available (non-circular by design). Reads via
+  /// [LsmEngine.get] **directly**, bypassing [getRawByName] entirely (Q2):
+  /// `getRawByName` now wraps its value with [EncryptionEnvelope] by
+  /// default, so going through it here would break this exemption the
+  /// moment a provider is configured. This direct-path fix keeps `enc:blob`
+  /// on a genuinely separate raw path rather than depending on
+  /// `getRawByName` staying unencrypted by accident.
   ///
   /// Throws [FormatException] if the stored bytes cannot be decoded.
   Future<EncryptionBlob?> getEncryptionBlob() async {
-    final bytes = await getRawByName(kEncryptionBlobName);
+    final bytes = await _engine.get(
+      kNamespace,
+      _nameToKey(kEncryptionBlobName),
+    );
     if (bytes == null) return null;
     return EncryptionBlob.decode(bytes);
   }
 
   /// Writes [blob] to `$meta` under `enc:blob`.
   ///
-  /// The blob is encoded as raw CBOR and stored via [putRawByName] — it does
-  /// NOT pass through [ValueCodec] — keeping the bootstrap non-circular.
+  /// The blob is encoded as raw CBOR and written via [LsmEngine.put]
+  /// **directly** — it does NOT pass through [ValueCodec],
+  /// [EncryptionEnvelope], or [putRawByName] — keeping the bootstrap
+  /// non-circular (see [getEncryptionBlob]'s doc comment for the Q2
+  /// direct-path rationale).
   ///
   /// This must be called (and fully flushed) **before** any encrypted user value
   /// is written, so that crash recovery can always find the blob when the engine
   /// is reopened.
   Future<void> putEncryptionBlob(EncryptionBlob blob) =>
-      putRawByName(kEncryptionBlobName, blob.encode());
+      _engine.put(kNamespace, _nameToKey(kEncryptionBlobName), blob.encode());
+
+  // ── Format-version marker (Phase 2/B8-B9) ─────────────────────────────────
+
+  /// The symbolic name under which the `$meta` format-version marker is
+  /// stored.
+  static const String kFormatVersionMarkerName = 'formatVersion';
+
+  /// The current database format version. Bumped whenever a future change
+  /// alters the on-disk framing of `$meta`/index/FTS/Vec/vault values in a
+  /// way that is not safely self-describing per value (mirroring the
+  /// reasoning that motivated this marker in the first place — see the class
+  /// doc comment and `docs/spec/31_encryption.md`).
+  static const int kCurrentFormatVersion = 1;
+
+  /// Reads the raw format-version marker byte, or `null` if absent.
+  ///
+  /// Reads via [LsmEngine.get] **directly**, the same raw path as
+  /// [getEncryptionBlob] — this is the value `KvStoreImpl.open()` checks
+  /// *before* any other `$meta`/index/FTS/Vec/vault value is read through
+  /// [EncryptionEnvelope]/`ValueCodec`, so it must not itself depend on
+  /// either (non-circular by construction, same reasoning as `enc:blob`).
+  ///
+  /// Absence does **not** by itself mean "legacy database" — see
+  /// `KvStoreImpl.open()`'s three-way new/legacy/empty discrimination
+  /// (Phase 2/B8-B9), which also consults [OpenResult.isNewDatabase].
+  Future<int?> getFormatVersionMarker() async {
+    final bytes = await _engine.get(
+      kNamespace,
+      _nameToKey(kFormatVersionMarkerName),
+    );
+    if (bytes == null || bytes.isEmpty) return null;
+    return bytes[0];
+  }
+
+  /// Writes [kCurrentFormatVersion] as the format-version marker.
+  ///
+  /// Called exactly once, at initial database creation (`KvStoreImpl.open()`
+  /// case (c) — see [getFormatVersionMarker]'s doc comment). Writes via the
+  /// same raw path as [getFormatVersionMarker]/[getEncryptionBlob].
+  Future<void> putFormatVersionMarker() => _engine.put(
+    kNamespace,
+    _nameToKey(kFormatVersionMarkerName),
+    Uint8List.fromList([kCurrentFormatVersion]),
+  );
 
   // ── Key encoding ───────────────────────────────────────────────────────────
 

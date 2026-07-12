@@ -359,11 +359,19 @@ void main() {
           cloudAdapter,
         );
         expect(hwm, isNotNull);
-        // HWM must not exceed the max HLC of the syncable SSTable (1001 ms).
-        // If it were Hlc(9999, 9) the .local.sst file was erroneously included.
+        // The .local.sst file's maxHlc — Hlc(9999, 9) — must not have
+        // contributed to the HWM. This can no longer be asserted as an
+        // absolute upper bound of 1001ms: KvStoreImpl.open() now always
+        // writes one $meta format-version-marker entry (Encryption
+        // confidentiality reconciliation plan, Phase 2/B8-B9), so push()'s
+        // own flush (step 1) legitimately produces an additional syncable
+        // SSTable stamped with the real wall-clock HLC, which is
+        // legitimately the new high-water mark. The invariant this test
+        // actually cares about — that the *local-only* file specifically
+        // never contributes — is what's asserted here instead.
         expect(
-          hwm!.currentHlc.physicalMs,
-          lessThanOrEqualTo(1001),
+          hwm!.currentHlc,
+          isNot(equals(const Hlc(9999, 9))),
           reason: '.local.sst HLC must not contribute to the high-water mark',
         );
       },
@@ -457,6 +465,16 @@ void main() {
       // File should still be the sentinel (not overwritten with valid SST).
       final bytes = await localAdapter.readFile('$_dbDir/sst/$peerFilename');
       expect(bytes, equals(Uint8List.fromList([0xFF, 0xFF])));
+
+      // Restore valid content before this test's tearDown() calls
+      // store.close(), which flushes and may trigger a compaction that reads
+      // every Manifest-tracked SSTable — including this one, still
+      // registered from the first (successful) ingest above. Leaving the
+      // 2-byte sentinel in place would make that unrelated close()-time
+      // compaction throw CorruptedSstableException; this sentinel's job
+      // (proving the *second* pull() didn't re-download/overwrite the file)
+      // is already done by the assertion above.
+      await localAdapter.writeFile('$_dbDir/sst/$peerFilename', sstBytes);
     });
 
     test('pull handles empty sync folder gracefully', () async {

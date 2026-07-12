@@ -107,6 +107,12 @@ final class KvStoreImpl implements KvStore {
   /// should supply a stable per-device UUID prefix via [DeviceId.load].
   ///
   /// Throws [LockException] if another process holds the database lock.
+  ///
+  /// Throws [LegacyDatabaseFormatException] if [dbDir] contains persisted
+  /// state (`CURRENT`/manifest/SSTables) but predates the Encryption
+  /// confidentiality reconciliation plan's `$meta` format-version marker
+  /// (Phase 2/B8-B9) — see that exception's doc comment. There is no
+  /// migration path; the database must be recreated.
   static Future<(KvStoreImpl, OpenResult)> open(
     String dbDir,
     StorageAdapter adapter, {
@@ -124,13 +130,100 @@ final class KvStoreImpl implements KvStore {
     // tombstone GC floor after dropping tombstones (H4-FU3).
     engine.setMetaStore(meta);
 
-    // Check for the dirty-open flag written by the previous session.
+    // ── Database format-version gate (Phase 2/B8-B9) ───────────────────────
+    //
+    // Must run before any other $meta/index/FTS/Vec/vault value is read
+    // through EncryptionEnvelope/ValueCodec (both getDirtyFlag below and
+    // every later collaborator's reads) — a legacy pre-plan value has no
+    // leading flag byte, and a per-value "does this look like a valid flag"
+    // check cannot safely distinguish that from a genuine current-format
+    // value (small CBOR ints 0/1 collide with the two valid EncryptionFlag
+    // bytes). Gating once, at the database level, is what makes the
+    // "recreate the database" stance actually safe and enforceable.
+    //
+    // Three-way discrimination (marker absence alone is not sufficient — a
+    // brand-new database also has no marker until this method writes it):
+    // (a) marker present            → current format, proceed.
+    // (b) marker absent, not new    → legacy database, refuse cleanly.
+    // (c) marker absent, new        → brand-new database, write the marker.
+    //
+    // "New" is not just CrashRecovery's isNewDatabase (no CURRENT found this
+    // open): it is widened to also cover a database whose CURRENT/Manifest
+    // *did* survive a crash but whose $meta content did not — a real,
+    // fault-injection-verified scenario with KvStoreConfig.fsyncOnWrite:
+    // false (a lower-durability, higher-throughput mode; see WalWriter's doc
+    // comment), where CURRENT/Manifest writes are unconditionally fsync'd
+    // (H1/M3) but ordinary $meta puts — including this marker and enc:blob,
+    // both written via the same LsmEngine.put path as any other value — are
+    // not. Without this widening, such a database would be permanently
+    // misclassified as legacy on every future open, even though it never
+    // held any content (this mirrors enc:blob's own pre-existing crash
+    // story: an unsynced provisioning write is lost together with the rest
+    // of that session, and the database falls back to "looks unencrypted" —
+    // see encryption_crash_test.dart).
+    //
+    // The check is a direct, comprehensive "is $meta itself completely
+    // empty" scan — not an enumeration of specific known keys (namespaces,
+    // enc:blob, etc.), which would silently miss any *other* surviving
+    // $meta entry (e.g. a bare device_id written before a crash, with no
+    // namespace ever registered — a realistic, independently-reachable
+    // sequence, since ensureDeviceId() can be called before any document
+    // write). Scanning $meta here is safe even before the format-version
+    // gate has "passed": it reads raw bytes only (isEmpty on the stream),
+    // never decoding through EncryptionEnvelope/ValueCodec, so a legacy
+    // value's lack of framing cannot cause a misparse here. This only runs
+    // in the rare marker-absent path (never on the common already-marked
+    // path), so the extra scan cost is not paid on every open.
+    final formatVersion = await meta.getFormatVersionMarker();
+    if (formatVersion == null) {
+      final looksFresh =
+          recoveryResult.isNewDatabase ||
+          await engine.scan(MetaStore.kNamespace).isEmpty;
+      if (looksFresh) {
+        // Case (c): stamp the current format version so every future open
+        // takes the case (a) path.
+        await meta.putFormatVersionMarker();
+        // Defensive: also syncDir(dbDir) so the marker's WAL record (which
+        // may be the very first write to a brand-new wal-00001.log —
+        // WalWriter.append only syncFile's file *content*, never syncDir's
+        // its own directory entry) is durable independent of any later
+        // write. NOT independently regression-tested: the "looksFresh"
+        // widening above already self-heals this exact scenario on the
+        // very next open (marker absent + isNewDatabase false + $meta empty
+        // still resolves to case (c), silently re-stamping the marker), so
+        // removing this line does not currently make any test fail —
+        // confirmed by reverting it locally and re-running
+        // manifest_fsync_recovery_test.dart's "fresh database create is
+        // durable" test and a targeted 50-write-then-crash probe, both of
+        // which passed regardless. Kept anyway as defense-in-depth: it
+        // makes the marker durable by construction rather than by relying
+        // on the self-heal being reachable in every future scenario (e.g. a
+        // future caller that inspects `$meta` state without going through
+        // `KvStoreImpl.open()`'s self-heal path). Harmless no-op when
+        // dbDir was already syncDir'd more recently.
+        await adapter.syncDir(dbDir);
+      } else {
+        // Case (b): CURRENT/manifest already existed and this directory has
+        // genuine persisted content, but no format-version marker was ever
+        // written — it predates this plan. Refuse cleanly rather than risk
+        // a per-value misparse. The caller must recreate the database;
+        // there is no migration path (see LegacyDatabaseFormatException's
+        // doc comment).
+        throw LegacyDatabaseFormatException(dbDir);
+      }
+    }
+    // Case (a): marker present, nothing to do — fall through.
+
+    // Check for the dirty-open flag written by the previous session. Safe to
+    // call before any EncryptionProvider is available — see getDirtyFlag's
+    // doc comment for why (presence-only check, no decryption needed).
     final hadUnclosedSession = await meta.getDirtyFlag();
 
     final openResult = OpenResult(
       hadInterruptedWrites: recoveryResult.hadInterruptedWrites,
       affectedNamespaces: recoveryResult.affectedNamespaces,
       hadUnclosedSession: hadUnclosedSession,
+      isNewDatabase: recoveryResult.isNewDatabase,
     );
 
     return (

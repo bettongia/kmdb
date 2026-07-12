@@ -829,12 +829,29 @@ implementer to improvise):**
 
 Implementation:
 
-- [ ] Implement the late-bound `EncryptionProvider?` on `MetaStore` per the
+- [x] Implement the late-bound `EncryptionProvider?` on `MetaStore` per the
       Q1 resolution; wire `KmdbDatabase.open()` to assign it at the correct
       point in the bootstrap sequence (before the first application-level
       write is admitted; verify the very first `device_id` write on a
-      brand-new database is not written before this point).
-- [ ] Route `namespaces` registry (`registerNamespace`/
+      brand-new database is not written before this point). Done —
+      `MetaStore.encryption` (mutable field, `const` removed from the
+      constructor); `KmdbDatabase.open()` assigns it immediately after
+      `_runEncryptionBootstrap` returns, before any other collaborator is
+      constructed. Traced the bootstrap: the only `$meta` activity before
+      that point is `_runEncryptionBootstrap`'s own `enc:blob` read/write,
+      which is exempt (raw path, Q2) — so there is no earlier `$meta` write
+      this assignment could miss. One additional early-read hazard was found
+      and fixed during implementation: `KvStoreImpl.open()` calls
+      `meta.getDirtyFlag()` *before* `KmdbDatabase.open()` can assign a
+      provider (it runs one layer down, inside `KvStoreImpl.open()` itself);
+      `getDirtyFlag()` was changed to a presence-only check (no
+      `EncryptionEnvelope.unwrap` needed — `setDirty`/`clearDirty`'s own
+      write/delete semantics make presence alone sufficient) so it is safe
+      to call at that point regardless of encryption state. Verified via the
+      Bootstrap ordering (Q1) test group in
+      `test/engine/meta_store_encryption_test.dart` (device_id's *first*
+      write confirmed encrypted).
+- [x] Route `namespaces` registry (`registerNamespace`/
       `appendNamespaceRegistration`/`getNamespaces`), `gen:{namespace}`
       counters (`incrementGenerationCounter`/`appendGenerationCounterBump`/
       `getGenerationCounter`), `device_id` (`putDeviceId`/`getDeviceId`),
@@ -848,8 +865,12 @@ Implementation:
       (two encoders), `VersionManager`, per B7's blast-radius note) through
       **`EncryptionEnvelope.wrap`/`unwrap`** (not `ValueCodec` — see B4/B7
       above), encrypting in place inside each helper per the B3 decision
-      above.
-- [ ] **Conflict to resolve (found while drafting this phase, not by the
+      above. Done exactly as specified — see `meta_store.dart`. All six
+      `getRawByName`/`putRawByName` consumers get encryption "for free"
+      (verified: their own test suites — `IndexManager`, `FtsManager`,
+      `VecManager`, `SchemaManager`, `VersionManager` — all still pass with
+      no changes needed on their side).
+- [x] **Conflict to resolve (found while drafting this phase, not by the
       reviewer): `getEncryptionBlob`/`putEncryptionBlob` currently call
       `getRawByName`/`putRawByName` internally** (`meta_store.dart:386`,
       `:400`) — the same two generic accessors the bullet above just made
@@ -860,8 +881,8 @@ Implementation:
       named accessors) instead of going through `getRawByName`/
       `putRawByName`. This keeps `enc:blob` on a genuinely separate raw path
       rather than depending on a shared method staying unencrypted by
-      accident.
-- [ ] **B8/B9 — migration stance (breaking format change) and its
+      accident. Done — both now call `_engine.get`/`_engine.put` directly.
+- [x] **B8/B9 — migration stance (breaking format change) and its
       database-level enforcement gate.** Routing existing `$meta`/
       index-state/schema/version values through `EncryptionEnvelope` changes
       their on-disk bytes even when encryption is off (the envelope still
@@ -930,11 +951,112 @@ Implementation:
       would have passed a weaker test); and a complementary test that a
       brand-new (empty) database opens successfully and writes the marker (so
       the (c) path is not misclassified as legacy).
-- [ ] Explicitly verify `enc:blob` (`getEncryptionBlob`/`putEncryptionBlob`)
+
+      **Implementation notes (found during implementation, not anticipated by
+      the plan text — recorded per the workflow policy):**
+      1. **The `isNewDatabase` signal did not exist and had to be added.**
+         `CrashRecovery.open()` never exposed "was `CURRENT` absent this
+         open" outward. Added `OpenResult.isNewDatabase` (threaded from a new
+         local in `CrashRecovery.open()`, set exactly when the `CURRENT`-read
+         `StorageException` branch runs) and implemented the gate in
+         `KvStoreImpl.open()`, immediately after `MetaStore` construction —
+         not in `KmdbDatabase.open()` as the marker's `$meta` home might
+         suggest — because the gate must run before *any* caller of
+         `KvStoreImpl.open()` (not just `KmdbDatabase`) can read a framed
+         value, and `isNewDatabase` is only naturally available at that
+         layer.
+      2. **A latent, pre-existing engine fragility — not independently
+         regression-tested; the claim that it was has been corrected
+         (`kmdb-qa`, 2026-07-13).** `WalWriter.append` only calls
+         `StorageAdapter.syncFile` (content), never `syncDir` (the file's
+         own directory entry), so in principle the *first* write to a
+         brand-new `wal-00001.log` — the marker's WAL append, in this
+         case — is not durable until *some* later `syncDir(dbDir)` call
+         commits the file's own directory entry. An explicit
+         `syncDir(dbDir)` was added right after `putFormatVersionMarker()`
+         in the brand-new-database branch as a defensive measure. **This
+         was originally (incorrectly) claimed to be
+         regression-covered by `manifest_fsync_recovery_test.dart`'s "fresh
+         database create is durable" test.** `kmdb-qa` reverted the fix and
+         reran that test (and their own targeted 50-write-then-crash probe)
+         — both **passed without the fix**, and reverting-and-rerunning
+         locally reproduced the same result. Root cause: **the fix's own
+         Phase 2/B8-B9 "looks fresh" widening (item 3 below) already
+         self-heals this exact failure mode** — on the very next open, a
+         database whose marker was lost to this gap has `isNewDatabase`
+         false but `$meta` completely empty (since nothing else survived
+         the same uncommitted WAL file either), so the widened condition
+         re-classifies it as case (c) and silently re-stamps the marker.
+         The two fixes structurally overlap for the single-session,
+         first-write-is-the-marker scenario this item addresses, so no
+         test can currently distinguish "fix present" from "fix absent" —
+         `kmdb-qa` was unable to construct one either. The `syncDir` call is
+         kept as defense-in-depth (it makes the marker durable by
+         construction rather than by relying on a later self-heal being
+         reachable in every future code path), but it is **not** an
+         independently-verified fix and must not be described as one. The
+         underlying `WalWriter.append`-never-`syncDir`'s gap is a
+         pre-existing engine fragility outside this plan's scope;
+         `kmdb-architect` is recording it as a documented invariant in the
+         spec separately (not this plan's job to fix).
+      3. **The "new" signal needed widening beyond `isNewDatabase` alone —
+         found via `encryption_crash_test.dart`'s existing
+         `KvStoreConfig.forTesting()`/`fsyncOnWrite: false` crash scenarios.**
+         With `fsyncOnWrite: false` (a real, if lower-durability, config —
+         not test-only in principle), `CURRENT`/Manifest still survive a
+         crash unconditionally, but ordinary `$meta` puts (the marker,
+         `enc:blob`, anything) do not — so a crash immediately after a
+         brand-new database's provisioning session left `CURRENT` present
+         but the marker absent, misclassifying an empty, content-free
+         database as legacy. This exactly mirrors `enc:blob`'s own
+         pre-existing, already-accepted crash story (an unsynced
+         provisioning write is lost with the rest of that session; the
+         database just falls back to "looks unencrypted"). Fixed by widening
+         the "looks fresh" condition to
+         `isNewDatabase || await engine.scan(MetaStore.kNamespace).isEmpty`
+         — a direct, comprehensive "is `$meta` itself completely empty" scan
+         (not an enumeration of specific known keys, which was tried first
+         and found to miss realistic cases — e.g. a bare `device_id` with no
+         namespace ever registered, since `ensureDeviceId()` is independently
+         callable before any document write). This scan only ever runs on
+         the rare marker-absent path (never on the common already-marked
+         path), and only reads raw bytes (`Stream.isEmpty`, no
+         `EncryptionEnvelope`/`ValueCodec` decode), so it cannot itself
+         misparse a legacy value. Regression-covered by
+         `encryption_crash_test.dart`'s two provisioning-crash-safety tests
+         (both failed before this fix and pass after) and by four new,
+         targeted tests in `test/engine/meta_store_encryption_test.dart`
+         (legacy DB with real content refuses; legacy DB with gen counter
+         `0` refuses; legacy DB with gen counter `1` refuses; legacy DB with
+         only a bare `device_id` refuses — the last one specifically
+         exercises the "no namespace ever registered" gap the first,
+         narrower attempt at this fix missed).
+      4. **Two unrelated pre-existing tests needed updating, not because
+         they were wrong, but because the marker's existence is a real,
+         permanent behavioural change to every `open()`:**
+         `writebatch_atomicity_test.dart`'s "single put folds document + meta
+         writes into one batch frame" assumed the user's batch frame starts
+         at WAL offset 0 (now offset > 0, since the marker's own WAL record
+         precedes it on a fresh database) — changed to scan for the batch
+         frame, mirroring the sibling test's own approach.
+         `sync_engine_test.dart`'s HWM test asserted an absolute upper bound
+         on the high-water mark that assumed a freshly-opened, never-written
+         store's memtable is empty at `push()`-time flush — no longer true,
+         since `$meta` (single-`$`, syncable) legitimately contributes the
+         marker's real-wall-clock HLC now. Narrowed the assertion to the
+         specific invariant the test actually verifies (the `.local.sst`
+         file's HLC must not leak in), per its own doc comment.
+- [x] Explicitly verify `enc:blob` (`getEncryptionBlob`/`putEncryptionBlob`)
       is untouched and still uses the raw path (Q2) — this guard is now more
       load-bearing than before, since the general `$meta` path encrypts by
-      default and must provably never touch `enc:blob`.
-- [ ] Tests: MetaStore round-trip with encryption on/off; bootstrap-ordering
+      default and must provably never touch `enc:blob`. Verified by a
+      dedicated test (`MetaStore — enc:blob exemption (Q2)` group in
+      `test/engine/meta_store_encryption_test.dart`) that sets
+      `MetaStore.encryption` to a real provider and confirms
+      `getEncryptionBlob`/`putEncryptionBlob` still round-trip via the raw
+      path (byte-level check: the stored bytes are not
+      `EncryptionFlag.aesGcm`-prefixed).
+- [x] Tests: MetaStore round-trip with encryption on/off; bootstrap-ordering
       regression test that opens a brand-new database with encryption enabled
       from the very first write and confirms no `$meta` entry (including the
       first `device_id` write) ends up unencrypted; confirm crash-recovery
@@ -942,20 +1064,59 @@ Implementation:
       encrypted `$meta` entries in the WAL — this touches the durability-
       critical path called out in CLAUDE.md, so exercise it against the
       `FaultyStorageAdapter` fault-injection harness, not just the in-memory
-      test adapter.
+      test adapter. Done — new file `test/engine/meta_store_encryption_test.dart`
+      (16 tests): encryption round-trip group (gen counter, device ID,
+      namespace registry, tombstone floor, `getRawByName`/`putRawByName`,
+      dirty flag, wrong-DEK failure), `enc:blob` exemption group, format-
+      version marker group (5 tests, including the two byte-collision cases),
+      bootstrap-ordering group, and a `FaultyStorageAdapter` crash-recovery
+      group (WAL replay of encrypted `$meta` + document data after a
+      crash-before-flush). Full package: 2,345 tests pass (2,329 + 16 new),
+      12 e2e skipped.
 
 **Phase 2 close-out (see the workflow policy above):**
 
-- [ ] Verify every task/step checkbox above is checked off — do not proceed
+- [x] Verify every task/step checkbox above is checked off — do not proceed
       to commit with any left unchecked.
-- [ ] Run `make pre_commit` (format, analyze, license_check, scoped tests).
-- [ ] Hand off to `kmdb-qa` for sign-off on Phase 2's diff specifically —
+- [x] Run `make pre_commit` (format, analyze, license_check, scoped tests).
+      Green: format_check, analyze (zero issues across the whole workspace),
+      license_check, and `melos pre_commit_test` (2,345 tests, 12 e2e
+      skipped) all passed.
+- [x] Hand off to `kmdb-qa` for sign-off on Phase 2's diff specifically —
       this is the phase with the most architectural risk (the late-bound
       provider, the `enc:blob` carve-out, and the format-version gate), so
       give the QA pass particular attention to the B8/B9 marker logic and
       the crash-recovery fault-injection results, not just test coverage
       numbers. Resolve every blocking item before committing.
-- [ ] Commit Phase 2 on the plan's branch.
+      **Signed off (2026-07-13), run by the coordinator session** (this
+      `kmdb-plan-implement` session has no Agent/Task tool — see
+      `.claude/agent-memory/kmdb-plan-implement/feedback_no_agent_tool.md`).
+      All three flagged items were independently verified as correct and
+      sound, with detailed reasoning: the B8/B9 three-way discrimination,
+      the widened freshness-gate condition, and the `getDirtyFlag`
+      presence-only change. **One blocking issue, since fixed:**
+      `LegacyDatabaseFormatException` was not exported from
+      `packages/kmdb/lib/kmdb.dart` — every peer open-time exception
+      (`LockException`, `StorageException`, `EncryptionError`) was, this one
+      wasn't. Added to the `show` clause. **One correction to this plan's own
+      notes, since made:** the `syncDir(dbDir)` fix's item 2 note above
+      originally claimed `manifest_fsync_recovery_test.dart` regression-covers
+      it — `kmdb-qa` reverted the fix, reran that test and their own targeted
+      probe, and both passed without the fix (confirmed independently by
+      reverting and rerunning locally). The fix itself is sound
+      defense-in-depth and is kept; the false regression-coverage claim in
+      item 2 above has been corrected to explain why no test can currently
+      isolate it (structural overlap with item 3's self-heal). `kmdb-architect`
+      is separately recording the underlying `WalWriter.append`-never-`syncDir`'s
+      gap as a documented spec invariant (pre-existing engine fragility,
+      out of this plan's scope). **Non-blocking, addressed:** a one-line doc
+      comment was added to `appendTombstoneFloorAdvance` warning about the
+      write/read encryption asymmetry with `getTombstoneFloor` should it ever
+      be wired up for real; the comment-drift nit in
+      `meta_store_encryption_test.dart` (claimed to seed a namespaces registry
+      entry it didn't) was fixed in the two affected tests.
+- [x] Commit Phase 2 on the plan's branch.
+      **`kmdb-pre-commit`: re-run after the above fixes — PASS.** See below.
 
 ### Phase 3 — Gap 4: vault manifest `originalName`
 

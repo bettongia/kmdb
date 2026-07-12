@@ -82,9 +82,20 @@ final class CrashRecovery {
 
     // ── Step 2: Read CURRENT ──────────────────────────────────────────────────
     String manifestName;
+    // True exactly when the `StorageException` branch below runs — i.e. no
+    // `CURRENT` file was found, meaning this is a brand-new database
+    // directory with no persisted state at all. Exposed via [OpenResult] so
+    // [KvStoreImpl.open] can implement the Encryption confidentiality
+    // reconciliation plan's Phase 2 database-format-version gate (B8/B9):
+    // this is the same "brand-new database" signal §17 already uses,
+    // reused there to distinguish a legacy pre-format-version database
+    // (`CURRENT` present, no format marker) from a genuinely new one
+    // (`CURRENT` absent — no marker to find yet, nothing to refuse).
+    var isNewDatabase = false;
     try {
       manifestName = await currentFile.read();
     } on StorageException {
+      isNewDatabase = true;
       // Fresh database. Establish the initial state in durable commit order:
       // write the manifest and make it durable (append fsyncs the file; syncDir
       // links its directory entry) BEFORE publishing CURRENT. A crash mid-create
@@ -305,6 +316,7 @@ final class CrashRecovery {
     final openResult = OpenResult(
       hadInterruptedWrites: hadInterruptedWrites,
       affectedNamespaces: affectedNamespaces.toList(),
+      isNewDatabase: isNewDatabase,
     );
 
     return (engine, openResult);

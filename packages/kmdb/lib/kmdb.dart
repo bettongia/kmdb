@@ -28,7 +28,8 @@ export 'src/engine/kvstore/kv_store.dart'
         BatchEntry,
         KvStoreConfig,
         StoreStats,
-        StoreInfo;
+        StoreInfo,
+        LegacyDatabaseFormatException;
 export 'src/engine/kvstore/kv_store_impl.dart' show KvStoreImpl;
 export 'src/engine/platform/storage_adapter_interface.dart'
     show StorageAdapter, StorageException, LockException;

@@ -110,15 +110,32 @@ void main() {
 
         final walPath = _activeWalPath(adapter);
         final bytes = adapter.files[walPath]!;
-        // The first record at offset 0 must be a batch frame.
-        expect(bytes[8], equals(WalRecordType.batch.byte));
-        final decoded = WalBatchFrame.tryDecode(bytes, 0);
-        expect(decoded, isNotNull);
+        // Scan for the first batch frame rather than assuming it starts at
+        // offset 0 — KvStoreImpl.open() writes the $meta format-version
+        // marker (Encryption confidentiality reconciliation plan, Phase
+        // 2/B8-B9) as a single, non-batch WalRecordType.put record before
+        // this test's store.put() ever runs, so on a freshly created
+        // database the batch frame this test cares about is *not* the very
+        // first record in the WAL file (mirrors the sibling
+        // "multi-entry writeBatch" test's scan-based approach above).
+        WalBatchFrame? decoded;
+        var pos = 0;
+        while (pos < bytes.length) {
+          if (bytes.length - pos < 9) break;
+          final type = bytes[pos + 8];
+          if (type == WalRecordType.batch.byte) {
+            decoded = WalBatchFrame.tryDecode(bytes, pos)!.$1;
+            break;
+          }
+          final skipped = WalRecord.tryDecode(bytes, pos)!;
+          pos += skipped.$2;
+        }
+        expect(decoded, isNotNull, reason: 'no batch frame found in the WAL');
         // The frame should carry the document write and at least one meta write
         // (dirty flag), and the gen-counter and namespace-registry puts.
-        expect(decoded!.$1.records.length, greaterThanOrEqualTo(2));
+        expect(decoded!.records.length, greaterThanOrEqualTo(2));
         // At least one record must be in $meta — confirming the fold landed.
-        final hasMeta = decoded.$1.records.any((r) => r.namespace == r'$meta');
+        final hasMeta = decoded.records.any((r) => r.namespace == r'$meta');
         expect(
           hasMeta,
           isTrue,

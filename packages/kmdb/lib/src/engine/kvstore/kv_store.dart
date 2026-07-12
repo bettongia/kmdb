@@ -361,6 +361,41 @@ final class StoreInfo {
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
+/// Thrown by [KvStoreImpl.open] when a database directory contains persisted
+/// state (`CURRENT`/manifest/SSTables) but is missing the `$meta`
+/// format-version marker introduced by the Encryption confidentiality
+/// reconciliation plan (Phase 2/B8-B9).
+///
+/// This indicates the database was created by pre-plan code, whose `$meta`,
+/// index/FTS/Vec state, and vault-search index values were bare CBOR with no
+/// leading [EncryptionFlag]/[CompressionFlag] framing byte. The current code
+/// unconditionally expects that framing (via `EncryptionEnvelope`/
+/// `ValueCodec`) on every value it reads through those paths — attempting to
+/// read a pre-plan value would either throw an unrelated, confusing error or,
+/// worse, silently misparse a legacy CBOR byte that happens to collide with a
+/// valid flag byte (small integers 0/1 are indistinguishable from
+/// `EncryptionFlag.none`/`EncryptionFlag.aesGcm` at the single-byte level —
+/// this is exactly why the gate is enforced once at the database level here,
+/// not per-value).
+///
+/// This is a pre-v1-beta breaking format change with **no migration path**,
+/// consistent with the original Phase 12 encryption precedent: the database
+/// must be recreated. There is no way to open it with older or newer code.
+final class LegacyDatabaseFormatException implements Exception {
+  const LegacyDatabaseFormatException(this.dbDir);
+
+  /// The database directory that failed to open.
+  final String dbDir;
+
+  @override
+  String toString() =>
+      'LegacyDatabaseFormatException: the database at "$dbDir" was created '
+      'before the Encryption confidentiality reconciliation plan landed and '
+      'cannot be opened by this version of KMDB. There is no migration path '
+      '— recreate the database (see docs/spec/31_encryption.md and '
+      'docs/spec/28_release_checklist.md).';
+}
+
 /// A raw key-value entry returned by [KvStore.scan].
 typedef KvEntry = ({String key, Uint8List value});
 
@@ -384,6 +419,7 @@ final class OpenResult {
     this.hadInterruptedWrites = false,
     this.affectedNamespaces = const [],
     this.hadUnclosedSession = false,
+    this.isNewDatabase = false,
   });
 
   /// True if a retained WAL file was truncated and replay discarded its final
@@ -398,6 +434,13 @@ final class OpenResult {
   /// True if the dirty-open flag in `$meta` was set, indicating an unclean
   /// shutdown. Broader than WAL checksum failures — any crash sets this.
   final bool hadUnclosedSession;
+
+  /// True if no `CURRENT` file was found at open time — i.e. this is a
+  /// brand-new database directory with no persisted state at all (§17's
+  /// existing "fresh database" signal, exposed here so [KvStoreImpl.open]
+  /// can implement the Encryption confidentiality reconciliation plan's
+  /// database-format-version gate, Phase 2/B8-B9).
+  final bool isNewDatabase;
 }
 
 // ── WriteBatch ────────────────────────────────────────────────────────────────
