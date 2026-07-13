@@ -155,8 +155,13 @@ void main() {
 
       final raw = await store.get(MetaStore.kNamespace, MetaStore.deviceIdKey);
       expect(raw![0], equals(EncryptionFlag.aesGcm.byte));
-      // Ciphertext must not contain the plaintext device ID.
-      expect(raw, isNot(contains(_bytes('a1b2c3d4').first)));
+      // Ciphertext must not contain the plaintext device ID. Compare against
+      // the full plaintext byte *sequence*, not a single byte value — random
+      // nonce/ciphertext bytes will contain any given single byte value with
+      // high probability (~13% for one byte over ~40 bytes), which made the
+      // previous single-byte `contains` assertion flaky. An 8-byte sequence
+      // colliding by chance is negligible.
+      expect(String.fromCharCodes(raw), isNot(contains('a1b2c3d4')));
 
       await store.close();
     });
