@@ -1120,29 +1120,97 @@ Implementation:
 
 ### Phase 3 — Gap 4: vault manifest `originalName`
 
-- [ ] Implement the Q6-resolved fix (encrypt `originalName` in place,
-      recommended) in `VaultManifest`.
-- [ ] Update every `originalName` read site (ingest, manifest readers, and
+- [x] Implement the Q6-resolved fix (encrypt `originalName` in place,
+      recommended) in `VaultManifest`. Done — `originalName` is not encoded
+      inside `VaultManifest` itself (which stays a pure, synchronous JSON
+      DTO, no `EncryptionProvider` knowledge, consistent with keeping
+      `toJson`/`fromJson` simple); instead `VaultStore.ingest` (the sole
+      construction site for a locally-authored manifest) wraps it with
+      `EncryptionEnvelope` and base64-encodes the result before constructing
+      the `VaultManifest`, reusing the existing `encrypted` flag to signal
+      both blob-and-name ciphertext together (a database is either born
+      encrypted or never encrypted, so the two are always set in lockstep —
+      no new field needed).
+- [x] Update every `originalName` read site (ingest, manifest readers, and
       coordinate with `plan_0_08_vault_file_export.md`'s `vault export`
       command if that work is implemented concurrently or after this phase —
-      check its status before starting this phase).
-- [ ] Update §31 to explicitly acknowledge `mediaType`/`size`/`sha256`/
+      check its status before starting this phase). Checked:
+      `plan_0_08_vault_file_export.md` status is `Open` (not implemented,
+      not concurrently in progress) — no coordination needed. `originalName`
+      read sites audited: `VaultStore.getManifest` is the sole decryption
+      point (fixed); `VaultPackage`'s `uploadManifest.originalName` and
+      `kmdb_cli`'s `vault_import_helper.dart` both read from a *different*
+      object — the upload-time hint manifest bundled inside a `.kvlt`
+      *import* archive, which is by design always portable plaintext (§31
+      "KVLT and Encryption") — out of scope, left untouched.
+      `vault_indexing_isolate.dart`'s `VaultManifest(...)` is a throwaway,
+      never-persisted manifest built only to pass `mediaType` to a text
+      extractor (`originalName: ''`) — no encryption concern, left
+      untouched. `local_directory_vault_adapter.dart`'s
+      `syncVaultMetadata`/`createStub` path reads a peer device's already
+      (identically) encrypted `manifest.json` verbatim and writes it through
+      unchanged — correct as-is, no decryption needed at that layer.
+- [x] Update §31 to explicitly acknowledge `mediaType`/`size`/`sha256`/
       `createdAt` as plaintext `manifest.json` surfaces, with the existing
       rationale (dedup, sync routing) stated plainly rather than left
-      implicit.
-- [ ] Tests: manifest round-trip with encryption on/off; confirm dedup
+      implicit. Done — §31 gap 5 rewritten: a progress note records the
+      `originalName` fix, and each of `sha256`/`mediaType`+`size`/
+      `crc32c`+`createdAt` gets its own explicit, stated rationale for
+      staying plaintext (previously only implied). Also corrected a stale
+      field name (`hlcTimestamp` → `createdAt`, matching the actual
+      `VaultManifest.toJson()` field).
+- [x] Tests: manifest round-trip with encryption on/off; confirm dedup
       (`sha256`-keyed) and sync-routing logic (which reads `mediaType`/`size`
-      without decrypting) are unaffected.
+      without decrypting) are unaffected. Done — new "VaultStore.originalName
+      encryption (Gap 4)" group in `test/encryption/vault_encryption_test.dart`
+      (8 tests): plaintext round-trip unchanged; encrypted `originalName` not
+      visible on disk; `getManifest()` transparent decrypt; `StateError` with
+      no provider; `EncryptionError` with the wrong DEK;
+      `mediaType`/`size`/`sha256`/`createdAt` readable as bare JSON without
+      any decryption even when `originalName` is encrypted (the sync-routing/
+      dedup invariant, asserted directly against the raw on-disk bytes, not
+      just behaviourally); and a dedup test confirming a second ingest with a
+      different `originalName` does not overwrite the first (encrypted)
+      manifest. Full `test/vault/` + `test/encryption/` suites: 585 tests
+      pass.
 
 **Phase 3 close-out (see the workflow policy above):**
 
-- [ ] Verify every task/step checkbox above is checked off — do not proceed
+- [x] Verify every task/step checkbox above is checked off — do not proceed
       to commit with any left unchecked.
-- [ ] Run `make pre_commit` (format, analyze, license_check, scoped tests).
-- [ ] Hand off to `kmdb-qa` for sign-off on Phase 3's diff specifically
+- [x] Run `make pre_commit` (format, analyze, license_check, scoped tests).
+- [x] Hand off to `kmdb-qa` for sign-off on Phase 3's diff specifically
       (`VaultManifest`, its read sites, and the §31 acknowledgment). Resolve
       every blocking item before committing.
-- [ ] Commit Phase 3 on the plan's branch.
+      **Signed off (2026-07-13), run by the coordinator session** (this
+      session has no Agent/Task tool — see
+      `.claude/agent-memory/kmdb-plan-implement/feedback_no_agent_tool.md`).
+      Ready to commit on its own merits: the encrypt-in-place design, base64
+      handling, `encrypted`-flag lockstep, and `getManifest`-as-sole-
+      decryption-point were all verified correct. `kmdb-qa` independently
+      checked the KVLT-archives-are-intentionally-plaintext reasoning
+      against `docs/spec/24_vault.md` and the live `export_command.dart`/
+      `dump_command.dart` code paths (not just this plan's summary) —
+      confirmed correct, not a rationalised gap. Test coverage and the
+      not-yet-implemented `vault export` plan's coordination status were
+      both confirmed fine. Two unrelated items surfaced and were resolved
+      alongside this phase, not part of Phase 3's own diff: (a) a flaky
+      probabilistic single-byte assertion in Phase 2's (already-committed)
+      `meta_store_encryption_test.dart` device-ID test, fixed by `kmdb-qa`
+      and landed as its own standalone commit `6c05590` before this phase's
+      commit; (b) a second, earlier instance of the `mimeType`/
+      `hlcTimestamp`/numeric-`crc32c` field-name drift in §31's manifest
+      JSON example (~line 247) — the same class of staleness this phase's
+      own gap-5 prose fix corrected, but a spot this phase's edit didn't
+      reach — fixed by `kmdb-architect` in the same file. A separate,
+      pre-existing, unrelated `sync_engine_test.dart:1170` flake (wall-clock
+      HLC placement under parallel full-suite load, not a production bug)
+      was logged to `docs/roadmap/0_09.md` on `main` by `kmdb-architect` —
+      out of this plan's scope, not touched here.
+- [x] Commit Phase 3 on the plan's branch.
+      **`kmdb-pre-commit`: PASS** (format/analyze/license clean, 2,352/2,352
+      tests; one transient native-assets-bundling flake on the first run
+      cleared on rerun, unrelated to this plan's code).
 
 ### Phase 4 — Gap 2: HMAC-keyed namespace tokens
 

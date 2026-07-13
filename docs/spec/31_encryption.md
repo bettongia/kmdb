@@ -242,11 +242,13 @@ The `manifest.json` for each blob gains an `encrypted: boolean` field:
 
 ```json
 {
+  "schemaVersion": "1",
   "sha256": "...",
-  "crc32c": 12345678,
-  "mimeType": "image/jpeg",
   "size": 1024,
-  "hlcTimestamp": "...",
+  "crc32c": "a1b2c3d4",
+  "mediaType": "image/jpeg",
+  "originalName": "photo.jpg",
+  "createdAt": "...",
   "encrypted": true
 }
 ```
@@ -564,16 +566,46 @@ identity, timing) but **not document content**.
 
 #### 5. Vault `manifest.json` is plaintext
 
-Each vault blob is accompanied by a plaintext `manifest.json` on disk and in
-cloud sync, containing `mediaType`, `size`, `hlcTimestamp`, `sha256`, and
-`originalName`.
+Each vault blob is accompanied by a `manifest.json` on disk and in cloud
+sync, containing `schemaVersion`, `sha256`, `size`, `crc32c`, `mediaType`,
+`originalName`, `createdAt`, and (when encryption is active) `encrypted`.
 
-- The `sha256` content address is **intentionally** computed over the plaintext
-  blob bytes so that deduplication continues to work across devices (documented
-  in _Vault Encryption_).
-- `originalName`, `mediaType`, and `size` are plaintext surfaces that are
-  **not** otherwise acknowledged. They leak the original filename, content type,
-  and size of every stored blob to anyone with sync or disk access.
+**Progress note (Encryption confidentiality reconciliation plan, Gap 4,
+Phase 3 — 2026-07-13):** `originalName` is now encrypted in place when a
+database `EncryptionProvider` is configured. `VaultStore.ingest` wraps it
+with `EncryptionEnvelope` and base64-encodes the result before it is written
+into `manifest.json` (keeping the manifest's JSON shape stable — the field
+is still a JSON string, just ciphertext rather than plaintext);
+`VaultStore.getManifest` is the sole decryption point and transparently
+returns the plaintext name to every caller. The existing `encrypted` boolean
+field governs both the blob ciphertext and this field together — a database
+is either born encrypted or never encrypted, so the two are always set in
+lockstep; there is no scenario where one is encrypted and the other is not.
+This closes the `originalName` leak this gap originally documented, but
+**not** the remaining plaintext surfaces below — see Phase 5 for the
+`docs/roadmap/0_08.md` and full "gaps resolved" bookkeeping update once all
+four plan gaps have landed.
+
+The following fields remain **intentionally plaintext**, each for a stated
+functional reason rather than by omission:
+
+- **`sha256`** — computed over the plaintext blob bytes (not ciphertext) so
+  that content-addressed deduplication continues to work identically across
+  encrypted and unencrypted devices, and so two devices holding the same
+  logical content converge on the same address regardless of encryption
+  state (documented in _Vault Encryption_ above).
+- **`mediaType` and `size`** — read directly from `manifest.json` without
+  decryption by sync routing and by consumers (e.g. vault search's extractor
+  selection, `kmdb_cli`'s `export`/`dump` commands) that only need to know
+  *what kind* and *how large* an object is, not its content or name. Forcing
+  decryption to answer those questions would require every such consumer to
+  hold the DEK, which is a materially larger change than this plan's scope.
+- **`crc32c` and `createdAt`** — secondary identity/provenance metadata with
+  no confidentiality value beyond what `sha256`/`size` already expose.
+
+These are accepted, documented plaintext surfaces, not open defects — they
+leak *metadata about* a stored object (its type, size, and content address)
+but never its name or content.
 
 #### 6. Vault `extract/` filesystem artifacts (resolved — WI-10)
 

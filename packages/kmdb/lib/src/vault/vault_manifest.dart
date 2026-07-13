@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/// @docImport '../encryption/encryption_envelope.dart';
 /// @docImport 'media_type_detector.dart';
+/// @docImport 'vault_store.dart';
 library;
 
 import 'dart:convert';
@@ -95,6 +97,17 @@ final class VaultManifest {
   /// The original filename at the time of ingestion (e.g. `"photo.jpg"`).
   ///
   /// This is informational only. The blob is stored by hash, not by name.
+  ///
+  /// **Encryption (Gap 4, Encryption confidentiality reconciliation
+  /// plan):** when [encrypted] is `true`, this field holds base64-encoded
+  /// [EncryptionEnvelope]-wrapped ciphertext, not the plaintext name — see
+  /// [VaultStore.getManifest] (the sole decryption point) and
+  /// [VaultStore.ingest] (the sole encryption point). Callers should almost
+  /// always obtain a [VaultManifest] via [VaultStore.getManifest], which
+  /// transparently decrypts this field; reading it directly from a manifest
+  /// constructed by [VaultManifest.fromJson]/[fromJsonString] without going
+  /// through [VaultStore] yields the raw (possibly still-encrypted) stored
+  /// value.
   final String originalName;
 
   /// The HLC timestamp string at the time of ingestion.
@@ -103,12 +116,25 @@ final class VaultManifest {
   /// directly (see §24 for the one-directional dependency rationale).
   final String createdAt;
 
-  /// Whether the blob file is stored as AES-256-GCM ciphertext.
+  /// Whether the blob file is stored as AES-256-GCM ciphertext, **and**
+  /// (Gap 4, Encryption confidentiality reconciliation plan) whether
+  /// [originalName] is stored as base64-encoded [EncryptionEnvelope]
+  /// ciphertext rather than plaintext.
   ///
   /// When `true`, the file at `blob` is `[12-byte nonce][ciphertext][16-byte
   /// tag]` produced by [EncryptionProvider.encrypt]. The SHA-256 and CRC32C
   /// fields in this manifest are computed over the **plaintext** bytes, so
   /// recovery must decrypt the blob before verifying the content address.
+  /// One flag governs both the blob and [originalName] because a database
+  /// is either born encrypted or never encrypted (no per-write, per-field
+  /// opt-in/opt-out — see §31), so the two are always set together; there is
+  /// no scenario where one is encrypted and the other is not.
+  ///
+  /// `mediaType`/`size`/`sha256`/`createdAt` remain plaintext even when this
+  /// is `true` — they are relied on for deduplication (`sha256`) and sync
+  /// routing (`mediaType`/`size`) without requiring decryption; see §31's
+  /// "Threat Model & Confidentiality Boundaries" for the documented
+  /// rationale.
   ///
   /// Defaults to `false` for unencrypted databases.
   final bool encrypted;
