@@ -1495,37 +1495,116 @@ at lines 539–564. This phase is **updating those existing entries to
 "resolved" and correcting stale detail**, not writing the acknowledgments
 from scratch.
 
-- [ ] §31: mark gaps 1–4 (in §31's own numbering) resolved once their phases
+- [x] §31: mark gaps 1–4 (in §31's own numbering) resolved once their phases
       land; correct the "Provider Threading" over-claim at lines 474–478 now
       that `MetaStore`/vault writers are wired; update the protected/
       unprotected surface lists to match Phases 1–4; add the Gap 2
       residual-leakage and DEK-rotation notes; add the Q7 CLI-credentials
-      accepted-limitation note (new, not currently in §31).
-- [ ] §24: correct the "vault chunk vectors have no KV namespace" claim.
-- [ ] Record B8's breaking-format-change decision: a note in §31 (existing
+      accepted-limitation note (new, not currently in §31). **Done**:
+      rewrote _Provider Threading_ to state value + namespace-token
+      encryption are both wired (was: "known gap, FTS/Vec not yet
+      encrypted"); gaps 1–5 (§31's own numbering) each now carry a
+      "resolved" heading + summary with a link to the responsible plan
+      phase, keeping the original investigation prose as historical
+      record; gap 2's residual-leakage/DEK-rotation/migration-mechanism
+      notes were already added during Phase 4 and are unchanged here; added
+      a new gap 9 for the Q7 CLI-credentials accepted-limitation (wasn't in
+      §31 before); rewrote the closing _Summary_ paragraph to state the
+      current (not aspirational) confidentiality guarantee. Also added a
+      new _Database Format-Version Gate_ subsection under _Bootstrap
+      Sequence_ documenting the marker/`LegacyDatabaseFormatException`
+      mechanism in full — this didn't exist anywhere in §31 despite
+      `LegacyDatabaseFormatException`'s own doc comment already promising
+      "see docs/spec/31_encryption.md" (a genuine pre-existing doc gap from
+      Phase 2, closed here).
+- [x] §24: correct the "vault chunk vectors have no KV namespace" claim.
+      **Verified this claim never existed in §24 itself** — grepped for
+      `hexTerm`/`vec:idx`/"no KV namespace"/"filesystem-only" and found zero
+      matches. The actual stale claim was in `docs/roadmap/0_06.md`, which
+      Phase 1 already corrected (`$$vault:vec:idx:{sha256}` KV namespace
+      note, verified present). This checklist item was based on a
+      pre-Phase-1 mental model; nothing further to do in §24.
+- [x] Record B8's breaking-format-change decision: a note in §31 (existing
       databases created before this plan lands must be recreated — no
       migration path, consistent with the Phase 12 precedent) and an entry
       in `docs/spec/28_release_checklist.md` calling this out explicitly for
-      anyone upgrading a pre-existing dev/test database.
-- [ ] §99 glossary: add "index token" / HMAC token terminology if Gap 2 ships.
-- [ ] `docs/roadmap/0_08.md`: mark Gaps 1–4 complete with links to this plan
+      anyone upgrading a pre-existing dev/test database. **Done**: the new
+      §31 _Database Format-Version Gate_ subsection above states the
+      "no migration, must recreate" stance explicitly; added RC-22 to
+      `docs/spec/28_release_checklist.md` following the existing RC-N
+      template, cross-referenced from both directions
+      (`LegacyDatabaseFormatException`'s doc comment already pointed here;
+      RC-22 points back to the exception and §31).
+- [x] §99 glossary: add "index token" / HMAC token terminology if Gap 2 ships.
+      **Done**: new "Index token" entry (alphabetically placed between IDF
+      and Inverted index) covering the hex-vs-HMAC dual scheme, the HKDF
+      sub-key, domain separation, and the `tokenMode` migration marker;
+      updated the "Inverted index" and `` `$$vault:fts:` `` entries' stale
+      `{hexTerm}` namespace examples to `{token}` with a cross-reference.
+- [x] `docs/roadmap/0_08.md`: mark Gaps 1–4 complete with links to this plan
       and the merged PR(s); update the stale `$fts:`/`$vfts:` namespace names
       in the gap text to their current `$$`-prefixed forms for future
-      readers.
-- [ ] Run `make site` after spec edits.
+      readers. **Done**: added a "Status: Complete" summary at the top of
+      the section linking to the plan (path anticipates the plan's move to
+      `docs/plans/completed/` as part of the final whole-PR step — not yet
+      moved as of this phase, per the coordinator's explicit instruction not
+      to run the final whole-PR steps in this phase); each Gap heading now
+      carries a "— resolved" suffix; fixed stale namespace forms
+      (`$fts:`→`$$fts:`, `$vec:`→`$$vec:`, `$vfts:`→`$$vault:fts:`,
+      `$index:`→`$$index:`) and the stale `hlcTimestamp` manifest field name
+      (→ `createdAt`) throughout; resolved the three "Open questions for the
+      plan" bullets inline; rewrote "Sequencing" as "Sequencing (as
+      executed)" describing the actual Phase 1→2→3→4→5 order and why Phase 4
+      was sequenced last (`EncryptionProvider`/`MetaStore` dependencies from
+      Phase 2). No PR link yet — the PR is opened as part of the coordinator's
+      final whole-PR step, not this phase; will need a follow-up link once
+      that happens (out of scope for this session per the coordinator's
+      explicit instruction to pause after Phase 5).
+- [x] Run `make site` after spec edits. **Done**: `make site` itself is not a
+      real target (CLAUDE.md); ran `make doc_site_html` (the correct target
+      per CLAUDE.md's own note) after `rm -rf site` for a clean build — exit
+      0, `site/spec.html` (922 KB) and `site/roadmap.html` (96 KB) generated
+      without pandoc errors; spot-checked both for the new content (new §31
+      sections, updated `0_08.md` gap text) rendering correctly. The
+      pre-existing dartdoc `[SomeSymbol]` "unresolved doc reference"
+      warnings (`VaultSearchManager`, `searchVault`, `EncryptionConfig.
+      create`, `PdfTextExtractor`) are in files this plan never touched —
+      confirmed pre-existing, not a regression from this phase.
 
 **Phase 5 close-out (see the workflow policy above):**
 
-- [ ] Verify every task/step checkbox above is checked off — do not proceed
+- [x] Verify every task/step checkbox above is checked off — do not proceed
       to commit with any left unchecked.
-- [ ] Run `make pre_commit` (format, analyze, license_check, scoped tests;
+- [x] Run `make pre_commit` (format, analyze, license_check, scoped tests;
       also run `make doc_site`/`make site` since this phase touches spec
       files — see CLAUDE.md's note that `make site` itself is not a real
-      target).
-- [ ] Hand off to `kmdb-qa` for sign-off on Phase 5's diff specifically (doc
+      target). All sub-gates independently verified: `dart format
+      --output=none --set-exit-if-changed packages` (exit 0, 0 files
+      changed — this phase is markdown-only); `melos run analyze` (exit 0,
+      clean across all 7 packages — unaffected by markdown-only changes,
+      run anyway for completeness); `make license_check` (exit 0); full
+      `kmdb` test suite (2369 passed, 12 skipped E2E, 0 failed — unchanged
+      from Phase 4's count, as expected for a doc-only phase);
+      `make doc_site_html` (exit 0, see the "Run `make site`" item above
+      for detail).
+- [x] Hand off to `kmdb-qa` for sign-off on Phase 5's diff specifically (doc
       accuracy against what Phases 1–4 actually shipped, not just prose
       quality). Resolve every blocking item before committing.
-- [ ] Commit Phase 5 on the plan's branch.
+
+**`kmdb-qa` review (2026-07-13):** reviewed Phase 5 in depth — spot-checked
+§31's "resolved" claims against the actual Phase 2 and Phase 4 code (the two
+most complex phases, and the two that had mid-implementation QA findings)
+rather than trusting the doc text; verified the new _Database Format-Version
+Gate_ subsection accurately describes the real three-way discrimination;
+verified the §99 glossary entry and RC-22 against the actual shipped
+`indexToken` implementation; verified the roadmap namespace corrections
+against real constants; confirmed the §24 finding (no stale claim there — it
+was in `0_06.md` and already fixed in Phase 1) by checking git history
+themselves. One small inline fix made directly (a dangling "Progress note"
+cross-reference in §31 that no longer existed after the rewrite) — carried
+along in this commit. `kmdb-pre-commit` then confirmed all four gates green
+(2369 tests, 0 failed). **Phase 5 signed off.**
+- [x] Commit Phase 5 on the plan's branch.
 
 **Final step — whole-PR checks, spec alignment, and pre-commit.** Everything
 above is per-phase. These checks need the complete picture (all five phases

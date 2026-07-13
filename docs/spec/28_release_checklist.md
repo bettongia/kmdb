@@ -746,6 +746,53 @@ contention test that exercises the lease protocol.
 
 ---
 
+### RC-22 — Encryption confidentiality reconciliation: legacy database format break
+
+- **Area:** encryption / storage engine
+- **Validates:** that a database created before the Encryption
+  confidentiality reconciliation plan landed (`$meta` values stored as bare
+  CBOR, no leading `EncryptionFlag` byte) fails to open with a clear,
+  explicit error (`LegacyDatabaseFormatException`) rather than a silent
+  misparse of a legacy value's first CBOR byte as an encryption/compression
+  flag — this matters most for `device_id`, since a silently-corrupted
+  device identity would break sync continuity rather than fail loudly.
+- **Why not automated:** the automated suite (`meta_store_encryption_test.dart`
+  and the `KvStoreImpl.open()` format-version-gate tests) already covers the
+  detection logic itself against synthetic legacy-shaped fixtures. What
+  cannot be automated is confirming this against a *genuinely* pre-plan
+  on-disk database directory produced by an actual older build of `kmdb` —
+  the automated suite has no such artifact and constructing one requires a
+  human to have kept (or be willing to regenerate) a pre-plan database.
+- **Applies when:** before the first release that ships the Encryption
+  confidentiality reconciliation plan (`docs/roadmap/0_08.md`); a reminder
+  for anyone with a pre-existing dev/test database directory created before
+  this plan landed.
+- **Prerequisites:** a database directory created by a `kmdb` build from
+  before this plan's Phase 2 landed (tag/commit prior to the `$meta`
+  format-version gate), or a fresh directory with a hand-crafted bare-CBOR
+  `$meta` entry and no `formatVersion` marker.
+- **Steps:**
+  1. Attempt `KmdbDatabase.open()` (or `KvStoreImpl.open()`) against the
+     pre-plan database directory.
+  2. Confirm the call throws `LegacyDatabaseFormatException` with a message
+     pointing to this document and `docs/spec/31_encryption.md`'s _Database
+     Format-Version Gate_ section — not a generic decode error, a hang, or
+     (worst case) a successful open with corrupted `device_id`/namespace
+     registry data.
+  3. Confirm there is no supported way to open the legacy database with the
+     current code — the only remedy is to recreate the database (export any
+     needed data first, using an older `kmdb` build if necessary).
+- **Expected result:** the legacy database fails to open with a clear,
+  actionable `LegacyDatabaseFormatException`; no silent corruption or
+  partial-open state occurs.
+- **Related:** `docs/spec/31_encryption.md` (_Database Format-Version
+  Gate_), `docs/plans/completed/
+  plan_0_08_encryption_confidentiality_reconciliation.md` (B8),
+  `packages/kmdb/lib/src/engine/kvstore/kv_store.dart`
+  (`LegacyDatabaseFormatException`).
+
+---
+
 ## Release log
 
 | Version      | Date         | Tester | Checks run  | Result      | Notes              |

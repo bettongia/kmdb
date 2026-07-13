@@ -163,12 +163,34 @@ IDF (Inverse Document Frequency)
   `log(1 + (n − df + 0.5) / (df + 0.5))` where `n` is the total document
   count and `df` is the number of documents containing the term.
 
+Index token
+
+: The `{token}` namespace-name suffix in KMDB's namespace-per-term/
+  namespace-per-value system indexes (`$$fts:{ns}:{field}:{token}`,
+  `$$index:{ns}:{path}:{token}`, `$$vault:fts:{sha256}:{token}`). On an
+  unencrypted database, `{token}` is a plaintext lowercase-hex encoding of
+  the underlying term/value (`FtsManager._termToHex`,
+  `IndexWriter._encodeValueHex`) — visible to anyone with local SSTable
+  access. On an encrypted database, `{token}` is instead an HMAC-SHA256
+  token from `EncryptionProvider.indexToken`, keyed by a sub-key derived
+  from (but distinct from) the DEK via HKDF-SHA256
+  (`info = "kmdb-index-token"`), and domain-separated per index type so the
+  same term/value never produces the same token in a different field or
+  collection. This closes the search-vocabulary/indexed-value enumeration
+  attack the plaintext-hex scheme allowed (Encryption confidentiality
+  reconciliation plan, Gap 2). Which scheme a given index's persisted
+  entries currently use is tracked by a `tokenMode` (`hex` | `hmac`)
+  discriminator in the index's `$meta` state, checked at `open()`/`recover()`
+  to detect a software-version upgrade of an already-encrypted database and
+  trigger a purge-and-rebuild. See §31 (_Known gaps and unprotected
+  surfaces_, gaps 2/3).
+
 Inverted index
 
 : A data structure mapping from terms to the documents that contain them.
   KMDB's lexical search index (§21) stores one KV namespace per term
-  (`$$fts:{ns}:{field}:{hexTerm}`), with document IDs as keys and term
-  frequency as values.
+  (`$$fts:{ns}:{field}:{token}` — see Index token), with document IDs as
+  keys and term frequency as values.
 
 ISS pattern (Identity–Size–Secondary)
 
@@ -369,10 +391,10 @@ VaultTextExtractor
 `$$vault:fts:`
 
 : The `$$`-prefixed local-only namespace used to store BM25 inverted-index
-  entries for vault blobs. Full form: `$$vault:fts:{sha256}:{hexTerm}` (per-chunk
-  term frequency) and `$$vault:fts:corpus:{sha256}` (corpus statistics: chunk
-  count and total token count). Never uploaded to the sync folder. See §32 and
-  the `$$` (double-dollar prefix) entry.
+  entries for vault blobs. Full form: `$$vault:fts:{sha256}:{token}` (per-chunk
+  term frequency — see Index token) and `$$vault:fts:corpus:{sha256}` (corpus
+  statistics: chunk count and total token count). Never uploaded to the sync
+  folder. See §32 and the `$$` (double-dollar prefix) entry.
 
 `$$vault:vec:idx:`
 
