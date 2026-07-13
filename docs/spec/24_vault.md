@@ -105,8 +105,11 @@ The manifest is **immutable** — it is never mutated after creation.
 | `crc32c`        | string  | 8-hex-char CRC32C checksum. |
 | `size`          | integer | File size in bytes. |
 | `mediaType`     | string  | MIME type determined by file signature (magic numbers). |
-| `originalName`  | string  | Original filename at time of ingestion. |
+| `originalName`  | string  | Original filename at time of ingestion. Encrypted in place (base64-encoded `EncryptionEnvelope` ciphertext) when the database has an `EncryptionProvider` configured — see [Encryption](#encryption). |
 | `createdAt`     | string  | HLC timestamp passed in by the caller at write time. |
+
+When encryption is active the manifest also carries an `encrypted: true` field
+(see [Encryption](#encryption)); it is absent on an unencrypted database.
 
 The media type is determined by file signature inspection, not the file
 extension. A media type detection interface is defined; the concrete library
@@ -561,6 +564,22 @@ stored encrypted on disk. Encryption is applied by `VaultStore` at ingest time:
    stored_bytes = nonce(12B) || AES-256-GCM(dek, plaintext) || tag(16B)
    ```
 3. The `manifest.json` gains `"encrypted": true`.
+4. The `originalName` field is encrypted in place (Encryption confidentiality
+   reconciliation, Gap 4). `VaultStore.ingest` wraps the filename with
+   `EncryptionEnvelope` and base64-encodes the result before writing it into
+   `manifest.json`, keeping the manifest's JSON shape stable (the field remains
+   a JSON string — ciphertext rather than plaintext). `VaultStore.getManifest`
+   is the sole decryption point and transparently returns the plaintext name to
+   every caller. The `encrypted` flag governs the blob ciphertext and
+   `originalName` together — a database is either born encrypted or never
+   encrypted, so both are always set in lockstep.
+
+The remaining `manifest.json` fields — `sha256`, `size`, `crc32c`,
+`mediaType`, and `createdAt` — stay **intentionally plaintext**, each for a
+stated functional reason (content-addressed dedup, sync routing, extractor
+selection); see §31 gap 5 for the per-field reasoning. These leak metadata
+*about* a stored object (its type, size, and content address) but never its
+name or content.
 
 On read, `VaultStore.getBytes()` inspects the `encrypted` field. If `true`, it
 decrypts the raw bytes before returning them. If `encrypted: true` but no

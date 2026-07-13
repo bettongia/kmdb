@@ -184,7 +184,7 @@ encryption precedent (no in-place migration for encryption either): a
 database created before this plan landed must be recreated.** This applies
 to every pre-plan database, encrypted or not, since the format break is in
 the general `$meta` framing, not specifically in encryption. See
-`docs/spec/28_release_checklist.md`'s entry for anyone upgrading a
+`docs/spec/28_release_checklist.md` RC-22 for anyone upgrading a
 pre-existing dev/test database.
 
 ## Key Derivation
@@ -315,10 +315,18 @@ final doc   = await ValueCodec.decode(bytes, encryption: _db.encryption);
 All call sites in `KmdbCollection`, `IndexManager`, `VersionManager`, and
 `VaultRefInterceptor` receive the provider from `KmdbDatabase.encryption`.
 
-System namespace values vary in their sync behaviour. `$ver:` and `$vault:`
-entries ride in syncable SSTables and reach the cloud. `$$index:`, `$$fts:`,
-and `$$vec:` entries are **local-only** — they are stored in `.local.sst` files
-and never uploaded (see §6 Flush Partitioning, §12). All index values are
+System namespace values vary in their sync behaviour. `$meta`, `$ver:`, and
+`$vault:` entries (all single-`$`) ride in syncable SSTables and reach the
+cloud. `$$index:`, `$$fts:`, and `$$vec:` entries (double-`$$`) are
+**local-only** — they are stored in `.local.sst` files and never uploaded (see
+§6 Flush Partitioning, §12). The syncable/local-only split is decided **only**
+by the `$$` prefix via the flush-time `.local.sst` partitioning, not by the
+`syncNamespaces` parameter: `syncNamespaces` defaults to the user (non-`$`)
+collections and is deliberately **not** applied as a per-entry upload filter,
+so `$meta` — despite being `$`-prefixed and thus excluded from that default set
+— still rides synced SSTables and reaches the cloud. This is exactly why `$meta`
+encryption (Gap 3) closes a genuine cloud-provider exposure, not merely a
+local-disk one. See §12 _Namespace-Scoped Sync_ for the full mechanism. All index values are
 encrypted so disk storage never sees plaintext document content: `FtsManager`
 and `VecManager` route their index values through `EncryptionEnvelope`/
 `ValueCodec` per value shape, and `MetaStore` (the `$meta` system namespace —
@@ -533,6 +541,19 @@ sync:
   materialised views (when the materialised-view cache is implemented) are
   encrypted, because their write paths thread the `EncryptionProvider` through
   `ValueCodec.encode` (see _Provider Threading_).
+- **FTS, Vec, and vault-search index values** — the _values_ stored under
+  `$$fts:`, `$$vec:`, `$$vault:fts:`, `$$vault:vec:idx:`, and `$$vault:extract:`
+  are encrypted via `EncryptionEnvelope` (scalars/opaque bytes — term-frequency
+  ints, SQ8 vectors, the BM25 corpus sentinel) or `ValueCodec` (`Map`-shaped
+  values — `$$fts:doc:`, `VaultExtractionState`) per value shape (Encryption
+  confidentiality reconciliation, Gap 1 — see gap 1 below). These namespaces
+  are local-only, so this protects against local disk theft, not a cloud
+  provider.
+- **`$meta` operational metadata** — device ID, the namespace registry,
+  generation counters, the dirty flag, the tombstone-GC floor, and index/FTS/
+  Vec state are encrypted via `EncryptionEnvelope` (Gap 3), the one documented
+  exemption being `enc:blob` itself (see _enc:blob Structure_). Because `$meta`
+  rides synced SSTables, this is genuine cloud-provider protection.
 - **Vault blob bytes** — the `VaultStore` encrypts blob payloads with the DEK
   before writing them to disk and to the cloud (see _Vault Encryption_).
 - **Vault `extract/` filesystem artifacts (WI-10, gap 6 below)** — `text.txt`,
@@ -773,9 +794,9 @@ encrypted blob's `extract/` subdirectory: `text.txt` (full extracted text),
 `chunks_v1.json` (chunk byte-offset metadata), and `vectors_{modelId}_sq8.bin`
 (SQ8-quantised embedding vectors, semantic mode only). No fourth
 `extract_status.json` file is ever written — extraction status is persisted
-solely to the `$$vault:extract:{sha256}` KV entry (see gap 1's sibling
-discussion of unencrypted KV _values_, which is a separate, still-open defect
-tracked as v0.08 Gap 1).
+solely to the `$$vault:extract:{sha256}` KV entry, whose _value_ is now
+encrypted via `ValueCodec` at the `VaultSearchManager` call site (gap 1,
+resolved — a distinct surface from the `extract/` files this gap covers).
 
 WI-10 encrypts these three files when a database `EncryptionProvider` is
 configured, using `VaultSearchManager.writeExtractArtifact` /

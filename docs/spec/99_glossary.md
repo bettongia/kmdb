@@ -124,6 +124,19 @@ EmbeddingKind
   En v1.5 defines neither prefix, so `EmbeddingKind` is a no-op for it. See
   §22.
 
+EncryptionEnvelope
+
+: A shared encryption primitive (`lib/src/encryption/encryption_envelope.dart`)
+  that wraps/unwraps a raw `Uint8List` payload as
+  `[EncryptionFlag byte][nonce‖ciphertext‖tag]` (encrypted) or
+  `[EncryptionFlag.none][plaintext]` (no provider). Used for scalar and
+  opaque-byte values that are **not** `Map<String, dynamic>` shaped, where
+  `ValueCodec` does not apply — every `$meta` value (Gap 3), FTS/Vec/vault
+  term-frequency ints and SQ8 vectors (Gap 1), and WI-10's `extract/` file
+  framing. Introduced by the Encryption confidentiality reconciliation plan
+  (`docs/roadmap/0_08.md`); `ValueCodec` remains the primitive for `Map`-shaped
+  values. See §31.
+
 enc:blob
 
 : A CBOR-encoded record stored in the `$meta` namespace under the key `enc:blob`.
