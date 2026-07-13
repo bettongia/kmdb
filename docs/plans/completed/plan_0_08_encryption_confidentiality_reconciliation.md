@@ -1,6 +1,6 @@
 # Encryption confidentiality reconciliation
 
-**Status**: Implementing
+**Status**: Complete
 
 **PR link**: —
 
@@ -2302,5 +2302,70 @@ the `kmdb-plan-implement` agent.
 
 ## Summary
 
-{Dot points highlighting the work undertaken — fill in once implementation is
-complete.}
+All four gaps from `docs/roadmap/0_08.md`'s "Encryption confidentiality
+reconciliation" are closed, across six commits on
+`20260711_plan_0_08_encryption_confidentiality_reconciliation`:
+
+- **Phase 1 (Gap 1, `7808513`)** — FTS/Vec/vault-search index values now
+  encrypted, via a new `EncryptionEnvelope` primitive (scalars/raw bytes) and
+  existing `ValueCodec` (map-shaped values), chosen per value shape. WI-10's
+  `writeExtractArtifact`/`readExtractArtifact` refactored onto the shared
+  envelope. Two implementation-level deviations from the plan's literal
+  per-value-shape split (uniform envelope wrapping for shared-namespace
+  entries in `FtsManager` and `VaultSearchManager`) were both independently
+  verified by `kmdb-qa` as sound engineering, not shortcuts.
+- **Interleaved fix (`6c05590`)** — strengthened a flaky ciphertext-exclusion
+  assertion in a Phase-1-era test (single-byte check collided with random
+  ciphertext ~13-15% of the time).
+- **Phase 2 (Gap 3, `287edd5`)** — `MetaStore` values now encrypted via a
+  late-bound `EncryptionProvider`, with a new database-level format-version
+  gate (three-way new/legacy/empty discrimination) replacing an originally-
+  planned per-value flag check that was shown during planning to be unsound
+  (CBOR's small-integer encoding collides with the two valid encryption flag
+  bytes). Three real durability bugs were found and fixed via
+  `FaultyStorageAdapter` fault injection during this phase. A `kmdb-qa` round
+  caught a missing public export and an inaccurate regression-coverage claim,
+  both corrected before commit.
+- **Phase 3 (Gap 4, `2843034`)** — vault manifest `originalName` now encrypted
+  in place (base64-encoded `EncryptionEnvelope` ciphertext), with the
+  KVLT-archive-is-intentionally-plaintext exclusion independently verified
+  against spec and the live export code paths, not just accepted on the
+  implementer's word.
+- **Phase 4 (Gap 2, `c6ccaec`)** — DEK-derived HMAC namespace tokens (HKDF
+  sub-key, domain-separated) replace plaintext hex terms/values across
+  document FTS, secondary indexes, and vault FTS, with a persisted
+  `tokenMode` discriminator triggering automatic rebuild on format-version
+  mismatch. `VecIndexState` was deliberately excluded from this mechanism —
+  independently verified correct, since vector namespaces never embedded a
+  hex-tokenized term/value to begin with. A `kmdb-qa` round found and the
+  implementer fixed a real blocking confidentiality bug (B1): a database
+  needing both a model-version rebuild and a hex→HMAC token migration in the
+  same `open()` could leave stale plaintext-derivable hex namespaces
+  orphaned on disk. The fix was independently re-verified as load-bearing by
+  `kmdb-qa` reverting it and confirming the regression test failed.
+- **Phase 5 (docs, `ccf0dde`)** — §31/§24/§99/roadmap updated to mark all
+  four gaps resolved.
+- **Final commit (`445261f`)** — a dedicated `kmdb-architect` spec-alignment
+  pass (beyond Phase 5's own scope) found and fixed a real remaining gap:
+  `docs/spec/32_vault_search.md`'s encryption-compatibility section was still
+  pre-WI-10/pre-Phase-1, contradicting shipped work. Whole-PR checks
+  (coverage, §18 benchmarks, `kmdb_harness` multi-device convergence
+  including a dedicated encrypted two-device sync scenario, and a final
+  aggregate `kmdb-qa` sign-off) all passed.
+
+**Process note:** this plan used a deliberately heavier-than-usual workflow
+(per-phase `kmdb-qa` sign-off rather than one review at the end, plus a
+dedicated final `kmdb-architect` spec pass) given the stakes — durability-
+critical paths and a breaking, unmigrated format change. That process caught
+a missing export, an inaccurate test-coverage claim, a genuine confidentiality
+bug, and a stale spec section that a single end-of-plan review would very
+plausibly have missed, echoing why the plan's own five-pass review was needed
+to reach `Investigated` in the first place.
+
+Two follow-up items were surfaced during implementation and logged to
+`docs/roadmap/0_09.md` (out of this plan's scope, not blocking): a latent
+WAL directory-entry durability fragility (`WalWriter.append` never
+`syncDir`s a brand-new WAL file's own directory entry, currently masked by
+incidental `syncDir` calls elsewhere), and a pre-existing, intermittent
+`sync_engine_test.dart` H4-FU3 test flake (diagnosed as a test-design issue,
+not a confirmed production bug).
