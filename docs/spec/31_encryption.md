@@ -541,6 +541,78 @@ Closing this requires an architectural change to the FTS key layout and is under
 active research. It is documented here as a known limitation rather than a
 defect that can be fixed by threading a provider.
 
+**Progress note (Encryption confidentiality reconciliation plan, Gap 2, Phase
+4 — 2026-07-13):** when a database `EncryptionProvider` is configured, the
+`{hexTerm}` segment above is replaced with an HMAC-SHA256 token derived via
+`EncryptionProvider.indexToken` — a sub-key distinct from (but derived from)
+the DEK via HKDF-SHA256 (`info = "kmdb-index-token"`), never the raw DEK
+directly. The HMAC input is domain-separated as `"{ns}:{field}:" + term`, so
+the same term in a different field or collection never produces the same
+token. This closes the **vocabulary-enumeration** attack this gap originally
+documented: an adversary with local SSTable access can no longer recover
+which terms appear anywhere in the database just by reading namespace names.
+Unencrypted databases are unaffected — they continue to use plaintext hex
+tokens, since there is no DEK to derive a sub-key from and no confidentiality
+property being claimed for them in the first place.
+
+This does **not** close every namespace-based side channel, only the specific
+one this gap names (recovering the literal term/value from the namespace
+name). The following statistical leakage remains, as an accepted limitation,
+even on an encrypted database:
+
+- **Term/value frequency** — the number of chunks in a base-term or
+  secondary-index namespace (its "posting list" size) reveals how often that
+  (unknown) term/value occurs, without revealing what it is.
+- **Per-term/per-value document count** — the number of distinct document
+  keys within a namespace reveals how many documents contain that (unknown)
+  term/value.
+- **Search-pattern / access-pattern leakage** — repeated queries against the
+  same namespace over time reveal that the same (unknown) term/value is being
+  searched for repeatedly, which combined with external context could narrow
+  down what it is.
+- **Co-occurrence** — an adversary who can correlate which namespaces are
+  read together within a single query (e.g. a multi-term BM25 search) can
+  infer that those (unknown) terms co-occur in the corpus, without knowing
+  the terms themselves.
+
+None of these reveal document *content* — they are the same class of
+metadata leakage the rest of this section already documents for `$meta`,
+manifests, and filenames (operational/statistical, not content). Closing them
+would require a materially different index structure (e.g. oblivious RAM or
+padding/bucketing schemes) that is out of scope for this plan.
+
+**DEK-rotation interaction:** passphrase or recovery-code rotation re-wraps
+the DEK under a new KEK but does not change the DEK itself (see _Key
+Derivation_ above), so `EncryptionProvider.indexToken`'s HKDF sub-key —
+derived from the DEK — is unchanged and every existing HMAC token remains
+valid across rotation; no index rebuild is triggered or needed. A future
+"change the DEK" feature (not currently implemented — there is no supported
+way to replace the DEK on an existing database) would invalidate every
+previously-derived token and require a full `$$fts:`/`$$index:`/`$$vault:fts:`
+rebuild, exactly as a software-version upgrade of the tokenisation scheme
+itself does today (see the `tokenMode` migration described next).
+
+**Format-version migration:** `FtsIndexState`, the secondary index's `$meta`
+state, and `VaultExtractionState` each persist a `tokenMode` (`hex` | `hmac`)
+discriminator alongside their existing status fields. At
+`KmdbDatabase.open()`, `FtsManager.checkAndTransitionOnOpen`,
+`IndexManager.checkTokenModeOnOpen`, and `VaultSearchManager.recover` each
+compare the persisted `tokenMode` against what the currently-running code
+would produce (`hmac` when a provider is configured, `hex` otherwise). A
+mismatch — which can only arise from a software-version upgrade of an
+already-encrypted database whose indexes were built by pre-Gap-2 code, since
+encryption itself cannot be toggled on an existing database
+(`KmdbDatabase.open()` throws `cannotProvisionNonEmptyDatabase` on non-empty
+databases) — triggers a purge of the stale-mode sub-namespaces (not merely a
+`stale` marking; the entries are unreachable by the new scheme's writes and
+reads, so leaving them in place would defeat this gap by keeping
+plaintext-derivable tokens on disk indefinitely) followed by a lazy rebuild,
+mirroring WI-1's model-identity invalidation for `VecIndexState`. `VecIndexState`
+itself carries no `tokenMode` — `VecManager`'s `$$vec:{ns}:{field}` and
+`$$vault:vec:idx:{sha256}` namespaces are keyed by document ID / chunk index,
+never by an embedded term or value, so there is no hex-tokenised namespace
+scheme for it to migrate away from.
+
 #### 3. Secondary index namespace names embed indexed values
 
 Secondary indexes use the layout `$$index:{ns}:{field}:{value}`, which embeds the
@@ -549,6 +621,19 @@ namespace names are part of the SSTable key and are never encrypted. This is not
 document content per se, but the indexed values drawn from documents — e.g.
 every distinct value of an indexed `status` or `email` field — are visible to
 anyone with SSTable access.
+
+**Progress note (Encryption confidentiality reconciliation plan, Gap 2, Phase
+4 — 2026-07-13):** identical fix and identical residual limitations to gap 2
+above — `{value}` becomes an HMAC-SHA256 token (`EncryptionProvider.
+indexToken`, message domain-separated as `"{ns}:{path}:" + hexEncodedValue`)
+when a provider is configured. One additional, index-specific consequence:
+`IndexWriter`'s hex encoding for `int`/`double` values is deliberately
+sort-order-preserving (documented for a *future* range-scan use — no current
+query path performs a range scan over a secondary index, only equality
+lookup via `IndexReader`), but an HMAC token is not order-preserving. This is
+a deferred limitation, not a regression: range-scan support for encrypted
+secondary indexes does not exist yet in either mode, so nothing that worked
+before stops working.
 
 #### 4. `MetaStore` values are not encrypted
 

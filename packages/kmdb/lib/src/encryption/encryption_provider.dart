@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'dart:convert' show utf8;
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
@@ -44,6 +45,56 @@ abstract interface class EncryptionProvider {
   ///
   /// Throws [EncryptionError] for other failure modes.
   Future<Uint8List> decrypt(Uint8List ciphertext);
+
+  /// Derives a deterministic, keyed namespace token for [message] (Gap 2 of
+  /// the Encryption confidentiality reconciliation plan, Q4).
+  ///
+  /// Used to replace the plaintext hex encoding of FTS terms and secondary
+  /// index values in KvStore namespace names (e.g. `$$fts:{ns}:{field}:
+  /// {hexTerm}`) with an HMAC-SHA256 token that does not reveal the
+  /// underlying term/value to anyone without the database's DEK. Callers
+  /// must pass an already domain-separated [message] so that the same term
+  /// or value in different fields/namespaces never collides:
+  /// `"{ns}:{field}:{term}"` for FTS, `"{ns}:{path}:{hexEncodedValue}"` for a
+  /// secondary index, `"{sha256}:{term}"` for vault FTS.
+  ///
+  /// The `:`-join is a plain concatenation, not a length-prefixed encoding,
+  /// so it is not fully collision-proof in the abstract: a collection
+  /// namespace or field/path containing a literal `:` could in theory shift
+  /// the split point and collide with a different (ns, field, term) triple
+  /// that concatenates to the same string (e.g. `ns="a", field="b:c"` vs.
+  /// `ns="a", field="b", term` starting with `"c:"`). The vault-FTS domain
+  /// (`"{sha256}:{term}"`) is immune — `sha256` is always exactly 64 hex
+  /// characters, so the split point is fixed regardless of `term`'s content
+  /// — and the secondary-index domain's final component is always
+  /// hex-encoded (`{hexEncodedValue}`), so it cannot itself introduce a
+  /// `:`. The FTS domain's `ns`/`field` (and the secondary-index domain's
+  /// `ns`/`path`) are drawn from application-chosen collection/field names,
+  /// not attacker-controlled input in this threat model, and are not
+  /// currently escaped against embedded `:` — a theoretical gap, not
+  /// exploitable via untrusted data, and left unfixed as out of scope for
+  /// this plan (Gap 2 exists to hide term/value *content*, not to defend
+  /// against a database schema deliberately designed to produce colliding
+  /// tokens).
+  ///
+  /// The token is computed from a sub-key **derived from, but distinct from,
+  /// the DEK** via HKDF-SHA256 (`info = "kmdb-index-token"`) — never the raw
+  /// DEK directly — so that a compromised index token cannot be used to
+  /// derive the DEK itself. The sub-key is derived once (lazily, on first
+  /// call) and cached for the lifetime of this provider.
+  ///
+  /// Returns a 32-character lowercase hex string (a 16-byte / 128-bit
+  /// truncation of the full 32-byte HMAC-SHA256 output — ample forgery/
+  /// collision resistance for a local-disk namespace token while keeping
+  /// namespace names compact; see `namespace_codec.dart`'s 255-byte cap).
+  ///
+  /// Deterministic and reproducible across process restarts for a given DEK:
+  /// the same [message] always produces the same token as long as the
+  /// database's DEK is unchanged. Passphrase/recovery-code rotation re-wraps
+  /// the DEK but does not change it, so tokens survive rotation — see §31's
+  /// "DEK rotation and index tokens" note. A future "change the DEK" feature
+  /// would invalidate every token and require a full index rebuild.
+  Future<String> indexToken(String message);
 }
 
 /// AES-256-GCM implementation of [EncryptionProvider].
@@ -161,4 +212,54 @@ final class AesGcmEncryptionProvider implements EncryptionProvider {
   /// need to extract the DEK from an unlocked provider. Must not be stored or
   /// logged.
   Uint8List get dek => Uint8List.fromList(_dek);
+
+  // ── Namespace token derivation (Gap 2, Q4) ─────────────────────────────────
+
+  /// HKDF info string for [indexToken]'s sub-key: `kmdb-index-token`.
+  ///
+  /// Domain-separates this HKDF output from every other HKDF use in KMDB
+  /// (currently only the recovery-KEK derivation in `key_derivation.dart`,
+  /// whose info string is `kmdb-recovery-kek-v1`), so the two derivations can
+  /// never collide even though both start from key material tied to the same
+  /// database.
+  static const List<int> _kIndexTokenInfo = [
+    // b'kmdb-index-token'
+    0x6b, 0x6d, 0x64, 0x62, 0x2d, 0x69, 0x6e, 0x64,
+    0x65, 0x78, 0x2d, 0x74, 0x6f, 0x6b, 0x65, 0x6e,
+  ];
+
+  /// The HMAC-SHA256 algorithm used both for HKDF (sub-key derivation) and
+  /// for computing the per-message token itself.
+  static final _hmacSha256 = Hmac(Sha256());
+
+  /// Lazily-derived, cached sub-key used by [indexToken].
+  ///
+  /// Memoized as a `Future` (not the resolved bytes) so that concurrent
+  /// callers racing to compute the very first token all await the same
+  /// in-flight derivation rather than each independently deriving it — HKDF
+  /// is deterministic, so a duplicate derivation would not be incorrect, just
+  /// wasteful.
+  Future<SecretKey>? _indexTokenSubKeyFuture;
+
+  Future<SecretKey> _indexTokenSubKey() {
+    return _indexTokenSubKeyFuture ??= Hkdf(hmac: _hmacSha256, outputLength: 32)
+        .deriveKey(
+          secretKey: SecretKey(_dek),
+          nonce: const <int>[],
+          info: _kIndexTokenInfo,
+        );
+  }
+
+  @override
+  Future<String> indexToken(String message) async {
+    final subKey = await _indexTokenSubKey();
+    final mac = await _hmacSha256.calculateMac(
+      utf8.encode(message),
+      secretKey: subKey,
+    );
+    // Truncate the 32-byte HMAC-SHA256 output to 16 bytes (128 bits) — see
+    // the [EncryptionProvider.indexToken] doc comment for the rationale.
+    final truncated = mac.bytes.sublist(0, 16);
+    return truncated.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  }
 }

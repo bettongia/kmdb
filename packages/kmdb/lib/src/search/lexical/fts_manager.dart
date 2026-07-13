@@ -131,25 +131,103 @@ final class FtsManager implements WriteAugmentor {
   /// read on the hot path.
   final _statusCache = <String, FtsIndexStatus>{};
 
-  // ── Startup ─────────────────────────────────────────────────────────────────
+  /// The [FtsTokenMode] the currently-configured [_encryption] would
+  /// produce. Stamped onto every [FtsIndexState] this manager persists so a
+  /// later [checkAndTransitionOnOpen] can detect a format-version mismatch
+  /// (Gap 2, Q5).
+  FtsTokenMode get _currentTokenMode =>
+      _encryption != null ? FtsTokenMode.hmac : FtsTokenMode.hex;
 
-  /// Called during [KmdbDatabase.open] to recover from unclean shutdowns.
+  /// Called during [KmdbDatabase.open] to recover from unclean shutdowns and
+  /// detect a namespace-token format-version upgrade (Gap 2, Q5).
   ///
-  /// Any index found in `syncing` state indicates that [applyDelta] was
-  /// interrupted by a crash. The index is transitioned to `stale` so the next
-  /// call to [ensureBuilt] triggers a full rebuild.
+  /// Two independent checks per declared index:
+  ///
+  /// 1. **Crash recovery:** any index found in `syncing` state indicates that
+  ///    [applyDelta] was interrupted by a crash. The index is transitioned to
+  ///    `stale` so the next call to [ensureBuilt] triggers a full rebuild.
+  /// 2. **Token-mode migration:** if the persisted [FtsIndexState.tokenMode]
+  ///    does not match what the currently-running code would produce (`hmac`
+  ///    when an [EncryptionProvider] is configured, `hex` otherwise), the
+  ///    index's base-term namespaces were tokenised under a scheme the
+  ///    current code no longer computes — those entries are unreachable by
+  ///    future reads/writes and, left in place, would defeat Gap 2 by leaving
+  ///    the plaintext-derivable hex tokens it closes on disk indefinitely.
+  ///    [_purgeBaseNamespaces] deletes every base-term sub-namespace for the
+  ///    index (the *only* namespace type Gap 2 affects — the overlay/doc/
+  ///    corpus namespaces are fixed per `(ns, field)` and are safely
+  ///    overwritten in place by the next [_buildIndex] run), then the state
+  ///    is reset to [FtsIndexStatus.undefined] so the index rebuilds lazily
+  ///    on the next [ensureBuilt] call — the same path used for a brand-new
+  ///    index (mirrors [VecManager.checkAndTransitionOnOpen]'s model-identity
+  ///    check).
+  ///
+  /// Must run **after** [MetaStore]'s [EncryptionProvider] has been bound
+  /// (`KmdbDatabase.open`, Gap 3/Q1), since the index state read here is
+  /// itself encrypted.
+  ///
+  /// This is not a runtime encryption toggle — see [FtsTokenMode]'s doc
+  /// comment.
   Future<void> checkAndTransitionOnOpen() async {
     for (final def in _defs) {
-      final state = await _loadState(def.collection, def.field);
-      // Populate the status cache so interceptWrite can make decisions without
-      // an async meta read on the hot write path.
-      _statusCache[_statusCacheKey(def.collection, def.field)] = state.status;
+      var state = await _loadState(def.collection, def.field);
+
       if (state.status == FtsIndexStatus.syncing) {
-        await _saveState(
-          state.copyWith(status: FtsIndexStatus.stale),
-          def.collection,
-          def.field,
+        state = state.copyWith(status: FtsIndexStatus.stale);
+        await _saveState(state, def.collection, def.field);
+      }
+
+      if (state.status != FtsIndexStatus.undefined &&
+          state.tokenMode != _currentTokenMode) {
+        await _purgeBaseNamespaces(def.collection, def.field);
+        state = FtsIndexState(
+          namespace: def.collection,
+          field: def.field,
+          status: FtsIndexStatus.undefined,
         );
+        await _saveState(state, def.collection, def.field);
+      }
+
+      // Populate the status cache so interceptWrite can make decisions
+      // without an async meta read on the hot write path.
+      _statusCache[_statusCacheKey(def.collection, def.field)] = state.status;
+    }
+  }
+
+  /// Deletes every base-term sub-namespace (`$$fts:{ns}:{field}:{token}`) for
+  /// `(ns, field)`, in batches of 200 entries per sub-namespace — mirrors
+  /// [IndexManager.removeIndex]'s sub-namespace purge.
+  ///
+  /// Used exclusively by [checkAndTransitionOnOpen]'s token-mode migration:
+  /// the prefix `$$fts:{ns}:{field}:` matches only base-term namespaces
+  /// (the sibling overlay/doc/corpus namespaces use the fixed literal
+  /// segments `overlay`/`doc`/`corpus` immediately after `$$fts:`, so they
+  /// only collide if a real collection were literally named `overlay`,
+  /// `doc`, or `corpus` — a pre-existing naming-scheme assumption, not
+  /// introduced here).
+  Future<void> _purgeBaseNamespaces(String ns, String field) async {
+    final subNsPrefix =
+        r'$$fts:'
+        '$ns:$field:';
+    final all = await _store.allStoredNamespaces();
+    final subNamespaces = all.where((n) => n.startsWith(subNsPrefix));
+
+    for (final subNs in subNamespaces) {
+      const batchSize = 200;
+      var batch = WriteBatch();
+      var count = 0;
+
+      await for (final entry in _store.scan(subNs)) {
+        batch.delete(subNs, entry.key);
+        count++;
+        if (count >= batchSize) {
+          await _store.writeBatchInternal(batch);
+          batch = WriteBatch();
+          count = 0;
+        }
+      }
+      if (!batch.isEmpty) {
+        await _store.writeBatchInternal(batch);
       }
     }
   }
@@ -415,6 +493,7 @@ final class FtsManager implements WriteAugmentor {
         namespace: ns,
         field: field,
         status: FtsIndexStatus.building,
+        tokenMode: _currentTokenMode,
       ),
       ns,
       field,
@@ -481,7 +560,7 @@ final class FtsManager implements WriteAugmentor {
         final oldDocInfo = await _readDocInfo(ns, field, docId);
         for (final oldTerm in oldDocInfo.terms) {
           if (!overlayMap.containsKey(oldTerm)) {
-            writeBatch.delete(_termNamespace(ns, field, oldTerm), docId);
+            writeBatch.delete(await _termNamespace(ns, field, oldTerm), docId);
           }
         }
 
@@ -563,6 +642,7 @@ final class FtsManager implements WriteAugmentor {
         field: field,
         status: FtsIndexStatus.current,
         builtAt: now,
+        tokenMode: _currentTokenMode,
       ),
       ns,
       field,
@@ -762,11 +842,11 @@ final class FtsManager implements WriteAugmentor {
     final termDf = <String, int>{};
 
     for (final term in queryTerms) {
-      // Scan the per-term namespace: `$$fts:{ns}:{field}:{hexTerm}`.
+      // Scan the per-term namespace: `$$fts:{ns}:{field}:{token}`.
       // All entries in this namespace have docId as the key (32-char UUID),
       // so no startKey/endKey constraints are needed.
       await for (final entry in _store.scan(
-        _termNamespace(namespace, field, term),
+        await _termNamespace(namespace, field, term),
       )) {
         final docId = entry.key;
 
@@ -857,10 +937,10 @@ final class FtsManager implements WriteAugmentor {
       if (decoded is String && decoded == kFtsTombstone) {
         // Remove base entries for this document by looking up the stored terms
         // from the doc info namespace. Base entries use namespace-per-term:
-        // each term has its own namespace `$$fts:{ns}:{field}:{hexTerm}`.
+        // each term has its own namespace `$$fts:{ns}:{field}:{token}`.
         final docInfo = await _readDocInfo(namespace, field, docId);
         for (final term in docInfo.terms) {
-          batch.delete(_termNamespace(namespace, field, term), docId);
+          batch.delete(await _termNamespace(namespace, field, term), docId);
         }
         batch.delete(overlayNs, docId);
         batch.delete(docNs, docId);
@@ -875,7 +955,10 @@ final class FtsManager implements WriteAugmentor {
         for (final oldTerm in oldDocInfo.terms) {
           if (!currentTerms.containsKey(oldTerm)) {
             // Term was removed in the update — delete stale base entry.
-            batch.delete(_termNamespace(namespace, field, oldTerm), docId);
+            batch.delete(
+              await _termNamespace(namespace, field, oldTerm),
+              docId,
+            );
           }
         }
 
@@ -885,7 +968,11 @@ final class FtsManager implements WriteAugmentor {
             _encodeCborInt(t.value),
             _encryption,
           );
-          batch.put(_termNamespace(namespace, field, t.key), docId, wrapped);
+          batch.put(
+            await _termNamespace(namespace, field, t.key),
+            docId,
+            wrapped,
+          );
         }
 
         // Update doc info to reflect the current terms (post-compaction).
@@ -1026,28 +1113,47 @@ final class FtsManager implements WriteAugmentor {
 
   // ── Namespace helpers ─────────────────────────────────────────────────────
 
-  /// Per-term namespace: `$$fts:{ns}:{field}:{hexTerm}`.
+  /// Per-term namespace: `$$fts:{ns}:{field}:{token}`.
   ///
   /// The `$$` prefix marks this as a local-only namespace — its contents are
   /// never uploaded to the sync folder. Each device rebuilds its FTS index
   /// independently from document data.
   ///
-  /// The term is UTF-8 encoded and hex-stringified (same approach as
-  /// `IndexWriter` for field values). Within this namespace, the key is the
-  /// 32-character UUIDv7 docId and the value is a CBOR-encoded term frequency.
+  /// [_termToken] resolves `{token}`: plaintext hex when this database is
+  /// unencrypted, or an HMAC-SHA256 token when it is (Encryption
+  /// confidentiality reconciliation plan, Gap 2). Within this namespace, the
+  /// key is the 32-character UUIDv7 docId and the value is a CBOR-encoded
+  /// term frequency.
   ///
   /// Using a separate namespace per term keeps all keys as 32-char hex UUIDs,
   /// satisfying the KvStore key constraint.
-  static String _termNamespace(String ns, String field, String term) {
-    final hexTerm = _termToHex(term);
+  Future<String> _termNamespace(String ns, String field, String term) async {
+    final token = await _termToken(ns, field, term);
     return r'$$fts:'
-        '$ns:$field:$hexTerm';
+        '$ns:$field:$token';
   }
 
   /// Encodes [term] as a lowercase hex string of its UTF-8 bytes.
+  ///
+  /// Used directly as the namespace token when this database is unencrypted
+  /// (`tokenMode: hex`) — see [_termToken].
   static String _termToHex(String term) {
     final bytes = utf8.encode(term);
     return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  }
+
+  /// Resolves the namespace-suffix token for `(ns, field, term)`.
+  ///
+  /// When [_encryption] is `null` (unencrypted database), returns the
+  /// plaintext hex encoding via [_termToHex] — unchanged from the pre-Gap-2
+  /// behaviour. When [_encryption] is set, returns an HMAC-SHA256 token via
+  /// [EncryptionProvider.indexToken], domain-separated by `ns` and `field` so
+  /// the same term in a different field or collection never produces the
+  /// same token (Encryption confidentiality reconciliation plan, Gap 2, Q4).
+  Future<String> _termToken(String ns, String field, String term) {
+    final encryption = _encryption;
+    if (encryption == null) return Future.value(_termToHex(term));
+    return encryption.indexToken('$ns:$field:$term');
   }
 
   /// Overlay namespace: `$$fts:overlay:{ns}:{field}`.
@@ -1089,7 +1195,7 @@ final class FtsManager implements WriteAugmentor {
 
   /// Writes one base entry per unique term into its own term namespace.
   ///
-  /// Each base entry: namespace = `$$fts:{ns}:{field}:{hexTerm}`, key = docId.
+  /// Each base entry: namespace = `$$fts:{ns}:{field}:{token}`, key = docId.
   ///
   /// Values are scalar CBOR ints (term frequency), not `Map`-shaped, so they
   /// are wrapped with [EncryptionEnvelope] rather than [ValueCodec]
@@ -1107,7 +1213,7 @@ final class FtsManager implements WriteAugmentor {
         _encryption,
       );
       batch.put(
-        _termNamespace(namespace, def.field, entry.key),
+        await _termNamespace(namespace, def.field, entry.key),
         docId,
         wrapped,
       );

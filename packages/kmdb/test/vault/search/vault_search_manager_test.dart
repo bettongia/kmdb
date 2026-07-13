@@ -1078,6 +1078,188 @@ void main() {
     });
   });
 
+  // ── Stacked upgrade: model version + token mode (Gap 2, B1 regression) ────
+
+  group('recover() — stacked model-version + token-mode upgrade (B1)', () {
+    test('a blob needing BOTH a model-version bump AND a hex→hmac token '
+        'migration in the same recover() call has its stale hex namespaces '
+        'purged, not orphaned', () async {
+      // Simulates an encrypted pre-Gap-2 database that also picks up a
+      // model swap on the next open() — a real, reachable scenario
+      // (kmdb-qa B1): before this fix, `_checkTokenMode`'s purge was
+      // skipped entirely whenever `_checkModelVersion` fired first for the
+      // same blob, silently leaving the hex-tokenised `$$vault:fts:`
+      // namespaces (and the plaintext-derivable search vocabulary they
+      // leak) on disk indefinitely.
+      final dek = await KeyDerivation.generateDek();
+      final provider = AesGcmEncryptionProvider(dek);
+
+      final sha256 = await _ingest(
+        vaultStore,
+        Uint8List.fromList(utf8.encode('stacked upgrade test content')),
+      );
+
+      // Seed hex-tokenised BM25 namespaces directly — this is what
+      // pre-Gap-2 code would have written even on an encrypted database
+      // (Gap 2 did not exist yet, so namespace tokens were always hex
+      // regardless of encryption state).
+      final termBatch = WriteBatch();
+      await const VaultBm25Writer().write(
+        sha256: sha256,
+        termFrequencies: [
+          {'mountains': 2, 'rivers': 1},
+        ],
+        totalTokens: 3,
+        batch: termBatch,
+        encryption: null, // pre-Gap-2: always hex, regardless of encryption.
+      );
+      await kvStore.writeBatchInternal(termBatch);
+
+      final hexNamespaces = (await kvStore.allStoredNamespaces())
+          .where((n) => n.startsWith('$kVaultFtsPrefix$sha256:'))
+          .toSet();
+      expect(hexNamespaces, isNotEmpty);
+
+      // Seed the `indexed` extract state: an old model version AND an
+      // absent `ftsTokenMode` (defaults to hex — see
+      // VaultExtractionState.fromMap), encrypted (Gap 1/3 already active
+      // on this "pre-Gap-2" database).
+      final indexedState = VaultExtractionState(
+        sha256: sha256,
+        status: VaultExtractionStatus.indexed,
+        modelVersion: 'old-model-v0',
+        chunkCount: 1,
+      );
+      await kvStore.writeBatchInternal(
+        WriteBatch()..put(
+          '$kVaultExtractPrefix$sha256',
+          kVaultCorpusSentinelKey,
+          await indexedState.encode(encryption: provider),
+        ),
+      );
+
+      // Reopen with BOTH a new EncryptionProvider (same DEK — the
+      // provider is what changed, i.e. the code version, not the DEK) and
+      // a different embedding model — the stacked-upgrade condition.
+      final model = _FakeEmbeddingModel();
+      final manager = VaultSearchManager(
+        config: VaultSearchConfig(
+          chunkSize: 50,
+          chunkOverlap: 5,
+          extractors: [_FixedTextExtractor()],
+        ),
+        kvStore: kvStore,
+        vaultStore: vaultStore,
+        embeddingModel: model,
+        encryption: provider,
+      );
+      manager.attach();
+      addTearDown(manager.close);
+      await manager.recover();
+
+      final finalState = await _awaitTerminal(
+        kvStore,
+        sha256,
+        encryption: provider,
+      );
+      expect(
+        finalState.status,
+        equals(VaultExtractionStatus.indexed),
+        reason:
+            'stacked model-version + token-mode mismatch must still '
+            'converge to a fully re-indexed blob',
+      );
+      expect(
+        finalState.modelVersion,
+        equals('fake-model-v1'),
+        reason: 'the model-version bump must have taken effect',
+      );
+
+      // The critical B1 assertion: none of the stale hex-tokenised
+      // namespaces survive recover() — they must be purged even though
+      // the model-version check also fired for this blob.
+      final namespacesAfter = await kvStore.allStoredNamespaces();
+      for (final staleNs in hexNamespaces) {
+        expect(
+          namespacesAfter,
+          isNot(contains(staleNs)),
+          reason:
+              'stale hex-tokenised namespace $staleNs must be purged by '
+              'recover(), not orphaned alongside a model-version re-index',
+        );
+      }
+
+      // And the blob is correctly searchable again — new BM25 entries
+      // exist somewhere under $$vault:fts:{sha256}: (HMAC-tokenised now).
+      final namespacesForBlob = namespacesAfter
+          .where((n) => n.startsWith('$kVaultFtsPrefix$sha256:'))
+          .toSet();
+      expect(namespacesForBlob, isNotEmpty);
+      expect(namespacesForBlob.intersection(hexNamespaces), isEmpty);
+    });
+
+    test('a model-version-only mismatch (no token-mode mismatch) still '
+        're-indexes correctly with no spurious purge (regression guard for '
+        'the B1 fix)', () async {
+      // Same database, same tokenMode before and after (both hex,
+      // unencrypted) — only the model version changes. The B1 fix must
+      // not have turned _checkTokenMode into an unconditional purge.
+      final sha256 = await _ingest(
+        vaultStore,
+        Uint8List.fromList(utf8.encode('model-only upgrade test content')),
+      );
+
+      final termBatch = WriteBatch();
+      await const VaultBm25Writer().write(
+        sha256: sha256,
+        termFrequencies: [
+          {'oceans': 1},
+        ],
+        totalTokens: 1,
+        batch: termBatch,
+      );
+      await kvStore.writeBatchInternal(termBatch);
+
+      final namespacesBefore = (await kvStore.allStoredNamespaces())
+          .where((n) => n.startsWith('$kVaultFtsPrefix$sha256:'))
+          .toSet();
+      expect(namespacesBefore, isNotEmpty);
+
+      final indexedState = VaultExtractionState(
+        sha256: sha256,
+        status: VaultExtractionStatus.indexed,
+        modelVersion: 'old-model-v0',
+        chunkCount: 1,
+      );
+      await kvStore.writeBatchInternal(
+        WriteBatch()..put(
+          '$kVaultExtractPrefix$sha256',
+          kVaultCorpusSentinelKey,
+          await indexedState.encode(),
+        ),
+      );
+
+      final model = _FakeEmbeddingModel();
+      final manager = VaultSearchManager(
+        config: VaultSearchConfig(
+          chunkSize: 50,
+          chunkOverlap: 5,
+          extractors: [_FixedTextExtractor()],
+        ),
+        kvStore: kvStore,
+        vaultStore: vaultStore,
+        embeddingModel: model,
+      );
+      manager.attach();
+      addTearDown(manager.close);
+      await manager.recover();
+
+      final finalState = await _awaitTerminal(kvStore, sha256);
+      expect(finalState.status, equals(VaultExtractionStatus.indexed));
+      expect(finalState.modelVersion, equals('fake-model-v1'));
+    });
+  });
+
   // ── Crash recovery ────────────────────────────────────────────────────────
 
   group('recover() — crash scenarios', () {

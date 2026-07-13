@@ -257,7 +257,7 @@ Future<void> _seedVaultSearchEntries(
 }) async {
   // ── BM25 index ($$vault:fts:corpus: and $$vault:fts:{sha256}: namespaces) ──
   final bm25Batch = WriteBatch();
-  const VaultBm25Writer().write(
+  await const VaultBm25Writer().write(
     sha256: sha256,
     termFrequencies: [
       {'machin': 3, 'learn': 2},

@@ -245,11 +245,12 @@ Future<void> _seedBm25(
     (sum, tf) => sum + tf.values.fold<int>(0, (s, v) => s + v),
   );
   final raw = WriteBatch();
-  const VaultBm25Writer().write(
+  await const VaultBm25Writer().write(
     sha256: sha256,
     termFrequencies: termFrequencies,
     totalTokens: totalTokens,
     batch: raw,
+    encryption: encryption,
   );
   final batch = WriteBatch();
   for (final entry in raw.entries) {
@@ -1301,7 +1302,7 @@ void main() {
         await _seedVaultBlob(vaultStore, sha256);
         await _seedBm25(kvStore, sha256, [
           {'snippet': 2},
-        ]);
+        ], encryption: provider);
         await _seedDocref(kvStore, sha256, _docId1, 'attachment');
 
         // Write ENCRYPTED extract artifacts via the manager's codec.
@@ -1354,7 +1355,7 @@ void main() {
       await _seedVaultBlob(vaultStore, sha256);
       await _seedBm25(kvStore, sha256, [
         {'snippet': 2},
-      ]);
+      ], encryption: provider);
       await _seedDocref(kvStore, sha256, _docId1, 'attachment');
 
       const text = 'Encrypted text that will be corrupted after writing.';

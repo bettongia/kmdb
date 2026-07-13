@@ -1214,15 +1214,56 @@ Implementation:
 
 ### Phase 4 — Gap 2: HMAC-keyed namespace tokens
 
-- [ ] Add sub-key derivation to `EncryptionProvider` (`deriveSubKey(info)` or
+- [x] Add sub-key derivation to `EncryptionProvider` (`deriveSubKey(info)` or
       a purpose-built `indexToken(domain, term)`), using the existing HKDF
       machinery in `key_derivation.dart`, `info = "kmdb-index-token"` (Q4).
-- [ ] Replace `FtsManager._termToHex`, `index_writer._encodeValueHex`/
+      **Done as `Future<String> indexToken(String message)`** on the
+      `EncryptionProvider` interface (a single domain-separated message
+      string, not a split `domain`/`term` pair — simpler call sites, same
+      effect). `AesGcmEncryptionProvider` derives the sub-key lazily on first
+      call via the existing `cryptography` package's async `Hkdf`/`Hmac`
+      machinery (bit-for-bit the same approach as `key_derivation.dart`'s
+      recovery-KEK derivation), caches it as a memoized `Future<SecretKey>`
+      (concurrent first-callers await the same in-flight derivation — see the
+      "concurrent first calls" test), then computes HMAC-SHA256 over the
+      message and truncates to 16 bytes (32 hex chars) — verified this
+      requires no new dependency: `calculateMac` is part of the same
+      `cryptography` package already used throughout this file, so
+      `indexToken` is `async` end-to-end (no synchronous fast path was
+      needed — every production call site is already inside an `async`
+      function; verified by grep before converting). Tested in
+      `test/encryption/encryption_provider_test.dart`'s `indexToken` group:
+      determinism, cross-instance reproducibility (same DEK), 32-hex-char
+      format, domain separation (field and collection), different-DEK
+      produces a different token, concurrent-call safety, and a
+      raw-DEK-non-leakage guard.
+- [x] Replace `FtsManager._termToHex`, `index_writer._encodeValueHex`/
       `indexNamespaceForValue`, and `VaultBm25Writer._termToHex` with
       HMAC-SHA256 token generation when a provider is active; domain-separate
       per 0_08.md (`"{ns}:{field}:" + term` for FTS, `"{ns}:{path}:" + value`
       for index). Fall back to today's plaintext hex when encryption is off.
-- [ ] Add a `tokenMode: hex | hmac` discriminator to `FtsIndexState`,
+      **Done exactly as specified**, plus `VaultBm25Writer._termNamespace`
+      domain-separated as `"{sha256}:" + term` (the vault-FTS equivalent of
+      `ns:field`, since vault indexing is scoped per blob, not per
+      collection field). Secondary-index domain separation clarified in code
+      comments: the HMAC message uses the *hex-encoded* value
+      (`_encodeValueHex(value)`) as the value component, not a re-derived
+      "natural" string form — this reuses the existing canonical string
+      representation `IndexWriter` already produces for every value type
+      (int/double/bool/string) rather than inventing a second one, and is
+      the literal reading of "`{value}`" in the plan's formula. Making the
+      namespace-computation chain `async` required converting
+      `IndexWriter.addEntries`/`removeEntries`/`indexNamespaceForValue` and
+      `IndexReader.lookupByValue` from sync to async (all call sites were
+      already inside `async` functions — verified by grep, zero production
+      code needed restructuring beyond adding `await`); `VaultBm25Writer`
+      keeps its "static const, values stay raw/unwrapped" character for Gap
+      1 but necessarily gains an `EncryptionProvider?` *parameter* (not
+      field) on `write`/`deleteTermEntry` for Gap 2's namespace computation,
+      since — unlike Gap 1's values — the namespace name cannot be
+      wrapped/computed after the fact by `VaultSearchManager`; documented
+      this split explicitly in the class doc comment.
+- [x] Add a `tokenMode: hex | hmac` discriminator to `FtsIndexState`,
       `VecIndexState`, and the secondary index's `$meta` state (Q5); on
       `open()`, detect a mismatch between the stored mode and what the
       current code version would produce (a **format-version mismatch**, not
@@ -1231,15 +1272,55 @@ Implementation:
       index, mirroring WI-1's model-identity invalidation pattern. This
       detection must run only after Phase 2's `MetaStore` provider binding is
       in place, since the index state being read is itself now encrypted.
-- [ ] Resolve and implement Q3 (empty `$$index:` value).
-- [ ] Document the residual statistical side-channel limitations (term
+      **Deviation found during implementation, documented here rather than
+      silently applied: `VecIndexState` does NOT get a `tokenMode` field.**
+      Verified against the actual code (`vec_manager.dart`, all
+      `VecIndexState.*Namespace` helpers): `$$vec:{ns}:{field}`,
+      `$$vec:corpus:{ns}:{field}`, and `$$vec:truncated:{ns}:{field}` are
+      all keyed by document ID, never by an embedded term or value the way
+      `$$fts:{ns}:{field}:{token}` and `$$index:{ns}:{path}:{token}` are —
+      there is no hex-tokenised namespace scheme for Vec to migrate away
+      from in the first place (confirmed by grepping `vec_manager.dart` for
+      any hex/`toRadixString` encoding: none exists). The same is true of
+      `VaultVecWriter`'s `$$vault:vec:idx:{sha256}` (keyed by chunk index,
+      not by term). Adding an always-inert `tokenMode` field to
+      `VecIndexState` would be exactly the kind of dead-weight/no-op state
+      CLAUDE.md warns against. Implemented instead: `tokenMode` on
+      `FtsIndexState` (checked in `FtsManager.checkAndTransitionOnOpen`,
+      which purges stale-mode base-term namespaces via a new
+      `_purgeBaseNamespaces` helper before resetting to `undefined`) and a
+      new `IndexTokenMode` enum + `tokenMode` field on the secondary index's
+      `IndexState` (checked in a new `IndexManager.checkTokenModeOnOpen`,
+      called from `KmdbDatabase.open()` right after `IndexManager`
+      construction and before `checkInterruptedBuilds` so a purge-triggered
+      index is never also misreported as an interrupted build — it reuses
+      the existing `removeIndex()` method, which already purges every
+      sub-namespace and the `$meta` state entry). Vault FTS gets an
+      analogous per-blob `ftsTokenMode` field on `VaultExtractionState`
+      (reusing the `FtsTokenMode` enum), checked in a new
+      `VaultSearchManager._checkTokenMode`, called from `recover()`
+      alongside the existing `_checkModelVersion` check (mutually exclusive
+      with it — `_checkModelVersion` now returns `bool` so `recover()` can
+      skip the redundant second reset-and-enqueue when a model-version
+      change already triggered one; `_enqueue` has no dedup).
+- [x] Resolve and implement Q3 (empty `$$index:` value). **Confirmed
+      unchanged**: `IndexWriter.addEntries` still writes `Uint8List(0)` —
+      the namespace token alone carries the (now-opaque) value, so an empty
+      value remains correct and adds no GCM overhead, exactly as Q3
+      concluded during investigation.
+- [x] Document the residual statistical side-channel limitations (term
       frequency, search-pattern leakage, co-occurrence, per-term document
       count) in §31's "Threat Model & Confidentiality Boundaries" section as
-      an accepted limitation, per 0_08.md's own framing.
-- [ ] Document the DEK-rotation interaction: passphrase rotation re-wraps but
+      an accepted limitation, per 0_08.md's own framing. Added as a
+      "Progress note" under gaps 2 and 3 (not yet marked "resolved" —
+      that bookkeeping is Phase 5's job per the existing convention gap 1's
+      note already established).
+- [x] Document the DEK-rotation interaction: passphrase rotation re-wraps but
       does not change the DEK, so HMAC tokens survive rotation; a future
-      "change the DEK" feature would require a full index rebuild.
-- [ ] Tests: token generation is deterministic and reproducible from the same
+      "change the DEK" feature would require a full index rebuild. Added
+      alongside the residual-leakage note in §31, plus in
+      `EncryptionProvider.indexToken`'s doc comment.
+- [x] Tests: token generation is deterministic and reproducible from the same
       DEK across process restarts; different fields/namespaces with the same
       term produce different tokens (domain separation); an encrypted
       database whose index state predates Gap 2 (`tokenMode: hex`) rebuilds
@@ -1248,20 +1329,162 @@ Implementation:
       scenario — see Q5, **not** a runtime encryption toggle, which cannot
       occur); a database provisioned unencrypted continues to use hex
       indefinitely (a distinct database, not a toggled state); query-time
-      namespace reconstruction matches write-time for every mode.
+      namespace reconstruction matches write-time for every mode. **Done**:
+      `test/encryption/encryption_provider_test.dart` (`indexToken` group,
+      9 tests — determinism, domain separation ×2, format, different-DEK,
+      concurrency, non-leakage); new `test/search/lexical/
+      fts_token_mode_test.dart` (3 tests) and new `test/query/
+      index_token_mode_test.dart` (3 tests), each covering: real
+      hex→hmac migration with a purge assertion (stale namespaces gone,
+      new namespaces disjoint from the old set, search/lookup still
+      correct after rebuild), the "unencrypted stays on hex, no spurious
+      rebuild" regression guard, and write-time/query-time namespace-match
+      across two manager instances sharing one DEK. The vault-FTS migration
+      is exercised end-to-end (not just unit-tested) by rewriting
+      `test/vault/search/vault_extract_encryption_test.dart`'s existing
+      "toggle-on / mixed-state" integration test — see that file's doc
+      comment for why it needed rewriting: it previously modelled a
+      "mixed-state, both directly searchable" scenario for Gap 1 (value
+      encryption, which genuinely does coexist indefinitely since each
+      artifact is self-describing) that is **not** true the same way for
+      Gap 2 (namespace tokens, which are not self-describing — an
+      HMAC-mode manager cannot find hex-mode entries without recover()'s
+      migration step). The rewritten test adds the `attach()`/`recover()`
+      calls the original test omitted (mirroring `KmdbDatabase.open()`'s
+      real sequence exactly) and asserts the blob is migrated *before* any
+      search runs against it, which is the actual production guarantee.
+      All two-manager-instance tests here and in the two new unit-test
+      files follow the same "construct a second manager over the same
+      KvStoreImpl" technique the plan's own investigation established as
+      the valid way to test this mechanism, given a literal
+      "toggle encryption on an existing KmdbDatabase" is architecturally
+      impossible (B5) — confirmed this reasoning extends soundly to
+      `FtsManager`/`IndexManager` directly (not just `VaultSearchManager`),
+      since none of the three collaborators enforce single-instance-per-
+      store at the type level.
 
 **Phase 4 close-out (see the workflow policy above):**
 
-- [ ] Verify every task/step checkbox above is checked off — do not proceed
+- [x] Verify every task/step checkbox above is checked off — do not proceed
       to commit with any left unchecked.
-- [ ] Run `make pre_commit` (format, analyze, license_check, scoped tests).
-- [ ] Hand off to `kmdb-qa` for sign-off on Phase 4's diff specifically —
+- [x] Run `make pre_commit` (format, analyze, license_check, scoped tests).
+      Format check initially failed (8 files needed reformatting — new test
+      files plus a few edited lib files); fixed with `make format` and
+      reran. All four sub-gates now pass independently verified:
+      `dart format --output=none --set-exit-if-changed packages` (exit 0),
+      `melos run analyze` (exit 0, "No issues found!" across all 7
+      packages), `make license_check` (exit 0), and the full `kmdb` test
+      suite (2367 passed, 12 skipped E2E, 0 failed).
+- [x] Hand off to `kmdb-qa` for sign-off on Phase 4's diff specifically —
       this is the largest, least mechanical phase (new HMAC/HKDF primitive,
       `tokenMode` rebuild-on-upgrade behaviour), so give it particular
       attention: token determinism, domain separation, and the rebuild path
       actually exercised end-to-end, not just unit-tested in isolation.
       Resolve every blocking item before committing.
-- [ ] Commit Phase 4 on the plan's branch.
+
+**`kmdb-qa` review, round 1 (2026-07-13):** thorough pass — confirmed correct:
+the `indexToken` HKDF/HMAC crypto (genuinely tested, not just claimed), the
+sequencing after Phase 2's provider binding, the `VecIndexState`-has-no-`
+tokenMode` deviation (independently re-verified: vector namespaces key by
+`(ns, field)` with no embedded term/value, so there is nothing to migrate),
+the fallback-to-hex-when-unencrypted behaviour, and the
+`vault_extract_encryption_test.dart` rewrite (a legitimate strengthening, not
+a weakened test). One **blocking bug found (B1)**, two trivial non-blocking
+nits.
+
+- [x] **B1 (blocking, fixed) — `VaultSearchManager.recover()` skipped the
+      Gap-2 hex-namespace purge entirely whenever a model-version reset also
+      fired for the same blob.** The original `recover()` call site gated
+      the *whole* `_checkTokenMode` call behind `if (!resetForModel)`, so a
+      blob needing **both** a model-version bump **and** a hex→hmac token
+      migration in the same `open()` — a real, reachable scenario: an
+      encrypted pre-Gap-2 database that also picks up a model swap (exactly
+      what the multilingual-embedding-model roadmap item would trigger) —
+      had its stale `$$vault:fts:{sha256}:*` hex namespaces silently
+      orphaned on disk indefinitely, still leaking the search vocabulary in
+      plaintext hex terms — precisely the confidentiality property this
+      phase exists to close. Root cause: the purge (must always run on a
+      mode mismatch) and the reset+re-enqueue (must be deduplicated between
+      the two checks, since `_enqueue` has no dedup) were coupled behind one
+      shared boolean instead of being independently gated. **Fix:**
+      `_checkTokenMode` now takes a required `alreadyReset` parameter — the
+      purge loop runs unconditionally whenever `state.ftsTokenMode` doesn't
+      match `_currentTokenMode`, and only the trailing reset-to-`pending`+
+      `_enqueue` step is skipped when `alreadyReset` is `true`.
+      `_checkModelVersion`'s `bool` return (added in the original
+      implementation for the old, now-removed gating) is threaded straight
+      into `_checkTokenMode`'s `alreadyReset` argument at the single
+      `recover()` call site. **Verified the fix is load-bearing, not just
+      claimed:** temporarily reverted the call site to the old
+      `if (!resetForModel)` gating, reran the new stacked-upgrade test below
+      — it failed exactly as expected (stale hex namespace found in the
+      post-`recover()` namespace set) — then restored the fix and confirmed
+      it passes again.
+- [x] Add a test that stacks both conditions (encrypted pre-Gap-2 index
+      state **and** a model-version mismatch on the same blob) and confirms
+      no hex namespace survives `recover()`. Added a new group in
+      `test/vault/search/vault_search_manager_test.dart`,
+      `'recover() — stacked model-version + token-mode upgrade (B1)'`, with
+      two tests: (1) the stacked scenario itself — seeds hex-tokenised BM25
+      namespaces plus an `indexed` extract state with an old model version
+      and an absent `tokenMode` (defaults to hex), reopens with both a new
+      `EncryptionProvider` and a different embedding model, and asserts
+      every pre-existing hex namespace is gone from
+      `allStoredNamespaces()` after `recover()`, the model version updated,
+      and the blob reached `indexed` again; (2) a model-version-only
+      regression guard (no token-mode mismatch) confirming the fix did not
+      turn `_checkTokenMode` into an unconditional purge.
+- [x] Nit: license headers on the two new test files
+      (`test/search/lexical/fts_token_mode_test.dart`,
+      `test/query/index_token_mode_test.dart`) — fixed the missing period
+      after "The Authors" and `http://` → `https://` to match
+      `header_template.txt` exactly (was passing `license_check`'s
+      mechanical `addlicense` diff, just visually inconsistent with every
+      other file).
+- [x] Nit (optional, documented since the code was already being touched):
+      the domain-separator `:`-join scheme is a plain concatenation, not a
+      length-prefixed encoding — documented in
+      `EncryptionProvider.indexToken`'s doc comment: the vault-FTS domain
+      (`sha256:term`) is immune (sha256 is always exactly 64 hex chars, a
+      fixed split point), the secondary-index domain's value component is
+      immune (always hex-encoded, never contains `:`), but the FTS domain's
+      `ns`/`field` (and the secondary-index domain's `ns`/`path`) are not
+      escaped against an embedded literal `:` — a theoretical concatenation
+      ambiguity, not exploitable via untrusted input in this threat model
+      (collection/field names are application-chosen, not attacker
+      data), left undocumented-but-unfixed no longer — now documented,
+      deliberately left unfixed as out of scope.
+- [x] Re-ran `make pre_commit` after the B1 fix + nits: all four sub-gates
+      pass independently verified (format_check exit 0 — one file needed
+      reformatting, fixed via `make format`; `melos run analyze` exit 0
+      clean across all 7 packages; `make license_check` exit 0; full `kmdb`
+      test suite 2369 passed — up from 2367 by the two new B1 tests — 12
+      skipped E2E, 0 failed). The known pre-existing
+      `sync_engine_test.dart` H4-FU3 flake (logged to
+      `docs/roadmap/0_09.md`, unrelated to this plan) did not reappear on
+      this run.
+- [x] Hand off to `kmdb-qa` for a **second** round of sign-off on the B1 fix
+      specifically, given the severity of what round 1 found — re-verify
+      the purge-vs-reset decoupling is correct in all four
+      purge/reset-mismatch combinations (neither mismatched, only
+      token-mode mismatched, only model-version mismatched, both
+      mismatched) and that the new stacked-upgrade test actually exercises
+      the fix (not just superficially passes). Resolve every blocking item
+      before committing.
+
+**`kmdb-qa` review, round 2 (2026-07-13):** did not just trust the round-1
+revert-and-confirm claim — independently reverted the fix themselves, re-ran
+the stacked test, watched it fail with the actual plaintext hex tokens
+(`"mountains"`, `"rivers"`) visibly surviving in the failure output, then
+restored the fix and confirmed it passes. The purge-vs-reset separation was
+verified by direct code read (purge unconditional on a `tokenMode` mismatch;
+only the trailing reset/re-enqueue gated by `alreadyReset`). The
+required-parameter change (`_checkTokenMode(..., {required bool
+alreadyReset})`) was confirmed to have exactly one call site, with no
+missed/wrong updates. Both nits (license headers, domain-separator doc note)
+confirmed fixed. `make pre_commit` re-run independently: 2357 passed, 12
+skipped E2E, green. **Phase 4 signed off — genuinely clean.**
+- [x] Commit Phase 4 on the plan's branch.
 
 ### Phase 5 — Spec, roadmap, and glossary updates
 

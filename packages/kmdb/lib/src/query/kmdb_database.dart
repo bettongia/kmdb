@@ -426,6 +426,14 @@ final class KmdbDatabase {
         encryption: encryption,
       );
 
+      // Detect a namespace-token format-version upgrade (Encryption
+      // confidentiality reconciliation plan, Gap 2, Q5) and purge+rebuild any
+      // affected index before checking for interrupted builds below, so a
+      // purge-triggered index is never also misreported as one interrupted by
+      // an unclean shutdown. Must run after `store.meta.encryption` is
+      // assigned above (the persisted index state is itself encrypted).
+      await indexManager.checkTokenModeOnOpen();
+
       // Report any indexes whose build was interrupted by an unclean shutdown.
       if (openResult.hadUnclosedSession && onIndexRebuildRequired != null) {
         final interrupted = await indexManager.checkInterruptedBuilds();

@@ -29,6 +29,7 @@ import 'dart:typed_data';
 
 import '../../encoding/value_codec.dart';
 import '../../encryption/encryption_provider.dart';
+import '../../search/lexical/fts_index_state.dart' show FtsTokenMode;
 
 /// The lifecycle status of a single vault blob's text extraction and indexing.
 enum VaultExtractionStatus {
@@ -113,6 +114,7 @@ final class VaultExtractionState {
     this.charset,
     this.script,
     this.language,
+    this.ftsTokenMode,
   });
 
   /// The sha256 of the vault blob this state belongs to.
@@ -191,6 +193,19 @@ final class VaultExtractionState {
   /// section for the full rationale).
   final String? language;
 
+  /// How this blob's `$$vault:fts:{sha256}:*` base-term namespace tokens were
+  /// computed as of the last successful index (Encryption confidentiality
+  /// reconciliation plan, Gap 2, Q5).
+  ///
+  /// `null` before indexing, and also the value read back for blobs indexed
+  /// before Gap 2 shipped (treated identically to [FtsTokenMode.hex] by
+  /// [VaultSearchManager._checkTokenMode] — pre-Gap-2 indexing was always
+  /// hex-tokenised). Mirrors [FtsIndexState.tokenMode]/[IndexState.tokenMode]
+  /// but lives on the per-blob extraction state rather than a
+  /// per-(namespace, field) index state, since vault indexing is scoped per
+  /// blob, not per collection field.
+  final FtsTokenMode? ftsTokenMode;
+
   /// Encodes this state as a CBOR-serialisable [Map].
   ///
   /// Only non-null fields are included (except [status] and [modelVersion],
@@ -206,6 +221,7 @@ final class VaultExtractionState {
     if (charset != null) 'charset': charset,
     if (script != null) 'script': script,
     if (language != null) 'language': language,
+    if (ftsTokenMode != null) 'ftsTokenMode': ftsTokenMode!.name,
   };
 
   /// Decodes a [VaultExtractionState] from a CBOR-decoded [Map] and [sha256].
@@ -232,6 +248,14 @@ final class VaultExtractionState {
       chunkOverlap = (params['chunkOverlap'] as num?)?.toInt();
     }
 
+    final ftsTokenModeStr = map['ftsTokenMode'] as String?;
+    final ftsTokenMode = ftsTokenModeStr == null
+        ? null
+        : FtsTokenMode.values.firstWhere(
+            (m) => m.name == ftsTokenModeStr,
+            orElse: () => FtsTokenMode.hex,
+          );
+
     return VaultExtractionState(
       sha256: sha256,
       status: status,
@@ -244,6 +268,7 @@ final class VaultExtractionState {
       charset: map['charset'] as String?,
       script: map['script'] as String?,
       language: map['language'] as String?,
+      ftsTokenMode: ftsTokenMode,
     );
   }
 

@@ -351,7 +351,11 @@ final class VaultSearcher<T> {
       var blobScore = 0.0;
 
       for (final term in queryTerms) {
-        final termNs = VaultBm25Writer.termNamespace(sha256, term);
+        final termNs = await VaultBm25Writer.termNamespace(
+          sha256,
+          term,
+          encryption: _manager.encryption,
+        );
         final chunkTfs = <int, int>{}; // chunkIndex → tf
 
         await for (final entry in _kvStore.scan(termNs)) {
