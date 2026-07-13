@@ -670,6 +670,16 @@ no-op (just a wasted load) rather than a bug.
 
 ## Implementation plan
 
+**Process (2026-07-14, mirroring `plan_0_08_encryption_confidentiality_reconciliation.md`):**
+one branch + one worktree + one PR for both phases. Each phase gets its own
+**checklist-verify → `make pre_commit` → `kmdb-qa` sign-off on that phase's
+diff specifically → commit** sequence before starting the next phase — not
+one review deferred to the end. After both phases are committed, run a
+**final whole-PR `kmdb-qa` pass** for cross-phase concerns the per-phase
+reviews can't see in isolation (aggregate coverage, branch-vs-`main` diff
+scope, cross-phase consistency). Open the PR once that final pass signs off.
+**Do not merge the PR** — merging back to `main` is done by the user.
+
 ### Phase A — wire vault into the CLI (all vault commands, lexical search)
 
 - [ ] In `database_opener.dart`, construct `VaultStore(dbDir: dbPath, adapter:
@@ -715,6 +725,15 @@ no-op (just a wasted load) rather than a bug.
       different file is more authoritative for the CLI wiring surface) to
       note that `kmdb_cli` now constructs a `VaultStore` and configures vault
       search by default for every database it opens.
+
+**Phase A checkpoint:**
+
+- [ ] Run `make pre_commit` on Phase A's diff — format, analyze,
+      license_check, tests all green.
+- [ ] Hand off to `kmdb-qa` for sign-off on **Phase A's diff specifically**
+      (not the whole plan). Resolve every blocking item before proceeding to
+      Phase B.
+- [ ] Commit Phase A on the plan's branch once sign-off is received.
 
 ### Phase B — semantic/hybrid search (vault + document-field, real)
 
@@ -826,14 +845,29 @@ no-op (just a wasted load) rather than a bug.
       model-acquisition flow and a `vecIndexes` config surface, rather than
       leaving both as CLI-unimplemented.
 
-**Final step — QA sign-off and pre-commit:**
+**Phase B checkpoint:**
 
-- [ ] Run `make coverage` — confirm >95% on all new files.
-- [ ] Hand off to the **`kmdb-qa` agent** for sign-off (spec alignment, doc
-      comments, test coverage/adequacy, code health). Resolve every blocking
-      item before proceeding. Do not open a PR until sign-off is received.
-- [ ] Run `make pre_commit` — format, analyze, license_check, tests all green.
+- [ ] Run `make pre_commit` on Phase B's diff — format, analyze,
+      license_check, tests all green.
+- [ ] Hand off to `kmdb-qa` for sign-off on **Phase B's diff specifically**.
+      Resolve every blocking item before proceeding.
+- [ ] Commit Phase B on the plan's branch once sign-off is received.
+
+**Final step — whole-PR QA sign-off and pre-commit:**
+
+- [ ] Run `make coverage` on the full branch diff — confirm >95% on all new
+      files, aggregated across both phases (per-phase coverage checks above
+      only see one phase's diff at a time).
+- [ ] Hand off to the **`kmdb-qa` agent** for a **final whole-PR sign-off** —
+      cross-phase concerns the per-phase reviews couldn't see in isolation
+      (aggregate coverage, full branch-vs-`main` diff scope, cross-phase
+      consistency). This is not a repeat of the per-phase reviews at the same
+      depth — those already happened. Resolve every blocking item before
+      proceeding. Do not open a PR until this sign-off is received.
+- [ ] Run `make pre_commit` on the full branch — format, analyze,
+      license_check, tests all green.
 - [ ] Verify licence headers on all new files (2026).
+- [ ] Open the PR. **Do not merge it** — the user merges it back to `main`.
 
 ## Plan review (kmdb-plan-reviewer, 2026-07-10)
 
