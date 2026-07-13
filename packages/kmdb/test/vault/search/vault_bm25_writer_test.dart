@@ -35,9 +35,9 @@ void main() {
   group('VaultBm25Writer', () {
     // ── write() — term namespace keys ───────────────────────────────────────
 
-    test('writes per-chunk term entries with correct namespace', () {
+    test('writes per-chunk term entries with correct namespace', () async {
       final batch = WriteBatch();
-      writer.write(
+      await writer.write(
         sha256: sha256,
         termFrequencies: [
           {'hello': 2, 'world': 1},
@@ -93,9 +93,9 @@ void main() {
 
     // ── write() — corpus sentinel ───────────────────────────────────────────
 
-    test('writes corpus sentinel with correct namespace and key', () {
+    test('writes corpus sentinel with correct namespace and key', () async {
       final batch = WriteBatch();
-      writer.write(
+      await writer.write(
         sha256: sha256,
         termFrequencies: [
           {'foo': 1},
@@ -118,9 +118,9 @@ void main() {
       expect(decoded.totalTokens, equals(3));
     });
 
-    test('corpus sentinel n = number of chunks', () {
+    test('corpus sentinel n = number of chunks', () async {
       final batch = WriteBatch();
-      writer.write(
+      await writer.write(
         sha256: sha256,
         termFrequencies: [
           {'a': 1},
@@ -140,9 +140,9 @@ void main() {
 
     // ── write() — multiple chunks ───────────────────────────────────────────
 
-    test('writes multiple chunks with correct key index', () {
+    test('writes multiple chunks with correct key index', () async {
       final batch = WriteBatch();
-      writer.write(
+      await writer.write(
         sha256: sha256,
         termFrequencies: [
           {'foo': 1},
@@ -166,24 +166,27 @@ void main() {
 
     // ── write() — empty term maps ───────────────────────────────────────────
 
-    test('empty term maps produce only corpus sentinel (no term entries)', () {
-      final batch = WriteBatch();
-      writer.write(
-        sha256: sha256,
-        termFrequencies: [{}],
-        totalTokens: 0,
-        batch: batch,
-      );
-      // Only the corpus sentinel should be present.
-      final nonCorpus = batch.entries.where(
-        (e) => !e.namespace.startsWith(kVaultFtsCorpusPrefix),
-      );
-      expect(nonCorpus, isEmpty);
-    });
+    test(
+      'empty term maps produce only corpus sentinel (no term entries)',
+      () async {
+        final batch = WriteBatch();
+        await writer.write(
+          sha256: sha256,
+          termFrequencies: [{}],
+          totalTokens: 0,
+          batch: batch,
+        );
+        // Only the corpus sentinel should be present.
+        final nonCorpus = batch.entries.where(
+          (e) => !e.namespace.startsWith(kVaultFtsCorpusPrefix),
+        );
+        expect(nonCorpus, isEmpty);
+      },
+    );
 
-    test('empty chunk list produces only corpus sentinel with n=0', () {
+    test('empty chunk list produces only corpus sentinel with n=0', () async {
       final batch = WriteBatch();
-      writer.write(
+      await writer.write(
         sha256: sha256,
         termFrequencies: const [],
         totalTokens: 0,
@@ -212,21 +215,24 @@ void main() {
 
     // ── deleteTermEntry() ──────────────────────────────────────────────────
 
-    test('deleteTermEntry adds delete entry for correct namespace and key', () {
-      final batch = WriteBatch();
-      writer.deleteTermEntry(
-        sha256: sha256,
-        term: 'hello',
-        chunkIndex: 3,
-        batch: batch,
-      );
-      final helloHex = VaultBm25Writer.termToHex('hello');
-      final ns = '$kVaultFtsPrefix$sha256:$helloHex';
-      final entry = batch.entries.firstWhere(
-        (e) => e.namespace == ns && e.key == kVaultChunkKey(3),
-      );
-      expect(entry.value, isNull);
-    });
+    test(
+      'deleteTermEntry adds delete entry for correct namespace and key',
+      () async {
+        final batch = WriteBatch();
+        await writer.deleteTermEntry(
+          sha256: sha256,
+          term: 'hello',
+          chunkIndex: 3,
+          batch: batch,
+        );
+        final helloHex = VaultBm25Writer.termToHex('hello');
+        final ns = '$kVaultFtsPrefix$sha256:$helloHex';
+        final entry = batch.entries.firstWhere(
+          (e) => e.namespace == ns && e.key == kVaultChunkKey(3),
+        );
+        expect(entry.value, isNull);
+      },
+    );
 
     // ── Namespace prefix correctness ────────────────────────────────────────
 
@@ -257,9 +263,9 @@ void main() {
       expect(VaultBm25Writer.decodeTf(null), equals(0));
     });
 
-    test('decodeTf round-trips various values', () {
+    test('decodeTf round-trips various values', () async {
       final batch = WriteBatch();
-      writer.write(
+      await writer.write(
         sha256: sha256,
         termFrequencies: [
           {'x': 42},

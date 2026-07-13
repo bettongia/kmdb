@@ -159,26 +159,26 @@ void main() {
   // ── IndexWriter add/remove entries ────────────────────────────────────────
 
   group('IndexWriter add/remove entries', () {
-    test('entry namespace encodes field value', () {
+    test('entry namespace encodes field value', () async {
       final batch = WriteBatch();
-      IndexWriter.addEntries(
+      await IndexWriter.addEntries(
         batch: batch,
         definition: _cityIndex,
         docKey: _key(),
         document: {'city': 'London'},
       );
       expect(batch.length, equals(1));
-      final expectedNs = IndexWriter.indexNamespaceForValue(
+      final expectedNs = (await IndexWriter.indexNamespaceForValue(
         _cityIndex,
         'London',
-      )!;
+      ))!;
       expect(batch.entries.first.namespace, equals(expectedNs));
     });
 
-    test('entry key is the document key', () {
+    test('entry key is the document key', () async {
       final docKey = _key();
       final batch = WriteBatch();
-      IndexWriter.addEntries(
+      await IndexWriter.addEntries(
         batch: batch,
         definition: _cityIndex,
         docKey: docKey,
@@ -187,27 +187,30 @@ void main() {
       expect(batch.entries.first.key, equals(docKey));
     });
 
-    test('fan-out: one entry per array element in separate namespaces', () {
-      final batch = WriteBatch();
-      final def = IndexDefinition('contacts', 'tags[]');
-      IndexWriter.addEntries(
-        batch: batch,
-        definition: def,
-        docKey: _key(),
-        document: {
-          'tags': ['dart', 'flutter'],
-        },
-      );
-      expect(batch.length, equals(2));
-      // Each element has its own namespace.
-      final ns0 = batch.entries[0].namespace;
-      final ns1 = batch.entries[1].namespace;
-      expect(ns0, isNot(equals(ns1)));
-    });
+    test(
+      'fan-out: one entry per array element in separate namespaces',
+      () async {
+        final batch = WriteBatch();
+        final def = IndexDefinition('contacts', 'tags[]');
+        await IndexWriter.addEntries(
+          batch: batch,
+          definition: def,
+          docKey: _key(),
+          document: {
+            'tags': ['dart', 'flutter'],
+          },
+        );
+        expect(batch.length, equals(2));
+        // Each element has its own namespace.
+        final ns0 = batch.entries[0].namespace;
+        final ns1 = batch.entries[1].namespace;
+        expect(ns0, isNot(equals(ns1)));
+      },
+    );
 
-    test('skips null field', () {
+    test('skips null field', () async {
       final batch = WriteBatch();
-      IndexWriter.addEntries(
+      await IndexWriter.addEntries(
         batch: batch,
         definition: _cityIndex,
         docKey: _key(),
@@ -216,9 +219,9 @@ void main() {
       expect(batch.isEmpty, isTrue);
     });
 
-    test('skips missing field', () {
+    test('skips missing field', () async {
       final batch = WriteBatch();
-      IndexWriter.addEntries(
+      await IndexWriter.addEntries(
         batch: batch,
         definition: _cityIndex,
         docKey: _key(),
@@ -227,10 +230,10 @@ void main() {
       expect(batch.isEmpty, isTrue);
     });
 
-    test('remove entries adds delete with same namespace and key', () {
+    test('remove entries adds delete with same namespace and key', () async {
       final docKey = _key();
       final addBatch = WriteBatch();
-      IndexWriter.addEntries(
+      await IndexWriter.addEntries(
         batch: addBatch,
         definition: _cityIndex,
         docKey: docKey,
@@ -238,7 +241,7 @@ void main() {
       );
 
       final delBatch = WriteBatch();
-      IndexWriter.removeEntries(
+      await IndexWriter.removeEntries(
         batch: delBatch,
         definition: _cityIndex,
         docKey: docKey,
@@ -455,7 +458,10 @@ void main() {
       await col.put(_Contact(id: k1, city: 'London'));
 
       // The value-specific index namespace should not exist yet.
-      final ns = IndexWriter.indexNamespaceForValue(_cityIndex, 'London')!;
+      final ns = (await IndexWriter.indexNamespaceForValue(
+        _cityIndex,
+        'London',
+      ))!;
       final indexKeys = await db.store.scan(ns).toList();
       expect(indexKeys, isEmpty);
       await db.close();

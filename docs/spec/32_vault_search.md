@@ -459,15 +459,38 @@ kmdb <db> vault status
 ## Encryption Compatibility
 
 When the database is opened with an `EncryptionConfig` (see §31), vault blobs
-are stored encrypted on disk. Vault search handles encryption transparently:
+are stored encrypted on disk. Vault search handles encryption transparently,
+and — as of the Encryption confidentiality reconciliation plan
+(`docs/roadmap/0_08.md`) — every derived vault-search artifact, filesystem
+files *and* LSM values alike, is also encrypted when a provider is configured:
 
 1. `VaultStore.getBytes()` decrypts the blob before returning bytes to the
    search indexing isolate.
-2. The extracted `text.txt` and `chunks_v1.json` files are stored in plaintext
-   in the local `extract/` directory (this directory is never synced).
-3. The `vectors_*_sq8.bin` file and LSM entries are not encrypted — they are
-   derived data, device-local, and require no additional protection beyond OS
-   filesystem permissions.
+2. The `extract/` filesystem artifacts (`text.txt`, `chunks_v1.json`, and
+   `vectors_{modelId}_sq8.bin`) are each encrypted with the DEK and prefixed
+   with a self-describing `EncryptionFlag` byte (WI-10) — see the
+   _Encryption (WI-10)_ section above and §31 for the flag-byte format and the
+   toggle-on/mixed-state behaviour. This directory lives inside the local
+   database directory and is never synced.
+3. The LSM index **values** under `$$vault:fts:`, `$$vault:fts:corpus:`,
+   `$$vault:vec:idx:`, and `$$vault:extract:` are encrypted at the
+   `VaultSearchManager` call site (Encryption confidentiality reconciliation,
+   Gap 1): the BM25 term-frequency ints, SQ8 vector bytes, and BM25 corpus
+   sentinel via `EncryptionEnvelope`; the `VaultExtractionState` map (charset,
+   script, language, modelVersion, chunkCount, error) via `ValueCodec`. These
+   namespaces are local-only, so this protects against local disk theft rather
+   than a cloud provider.
+4. On an encrypted database the `$$vault:fts:` namespace-**name** `{token}`
+   segment is an HMAC-SHA256 token (`EncryptionProvider.indexToken`) rather
+   than a plaintext hex encoding of the term (Gap 2), so local SSTable access
+   cannot enumerate the indexed vocabulary by reading namespace names.
+   `VaultExtractionState` persists an `ftsTokenMode` (`hex` | `hmac`)
+   discriminator; `VaultSearchManager`'s startup recovery (`_checkTokenMode`)
+   detects a software-version upgrade of an already-encrypted database, purges
+   the stale-mode `$$vault:fts:{sha256}:*` namespaces, and re-enqueues the blob
+   for re-indexing under HMAC tokens — mirroring `FtsManager`/`IndexManager`'s
+   equivalent migration. `$$vault:vec:idx:` is keyed by chunk index, never an
+   embedded term, so it carries no token to migrate.
 
 If the vault is encrypted and the database is re-opened without an encryption
 provider, `VaultStore.getBytes()` will throw a `StateError` before the search

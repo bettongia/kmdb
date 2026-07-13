@@ -354,12 +354,14 @@ final class KmdbDatabase {
     // backed by an initialised compressor.
     //
     // Ordering rationale: KvStoreImpl.open() and the schema/meta loads that
-    // follow do NOT route through ValueCodec (MetaStore uses raw CBOR). The
-    // first compressed-value decode paths (KmdbCollection reads, IndexManager
-    // lazy build, versioning) are only reachable after open() returns, so
-    // placing init() before KvStoreImpl.open() is both sufficient and correct.
-    // If a future change causes documents to be decoded during recovery, this
-    // comment is the signal that init() must still precede that code.
+    // follow do NOT route through ValueCodec (MetaStore routes its values
+    // through EncryptionEnvelope instead — see meta_store.dart — which has no
+    // compression step at all, unlike ValueCodec). The first compressed-value
+    // decode paths (KmdbCollection reads, IndexManager lazy build, versioning)
+    // are only reachable after open() returns, so placing init() before
+    // KvStoreImpl.open() is both sufficient and correct. If a future change
+    // causes documents to be decoded during recovery, this comment is the
+    // signal that init() must still precede that code.
     await ZstdSimple.init(
       wasmUrl: wasmUrl ?? 'assets/packages/betto_zstd/assets/zstd.wasm',
     );
@@ -392,16 +394,30 @@ final class KmdbDatabase {
       // $meta to determine the 4-state outcome. The resulting EncryptionProvider?
       // is threaded into every collaborator below.
       //
-      // The bootstrap never routes through ValueCodec (MetaStore.getRawByName uses
-      // raw CBOR), keeping the read path non-circular: the DEK is available before
-      // any encrypted value needs to be decoded.
+      // The bootstrap's OWN enc:blob read/write never routes through ValueCodec
+      // or EncryptionEnvelope (MetaStore.getEncryptionBlob/putEncryptionBlob use
+      // the LsmEngine directly), keeping the read path non-circular: the DEK is
+      // available before any encrypted value needs to be decoded.
       final encryption = await _runEncryptionBootstrap(
         store,
         encryptionConfig,
         path,
       );
 
-      final cache = CacheLayer(store: store);
+      // Assign the late-bound EncryptionProvider to MetaStore immediately —
+      // before constructing any other collaborator (Encryption confidentiality
+      // reconciliation plan, Gap 3, Q1). MetaStore is constructed at the engine
+      // layer with no provider (it is below the point where this bootstrap
+      // runs), so every $meta write from here on — including the very first
+      // one any collaborator below might issue — must see the provider already
+      // assigned. Traced against the exact bootstrap sequence: the encryption
+      // bootstrap above is the only $meta activity before this point (it uses
+      // the raw enc:blob path, which is exempt from this assignment entirely —
+      // see MetaStore.getEncryptionBlob/putEncryptionBlob), so there is no
+      // earlier $meta write this assignment could miss.
+      store.meta.encryption = encryption;
+
+      final cache = CacheLayer(store: store, encryption: encryption);
 
       final indexManager = IndexManager(
         store: store,
@@ -409,6 +425,14 @@ final class KmdbDatabase {
         onIndexReady: onIndexReady,
         encryption: encryption,
       );
+
+      // Detect a namespace-token format-version upgrade (Encryption
+      // confidentiality reconciliation plan, Gap 2, Q5) and purge+rebuild any
+      // affected index before checking for interrupted builds below, so a
+      // purge-triggered index is never also misreported as one interrupted by
+      // an unclean shutdown. Must run after `store.meta.encryption` is
+      // assigned above (the persisted index state is itself encrypted).
+      await indexManager.checkTokenModeOnOpen();
 
       // Report any indexes whose build was interrupted by an unclean shutdown.
       if (openResult.hadUnclosedSession && onIndexRebuildRequired != null) {

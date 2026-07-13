@@ -45,11 +45,13 @@ import 'package:betto_inferencing/betto_inferencing.dart'
 // Dart does not permit `this._fieldName` in named constructor parameters when
 // the field is private. The initialiser list pattern is unavoidable here.
 
+import '../../encryption/encryption_envelope.dart';
 import '../../encryption/encryption_flag.dart';
 import '../../encryption/encryption_provider.dart';
 import '../../engine/kvstore/kv_store.dart';
 import '../../engine/kvstore/kv_store_impl.dart';
 import '../../search/language_detection.dart';
+import '../../search/lexical/fts_index_state.dart' show FtsTokenMode;
 import '../vault_store.dart';
 import 'vault_bm25_writer.dart';
 import 'vault_chunk.dart';
@@ -165,6 +167,28 @@ final class VaultSearchManager {
   /// Returns the active search config.
   VaultSearchConfig get config => _config;
 
+  /// Returns the configured [EncryptionProvider], or `null` for a plaintext
+  /// database.
+  ///
+  /// Exposed for [VaultSearcher], which reconstructs `$$vault:fts:` namespace
+  /// tokens at query time and cannot access the private [_encryption] field
+  /// itself — Dart privacy is per-file, not per-directory (mirrors
+  /// [unwrapIndexValue]'s rationale above).
+  EncryptionProvider? get encryption => _encryption;
+
+  /// Unwraps a raw KV value written via [_wrapWriterEntries] (the
+  /// [EncryptionEnvelope]-based wrapping applied to every
+  /// [VaultBm25Writer]/[VaultVecWriter] entry — Gap 1 of the Encryption
+  /// confidentiality reconciliation plan).
+  ///
+  /// Exposed for [VaultSearcher], which reads `$$vault:fts:`/
+  /// `$$vault:vec:idx:` entries directly at query time but cannot access the
+  /// private [_encryption] field itself — Dart privacy is per-file, not
+  /// per-directory, even though both classes live under
+  /// `lib/src/vault/search/` (mirrors the [readExtractArtifact] seam above).
+  Future<Uint8List> unwrapIndexValue(Uint8List bytes) =>
+      EncryptionEnvelope.unwrap(bytes, _encryption);
+
   /// Writes [plaintext] to [path] as an `extract/` filesystem artifact,
   /// encrypting it first when the database has an [EncryptionProvider]
   /// configured (§31).
@@ -179,13 +203,17 @@ final class VaultSearchManager {
   /// [EncryptionFlag.aesGcm.byte] → nonce(12B) || AES-256-GCM ciphertext || tag(16B)
   /// ```
   ///
-  /// When no [EncryptionProvider] is configured, [plaintext] is written
-  /// unencrypted (byte-identical to the pre-encryption format save for the
-  /// leading [EncryptionFlag.none] byte). This lets encryption be toggled on
-  /// for a database that already has plaintext artifacts: old files keep
-  /// their `none` flag and remain readable, while newly (re)indexed blobs are
-  /// written with the `aesGcm` flag once a provider is configured — see
-  /// [reindexVault] for the migration path.
+  /// Delegates to [EncryptionEnvelope.wrap] (this class was the original
+  /// inline implementation of that pattern before it was factored out into a
+  /// shared helper — see `docs/plans/completed/` "Encryption confidentiality
+  /// reconciliation" plan). When no [EncryptionProvider] is configured,
+  /// [plaintext] is written unencrypted (byte-identical to the
+  /// pre-encryption format save for the leading [EncryptionFlag.none] byte).
+  /// This lets encryption be toggled on for a database that already has
+  /// plaintext artifacts: old files keep their `none` flag and remain
+  /// readable, while newly (re)indexed blobs are written with the `aesGcm`
+  /// flag once a provider is configured — see [reindexVault] for the
+  /// migration path.
   ///
   /// These artifacts are read/written whole-file only. An AES-GCM-encrypted
   /// artifact cannot be range-read — the entire ciphertext is required to
@@ -193,28 +221,18 @@ final class VaultSearchManager {
   /// callers must not attempt to layer [readFileRange]-style partial reads on
   /// top of this format.
   Future<void> writeExtractArtifact(String path, Uint8List plaintext) async {
-    final enc = _encryption;
-    final Uint8List payload;
-    if (enc != null) {
-      final ciphertext = await enc.encrypt(plaintext);
-      payload = Uint8List(1 + ciphertext.length)
-        ..[0] = EncryptionFlag.aesGcm.byte
-        ..setAll(1, ciphertext);
-    } else {
-      payload = Uint8List(1 + plaintext.length)
-        ..[0] = EncryptionFlag.none.byte
-        ..setAll(1, plaintext);
-    }
+    final payload = await EncryptionEnvelope.wrap(plaintext, _encryption);
     await _vaultStore.adapter.writeFile(path, payload);
   }
 
   /// Reads and, if necessary, decrypts an `extract/` filesystem artifact
   /// previously written by [writeExtractArtifact].
   ///
-  /// Parses the leading [EncryptionFlag] byte to determine whether the
-  /// remaining bytes are plaintext ([EncryptionFlag.none]) or
-  /// AES-256-GCM ciphertext ([EncryptionFlag.aesGcm]), independent of the
-  /// database's current encryption state.
+  /// Delegates to [EncryptionEnvelope.unwrap], which parses the leading
+  /// [EncryptionFlag] byte to determine whether the remaining bytes are
+  /// plaintext ([EncryptionFlag.none]) or AES-256-GCM ciphertext
+  /// ([EncryptionFlag.aesGcm]), independent of the database's current
+  /// encryption state.
   ///
   /// Throws:
   /// - [FormatException] if the file at [path] is empty (there is no flag
@@ -236,22 +254,7 @@ final class VaultSearchManager {
     if (raw.isEmpty) {
       throw FormatException('Extract artifact at "$path" is empty');
     }
-    final flag = EncryptionFlag.fromByte(raw[0]);
-    final body = Uint8List.sublistView(raw, 1);
-    switch (flag) {
-      case EncryptionFlag.none:
-        return body;
-      case EncryptionFlag.aesGcm:
-        final enc = _encryption;
-        if (enc == null) {
-          throw StateError(
-            'Extract artifact at "$path" is encrypted but no '
-            'EncryptionProvider is configured. Open the database with an '
-            'EncryptionConfig.',
-          );
-        }
-        return enc.decrypt(body);
-    }
+    return EncryptionEnvelope.unwrap(raw, _encryption);
   }
 
   /// Registers [VaultStore.onAfterIngest] so newly ingested blobs are
@@ -302,7 +305,11 @@ final class VaultSearchManager {
       }
 
       try {
-        final state = VaultExtractionState.decode(bytes, sha256);
+        final state = await VaultExtractionState.decode(
+          bytes,
+          sha256,
+          encryption: _encryption,
+        );
 
         switch (state.status) {
           case VaultExtractionStatus.extracting:
@@ -311,7 +318,16 @@ final class VaultSearchManager {
 
           case VaultExtractionStatus.indexed:
             // Check model version — may need re-index if model changed.
-            await _checkModelVersion(sha256, state);
+            // Always also check token mode (B1 fix): a blob can need BOTH a
+            // model-version bump AND a hex→hmac token migration in the same
+            // recover() call (an encrypted pre-Gap-2 database that also
+            // picks up a model swap), and the model-version re-index path
+            // never purges stale-mode `$$vault:fts:` namespaces on its own —
+            // only `_checkTokenMode` does that. `resetForModel` is passed
+            // through so `_checkTokenMode` skips just its own redundant
+            // reset+re-enqueue (`_enqueue` has no dedup), never its purge.
+            final resetForModel = await _checkModelVersion(sha256, state);
+            await _checkTokenMode(sha256, state, alreadyReset: resetForModel);
 
           case VaultExtractionStatus.pending:
             // Re-enqueue (was pending at crash time — lost from in-memory queue).
@@ -384,7 +400,11 @@ final class VaultSearchManager {
         continue;
       }
       try {
-        final state = VaultExtractionState.decode(bytes, sha256);
+        final state = await VaultExtractionState.decode(
+          bytes,
+          sha256,
+          encryption: _encryption,
+        );
         switch (state.status) {
           case VaultExtractionStatus.indexed:
             indexed++;
@@ -451,7 +471,11 @@ final class VaultSearchManager {
         needsReset = true;
       } else {
         try {
-          final state = VaultExtractionState.decode(bytes, sha256);
+          final state = await VaultExtractionState.decode(
+            bytes,
+            sha256,
+            encryption: _encryption,
+          );
           // Reset indexed and extracting blobs; leave failed/unsupported/pending
           // as-is (failed can be retried with reindex, pending already queued).
           needsReset =
@@ -687,14 +711,22 @@ final class VaultSearchManager {
     );
 
     final batch = WriteBatch();
-    _bm25Writer.write(
-      sha256: sha256,
-      termFrequencies: result.termFrequencies,
-      totalTokens: totalTokens,
-      batch: batch,
+    await _wrapWriterEntries(
+      (b) => _bm25Writer.write(
+        sha256: sha256,
+        termFrequencies: result.termFrequencies,
+        totalTokens: totalTokens,
+        batch: b,
+        encryption: _encryption,
+      ),
+      batch,
     );
     if (embeddings.isNotEmpty) {
-      _vecWriter.write(sha256: sha256, embeddings: embeddings, batch: batch);
+      await _wrapWriterEntries(
+        (b) async =>
+            _vecWriter.write(sha256: sha256, embeddings: embeddings, batch: b),
+        batch,
+      );
     }
 
     final finalState = VaultExtractionState(
@@ -707,8 +739,9 @@ final class VaultSearchManager {
       charset: result.charset,
       script: result.script,
       language: result.language,
+      ftsTokenMode: _currentTokenMode,
     );
-    _writeExtractStatusToBatch(sha256, finalState, batch);
+    await _writeExtractStatusToBatch(sha256, finalState, batch);
     await _kvStore.writeBatchInternal(batch);
 
     await _emitStatus();
@@ -826,14 +859,25 @@ final class VaultSearchManager {
       );
 
       final batch = WriteBatch();
-      _bm25Writer.write(
-        sha256: sha256,
-        termFrequencies: chunkResult.termFrequencies,
-        totalTokens: totalTokens,
-        batch: batch,
+      await _wrapWriterEntries(
+        (b) => _bm25Writer.write(
+          sha256: sha256,
+          termFrequencies: chunkResult.termFrequencies,
+          totalTokens: totalTokens,
+          batch: b,
+          encryption: _encryption,
+        ),
+        batch,
       );
       if (embeddings.isNotEmpty) {
-        _vecWriter.write(sha256: sha256, embeddings: embeddings, batch: batch);
+        await _wrapWriterEntries(
+          (b) async => _vecWriter.write(
+            sha256: sha256,
+            embeddings: embeddings,
+            batch: b,
+          ),
+          batch,
+        );
       }
       final finalState = VaultExtractionState(
         sha256: sha256,
@@ -845,8 +889,9 @@ final class VaultSearchManager {
         charset: state.charset,
         script: state.script,
         language: state.language,
+        ftsTokenMode: _currentTokenMode,
       );
-      _writeExtractStatusToBatch(sha256, finalState, batch);
+      await _writeExtractStatusToBatch(sha256, finalState, batch);
       await _kvStore.writeBatchInternal(batch);
     } catch (_) {
       // Recovery failed — reset to pending.
@@ -861,8 +906,24 @@ final class VaultSearchManager {
     }
   }
 
+  /// The [FtsTokenMode] the currently-configured [_encryption] would
+  /// produce. Stamped onto every `indexed` [VaultExtractionState] this
+  /// manager persists so a later [_checkTokenMode] can detect a
+  /// format-version mismatch (Gap 2, Q5).
+  FtsTokenMode get _currentTokenMode =>
+      _encryption != null ? FtsTokenMode.hmac : FtsTokenMode.hex;
+
   /// Checks the model version of an `indexed` blob and resets if stale.
-  Future<void> _checkModelVersion(
+  ///
+  /// Returns `true` if a reset+re-enqueue was triggered, so [_checkTokenMode]
+  /// (checked immediately after, in [recover]) can skip its own **reset**
+  /// step for this blob — `_enqueue` has no dedup, so triggering a
+  /// reset+re-enqueue from both checks would process the same blob twice.
+  /// This does **not** let [_checkTokenMode] skip its **purge** step (see
+  /// that method's doc comment — B1, found in `kmdb-qa` review): the two
+  /// concerns (purge, and reset+re-enqueue) must be independently
+  /// deduplication-safe, not coupled behind one shared boolean gate.
+  Future<bool> _checkModelVersion(
     String sha256,
     VaultExtractionState state,
   ) async {
@@ -879,13 +940,166 @@ final class VaultSearchManager {
         final manifest = await _vaultStore.getManifest(sha256);
         _enqueue(sha256, manifest.mediaType);
       }
+      return true;
     }
     // If model == null and storedModelVersion.isNotEmpty: lexical-only mode
     // but blob has vec entries. Leave FTS as-is; vecs will not be queried.
     // No re-index needed for lexical-only mode.
+    return false;
+  }
+
+  /// Checks the namespace-token mode of an `indexed` blob and, on a
+  /// mismatch, purges its stale-mode BM25 entries and (unless [alreadyReset]
+  /// is `true`) resets it for a full re-index (Encryption confidentiality
+  /// reconciliation plan, Gap 2, Q5).
+  ///
+  /// [state.ftsTokenMode] is `null` for blobs indexed before Gap 2 shipped —
+  /// treated identically to [FtsTokenMode.hex] (pre-Gap-2 indexing was always
+  /// hex-tokenised), so an unencrypted database that predates Gap 2 correctly
+  /// reports no mismatch and is left untouched.
+  ///
+  /// [alreadyReset] must be `true` when [_checkModelVersion] already reset
+  /// and re-enqueued this same blob (called immediately before this method,
+  /// in [recover]). **The purge below always runs regardless of
+  /// [alreadyReset]** — this is the fix for a real bug (B1, found in
+  /// `kmdb-qa` review of this method's first version): a blob that needs
+  /// *both* a model-version bump *and* a token-mode migration in the same
+  /// [recover] call (a reachable scenario — an encrypted pre-Gap-2 database
+  /// that also picks up a model swap) previously had its purge **skipped
+  /// entirely** when [_checkModelVersion] fired first, because the caller
+  /// gated the whole method behind `!resetForModel`. The model-version
+  /// re-index path (`_processNextItem`) only ever writes into whatever
+  /// namespaces the *current* `tokenMode` computes — it has no knowledge of,
+  /// and never discovers or deletes, namespaces computed under a *different*
+  /// mode — so skipping the purge left the stale hex-tokenised namespaces
+  /// (and the plaintext-derivable search vocabulary they leak) on disk
+  /// indefinitely, silently defeating this entire gap for exactly the
+  /// stacked-upgrade case. Only the **reset+re-enqueue** step below is
+  /// conditional on [alreadyReset] — `_enqueue` has no dedup, so performing
+  /// it twice for one blob would just be wasteful double-processing, not
+  /// incorrect, but is worth avoiding.
+  ///
+  /// Unlike [_checkModelVersion] (which relies on the next full re-index to
+  /// overwrite entries at the *same*, model-agnostic `$$vault:vec:idx:
+  /// {sha256}` namespace), a token-mode mismatch means the base-term
+  /// namespaces themselves are computed differently — the old-mode entries
+  /// are not just stale, they are **unreachable** by any future read/write
+  /// under the new scheme. Left in place, they would defeat Gap 2 by leaving
+  /// the very plaintext-derivable tokens it closes on disk indefinitely, so
+  /// this method purges every `$$vault:fts:{sha256}:*` base-term
+  /// sub-namespace before re-queuing the blob (mirrors
+  /// [FtsManager.checkAndTransitionOnOpen]'s `_purgeBaseNamespaces`,
+  /// generalised to a single sha256-scoped namespace prefix, and
+  /// [IndexManager.checkTokenModeOnOpen]).
+  Future<void> _checkTokenMode(
+    String sha256,
+    VaultExtractionState state, {
+    required bool alreadyReset,
+  }) async {
+    final storedMode = state.ftsTokenMode ?? FtsTokenMode.hex;
+    if (storedMode == _currentTokenMode) return;
+
+    // Purge every base-term sub-namespace for this blob — unconditionally,
+    // regardless of [alreadyReset] (B1 fix, see doc comment above). The
+    // prefix `$$vault:fts:{sha256}:` is precise: it does not match this
+    // blob's own corpus namespace (`$$vault:fts:corpus:{sha256}` —
+    // "corpus:" appears before, not after, the sha256) or any other blob's
+    // namespaces (sha256 hashes are fixed-length hex, so one hash is never
+    // a prefix of another in a way that could collide here).
+    final subNsPrefix = '$kVaultFtsPrefix$sha256:';
+    final all = await _kvStore.allStoredNamespaces();
+    final subNamespaces = all.where((n) => n.startsWith(subNsPrefix));
+
+    for (final subNs in subNamespaces) {
+      const batchSize = 200;
+      var batch = WriteBatch();
+      var count = 0;
+
+      await for (final entry in _kvStore.scan(subNs)) {
+        batch.delete(subNs, entry.key);
+        count++;
+        if (count >= batchSize) {
+          await _kvStore.writeBatchInternal(batch);
+          batch = WriteBatch();
+          count = 0;
+        }
+      }
+      if (!batch.isEmpty) {
+        await _kvStore.writeBatchInternal(batch);
+      }
+    }
+
+    // The reset+re-enqueue step is the only part deduplicated against
+    // _checkModelVersion — it already reset and re-enqueued this blob, so
+    // doing it again here would just be redundant double-processing (not
+    // incorrect, since re-processing is idempotent, but wasteful).
+    if (alreadyReset) return;
+
+    // Reset to pending so the blob is fully re-extracted and re-indexed
+    // under the current namespace-token scheme.
+    await _writeExtractStatusToKv(sha256, VaultExtractionState.pending(sha256));
+    if (await _vaultStore.isHydrated(sha256)) {
+      final manifest = await _vaultStore.getManifest(sha256);
+      _enqueue(sha256, manifest.mediaType);
+    }
   }
 
   // ── Internal: filesystem and LSM write helpers ─────────────────────────────
+
+  /// Runs [writerFn] (a [VaultBm25Writer.write] or [VaultVecWriter.write]
+  /// call) against a throwaway [WriteBatch] to capture its raw (unencrypted)
+  /// *values*, then re-emits each entry into [target] wrapped with
+  /// [EncryptionEnvelope].
+  ///
+  /// [VaultBm25Writer] and [VaultVecWriter] produce raw (unwrapped) *values*
+  /// — [static] `const`, no [EncryptionProvider] field of their own — so
+  /// [VaultSearchManager] — which already holds the provider it uses for
+  /// [writeExtractArtifact]/[readExtractArtifact] — applies value encryption
+  /// at this call site instead (Encryption confidentiality reconciliation
+  /// plan, Phase 1 checklist). Every value the two writers produce (per-chunk
+  /// term-frequency ints, the BM25 corpus sentinel, and per-chunk SQ8
+  /// vectors) is treated uniformly as an opaque byte blob via
+  /// [EncryptionEnvelope] rather than splitting the corpus sentinel out
+  /// through [ValueCodec] (a literal reading of Phase 0/B7's per-value-shape
+  /// categorisation) — since the writers never construct a
+  /// `Map<String, dynamic>` in the first place (they build raw CBOR
+  /// directly), routing the corpus sentinel through `ValueCodec` here would
+  /// require decoding the writer's raw CBOR bytes and re-encoding them as a
+  /// `Map` purely for wire-format uniformity, with no confidentiality
+  /// benefit (the AES-GCM strength is identical either way) — a documented,
+  /// narrow deviation found during implementation, paralleling the same
+  /// reasoning applied to `FtsManager`'s overlay namespace. See the plan's
+  /// Phase 1 checklist for the recorded rationale.
+  ///
+  /// [writerFn]'s return type is `Future<void>` (not `void`) because
+  /// **namespace token computation cannot be deferred to this call site** the
+  /// way value encryption is (Gap 2): the namespace name is part of the
+  /// [WriteBatch] entry itself, so [VaultBm25Writer.write] must compute it
+  /// up front and therefore needs to `await`
+  /// [EncryptionProvider.indexToken]. Callers writing a synchronous
+  /// [VaultVecWriter.write] (which has no namespace tokens to compute) simply
+  /// wrap the call in an `async` closure.
+  ///
+  /// Using a throwaway batch (rather than letting the writer's raw entries
+  /// land in [target] and rewriting them in place) also means the
+  /// unencrypted bytes are never committed to the WAL/memtable even
+  /// transiently — they exist only in the discarded [WriteBatch] local to
+  /// this method.
+  Future<void> _wrapWriterEntries(
+    Future<void> Function(WriteBatch) writerFn,
+    WriteBatch target,
+  ) async {
+    final raw = WriteBatch();
+    await writerFn(raw);
+    for (final entry in raw.entries) {
+      if (entry.isDelete) {
+        target.delete(entry.namespace, entry.key);
+        continue;
+      }
+      final wrapped = await EncryptionEnvelope.wrap(entry.value!, _encryption);
+      target.put(entry.namespace, entry.key, wrapped);
+    }
+  }
 
   /// Writes [state] as a [WriteBatch] entry in the `$$vault:extract` namespace.
   ///
@@ -896,7 +1110,7 @@ final class VaultSearchManager {
     VaultExtractionState state,
   ) async {
     final batch = WriteBatch();
-    _writeExtractStatusToBatch(sha256, state, batch);
+    await _writeExtractStatusToBatch(sha256, state, batch);
     await _kvStore.writeBatchInternal(batch);
   }
 
@@ -904,12 +1118,12 @@ final class VaultSearchManager {
   ///
   /// The key is [kVaultCorpusSentinelKey] — a fixed, non-colliding hex key
   /// (mirrors [FtsManager]'s corpus sentinel pattern).
-  void _writeExtractStatusToBatch(
+  Future<void> _writeExtractStatusToBatch(
     String sha256,
     VaultExtractionState state,
     WriteBatch batch,
-  ) {
-    final encoded = state.encode();
+  ) async {
+    final encoded = await state.encode(encryption: _encryption);
     batch.put('$kVaultExtractPrefix$sha256', kVaultCorpusSentinelKey, encoded);
   }
 

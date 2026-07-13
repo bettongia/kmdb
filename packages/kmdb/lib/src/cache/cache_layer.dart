@@ -15,6 +15,8 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import '../encryption/encryption_envelope.dart';
+import '../encryption/encryption_provider.dart';
 import '../engine/compaction/reclamation_policy.dart'
     show ReclamationPolicyRegistry;
 import '../engine/kvstore/kv_store.dart';
@@ -72,16 +74,28 @@ final class CacheLayer implements KvStore {
   /// Creates a [CacheLayer] wrapping [_store].
   ///
   /// [tier] defaults to [detectCacheTier]. [maxObjects] overrides the
-  /// tier-derived session cache capacity.
-  CacheLayer({required this._store, CacheTier? tier, int? maxObjects})
-    : _tier = tier ?? detectCacheTier(),
-      _cache = SessionCache(
-        maxObjects: maxObjects ?? (tier ?? detectCacheTier()).maxSessionObjects,
-      ) {
+  /// tier-derived session cache capacity. [encryption] is the database's
+  /// [EncryptionProvider], or `null` for a plaintext database — needed so
+  /// [_readGeneration] can correctly unwrap the `$meta` generation-counter
+  /// bytes it reads directly (see that method's doc comment).
+  CacheLayer({
+    required this._store,
+    CacheTier? tier,
+    int? maxObjects,
+    this.encryption,
+  }) : _tier = tier ?? detectCacheTier(),
+       _cache = SessionCache(
+         maxObjects:
+             maxObjects ?? (tier ?? detectCacheTier()).maxSessionObjects,
+       ) {
     _writeEventSub = _store.writeEvents.listen(_onWriteEvent);
   }
 
   final KvStore _store;
+
+  /// The database's [EncryptionProvider], or `null` for a plaintext
+  /// database. See the constructor doc comment.
+  final EncryptionProvider? encryption;
   final CacheTier _tier;
   final SessionCache _cache;
   late final StreamSubscription<String> _writeEventSub;
@@ -259,13 +273,26 @@ final class CacheLayer implements KvStore {
   /// Reads the generation counter for [namespace] from `$meta`.
   ///
   /// Returns 0 if no counter has been written yet (namespace is empty).
+  ///
+  /// Reads the raw `$meta` bytes directly via [_store] (a [KvStore], not a
+  /// `MetaStore` — [CacheLayer] deliberately depends only on the generic
+  /// [KvStore] interface so it stays testable against plain [KvStore]
+  /// doubles) rather than going through `MetaStore.getGenerationCounter`.
+  /// Because [MetaStore.appendGenerationCounterBump] now wraps this value
+  /// with [EncryptionEnvelope] (Encryption confidentiality reconciliation
+  /// plan, Gap 3), this method must unwrap it the same way before decoding
+  /// the big-endian uint64 — reading the raw bytes directly (as before this
+  /// plan) would misinterpret the leading flag byte as part of the encoded
+  /// integer.
   Future<int> _readGeneration(String namespace) async {
     _trackedNamespaces.add(namespace);
     final bytes = await _store.get(
       MetaStore.kNamespace,
       MetaStore.genKey(namespace),
     );
-    if (bytes == null || bytes.length < 8) return 0;
-    return ByteData.sublistView(bytes).getUint64(0, Endian.big);
+    if (bytes == null) return 0;
+    final unwrapped = await EncryptionEnvelope.unwrap(bytes, encryption);
+    if (unwrapped.length < 8) return 0;
+    return ByteData.sublistView(unwrapped).getUint64(0, Endian.big);
   }
 }

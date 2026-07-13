@@ -52,6 +52,13 @@ final class _XorProvider implements EncryptionProvider {
       ciphertext.sublist(1).map((b) => b ^ key).toList(),
     );
   }
+
+  // Not exercised by this file's tests (which cover ValueCodec's
+  // encrypt/decrypt layering, not Gap 2's namespace tokens); a trivial
+  // deterministic stub satisfies the interface.
+  @override
+  Future<String> indexToken(String message) async =>
+      message.hashCode.toRadixString(16).padLeft(8, '0');
 }
 
 /// Wrong-key [EncryptionProvider] that always throws [EncryptionError.badCredentials].
@@ -68,6 +75,10 @@ final class _BadKeyProvider implements EncryptionProvider {
         EncryptionErrorCode.badCredentials,
         'Wrong key (test)',
       );
+
+  @override
+  Future<String> indexToken(String message) async =>
+      throw const EncryptionError(EncryptionErrorCode.encryptionFailed, 'test');
 }
 
 void main() {

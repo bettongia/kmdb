@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'dart:convert' show json;
 import 'dart:typed_data';
 
 import 'package:kmdb/src/encoding/value_codec.dart';
+import 'package:kmdb/src/encryption/encryption_error.dart';
 import 'package:kmdb/src/encryption/encryption_provider.dart';
 import 'package:kmdb/src/encryption/key_derivation.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
@@ -227,6 +229,176 @@ void main() {
       final manifest = await store.getManifest(ref.sha256);
       expect(manifest.encrypted, isTrue);
       expect(manifest.sha256, equals(ref.sha256));
+    });
+  });
+
+  // ── originalName encryption (Gap 4) ───────────────────────────────────────────
+
+  group('VaultStore.originalName encryption (Gap 4)', () {
+    late Uint8List dek;
+    late AesGcmEncryptionProvider provider;
+
+    setUpAll(() async {
+      dek = await KeyDerivation.generateDek();
+    });
+
+    setUp(() {
+      provider = AesGcmEncryptionProvider(dek);
+    });
+
+    test(
+      'plaintext database: originalName is stored and read back unchanged',
+      () async {
+        final store = _TestVaultStore(adapter);
+        final data = _bytes('unencrypted originalName test');
+        final ref = await store.ingest(
+          bytes: data,
+          hlcTimestamp: _hlc,
+          originalName: 'report.pdf',
+        );
+
+        final manifest = await store.getManifest(ref.sha256);
+        expect(manifest.originalName, equals('report.pdf'));
+        expect(manifest.encrypted, isFalse);
+
+        // The raw manifest.json on disk must contain the plaintext name —
+        // unchanged behaviour for an unencrypted database.
+        final rawJson = String.fromCharCodes(
+          adapter.files[store.manifestPath(ref.sha256)]!,
+        );
+        expect(rawJson, contains('report.pdf'));
+      },
+    );
+
+    test(
+      'encrypted database: originalName is not visible in manifest.json on disk',
+      () async {
+        final store = _TestVaultStore(adapter, encryption: provider);
+        const secretName = 'confidential-salary-report.xlsx';
+        final data = _bytes('encrypted originalName test');
+        final ref = await store.ingest(
+          bytes: data,
+          hlcTimestamp: _hlc,
+          originalName: secretName,
+        );
+
+        final rawJson = String.fromCharCodes(
+          adapter.files[store.manifestPath(ref.sha256)]!,
+        );
+        expect(
+          rawJson,
+          isNot(contains(secretName)),
+          reason:
+              'Plaintext originalName must not appear anywhere in '
+              'manifest.json when encryption is active',
+        );
+      },
+    );
+
+    test(
+      'encrypted database: getManifest() transparently decrypts originalName',
+      () async {
+        final store = _TestVaultStore(adapter, encryption: provider);
+        const secretName = 'private-notes.docx';
+        final data = _bytes('decrypt round-trip test');
+        final ref = await store.ingest(
+          bytes: data,
+          hlcTimestamp: _hlc,
+          originalName: secretName,
+        );
+
+        final manifest = await store.getManifest(ref.sha256);
+        expect(manifest.originalName, equals(secretName));
+        expect(manifest.encrypted, isTrue);
+      },
+    );
+
+    test('getManifest() throws StateError when originalName is encrypted but '
+        'no provider is configured', () async {
+      final storeWithEnc = _TestVaultStore(adapter, encryption: provider);
+      final data = _bytes('no-provider-on-read test');
+      final ref = await storeWithEnc.ingest(
+        bytes: data,
+        hlcTimestamp: _hlc,
+        originalName: 'secret.txt',
+      );
+
+      final storeNoEnc = _TestVaultStore(adapter);
+      await expectLater(
+        storeNoEnc.getManifest(ref.sha256),
+        throwsA(isA<StateError>()),
+      );
+    });
+
+    test('getManifest() throws EncryptionError when originalName was encrypted '
+        'with a different DEK', () async {
+      final storeWithEnc = _TestVaultStore(adapter, encryption: provider);
+      final data = _bytes('wrong-key-on-read test');
+      final ref = await storeWithEnc.ingest(
+        bytes: data,
+        hlcTimestamp: _hlc,
+        originalName: 'secret.txt',
+      );
+
+      final otherDek = await KeyDerivation.generateDek();
+      final storeWrongKey = _TestVaultStore(
+        adapter,
+        encryption: AesGcmEncryptionProvider(otherDek),
+      );
+      await expectLater(
+        storeWrongKey.getManifest(ref.sha256),
+        throwsA(isA<EncryptionError>()),
+      );
+    });
+
+    test(
+      'mediaType/size/sha256/createdAt remain plaintext and readable without '
+      'decryption even when originalName is encrypted (sync-routing/dedup '
+      'invariant)',
+      () async {
+        final store = _TestVaultStore(adapter, encryption: provider);
+        final data = _bytes('sync routing check');
+        final ref = await store.ingest(
+          bytes: data,
+          hlcTimestamp: _hlc,
+          originalName: 'secret.txt',
+          explicitMediaType: 'text/plain',
+        );
+
+        // Parse manifest.json as bare JSON (no VaultStore/decryption
+        // involved) — mediaType/size/sha256/createdAt must be readable
+        // exactly as sync routing and dedup logic rely on.
+        final rawJson = json.decode(
+          String.fromCharCodes(adapter.files[store.manifestPath(ref.sha256)]!),
+        );
+        expect(rawJson['mediaType'], equals('text/plain'));
+        expect(rawJson['size'], equals(data.length));
+        expect(rawJson['sha256'], equals(ref.sha256));
+        expect(rawJson['createdAt'], equals(_hlc));
+        // Only originalName is opaque ciphertext.
+        expect(rawJson['originalName'], isNot(equals('secret.txt')));
+      },
+    );
+
+    test('deduplication: a duplicate ingest with a different originalName does '
+        'not overwrite the first (encrypted) manifest', () async {
+      final store = _TestVaultStore(adapter, encryption: provider);
+      final data = _bytes('dedup with encrypted originalName');
+
+      final ref1 = await store.ingest(
+        bytes: data,
+        hlcTimestamp: _hlc,
+        originalName: 'first-name.txt',
+      );
+      final ref2 = await store.ingest(
+        bytes: data,
+        hlcTimestamp: _hlc,
+        originalName: 'second-name.txt',
+      );
+
+      expect(ref1.sha256, equals(ref2.sha256));
+      final manifest = await store.getManifest(ref1.sha256);
+      expect(manifest.originalName, equals('first-name.txt'));
     });
   });
 

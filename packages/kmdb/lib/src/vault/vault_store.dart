@@ -19,6 +19,7 @@ library;
 import 'dart:convert';
 import 'dart:typed_data';
 
+import '../encryption/encryption_envelope.dart';
 import '../encryption/encryption_provider.dart';
 import '../engine/kvstore/kv_store.dart';
 import '../engine/platform/storage_adapter_interface.dart';
@@ -281,13 +282,31 @@ class VaultStore {
 
     // Step 6: write manifest.json.
     // The `encrypted` flag signals to readers and vault recovery that the
-    // stored blob is ciphertext and must be decrypted before use.
+    // stored blob is ciphertext and must be decrypted before use — and (Gap 4,
+    // Encryption confidentiality reconciliation plan) that `originalName` is
+    // stored as base64-encoded EncryptionEnvelope ciphertext rather than
+    // plaintext. Encrypting in place here (rather than moving the field out
+    // of manifest.json) is the Q6-resolved decision: smaller blast radius,
+    // manifest.json's shape stays stable, and no cross-plan coordination is
+    // needed with `vault export` (plan_0_08_vault_file_export.md, status
+    // `Open` as of this phase — not implemented, so there is no `vault
+    // export` read site to update yet).
+    final String storedOriginalName;
+    if (enc != null) {
+      final wrapped = await EncryptionEnvelope.wrap(
+        Uint8List.fromList(utf8.encode(originalName)),
+        enc,
+      );
+      storedOriginalName = base64.encode(wrapped);
+    } else {
+      storedOriginalName = originalName;
+    }
     final manifest = VaultManifest(
       sha256: sha256,
       size: size,
       crc32c: crc32c,
       mediaType: mediaType,
-      originalName: originalName,
+      originalName: storedOriginalName,
       createdAt: hlcTimestamp,
       encrypted: isEncrypted,
     );
@@ -353,7 +372,17 @@ class VaultStore {
 
   /// Returns the [VaultManifest] for [sha256].
   ///
+  /// The sole decryption point for [VaultManifest.originalName] (Gap 4,
+  /// Encryption confidentiality reconciliation plan): when the manifest was
+  /// written with `encrypted: true`, [originalName] on disk is
+  /// base64-encoded [EncryptionEnvelope] ciphertext; this method transparently
+  /// decrypts it before returning, so every caller (recovery, GC, vault
+  /// search indexing, the CLI's `export`/`dump` commands) sees the plaintext
+  /// name without needing to know about the encoding.
+  ///
   /// Throws [VaultObjectNotFoundException] if no manifest exists locally.
+  /// Throws [StateError] if the manifest is encrypted but no
+  /// [EncryptionProvider] is configured.
   Future<VaultManifest> getManifest(String sha256) async {
     final path = manifestPath(sha256);
     if (!await _adapter.fileExists(path)) {
@@ -361,7 +390,31 @@ class VaultStore {
     }
     final bytes = await _adapter.readFile(path);
     final jsonStr = utf8.decode(bytes);
-    return VaultManifest.fromJsonString(jsonStr);
+    final raw = VaultManifest.fromJsonString(jsonStr);
+    if (!raw.encrypted) return raw;
+
+    final enc = encryption;
+    if (enc == null) {
+      throw StateError(
+        'VaultStore.getManifest($sha256): originalName is encrypted but no '
+        'EncryptionProvider is configured. Open the database with an '
+        'EncryptionConfig.',
+      );
+    }
+    final decrypted = await EncryptionEnvelope.unwrap(
+      base64.decode(raw.originalName),
+      enc,
+    );
+    return VaultManifest(
+      schemaVersion: raw.schemaVersion,
+      sha256: raw.sha256,
+      size: raw.size,
+      crc32c: raw.crc32c,
+      mediaType: raw.mediaType,
+      originalName: utf8.decode(decrypted),
+      createdAt: raw.createdAt,
+      encrypted: raw.encrypted,
+    );
   }
 
   // ── Manifest write/delete helpers ──────────────────────────────────────────

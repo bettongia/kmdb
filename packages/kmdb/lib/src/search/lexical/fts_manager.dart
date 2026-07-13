@@ -26,6 +26,7 @@ import 'package:betto_lexical/betto_lexical.dart'
 import 'package:meta/meta.dart' show visibleForTesting;
 
 import '../../encoding/value_codec.dart';
+import '../../encryption/encryption_envelope.dart';
 import '../../encryption/encryption_provider.dart';
 import '../../engine/kvstore/kv_store.dart';
 import '../../engine/kvstore/kv_store_impl.dart';
@@ -130,25 +131,103 @@ final class FtsManager implements WriteAugmentor {
   /// read on the hot path.
   final _statusCache = <String, FtsIndexStatus>{};
 
-  // ── Startup ─────────────────────────────────────────────────────────────────
+  /// The [FtsTokenMode] the currently-configured [_encryption] would
+  /// produce. Stamped onto every [FtsIndexState] this manager persists so a
+  /// later [checkAndTransitionOnOpen] can detect a format-version mismatch
+  /// (Gap 2, Q5).
+  FtsTokenMode get _currentTokenMode =>
+      _encryption != null ? FtsTokenMode.hmac : FtsTokenMode.hex;
 
-  /// Called during [KmdbDatabase.open] to recover from unclean shutdowns.
+  /// Called during [KmdbDatabase.open] to recover from unclean shutdowns and
+  /// detect a namespace-token format-version upgrade (Gap 2, Q5).
   ///
-  /// Any index found in `syncing` state indicates that [applyDelta] was
-  /// interrupted by a crash. The index is transitioned to `stale` so the next
-  /// call to [ensureBuilt] triggers a full rebuild.
+  /// Two independent checks per declared index:
+  ///
+  /// 1. **Crash recovery:** any index found in `syncing` state indicates that
+  ///    [applyDelta] was interrupted by a crash. The index is transitioned to
+  ///    `stale` so the next call to [ensureBuilt] triggers a full rebuild.
+  /// 2. **Token-mode migration:** if the persisted [FtsIndexState.tokenMode]
+  ///    does not match what the currently-running code would produce (`hmac`
+  ///    when an [EncryptionProvider] is configured, `hex` otherwise), the
+  ///    index's base-term namespaces were tokenised under a scheme the
+  ///    current code no longer computes — those entries are unreachable by
+  ///    future reads/writes and, left in place, would defeat Gap 2 by leaving
+  ///    the plaintext-derivable hex tokens it closes on disk indefinitely.
+  ///    [_purgeBaseNamespaces] deletes every base-term sub-namespace for the
+  ///    index (the *only* namespace type Gap 2 affects — the overlay/doc/
+  ///    corpus namespaces are fixed per `(ns, field)` and are safely
+  ///    overwritten in place by the next [_buildIndex] run), then the state
+  ///    is reset to [FtsIndexStatus.undefined] so the index rebuilds lazily
+  ///    on the next [ensureBuilt] call — the same path used for a brand-new
+  ///    index (mirrors [VecManager.checkAndTransitionOnOpen]'s model-identity
+  ///    check).
+  ///
+  /// Must run **after** [MetaStore]'s [EncryptionProvider] has been bound
+  /// (`KmdbDatabase.open`, Gap 3/Q1), since the index state read here is
+  /// itself encrypted.
+  ///
+  /// This is not a runtime encryption toggle — see [FtsTokenMode]'s doc
+  /// comment.
   Future<void> checkAndTransitionOnOpen() async {
     for (final def in _defs) {
-      final state = await _loadState(def.collection, def.field);
-      // Populate the status cache so interceptWrite can make decisions without
-      // an async meta read on the hot write path.
-      _statusCache[_statusCacheKey(def.collection, def.field)] = state.status;
+      var state = await _loadState(def.collection, def.field);
+
       if (state.status == FtsIndexStatus.syncing) {
-        await _saveState(
-          state.copyWith(status: FtsIndexStatus.stale),
-          def.collection,
-          def.field,
+        state = state.copyWith(status: FtsIndexStatus.stale);
+        await _saveState(state, def.collection, def.field);
+      }
+
+      if (state.status != FtsIndexStatus.undefined &&
+          state.tokenMode != _currentTokenMode) {
+        await _purgeBaseNamespaces(def.collection, def.field);
+        state = FtsIndexState(
+          namespace: def.collection,
+          field: def.field,
+          status: FtsIndexStatus.undefined,
         );
+        await _saveState(state, def.collection, def.field);
+      }
+
+      // Populate the status cache so interceptWrite can make decisions
+      // without an async meta read on the hot write path.
+      _statusCache[_statusCacheKey(def.collection, def.field)] = state.status;
+    }
+  }
+
+  /// Deletes every base-term sub-namespace (`$$fts:{ns}:{field}:{token}`) for
+  /// `(ns, field)`, in batches of 200 entries per sub-namespace — mirrors
+  /// [IndexManager.removeIndex]'s sub-namespace purge.
+  ///
+  /// Used exclusively by [checkAndTransitionOnOpen]'s token-mode migration:
+  /// the prefix `$$fts:{ns}:{field}:` matches only base-term namespaces
+  /// (the sibling overlay/doc/corpus namespaces use the fixed literal
+  /// segments `overlay`/`doc`/`corpus` immediately after `$$fts:`, so they
+  /// only collide if a real collection were literally named `overlay`,
+  /// `doc`, or `corpus` — a pre-existing naming-scheme assumption, not
+  /// introduced here).
+  Future<void> _purgeBaseNamespaces(String ns, String field) async {
+    final subNsPrefix =
+        r'$$fts:'
+        '$ns:$field:';
+    final all = await _store.allStoredNamespaces();
+    final subNamespaces = all.where((n) => n.startsWith(subNsPrefix));
+
+    for (final subNs in subNamespaces) {
+      const batchSize = 200;
+      var batch = WriteBatch();
+      var count = 0;
+
+      await for (final entry in _store.scan(subNs)) {
+        batch.delete(subNs, entry.key);
+        count++;
+        if (count >= batchSize) {
+          await _store.writeBatchInternal(batch);
+          batch = WriteBatch();
+          count = 0;
+        }
+      }
+      if (!batch.isEmpty) {
+        await _store.writeBatchInternal(batch);
       }
     }
   }
@@ -255,14 +334,14 @@ final class FtsManager implements WriteAugmentor {
     final terms = tf.keys.toList();
 
     // Write base index entries (one per unique term).
-    _writeBaseEntries(def, namespace, docId, tf, batch);
+    await _writeBaseEntries(def, namespace, docId, tf, batch);
 
     // Write per-document info (token count + terms list for compaction).
-    _writeDocInfo(namespace, def.field, docId, tokenCount, terms, batch);
+    await _writeDocInfo(namespace, def.field, docId, tokenCount, terms, batch);
 
     // Read current corpus stats and increment.
     final stats = await _readCorpusStats(namespace, def.field);
-    _writeCorpusStats(
+    await _writeCorpusStats(
       namespace,
       def.field,
       n: stats.n + 1,
@@ -295,10 +374,10 @@ final class FtsManager implements WriteAugmentor {
 
     if (newFieldValue == null) {
       // Field was removed in the update — treat as a delete of the FTS entry.
-      _writeTombstone(namespace, def.field, docId, batch);
+      await _writeTombstone(namespace, def.field, docId, batch);
       batch.delete(_docNamespace(namespace, def.field), docId);
       final stats = await _readCorpusStats(namespace, def.field);
-      _writeCorpusStats(
+      await _writeCorpusStats(
         namespace,
         def.field,
         n: (stats.n - 1).clamp(0, _maxInt),
@@ -322,13 +401,13 @@ final class FtsManager implements WriteAugmentor {
 
     // Write overlay entry with current term frequencies. This supersedes the
     // stale base entries during queries until compaction reconciles them.
-    _writeOverlayEntry(namespace, def.field, docId, newTf, batch);
+    await _writeOverlayEntry(namespace, def.field, docId, newTf, batch);
 
     // Update doc info with the new token count but KEEP the old terms list.
     // Compaction uses the old terms to enumerate which base namespaces
     // (`$$fts:{ns}:{field}:{hexTerm}`) need stale entries removed. After
     // compaction rewrites the base entries, it updates the terms list.
-    _writeDocInfo(
+    await _writeDocInfo(
       namespace,
       def.field,
       docId,
@@ -340,7 +419,7 @@ final class FtsManager implements WriteAugmentor {
     // Adjust corpus stats by the token count delta.
     final stats = await _readCorpusStats(namespace, def.field);
     final delta = newTokenCount - oldTokenCount;
-    _writeCorpusStats(
+    await _writeCorpusStats(
       namespace,
       def.field,
       n: stats.n,
@@ -359,14 +438,14 @@ final class FtsManager implements WriteAugmentor {
     if (oldTokenCount == 0) return; // never indexed — nothing to do
 
     // Write TOMBSTONE to overlay so the query path excludes this document.
-    _writeTombstone(namespace, def.field, docId, batch);
+    await _writeTombstone(namespace, def.field, docId, batch);
 
     // Delete the per-document token count.
     batch.delete(_docNamespace(namespace, def.field), docId);
 
     // Decrement corpus stats.
     final stats = await _readCorpusStats(namespace, def.field);
-    _writeCorpusStats(
+    await _writeCorpusStats(
       namespace,
       def.field,
       n: (stats.n - 1).clamp(0, _maxInt),
@@ -414,6 +493,7 @@ final class FtsManager implements WriteAugmentor {
         namespace: ns,
         field: field,
         status: FtsIndexStatus.building,
+        tokenMode: _currentTokenMode,
       ),
       ns,
       field,
@@ -422,7 +502,7 @@ final class FtsManager implements WriteAugmentor {
     // 2. Initialise corpus stats to zero before the scan so that write
     //    interception during the scan has a valid starting point.
     final initBatch = WriteBatch();
-    _writeCorpusStats(ns, field, n: 0, totalTokens: 0, batch: initBatch);
+    await _writeCorpusStats(ns, field, n: 0, totalTokens: 0, batch: initBatch);
     await _store.writeBatchInternal(initBatch);
 
     // 3. Scan the namespace and write base index entries.
@@ -457,7 +537,7 @@ final class FtsManager implements WriteAugmentor {
         docId,
       );
       final overlay = overlayBytes != null
-          ? _decodeOverlayBytes(overlayBytes)
+          ? await _decodeOverlayBytes(overlayBytes)
           : null;
 
       if (overlay is String && overlay == kFtsTombstone) {
@@ -480,7 +560,7 @@ final class FtsManager implements WriteAugmentor {
         final oldDocInfo = await _readDocInfo(ns, field, docId);
         for (final oldTerm in oldDocInfo.terms) {
           if (!overlayMap.containsKey(oldTerm)) {
-            writeBatch.delete(_termNamespace(ns, field, oldTerm), docId);
+            writeBatch.delete(await _termNamespace(ns, field, oldTerm), docId);
           }
         }
 
@@ -509,8 +589,15 @@ final class FtsManager implements WriteAugmentor {
         tokenCount = tokens.length;
       }
 
-      _writeBaseEntries(def, ns, docId, tf, writeBatch);
-      _writeDocInfo(ns, field, docId, tokenCount, tf.keys.toList(), writeBatch);
+      await _writeBaseEntries(def, ns, docId, tf, writeBatch);
+      await _writeDocInfo(
+        ns,
+        field,
+        docId,
+        tokenCount,
+        tf.keys.toList(),
+        writeBatch,
+      );
       batchCount++;
 
       if (batchCount >= batchSize) {
@@ -533,12 +620,12 @@ final class FtsManager implements WriteAugmentor {
     await for (final docEntry in _store.scan(_docNamespace(ns, field))) {
       finalDocCount++;
       // Doc namespace values are now CBOR maps {n, t}; extract the count.
-      final info = _readDocInfoFromBytes(docEntry.value);
+      final info = await _readDocInfoFromBytes(docEntry.value);
       finalTotalTokens += info.count;
     }
 
     final statsBatch = WriteBatch();
-    _writeCorpusStats(
+    await _writeCorpusStats(
       ns,
       field,
       n: finalDocCount,
@@ -555,6 +642,7 @@ final class FtsManager implements WriteAugmentor {
         field: field,
         status: FtsIndexStatus.current,
         builtAt: now,
+        tokenMode: _currentTokenMode,
       ),
       ns,
       field,
@@ -754,11 +842,11 @@ final class FtsManager implements WriteAugmentor {
     final termDf = <String, int>{};
 
     for (final term in queryTerms) {
-      // Scan the per-term namespace: `$$fts:{ns}:{field}:{hexTerm}`.
+      // Scan the per-term namespace: `$$fts:{ns}:{field}:{token}`.
       // All entries in this namespace have docId as the key (32-char UUID),
       // so no startKey/endKey constraints are needed.
       await for (final entry in _store.scan(
-        _termNamespace(namespace, field, term),
+        await _termNamespace(namespace, field, term),
       )) {
         final docId = entry.key;
 
@@ -771,7 +859,7 @@ final class FtsManager implements WriteAugmentor {
 
         if (overlay == null) {
           // No overlay — document not updated since last base write.
-          effectiveTf = _decodeCborInt(entry.value);
+          effectiveTf = await _decodeCborInt(entry.value);
         } else if (overlay is String && overlay == kFtsTombstone) {
           // Tombstone — document deleted; skip.
           continue;
@@ -843,16 +931,16 @@ final class FtsManager implements WriteAugmentor {
 
     for (final overlayEntry in overlayEntries) {
       final docId = overlayEntry.docId;
-      final decoded = _decodeOverlayBytes(overlayEntry.value);
+      final decoded = await _decodeOverlayBytes(overlayEntry.value);
       final batch = WriteBatch();
 
       if (decoded is String && decoded == kFtsTombstone) {
         // Remove base entries for this document by looking up the stored terms
         // from the doc info namespace. Base entries use namespace-per-term:
-        // each term has its own namespace `$$fts:{ns}:{field}:{hexTerm}`.
+        // each term has its own namespace `$$fts:{ns}:{field}:{token}`.
         final docInfo = await _readDocInfo(namespace, field, docId);
         for (final term in docInfo.terms) {
-          batch.delete(_termNamespace(namespace, field, term), docId);
+          batch.delete(await _termNamespace(namespace, field, term), docId);
         }
         batch.delete(overlayNs, docId);
         batch.delete(docNs, docId);
@@ -867,21 +955,28 @@ final class FtsManager implements WriteAugmentor {
         for (final oldTerm in oldDocInfo.terms) {
           if (!currentTerms.containsKey(oldTerm)) {
             // Term was removed in the update — delete stale base entry.
-            batch.delete(_termNamespace(namespace, field, oldTerm), docId);
+            batch.delete(
+              await _termNamespace(namespace, field, oldTerm),
+              docId,
+            );
           }
         }
 
         // Write current base entries from the overlay, replacing stale ones.
         for (final t in currentTerms.entries) {
-          batch.put(
-            _termNamespace(namespace, field, t.key),
-            docId,
+          final wrapped = await EncryptionEnvelope.wrap(
             _encodeCborInt(t.value),
+            _encryption,
+          );
+          batch.put(
+            await _termNamespace(namespace, field, t.key),
+            docId,
+            wrapped,
           );
         }
 
         // Update doc info to reflect the current terms (post-compaction).
-        _writeDocInfo(
+        await _writeDocInfo(
           namespace,
           field,
           docId,
@@ -1018,28 +1113,47 @@ final class FtsManager implements WriteAugmentor {
 
   // ── Namespace helpers ─────────────────────────────────────────────────────
 
-  /// Per-term namespace: `$$fts:{ns}:{field}:{hexTerm}`.
+  /// Per-term namespace: `$$fts:{ns}:{field}:{token}`.
   ///
   /// The `$$` prefix marks this as a local-only namespace — its contents are
   /// never uploaded to the sync folder. Each device rebuilds its FTS index
   /// independently from document data.
   ///
-  /// The term is UTF-8 encoded and hex-stringified (same approach as
-  /// `IndexWriter` for field values). Within this namespace, the key is the
-  /// 32-character UUIDv7 docId and the value is a CBOR-encoded term frequency.
+  /// [_termToken] resolves `{token}`: plaintext hex when this database is
+  /// unencrypted, or an HMAC-SHA256 token when it is (Encryption
+  /// confidentiality reconciliation plan, Gap 2). Within this namespace, the
+  /// key is the 32-character UUIDv7 docId and the value is a CBOR-encoded
+  /// term frequency.
   ///
   /// Using a separate namespace per term keeps all keys as 32-char hex UUIDs,
   /// satisfying the KvStore key constraint.
-  static String _termNamespace(String ns, String field, String term) {
-    final hexTerm = _termToHex(term);
+  Future<String> _termNamespace(String ns, String field, String term) async {
+    final token = await _termToken(ns, field, term);
     return r'$$fts:'
-        '$ns:$field:$hexTerm';
+        '$ns:$field:$token';
   }
 
   /// Encodes [term] as a lowercase hex string of its UTF-8 bytes.
+  ///
+  /// Used directly as the namespace token when this database is unencrypted
+  /// (`tokenMode: hex`) — see [_termToken].
   static String _termToHex(String term) {
     final bytes = utf8.encode(term);
     return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  }
+
+  /// Resolves the namespace-suffix token for `(ns, field, term)`.
+  ///
+  /// When [_encryption] is `null` (unencrypted database), returns the
+  /// plaintext hex encoding via [_termToHex] — unchanged from the pre-Gap-2
+  /// behaviour. When [_encryption] is set, returns an HMAC-SHA256 token via
+  /// [EncryptionProvider.indexToken], domain-separated by `ns` and `field` so
+  /// the same term in a different field or collection never produces the
+  /// same token (Encryption confidentiality reconciliation plan, Gap 2, Q4).
+  Future<String> _termToken(String ns, String field, String term) {
+    final encryption = _encryption;
+    if (encryption == null) return Future.value(_termToHex(term));
+    return encryption.indexToken('$ns:$field:$term');
   }
 
   /// Overlay namespace: `$$fts:overlay:{ns}:{field}`.
@@ -1081,19 +1195,27 @@ final class FtsManager implements WriteAugmentor {
 
   /// Writes one base entry per unique term into its own term namespace.
   ///
-  /// Each base entry: namespace = `$$fts:{ns}:{field}:{hexTerm}`, key = docId.
-  void _writeBaseEntries(
+  /// Each base entry: namespace = `$$fts:{ns}:{field}:{token}`, key = docId.
+  ///
+  /// Values are scalar CBOR ints (term frequency), not `Map`-shaped, so they
+  /// are wrapped with [EncryptionEnvelope] rather than [ValueCodec]
+  /// (Encryption confidentiality reconciliation plan, Phase 0/B7).
+  Future<void> _writeBaseEntries(
     FtsIndexDefinition def,
     String namespace,
     String docId,
     Map<String, int> tf,
     WriteBatch batch,
-  ) {
+  ) async {
     for (final entry in tf.entries) {
-      batch.put(
-        _termNamespace(namespace, def.field, entry.key),
-        docId,
+      final wrapped = await EncryptionEnvelope.wrap(
         _encodeCborInt(entry.value),
+        _encryption,
+      );
+      batch.put(
+        await _termNamespace(namespace, def.field, entry.key),
+        docId,
+        wrapped,
       );
     }
   }
@@ -1102,69 +1224,90 @@ final class FtsManager implements WriteAugmentor {
   ///
   /// The terms list is required by [compact] to enumerate which term
   /// namespaces must be cleaned up when processing tombstone overlays.
-  void _writeDocInfo(
+  ///
+  /// The value is `Map`-shaped (`{n, t: […]}`), so it is routed through
+  /// [ValueCodec] directly (Phase 0/B7).
+  Future<void> _writeDocInfo(
     String namespace,
     String field,
     String docId,
     int count,
     List<String> terms,
     WriteBatch batch,
-  ) {
-    final encoded = Uint8List.fromList(
-      cbor.encode(
-        CborMap({
-          CborString('n'): CborSmallInt(count),
-          CborString('t'): CborList(terms.map(CborString.new).toList()),
-        }),
-      ),
-    );
+  ) async {
+    final encoded = await ValueCodec.encode({
+      'n': count,
+      't': terms,
+    }, encryption: _encryption);
     batch.put(_docNamespace(namespace, field), docId, encoded);
   }
 
-  void _writeCorpusStats(
+  /// The value is `Map`-shaped (`{n, totalTokens}`), so it is routed through
+  /// [ValueCodec] directly (Phase 0/B7).
+  Future<void> _writeCorpusStats(
     String namespace,
     String field, {
     required int n,
     required int totalTokens,
     required WriteBatch batch,
-  }) {
-    final encoded = Uint8List.fromList(
-      cbor.encode(
-        CborMap({
-          CborString('n'): CborSmallInt(n),
-          CborString('totalTokens'): CborSmallInt(totalTokens),
-        }),
-      ),
-    );
+  }) async {
+    final encoded = await ValueCodec.encode({
+      'n': n,
+      'totalTokens': totalTokens,
+    }, encryption: _encryption);
     batch.put(_corpusNamespace(namespace, field), _corpusKey, encoded);
   }
 
-  void _writeOverlayEntry(
+  /// Writes an overlay entry recording the current term→tf map for [docId].
+  ///
+  /// The overlay namespace/key also holds [kFtsTombstone] sentinel values
+  /// written by [_writeTombstone] — the two write helpers share the same
+  /// `(namespace, docId)` slot and a reader (`_decodeOverlayBytes`) cannot
+  /// know in advance which shape a given entry holds. Because [ValueCodec]
+  /// is `Map`-only and [EncryptionEnvelope] is opaque-bytes-only, mixing the
+  /// two primitives across this shared namespace would make the plaintext
+  /// on-disk framing ambiguous on read (a [ValueCodec]-encoded map has an
+  /// extra `CompressionFlag` byte an [EncryptionEnvelope]-wrapped scalar does
+  /// not). To keep the two write helpers safely co-resident in one
+  /// namespace, both continue to produce a single, self-describing raw CBOR
+  /// blob exactly as before this plan (a [CborMap] here, a [CborString] in
+  /// [_writeTombstone]) and only the *outer* encryption layer is added via
+  /// [EncryptionEnvelope], which treats that raw CBOR blob as an opaque byte
+  /// payload. This is a deliberate, documented narrowing of Phase 0/B7's
+  /// literal "`_writeOverlayEntry` → `ValueCodec`" categorisation — found
+  /// during implementation by re-verifying the write sites, not assumed —
+  /// see the plan's Phase 1 checklist for the recorded rationale.
+  Future<void> _writeOverlayEntry(
     String namespace,
     String field,
     String docId,
     Map<String, int> tf,
     WriteBatch batch,
-  ) {
-    final encoded = Uint8List.fromList(
+  ) async {
+    final cborBytes = Uint8List.fromList(
       cbor.encode(
         CborMap(tf.map((k, v) => MapEntry(CborString(k), CborSmallInt(v)))),
       ),
     );
-    batch.put(_overlayNamespace(namespace, field), docId, encoded);
+    final wrapped = await EncryptionEnvelope.wrap(cborBytes, _encryption);
+    batch.put(_overlayNamespace(namespace, field), docId, wrapped);
   }
 
-  void _writeTombstone(
+  /// Writes the [kFtsTombstone] sentinel into the overlay namespace for
+  /// [docId]. See [_writeOverlayEntry]'s doc comment for why this shares an
+  /// [EncryptionEnvelope]-wrapped raw-CBOR encoding with the overlay map
+  /// case rather than being routed through [ValueCodec] independently.
+  Future<void> _writeTombstone(
     String namespace,
     String field,
     String docId,
     WriteBatch batch,
-  ) {
-    batch.put(
-      _overlayNamespace(namespace, field),
-      docId,
-      Uint8List.fromList(cbor.encode(CborString(kFtsTombstone))),
+  ) async {
+    final cborBytes = Uint8List.fromList(
+      cbor.encode(CborString(kFtsTombstone)),
     );
+    final wrapped = await EncryptionEnvelope.wrap(cborBytes, _encryption);
+    batch.put(_overlayNamespace(namespace, field), docId, wrapped);
   }
 
   // ── Read helpers ──────────────────────────────────────────────────────────
@@ -1179,9 +1322,7 @@ final class FtsManager implements WriteAugmentor {
     );
     if (bytes == null || bytes.isEmpty) return (n: 0, totalTokens: 0);
     try {
-      final decoded = cbor.decode(bytes);
-      if (decoded is! CborMap) return (n: 0, totalTokens: 0);
-      final map = decoded.toObject() as Map<dynamic, dynamic>;
+      final map = await ValueCodec.decode(bytes, encryption: _encryption);
       return (
         n: (map['n'] as num?)?.toInt() ?? 0,
         totalTokens: (map['totalTokens'] as num?)?.toInt() ?? 0,
@@ -1218,24 +1359,32 @@ final class FtsManager implements WriteAugmentor {
     return _readDocInfoFromBytes(bytes);
   }
 
-  /// Decodes doc info from raw [bytes] (synchronous helper for batch scanning).
-  static ({int count, List<String> terms}) _readDocInfoFromBytes(
+  /// Decodes doc info from raw [bytes].
+  ///
+  /// Instance method (not `static`) and `async` — decoding now goes through
+  /// [ValueCodec.decode], which is `Future`-returning and needs [_encryption]
+  /// (Phase 0/B7; Phase 1 of the Encryption confidentiality reconciliation
+  /// plan).
+  ///
+  /// The pre-this-plan "legacy format stored token count as a plain integer"
+  /// fallback has been removed: that fallback existed for an even older,
+  /// pre-map-shaped doc-info format, predating this plan's format-version
+  /// gate (Phase 2). Any database old enough to contain such bare-int values
+  /// is refused at `open()` by that gate before this method is ever reached,
+  /// so the fallback was dead code under the new "no migration, recreate the
+  /// database" stance and is not reintroduced here.
+  Future<({int count, List<String> terms})> _readDocInfoFromBytes(
     Uint8List bytes,
-  ) {
+  ) async {
     if (bytes.isEmpty) return (count: 0, terms: const <String>[]);
     try {
-      final decoded = cbor.decode(bytes);
-      if (decoded is CborMap) {
-        final map = decoded.toObject() as Map<dynamic, dynamic>;
-        final count = (map['n'] as num?)?.toInt() ?? 0;
-        final rawTerms = map['t'];
-        final terms = rawTerms is List
-            ? rawTerms.whereType<String>().toList()
-            : const <String>[];
-        return (count: count, terms: terms);
-      }
-      // Fallback: legacy format stored token count as a plain integer.
-      return (count: _decodeCborInt(bytes), terms: const <String>[]);
+      final map = await ValueCodec.decode(bytes, encryption: _encryption);
+      final count = (map['n'] as num?)?.toInt() ?? 0;
+      final rawTerms = map['t'];
+      final terms = rawTerms is List
+          ? rawTerms.whereType<String>().toList()
+          : const <String>[];
+      return (count: count, terms: terms);
     } catch (_) {
       return (count: 0, terms: const <String>[]);
     }
@@ -1255,9 +1404,14 @@ final class FtsManager implements WriteAugmentor {
     return _decodeOverlayBytes(bytes);
   }
 
-  static Object? _decodeOverlayBytes(Uint8List bytes) {
+  /// Decodes an overlay entry. See [_writeOverlayEntry]'s doc comment for why
+  /// this peels the outer [EncryptionEnvelope] layer and then applies the
+  /// original raw-CBOR type discrimination (`CborString` vs `CborMap`)
+  /// rather than routing through [ValueCodec].
+  Future<Object?> _decodeOverlayBytes(Uint8List bytes) async {
     try {
-      final decoded = cbor.decode(bytes);
+      final inner = await EncryptionEnvelope.unwrap(bytes, _encryption);
+      final decoded = cbor.decode(inner);
       if (decoded is CborString) return decoded.toString();
       if (decoded is CborMap) return decoded.toObject();
       return null;
@@ -1289,12 +1443,20 @@ final class FtsManager implements WriteAugmentor {
 
   // ── CBOR helpers ──────────────────────────────────────────────────────────
 
+  /// Encodes [value] as raw (unwrapped) CBOR. Callers apply
+  /// [EncryptionEnvelope.wrap] separately — kept as a pure sync CBOR encoder
+  /// so it can also produce the un-wrapped bytes [_writeOverlayEntry] embeds
+  /// inside its own envelope.
   static Uint8List _encodeCborInt(int value) =>
       Uint8List.fromList(cbor.encode(CborSmallInt(value)));
 
-  static int _decodeCborInt(Uint8List bytes) {
+  /// Decodes a base-entry term-frequency value written by
+  /// [_writeBaseEntries]: peels the [EncryptionEnvelope] layer, then decodes
+  /// the inner raw CBOR int.
+  Future<int> _decodeCborInt(Uint8List bytes) async {
     try {
-      final decoded = cbor.decode(bytes);
+      final inner = await EncryptionEnvelope.unwrap(bytes, _encryption);
+      final decoded = cbor.decode(inner);
       if (decoded is CborSmallInt) return decoded.toInt();
       if (decoded is CborInt) return decoded.toBigInt().toInt();
       return 0;

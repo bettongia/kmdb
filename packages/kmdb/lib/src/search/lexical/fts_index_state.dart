@@ -49,6 +49,30 @@ enum FtsIndexStatus {
   syncing,
 }
 
+/// Discriminates how base-entry namespace tokens (the `{token}` segment of
+/// [FtsIndexState.baseKey]) were computed when this index was last (re)built.
+///
+/// Introduced by the Encryption confidentiality reconciliation plan, Gap 2
+/// (Q5), as a persisted format-version marker — the same role
+/// [VecIndexState.modelId] plays for embedding-model identity. It is **not**
+/// a runtime toggle: encryption cannot be enabled/disabled on an existing
+/// database (see `KmdbDatabase.open`'s `cannotProvisionNonEmptyDatabase`
+/// check), so the only way this value can mismatch what the current code
+/// would produce is a software upgrade that changes the tokenisation scheme
+/// for an already-encrypted database.
+enum FtsTokenMode {
+  /// Terms are UTF-8-encoded and hex-stringified in plaintext
+  /// ([FtsManager._termToHex]). Used when the database is unencrypted, and
+  /// also the value read back from indexes built before Gap 2 shipped
+  /// (absent/unrecognised `tokenMode` decodes to this — see [fromBytes]).
+  hex,
+
+  /// Terms are tokenised via [EncryptionProvider.indexToken] (HMAC-SHA256,
+  /// keyed by a sub-key derived from the database's DEK). Used when the
+  /// database is encrypted.
+  hmac,
+}
+
 /// Persistent state for a single FTS index field, stored as a CBOR map in
 /// the `$meta` system namespace under the key returned by [metaKey].
 final class FtsIndexState {
@@ -59,6 +83,7 @@ final class FtsIndexState {
     required this.status,
     this.builtThrough = '',
     this.builtAt = '',
+    this.tokenMode = FtsTokenMode.hex,
   });
 
   /// The collection namespace this index covers.
@@ -78,17 +103,27 @@ final class FtsIndexState {
   /// Empty when not yet built. Informational only.
   final String builtAt;
 
+  /// How base-entry namespace tokens were computed as of the last build.
+  ///
+  /// Compared against what the currently-running code would produce (`hmac`
+  /// when an [EncryptionProvider] is configured, `hex` otherwise) at
+  /// `KmdbDatabase.open` time; a mismatch triggers a full rebuild — see
+  /// [FtsManager.checkAndTransitionOnOpen] (Gap 2, Q5).
+  final FtsTokenMode tokenMode;
+
   /// Returns a copy with the specified fields overridden.
   FtsIndexState copyWith({
     FtsIndexStatus? status,
     String? builtThrough,
     String? builtAt,
+    FtsTokenMode? tokenMode,
   }) => FtsIndexState(
     namespace: namespace,
     field: field,
     status: status ?? this.status,
     builtThrough: builtThrough ?? this.builtThrough,
     builtAt: builtAt ?? this.builtAt,
+    tokenMode: tokenMode ?? this.tokenMode,
   );
 
   // ── CBOR serialisation ─────────────────────────────────────────────────────
@@ -101,6 +136,7 @@ final class FtsIndexState {
       CborString('status'): CborString(status.name),
       CborString('builtThrough'): CborString(builtThrough),
       CborString('builtAt'): CborString(builtAt),
+      CborString('tokenMode'): CborString(tokenMode.name),
     });
     return Uint8List.fromList(cbor.encode(map));
   }
@@ -109,6 +145,14 @@ final class FtsIndexState {
   ///
   /// Returns a state with [FtsIndexStatus.undefined] if [bytes] is empty,
   /// null, or corrupt so that callers can always proceed safely.
+  ///
+  /// [tokenMode] defaults to [FtsTokenMode.hex] when absent from the
+  /// serialised map — indexes built before Gap 2 shipped were always
+  /// hex-tokenised, so this default is not a guess, it is the actual prior
+  /// behaviour. This is also what lets [FtsManager.checkAndTransitionOnOpen]
+  /// detect the pre-Gap-2 → Gap-2 upgrade on an already-encrypted database:
+  /// the absent-tokenMode-defaults-to-`hex` read will mismatch the `hmac`
+  /// the current (encrypted) code expects, exactly as intended.
   static FtsIndexState fromBytes(
     String namespace,
     String field,
@@ -129,12 +173,18 @@ final class FtsIndexState {
         (s) => s.name == statusStr,
         orElse: () => FtsIndexStatus.undefined,
       );
+      final tokenModeStr = map['tokenMode'] as String? ?? 'hex';
+      final tokenMode = FtsTokenMode.values.firstWhere(
+        (m) => m.name == tokenModeStr,
+        orElse: () => FtsTokenMode.hex,
+      );
       return FtsIndexState(
         namespace: namespace,
         field: field,
         status: status,
         builtThrough: map['builtThrough'] as String? ?? '',
         builtAt: map['builtAt'] as String? ?? '',
+        tokenMode: tokenMode,
       );
     } catch (_) {
       return undefined;

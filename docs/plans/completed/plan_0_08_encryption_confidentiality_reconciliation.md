@@ -1,6 +1,6 @@
 # Encryption confidentiality reconciliation
 
-**Status**: Investigated
+**Status**: Complete
 
 **PR link**: —
 
@@ -619,11 +619,15 @@ flagged for that write site):
 Per Phase 0's B7 split: `ValueCodec` for map-shaped values, the new
 `EncryptionEnvelope` helper for scalars/raw bytes.
 
-- [ ] Add `EncryptionEnvelope.wrap`/`unwrap` under `lib/src/encryption/`
+- [x] Add `EncryptionEnvelope.wrap`/`unwrap` under `lib/src/encryption/`
       (see Phase 0/B7); refactor `VaultSearchManager.writeExtractArtifact`/
       `readExtractArtifact` (WI-10) to use it instead of their inlined
-      copy of the same pattern.
-- [ ] `FtsManager`: `_writeDocInfo`, `_writeCorpusStats`, `_writeOverlayEntry`
+      copy of the same pattern. Done:
+      `packages/kmdb/lib/src/encryption/encryption_envelope.dart` +
+      refactor; regression-tested by the pre-existing
+      `vault_extract_artifact_codec_test.dart` (unchanged, all 8 pass) plus
+      a new dedicated `encryption_envelope_test.dart` (12 tests).
+- [x] `FtsManager`: `_writeDocInfo`, `_writeCorpusStats`, `_writeOverlayEntry`
       (and their read counterparts `_readDocInfoFromBytes`,
       `_readCorpusStats`, `_decodeOverlayBytes`) → `ValueCodec.encode/decode
       (encryption: _encryption)` (map-shaped). `_writeBaseEntries`/
@@ -631,13 +635,29 @@ Per Phase 0's B7 split: `ValueCodec` for map-shaped values, the new
       `EncryptionEnvelope.wrap/unwrap` (scalar), with `_decodeCborInt`
       updated to match. Convert the static/sync decode helpers to async
       instance methods as needed either way, since both primitives are async.
-- [ ] `VecManager`: `_writeCorpusN`/`_readCorpusN` (`{n}`) →
+      **Implementation note (deviation, recorded per the workflow policy):**
+      `_writeOverlayEntry` and `_writeTombstone` share one namespace/key
+      slot, and a reader cannot know in advance which shape (map vs.
+      tombstone string) a given entry holds — mixing `ValueCodec` (which adds
+      an extra `CompressionFlag` byte) and `EncryptionEnvelope` across that
+      shared slot makes the plaintext framing ambiguous on read. Resolved by
+      keeping both writers' existing raw-CBOR encoding (unchanged,
+      self-describing via `CborString`/`CborMap` type-tagging) and applying
+      only the outer `EncryptionEnvelope` layer uniformly to the overlay
+      namespace — see the doc comment on `_writeOverlayEntry` in
+      `fts_manager.dart` for the full rationale. `_writeDocInfo`/
+      `_writeCorpusStats` are unaffected (their namespaces are not shared
+      with any other shape) and route through `ValueCodec` exactly as
+      specified.
+- [x] `VecManager`: `_writeCorpusN`/`_readCorpusN` (`{n}`) →
       `ValueCodec.encode/decode` (map-shaped). The raw SQ8 vector bytes →
       `EncryptionEnvelope.wrap/unwrap` (scalar — deliberately **not**
       `ValueCodec`, to avoid a CBOR-map wrapper interfering with the
       fixed-length corruption guard). Move the length-corruption guard
       (`entry.value.length != expectedByteLen`) to run after decryption.
-- [ ] `VaultSearchManager`: pre-wrap/unwrap values for `VaultBm25Writer`/
+      Done — the guard now runs on the unwrapped bytes in `_scoreField`'s
+      both read paths (targeted lookup and full scan).
+- [x] `VaultSearchManager`: pre-wrap/unwrap values for `VaultBm25Writer`/
       `VaultVecWriter` at the call site (using the provider it already
       holds) before/after `writeBatchInternal`/scan reads, rather than
       threading the provider into the (currently `const`) writer classes.
@@ -646,17 +666,48 @@ Per Phase 0's B7 split: `ValueCodec` for map-shaped values, the new
       route through `ValueCodec` (map-shaped); `_encodeCborInt` (per-chunk
       TF) → `EncryptionEnvelope` (scalar). `VaultVecWriter`'s raw SQ8 bytes
       → `EncryptionEnvelope` (scalar, same reasoning as `VecManager`).
-- [ ] `VaultExtractionState.encode()`/`decode()`: already built from/to a
+      **Implementation note (deviation, recorded per the workflow policy):**
+      implemented via a `_wrapWriterEntries` helper that runs the writer
+      against a throwaway `WriteBatch` and re-emits every entry (including
+      the corpus sentinel) wrapped uniformly with `EncryptionEnvelope`,
+      rather than splitting the corpus sentinel out through `ValueCodec` as
+      literally specified — since `VaultBm25Writer`/`VaultVecWriter` never
+      construct a `Map<String, dynamic>` in the first place (they build raw
+      CBOR directly, by design, per this same checklist item's "keep the
+      writers unaware of encryption" constraint), routing just the corpus
+      sentinel through `ValueCodec` would mean decoding the writer's raw
+      CBOR and re-encoding it as a `Map` purely for wire-format uniformity,
+      with no confidentiality benefit (identical AES-GCM strength either
+      way). See `_wrapWriterEntries`'s doc comment in
+      `vault_search_manager.dart` for the full rationale — this parallels
+      the `FtsManager` overlay-namespace deviation above. `VaultSearcher`'s
+      read paths (`unwrapIndexValue`, exposed on `VaultSearchManager` since
+      Dart privacy is per-file) were updated to match.
+- [x] `VaultExtractionState.encode()`/`decode()`: already built from/to a
       `Map<String, dynamic>` (`toMap()`) — route through `ValueCodec`
       directly (map-shaped), called from `VaultSearchManager.
-      _writeExtractStatusToBatch` and its read counterpart.
-- [ ] Correct the incorrect "never needs encryption at this layer" doc comment
+      _writeExtractStatusToBatch` and its read counterpart. Done — `encode`/
+      `decode` now take an optional `EncryptionProvider?` and are
+      `Future`-returning (`decode` is a `static` method, not a `factory`
+      constructor, since Dart forbids async factory constructors); the
+      now-unused hand-rolled CBOR helpers (`_mapToCbor`/`_valueToCbor`/
+      `_cborToMap`/`_cborToValue`) were deleted rather than left dead.
+- [x] Correct the incorrect "never needs encryption at this layer" doc comment
       in `vault_bm25_writer.dart` (171–177), and the equivalent claim in
-      `vault_extraction_state.dart`'s `encode()` doc comment.
-- [ ] Add `$$vault:vec:idx:` to the set of namespaces §31 lists as
+      `vault_extraction_state.dart`'s `encode()` doc comment. Done, plus an
+      added "Encryption layering" doc section on both `VaultBm25Writer` and
+      `VaultVecWriter` clarifying the raw-vs-wrapped byte distinction.
+- [x] Add `$$vault:vec:idx:` to the set of namespaces §31 lists as
       value-encrypted; correct the WI-3 "no KV namespace" claim in 0_06.md and
-      §24.
-- [ ] Tests: round-trip encrypted write/read for each modified write site
+      §24. Done: `docs/roadmap/0_06.md`'s false "vault chunk vectors have no
+      KV namespace" claim corrected; §31's gap 1 section extended to name
+      the vault-search writers/namespaces (including `$$vault:vec:idx:`) and
+      records a Phase 1 progress note (full "resolved" rewrite is Phase 5's
+      job, once all four gaps have landed). §24 was checked and does not
+      contain the false claim (only 0_06.md did) — no change needed there;
+      §24's "see §32" pointer to the already-accurate
+      `docs/spec/32_vault_search.md` namespace table was verified correct.
+- [x] Tests: round-trip encrypted write/read for each modified write site
       (both primitives); confirm a **freshly created** unencrypted database
       round-trips correctly through the new framing and produces identical
       query results (**not** "byte-for-byte unchanged" — under this design
@@ -669,19 +720,53 @@ Per Phase 0's B7 split: `ValueCodec` for map-shaped values, the new
       encryption on (search correctness, not just storage format); confirm
       `writeExtractArtifact`/`readExtractArtifact` behave identically
       before/after the `EncryptionEnvelope` refactor (regression test, not
-      just new coverage).
+      just new coverage). Done — `vec_manager_test.dart`'s "384-byte" test
+      updated to the new `384 + 1` on-disk length with an explanatory
+      comment (the concrete instance of the byte-format-change note above);
+      full `test/vault/`, `test/search/`, and `test/encryption/` suites pass
+      (2,329 tests across the whole `kmdb` package, 12 e2e skipped).
 
 **Phase 1 close-out (see the workflow policy above):**
 
-- [ ] Verify every task/step checkbox above is checked off — do not proceed
+- [x] Verify every task/step checkbox above is checked off — do not proceed
       to commit with any left unchecked.
-- [ ] Run `make pre_commit` (format, analyze, license_check, scoped tests).
-- [ ] Hand off to `kmdb-qa` for sign-off on Phase 1's diff specifically
+- [x] Run `make pre_commit` (format, analyze, license_check, scoped tests).
+      Green: format_check, analyze (zero issues across the whole workspace),
+      license_check, and `melos pre_commit_test` (2,329 tests, 12 e2e
+      skipped) all passed.
+- [x] Hand off to `kmdb-qa` for sign-off on Phase 1's diff specifically
       (`EncryptionEnvelope`, `FtsManager`, `VecManager`,
       `VaultSearchManager`/writers, `VaultExtractionState`, and the
       `writeExtractArtifact`/`readExtractArtifact` refactor). Resolve every
       blocking item before committing.
-- [ ] Commit Phase 1 on the plan's branch.
+      **Signed off (2026-07-11), run by the coordinator session (this
+      `kmdb-plan-implement` session has no Agent/Task tool — see
+      `.claude/agent-memory/kmdb-plan-implement/feedback_no_agent_tool.md`).
+      No blocking issues.** Both documented deviations (`FtsManager`'s
+      overlay/tombstone uniform `EncryptionEnvelope` wrapping;
+      `VaultSearchManager`'s `_wrapWriterEntries` helper) were independently
+      judged sound engineering matching the plan's real intent (one
+      confidentiality primitive per shared namespace), not deviations
+      needing correction. The `VecManager` SQ8 post-decryption corruption
+      guard was verified correct in both the targeted-lookup and full-scan
+      read paths. All dimensions passed: fidelity, spec alignment, doc
+      comments, test coverage/pass status, formatting, analysis, code
+      quality. Two **non-blocking** notes for a later phase/follow-up (not
+      addressed in Phase 1): (a) no test currently seeds a
+      genuinely-corrupted *encrypted* SQ8 vector and asserts it's skipped at
+      query time (unit-level `EncryptionEnvelope` coverage is strong, but
+      there's no full encrypted-index-search integration test for this
+      corruption path); (b) Phase 5's eventual §31 "gap resolved" rewrite
+      should route through `kmdb-architect` rather than being authored
+      inline — already the plan's stated approach, reconfirmed.
+- [x] Commit Phase 1 on the plan's branch.
+      **`kmdb-pre-commit`: PASS (2026-07-11, coordinator session).**
+      format_check clean (456 files), analyze clean (0 issues across all 7
+      packages), license_check clean (both new files' headers verified
+      byte-for-byte against `header_template.txt`), `pre_commit_test` 2,329
+      passed / 0 failed / 12 skipped (expected e2e skips). One transient
+      sandbox note (Dart telemetry config write on first run, unrelated to
+      this plan's code) — re-run was clean.
 
 ### Phase 2 — Gap 3: encrypt MetaStore values
 
@@ -744,12 +829,29 @@ implementer to improvise):**
 
 Implementation:
 
-- [ ] Implement the late-bound `EncryptionProvider?` on `MetaStore` per the
+- [x] Implement the late-bound `EncryptionProvider?` on `MetaStore` per the
       Q1 resolution; wire `KmdbDatabase.open()` to assign it at the correct
       point in the bootstrap sequence (before the first application-level
       write is admitted; verify the very first `device_id` write on a
-      brand-new database is not written before this point).
-- [ ] Route `namespaces` registry (`registerNamespace`/
+      brand-new database is not written before this point). Done —
+      `MetaStore.encryption` (mutable field, `const` removed from the
+      constructor); `KmdbDatabase.open()` assigns it immediately after
+      `_runEncryptionBootstrap` returns, before any other collaborator is
+      constructed. Traced the bootstrap: the only `$meta` activity before
+      that point is `_runEncryptionBootstrap`'s own `enc:blob` read/write,
+      which is exempt (raw path, Q2) — so there is no earlier `$meta` write
+      this assignment could miss. One additional early-read hazard was found
+      and fixed during implementation: `KvStoreImpl.open()` calls
+      `meta.getDirtyFlag()` *before* `KmdbDatabase.open()` can assign a
+      provider (it runs one layer down, inside `KvStoreImpl.open()` itself);
+      `getDirtyFlag()` was changed to a presence-only check (no
+      `EncryptionEnvelope.unwrap` needed — `setDirty`/`clearDirty`'s own
+      write/delete semantics make presence alone sufficient) so it is safe
+      to call at that point regardless of encryption state. Verified via the
+      Bootstrap ordering (Q1) test group in
+      `test/engine/meta_store_encryption_test.dart` (device_id's *first*
+      write confirmed encrypted).
+- [x] Route `namespaces` registry (`registerNamespace`/
       `appendNamespaceRegistration`/`getNamespaces`), `gen:{namespace}`
       counters (`incrementGenerationCounter`/`appendGenerationCounterBump`/
       `getGenerationCounter`), `device_id` (`putDeviceId`/`getDeviceId`),
@@ -763,8 +865,12 @@ Implementation:
       (two encoders), `VersionManager`, per B7's blast-radius note) through
       **`EncryptionEnvelope.wrap`/`unwrap`** (not `ValueCodec` — see B4/B7
       above), encrypting in place inside each helper per the B3 decision
-      above.
-- [ ] **Conflict to resolve (found while drafting this phase, not by the
+      above. Done exactly as specified — see `meta_store.dart`. All six
+      `getRawByName`/`putRawByName` consumers get encryption "for free"
+      (verified: their own test suites — `IndexManager`, `FtsManager`,
+      `VecManager`, `SchemaManager`, `VersionManager` — all still pass with
+      no changes needed on their side).
+- [x] **Conflict to resolve (found while drafting this phase, not by the
       reviewer): `getEncryptionBlob`/`putEncryptionBlob` currently call
       `getRawByName`/`putRawByName` internally** (`meta_store.dart:386`,
       `:400`) — the same two generic accessors the bullet above just made
@@ -775,8 +881,8 @@ Implementation:
       named accessors) instead of going through `getRawByName`/
       `putRawByName`. This keeps `enc:blob` on a genuinely separate raw path
       rather than depending on a shared method staying unencrypted by
-      accident.
-- [ ] **B8/B9 — migration stance (breaking format change) and its
+      accident. Done — both now call `_engine.get`/`_engine.put` directly.
+- [x] **B8/B9 — migration stance (breaking format change) and its
       database-level enforcement gate.** Routing existing `$meta`/
       index-state/schema/version values through `EncryptionEnvelope` changes
       their on-disk bytes even when encryption is off (the envelope still
@@ -845,11 +951,112 @@ Implementation:
       would have passed a weaker test); and a complementary test that a
       brand-new (empty) database opens successfully and writes the marker (so
       the (c) path is not misclassified as legacy).
-- [ ] Explicitly verify `enc:blob` (`getEncryptionBlob`/`putEncryptionBlob`)
+
+      **Implementation notes (found during implementation, not anticipated by
+      the plan text — recorded per the workflow policy):**
+      1. **The `isNewDatabase` signal did not exist and had to be added.**
+         `CrashRecovery.open()` never exposed "was `CURRENT` absent this
+         open" outward. Added `OpenResult.isNewDatabase` (threaded from a new
+         local in `CrashRecovery.open()`, set exactly when the `CURRENT`-read
+         `StorageException` branch runs) and implemented the gate in
+         `KvStoreImpl.open()`, immediately after `MetaStore` construction —
+         not in `KmdbDatabase.open()` as the marker's `$meta` home might
+         suggest — because the gate must run before *any* caller of
+         `KvStoreImpl.open()` (not just `KmdbDatabase`) can read a framed
+         value, and `isNewDatabase` is only naturally available at that
+         layer.
+      2. **A latent, pre-existing engine fragility — not independently
+         regression-tested; the claim that it was has been corrected
+         (`kmdb-qa`, 2026-07-13).** `WalWriter.append` only calls
+         `StorageAdapter.syncFile` (content), never `syncDir` (the file's
+         own directory entry), so in principle the *first* write to a
+         brand-new `wal-00001.log` — the marker's WAL append, in this
+         case — is not durable until *some* later `syncDir(dbDir)` call
+         commits the file's own directory entry. An explicit
+         `syncDir(dbDir)` was added right after `putFormatVersionMarker()`
+         in the brand-new-database branch as a defensive measure. **This
+         was originally (incorrectly) claimed to be
+         regression-covered by `manifest_fsync_recovery_test.dart`'s "fresh
+         database create is durable" test.** `kmdb-qa` reverted the fix and
+         reran that test (and their own targeted 50-write-then-crash probe)
+         — both **passed without the fix**, and reverting-and-rerunning
+         locally reproduced the same result. Root cause: **the fix's own
+         Phase 2/B8-B9 "looks fresh" widening (item 3 below) already
+         self-heals this exact failure mode** — on the very next open, a
+         database whose marker was lost to this gap has `isNewDatabase`
+         false but `$meta` completely empty (since nothing else survived
+         the same uncommitted WAL file either), so the widened condition
+         re-classifies it as case (c) and silently re-stamps the marker.
+         The two fixes structurally overlap for the single-session,
+         first-write-is-the-marker scenario this item addresses, so no
+         test can currently distinguish "fix present" from "fix absent" —
+         `kmdb-qa` was unable to construct one either. The `syncDir` call is
+         kept as defense-in-depth (it makes the marker durable by
+         construction rather than by relying on a later self-heal being
+         reachable in every future code path), but it is **not** an
+         independently-verified fix and must not be described as one. The
+         underlying `WalWriter.append`-never-`syncDir`'s gap is a
+         pre-existing engine fragility outside this plan's scope;
+         `kmdb-architect` is recording it as a documented invariant in the
+         spec separately (not this plan's job to fix).
+      3. **The "new" signal needed widening beyond `isNewDatabase` alone —
+         found via `encryption_crash_test.dart`'s existing
+         `KvStoreConfig.forTesting()`/`fsyncOnWrite: false` crash scenarios.**
+         With `fsyncOnWrite: false` (a real, if lower-durability, config —
+         not test-only in principle), `CURRENT`/Manifest still survive a
+         crash unconditionally, but ordinary `$meta` puts (the marker,
+         `enc:blob`, anything) do not — so a crash immediately after a
+         brand-new database's provisioning session left `CURRENT` present
+         but the marker absent, misclassifying an empty, content-free
+         database as legacy. This exactly mirrors `enc:blob`'s own
+         pre-existing, already-accepted crash story (an unsynced
+         provisioning write is lost with the rest of that session; the
+         database just falls back to "looks unencrypted"). Fixed by widening
+         the "looks fresh" condition to
+         `isNewDatabase || await engine.scan(MetaStore.kNamespace).isEmpty`
+         — a direct, comprehensive "is `$meta` itself completely empty" scan
+         (not an enumeration of specific known keys, which was tried first
+         and found to miss realistic cases — e.g. a bare `device_id` with no
+         namespace ever registered, since `ensureDeviceId()` is independently
+         callable before any document write). This scan only ever runs on
+         the rare marker-absent path (never on the common already-marked
+         path), and only reads raw bytes (`Stream.isEmpty`, no
+         `EncryptionEnvelope`/`ValueCodec` decode), so it cannot itself
+         misparse a legacy value. Regression-covered by
+         `encryption_crash_test.dart`'s two provisioning-crash-safety tests
+         (both failed before this fix and pass after) and by four new,
+         targeted tests in `test/engine/meta_store_encryption_test.dart`
+         (legacy DB with real content refuses; legacy DB with gen counter
+         `0` refuses; legacy DB with gen counter `1` refuses; legacy DB with
+         only a bare `device_id` refuses — the last one specifically
+         exercises the "no namespace ever registered" gap the first,
+         narrower attempt at this fix missed).
+      4. **Two unrelated pre-existing tests needed updating, not because
+         they were wrong, but because the marker's existence is a real,
+         permanent behavioural change to every `open()`:**
+         `writebatch_atomicity_test.dart`'s "single put folds document + meta
+         writes into one batch frame" assumed the user's batch frame starts
+         at WAL offset 0 (now offset > 0, since the marker's own WAL record
+         precedes it on a fresh database) — changed to scan for the batch
+         frame, mirroring the sibling test's own approach.
+         `sync_engine_test.dart`'s HWM test asserted an absolute upper bound
+         on the high-water mark that assumed a freshly-opened, never-written
+         store's memtable is empty at `push()`-time flush — no longer true,
+         since `$meta` (single-`$`, syncable) legitimately contributes the
+         marker's real-wall-clock HLC now. Narrowed the assertion to the
+         specific invariant the test actually verifies (the `.local.sst`
+         file's HLC must not leak in), per its own doc comment.
+- [x] Explicitly verify `enc:blob` (`getEncryptionBlob`/`putEncryptionBlob`)
       is untouched and still uses the raw path (Q2) — this guard is now more
       load-bearing than before, since the general `$meta` path encrypts by
-      default and must provably never touch `enc:blob`.
-- [ ] Tests: MetaStore round-trip with encryption on/off; bootstrap-ordering
+      default and must provably never touch `enc:blob`. Verified by a
+      dedicated test (`MetaStore — enc:blob exemption (Q2)` group in
+      `test/engine/meta_store_encryption_test.dart`) that sets
+      `MetaStore.encryption` to a real provider and confirms
+      `getEncryptionBlob`/`putEncryptionBlob` still round-trip via the raw
+      path (byte-level check: the stored bytes are not
+      `EncryptionFlag.aesGcm`-prefixed).
+- [x] Tests: MetaStore round-trip with encryption on/off; bootstrap-ordering
       regression test that opens a brand-new database with encryption enabled
       from the very first write and confirms no `$meta` entry (including the
       first `device_id` write) ends up unencrypted; confirm crash-recovery
@@ -857,58 +1064,206 @@ Implementation:
       encrypted `$meta` entries in the WAL — this touches the durability-
       critical path called out in CLAUDE.md, so exercise it against the
       `FaultyStorageAdapter` fault-injection harness, not just the in-memory
-      test adapter.
+      test adapter. Done — new file `test/engine/meta_store_encryption_test.dart`
+      (16 tests): encryption round-trip group (gen counter, device ID,
+      namespace registry, tombstone floor, `getRawByName`/`putRawByName`,
+      dirty flag, wrong-DEK failure), `enc:blob` exemption group, format-
+      version marker group (5 tests, including the two byte-collision cases),
+      bootstrap-ordering group, and a `FaultyStorageAdapter` crash-recovery
+      group (WAL replay of encrypted `$meta` + document data after a
+      crash-before-flush). Full package: 2,345 tests pass (2,329 + 16 new),
+      12 e2e skipped.
 
 **Phase 2 close-out (see the workflow policy above):**
 
-- [ ] Verify every task/step checkbox above is checked off — do not proceed
+- [x] Verify every task/step checkbox above is checked off — do not proceed
       to commit with any left unchecked.
-- [ ] Run `make pre_commit` (format, analyze, license_check, scoped tests).
-- [ ] Hand off to `kmdb-qa` for sign-off on Phase 2's diff specifically —
+- [x] Run `make pre_commit` (format, analyze, license_check, scoped tests).
+      Green: format_check, analyze (zero issues across the whole workspace),
+      license_check, and `melos pre_commit_test` (2,345 tests, 12 e2e
+      skipped) all passed.
+- [x] Hand off to `kmdb-qa` for sign-off on Phase 2's diff specifically —
       this is the phase with the most architectural risk (the late-bound
       provider, the `enc:blob` carve-out, and the format-version gate), so
       give the QA pass particular attention to the B8/B9 marker logic and
       the crash-recovery fault-injection results, not just test coverage
       numbers. Resolve every blocking item before committing.
-- [ ] Commit Phase 2 on the plan's branch.
+      **Signed off (2026-07-13), run by the coordinator session** (this
+      `kmdb-plan-implement` session has no Agent/Task tool — see
+      `.claude/agent-memory/kmdb-plan-implement/feedback_no_agent_tool.md`).
+      All three flagged items were independently verified as correct and
+      sound, with detailed reasoning: the B8/B9 three-way discrimination,
+      the widened freshness-gate condition, and the `getDirtyFlag`
+      presence-only change. **One blocking issue, since fixed:**
+      `LegacyDatabaseFormatException` was not exported from
+      `packages/kmdb/lib/kmdb.dart` — every peer open-time exception
+      (`LockException`, `StorageException`, `EncryptionError`) was, this one
+      wasn't. Added to the `show` clause. **One correction to this plan's own
+      notes, since made:** the `syncDir(dbDir)` fix's item 2 note above
+      originally claimed `manifest_fsync_recovery_test.dart` regression-covers
+      it — `kmdb-qa` reverted the fix, reran that test and their own targeted
+      probe, and both passed without the fix (confirmed independently by
+      reverting and rerunning locally). The fix itself is sound
+      defense-in-depth and is kept; the false regression-coverage claim in
+      item 2 above has been corrected to explain why no test can currently
+      isolate it (structural overlap with item 3's self-heal). `kmdb-architect`
+      is separately recording the underlying `WalWriter.append`-never-`syncDir`'s
+      gap as a documented spec invariant (pre-existing engine fragility,
+      out of this plan's scope). **Non-blocking, addressed:** a one-line doc
+      comment was added to `appendTombstoneFloorAdvance` warning about the
+      write/read encryption asymmetry with `getTombstoneFloor` should it ever
+      be wired up for real; the comment-drift nit in
+      `meta_store_encryption_test.dart` (claimed to seed a namespaces registry
+      entry it didn't) was fixed in the two affected tests.
+- [x] Commit Phase 2 on the plan's branch.
+      **`kmdb-pre-commit`: re-run after the above fixes — PASS.** See below.
 
 ### Phase 3 — Gap 4: vault manifest `originalName`
 
-- [ ] Implement the Q6-resolved fix (encrypt `originalName` in place,
-      recommended) in `VaultManifest`.
-- [ ] Update every `originalName` read site (ingest, manifest readers, and
+- [x] Implement the Q6-resolved fix (encrypt `originalName` in place,
+      recommended) in `VaultManifest`. Done — `originalName` is not encoded
+      inside `VaultManifest` itself (which stays a pure, synchronous JSON
+      DTO, no `EncryptionProvider` knowledge, consistent with keeping
+      `toJson`/`fromJson` simple); instead `VaultStore.ingest` (the sole
+      construction site for a locally-authored manifest) wraps it with
+      `EncryptionEnvelope` and base64-encodes the result before constructing
+      the `VaultManifest`, reusing the existing `encrypted` flag to signal
+      both blob-and-name ciphertext together (a database is either born
+      encrypted or never encrypted, so the two are always set in lockstep —
+      no new field needed).
+- [x] Update every `originalName` read site (ingest, manifest readers, and
       coordinate with `plan_0_08_vault_file_export.md`'s `vault export`
       command if that work is implemented concurrently or after this phase —
-      check its status before starting this phase).
-- [ ] Update §31 to explicitly acknowledge `mediaType`/`size`/`sha256`/
+      check its status before starting this phase). Checked:
+      `plan_0_08_vault_file_export.md` status is `Open` (not implemented,
+      not concurrently in progress) — no coordination needed. `originalName`
+      read sites audited: `VaultStore.getManifest` is the sole decryption
+      point (fixed); `VaultPackage`'s `uploadManifest.originalName` and
+      `kmdb_cli`'s `vault_import_helper.dart` both read from a *different*
+      object — the upload-time hint manifest bundled inside a `.kvlt`
+      *import* archive, which is by design always portable plaintext (§31
+      "KVLT and Encryption") — out of scope, left untouched.
+      `vault_indexing_isolate.dart`'s `VaultManifest(...)` is a throwaway,
+      never-persisted manifest built only to pass `mediaType` to a text
+      extractor (`originalName: ''`) — no encryption concern, left
+      untouched. `local_directory_vault_adapter.dart`'s
+      `syncVaultMetadata`/`createStub` path reads a peer device's already
+      (identically) encrypted `manifest.json` verbatim and writes it through
+      unchanged — correct as-is, no decryption needed at that layer.
+- [x] Update §31 to explicitly acknowledge `mediaType`/`size`/`sha256`/
       `createdAt` as plaintext `manifest.json` surfaces, with the existing
       rationale (dedup, sync routing) stated plainly rather than left
-      implicit.
-- [ ] Tests: manifest round-trip with encryption on/off; confirm dedup
+      implicit. Done — §31 gap 5 rewritten: a progress note records the
+      `originalName` fix, and each of `sha256`/`mediaType`+`size`/
+      `crc32c`+`createdAt` gets its own explicit, stated rationale for
+      staying plaintext (previously only implied). Also corrected a stale
+      field name (`hlcTimestamp` → `createdAt`, matching the actual
+      `VaultManifest.toJson()` field).
+- [x] Tests: manifest round-trip with encryption on/off; confirm dedup
       (`sha256`-keyed) and sync-routing logic (which reads `mediaType`/`size`
-      without decrypting) are unaffected.
+      without decrypting) are unaffected. Done — new "VaultStore.originalName
+      encryption (Gap 4)" group in `test/encryption/vault_encryption_test.dart`
+      (8 tests): plaintext round-trip unchanged; encrypted `originalName` not
+      visible on disk; `getManifest()` transparent decrypt; `StateError` with
+      no provider; `EncryptionError` with the wrong DEK;
+      `mediaType`/`size`/`sha256`/`createdAt` readable as bare JSON without
+      any decryption even when `originalName` is encrypted (the sync-routing/
+      dedup invariant, asserted directly against the raw on-disk bytes, not
+      just behaviourally); and a dedup test confirming a second ingest with a
+      different `originalName` does not overwrite the first (encrypted)
+      manifest. Full `test/vault/` + `test/encryption/` suites: 585 tests
+      pass.
 
 **Phase 3 close-out (see the workflow policy above):**
 
-- [ ] Verify every task/step checkbox above is checked off — do not proceed
+- [x] Verify every task/step checkbox above is checked off — do not proceed
       to commit with any left unchecked.
-- [ ] Run `make pre_commit` (format, analyze, license_check, scoped tests).
-- [ ] Hand off to `kmdb-qa` for sign-off on Phase 3's diff specifically
+- [x] Run `make pre_commit` (format, analyze, license_check, scoped tests).
+- [x] Hand off to `kmdb-qa` for sign-off on Phase 3's diff specifically
       (`VaultManifest`, its read sites, and the §31 acknowledgment). Resolve
       every blocking item before committing.
-- [ ] Commit Phase 3 on the plan's branch.
+      **Signed off (2026-07-13), run by the coordinator session** (this
+      session has no Agent/Task tool — see
+      `.claude/agent-memory/kmdb-plan-implement/feedback_no_agent_tool.md`).
+      Ready to commit on its own merits: the encrypt-in-place design, base64
+      handling, `encrypted`-flag lockstep, and `getManifest`-as-sole-
+      decryption-point were all verified correct. `kmdb-qa` independently
+      checked the KVLT-archives-are-intentionally-plaintext reasoning
+      against `docs/spec/24_vault.md` and the live `export_command.dart`/
+      `dump_command.dart` code paths (not just this plan's summary) —
+      confirmed correct, not a rationalised gap. Test coverage and the
+      not-yet-implemented `vault export` plan's coordination status were
+      both confirmed fine. Two unrelated items surfaced and were resolved
+      alongside this phase, not part of Phase 3's own diff: (a) a flaky
+      probabilistic single-byte assertion in Phase 2's (already-committed)
+      `meta_store_encryption_test.dart` device-ID test, fixed by `kmdb-qa`
+      and landed as its own standalone commit `6c05590` before this phase's
+      commit; (b) a second, earlier instance of the `mimeType`/
+      `hlcTimestamp`/numeric-`crc32c` field-name drift in §31's manifest
+      JSON example (~line 247) — the same class of staleness this phase's
+      own gap-5 prose fix corrected, but a spot this phase's edit didn't
+      reach — fixed by `kmdb-architect` in the same file. A separate,
+      pre-existing, unrelated `sync_engine_test.dart:1170` flake (wall-clock
+      HLC placement under parallel full-suite load, not a production bug)
+      was logged to `docs/roadmap/0_09.md` on `main` by `kmdb-architect` —
+      out of this plan's scope, not touched here.
+- [x] Commit Phase 3 on the plan's branch.
+      **`kmdb-pre-commit`: PASS** (format/analyze/license clean, 2,352/2,352
+      tests; one transient native-assets-bundling flake on the first run
+      cleared on rerun, unrelated to this plan's code).
 
 ### Phase 4 — Gap 2: HMAC-keyed namespace tokens
 
-- [ ] Add sub-key derivation to `EncryptionProvider` (`deriveSubKey(info)` or
+- [x] Add sub-key derivation to `EncryptionProvider` (`deriveSubKey(info)` or
       a purpose-built `indexToken(domain, term)`), using the existing HKDF
       machinery in `key_derivation.dart`, `info = "kmdb-index-token"` (Q4).
-- [ ] Replace `FtsManager._termToHex`, `index_writer._encodeValueHex`/
+      **Done as `Future<String> indexToken(String message)`** on the
+      `EncryptionProvider` interface (a single domain-separated message
+      string, not a split `domain`/`term` pair — simpler call sites, same
+      effect). `AesGcmEncryptionProvider` derives the sub-key lazily on first
+      call via the existing `cryptography` package's async `Hkdf`/`Hmac`
+      machinery (bit-for-bit the same approach as `key_derivation.dart`'s
+      recovery-KEK derivation), caches it as a memoized `Future<SecretKey>`
+      (concurrent first-callers await the same in-flight derivation — see the
+      "concurrent first calls" test), then computes HMAC-SHA256 over the
+      message and truncates to 16 bytes (32 hex chars) — verified this
+      requires no new dependency: `calculateMac` is part of the same
+      `cryptography` package already used throughout this file, so
+      `indexToken` is `async` end-to-end (no synchronous fast path was
+      needed — every production call site is already inside an `async`
+      function; verified by grep before converting). Tested in
+      `test/encryption/encryption_provider_test.dart`'s `indexToken` group:
+      determinism, cross-instance reproducibility (same DEK), 32-hex-char
+      format, domain separation (field and collection), different-DEK
+      produces a different token, concurrent-call safety, and a
+      raw-DEK-non-leakage guard.
+- [x] Replace `FtsManager._termToHex`, `index_writer._encodeValueHex`/
       `indexNamespaceForValue`, and `VaultBm25Writer._termToHex` with
       HMAC-SHA256 token generation when a provider is active; domain-separate
       per 0_08.md (`"{ns}:{field}:" + term` for FTS, `"{ns}:{path}:" + value`
       for index). Fall back to today's plaintext hex when encryption is off.
-- [ ] Add a `tokenMode: hex | hmac` discriminator to `FtsIndexState`,
+      **Done exactly as specified**, plus `VaultBm25Writer._termNamespace`
+      domain-separated as `"{sha256}:" + term` (the vault-FTS equivalent of
+      `ns:field`, since vault indexing is scoped per blob, not per
+      collection field). Secondary-index domain separation clarified in code
+      comments: the HMAC message uses the *hex-encoded* value
+      (`_encodeValueHex(value)`) as the value component, not a re-derived
+      "natural" string form — this reuses the existing canonical string
+      representation `IndexWriter` already produces for every value type
+      (int/double/bool/string) rather than inventing a second one, and is
+      the literal reading of "`{value}`" in the plan's formula. Making the
+      namespace-computation chain `async` required converting
+      `IndexWriter.addEntries`/`removeEntries`/`indexNamespaceForValue` and
+      `IndexReader.lookupByValue` from sync to async (all call sites were
+      already inside `async` functions — verified by grep, zero production
+      code needed restructuring beyond adding `await`); `VaultBm25Writer`
+      keeps its "static const, values stay raw/unwrapped" character for Gap
+      1 but necessarily gains an `EncryptionProvider?` *parameter* (not
+      field) on `write`/`deleteTermEntry` for Gap 2's namespace computation,
+      since — unlike Gap 1's values — the namespace name cannot be
+      wrapped/computed after the fact by `VaultSearchManager`; documented
+      this split explicitly in the class doc comment.
+- [x] Add a `tokenMode: hex | hmac` discriminator to `FtsIndexState`,
       `VecIndexState`, and the secondary index's `$meta` state (Q5); on
       `open()`, detect a mismatch between the stored mode and what the
       current code version would produce (a **format-version mismatch**, not
@@ -917,15 +1272,55 @@ Implementation:
       index, mirroring WI-1's model-identity invalidation pattern. This
       detection must run only after Phase 2's `MetaStore` provider binding is
       in place, since the index state being read is itself now encrypted.
-- [ ] Resolve and implement Q3 (empty `$$index:` value).
-- [ ] Document the residual statistical side-channel limitations (term
+      **Deviation found during implementation, documented here rather than
+      silently applied: `VecIndexState` does NOT get a `tokenMode` field.**
+      Verified against the actual code (`vec_manager.dart`, all
+      `VecIndexState.*Namespace` helpers): `$$vec:{ns}:{field}`,
+      `$$vec:corpus:{ns}:{field}`, and `$$vec:truncated:{ns}:{field}` are
+      all keyed by document ID, never by an embedded term or value the way
+      `$$fts:{ns}:{field}:{token}` and `$$index:{ns}:{path}:{token}` are —
+      there is no hex-tokenised namespace scheme for Vec to migrate away
+      from in the first place (confirmed by grepping `vec_manager.dart` for
+      any hex/`toRadixString` encoding: none exists). The same is true of
+      `VaultVecWriter`'s `$$vault:vec:idx:{sha256}` (keyed by chunk index,
+      not by term). Adding an always-inert `tokenMode` field to
+      `VecIndexState` would be exactly the kind of dead-weight/no-op state
+      CLAUDE.md warns against. Implemented instead: `tokenMode` on
+      `FtsIndexState` (checked in `FtsManager.checkAndTransitionOnOpen`,
+      which purges stale-mode base-term namespaces via a new
+      `_purgeBaseNamespaces` helper before resetting to `undefined`) and a
+      new `IndexTokenMode` enum + `tokenMode` field on the secondary index's
+      `IndexState` (checked in a new `IndexManager.checkTokenModeOnOpen`,
+      called from `KmdbDatabase.open()` right after `IndexManager`
+      construction and before `checkInterruptedBuilds` so a purge-triggered
+      index is never also misreported as an interrupted build — it reuses
+      the existing `removeIndex()` method, which already purges every
+      sub-namespace and the `$meta` state entry). Vault FTS gets an
+      analogous per-blob `ftsTokenMode` field on `VaultExtractionState`
+      (reusing the `FtsTokenMode` enum), checked in a new
+      `VaultSearchManager._checkTokenMode`, called from `recover()`
+      alongside the existing `_checkModelVersion` check (mutually exclusive
+      with it — `_checkModelVersion` now returns `bool` so `recover()` can
+      skip the redundant second reset-and-enqueue when a model-version
+      change already triggered one; `_enqueue` has no dedup).
+- [x] Resolve and implement Q3 (empty `$$index:` value). **Confirmed
+      unchanged**: `IndexWriter.addEntries` still writes `Uint8List(0)` —
+      the namespace token alone carries the (now-opaque) value, so an empty
+      value remains correct and adds no GCM overhead, exactly as Q3
+      concluded during investigation.
+- [x] Document the residual statistical side-channel limitations (term
       frequency, search-pattern leakage, co-occurrence, per-term document
       count) in §31's "Threat Model & Confidentiality Boundaries" section as
-      an accepted limitation, per 0_08.md's own framing.
-- [ ] Document the DEK-rotation interaction: passphrase rotation re-wraps but
+      an accepted limitation, per 0_08.md's own framing. Added as a
+      "Progress note" under gaps 2 and 3 (not yet marked "resolved" —
+      that bookkeeping is Phase 5's job per the existing convention gap 1's
+      note already established).
+- [x] Document the DEK-rotation interaction: passphrase rotation re-wraps but
       does not change the DEK, so HMAC tokens survive rotation; a future
-      "change the DEK" feature would require a full index rebuild.
-- [ ] Tests: token generation is deterministic and reproducible from the same
+      "change the DEK" feature would require a full index rebuild. Added
+      alongside the residual-leakage note in §31, plus in
+      `EncryptionProvider.indexToken`'s doc comment.
+- [x] Tests: token generation is deterministic and reproducible from the same
       DEK across process restarts; different fields/namespaces with the same
       term produce different tokens (domain separation); an encrypted
       database whose index state predates Gap 2 (`tokenMode: hex`) rebuilds
@@ -934,20 +1329,162 @@ Implementation:
       scenario — see Q5, **not** a runtime encryption toggle, which cannot
       occur); a database provisioned unencrypted continues to use hex
       indefinitely (a distinct database, not a toggled state); query-time
-      namespace reconstruction matches write-time for every mode.
+      namespace reconstruction matches write-time for every mode. **Done**:
+      `test/encryption/encryption_provider_test.dart` (`indexToken` group,
+      9 tests — determinism, domain separation ×2, format, different-DEK,
+      concurrency, non-leakage); new `test/search/lexical/
+      fts_token_mode_test.dart` (3 tests) and new `test/query/
+      index_token_mode_test.dart` (3 tests), each covering: real
+      hex→hmac migration with a purge assertion (stale namespaces gone,
+      new namespaces disjoint from the old set, search/lookup still
+      correct after rebuild), the "unencrypted stays on hex, no spurious
+      rebuild" regression guard, and write-time/query-time namespace-match
+      across two manager instances sharing one DEK. The vault-FTS migration
+      is exercised end-to-end (not just unit-tested) by rewriting
+      `test/vault/search/vault_extract_encryption_test.dart`'s existing
+      "toggle-on / mixed-state" integration test — see that file's doc
+      comment for why it needed rewriting: it previously modelled a
+      "mixed-state, both directly searchable" scenario for Gap 1 (value
+      encryption, which genuinely does coexist indefinitely since each
+      artifact is self-describing) that is **not** true the same way for
+      Gap 2 (namespace tokens, which are not self-describing — an
+      HMAC-mode manager cannot find hex-mode entries without recover()'s
+      migration step). The rewritten test adds the `attach()`/`recover()`
+      calls the original test omitted (mirroring `KmdbDatabase.open()`'s
+      real sequence exactly) and asserts the blob is migrated *before* any
+      search runs against it, which is the actual production guarantee.
+      All two-manager-instance tests here and in the two new unit-test
+      files follow the same "construct a second manager over the same
+      KvStoreImpl" technique the plan's own investigation established as
+      the valid way to test this mechanism, given a literal
+      "toggle encryption on an existing KmdbDatabase" is architecturally
+      impossible (B5) — confirmed this reasoning extends soundly to
+      `FtsManager`/`IndexManager` directly (not just `VaultSearchManager`),
+      since none of the three collaborators enforce single-instance-per-
+      store at the type level.
 
 **Phase 4 close-out (see the workflow policy above):**
 
-- [ ] Verify every task/step checkbox above is checked off — do not proceed
+- [x] Verify every task/step checkbox above is checked off — do not proceed
       to commit with any left unchecked.
-- [ ] Run `make pre_commit` (format, analyze, license_check, scoped tests).
-- [ ] Hand off to `kmdb-qa` for sign-off on Phase 4's diff specifically —
+- [x] Run `make pre_commit` (format, analyze, license_check, scoped tests).
+      Format check initially failed (8 files needed reformatting — new test
+      files plus a few edited lib files); fixed with `make format` and
+      reran. All four sub-gates now pass independently verified:
+      `dart format --output=none --set-exit-if-changed packages` (exit 0),
+      `melos run analyze` (exit 0, "No issues found!" across all 7
+      packages), `make license_check` (exit 0), and the full `kmdb` test
+      suite (2367 passed, 12 skipped E2E, 0 failed).
+- [x] Hand off to `kmdb-qa` for sign-off on Phase 4's diff specifically —
       this is the largest, least mechanical phase (new HMAC/HKDF primitive,
       `tokenMode` rebuild-on-upgrade behaviour), so give it particular
       attention: token determinism, domain separation, and the rebuild path
       actually exercised end-to-end, not just unit-tested in isolation.
       Resolve every blocking item before committing.
-- [ ] Commit Phase 4 on the plan's branch.
+
+**`kmdb-qa` review, round 1 (2026-07-13):** thorough pass — confirmed correct:
+the `indexToken` HKDF/HMAC crypto (genuinely tested, not just claimed), the
+sequencing after Phase 2's provider binding, the `VecIndexState`-has-no-`
+tokenMode` deviation (independently re-verified: vector namespaces key by
+`(ns, field)` with no embedded term/value, so there is nothing to migrate),
+the fallback-to-hex-when-unencrypted behaviour, and the
+`vault_extract_encryption_test.dart` rewrite (a legitimate strengthening, not
+a weakened test). One **blocking bug found (B1)**, two trivial non-blocking
+nits.
+
+- [x] **B1 (blocking, fixed) — `VaultSearchManager.recover()` skipped the
+      Gap-2 hex-namespace purge entirely whenever a model-version reset also
+      fired for the same blob.** The original `recover()` call site gated
+      the *whole* `_checkTokenMode` call behind `if (!resetForModel)`, so a
+      blob needing **both** a model-version bump **and** a hex→hmac token
+      migration in the same `open()` — a real, reachable scenario: an
+      encrypted pre-Gap-2 database that also picks up a model swap (exactly
+      what the multilingual-embedding-model roadmap item would trigger) —
+      had its stale `$$vault:fts:{sha256}:*` hex namespaces silently
+      orphaned on disk indefinitely, still leaking the search vocabulary in
+      plaintext hex terms — precisely the confidentiality property this
+      phase exists to close. Root cause: the purge (must always run on a
+      mode mismatch) and the reset+re-enqueue (must be deduplicated between
+      the two checks, since `_enqueue` has no dedup) were coupled behind one
+      shared boolean instead of being independently gated. **Fix:**
+      `_checkTokenMode` now takes a required `alreadyReset` parameter — the
+      purge loop runs unconditionally whenever `state.ftsTokenMode` doesn't
+      match `_currentTokenMode`, and only the trailing reset-to-`pending`+
+      `_enqueue` step is skipped when `alreadyReset` is `true`.
+      `_checkModelVersion`'s `bool` return (added in the original
+      implementation for the old, now-removed gating) is threaded straight
+      into `_checkTokenMode`'s `alreadyReset` argument at the single
+      `recover()` call site. **Verified the fix is load-bearing, not just
+      claimed:** temporarily reverted the call site to the old
+      `if (!resetForModel)` gating, reran the new stacked-upgrade test below
+      — it failed exactly as expected (stale hex namespace found in the
+      post-`recover()` namespace set) — then restored the fix and confirmed
+      it passes again.
+- [x] Add a test that stacks both conditions (encrypted pre-Gap-2 index
+      state **and** a model-version mismatch on the same blob) and confirms
+      no hex namespace survives `recover()`. Added a new group in
+      `test/vault/search/vault_search_manager_test.dart`,
+      `'recover() — stacked model-version + token-mode upgrade (B1)'`, with
+      two tests: (1) the stacked scenario itself — seeds hex-tokenised BM25
+      namespaces plus an `indexed` extract state with an old model version
+      and an absent `tokenMode` (defaults to hex), reopens with both a new
+      `EncryptionProvider` and a different embedding model, and asserts
+      every pre-existing hex namespace is gone from
+      `allStoredNamespaces()` after `recover()`, the model version updated,
+      and the blob reached `indexed` again; (2) a model-version-only
+      regression guard (no token-mode mismatch) confirming the fix did not
+      turn `_checkTokenMode` into an unconditional purge.
+- [x] Nit: license headers on the two new test files
+      (`test/search/lexical/fts_token_mode_test.dart`,
+      `test/query/index_token_mode_test.dart`) — fixed the missing period
+      after "The Authors" and `http://` → `https://` to match
+      `header_template.txt` exactly (was passing `license_check`'s
+      mechanical `addlicense` diff, just visually inconsistent with every
+      other file).
+- [x] Nit (optional, documented since the code was already being touched):
+      the domain-separator `:`-join scheme is a plain concatenation, not a
+      length-prefixed encoding — documented in
+      `EncryptionProvider.indexToken`'s doc comment: the vault-FTS domain
+      (`sha256:term`) is immune (sha256 is always exactly 64 hex chars, a
+      fixed split point), the secondary-index domain's value component is
+      immune (always hex-encoded, never contains `:`), but the FTS domain's
+      `ns`/`field` (and the secondary-index domain's `ns`/`path`) are not
+      escaped against an embedded literal `:` — a theoretical concatenation
+      ambiguity, not exploitable via untrusted input in this threat model
+      (collection/field names are application-chosen, not attacker
+      data), left undocumented-but-unfixed no longer — now documented,
+      deliberately left unfixed as out of scope.
+- [x] Re-ran `make pre_commit` after the B1 fix + nits: all four sub-gates
+      pass independently verified (format_check exit 0 — one file needed
+      reformatting, fixed via `make format`; `melos run analyze` exit 0
+      clean across all 7 packages; `make license_check` exit 0; full `kmdb`
+      test suite 2369 passed — up from 2367 by the two new B1 tests — 12
+      skipped E2E, 0 failed). The known pre-existing
+      `sync_engine_test.dart` H4-FU3 flake (logged to
+      `docs/roadmap/0_09.md`, unrelated to this plan) did not reappear on
+      this run.
+- [x] Hand off to `kmdb-qa` for a **second** round of sign-off on the B1 fix
+      specifically, given the severity of what round 1 found — re-verify
+      the purge-vs-reset decoupling is correct in all four
+      purge/reset-mismatch combinations (neither mismatched, only
+      token-mode mismatched, only model-version mismatched, both
+      mismatched) and that the new stacked-upgrade test actually exercises
+      the fix (not just superficially passes). Resolve every blocking item
+      before committing.
+
+**`kmdb-qa` review, round 2 (2026-07-13):** did not just trust the round-1
+revert-and-confirm claim — independently reverted the fix themselves, re-ran
+the stacked test, watched it fail with the actual plaintext hex tokens
+(`"mountains"`, `"rivers"`) visibly surviving in the failure output, then
+restored the fix and confirmed it passes. The purge-vs-reset separation was
+verified by direct code read (purge unconditional on a `tokenMode` mismatch;
+only the trailing reset/re-enqueue gated by `alreadyReset`). The
+required-parameter change (`_checkTokenMode(..., {required bool
+alreadyReset})`) was confirmed to have exactly one call site, with no
+missed/wrong updates. Both nits (license headers, domain-separator doc note)
+confirmed fixed. `make pre_commit` re-run independently: 2357 passed, 12
+skipped E2E, green. **Phase 4 signed off — genuinely clean.**
+- [x] Commit Phase 4 on the plan's branch.
 
 ### Phase 5 — Spec, roadmap, and glossary updates
 
@@ -958,57 +1495,163 @@ at lines 539–564. This phase is **updating those existing entries to
 "resolved" and correcting stale detail**, not writing the acknowledgments
 from scratch.
 
-- [ ] §31: mark gaps 1–4 (in §31's own numbering) resolved once their phases
+- [x] §31: mark gaps 1–4 (in §31's own numbering) resolved once their phases
       land; correct the "Provider Threading" over-claim at lines 474–478 now
       that `MetaStore`/vault writers are wired; update the protected/
       unprotected surface lists to match Phases 1–4; add the Gap 2
       residual-leakage and DEK-rotation notes; add the Q7 CLI-credentials
-      accepted-limitation note (new, not currently in §31).
-- [ ] §24: correct the "vault chunk vectors have no KV namespace" claim.
-- [ ] Record B8's breaking-format-change decision: a note in §31 (existing
+      accepted-limitation note (new, not currently in §31). **Done**:
+      rewrote _Provider Threading_ to state value + namespace-token
+      encryption are both wired (was: "known gap, FTS/Vec not yet
+      encrypted"); gaps 1–5 (§31's own numbering) each now carry a
+      "resolved" heading + summary with a link to the responsible plan
+      phase, keeping the original investigation prose as historical
+      record; gap 2's residual-leakage/DEK-rotation/migration-mechanism
+      notes were already added during Phase 4 and are unchanged here; added
+      a new gap 9 for the Q7 CLI-credentials accepted-limitation (wasn't in
+      §31 before); rewrote the closing _Summary_ paragraph to state the
+      current (not aspirational) confidentiality guarantee. Also added a
+      new _Database Format-Version Gate_ subsection under _Bootstrap
+      Sequence_ documenting the marker/`LegacyDatabaseFormatException`
+      mechanism in full — this didn't exist anywhere in §31 despite
+      `LegacyDatabaseFormatException`'s own doc comment already promising
+      "see docs/spec/31_encryption.md" (a genuine pre-existing doc gap from
+      Phase 2, closed here).
+- [x] §24: correct the "vault chunk vectors have no KV namespace" claim.
+      **Verified this claim never existed in §24 itself** — grepped for
+      `hexTerm`/`vec:idx`/"no KV namespace"/"filesystem-only" and found zero
+      matches. The actual stale claim was in `docs/roadmap/0_06.md`, which
+      Phase 1 already corrected (`$$vault:vec:idx:{sha256}` KV namespace
+      note, verified present). This checklist item was based on a
+      pre-Phase-1 mental model; nothing further to do in §24.
+- [x] Record B8's breaking-format-change decision: a note in §31 (existing
       databases created before this plan lands must be recreated — no
       migration path, consistent with the Phase 12 precedent) and an entry
       in `docs/spec/28_release_checklist.md` calling this out explicitly for
-      anyone upgrading a pre-existing dev/test database.
-- [ ] §99 glossary: add "index token" / HMAC token terminology if Gap 2 ships.
-- [ ] `docs/roadmap/0_08.md`: mark Gaps 1–4 complete with links to this plan
+      anyone upgrading a pre-existing dev/test database. **Done**: the new
+      §31 _Database Format-Version Gate_ subsection above states the
+      "no migration, must recreate" stance explicitly; added RC-22 to
+      `docs/spec/28_release_checklist.md` following the existing RC-N
+      template, cross-referenced from both directions
+      (`LegacyDatabaseFormatException`'s doc comment already pointed here;
+      RC-22 points back to the exception and §31).
+- [x] §99 glossary: add "index token" / HMAC token terminology if Gap 2 ships.
+      **Done**: new "Index token" entry (alphabetically placed between IDF
+      and Inverted index) covering the hex-vs-HMAC dual scheme, the HKDF
+      sub-key, domain separation, and the `tokenMode` migration marker;
+      updated the "Inverted index" and `` `$$vault:fts:` `` entries' stale
+      `{hexTerm}` namespace examples to `{token}` with a cross-reference.
+- [x] `docs/roadmap/0_08.md`: mark Gaps 1–4 complete with links to this plan
       and the merged PR(s); update the stale `$fts:`/`$vfts:` namespace names
       in the gap text to their current `$$`-prefixed forms for future
-      readers.
-- [ ] Run `make site` after spec edits.
+      readers. **Done**: added a "Status: Complete" summary at the top of
+      the section linking to the plan (path anticipates the plan's move to
+      `docs/plans/completed/` as part of the final whole-PR step — not yet
+      moved as of this phase, per the coordinator's explicit instruction not
+      to run the final whole-PR steps in this phase); each Gap heading now
+      carries a "— resolved" suffix; fixed stale namespace forms
+      (`$fts:`→`$$fts:`, `$vec:`→`$$vec:`, `$vfts:`→`$$vault:fts:`,
+      `$index:`→`$$index:`) and the stale `hlcTimestamp` manifest field name
+      (→ `createdAt`) throughout; resolved the three "Open questions for the
+      plan" bullets inline; rewrote "Sequencing" as "Sequencing (as
+      executed)" describing the actual Phase 1→2→3→4→5 order and why Phase 4
+      was sequenced last (`EncryptionProvider`/`MetaStore` dependencies from
+      Phase 2). No PR link yet — the PR is opened as part of the coordinator's
+      final whole-PR step, not this phase; will need a follow-up link once
+      that happens (out of scope for this session per the coordinator's
+      explicit instruction to pause after Phase 5).
+- [x] Run `make site` after spec edits. **Done**: `make site` itself is not a
+      real target (CLAUDE.md); ran `make doc_site_html` (the correct target
+      per CLAUDE.md's own note) after `rm -rf site` for a clean build — exit
+      0, `site/spec.html` (922 KB) and `site/roadmap.html` (96 KB) generated
+      without pandoc errors; spot-checked both for the new content (new §31
+      sections, updated `0_08.md` gap text) rendering correctly. The
+      pre-existing dartdoc `[SomeSymbol]` "unresolved doc reference"
+      warnings (`VaultSearchManager`, `searchVault`, `EncryptionConfig.
+      create`, `PdfTextExtractor`) are in files this plan never touched —
+      confirmed pre-existing, not a regression from this phase.
 
 **Phase 5 close-out (see the workflow policy above):**
 
-- [ ] Verify every task/step checkbox above is checked off — do not proceed
+- [x] Verify every task/step checkbox above is checked off — do not proceed
       to commit with any left unchecked.
-- [ ] Run `make pre_commit` (format, analyze, license_check, scoped tests;
+- [x] Run `make pre_commit` (format, analyze, license_check, scoped tests;
       also run `make doc_site`/`make site` since this phase touches spec
       files — see CLAUDE.md's note that `make site` itself is not a real
-      target).
-- [ ] Hand off to `kmdb-qa` for sign-off on Phase 5's diff specifically (doc
+      target). All sub-gates independently verified: `dart format
+      --output=none --set-exit-if-changed packages` (exit 0, 0 files
+      changed — this phase is markdown-only); `melos run analyze` (exit 0,
+      clean across all 7 packages — unaffected by markdown-only changes,
+      run anyway for completeness); `make license_check` (exit 0); full
+      `kmdb` test suite (2369 passed, 12 skipped E2E, 0 failed — unchanged
+      from Phase 4's count, as expected for a doc-only phase);
+      `make doc_site_html` (exit 0, see the "Run `make site`" item above
+      for detail).
+- [x] Hand off to `kmdb-qa` for sign-off on Phase 5's diff specifically (doc
       accuracy against what Phases 1–4 actually shipped, not just prose
       quality). Resolve every blocking item before committing.
-- [ ] Commit Phase 5 on the plan's branch.
+
+**`kmdb-qa` review (2026-07-13):** reviewed Phase 5 in depth — spot-checked
+§31's "resolved" claims against the actual Phase 2 and Phase 4 code (the two
+most complex phases, and the two that had mid-implementation QA findings)
+rather than trusting the doc text; verified the new _Database Format-Version
+Gate_ subsection accurately describes the real three-way discrimination;
+verified the §99 glossary entry and RC-22 against the actual shipped
+`indexToken` implementation; verified the roadmap namespace corrections
+against real constants; confirmed the §24 finding (no stale claim there — it
+was in `0_06.md` and already fixed in Phase 1) by checking git history
+themselves. One small inline fix made directly (a dangling "Progress note"
+cross-reference in §31 that no longer existed after the rewrite) — carried
+along in this commit. `kmdb-pre-commit` then confirmed all four gates green
+(2369 tests, 0 failed). **Phase 5 signed off.**
+- [x] Commit Phase 5 on the plan's branch.
 
 **Final step — whole-PR checks, spec alignment, and pre-commit.** Everything
 above is per-phase. These checks need the complete picture (all five phases
 landed) and run once, after Phase 5's commit, before opening the PR:
 
-- [ ] Run `make coverage` — confirm >95% on all new/changed files across all
+- [x] Run `make coverage` — confirm >95% on all new/changed files across all
       five phases, and that the overall project minimum (CLAUDE.md: 90%,
-      current baseline: 95%) is maintained.
-- [ ] Run the §18 performance benchmarks (`packages/kmdb/benchmark/main.dart`)
+      current baseline: 95%) is maintained. **Done (kmdb-qa, 2026-07-14):**
+      overall 94.8% (10867/11459), every package ≥90% (core `kmdb` 95.4%).
+      ~0.2% under the 95% baseline in aggregate, but the shortfall is entirely
+      defensive/boilerplate branches in new code (an unused private
+      constructor, exception `toString()`, corrupt-persisted-state `orElse`
+      fallbacks, batch-threshold branches only hit on oversized rebuilds) —
+      core encryption logic (`meta_store.dart`, `cache_layer.dart`,
+      `vault_bm25_writer.dart`, `encryption_provider.dart`,
+      `encryption_envelope.dart`) is 95.6-100% covered. Accepted as-is per
+      kmdb-qa's judgment call; not chased further.
+- [x] Run the §18 performance benchmarks (`packages/kmdb/benchmark/main.dart`)
       before/after — value encryption on every FTS/Vec write adds AES-GCM
       overhead to a hot path; confirm no P99 regression outside acceptable
       bounds, or document the regression and get sign-off on it explicitly.
-- [ ] Run the multi-device `kmdb_harness` package — **only Gap 3's `$meta`
+      **Done (kmdb-qa, 2026-07-14):** branch vs. `main` at the merge-base, all
+      four §18 operations within target on a clean run (Put/Delete 0.59ms,
+      Put-with-flush 10.4ms, Scan 7.12ms, DB open 1.61ms — targets 5/200/10/100
+      respectively). One noisy first run showed a marginal Scan miss
+      (10.8ms vs. 10.0ms target); a clean rerun passed 10/10, and both noisy
+      runs showed elevated Max values matching `main`'s own noise floor — a
+      system-load artifact, not a regression. The PR adds no per-value crypto
+      to the unencrypted document scan/flush hot path (only a 1-byte envelope
+      flag on `$meta`/index values); AES-GCM cost is opt-in and only paid by
+      encrypted databases, which this benchmark doesn't exercise.
+- [x] Run the multi-device `kmdb_harness` package — **only Gap 3's `$meta`
       and Gap 4's manifest touch synced state** (Gap 1/2 namespaces are
       local-only per the corrected threat model, so cross-device sync
       behaviour is unaffected by them); confirm cross-device sync still
       converges correctly with Gap 3/4's now-encrypted synced values. Only
       encrypted databases pay the AES-GCM cost on any of these paths —
-      encryption remains opt-in throughout.
-- [ ] Hand off to the **`kmdb-architect` agent** for a dedicated
+      encryption remains opt-in throughout. **Done (kmdb-qa, 2026-07-14):**
+      `kmdb_harness` 153/153 passing (baseline unencrypted convergence
+      intact). Since the harness itself can't inject encryption, kmdb-qa wrote
+      and ran a dedicated two-device encrypted-sync scenario (shared DEK,
+      `MemorySyncAdapter`) confirming bidirectional convergence of encrypted
+      values; also verified the bootstrap chicken-and-egg is handled correctly
+      (`enc:blob` and the format-version marker are exempt from `$meta`
+      encryption so a peer can bootstrap decryption). Scratch test not
+      committed (ad hoc verification only).
+- [x] Hand off to the **`kmdb-architect` agent** for a dedicated
       spec-alignment pass: confirm §31, §24, §99, and `docs/roadmap/0_08.md`
       now accurately describe the *complete* implemented state across all
       four gaps — not just that Phase 5's own diff reads well in isolation.
@@ -1017,16 +1660,49 @@ landed) and run once, after Phase 5's commit, before opening the PR:
       agent for `docs/spec/` per CLAUDE.md, and this plan's whole premise is
       a spec/code divergence, so an explicit final alignment check matters
       more here than on a typical plan. Resolve every discrepancy it finds
-      before proceeding.
-- [ ] Hand off to the **`kmdb-qa` agent** for a final whole-PR sign-off —
+      before proceeding. **Done (kmdb-architect, 2026-07-14) — this pass
+      earned its keep.** §12/§31's `$meta`-rides-synced-SSTables description
+      (flagged by kmdb-qa) was confirmed correct, no contradiction — the
+      `syncNamespaces` field kmdb-qa spotted is dead/unconsulted code, the
+      real split is the `$$`-prefix `.local.sst` partitioning. §99 and the
+      roadmap were independently re-verified as current. But the pass found
+      and fixed a real gap: **`docs/spec/32_vault_search.md`'s "Encryption
+      Compatibility" section was still pre-WI-10/pre-Phase-1**, stating
+      `text.txt`/`chunks_v1.json`/vector LSM entries are plaintext — directly
+      contradicted by both WI-10 (this repo's earlier work) and this plan's
+      own Phase 1. It slipped through every prior review because §32 wasn't
+      in Phase 5's declared update set (only §31/§24/§99/roadmap were).
+      Rewritten to describe encrypted blob/artifact/LSM-value state and the
+      Gap 2 HMAC token migration. Also fixed: a stale "still-open" reference
+      to Gap 1 in §31's gap 6, a `$meta` omission in §31's Provider Threading
+      paragraph, missing `originalName`-encryption coverage in §24, and added
+      an `EncryptionEnvelope` glossary entry. All fixes verified against the
+      shipping code, not just made to read well.
+- [x] Hand off to the **`kmdb-qa` agent** for a final whole-PR sign-off —
       this pass is about aggregate/cross-phase concerns (does the PR as a
       whole make sense, is overall coverage adequate, do the five commits
       tell a coherent story) rather than re-reviewing each phase's code in
       detail, since that already happened per-phase above. Do not open a PR
-      until sign-off is received.
-- [ ] Run `make pre_commit` one final time on the complete branch — format,
-      analyze, license_check, tests all green.
-- [ ] Verify licence headers on all new files (2026).
+      until sign-off is received. **Done (kmdb-qa, 2026-07-14):** covered by
+      the coverage/benchmark/harness items above plus an explicit aggregate
+      pass — shared primitives (`EncryptionEnvelope`, `EncryptionProvider.
+      indexToken`) used consistently at every call site across all phases; a
+      genuine cross-phase interaction (`CacheLayer._readGeneration` reading
+      Phase 2's now-wrapped generation counter directly, bypassing
+      `MetaStore`) was confirmed correctly updated to unwrap; commit history
+      is coherent (gaps closed out of numeric order by design, the interleaved
+      flaky-fix commit correctly scoped, Phase 5 fulfilling Phase 2's spec
+      forward-reference). No blocking issues. Signed off.
+- [x] Run `make pre_commit` one final time on the complete branch — format,
+      analyze, license_check, tests all green. **Done (kmdb-pre-commit,
+      2026-07-14):** all four gates pass on the final architect-fix commit
+      (459 files formatted/0 changed, 0 analysis issues across 7 packages,
+      license_check clean, 2369 tests passed/0 failed/12 e2e skipped).
+      `make doc_site_html` also verified clean (pandoc exit 0, architect's
+      spec edits reflected in the built HTML).
+- [x] Verify licence headers on all new files (2026). **Done** — verified by
+      kmdb-pre-commit at each phase's gate and again on this final run;
+      `addlicense --check` clean throughout.
 - [ ] Open the PR from the branch with its five phase commits intact; merge
       (do not squash) once approved, per the workflow policy above.
 
@@ -1626,5 +2302,70 @@ the `kmdb-plan-implement` agent.
 
 ## Summary
 
-{Dot points highlighting the work undertaken — fill in once implementation is
-complete.}
+All four gaps from `docs/roadmap/0_08.md`'s "Encryption confidentiality
+reconciliation" are closed, across six commits on
+`20260711_plan_0_08_encryption_confidentiality_reconciliation`:
+
+- **Phase 1 (Gap 1, `7808513`)** — FTS/Vec/vault-search index values now
+  encrypted, via a new `EncryptionEnvelope` primitive (scalars/raw bytes) and
+  existing `ValueCodec` (map-shaped values), chosen per value shape. WI-10's
+  `writeExtractArtifact`/`readExtractArtifact` refactored onto the shared
+  envelope. Two implementation-level deviations from the plan's literal
+  per-value-shape split (uniform envelope wrapping for shared-namespace
+  entries in `FtsManager` and `VaultSearchManager`) were both independently
+  verified by `kmdb-qa` as sound engineering, not shortcuts.
+- **Interleaved fix (`6c05590`)** — strengthened a flaky ciphertext-exclusion
+  assertion in a Phase-1-era test (single-byte check collided with random
+  ciphertext ~13-15% of the time).
+- **Phase 2 (Gap 3, `287edd5`)** — `MetaStore` values now encrypted via a
+  late-bound `EncryptionProvider`, with a new database-level format-version
+  gate (three-way new/legacy/empty discrimination) replacing an originally-
+  planned per-value flag check that was shown during planning to be unsound
+  (CBOR's small-integer encoding collides with the two valid encryption flag
+  bytes). Three real durability bugs were found and fixed via
+  `FaultyStorageAdapter` fault injection during this phase. A `kmdb-qa` round
+  caught a missing public export and an inaccurate regression-coverage claim,
+  both corrected before commit.
+- **Phase 3 (Gap 4, `2843034`)** — vault manifest `originalName` now encrypted
+  in place (base64-encoded `EncryptionEnvelope` ciphertext), with the
+  KVLT-archive-is-intentionally-plaintext exclusion independently verified
+  against spec and the live export code paths, not just accepted on the
+  implementer's word.
+- **Phase 4 (Gap 2, `c6ccaec`)** — DEK-derived HMAC namespace tokens (HKDF
+  sub-key, domain-separated) replace plaintext hex terms/values across
+  document FTS, secondary indexes, and vault FTS, with a persisted
+  `tokenMode` discriminator triggering automatic rebuild on format-version
+  mismatch. `VecIndexState` was deliberately excluded from this mechanism —
+  independently verified correct, since vector namespaces never embedded a
+  hex-tokenized term/value to begin with. A `kmdb-qa` round found and the
+  implementer fixed a real blocking confidentiality bug (B1): a database
+  needing both a model-version rebuild and a hex→HMAC token migration in the
+  same `open()` could leave stale plaintext-derivable hex namespaces
+  orphaned on disk. The fix was independently re-verified as load-bearing by
+  `kmdb-qa` reverting it and confirming the regression test failed.
+- **Phase 5 (docs, `ccf0dde`)** — §31/§24/§99/roadmap updated to mark all
+  four gaps resolved.
+- **Final commit (`445261f`)** — a dedicated `kmdb-architect` spec-alignment
+  pass (beyond Phase 5's own scope) found and fixed a real remaining gap:
+  `docs/spec/32_vault_search.md`'s encryption-compatibility section was still
+  pre-WI-10/pre-Phase-1, contradicting shipped work. Whole-PR checks
+  (coverage, §18 benchmarks, `kmdb_harness` multi-device convergence
+  including a dedicated encrypted two-device sync scenario, and a final
+  aggregate `kmdb-qa` sign-off) all passed.
+
+**Process note:** this plan used a deliberately heavier-than-usual workflow
+(per-phase `kmdb-qa` sign-off rather than one review at the end, plus a
+dedicated final `kmdb-architect` spec pass) given the stakes — durability-
+critical paths and a breaking, unmigrated format change. That process caught
+a missing export, an inaccurate test-coverage claim, a genuine confidentiality
+bug, and a stale spec section that a single end-of-plan review would very
+plausibly have missed, echoing why the plan's own five-pass review was needed
+to reach `Investigated` in the first place.
+
+Two follow-up items were surfaced during implementation and logged to
+`docs/roadmap/0_09.md` (out of this plan's scope, not blocking): a latent
+WAL directory-entry durability fragility (`WalWriter.append` never
+`syncDir`s a brand-new WAL file's own directory entry, currently masked by
+incidental `syncDir` calls elsewhere), and a pre-existing, intermittent
+`sync_engine_test.dart` H4-FU3 test flake (diagnosed as a test-design issue,
+not a confirmed production bug).

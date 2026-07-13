@@ -496,24 +496,30 @@ void main() {
 
     // ── WI-6: script/language CBOR round-trip ────────────────────────────────
 
-    test('script and language survive a CBOR encode/decode round-trip', () {
-      final state = VaultExtractionState(
-        sha256: sha256,
-        status: VaultExtractionStatus.indexed,
-        chunkCount: 2,
-        charset: 'utf-8',
-        script: 'Latn',
-        language: 'en',
-      );
-      final decoded = VaultExtractionState.decode(state.encode(), sha256);
-      expect(decoded.script, equals('Latn'));
-      expect(decoded.language, equals('en'));
-      expect(decoded.charset, equals('utf-8'));
-    });
+    test(
+      'script and language survive a CBOR encode/decode round-trip',
+      () async {
+        final state = VaultExtractionState(
+          sha256: sha256,
+          status: VaultExtractionStatus.indexed,
+          chunkCount: 2,
+          charset: 'utf-8',
+          script: 'Latn',
+          language: 'en',
+        );
+        final decoded = await VaultExtractionState.decode(
+          await state.encode(),
+          sha256,
+        );
+        expect(decoded.script, equals('Latn'));
+        expect(decoded.language, equals('en'));
+        expect(decoded.charset, equals('utf-8'));
+      },
+    );
 
     test(
       'null script/language are omitted from toMap() and decode back as null',
-      () {
+      () async {
         final state = VaultExtractionState(
           sha256: sha256,
           status: VaultExtractionStatus.indexed,
@@ -523,7 +529,10 @@ void main() {
         expect(map, isNot(contains('script')));
         expect(map, isNot(contains('language')));
 
-        final decoded = VaultExtractionState.decode(state.encode(), sha256);
+        final decoded = await VaultExtractionState.decode(
+          await state.encode(),
+          sha256,
+        );
         expect(decoded.script, isNull);
         expect(decoded.language, isNull);
       },

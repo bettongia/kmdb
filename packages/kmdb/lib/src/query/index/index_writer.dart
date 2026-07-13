@@ -15,6 +15,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import '../../encryption/encryption_provider.dart';
 import '../../engine/kvstore/kv_store.dart';
 import '../filter/field_path.dart';
 import 'index_definition.dart';
@@ -28,7 +29,7 @@ import 'index_definition.dart';
 /// dedicated system namespace is allocated:
 ///
 /// ```
-/// $$index:{ns}:{path}:{hexEncodedValue}
+/// $$index:{ns}:{path}:{token}
 /// ```
 ///
 /// Within that namespace, each document that has the given field value is
@@ -44,7 +45,8 @@ import 'index_definition.dart';
 ///
 /// ## Value encoding
 ///
-/// Field values are hex-encoded to produce a namespace-safe string:
+/// Field values are first encoded to a namespace-safe hex string (see
+/// [_encodeValueHex]):
 ///
 /// | Field type | Encoding |
 /// | ---------- | -------- |
@@ -53,6 +55,16 @@ import 'index_definition.dart';
 /// | `double` | 8-byte IEEE-754 with bit adjustment → hex (sort order preserved) |
 /// | `bool` | 1 byte (`0x00` = false, `0x01` = true) → hex |
 /// | `null` / missing | No entry written |
+///
+/// `{token}` above is this hex string verbatim when the database is
+/// unencrypted, or an HMAC-SHA256 token derived from it (via
+/// [EncryptionProvider.indexToken], domain-separated by `ns`/`path`) when the
+/// database is encrypted (Encryption confidentiality reconciliation plan,
+/// Gap 2). The HMAC token is **not** sort-order-preserving, so encrypted
+/// secondary indexes cannot support the `Future` "sort-order prefix for range
+/// scans" use noted on [encodeValueHex] below — no current query path relies
+/// on that ordering (equality lookup only, per [IndexReader]), so this is a
+/// deferred limitation, not a regression, and is documented in §31.
 ///
 /// ## Array fan-out
 ///
@@ -66,31 +78,47 @@ abstract final class IndexWriter {
   /// Adds index entries for [docKey] to [batch].
   ///
   /// For fan-out paths (ending `[]`), one entry is written per non-null
-  /// array element.
-  static void addEntries({
+  /// array element. [encryption], when non-null, tokenises the namespace
+  /// suffix via [EncryptionProvider.indexToken] instead of plaintext hex
+  /// (Gap 2).
+  static Future<void> addEntries({
     required WriteBatch batch,
     required IndexDefinition definition,
     required String docKey,
     required Map<String, dynamic> document,
-  }) {
+    EncryptionProvider? encryption,
+  }) async {
     for (final value in _resolveValues(definition.path, document)) {
       if (value == null || value == missing) continue;
-      final ns = indexNamespaceForValue(definition, value);
+      final ns = await indexNamespaceForValue(
+        definition,
+        value,
+        encryption: encryption,
+      );
       if (ns == null) continue;
       batch.put(ns, docKey, Uint8List(0));
     }
   }
 
   /// Removes index entries for [docKey] from [batch].
-  static void removeEntries({
+  ///
+  /// [encryption] must match whatever was passed to the [addEntries] call
+  /// that originally wrote the entries being removed, so the same namespace
+  /// tokens are reconstructed.
+  static Future<void> removeEntries({
     required WriteBatch batch,
     required IndexDefinition definition,
     required String docKey,
     required Map<String, dynamic> document,
-  }) {
+    EncryptionProvider? encryption,
+  }) async {
     for (final value in _resolveValues(definition.path, document)) {
       if (value == null || value == missing) continue;
-      final ns = indexNamespaceForValue(definition, value);
+      final ns = await indexNamespaceForValue(
+        definition,
+        value,
+        encryption: encryption,
+      );
       if (ns == null) continue;
       batch.delete(ns, docKey);
     }
@@ -100,13 +128,27 @@ abstract final class IndexWriter {
   /// [definition]'s index.
   ///
   /// Returns `null` for value types that are not indexable (List, Map, etc.).
-  static String? indexNamespaceForValue(
+  ///
+  /// When [encryption] is `null` (unencrypted database), the namespace
+  /// suffix is the plaintext hex encoding from [_encodeValueHex] — unchanged
+  /// from the pre-Gap-2 behaviour. When [encryption] is set, the suffix is an
+  /// HMAC-SHA256 token via [EncryptionProvider.indexToken], computed from a
+  /// message domain-separated by [IndexDefinition.namespace] and
+  /// [IndexDefinition.path] so the same value in a different field/collection
+  /// never produces the same token (Gap 2, Q4).
+  static Future<String?> indexNamespaceForValue(
     IndexDefinition definition,
-    Object value,
-  ) {
+    Object value, {
+    EncryptionProvider? encryption,
+  }) async {
     final hex = _encodeValueHex(value);
     if (hex == null) return null;
-    return '${definition.indexNamespace}:$hex';
+    final token = encryption == null
+        ? hex
+        : await encryption.indexToken(
+            '${definition.namespace}:${definition.path}:$hex',
+          );
+    return '${definition.indexNamespace}:$token';
   }
 
   // ── Internal ────────────────────────────────────────────────────────────────

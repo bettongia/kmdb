@@ -27,7 +27,9 @@ library;
 
 import 'dart:typed_data';
 
-import 'package:cbor/cbor.dart';
+import '../../encoding/value_codec.dart';
+import '../../encryption/encryption_provider.dart';
+import '../../search/lexical/fts_index_state.dart' show FtsTokenMode;
 
 /// The lifecycle status of a single vault blob's text extraction and indexing.
 enum VaultExtractionStatus {
@@ -77,9 +79,13 @@ enum VaultExtractionStatus {
 
 /// A snapshot of a vault blob's extraction and indexing state.
 ///
-/// Stored as a CBOR map in the `$$vault:extract:{sha256}` KV namespace
-/// (keyed by [kVaultCorpusSentinelKey]). This is the **only** persisted copy
-/// of extraction status — there is no filesystem mirror (no
+/// Stored as a [ValueCodec]-encoded map in the `$$vault:extract:{sha256}` KV
+/// namespace (keyed by [kVaultCorpusSentinelKey]) — encrypted when the
+/// database has an [EncryptionProvider] configured (Encryption
+/// confidentiality reconciliation plan, Gap 1: this value carries `charset`,
+/// `script`, `language`, `modelVersion`, `chunkCount`, and `error`, which may
+/// contain content fragments). This is the **only** persisted copy of
+/// extraction status — there is no filesystem mirror (no
 /// `extract_status.json` file is ever written; only `text.txt`,
 /// `chunks_v1.json`, and `vectors_*.bin` exist on disk, see §32).
 ///
@@ -108,6 +114,7 @@ final class VaultExtractionState {
     this.charset,
     this.script,
     this.language,
+    this.ftsTokenMode,
   });
 
   /// The sha256 of the vault blob this state belongs to.
@@ -186,6 +193,19 @@ final class VaultExtractionState {
   /// section for the full rationale).
   final String? language;
 
+  /// How this blob's `$$vault:fts:{sha256}:*` base-term namespace tokens were
+  /// computed as of the last successful index (Encryption confidentiality
+  /// reconciliation plan, Gap 2, Q5).
+  ///
+  /// `null` before indexing, and also the value read back for blobs indexed
+  /// before Gap 2 shipped (treated identically to [FtsTokenMode.hex] by
+  /// [VaultSearchManager._checkTokenMode] — pre-Gap-2 indexing was always
+  /// hex-tokenised). Mirrors [FtsIndexState.tokenMode]/[IndexState.tokenMode]
+  /// but lives on the per-blob extraction state rather than a
+  /// per-(namespace, field) index state, since vault indexing is scoped per
+  /// blob, not per collection field.
+  final FtsTokenMode? ftsTokenMode;
+
   /// Encodes this state as a CBOR-serialisable [Map].
   ///
   /// Only non-null fields are included (except [status] and [modelVersion],
@@ -201,6 +221,7 @@ final class VaultExtractionState {
     if (charset != null) 'charset': charset,
     if (script != null) 'script': script,
     if (language != null) 'language': language,
+    if (ftsTokenMode != null) 'ftsTokenMode': ftsTokenMode!.name,
   };
 
   /// Decodes a [VaultExtractionState] from a CBOR-decoded [Map] and [sha256].
@@ -227,6 +248,14 @@ final class VaultExtractionState {
       chunkOverlap = (params['chunkOverlap'] as num?)?.toInt();
     }
 
+    final ftsTokenModeStr = map['ftsTokenMode'] as String?;
+    final ftsTokenMode = ftsTokenModeStr == null
+        ? null
+        : FtsTokenMode.values.firstWhere(
+            (m) => m.name == ftsTokenModeStr,
+            orElse: () => FtsTokenMode.hex,
+          );
+
     return VaultExtractionState(
       sha256: sha256,
       status: status,
@@ -239,6 +268,7 @@ final class VaultExtractionState {
       charset: map['charset'] as String?,
       script: map['script'] as String?,
       language: map['language'] as String?,
+      ftsTokenMode: ftsTokenMode,
     );
   }
 
@@ -270,29 +300,28 @@ final class VaultExtractionState {
         error: error,
       );
 
-  /// Encodes this state as CBOR bytes for storage in `$$vault:extract:{sha256}`.
+  /// Encodes this state for storage in `$$vault:extract:{sha256}`.
   ///
-  /// Uses bare CBOR (no [ValueCodec] wrapper) consistent with the other vault
-  /// search index entries ([VaultBm25Writer], [VaultVecWriter]).
-  Uint8List encode() => Uint8List.fromList(cbor.encode(_mapToCbor(toMap())));
+  /// [toMap] is `Map<String, dynamic>`-shaped, so this routes through
+  /// [ValueCodec] directly (Encryption confidentiality reconciliation plan,
+  /// Phase 0/B7) rather than a bare CBOR encode — this is the fix for Gap 1's
+  /// leak of `charset`/`script`/`language`/`modelVersion`/`chunkCount`/
+  /// `error` (which may contain content fragments).
+  Future<Uint8List> encode({EncryptionProvider? encryption}) =>
+      ValueCodec.encode(toMap(), encryption: encryption);
 
-  /// Decodes a [VaultExtractionState] from CBOR bytes and [sha256].
+  /// Decodes a [VaultExtractionState] from [ValueCodec]-encoded bytes and
+  /// [sha256].
   ///
-  /// Throws [FormatException] if [bytes] cannot be decoded or the map is
-  /// missing the required `status` field.
-  factory VaultExtractionState.decode(Uint8List bytes, String sha256) {
-    final CborValue decoded;
-    try {
-      decoded = cbor.decode(bytes);
-    } catch (e) {
-      throw FormatException('VaultExtractionState: invalid CBOR: $e');
-    }
-    if (decoded is! CborMap) {
-      throw const FormatException(
-        'VaultExtractionState: expected CBOR map at top level',
-      );
-    }
-    final map = _cborToMap(decoded);
+  /// Throws [FormatException] if the decoded map is missing the required
+  /// `status` field, or any exception [ValueCodec.decode] itself throws for
+  /// malformed/undecryptable bytes.
+  static Future<VaultExtractionState> decode(
+    Uint8List bytes,
+    String sha256, {
+    EncryptionProvider? encryption,
+  }) async {
+    final map = await ValueCodec.decode(bytes, encryption: encryption);
     return VaultExtractionState.fromMap(map, sha256);
   }
 
@@ -301,33 +330,3 @@ final class VaultExtractionState {
       'VaultExtractionState(sha256: ${sha256.substring(0, 8)}..., '
       'status: ${status.name}, chunkCount: $chunkCount)';
 }
-
-// ── CBOR helpers (file-private) ───────────────────────────────────────────────
-
-/// Recursively converts a [Map<String, dynamic>] (as returned by
-/// [VaultExtractionState.toMap]) to a [CborMap].
-CborMap _mapToCbor(Map<String, dynamic> map) => CborMap({
-  for (final e in map.entries) CborString(e.key): _valueToCbor(e.value),
-});
-
-CborValue _valueToCbor(dynamic value) => switch (value) {
-  final String s => CborString(s),
-  final int i => CborSmallInt(i),
-  final bool b => CborBool(b),
-  final Map<String, dynamic> m => _mapToCbor(m),
-  _ => const CborNull(),
-};
-
-/// Recursively converts a decoded [CborMap] to [Map<String, dynamic>].
-Map<String, dynamic> _cborToMap(CborMap map) => {
-  for (final e in map.entries)
-    (e.key as CborString).toString(): _cborToValue(e.value),
-};
-
-dynamic _cborToValue(CborValue value) => switch (value) {
-  CborString() => value.toString(),
-  CborInt() => value.toObject(),
-  CborBool() => value.value,
-  CborMap() => _cborToMap(value),
-  _ => null,
-};

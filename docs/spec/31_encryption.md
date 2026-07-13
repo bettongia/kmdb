@@ -146,6 +146,47 @@ that lacks `enc:blob` cannot be safely retroactively encrypted — it would
 produce a mix of plaintext and encrypted values. The caller receives
 `EncryptionError.cannotProvisionNonEmptyDatabase`.
 
+### Database Format-Version Gate
+
+The Encryption confidentiality reconciliation plan's Phase 2 (Gap 3) made
+every general `$meta` accessor route through `EncryptionEnvelope`. This is a
+**pre-v1-beta breaking on-disk format change for every existing database, not
+just encrypted ones**: a database created by pre-plan code stores `$meta`
+values as bare CBOR with no leading flag byte, but the post-plan read path
+always expects one — and several of those values are authoritative and not
+rebuildable (`device_id` in particular; a changed device identity breaks sync
+continuity), so silently reinterpreting a legacy value's first CBOR byte as
+an `EncryptionFlag` would be actively dangerous, not just wrong.
+
+`KvStoreImpl.open()` therefore checks a `formatVersion` marker
+(`MetaStore.kFormatVersionMarkerName`, itself read/written via the same
+raw, non-circular path as `enc:blob` — see `MetaStore.
+getFormatVersionMarker`/`putFormatVersionMarker`) immediately after crash
+recovery, before any other `$meta`/index/FTS/Vec/vault value is read through
+`EncryptionEnvelope`/`ValueCodec`. Three-way discrimination (marker absence
+alone is not sufficient — a brand-new database also has no marker until this
+gate writes one):
+
+1. **Looks fresh** (`CrashRecovery`'s `isNewDatabase`, or `$meta` scans as
+   completely empty even if `CURRENT` exists — the widened check needed for
+   `fsyncOnWrite: false` test configs where a crash can leave `CURRENT`
+   durable but every `$meta` write lost) → write the marker
+   (`kCurrentFormatVersion = 1`) and proceed normally. This is the only path
+   a brand-new database takes.
+2. **Marker present and current** → proceed normally. This is the steady
+   state for every database opened after this plan landed.
+3. **Marker absent and the database is not empty** → the database predates
+   this plan. Throw `LegacyDatabaseFormatException` — a clean, explicit
+   failure (not a silent misparse of a legacy value as encrypted garbage).
+
+**There is no migration path, consistent with the original Phase 12
+encryption precedent (no in-place migration for encryption either): a
+database created before this plan landed must be recreated.** This applies
+to every pre-plan database, encrypted or not, since the format break is in
+the general `$meta` framing, not specifically in encryption. See
+`docs/spec/28_release_checklist.md` RC-22 for anyone upgrading a
+pre-existing dev/test database.
+
 ## Key Derivation
 
 ### Passphrase → KEK
@@ -242,11 +283,13 @@ The `manifest.json` for each blob gains an `encrypted: boolean` field:
 
 ```json
 {
+  "schemaVersion": "1",
   "sha256": "...",
-  "crc32c": 12345678,
-  "mimeType": "image/jpeg",
   "size": 1024,
-  "hlcTimestamp": "...",
+  "crc32c": "a1b2c3d4",
+  "mediaType": "image/jpeg",
+  "originalName": "photo.jpg",
+  "createdAt": "...",
   "encrypted": true
 }
 ```
@@ -272,18 +315,40 @@ final doc   = await ValueCodec.decode(bytes, encryption: _db.encryption);
 All call sites in `KmdbCollection`, `IndexManager`, `VersionManager`, and
 `VaultRefInterceptor` receive the provider from `KmdbDatabase.encryption`.
 
-System namespace values vary in their sync behaviour. `$ver:` and `$vault:`
-entries ride in syncable SSTables and reach the cloud. `$$index:`, `$$fts:`,
-and `$$vec:` entries are **local-only** — they are stored in `.local.sst` files
-and never uploaded (see §6 Flush Partitioning, §12). The **design intent** is
-that all index values are encrypted so disk storage never sees plaintext document
-content. In practice there is a known gap: `FtsManager` and `VecManager`
-currently write their index values via raw `cbor.encode()`, not
-`ValueCodec.encode(encryption:)`, so `$$fts:` and `$$vec:` values are **not yet
-encrypted**. This is tracked as a defect in the v0.08
-encryption reconciliation work item and will be corrected before the v1 beta.
-See the "Threat Model & Confidentiality Boundaries" section for the full picture
-of protected and unprotected surfaces.
+System namespace values vary in their sync behaviour. `$meta`, `$ver:`, and
+`$vault:` entries (all single-`$`) ride in syncable SSTables and reach the
+cloud. `$$index:`, `$$fts:`, and `$$vec:` entries (double-`$$`) are
+**local-only** — they are stored in `.local.sst` files and never uploaded (see
+§6 Flush Partitioning, §12). The syncable/local-only split is decided **only**
+by the `$$` prefix via the flush-time `.local.sst` partitioning, not by the
+`syncNamespaces` parameter: `syncNamespaces` defaults to the user (non-`$`)
+collections and is deliberately **not** applied as a per-entry upload filter,
+so `$meta` — despite being `$`-prefixed and thus excluded from that default set
+— still rides synced SSTables and reaches the cloud. This is exactly why `$meta`
+encryption (Gap 3) closes a genuine cloud-provider exposure, not merely a
+local-disk one. See §12 _Namespace-Scoped Sync_ for the full mechanism. All index values are
+encrypted so disk storage never sees plaintext document content: `FtsManager`
+and `VecManager` route their index values through `EncryptionEnvelope`/
+`ValueCodec` per value shape, and `MetaStore` (the `$meta` system namespace —
+device ID, namespace registry, generation counters, index/FTS/Vec state) is
+encrypted end to end except the one documented `enc:blob` exemption (see
+_enc:blob Structure_ above). The vault-search writers
+(`VaultBm25Writer`/`VaultVecWriter`/`VaultExtractionState`) are likewise
+encrypted at the `VaultSearchManager` call site. **This closes what was
+previously documented here as a known gap** (`FtsManager`/`VecManager`
+writing raw `cbor.encode()`) — see the Encryption confidentiality
+reconciliation plan (`docs/roadmap/0_08.md`), Gap 1.
+
+Beyond value encryption, the `$$fts:`/`$$index:`/`$$vault:fts:` namespace
+_names_ themselves are also protected when a provider is configured: the
+`{term}`/`{value}` segment is an HMAC-SHA256 token
+(`EncryptionProvider.indexToken`) rather than a plaintext hex encoding, so
+local SSTable access can no longer enumerate the search vocabulary or
+indexed field values by reading namespace names alone (Gap 2). See the
+"Threat Model & Confidentiality Boundaries" section for the full picture of
+protected and unprotected surfaces, including the residual statistical
+leakage this token scheme does not close (term frequency, search-pattern
+access, co-occurrence).
 
 ## Error Codes
 
@@ -476,6 +541,19 @@ sync:
   materialised views (when the materialised-view cache is implemented) are
   encrypted, because their write paths thread the `EncryptionProvider` through
   `ValueCodec.encode` (see _Provider Threading_).
+- **FTS, Vec, and vault-search index values** — the _values_ stored under
+  `$$fts:`, `$$vec:`, `$$vault:fts:`, `$$vault:vec:idx:`, and `$$vault:extract:`
+  are encrypted via `EncryptionEnvelope` (scalars/opaque bytes — term-frequency
+  ints, SQ8 vectors, the BM25 corpus sentinel) or `ValueCodec` (`Map`-shaped
+  values — `$$fts:doc:`, `VaultExtractionState`) per value shape (Encryption
+  confidentiality reconciliation, Gap 1 — see gap 1 below). These namespaces
+  are local-only, so this protects against local disk theft, not a cloud
+  provider.
+- **`$meta` operational metadata** — device ID, the namespace registry,
+  generation counters, the dirty flag, the tombstone-GC floor, and index/FTS/
+  Vec state are encrypted via `EncryptionEnvelope` (Gap 3), the one documented
+  exemption being `enc:blob` itself (see _enc:blob Structure_). Because `$meta`
+  rides synced SSTables, this is genuine cloud-provider protection.
 - **Vault blob bytes** — the `VaultStore` encrypts blob payloads with the DEK
   before writing them to disk and to the cloud (see _Vault Encryption_).
 - **Vault `extract/` filesystem artifacts (WI-10, gap 6 below)** — `text.txt`,
@@ -498,70 +576,216 @@ are intentional design trade-offs; others are code defects or architectural
 limitations under active work. Each is documented honestly so that callers can
 reason about the true confidentiality boundary.
 
-#### 1. FTS and Vec index _values_ are not encrypted (code defect)
+#### 1. FTS and Vec index _values_ are not encrypted (resolved — Encryption confidentiality reconciliation, Gap 1)
 
-`FtsManager` and `VecManager` currently serialise their index entries with a
-direct `cbor.encode()` call rather than `ValueCodec.encode(encryption:)`. As a
-result, the _values_ stored under the `$$fts:` and `$$vec:` namespaces are **not
-encrypted**, even when encryption is active.
+`FtsManager` and `VecManager` previously serialised their index entries with a
+direct `cbor.encode()` call rather than `ValueCodec.encode(encryption:)`, so
+the _values_ stored under the `$$fts:` and `$$vec:` namespaces were **not
+encrypted**, even when encryption was active — including `$$fts:doc:` values,
+which leaked the full tokenised term list of every document to anyone with
+local SSTable access. The same defect extended to the vault-search writers
+(`VaultBm25Writer`, `VaultVecWriter`, `VaultExtractionState`), which
+serialised `$$vault:fts:`, `$$vault:vec:idx:{sha256}`, and
+`$$vault:extract:{sha256}` the same unencrypted way — including
+`$$vault:vec:idx:`, the per-chunk SQ8 vector index missed by the original
+WI-3 audit (see `docs/roadmap/0_06.md`'s correction).
 
-This **contradicts the claim made above in _Provider Threading_** (the statement
-that `$$fts:` and `$$vec:` values are encrypted). That claim is currently
-incorrect for FTS and Vec; it is accurate for `$$index:`, `$ver:`, and `$vault:`.
-This is a code defect to be fixed by routing the FTS and Vec write paths through
-`ValueCodec`. Until it is fixed, `$$fts:doc:` values in particular **leak the
-full tokenised term list of every document** to anyone with local SSTable access.
+**Resolved** by the Encryption confidentiality reconciliation plan's Phase 1
+(`docs/roadmap/0_08.md`, Gap 1; see `docs/plans/completed/
+plan_0_08_encryption_confidentiality_reconciliation.md`). The FTS, Vec, and
+vault-search write paths now route every index value through
+`EncryptionEnvelope` (scalar/opaque values — term-frequency ints, SQ8
+vectors, the BM25 corpus sentinel) or `ValueCodec` (the remaining
+`Map`-shaped values — `$$fts:doc:`, `VaultExtractionState`) when a provider
+is configured, matching the _Provider Threading_ section's claim above. The
+one narrow, documented deviation from a literal per-value-shape split:
+`FtsManager`'s overlay namespace (`_writeOverlayEntry`/`_writeTombstone`
+share one namespace/key slot) keeps producing raw, self-describing CBOR with
+only the outer `EncryptionEnvelope` layer added uniformly, since mixing
+`ValueCodec`'s and `EncryptionEnvelope`'s distinct plaintext framings on a
+shared slot would make the wire format ambiguous to readers.
 
-#### 2. FTS namespace names embed search terms (architectural limitation)
+#### 2. FTS namespace names embed search terms (resolved for encrypted databases — Encryption confidentiality reconciliation, Gap 2)
 
 The lexical index uses a namespace-per-term layout,
-`$$fts:{ns}:{field}:{hexTerm}`, which embeds the (hex-encoded) search term
-directly in the namespace name. Namespace names are part of the SSTable _key_
-and are **never encrypted**. An adversary with local SSTable access can therefore
-enumerate the entire **search vocabulary** of the database — every distinct term
-that appears in any indexed field — simply by scanning namespace names. (These
-SSTables are local-only and never uploaded; the threat is a compromised local
+`$$fts:{ns}:{field}:{token}`, which embeds the search term in the namespace
+name. Namespace names are part of the SSTable _key_ and are **never
+encrypted** as a byte sequence — the confidentiality property below comes
+from what value is placed there, not from encrypting the namespace name
+itself. Prior to Gap 2, `{token}` was a plaintext hex encoding of the term,
+so an adversary with local SSTable access could enumerate the entire
+**search vocabulary** of the database — every distinct term that appears in
+any indexed field — simply by scanning namespace names. (These SSTables are
+local-only and never uploaded; the threat is a compromised local
 filesystem.)
 
-Closing this requires an architectural change to the FTS key layout and is under
-active research. It is documented here as a known limitation rather than a
-defect that can be fixed by threading a provider.
+**Resolved for encrypted databases** by the Encryption confidentiality
+reconciliation plan's Phase 4 (`docs/roadmap/0_08.md`, Gap 2): when a
+database `EncryptionProvider` is configured, `{token}` is an HMAC-SHA256
+token derived via `EncryptionProvider.indexToken` — a sub-key distinct from
+(but derived from) the DEK via HKDF-SHA256 (`info = "kmdb-index-token"`),
+never the raw DEK directly. The HMAC input is domain-separated as
+`"{ns}:{field}:" + term`, so the same term in a different field or
+collection never produces the same token. This closes the
+**vocabulary-enumeration** attack this gap originally documented: an
+adversary with local SSTable access can no longer recover which terms
+appear anywhere in the database just by reading namespace names.
+**Unencrypted databases are unaffected and remain a known, accepted
+limitation** — they continue to use plaintext hex tokens, since there is no
+DEK to derive a sub-key from and no confidentiality property claimed for an
+unencrypted database in the first place.
 
-#### 3. Secondary index namespace names embed indexed values
+This does **not** close every namespace-based side channel, only the specific
+one this gap names (recovering the literal term/value from the namespace
+name). The following statistical leakage remains, as an accepted limitation,
+even on an encrypted database:
 
-Secondary indexes use the layout `$$index:{ns}:{field}:{value}`, which embeds the
-**indexed field value** in the namespace name. As with FTS namespaces (gap 2),
-namespace names are part of the SSTable key and are never encrypted. This is not
-document content per se, but the indexed values drawn from documents — e.g.
-every distinct value of an indexed `status` or `email` field — are visible to
-anyone with SSTable access.
+- **Term/value frequency** — the number of chunks in a base-term or
+  secondary-index namespace (its "posting list" size) reveals how often that
+  (unknown) term/value occurs, without revealing what it is.
+- **Per-term/per-value document count** — the number of distinct document
+  keys within a namespace reveals how many documents contain that (unknown)
+  term/value.
+- **Search-pattern / access-pattern leakage** — repeated queries against the
+  same namespace over time reveal that the same (unknown) term/value is being
+  searched for repeatedly, which combined with external context could narrow
+  down what it is.
+- **Co-occurrence** — an adversary who can correlate which namespaces are
+  read together within a single query (e.g. a multi-term BM25 search) can
+  infer that those (unknown) terms co-occur in the corpus, without knowing
+  the terms themselves.
 
-#### 4. `MetaStore` values are not encrypted
+None of these reveal document *content* — they are the same class of
+metadata leakage the rest of this section already documents for `$meta`,
+manifests, and filenames (operational/statistical, not content). Closing them
+would require a materially different index structure (e.g. oblivious RAM or
+padding/bucketing schemes) that is out of scope for this plan.
 
-`MetaStore` bypasses `ValueCodec` entirely and writes raw CBOR directly to
-`_engine.put()`. For the `enc:blob` entry this is **intentional and required**:
-the blob is already protected by the wrapped DEK, and decrypting any value
-requires first reading `enc:blob`, so it cannot itself be encrypted (see
-_enc:blob Structure_).
+**DEK-rotation interaction:** passphrase or recovery-code rotation re-wraps
+the DEK under a new KEK but does not change the DEK itself (see _Key
+Derivation_ above), so `EncryptionProvider.indexToken`'s HKDF sub-key —
+derived from the DEK — is unchanged and every existing HMAC token remains
+valid across rotation; no index rebuild is triggered or needed. A future
+"change the DEK" feature (not currently implemented — there is no supported
+way to replace the DEK on an existing database) would invalidate every
+previously-derived token and require a full `$$fts:`/`$$index:`/`$$vault:fts:`
+rebuild, exactly as a software-version upgrade of the tokenisation scheme
+itself does today (see the `tokenMode` migration described next).
+
+**Format-version migration:** `FtsIndexState`, the secondary index's `$meta`
+state, and `VaultExtractionState` each persist a `tokenMode` (`hex` | `hmac`)
+discriminator alongside their existing status fields. At
+`KmdbDatabase.open()`, `FtsManager.checkAndTransitionOnOpen`,
+`IndexManager.checkTokenModeOnOpen`, and `VaultSearchManager.recover` each
+compare the persisted `tokenMode` against what the currently-running code
+would produce (`hmac` when a provider is configured, `hex` otherwise). A
+mismatch — which can only arise from a software-version upgrade of an
+already-encrypted database whose indexes were built by pre-Gap-2 code, since
+encryption itself cannot be toggled on an existing database
+(`KmdbDatabase.open()` throws `cannotProvisionNonEmptyDatabase` on non-empty
+databases) — triggers a purge of the stale-mode sub-namespaces (not merely a
+`stale` marking; the entries are unreachable by the new scheme's writes and
+reads, so leaving them in place would defeat this gap by keeping
+plaintext-derivable tokens on disk indefinitely) followed by a lazy rebuild,
+mirroring WI-1's model-identity invalidation for `VecIndexState`. `VecIndexState`
+itself carries no `tokenMode` — `VecManager`'s `$$vec:{ns}:{field}` and
+`$$vault:vec:idx:{sha256}` namespaces are keyed by document ID / chunk index,
+never by an embedded term or value, so there is no hex-tokenised namespace
+scheme for it to migrate away from.
+
+#### 3. Secondary index namespace names embed indexed values (resolved for encrypted databases — Encryption confidentiality reconciliation, Gap 2)
+
+Secondary indexes use the layout `$$index:{ns}:{field}:{token}`, which
+embeds the **indexed field value** in the namespace name. As with FTS
+namespaces (gap 2 above), namespace names are part of the SSTable key. This
+is not document content per se, but the indexed values drawn from
+documents — e.g. every distinct value of an indexed `status` or `email`
+field — were, prior to Gap 2, visible in plaintext hex to anyone with
+SSTable access.
+
+**Resolved for encrypted databases**, identical fix and identical residual
+limitations to gap 2 above — `{token}` becomes an HMAC-SHA256 token
+(`EncryptionProvider.indexToken`, message domain-separated as
+`"{ns}:{path}:" + hexEncodedValue`) when a provider is configured;
+unencrypted databases remain a known, accepted limitation on plaintext hex.
+One additional, index-specific consequence: `IndexWriter`'s hex encoding for
+`int`/`double` values is deliberately sort-order-preserving (documented for
+a *future* range-scan use — no current query path performs a range scan
+over a secondary index, only equality lookup via `IndexReader`), but an HMAC
+token is not order-preserving. This is a deferred limitation, not a
+regression: range-scan support for encrypted secondary indexes does not
+exist yet in either mode, so nothing that worked before stops working.
+
+#### 4. `MetaStore` values are not encrypted (resolved — Encryption confidentiality reconciliation, Gap 3)
+
+`MetaStore` previously bypassed `ValueCodec` entirely and wrote raw CBOR
+directly to `_engine.put()`. For the `enc:blob` entry this remains
+**intentional and required**: the blob is already protected by the wrapped
+DEK, and decrypting any value requires first reading `enc:blob`, so it
+cannot itself be encrypted (see _enc:blob Structure_) — `getEncryptionBlob`/
+`putEncryptionBlob` call the engine directly, bypassing the general
+`$meta` accessors entirely, so this exemption is enforced structurally, not
+just by convention.
 
 For **all other** `$meta` entries — device ID, the namespace registry,
-generation counters, HLC timestamps, and model identity — the lack of encryption
-is a previously-undocumented gap. These values reveal **operational metadata**
+generation counters, the dirty flag, the tombstone-GC floor, and
+index/FTS/Vec state — the previous lack of encryption was a
+previously-undocumented gap: these values reveal **operational metadata**
 (which namespaces exist, write activity via generation counters, device
 identity, timing) but **not document content**.
 
-#### 5. Vault `manifest.json` is plaintext
+**Resolved** by the Encryption confidentiality reconciliation plan's Phase 2
+(`docs/roadmap/0_08.md`, Gap 3): every general `$meta` accessor now routes
+through `EncryptionEnvelope` when a provider is configured. This introduced
+a database-level format-version marker gate at `KvStoreImpl.open()` (a
+`$meta` write itself, so it must precede every other `$meta` read/write) to
+safely distinguish a legacy pre-plan database (bare CBOR, no leading flag
+byte) from a genuinely new or already-migrated one — see the _Bootstrap
+Sequence_ section and the "Existing databases must be recreated" note below
+for the resulting breaking on-disk format change.
 
-Each vault blob is accompanied by a plaintext `manifest.json` on disk and in
-cloud sync, containing `mediaType`, `size`, `hlcTimestamp`, `sha256`, and
-`originalName`.
+#### 5. Vault `manifest.json` is plaintext (`originalName` resolved — Encryption confidentiality reconciliation, Gap 4)
 
-- The `sha256` content address is **intentionally** computed over the plaintext
-  blob bytes so that deduplication continues to work across devices (documented
-  in _Vault Encryption_).
-- `originalName`, `mediaType`, and `size` are plaintext surfaces that are
-  **not** otherwise acknowledged. They leak the original filename, content type,
-  and size of every stored blob to anyone with sync or disk access.
+Each vault blob is accompanied by a `manifest.json` on disk and in cloud
+sync, containing `schemaVersion`, `sha256`, `size`, `crc32c`, `mediaType`,
+`originalName`, `createdAt`, and (when encryption is active) `encrypted`.
+
+**Resolved for `originalName`** by the Encryption confidentiality
+reconciliation plan's Phase 3 (`docs/roadmap/0_08.md`, Gap 4):
+`originalName` is now encrypted in place when a database
+`EncryptionProvider` is configured. `VaultStore.ingest` wraps it with
+`EncryptionEnvelope` and base64-encodes the result before it is written
+into `manifest.json` (keeping the manifest's JSON shape stable — the field
+is still a JSON string, just ciphertext rather than plaintext);
+`VaultStore.getManifest` is the sole decryption point and transparently
+returns the plaintext name to every caller. The existing `encrypted` boolean
+field governs both the blob ciphertext and this field together — a database
+is either born encrypted or never encrypted, so the two are always set in
+lockstep; there is no scenario where one is encrypted and the other is not.
+This closes the `originalName` leak this gap originally documented. The
+remaining plaintext surfaces below are **accepted, not defects** — see each
+bullet's stated functional reason.
+
+The following fields remain **intentionally plaintext**, each for a stated
+functional reason rather than by omission:
+
+- **`sha256`** — computed over the plaintext blob bytes (not ciphertext) so
+  that content-addressed deduplication continues to work identically across
+  encrypted and unencrypted devices, and so two devices holding the same
+  logical content converge on the same address regardless of encryption
+  state (documented in _Vault Encryption_ above).
+- **`mediaType` and `size`** — read directly from `manifest.json` without
+  decryption by sync routing and by consumers (e.g. vault search's extractor
+  selection, `kmdb_cli`'s `export`/`dump` commands) that only need to know
+  *what kind* and *how large* an object is, not its content or name. Forcing
+  decryption to answer those questions would require every such consumer to
+  hold the DEK, which is a materially larger change than this plan's scope.
+- **`crc32c` and `createdAt`** — secondary identity/provenance metadata with
+  no confidentiality value beyond what `sha256`/`size` already expose.
+
+These are accepted, documented plaintext surfaces, not open defects — they
+leak *metadata about* a stored object (its type, size, and content address)
+but never its name or content.
 
 #### 6. Vault `extract/` filesystem artifacts (resolved — WI-10)
 
@@ -570,9 +794,9 @@ encrypted blob's `extract/` subdirectory: `text.txt` (full extracted text),
 `chunks_v1.json` (chunk byte-offset metadata), and `vectors_{modelId}_sq8.bin`
 (SQ8-quantised embedding vectors, semantic mode only). No fourth
 `extract_status.json` file is ever written — extraction status is persisted
-solely to the `$$vault:extract:{sha256}` KV entry (see gap 1's sibling
-discussion of unencrypted KV _values_, which is a separate, still-open defect
-tracked as v0.08 Gap 1).
+solely to the `$$vault:extract:{sha256}` KV entry, whose _value_ is now
+encrypted via `ValueCodec` at the `VaultSearchManager` call site (gap 1,
+resolved — a distinct surface from the `extract/` files this gap covers).
 
 WI-10 encrypts these three files when a database `EncryptionProvider` is
 configured, using `VaultSearchManager.writeExtractArtifact` /
@@ -626,17 +850,39 @@ natural time order — but it has a confidentiality consequence not otherwise
 framed in this section: anyone who can see a document key can recover the
 document's creation time to the millisecond.
 
+#### 9. `kmdb_cli` cloud sync credentials are plaintext (accepted, out of scope)
+
+`remote_config.dart` stores `AccessCredentials.toJson()` (Google Drive OAuth
+tokens) as plaintext JSON under `local/` — a per-machine, non-synced,
+CLI-only directory (see _Local Directory Layout_ in §03/§06). These
+credentials live **entirely outside the database encryption boundary**:
+never synced, never written into an SSTable, and not reachable from any
+`EncryptionProvider`-protected code path, so there is no `enc:blob`/DEK
+relationship to leverage even in principle. Accepted as a distinct,
+local-secret-at-rest surface rather than addressed by this plan (Encryption
+confidentiality reconciliation, Q7) — a future CLI-hardening item (OS
+keychain storage for CLI credentials) is the appropriate place to close
+this, not database-level encryption.
+
 ### Summary
 
 Encryption gives a strong guarantee about **document value confidentiality**
-against a cloud provider or a passphrase-less device thief. It gives **no
-guarantee** about metadata: search vocabulary, indexed values, filenames, blob
-manifests, operational `$meta`, document existence, timing, and creation
-timestamps all remain observable. Gap 1 is additionally a **content** leak
-(tokenised terms) that is tracked as a defect/work item rather than an
-accepted trade-off. Gap 6 (vault `extract/` filesystem artifacts, including
-the full extracted plaintext in `text.txt`) was the other content-leak gap in
-this category — it is now resolved by WI-10.
+against a cloud provider or a passphrase-less device thief, and — for
+encrypted databases as of the Encryption confidentiality reconciliation
+plan (`docs/roadmap/0_08.md`) — about **index value and namespace-name
+confidentiality** too: FTS/Vec/vault-search index values (gap 1), FTS and
+secondary-index namespace tokens (gaps 2/3), `$meta` operational metadata
+(gap 4), and vault manifest `originalName` (gap 5) are all encrypted or
+HMAC-tokenised. It gives **no guarantee** about the metadata that remains:
+document existence, filenames, blob `mediaType`/`size`/`crc32c`/`createdAt`,
+SSTable/WAL structure, creation timestamps (via UUIDv7 keys), and — even on
+an encrypted database — the residual statistical leakage the HMAC token
+scheme does not close (term/value frequency, search-pattern/access
+leakage, co-occurrence; see gap 2's residual-leakage list). Gap 6 (vault
+`extract/` filesystem artifacts, including the full extracted plaintext in
+`text.txt`) was the other content-leak gap in this category — it is
+resolved by WI-10. Unencrypted databases claim none of these
+properties and are unaffected by any of gaps 1–6.
 
 ## Crash Safety
 

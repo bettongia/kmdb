@@ -168,6 +168,104 @@ void main() {
     });
   });
 
+  // ── indexToken() (Encryption confidentiality reconciliation plan, Gap 2) ────
+
+  group('AesGcmEncryptionProvider.indexToken', () {
+    late Uint8List dek;
+
+    setUpAll(() async {
+      dek = await KeyDerivation.generateDek();
+    });
+
+    test('is deterministic for the same message and same DEK', () async {
+      final provider = AesGcmEncryptionProvider(Uint8List.fromList(dek));
+      final t1 = await provider.indexToken('articles:body:hello');
+      final t2 = await provider.indexToken('articles:body:hello');
+      expect(t1, equals(t2));
+    });
+
+    test('is reproducible across a fresh provider instance for the same DEK '
+        '(simulates a process restart: the DEK is unwrapped again on the next '
+        'KmdbDatabase.open, but sub-key derivation must still land on the same '
+        'token)', () async {
+      final provider1 = AesGcmEncryptionProvider(Uint8List.fromList(dek));
+      final provider2 = AesGcmEncryptionProvider(Uint8List.fromList(dek));
+      final t1 = await provider1.indexToken('articles:body:hello');
+      final t2 = await provider2.indexToken('articles:body:hello');
+      expect(t1, equals(t2));
+    });
+
+    test('is a 32-character lowercase hex string', () async {
+      final provider = AesGcmEncryptionProvider(Uint8List.fromList(dek));
+      final token = await provider.indexToken('articles:body:hello');
+      expect(token, hasLength(32));
+      expect(token, matches(RegExp(r'^[0-9a-f]{32}$')));
+    });
+
+    test('different terms produce different tokens', () async {
+      final provider = AesGcmEncryptionProvider(Uint8List.fromList(dek));
+      final t1 = await provider.indexToken('articles:body:hello');
+      final t2 = await provider.indexToken('articles:body:world');
+      expect(t1, isNot(equals(t2)));
+    });
+
+    test('domain separation: the same term in a different field produces a '
+        'different token', () async {
+      final provider = AesGcmEncryptionProvider(Uint8List.fromList(dek));
+      final bodyToken = await provider.indexToken('articles:body:hello');
+      final titleToken = await provider.indexToken('articles:title:hello');
+      expect(bodyToken, isNot(equals(titleToken)));
+    });
+
+    test('domain separation: the same term in a different collection '
+        'produces a different token', () async {
+      final provider = AesGcmEncryptionProvider(Uint8List.fromList(dek));
+      final articlesToken = await provider.indexToken('articles:body:hello');
+      final postsToken = await provider.indexToken('posts:body:hello');
+      expect(articlesToken, isNot(equals(postsToken)));
+    });
+
+    test(
+      'a different DEK produces a different token for the same message',
+      () async {
+        final provider1 = AesGcmEncryptionProvider(Uint8List.fromList(dek));
+        final otherDek = await KeyDerivation.generateDek();
+        final provider2 = AesGcmEncryptionProvider(otherDek);
+
+        final t1 = await provider1.indexToken('articles:body:hello');
+        final t2 = await provider2.indexToken('articles:body:hello');
+        expect(t1, isNot(equals(t2)));
+      },
+    );
+
+    test('concurrent first calls all resolve to the same token (single '
+        'in-flight sub-key derivation, not a race)', () async {
+      final provider = AesGcmEncryptionProvider(Uint8List.fromList(dek));
+      final results = await Future.wait([
+        provider.indexToken('articles:body:hello'),
+        provider.indexToken('articles:body:hello'),
+        provider.indexToken('articles:body:hello'),
+      ]);
+      expect(results.toSet(), hasLength(1));
+    });
+
+    test(
+      'does not leak the raw DEK or any substring of it into the token',
+      () async {
+        final provider = AesGcmEncryptionProvider(Uint8List.fromList(dek));
+        final token = await provider.indexToken('articles:body:hello');
+        final dekHex = dek
+            .map((b) => b.toRadixString(16).padLeft(2, '0'))
+            .join();
+        // A naive "HMAC with the raw DEK directly" implementation could
+        // still coincidentally avoid literal substring containment, but this
+        // guards against the most direct mistake (e.g. concatenating the DEK
+        // hex into the token instead of deriving a sub-key via HKDF).
+        expect(token, isNot(contains(dekHex.substring(0, 16))));
+      },
+    );
+  });
+
   // ── EncryptionError ───────────────────────────────────────────────────────────
 
   group('EncryptionError', () {

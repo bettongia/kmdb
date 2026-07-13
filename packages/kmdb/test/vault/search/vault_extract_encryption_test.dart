@@ -13,19 +13,52 @@
 // limitations under the License.
 
 /// Toggle-on / mixed-state integration test for WI-10 (`extract/` filesystem
-/// artifact encryption).
+/// artifact encryption) and the Encryption confidentiality reconciliation
+/// plan's Gap 2 (`$$vault:fts:` namespace-token migration).
 ///
-/// Exercises the exact transition the roadmap and §31 describe: a blob
-/// indexed before encryption was configured keeps its plaintext
-/// (`EncryptionFlag.none`) artifacts; a database that is subsequently
-/// reopened with a freshly provisioned [EncryptionProvider] (modelled here by
-/// constructing a second [VaultSearchManager] against the same [KvStoreImpl]
-/// / [VaultStore] — the same pattern [KmdbDatabase.open] uses to wire a live
-/// provider into the manager) writes newly indexed blobs with encrypted
-/// (`EncryptionFlag.aesGcm`) artifacts. Both coexist and are individually
-/// searchable and correct. [VaultSearchManager.reindexVault] then migrates
-/// the still-plaintext blob's artifacts to encrypted, without disturbing the
-/// blob that was already encrypted.
+/// Exercises the transition the roadmap and §31 describe: a blob indexed
+/// before encryption was configured keeps its plaintext (`EncryptionFlag.
+/// none`) artifacts and hex-tokenised `$$vault:fts:` namespaces; a database
+/// that is subsequently reopened with a freshly provisioned
+/// [EncryptionProvider] (modelled here by constructing a second
+/// [VaultSearchManager] against the same [KvStoreImpl] / [VaultStore] — the
+/// same pattern [KmdbDatabase.open] uses to wire a live provider into the
+/// manager) writes newly indexed blobs with encrypted (`EncryptionFlag.
+/// aesGcm`) artifacts and HMAC-tokenised namespaces.
+///
+/// **Value encryption (Gap 1) vs. namespace tokens (Gap 2) behave
+/// differently here, and the test is structured to make that difference
+/// explicit:**
+///
+/// - Gap 1 (value encryption) coexists trivially: a plaintext-flagged and an
+///   AES-GCM-flagged artifact can sit side by side indefinitely and are both
+///   correctly readable by any manager, because the leading [EncryptionFlag]
+///   byte makes each file self-describing regardless of the *reading*
+///   manager's own configuration.
+/// - Gap 2 (namespace tokens) does **not** coexist the same way: a manager's
+///   `$$vault:fts:` reads/writes are entirely determined by its own
+///   [EncryptionProvider] state (hex when `null`, HMAC when set) — there is
+///   no per-entry marker to fall back on, by design (that opacity is the
+///   whole point of Gap 2). A hex-tokenised blob is therefore invisible to
+///   an HMAC-mode manager until something migrates it.
+///
+/// In production that "something" is [VaultSearchManager.recover] — called
+/// by [KmdbDatabase.open] for every manager instance before the database is
+/// handed to the application, so an application-visible manager never
+/// observes a stale-token-mode blob as silently missing from search results.
+/// This test therefore calls [VaultSearchManager.attach] + [VaultSearchManager.recover]
+/// on `managerEnc` immediately after construction (mirroring
+/// `KmdbDatabase.open`'s exact sequence) so blob 1 is migrated to HMAC tokens
+/// (and, as a side effect of the resulting full re-extraction, to encrypted
+/// values too) *before* any search runs against it — matching the real
+/// guarantee the production code path provides, rather than the artificial
+/// "silently missing until an explicit `reindexVault()` call" state that
+/// skipping `recover()` would produce.
+///
+/// [VaultSearchManager.reindexVault] is still exercised afterward as an
+/// idempotence check: forcing a second full re-index of both
+/// already-current, already-HMAC-tokenised blobs must succeed and leave both
+/// correctly searchable.
 library;
 
 import 'dart:async';
@@ -115,13 +148,18 @@ Future<VaultExtractionState> _awaitTerminal(
   KvStoreImpl kvStore,
   String sha256, {
   Duration timeout = const Duration(seconds: 5),
+  EncryptionProvider? encryption,
 }) async {
   final deadline = DateTime.now().add(timeout);
   while (DateTime.now().isBefore(deadline)) {
     final ns = '$kVaultExtractPrefix$sha256';
     final bytes = await kvStore.get(ns, kVaultCorpusSentinelKey);
     if (bytes != null) {
-      final state = VaultExtractionState.decode(bytes, sha256);
+      final state = await VaultExtractionState.decode(
+        bytes,
+        sha256,
+        encryption: encryption,
+      );
       if (state.status == VaultExtractionStatus.indexed ||
           state.status == VaultExtractionStatus.failed ||
           state.status == VaultExtractionStatus.unsupported) {
@@ -149,9 +187,10 @@ Future<void> _seedDocref(
 }
 
 void main() {
-  test('toggle-on / mixed-state: pre-existing plaintext blob and newly '
-      'encrypted blob coexist and are both correctly searchable; '
-      'reindexVault() migrates the plaintext blob to encrypted', () async {
+  test('toggle-on / mixed-state: recover() migrates a pre-existing '
+      'hex-tokenised blob to HMAC tokens (and encrypted values) before any '
+      'search runs; both blobs are then correctly searchable, and a '
+      'subsequent reindexVault() is a correctness-preserving no-op', () async {
     final adapter = MemoryStorageAdapter();
     final (kvStore, _) = await KvStoreImpl.open(
       _dbDir,
@@ -214,6 +253,31 @@ void main() {
     );
     addTearDown(managerEnc.close);
 
+    // KmdbDatabase.open() always calls attach() + recover() on every
+    // VaultSearchManager it constructs, before the database is returned to
+    // the application. recover()'s token-mode check (Gap 2, Q5) detects that
+    // blob 1's `$$vault:fts:` entries were hex-tokenised by managerNoEnc
+    // (ftsTokenMode == null, treated as hex) while managerEnc's current mode
+    // is hmac, purges the stale-mode entries, and resets blob 1 to `pending`
+    // for a full re-index — reproducing exactly what a real app-visible
+    // manager guarantees, unlike skipping recover() (which would leave blob
+    // 1 silently unreachable by search, since HMAC tokens are not a superset
+    // of hex tokens — there is no fallback).
+    managerEnc.attach();
+    await managerEnc.recover();
+    await _awaitTerminal(kvStore, sha1, encryption: provider);
+
+    // Blob 1 is now migrated: encrypted values (a side effect of the full
+    // re-extraction recover() triggered) and HMAC-tokenised namespaces.
+    final rawText1AfterRecover = adapter.files['$extractDir1/text.txt']!;
+    expect(
+      rawText1AfterRecover[0],
+      equals(EncryptionFlag.aesGcm.byte),
+      reason:
+          "recover()'s token-mode migration must re-index blob 1 through "
+          'the now-encrypted manager, producing encrypted artifacts',
+    );
+
     const blob2Text = 'beta document about oceans and deserts';
     final ref2 = await vaultStore.ingest(
       bytes: Uint8List.fromList(utf8.encode(blob2Text)),
@@ -221,7 +285,7 @@ void main() {
     );
     final sha2 = ref2.sha256;
     await managerEnc.queueBlob(sha2, 'text/plain');
-    await _awaitTerminal(kvStore, sha2);
+    await _awaitTerminal(kvStore, sha2, encryption: provider);
 
     // Verify blob 2's text.txt is encrypted (EncryptionFlag.aesGcm).
     final extractDir2 = '${vaultStore.hashDir(sha2)}/extract';
@@ -239,9 +303,9 @@ void main() {
       reason: 'Encrypted artifact must not leak plaintext on disk',
     );
 
-    // ── Phase 3: both blobs must be simultaneously, correctly searchable
-    // via the encrypted-mode manager (which can read both the plaintext
-    // and the encrypted artifact, since each file is self-describing). ───
+    // ── Phase 3: both blobs — one migrated by recover(), one indexed
+    // natively under managerEnc — are simultaneously, correctly searchable
+    // via the same HMAC-tokenised, encrypted-mode manager. ────────────────
     final docId1 = '01900000000070008000000000000001';
     final docId2 = '01900000000070008000000000000002';
     await _seedDocref(kvStore, sha1, docId1);
@@ -270,21 +334,21 @@ void main() {
     expect(result2.hits.first.id, equals(docId2));
     expect(result2.hits.first.chunkContext.snippet, equals(blob2Text));
 
-    // ── Phase 4: reindexVault() migrates blob 1's artifacts from
-    // plaintext to encrypted, without disturbing blob 2. ──────────────────
+    // ── Phase 4: reindexVault() is an idempotence check — both blobs are
+    // already current and HMAC-tokenised, so forcing a full re-index must
+    // not disturb correctness (it unconditionally resets every `indexed`/
+    // `extracting` blob, regardless of token mode). ───────────────────────
     final resetCount = await managerEnc.reindexVault();
     expect(resetCount, equals(2)); // both indexed blobs are reset.
 
-    await _awaitTerminal(kvStore, sha1);
-    await _awaitTerminal(kvStore, sha2);
+    await _awaitTerminal(kvStore, sha1, encryption: provider);
+    await _awaitTerminal(kvStore, sha2, encryption: provider);
 
     final rawText1AfterReindex = adapter.files['$extractDir1/text.txt']!;
     expect(
       rawText1AfterReindex[0],
       equals(EncryptionFlag.aesGcm.byte),
-      reason:
-          'reindexVault() must migrate the plaintext blob to '
-          'encrypted once a provider is configured',
+      reason: 'blob 1 must remain encrypted after a forced re-index',
     );
 
     // Both blobs remain correct and searchable after the migration.

@@ -286,14 +286,24 @@ VaultSearchManager _makeManager(
 }
 
 /// Reads the extraction state for [sha256] from the KvStore.
+///
+/// [encryption] must match the provider (if any) used by the
+/// [VaultSearchManager] that wrote the state — [VaultExtractionState] is now
+/// encrypted when a provider is configured (Encryption confidentiality
+/// reconciliation plan, Gap 1).
 Future<VaultExtractionState?> _readState(
   KvStoreImpl kvStore,
-  String sha256,
-) async {
+  String sha256, {
+  EncryptionProvider? encryption,
+}) async {
   final ns = '$kVaultExtractPrefix$sha256';
   final bytes = await kvStore.get(ns, kVaultCorpusSentinelKey);
   if (bytes == null) return null;
-  return VaultExtractionState.decode(bytes, sha256);
+  return await VaultExtractionState.decode(
+    bytes,
+    sha256,
+    encryption: encryption,
+  );
 }
 
 /// Polls until [sha256] reaches a terminal indexing status or [timeout] elapses.
@@ -304,10 +314,11 @@ Future<VaultExtractionState> _awaitTerminal(
   KvStoreImpl kvStore,
   String sha256, {
   Duration timeout = const Duration(seconds: 5),
+  EncryptionProvider? encryption,
 }) async {
   final deadline = DateTime.now().add(timeout);
   while (DateTime.now().isBefore(deadline)) {
-    final state = await _readState(kvStore, sha256);
+    final state = await _readState(kvStore, sha256, encryption: encryption);
     if (state != null &&
         (state.status == VaultExtractionStatus.indexed ||
             state.status == VaultExtractionStatus.failed ||
@@ -620,7 +631,12 @@ void main() {
         isNotNull,
         reason: 'Corpus sentinel should be present',
       );
-      final corpus = VaultBm25Writer.decodeCorpus(corpusBytes);
+      // Written via EncryptionEnvelope (Phase 1) — unwrap before decoding the
+      // raw CBOR payload (`manager` has no encryption configured here, so
+      // this is a no-op plaintext unwrap, but it still peels the leading
+      // EncryptionFlag byte the raw decodeCorpus() helper does not expect).
+      final unwrapped = await manager.unwrapIndexValue(corpusBytes!);
+      final corpus = VaultBm25Writer.decodeCorpus(unwrapped);
       expect(corpus?.n, equals(state!.chunkCount));
     });
 
@@ -759,7 +775,7 @@ void main() {
           WriteBatch()..put(
             '$kVaultExtractPrefix$sha256',
             kVaultCorpusSentinelKey,
-            extractingState.encode(),
+            await extractingState.encode(),
           ),
         );
 
@@ -833,7 +849,7 @@ void main() {
         WriteBatch()..put(
           '$kVaultExtractPrefix$sha256',
           kVaultCorpusSentinelKey,
-          extractingState.encode(),
+          await extractingState.encode(),
         ),
       );
 
@@ -943,7 +959,7 @@ void main() {
         WriteBatch()..put(
           '$kVaultExtractPrefix$sha256',
           kVaultCorpusSentinelKey,
-          indexedState.encode(),
+          await indexedState.encode(),
         ),
       );
 
@@ -1005,7 +1021,7 @@ void main() {
         );
         if (bytes != null) {
           try {
-            final s = VaultExtractionState.decode(bytes, sha256);
+            final s = await VaultExtractionState.decode(bytes, sha256);
             if (s.status == VaultExtractionStatus.indexed ||
                 s.status == VaultExtractionStatus.failed) {
               finalState = s;
@@ -1062,6 +1078,188 @@ void main() {
     });
   });
 
+  // ── Stacked upgrade: model version + token mode (Gap 2, B1 regression) ────
+
+  group('recover() — stacked model-version + token-mode upgrade (B1)', () {
+    test('a blob needing BOTH a model-version bump AND a hex→hmac token '
+        'migration in the same recover() call has its stale hex namespaces '
+        'purged, not orphaned', () async {
+      // Simulates an encrypted pre-Gap-2 database that also picks up a
+      // model swap on the next open() — a real, reachable scenario
+      // (kmdb-qa B1): before this fix, `_checkTokenMode`'s purge was
+      // skipped entirely whenever `_checkModelVersion` fired first for the
+      // same blob, silently leaving the hex-tokenised `$$vault:fts:`
+      // namespaces (and the plaintext-derivable search vocabulary they
+      // leak) on disk indefinitely.
+      final dek = await KeyDerivation.generateDek();
+      final provider = AesGcmEncryptionProvider(dek);
+
+      final sha256 = await _ingest(
+        vaultStore,
+        Uint8List.fromList(utf8.encode('stacked upgrade test content')),
+      );
+
+      // Seed hex-tokenised BM25 namespaces directly — this is what
+      // pre-Gap-2 code would have written even on an encrypted database
+      // (Gap 2 did not exist yet, so namespace tokens were always hex
+      // regardless of encryption state).
+      final termBatch = WriteBatch();
+      await const VaultBm25Writer().write(
+        sha256: sha256,
+        termFrequencies: [
+          {'mountains': 2, 'rivers': 1},
+        ],
+        totalTokens: 3,
+        batch: termBatch,
+        encryption: null, // pre-Gap-2: always hex, regardless of encryption.
+      );
+      await kvStore.writeBatchInternal(termBatch);
+
+      final hexNamespaces = (await kvStore.allStoredNamespaces())
+          .where((n) => n.startsWith('$kVaultFtsPrefix$sha256:'))
+          .toSet();
+      expect(hexNamespaces, isNotEmpty);
+
+      // Seed the `indexed` extract state: an old model version AND an
+      // absent `ftsTokenMode` (defaults to hex — see
+      // VaultExtractionState.fromMap), encrypted (Gap 1/3 already active
+      // on this "pre-Gap-2" database).
+      final indexedState = VaultExtractionState(
+        sha256: sha256,
+        status: VaultExtractionStatus.indexed,
+        modelVersion: 'old-model-v0',
+        chunkCount: 1,
+      );
+      await kvStore.writeBatchInternal(
+        WriteBatch()..put(
+          '$kVaultExtractPrefix$sha256',
+          kVaultCorpusSentinelKey,
+          await indexedState.encode(encryption: provider),
+        ),
+      );
+
+      // Reopen with BOTH a new EncryptionProvider (same DEK — the
+      // provider is what changed, i.e. the code version, not the DEK) and
+      // a different embedding model — the stacked-upgrade condition.
+      final model = _FakeEmbeddingModel();
+      final manager = VaultSearchManager(
+        config: VaultSearchConfig(
+          chunkSize: 50,
+          chunkOverlap: 5,
+          extractors: [_FixedTextExtractor()],
+        ),
+        kvStore: kvStore,
+        vaultStore: vaultStore,
+        embeddingModel: model,
+        encryption: provider,
+      );
+      manager.attach();
+      addTearDown(manager.close);
+      await manager.recover();
+
+      final finalState = await _awaitTerminal(
+        kvStore,
+        sha256,
+        encryption: provider,
+      );
+      expect(
+        finalState.status,
+        equals(VaultExtractionStatus.indexed),
+        reason:
+            'stacked model-version + token-mode mismatch must still '
+            'converge to a fully re-indexed blob',
+      );
+      expect(
+        finalState.modelVersion,
+        equals('fake-model-v1'),
+        reason: 'the model-version bump must have taken effect',
+      );
+
+      // The critical B1 assertion: none of the stale hex-tokenised
+      // namespaces survive recover() — they must be purged even though
+      // the model-version check also fired for this blob.
+      final namespacesAfter = await kvStore.allStoredNamespaces();
+      for (final staleNs in hexNamespaces) {
+        expect(
+          namespacesAfter,
+          isNot(contains(staleNs)),
+          reason:
+              'stale hex-tokenised namespace $staleNs must be purged by '
+              'recover(), not orphaned alongside a model-version re-index',
+        );
+      }
+
+      // And the blob is correctly searchable again — new BM25 entries
+      // exist somewhere under $$vault:fts:{sha256}: (HMAC-tokenised now).
+      final namespacesForBlob = namespacesAfter
+          .where((n) => n.startsWith('$kVaultFtsPrefix$sha256:'))
+          .toSet();
+      expect(namespacesForBlob, isNotEmpty);
+      expect(namespacesForBlob.intersection(hexNamespaces), isEmpty);
+    });
+
+    test('a model-version-only mismatch (no token-mode mismatch) still '
+        're-indexes correctly with no spurious purge (regression guard for '
+        'the B1 fix)', () async {
+      // Same database, same tokenMode before and after (both hex,
+      // unencrypted) — only the model version changes. The B1 fix must
+      // not have turned _checkTokenMode into an unconditional purge.
+      final sha256 = await _ingest(
+        vaultStore,
+        Uint8List.fromList(utf8.encode('model-only upgrade test content')),
+      );
+
+      final termBatch = WriteBatch();
+      await const VaultBm25Writer().write(
+        sha256: sha256,
+        termFrequencies: [
+          {'oceans': 1},
+        ],
+        totalTokens: 1,
+        batch: termBatch,
+      );
+      await kvStore.writeBatchInternal(termBatch);
+
+      final namespacesBefore = (await kvStore.allStoredNamespaces())
+          .where((n) => n.startsWith('$kVaultFtsPrefix$sha256:'))
+          .toSet();
+      expect(namespacesBefore, isNotEmpty);
+
+      final indexedState = VaultExtractionState(
+        sha256: sha256,
+        status: VaultExtractionStatus.indexed,
+        modelVersion: 'old-model-v0',
+        chunkCount: 1,
+      );
+      await kvStore.writeBatchInternal(
+        WriteBatch()..put(
+          '$kVaultExtractPrefix$sha256',
+          kVaultCorpusSentinelKey,
+          await indexedState.encode(),
+        ),
+      );
+
+      final model = _FakeEmbeddingModel();
+      final manager = VaultSearchManager(
+        config: VaultSearchConfig(
+          chunkSize: 50,
+          chunkOverlap: 5,
+          extractors: [_FixedTextExtractor()],
+        ),
+        kvStore: kvStore,
+        vaultStore: vaultStore,
+        embeddingModel: model,
+      );
+      manager.attach();
+      addTearDown(manager.close);
+      await manager.recover();
+
+      final finalState = await _awaitTerminal(kvStore, sha256);
+      expect(finalState.status, equals(VaultExtractionStatus.indexed));
+      expect(finalState.modelVersion, equals('fake-model-v1'));
+    });
+  });
+
   // ── Crash recovery ────────────────────────────────────────────────────────
 
   group('recover() — crash scenarios', () {
@@ -1080,7 +1278,7 @@ void main() {
         // Seed `extracting` state directly — simulates the pre-flight write
         // in Step 0 of _processNextItem, before text.txt was written.
         final extractState = VaultExtractionState.extracting(sha256);
-        final stateBytes = extractState.encode();
+        final stateBytes = await extractState.encode();
         await kvStore.writeBatchInternal(
           WriteBatch()..put(
             '$kVaultExtractPrefix$sha256',
@@ -1120,7 +1318,7 @@ void main() {
 
         // Write extracting status manually (overriding whatever state is there).
         final extractState = VaultExtractionState.extracting(sha256);
-        final stateBytes = extractState.encode();
+        final stateBytes = await extractState.encode();
         await kvStore.writeBatchInternal(
           WriteBatch()..put(
             '$kVaultExtractPrefix$sha256',
@@ -1191,7 +1389,7 @@ void main() {
         WriteBatch()..put(
           '$kVaultExtractPrefix$sha256',
           kVaultCorpusSentinelKey,
-          extractState.encode(),
+          await extractState.encode(),
         ),
       );
 
@@ -1249,7 +1447,7 @@ void main() {
     test('failed state is left unchanged by recover()', () async {
       final sha256 = 'ee' * 32;
       final failedState = VaultExtractionState.failed(sha256, 'prior error');
-      final stateBytes = failedState.encode();
+      final stateBytes = await failedState.encode();
       await kvStore.writeBatchInternal(
         WriteBatch()..put(
           '$kVaultExtractPrefix$sha256',
@@ -1273,7 +1471,7 @@ void main() {
     test('unsupported state is left unchanged by recover()', () async {
       final sha256 = 'ff' * 32;
       final unsupState = VaultExtractionState.unsupported(sha256);
-      final stateBytes = unsupState.encode();
+      final stateBytes = await unsupState.encode();
       await kvStore.writeBatchInternal(
         WriteBatch()..put(
           '$kVaultExtractPrefix$sha256',
@@ -1315,7 +1513,7 @@ void main() {
         WriteBatch()..put(
           '$kVaultExtractPrefix$sha256',
           kVaultCorpusSentinelKey,
-          extractState.encode(),
+          await extractState.encode(),
         ),
       );
 
@@ -1371,7 +1569,14 @@ void main() {
       // async re-queue/re-extraction it kicks off has not yet run — so the
       // state observed here is the `pending` reset itself (mirrors the
       // "extracting state + no files → resets to pending" test above).
-      final resetState = await _readState(kvStore, sha256);
+      // recoveryManager (and its self-heal write) is configured with
+      // `encryption: provider`, so the pending-reset state it writes must be
+      // read back with the same provider.
+      final resetState = await _readState(
+        kvStore,
+        sha256,
+        encryption: provider,
+      );
       expect(
         resetState?.status,
         equals(VaultExtractionStatus.pending),
@@ -1381,8 +1586,14 @@ void main() {
       );
 
       // The self-heal re-queue eventually completes a fresh, successful
-      // re-extraction (since the underlying blob bytes are intact).
-      final finalState = await _awaitTerminal(kvStore, sha256);
+      // re-extraction (since the underlying blob bytes are intact). The
+      // re-extraction runs through `recoveryManager`, which has
+      // `encryption: provider` configured.
+      final finalState = await _awaitTerminal(
+        kvStore,
+        sha256,
+        encryption: provider,
+      );
       expect(finalState.status, equals(VaultExtractionStatus.indexed));
     });
   });
@@ -1514,7 +1725,7 @@ void main() {
         // survives the crash (simulates the pre-flight write in Step 0 of
         // _processNextItem that completed before the crash). ────────────────
         final extractingState = VaultExtractionState.extracting(sha256);
-        final stateBytes = extractingState.encode();
+        final stateBytes = await extractingState.encode();
         await crashKvStore.writeBatchInternal(
           WriteBatch()..put(
             '$kVaultExtractPrefix$sha256',
@@ -1658,7 +1869,7 @@ void main() {
           WriteBatch()..put(
             '$kVaultExtractPrefix$sha256',
             kVaultCorpusSentinelKey,
-            extractingState.encode(),
+            await extractingState.encode(),
           ),
         );
         await crashKvStore.flush();
@@ -1744,7 +1955,14 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 300));
 
         // Step F: Verify the index was rebuilt from the decrypted artifacts.
-        final recoveredState = await _readState(recoveredKvStore, sha256);
+        // recover() writes the final state through `manager`, which has
+        // `encryption: provider` configured, so it must be read back with
+        // the same provider.
+        final recoveredState = await _readState(
+          recoveredKvStore,
+          sha256,
+          encryption: provider,
+        );
         expect(
           recoveredState?.status,
           equals(VaultExtractionStatus.indexed),
@@ -1807,7 +2025,7 @@ void main() {
           WriteBatch()..put(
             '$kVaultExtractPrefix$sha256',
             kVaultCorpusSentinelKey,
-            VaultExtractionState.extracting(sha256).encode(),
+            await VaultExtractionState.extracting(sha256).encode(),
           ),
         );
 
@@ -1886,7 +2104,7 @@ void main() {
           WriteBatch()..put(
             '$kVaultExtractPrefix$sha256',
             kVaultCorpusSentinelKey,
-            VaultExtractionState.pending(sha256).encode(),
+            await VaultExtractionState.pending(sha256).encode(),
           ),
         );
 
@@ -1914,7 +2132,7 @@ void main() {
         WriteBatch()..put(
           '$kVaultExtractPrefix$sha256',
           kVaultCorpusSentinelKey,
-          VaultExtractionState.failed(sha256, 'prior error').encode(),
+          await VaultExtractionState.failed(sha256, 'prior error').encode(),
         ),
       );
 
@@ -1963,7 +2181,7 @@ void main() {
         WriteBatch()..put(
           '$kVaultExtractPrefix$sha256',
           kVaultCorpusSentinelKey,
-          VaultExtractionState.pending(sha256).encode(),
+          await VaultExtractionState.pending(sha256).encode(),
         ),
       );
 
@@ -1982,7 +2200,7 @@ void main() {
         WriteBatch()..put(
           '$kVaultExtractPrefix$sha256',
           kVaultCorpusSentinelKey,
-          VaultExtractionState.failed(sha256, 'err').encode(),
+          await VaultExtractionState.failed(sha256, 'err').encode(),
         ),
       );
 
@@ -2001,7 +2219,7 @@ void main() {
         WriteBatch()..put(
           '$kVaultExtractPrefix$sha256',
           kVaultCorpusSentinelKey,
-          VaultExtractionState.unsupported(sha256).encode(),
+          await VaultExtractionState.unsupported(sha256).encode(),
         ),
       );
 

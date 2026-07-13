@@ -48,6 +48,25 @@ enum IndexStatus {
   stale,
 }
 
+/// Discriminates how index-entry namespace tokens (the `{token}` segment of
+/// `$$index:{ns}:{path}:{token}`) were computed when this index was last
+/// (re)built.
+///
+/// Mirrors [FtsTokenMode] — see that type's doc comment for the full
+/// rationale (Encryption confidentiality reconciliation plan, Gap 2, Q5). Not
+/// a runtime toggle: the only way this can mismatch what the current code
+/// would produce is a software upgrade of an already-encrypted database.
+enum IndexTokenMode {
+  /// Values are hex-encoded in plaintext ([IndexWriter._encodeValueHex]).
+  /// Used when the database is unencrypted, and also the value read back
+  /// from indexes built before Gap 2 shipped.
+  hex,
+
+  /// Values are tokenised via [EncryptionProvider.indexToken]. Used when the
+  /// database is encrypted.
+  hmac,
+}
+
 /// Persistent state for a secondary index, stored as a CBOR map in `$meta`.
 final class IndexState {
   const IndexState({
@@ -56,6 +75,7 @@ final class IndexState {
     required this.status,
     this.builtThrough = 0,
     this.builtAt = '',
+    this.tokenMode = IndexTokenMode.hex,
   });
 
   final String namespace;
@@ -68,16 +88,22 @@ final class IndexState {
   /// HLC timestamp string recorded when the build completed (diagnostics only).
   final String builtAt;
 
+  /// How index-entry namespace tokens were computed as of the last build.
+  /// See [IndexTokenMode].
+  final IndexTokenMode tokenMode;
+
   IndexState copyWith({
     IndexStatus? status,
     int? builtThrough,
     String? builtAt,
+    IndexTokenMode? tokenMode,
   }) => IndexState(
     namespace: namespace,
     path: path,
     status: status ?? this.status,
     builtThrough: builtThrough ?? this.builtThrough,
     builtAt: builtAt ?? this.builtAt,
+    tokenMode: tokenMode ?? this.tokenMode,
   );
 }
 
@@ -132,6 +158,44 @@ final class IndexManager implements WriteAugmentor {
   /// All index definitions registered with this manager.
   List<IndexDefinition> get definitions => _definitions;
 
+  // ── Startup ─────────────────────────────────────────────────────────────────
+
+  /// Called during [KmdbDatabase.open] to detect a namespace-token
+  /// format-version upgrade and purge+rebuild any affected index
+  /// (Encryption confidentiality reconciliation plan, Gap 2, Q5).
+  ///
+  /// Compares each declared index's persisted [IndexState.tokenMode] against
+  /// what the currently-running code would produce (`hmac` when an
+  /// [EncryptionProvider] is configured, `hex` otherwise). On a mismatch, the
+  /// index's sub-namespaces were tokenised under a scheme the current code no
+  /// longer computes — those entries are effectively orphaned (unreachable by
+  /// future reads/writes) and, if left in place, would defeat Gap 2 by
+  /// leaving the very plaintext-derivable tokens it closes on disk
+  /// indefinitely. [removeIndex] purges every sub-namespace and the `$meta`
+  /// state entry, after which the index reads back as [IndexStatus.undefined]
+  /// and rebuilds lazily on the next write/query — the same path used for a
+  /// brand-new index (mirrors [VecManager.checkAndTransitionOnOpen]'s
+  /// model-identity check).
+  ///
+  /// Must run **after** [MetaStore]'s [EncryptionProvider] has been bound
+  /// (`KmdbDatabase.open`, Gap 3/Q1) and before [checkInterruptedBuilds], so a
+  /// purge-triggered index is never also reported as an interrupted build.
+  ///
+  /// This is not a runtime encryption toggle — see [IndexTokenMode]'s doc
+  /// comment. Indexes still in [IndexStatus.undefined] are skipped: there is
+  /// nothing to purge.
+  Future<void> checkTokenModeOnOpen() async {
+    final expected = _encryption != null
+        ? IndexTokenMode.hmac
+        : IndexTokenMode.hex;
+    for (final def in _definitions) {
+      final state = await _loadState(def);
+      if (state.status == IndexStatus.undefined) continue;
+      if (state.tokenMode == expected) continue;
+      await removeIndex(def.namespace, def.path);
+    }
+  }
+
   // ── Public API ──────────────────────────────────────────────────────────────
 
   /// Returns the definitions for [namespace] whose status is [current] or
@@ -181,6 +245,7 @@ final class IndexManager implements WriteAugmentor {
     store: _store,
     definition: definition,
     value: value,
+    encryption: _encryption,
   );
 
   /// Removes all stored data for the index on [namespace]/[path].
@@ -254,19 +319,21 @@ final class IndexManager implements WriteAugmentor {
     final active = await activeDefinitionsFor(namespace);
     for (final def in active) {
       if (oldDoc != null) {
-        IndexWriter.removeEntries(
+        await IndexWriter.removeEntries(
           batch: batch,
           definition: def,
           docKey: docKey,
           document: oldDoc,
+          encryption: _encryption,
         );
       }
       if (newDoc != null) {
-        IndexWriter.addEntries(
+        await IndexWriter.addEntries(
           batch: batch,
           definition: def,
           docKey: docKey,
           document: newDoc,
+          encryption: _encryption,
         );
       }
     }
@@ -361,6 +428,13 @@ final class IndexManager implements WriteAugmentor {
     Future(() => _buildIndex(definition)).catchError((_) {});
   }
 
+  /// The [IndexTokenMode] the currently-configured [_encryption] would
+  /// produce. Stamped onto every [IndexState] this manager persists so a
+  /// later [checkTokenModeOnOpen] can detect a format-version mismatch
+  /// (Gap 2, Q5).
+  IndexTokenMode get _currentTokenMode =>
+      _encryption != null ? IndexTokenMode.hmac : IndexTokenMode.hex;
+
   Future<void> _buildIndex(IndexDefinition definition) async {
     // 1. Record the generation at build start and mark status = building.
     final startGen = await _store.meta.getGenerationCounter(
@@ -372,6 +446,7 @@ final class IndexManager implements WriteAugmentor {
         path: definition.path,
         status: IndexStatus.building,
         builtThrough: startGen,
+        tokenMode: _currentTokenMode,
       ),
     );
 
@@ -395,6 +470,7 @@ final class IndexManager implements WriteAugmentor {
         path: definition.path,
         status: IndexStatus.current,
         builtThrough: endGen,
+        tokenMode: _currentTokenMode,
       );
       await _persistState(currentState);
       onIndexReady?.call(definition.namespace, definition.path);
@@ -407,6 +483,7 @@ final class IndexManager implements WriteAugmentor {
           path: definition.path,
           status: IndexStatus.stale,
           builtThrough: startGen,
+          tokenMode: _currentTokenMode,
         ),
       );
     }
@@ -426,11 +503,12 @@ final class IndexManager implements WriteAugmentor {
         continue; // skip corrupt values
       }
 
-      IndexWriter.addEntries(
+      await IndexWriter.addEntries(
         batch: batch,
         definition: definition,
         docKey: entry.key,
         document: doc,
+        encryption: _encryption,
       );
       count++;
 
@@ -482,10 +560,17 @@ final class IndexManager implements WriteAugmentor {
       CborString('status'): CborString(state.status.name),
       CborString('builtThrough'): CborSmallInt(state.builtThrough),
       CborString('builtAt'): CborString(state.builtAt),
+      CborString('tokenMode'): CborString(state.tokenMode.name),
     });
     return Uint8List.fromList(cbor.encode(map));
   }
 
+  /// Decodes an [IndexState] from CBOR. [tokenMode] defaults to
+  /// [IndexTokenMode.hex] when absent from the serialised map — indexes
+  /// built before Gap 2 shipped were always hex-tokenised, so this default is
+  /// the actual prior behaviour, not a guess. This is what lets
+  /// [checkTokenModeOnOpen] detect the pre-Gap-2 → Gap-2 upgrade on an
+  /// already-encrypted database.
   static IndexState _decodeState(IndexDefinition def, Uint8List bytes) {
     try {
       final decoded = cbor.decode(bytes);
@@ -502,12 +587,18 @@ final class IndexManager implements WriteAugmentor {
         (s) => s.name == statusStr,
         orElse: () => IndexStatus.undefined,
       );
+      final tokenModeStr = map['tokenMode'] as String? ?? 'hex';
+      final tokenMode = IndexTokenMode.values.firstWhere(
+        (m) => m.name == tokenModeStr,
+        orElse: () => IndexTokenMode.hex,
+      );
       return IndexState(
         namespace: def.namespace,
         path: def.path,
         status: status,
         builtThrough: (map['builtThrough'] as num?)?.toInt() ?? 0,
         builtAt: map['builtAt'] as String? ?? '',
+        tokenMode: tokenMode,
       );
     } catch (_) {
       return IndexState(
