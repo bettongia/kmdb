@@ -42,6 +42,35 @@ truncated at a flush boundary marker: a marker durably written before its
 SSTable became durable would otherwise cause still-live records to be skipped
 (see §17). Rotation therefore writes no boundary marker into the retiring file.
 
+### Directory-entry durability
+
+`WalWriter.append` (and `appendBatch`) fsync the WAL file's **content** via
+`StorageAdapter.syncFile` after each write, but they do **not** `syncDir` the
+directory that holds the WAL files. WAL files live in the database root
+(`{db-dir}/wal-*.log`), while the flush path only `syncDir`s the `sst/`
+subdirectory (it makes the newly-written SSTable's directory entry durable, not
+the WAL's). On a strict-POSIX filesystem an `fsync` of a file does not persist
+its parent directory entry — that requires an `fsync` of the parent directory.
+
+**Invariant: do not assume a freshly-created WAL file is durable from its
+content fsync alone.** A brand-new `wal-{N}.log` file's directory entry is
+guaranteed durable only after a subsequent `syncDir` on the WAL directory
+(`db-dir`). In the current engine that `syncDir(db-dir)` is incidental to the
+write path — it happens at `open()` (the device-identity write), on Manifest
+rotation, and during crash recovery — not as part of `WalWriter.append` or the
+immediate flush that rotated the WAL. The steady-state flush path `syncDir`s
+only `sst/`.
+
+In practice this is presently benign: the retiring WAL from the previous
+generation is already durable, and any data written to the new WAL survives a
+subsequent clean flush + Manifest record. The hazard is latent — a future code
+path that writes to a fresh WAL file and relies on that file surviving power
+loss *before* the next incidental `syncDir(db-dir)` would silently lose those
+records on recovery (the directory listing in §17's "Multiple WAL Files on
+Recovery" step would not enumerate a file whose directory entry never became
+durable). See the durability-ordering rationale in §17 and the tracked
+hardening item in the active roadmap.
+
 ### Multiple WAL Files on Recovery
 
 On `open()`, recovery collects all `wal-*.log` files present, sorts them by

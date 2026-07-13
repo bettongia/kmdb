@@ -16,15 +16,20 @@ model on thin clients:
   pipeline (vault_search proposal §9).
 
 This proposal explores a **KMDB server**: a headless process that wraps one or
-more `KmdbDatabase` instances and exposes their functionality — document CRUD,
-lexical/semantic/hybrid search over documents *and* the vault, and vault blob
-streaming — to lightweight clients over the network. The server hosts the
-"bulky" elements (embedding model, vector index, vault storage) so a thin client
-does not have to.
+more `KmdbDatabase` instances and exposes a complete remote API for them —
+document and namespace CRUD, secondary-index and search-index management,
+lexical/semantic/hybrid search over documents *and* the vault, and vault object
+CRUD — to lightweight clients over the network. The server hosts the "bulky"
+elements (embedding model, vector index, vault storage) so a thin client does
+not have to, and since a network boundary exists anyway, it exposes full CRUD
+rather than search alone.
 
-A secondary role is **sync participation** (§12): the server can act as a sync
-target other devices sync through, and/or sync onward to a cloud store on the
-user's behalf.
+The server has two composable parts (§4): a plain `SyncStorageAdapter` endpoint
+that other devices can sync through (§12), and the KMDB API itself, which can
+optionally run an embedded sync client against that endpoint or any other
+`SyncStorageAdapter`. With no sync configured, the API server's database is
+simply the one authoritative copy of the tenant's data — the common
+single-user case. Sync is opt-in on top of that, not a separate mode.
 
 ### The deployment model this targets
 
@@ -52,6 +57,9 @@ than glossing.
 
 ### Goals
 
+- Expose a complete remote API for KMDB — document and namespace CRUD,
+  secondary-index and search-index management, and vault object CRUD — so a
+  thin client can be a full KMDB client without embedding the library.
 - Let a thin mobile/web client run lexical, semantic, and hybrid search
   (documents and vault) it cannot run locally, by delegating to a server.
 - Let a thin client stream vault blobs on demand without replicating them.
@@ -81,6 +89,14 @@ than glossing.
 - Web support for the *server's own* embedding/index build. The server is
   native-only (§3.5); it is precisely what lets a *web client* get semantic
   search without running the model itself.
+- **Windows as a server host.** Not a target platform for this proposal, v1 or
+  otherwise. A Windows user who wants this can run it under WSL2, which is a
+  real Linux kernel — the Linux build should simply work there unmodified; no
+  separate Windows-native effort is planned (§3.5).
+- **macOS in v1.** Deferred, not rejected — see §3.5 and §11. Likely to work
+  largely out of the box for the single-tenant, no-isolation case (§6.3), since
+  nothing else in the design is Linux-specific until the container-per-tenant
+  tier (§6.2). Not validated or committed to for v1.
 
 ---
 
@@ -161,7 +177,7 @@ other device.
 
 The index can only reach a thin client as **query results over an API** — the
 server holds the index locally and answers queries; the index itself never
-leaves the server. That is exactly the shape of §4.3, and it is *why* the
+leaves the server. That is exactly the shape of §4.2, and it is *why* the
 offload use case needs a query API rather than a sync trick.
 
 ### 3.3 Encryption is value-level; the DEK is required to index anything
@@ -201,31 +217,47 @@ Devices sync **stubs** (`manifest.json` only) and hydrate blob bytes on demand
 
 ### 3.5 Platform: pure-Dart headless, native-only for the heavy parts
 
-Core `kmdb` is **pure Dart with no Flutter dependency**; on Linux it gets the
-`dart:io` native platform export, and `kmdb_cli` already proves headless
+Core `kmdb` is **pure Dart with no Flutter dependency**; on any native platform
+it gets the `dart:io` platform export, and `kmdb_cli` already proves headless
 operation. `kmdb_flutter` (Flutter secure-storage DEK cache) and `kmdb_icloud`
 are Flutter/Apple-only and irrelevant to a server — it uses `InMemoryDekCache`
 or a custom `DekCache` (OS keyring / env-injected key). ONNX semantic search
 runs headless via `betto_inferencing` → `betto_onnxrt`'s native-assets build
-hook, which works in a `dart compile exe` binary. But **semantic search and the
-vault are native-only (no web)** — so the server binary must target native, and
-its build must fire the native-assets hook from inside the package dir (per the
-CLAUDE.md native-asset-hooks note). This is a feature, not a limitation: the
-server is what brings semantic search to web clients that cannot run it.
+hook, which works in a `dart compile exe` binary. **v1 targets Linux only.**
+Nothing in the library forces that narrowly — `betto_inferencing` is tested on
+Linux, macOS, and Windows natively (its own CI runs separate `cicd_linux`/
+`cicd_macos`/`cicd_windows` targets) — but this proposal scopes v1 to Linux
+deliberately, since that's what the target deployment hardware (NAS/Pi/VPS,
+§1) already runs and it's the only platform the container-per-tenant isolation
+tier (§6.2) can use natively anyway. **macOS is plausible fast-follow work**,
+not v1: the single-tenant, no-isolation case (§6.3) has nothing
+Linux-specific in its way and would likely work close to out of the box, but
+it isn't validated or committed to here (§11). **Windows is out of scope**,
+full stop — not deferred, not planned. A Windows user who wants this can run
+the Linux build under WSL2, which is a real Linux kernel underneath; no
+separate Windows-native work is anticipated. What *is* fixed regardless of
+platform: **semantic search and the vault are native-only (no web)** — the
+server binary must target a native platform, and its build must fire the
+native-assets hook from inside the package dir (per the CLAUDE.md
+native-asset-hooks note). This is a feature, not a limitation: the server is
+what brings semantic search to web clients that cannot run it.
 
 ---
 
 ## 4. Integration Models
 
-There are three distinct shapes a server can take. They are not mutually
-exclusive; the recommendation is a primary shape with an optional companion.
+The server has two parts. They are not mutually exclusive — the recommendation
+is to ship both, by default, in one binary.
 
-### 4.1 Model A — Server as a `SyncStorageAdapter` (file-store / backup relay)
+### 4.1 Model A — Server as a `SyncStorageAdapter` endpoint
 
 The server exposes an HTTP object-store endpoint; a client points a **new
 `HttpSyncStorageAdapter`** at it (same shape as `kmdb_google_drive` /
 `kmdb_icloud`, §29–30). The server holds SSTable bytes + HWM + lease and does
-**zero** query work.
+**zero** query work. This is what lets *other* devices — an iPad running a
+local `KmdbDatabase`, another `kmdb_cli` install, or another instance of this
+same server — use this server as their cloud remote, the same way they'd point
+at Google Drive or iCloud today.
 
 - **Implements:** `SyncStorageAdapter` (the 7 members in §3.1), validated by
   `runSyncAdapterConformance`. Must honour the CAS contract (a mutex or
@@ -234,55 +266,90 @@ The server exposes an HTTP object-store endpoint; a client points a **new
 - **Trust:** can be **zero-knowledge** — it only ever sees ciphertext SSTables
   (§5, Option 2). Encryption metadata (namespace names, filenames, key
   timestamps) leaks per §31's documented gaps, but no plaintext.
-- **Does NOT give the offload use case.** The client still needs the SSTables
-  locally to answer queries. This is a backup target / sync transport, useful in
-  its own right (a self-hosted alternative to Google Drive/iCloud that the user
-  fully controls), but it is not "search on the server."
+- **On its own, does NOT give the offload use case.** A client using only this
+  endpoint still needs the SSTables locally to answer queries. It is a backup
+  target / sync transport in its own right (a self-hosted alternative to
+  Google Drive/iCloud that the user fully controls) — see §4.2 for how it
+  composes with the API side.
 
-### 4.2 Model B — Server as a sync peer device
+### 4.2 Model C — Server as a full KMDB API, with optional embedded sync — RECOMMENDED PRIMARY
 
-The server runs a full `KmdbDatabase`, calls `db.sync()` against the shared
-folder like any other device, ingests everyone's SSTables, and rebuilds its own
-`$$fts:`/`$$vec:` indexes locally.
+The server holds a `KmdbDatabase` and exposes a **complete remote API** to
+thin clients: document and namespace CRUD, secondary-index and search-index
+management, lexical/semantic/hybrid search over documents and the vault, and
+vault object CRUD. A thin client becomes a pure front-end — it holds no local
+`KmdbDatabase`, embeds no ONNX model, and never builds an index; every
+capability of the library is reachable over the network.
 
-- **Implements:** no sync interface — it *consumes* the existing
-  `KmdbDatabase` sync API (`ensureDeviceId`, `sync`/`push`/`pull`).
-- **Trust:** to rebuild indexes it must decrypt documents → it must hold the DEK
-  (§5, Option 1).
-- **Value:** keeps a server-side replica warm and consolidated; a natural base
-  for Model C. On its own it still cannot *ship* the index (§3.2) — it needs a
-  query API to expose it.
-
-### 4.3 Model C — Server as a query / search API (the offload model) — RECOMMENDED PRIMARY
-
-The server holds the authoritative (or a replica) `KmdbDatabase`, builds the
-vector index locally, and exposes **query and search endpoints** to thin
-clients. The thin client sends a query and receives ranked results; it never
-holds the model or the index.
-
-- **Implements:** a **net-new application-level API** (§8). No existing interface
-  covers this — it is greenfield surface.
-- **Trust:** requires the DEK to build/serve the index (§5, Option 1). This is
+- **Implements:** a **net-new application-level API** (§8). No existing
+  interface covers this — it is greenfield surface, but it maps directly onto
+  existing library primitives (`KmdbCollection`, `KmdbQuery`, `VaultStore`,
+  `FtsManager`/`VecManager`) rather than inventing new semantics.
+- **Trust:** requires the DEK to build/serve the search index and to
+  decrypt/encrypt documents and vault objects for CRUD (§5, Option 1). This is
   the "trusted box" posture.
-- **Value:** this is the **only shape that satisfies the actual motivating use
-  case** — a web/mobile client getting semantic/hybrid search and vault search
-  it cannot run locally. Everything else in §1's Goals flows from here.
+- **Scope:** search is the capability that most needed a server (§1), but once
+  the network boundary and the open `KmdbDatabase` exist, exposing full CRUD
+  and index management costs little extra and gives a genuinely complete
+  remote client story rather than a search-only appliance.
+- **Default: no sync configured, singular authoritative database.** With no
+  sync remote set up, the server's `KmdbDatabase` is simply the one
+  authoritative copy of the tenant's data — the common single-user,
+  single-server case, and the simplest deployment.
+- **Optional: embedded sync client.** The server can additionally run the
+  existing client-side sync engine (`ensureDeviceId`, `sync`/`push`/`pull`,
+  §12) against any configured `SyncStorageAdapter` — a co-located Model A
+  endpoint, a *different* server's Model A endpoint, or a third-party adapter
+  (Google Drive, iCloud). Configured this way, the server is a full sync peer
+  like any other device: it ingests other devices' SSTables and rebuilds its
+  own `$$fts:`/`$$vec:` indexes locally from them (§3.2 — the index itself is
+  never shipped over sync, only the underlying documents are). This absorbs
+  what an earlier pass of this proposal treated as a separate "server as a
+  sync peer" model; it is better understood as an optional capability of the
+  API server than a distinct deployment shape.
+- **Sync configuration is itself part of the API (§8.5)**, not an
+  operator-only, shell-access concern — a thin client needs to be able to add
+  a remote, trigger a sync, and check status, the same way `kmdb_cli`'s
+  `remote`/`sync` commands work locally today.
 
-### 4.4 Recommendation
+**Worked example:** Priya runs the server on her home NAS with no other
+devices configured. She edits documents from a web app on her laptop, talking
+directly to the server's API — the server's database is authoritative, no
+sync involved. She also owns an iPad that runs KMDB locally (not through the
+server) for offline reading. She configures the server's embedded sync client
+to point at the same cloud folder (or the server's own Model A endpoint) the
+iPad's local KMDB syncs to — from that point, edits made through the web app
+reach the iPad, and vault documents added on the iPad become searchable
+through the web app, via ordinary §12 sync running underneath.
 
-**Adopt Model C as the primary shape**, because it is the only one that delivers
-the motivating capability (§3.2 forecloses shipping the index; only serving
-*results* works). Model C can be layered on a Model B replica (the server syncs
-as a peer to stay current, then serves queries). Model A is a worthwhile
-**optional companion** — a self-hosted, zero-knowledge sync/backup target for
-users who want file custody without server-side search — and can ship
-independently since it touches no core code.
+### 4.3 Recommendation
 
-The tradeoff to flag loudly (and carried to §10): **Model C requires the server
-to hold the tenant's DEK and see plaintext.** Model A does not. A user choosing
-C is trading zero-knowledge-against-their-own-server for server-side search.
-That is a legitimate choice for a box you own — but it is a choice, and for
-multi-tenant hosting it is a significant one (§5.4, §6).
+**Model C is the primary shape**, because it is the only one that delivers the
+motivating capability (§3.2 rules out shipping the index over sync; serving
+*results* is the only path). Its embedded sync client (§4.2) is what lets it
+also participate as a peer among other syncing devices when that's wanted,
+without becoming a separate model.
+
+**Model A and Model C can ship in the same binary.** They have no structural
+conflict: Model A is an HTTP surface implementing `SyncStorageAdapter`
+conformance (§3.1) with no relationship to query logic; Model C is a separate
+HTTP surface built on an open `KmdbDatabase`. A single process can mount both
+route groups behind one `shelf`/`dart_frog` router, backed by the same
+underlying database instance. For a single-user deployment this means one
+binary and one install give the user both a full KMDB API and a self-hosted,
+zero-knowledge sync/backup target — Model A adds nothing extra to run once
+Model C exists. Recommendation: **ship both by default in the single-tenant
+binary**, with Model A switchable off for users who only want the API server.
+For multi-tenant hosting, both route groups live inside the same per-tenant
+worker (§6), so bundling does not affect isolation — only the supervisor/router
+is shared across tenants.
+
+The tradeoff to weigh (carried to §10): **Model C requires the server to hold
+the tenant's DEK and see plaintext**; Model A alone does not. A user who wants
+Model C's search and CRUD is trading zero-knowledge-against-their-own-server
+for that functionality. That's a reasonable choice for a box the user owns,
+and for multi-tenant hosting it is the central question addressed in §5.4 and
+§6.
 
 ---
 
@@ -346,21 +413,21 @@ benign. For **multi-tenant** hosting, Option 1 means **every tenant's DEK is
 resident in the host process (or host machine) simultaneously**, and the
 operator (or anyone who compromises the box) is trusted with every tenant's
 plaintext. This is a materially stronger statement than "I trust my own NAS," and
-it is the reason §6 insists the tenant boundary be a real OS boundary, not an
+it is why §6 recommends the tenant boundary be a real OS boundary, not an
 in-process one. **This — the DEK-in-server trust posture for multi-tenant
-hosting — is the central security decision of the whole proposal, not a
-footnote.** It is the first item in §10.
+hosting — is the central security question this proposal raises.** It is the
+first item in §10.
 
 ---
 
-## 6. Multi-Tenancy and Isolation — the Isolate Question, Resolved
+## 6. Multi-Tenancy and Isolation
 
-The starting-sketch draft proposed **Dart Isolates as the multi-tenant security
-boundary** (one isolate per user, spun up on demand, killed after idle — the
-"Hotel Model"), on the grounds that isolates share no heap. **This proposal
-rejects isolates as the tenant *security* boundary.** They remain useful as an
-intra-tenant concurrency tool; they are not a defensible isolation primitive for
-untrusted-adjacent multi-tenant data.
+Dart Isolates are an appealing first candidate for the multi-tenant boundary —
+one isolate per tenant, spun up on demand and torn down after idle, on the
+grounds that isolates share no heap. This proposal evaluates that option and
+recommends against it as the tenant *security* boundary: isolates remain
+useful as an intra-tenant concurrency tool, but they are not a strong enough
+isolation primitive for untrusted-adjacent multi-tenant data.
 
 ### 6.1 Why isolates are not a sufficient security boundary
 
@@ -372,9 +439,9 @@ untrusted-adjacent multi-tenant data.
    isolates as a *weaker* boundary than processes/VMs, disables
    `SharedArrayBuffer` and high-resolution timers to blunt Spectre-class side
    channels, and **falls back to process isolation for high-security tenants.**
-   Dart isolates have received no comparable Spectre mitigation. Betting a
-   stronger isolation guarantee than Cloudflare claims, on a runtime with less
-   hardening, is not defensible.
+   Dart isolates have received no comparable Spectre mitigation, so claiming a
+   stronger isolation guarantee than Cloudflare itself claims, on a runtime with
+   less hardening, is not a credible position.
 3. **Decisive: the heavy path runs in native code with full process memory
    access.** The embedding model and vector ops run through `betto_onnxrt` — a
    native C++ runtime invoked via FFI. **FFI code has no isolate boundary at
@@ -388,29 +455,41 @@ untrusted-adjacent multi-tenant data.
    real risks are a confused-deputy/wrong-DEK routing bug and cross-tenant memory
    disclosure — both of which a process boundary contains and an isolate boundary
    does not (a per-process DEK lives in a separate address space a bug in another
-   tenant's process cannot reach).
+   tenant's process cannot reach). This is why §6.2 recommends the tenant
+   boundary be a real OS boundary rather than an in-process one.
 
 ### 6.2 Recommended boundary: process-per-tenant (minimum), container-per-tenant (preferred)
 
 - **Process-per-tenant** is the minimum defensible boundary: OS-enforced address
   space separation, per-tenant DEK confined to its own process, crash isolation.
-- **Container-per-tenant** (rootless Docker / systemd-nspawn) is preferred for a
-  real hosting scenario, matching what Nextcloud AIO and Immich actually do:
-  add cgroup resource limits (cap a runaway embedding job), filesystem
-  namespacing (a tenant's DB directory is unreachable from another container),
-  and a seccomp profile. This is also the natural packaging unit (§9).
+  This tier is platform-agnostic — plain OS processes work identically on
+  Linux, macOS, or Windows, so it carries none of the Linux dependency below.
+- **Container-per-tenant** is preferred for a real hosting scenario, matching
+  what Nextcloud AIO and Immich actually do: cgroup resource limits (cap a
+  runaway embedding job), filesystem namespacing (a tenant's DB directory is
+  unreachable from another container), and a seccomp profile. **This tier is
+  inherently Linux**: namespaces, cgroups, and seccomp are Linux kernel
+  primitives, so the isolation guarantee only holds where a Linux kernel is
+  actually doing the enforcing — a fully compatible fit with v1's Linux-only
+  scope (§3.5), where it's a native, unmediated boundary rather than one
+  nested in a VM.
+  **Podman is the recommended runtime** — rootless and daemonless by default,
+  which matches the isolation posture this section argues for (no privileged
+  daemon that itself becomes a cross-tenant single point of failure), and a
+  drop-in CLI for anyone already thinking in Docker terms. This is also the
+  natural packaging unit (§9).
 - **A supervisor/router process** owns the public listener, authenticates the
   request, maps it to a tenant, and forwards to that tenant's worker over a local
   socket. The router **never holds any tenant's DEK** — DEKs live only in worker
   processes.
 
-The draft's **"Hotel Model" lifecycle is worth keeping — at process/container
-granularity, not isolate granularity.** Lazily start a tenant's worker on first
-request; tear it down after idle to reclaim RAM. The cost to price in: a cold
-start now includes an **Argon2id unlock (~300–500ms) plus loading the ONNX model
-and warming the vector index**, so the idle timeout wants to be minutes, not
-seconds, and the model can be memory-mapped/shared read-only across workers to
-cut per-tenant footprint (§9).
+A **lazy-start / idle-teardown lifecycle is worth adopting at process/container
+granularity**, not isolate granularity: start a tenant's worker on first
+request, tear it down after idle to reclaim resources. The cost to price in: a
+cold start now includes an **Argon2id unlock (~300–500ms) plus loading the ONNX
+model and warming the vector index**, so the idle timeout wants to be minutes,
+not seconds, and the model can be memory-mapped/shared read-only across workers
+to cut per-tenant footprint (§9).
 
 ### 6.3 Single-tenant deployments pay none of this
 
@@ -423,8 +502,8 @@ binary.
 
 ## 7. Network Exposure and Authentication
 
-The draft mandated HTTP/3 + WebID-OIDC. Both are reconsidered against what a
-self-hosted, single-operator box actually needs.
+This section sets out the recommended transport, exposure, and auth model,
+weighed against what a self-hosted, single-operator box actually needs.
 
 ### 7.1 Exposure: prefer a mesh VPN over port-forwarding
 
@@ -443,14 +522,15 @@ The server should be **agnostic to which** — it speaks plain HTTP on a local
 interface and lets the operator choose the exposure layer. It should **not**
 ship its own TLS/QUIC stack as a hard requirement.
 
-### 7.2 Transport: boring HTTP, not mandatory HTTP/3 or gRPC
+### 7.2 Transport: HTTP/1.1 or HTTP/2, not HTTP/3 or gRPC
 
 - **HTTP/1.1 or HTTP/2 + REST** over a `shelf`/`dart_frog` server is more than
   adequate behind a mesh or reverse proxy. HTTP/3's headline benefits (0-RTT,
   seamless Wi-Fi↔cellular migration) are marginal for a home server reached over
   a stable WireGuard tunnel, and a QUIC stack is real complexity for a hobbyist
-  binary. **Do not mandate HTTP/3.** (A reverse proxy can offer HTTP/3 to the
-  client edge for free if wanted, with no server change.)
+  binary, so this proposal does not recommend requiring it. (A reverse proxy
+  can offer HTTP/3 to the client edge for free if wanted, with no server
+  change.)
 - **gRPC is not required and is a poor fit for the web target** — it needs a
   grpc-web proxy in browsers, which a Flutter-web thin client would have to
   carry. Plain HTTP + JSON works in every browser out of the box.
@@ -475,6 +555,15 @@ Recommended:
   receives a long-lived token, and presents it as `Authorization: Bearer …`. A
   token maps to exactly one tenant; the router uses it to select the worker
   (§6.2). Tokens are revocable per device.
+- **A separate "create database" capability, distinct from a tenant token.** A
+  tenant's bearer token scopes it to *one* existing database (§6.2's worker
+  routing). Creating a *new* tenant database is a different, more privileged
+  action (§8.7) — the operator decides who holds it. The operator can keep it
+  operator-only (the traditional single-tenant self-host, provisioned once at
+  install time), or grant it to specific accounts so a household/group can
+  self-service new databases on the shared box without the operator's direct
+  involvement each time. Either way it is a capability an account either has
+  or doesn't, checked independently of the per-tenant bearer-token scoping.
 - **Network identity as a perimeter, not the only gate:** if reached over
   Tailscale, the mesh's device identity is a strong first factor, but the server
   must still enforce tenant scoping itself (defence in depth — never trust the
@@ -494,10 +583,43 @@ Recommended:
 
 ## 8. API Surface Sketch
 
-The thin client needs three capability groups. Concrete shapes (illustrative,
-not final):
+Since Model C exposes the full library surface, the API groups into seven
+capability areas. Concrete shapes below are illustrative, not final.
 
-### 8.1 Search (the core offload)
+### 8.1 Document and namespace CRUD
+
+```
+GET    /v1/db/{tenant}/collections                       # list configured collections
+GET    /v1/db/{tenant}/collections/{name}/docs/{id}
+PUT    /v1/db/{tenant}/collections/{name}/docs/{id}       # body: doc
+DELETE /v1/db/{tenant}/collections/{name}/docs/{id}
+POST   /v1/db/{tenant}/collections/{name}/query            # Filter DSL → results
+```
+
+This maps directly onto `KmdbCollection<T>`/`KmdbQuery<T>` (§13). Reactivity
+(`watch()`, §14) over the network needs a push channel — **SSE or WebSocket**
+streaming write-events for a namespace, debounced server-side. Worth
+prototyping but flagged as an open question (§10) since it changes the server
+from request/response to stateful-connection.
+
+### 8.2 Index management
+
+```
+POST   /v1/db/{tenant}/collections/{name}/indexes                 # define a secondary index (§16)
+GET    /v1/db/{tenant}/collections/{name}/indexes                 # status: undefined/building/current/stale
+DELETE /v1/db/{tenant}/collections/{name}/indexes/{path}
+POST   /v1/db/{tenant}/collections/{name}/searchIndex              # enable lexical/semantic/hybrid indexing (§20-23)
+GET    /v1/db/{tenant}/collections/{name}/searchIndex              # status + doc/term/vector counts
+DELETE /v1/db/{tenant}/collections/{name}/searchIndex
+```
+
+Index management is a control-plane concern distinct from querying — it exposes
+the same lifecycle states a local `KmdbDatabase.open()` caller already sees
+(§16 `undefined → building → current`/`stale`) and the `FtsManager`/
+`VecManager` enable/build calls (§20-23), so a remote client has the same
+control over indexing a local one has today.
+
+### 8.3 Search
 
 ```
 POST /v1/db/{tenant}/collections/{name}/search
@@ -517,45 +639,105 @@ This maps directly onto `KmdbCollection.search()` (§20) and the vault_search
 proposal's `searchVault()`. The server runs the embedding model and vector scan;
 the client just renders hits.
 
-### 8.2 Document CRUD passthrough
+### 8.4 Vault CRUD
 
 ```
-GET    /v1/db/{tenant}/collections/{name}/docs/{id}
-PUT    /v1/db/{tenant}/collections/{name}/docs/{id}     # body: doc
-DELETE /v1/db/{tenant}/collections/{name}/docs/{id}
-POST   /v1/db/{tenant}/collections/{name}/query          # Filter DSL → results
-```
-
-Reactivity (`watch()`, §14) over the network needs a push channel — **SSE or
-WebSocket** streaming write-events for a namespace, debounced server-side. Worth
-prototyping but flagged as an open question (§10) since it changes the server
-from request/response to stateful-connection.
-
-### 8.3 Vault blob streaming
-
-```
-GET /v1/db/{tenant}/vault/{sha256}          # Range: supported
+GET    /v1/db/{tenant}/vault/{sha256}          # Range: supported
     → 200/206 with blob bytes (server decrypts if DEK-held; §3.4)
-HEAD /v1/db/{tenant}/vault/{sha256}          # manifest metadata (size, mimeType)
-PUT  /v1/db/{tenant}/vault                   # upload → returns sha256
+HEAD   /v1/db/{tenant}/vault/{sha256}          # manifest metadata (size, mimeType)
+PUT    /v1/db/{tenant}/vault                   # upload → returns sha256
+DELETE /v1/db/{tenant}/vault/{sha256}          # drop a document's reference
+GET    /v1/db/{tenant}/vault                   # list objects (hash, size, mimeType, refcount)
 ```
 
 Hydrate-on-demand: a `GET` for a blob the server holds only as a stub triggers a
 server-side hydrate from its own sync backend before streaming. Range-streaming
 plaintext requires the DEK (§3.4); a zero-knowledge relay can only return the
-opaque whole ciphertext blob.
+opaque whole ciphertext blob. `DELETE` decrements a document's reference per
+§24's ref-counted GC rather than force-deleting a blob other documents still
+reference.
+
+### 8.5 Sync configuration and control
+
+```
+GET    /v1/db/{tenant}/sync/remotes                  # list configured remotes
+POST   /v1/db/{tenant}/sync/remotes                  # add a remote (adapter type + endpoint/credentials)
+DELETE /v1/db/{tenant}/sync/remotes/{name}
+POST   /v1/db/{tenant}/sync/remotes/{name}/sync      # trigger a sync cycle now
+GET    /v1/db/{tenant}/sync/status                    # last sync time, pending changes, known devices
+```
+
+This is what makes the server's embedded sync client (§4.2) usable from a thin
+client rather than an operator-only, shell-access concern — a remote is a
+named `SyncStorageAdapter` target, mirroring what `kmdb_cli`'s `remote`/`sync`
+commands already do locally against `local/config.json` (§7.3). Adding a
+remote here is how the "laptop web app, iPad reads later" example in §4.2 gets
+configured — the tenant points the server at the same cloud folder (or another
+server's Model A endpoint, §4.1) their other devices already sync through.
+
+### 8.6 Document versioning
+
+```
+GET  /v1/db/{tenant}/collections/{name}/docs/{id}/versions
+  reply: { "versions": [ { "hlc": "...", "doc": { ... } | null,
+                            "isDelete": false, "promotedFrom": "..." | null },
+                          ... ] }                    # newest first
+
+POST /v1/db/{tenant}/collections/{name}/docs/{id}/versions/{hlc}/promote
+  reply: { "doc": { ... } }                          # the newly-promoted current document
+```
+
+Maps directly onto `KmdbCollection.getVersions()` and `.promoteVersion()`
+(§11): the `$ver:` history chain, including delete-versions and
+`promotedFrom` provenance. Promoting a delete-version un-deletes the document
+(§11 "Promoting a delete-version"); promoting a put-version re-acquires any
+vault blobs it referenced. No new semantics — this is a thin wrapper over an
+existing `KmdbCollection<T>` method pair.
+
+### 8.7 Database provisioning and encryption management
+
+```
+POST   /v1/tenants                                    # requires the "create database" capability (§7.3)
+  body:  { "tenantId": "...", "encryption": { "passphrase": "..." } }   # omit `encryption` for an unencrypted database
+  reply: { "tenantId": "...", "deviceId": "...", "recoveryCode": "..." }  # present only if encryption was configured
+
+POST   /v1/db/{tenant}/encryption/change-passphrase    # requires the tenant's own credentials
+  body:  { "currentPassphrase": "...", "newPassphrase": "..." }
+```
+
+Creating a database is what `kmdb_cli`'s implicit `init` plus its startup
+`EncryptionConfig` bootstrap do together locally (§31 "Bootstrap Sequence",
+State 4 — first-time provisioning): a fresh DEK is generated, wrapped under an
+Argon2id KEK derived from the supplied passphrase, and a 16-word recovery code
+is generated and returned **exactly once** in the response — per §31, it is
+never stored anywhere, including on the server, so losing it after this
+response is unrecoverable. The request is routed like any other tenant
+request (§6.2): it lazily starts that tenant's worker, which is also where the
+fresh DEK ends up resident — the supervisor/router never sees it.
+`change-passphrase` mirrors `kmdb_cli`'s `encryption change-passphrase`
+sub-command (re-wraps the DEK, does not change it). There is currently no
+recovery-code regeneration operation, locally or here — the CLI doesn't have
+one yet either (§10).
 
 ---
 
 ## 9. Deployment and Packaging
 
+- **Both roles in one binary:** per §4.3, the default single-tenant binary
+  mounts both the Model A (sync/backup relay) and Model C (full API) route
+  groups in one process against the same `KmdbDatabase` — no separate install
+  or service needed for self-hosted sync.
 - **Single binary:** `dart compile exe` produces a self-contained server
   executable; the `betto_onnxrt` native-assets hook bundles the ONNX runtime
   (build must run from inside the package dir per the native-asset-hooks note).
   This is the friendliest artifact for a Pi/VPS operator.
-- **Docker image:** the natural distribution and, for multi-tenant, the
-  isolation unit (§6.2). One base image; the supervisor plus per-tenant worker
-  containers. Immich's multi-container split (API vs ML) is the reference layout.
+- **OCI image, run via Podman:** the natural distribution and, for
+  multi-tenant, the isolation unit (§6.2), built and run on the Linux hosts v1
+  targets (§3.5). One base image; the supervisor plus per-tenant worker
+  containers, run rootless under Podman rather than a privileged Docker
+  daemon. Immich's multi-container split (API vs ML) is the reference layout.
+  The image is a standard OCI image regardless — an operator who prefers
+  Docker on Linux can run the same image with no changes.
 - **Model asset:** the embedding model (~130 MB for `multilingual-e5-small`, per
   the vault_search multilingual work) is downloaded once via
   `betto_inferencing`'s `ModelDownloader` and can be **memory-mapped read-only
@@ -586,16 +768,18 @@ reasonable, it is stated.
    support both postures per-tenant. *Suggested default: (c) — search offload is
    opt-in per tenant and clearly labelled as "server can read this data."*
 
-2. **How does the server obtain each DEK?** Operator-supplied at start
-   (env/keyring), client-supplied-on-connect and cached for the session, or
-   only-for-unencrypted-databases? Each has a different UX and threat profile.
-   This is unspecified and needs a decision before §5/§8 can be planned.
+2. **How does the server obtain each DEK?** §8.7 answers this for a
+   *newly-provisioned* database — the DEK is generated fresh at creation time
+   from a caller-supplied passphrase, exactly like local bootstrap State 4
+   (§31). Still open: how an *existing* encrypted database gets unlocked after
+   the server restarts — operator-supplied at start (env/keyring),
+   client-supplied-on-connect and cached for the session (§31 `DekCache`), or
+   does it simply stay locked until a client authenticates? Each has a
+   different UX and threat profile.
 
-3. **Primary integration mode.** This proposal recommends **Model C (query API)
-   as primary** because it is the only shape that satisfies the motivating use
-   case (§4.4), with Model A as an optional zero-knowledge companion. Confirm
-   this, or redirect if the priority is actually self-hosted *sync/backup*
-   (Model A) rather than search offload.
+3. ~~**Primary integration mode.**~~ **Resolved:** Model C (full API) is
+   primary, and it ships bundled with Model A in the single-tenant binary
+   (§4.3) rather than as a separate deployment.
 
 4. **Tenant isolation boundary.** This proposal resolves **against isolates** and
    recommends **process- or container-per-tenant** (§6). Confirm the appetite for
@@ -631,10 +815,23 @@ reasonable, it is stated.
 10. **Transport.** Confirm **plain HTTP/1.1-2 + CBOR/JSON, exposure-agnostic**
     (§7.2) rather than a mandated HTTP/3 or gRPC stack.
 
+11. **Scope of the "create database" capability (§7.3, §8.7).** Is it
+    operator-only by default (the traditional model — the operator runs
+    `kmdb_cli init` locally or provisions via the API themselves), or does the
+    v1 baseline support granting it to specific accounts so a household/group
+    can self-service new databases? If self-service is in scope: is there a
+    quota per account, and does creating a database implicitly grant that
+    account the resulting tenant's bearer token, or is that a separate step?
+
 ---
 
 ## 11. Future Work
 
+- **macOS as a server host** (§3.5) — plausible fast-follow for the
+  single-tenant, no-isolation case (§6.3), which has no Linux-specific
+  dependency. Multi-tenant container-per-tenant hosting (§6.2) would still
+  need a Linux kernel underneath (e.g. `podman machine`), so isn't part of
+  this. Not committed to for v1; needs its own validation pass.
 - **Federation between KMDB servers** (Matrix-style) — households or communities
   whose servers act as sync points for each other.
 - **Keyword-only zero-knowledge search tier** (searchable symmetric encryption /

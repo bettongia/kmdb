@@ -4,6 +4,50 @@
 
 **PR link**: —
 
+## Abstract
+
+Vault functionality and semantic/hybrid search are fully built and tested at
+the `kmdb` core level, but neither works from the production `kmdb_cli`
+binary today. This plan wires both in, in two phases.
+
+**Phase A** fixes the root cause: `DatabaseOpener.open()` never constructs a
+`VaultStore`, so *every* vault-touching CLI command — `vault get`, `vault
+search`, `vault status`, `vault reindex`, `insert --import`, `update
+--vault`, `export`'s vault leg, `backup` — fails today, not just search. The
+CLI's own test suite never caught this because it universally bypasses
+`DatabaseOpener` with a test double. Phase A wires a `VaultStore`
+unconditionally and configures vault search with plain-text, HTML, Markdown,
+and PDF extraction enabled by default, fixes the CLI's dead `dart compile
+exe` build instructions (broken independently of this plan), and adds the
+production-path integration test that would have caught the original gap.
+
+**Phase B** makes semantic and hybrid search genuinely real, for both vault
+content and document fields — not just for vault search, and not just a
+relabelling of the CLI's existing fake `(hybrid)` output tag. It adds a
+`vecIndexes` configuration surface (mirroring the existing `ftsIndexes`
+pattern) so users can register semantic search on document fields via
+`search create --semantic`, constructs a real embedding model gated to avoid
+loading it on every CLI command, and wires both into `KmdbDatabase.open()`.
+
+Both phases were driven through two rounds of plan review that caught a
+would-be no-op fix (Phase A's original draft passed `vaultSearch:` without
+the `VaultStore` it silently depends on), a scope overclaim (Phase B
+originally claimed to fix document-field semantic search "for free," which
+was false without the `vecIndexes` surface), and an implementation trap in
+that surface (passing `vecIndexes` unconditionally would brick every CLI
+command against a database with a registered-but-modelless vector index —
+gated construction avoids this). All ten open questions raised across
+drafting and review are resolved and recorded inline under "Open questions."
+
+**Deferred:** nothing scope-wise — PDF extraction, originally the one
+candidate for deferral (it adds a third native library to every CLI build),
+was folded into Phase A instead. The one thing intentionally left outside
+this plan is *verification*, not functionality: `dart build cli`'s
+native-asset bundling was only tested on macOS arm64 here; Linux/Windows
+verification is logged as a `docs/spec/28_release_checklist.md` entry per
+project convention, since it needs a machine/CI runner this environment
+doesn't have — it is a one-time release gate, not a follow-up work item.
+
 ## Problem statement
 
 > **Scope note (2026-07-10):** the plan review below found the root cause is
@@ -52,9 +96,10 @@ This plan closes all three gaps in two phases:
 - **Phase A** — wire vault into the CLI generally: construct a `VaultStore`
   unconditionally in `DatabaseOpener.open()`, pass `vaultSearch:
   VaultSearchConfig()` with `PlainTextExtractor` + `HtmlTextExtractor` +
-  `MarkdownTextExtractor` registered by default (Q1). This fixes every vault
-  command in production, with lexical vault search as the motivating case, at
-  low risk and no new heavyweight dependencies.
+  `MarkdownTextExtractor` + `PdfTextExtractor` registered by default (Q1).
+  This fixes every vault command in production, with lexical vault search
+  (now covering plain text, HTML, Markdown, and PDF blobs) as the motivating
+  case.
 - **Phase B** — construct a real `EmbeddingModel` in `kmdb_cli` (gated so it
   doesn't load on every command — Q6), add a `vecIndexes` config surface
   mirroring the existing `ftsIndexes` pattern (Q7/Q8), and wire both into
@@ -324,6 +369,19 @@ search". Phase B depends on Phase A having landed (it extends the same
         `MarkdownTextExtractor` by default alongside `PlainTextExtractor`.
         `kmdb_extractor_pdf` stays opt-in/deferred (native-assets weight).
         Add both packages as direct `kmdb_cli` dependencies.
+      - **SUPERSEDED (2026-07-10):** product owner chose completeness over
+        deferral — `PdfTextExtractor` (`kmdb_extractor_pdf`, wrapping
+        `betto_pdfium`) is now **also registered by default** in Phase A,
+        alongside `HtmlTextExtractor`/`MarkdownTextExtractor`. This means
+        Phase A now bundles a *third* native library (PDFium) alongside ORT
+        and Zstd in every `dart build cli` output, not just two — the
+        bundling *mechanism* was verified to work generically for native-
+        asset build hooks (see the native-assets Investigation section), but
+        specifically bundling three libraries together was not itself
+        empirically tested; add a one-time smoke check in Phase A ("does
+        `dart build cli`'s `bundle/lib/` contain all three dylibs and does
+        the compiled binary still run") rather than assuming the two-library
+        result generalises untested.
 - [x] **Q2 — One-shot command cache-dir source.** `ReplConfig.cacheDir`
       (`~/.kmdbrc`) is currently loaded only by the interactive REPL session.
       One-shot commands (`kmdb <db> vault search ...`, invoked via
@@ -443,9 +501,14 @@ search". Phase B depends on Phase A having landed (it extends the same
   configuration.
 - `PdfTextExtractor` (`kmdb_extractor_pdf` package) — depends on
   `betto_pdfium`, which has its own native-assets build hook (bundles a
-  PDFium dylib). Registering it by default in the CLI means an unconditional
-  new direct dependency and more native weight in every CLI build/bundle,
-  even for users who never touch PDFs.
+  PDFium dylib). **Decision (2026-07-10, superseding the earlier opt-in
+  lean): register by default alongside the other three extractors.** Product
+  owner chose completeness — every user gets PDF vault search out of the
+  box — over minimising bundle size for users who don't have PDFs in their
+  vault. Consequence: Phase A now bundles three native libraries
+  (`libonnxruntime`, `libzstd`, PDFium) rather than two once Phase B also
+  lands; see the native-assets Investigation note below for the follow-on
+  verification this requires.
 - **Correction (2026-07-10): HTML/Markdown extractors now exist.** WI-9
   shipped and is `Complete`
   (`docs/plans/completed/plan_0_06_wi9_html_markdown_extractors.md`) — this
@@ -613,11 +676,20 @@ no-op (just a wasted load) rather than a bug.
       adapter)` unconditionally and pass `vaultStore:` to
       `KmdbDatabase.open()`.
 - [ ] Same call: pass `vaultSearch: VaultSearchConfig(extractors:
-      [HtmlTextExtractor(), MarkdownTextExtractor()])` (per Q1 —
-      `PlainTextExtractor` is auto-prepended by `VaultSearchConfig` itself, so
-      it does not need to be listed explicitly).
-- [ ] Add `kmdb_extractor_html` and `kmdb_extractor_markdown` as direct
-      dependencies of `packages/kmdb_cli/pubspec.yaml`.
+      [HtmlTextExtractor(), MarkdownTextExtractor(), PdfTextExtractor()])`
+      (per Q1, superseded decision — `PlainTextExtractor` is auto-prepended
+      by `VaultSearchConfig` itself, so it does not need to be listed
+      explicitly).
+- [ ] Add `kmdb_extractor_html`, `kmdb_extractor_markdown`, and
+      `kmdb_extractor_pdf` as direct dependencies of
+      `packages/kmdb_cli/pubspec.yaml`.
+- [ ] Verify `dart build cli` correctly bundles all three native libraries
+      together (`libonnxruntime`, `libzstd`, PDFium) once `kmdb_extractor_pdf`
+      (→ `betto_pdfium`) is added — the bundling *mechanism* was verified
+      generically for native-asset build hooks with two libraries during this
+      plan's grounding investigation, but three together were not empirically
+      tested. Confirm `bundle/lib/` contains all three dylibs and the compiled
+      binary still runs from an arbitrary working directory.
 - [ ] Confirm (add a test if not already covered) that constructing a
       `VaultStore` and running `VaultRecovery.recover()` /
       `VaultGc` construction is cheap when no `vault/` directory exists yet on
@@ -637,8 +709,8 @@ no-op (just a wasted load) rather than a bug.
       status`, `vault reindex` against a real (in-process) `KmdbDatabase`
       with a populated vault, confirming they no longer fail with "Vault
       search is not configured." Cover: empty vault, lexical hits over
-      plain-text/HTML/Markdown blobs, stub-blob warning path
-      (`status.stub > 0`).
+      plain-text/HTML/Markdown/PDF blobs (one fixture per extractor), stub-blob
+      warning path (`status.stub > 0`).
 - [ ] Update `docs/spec/24_vault.md` (confirm with `kmdb-architect` if a
       different file is more authoritative for the CLI wiring surface) to
       note that `kmdb_cli` now constructs a `VaultStore` and configures vault
