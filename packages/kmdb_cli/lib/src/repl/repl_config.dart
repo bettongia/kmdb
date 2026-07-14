@@ -66,6 +66,41 @@ final class ReplConfig {
   /// created lazily by [ModelDownloader] on first download.
   String get cacheDir => _cacheDir ?? _defaultCacheDir();
 
+  /// Reads just the `cacheDir` value from `~/.kmdbrc` (or [filePath] if
+  /// supplied), with **no file-write side effect** — unlike [load], which
+  /// writes a defaults file to `~/.kmdbrc` on first run and requires a
+  /// [SessionState] to populate.
+  ///
+  /// This exists for the one-shot CLI path (`cli_runner.dart`), which needs
+  /// [cacheDir] for `OnnxEmbeddingModel.load` but must not give every first
+  /// invocation of a plain command (e.g. `kmdb mydb get notes x`) a
+  /// `~/.kmdbrc`-creation side effect just to resolve a cache directory
+  /// (WI-12 Q2). The REPL path uses the same method for a single source of
+  /// truth, rather than reading the [cacheDir] getter (which depends on
+  /// [load] having already run).
+  ///
+  /// Returns the configured `cacheDir` if the file exists, is valid JSON, and
+  /// has a non-empty `cacheDir` string key; otherwise returns the same
+  /// `~/.kmdb_cache` default [cacheDir] falls back to. Read/parse errors are
+  /// silently ignored (matching [load]'s policy) and the default is returned.
+  static Future<String> readCacheDir({String? filePath}) async {
+    final path = filePath ?? _defaultPath();
+    final file = io.File(path);
+    if (!file.existsSync()) return _defaultCacheDir();
+    try {
+      final text = await file.readAsString(encoding: utf8);
+      final decoded = jsonDecode(text);
+      if (decoded is Map<String, dynamic> && decoded['cacheDir'] is String) {
+        final dir = (decoded['cacheDir'] as String).trim();
+        if (dir.isNotEmpty) return dir;
+      }
+    } catch (_) {
+      // Corrupt or unreadable config — fall through to the default, same
+      // fail-open policy as load().
+    }
+    return _defaultCacheDir();
+  }
+
   /// Loads config from [_path] and applies it to [state].
   ///
   /// If the file does not exist, writes a defaults file and returns without

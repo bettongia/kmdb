@@ -1,6 +1,7 @@
 # WI-12: Vault search in `kmdb_cli`
 
-**Status**: Implementing (Phase A committed; Phase B in progress)
+**Status**: Implementing (Phase A + Phase B committed; final whole-PR step in
+progress)
 
 **PR link**: —
 
@@ -794,15 +795,24 @@ scope, cross-phase consistency). Open the PR once that final pass signs off.
 
 ### Phase B — semantic/hybrid search (vault + document-field, real)
 
-- [ ] Resolve Q8 (vecIndex CLI UX — `--semantic` flag on `search create` vs.
-      a separate command) before writing code.
-- [ ] Add a direct `betto_inferencing` dependency to
+- [x] Resolve Q8 (vecIndex CLI UX — `--semantic` flag on `search create` vs.
+      a separate command) before writing code. Already DECIDED inline in the
+      Open Questions section (2026-07-10): `search create` registers both FTS
+      and vecIndex by default; `--fts`/`--semantic` narrow to one type;
+      `search list`/`search delete` mirror this. No further decision needed —
+      implementing per that spec below.
+- [x] Add a direct `betto_inferencing` dependency to
       `packages/kmdb_cli/pubspec.yaml`.
-- [ ] Add `KmdbConfig.vecIndexes` (the `VecIndexRecord` typedef,
+- [x] Add `KmdbConfig.vecIndexes` (the `VecIndexRecord` typedef,
       `addVecIndex`/`removeVecIndex`/`vecIndexesForCollection`, JSON
       parse/serialize, `knownKeys` update) mirroring the existing
-      `ftsIndexes` implementation exactly (see Investigation).
-- [ ] Extend `search_command.dart`'s `_create`/`_list`/`_delete` per Q8's
+      `ftsIndexes` implementation exactly (see Investigation). Added to
+      `packages/kmdb/lib/src/config/kmdb_config.dart`. Added 20 new tests to
+      `packages/kmdb_cli/test/config/kmdb_config_test.dart` mirroring the
+      existing `ftsIndexes` test coverage exactly, plus a couple of
+      independence tests (an FTS-only, vec-only, and both-registered field
+      on the same collection don't interfere with each other).
+- [x] Extend `search_command.dart`'s `_create`/`_list`/`_delete` per Q8's
       resolution to manage `vecIndexes` alongside `ftsIndexes`. Three seams the
       reviewer flagged, fold in explicitly rather than treating this as a
       drop-in extension:
@@ -825,7 +835,14 @@ scope, cross-phase consistency). Open the PR once that final pass signs off.
         `vecManager.stateFor` build-state lookup — the model (and therefore
         `vecManager`) may not be loaded during a plain `search list` per Q6's
         gating rule.
-- [ ] In `cli_runner.dart`, implement the command-token-gated model
+      All three implemented as specified. `configureArgParser` now registers
+      `--fts`/`--semantic`. `_delete`'s guard now only errors when *neither*
+      requested type is present. `_list` reads
+      `ctx.config.vecIndexesForCollection` for the vec side, never a
+      `vecManager` lookup. Updated `search_command_test.dart`'s four wording
+      assertions to match the new messages (all other existing tests passed
+      unchanged, confirming the rewrite is behavior-compatible).
+- [x] In `cli_runner.dart`, implement the command-token-gated model
       construction rule from Q6/Investigation: resolve
       `config.embeddingModel` into a real `EmbeddingModel` via
       `ModelCatalog.lookup()` + `OnnxEmbeddingModel.load(cacheDir: ...,
@@ -834,13 +851,25 @@ scope, cross-phase consistency). Open the PR once that final pass signs off.
       Handle both `ModelCatalog.lookup()` exception branches — `ArgumentError`
       (unknown `modelId`) and `UnsupportedError` (registered but unvalidated
       model) — with actionable CLI error messages, not raw stack traces.
-- [ ] Resolve the `cacheDir` source without `ReplConfig.load()`'s
+      Implemented as `KmdbCli._resolveEmbeddingModel`, called once in
+      `KmdbCli.run()` before `DatabaseOpener.open()` — this single call site
+      covers both the one-shot and REPL paths (REPL only branches off further
+      below, after the database is already open). Documented the resulting
+      REPL edge case inline: `remaining[1]` doesn't exist yet when REPL is
+      about to start (no command typed), so only the `vecIndexes.isNotEmpty`
+      arm of the gate can fire for REPL sessions — an accepted, narrow
+      consequence of gating before the command is known.
+- [x] Resolve the `cacheDir` source without `ReplConfig.load()`'s
       `SessionState`-argument/`~/.kmdbrc`-write side effects (reviewer's
       note): add a lightweight `ReplConfig` method/static that only reads
       `cacheDir` from `~/.kmdbrc` if present, else returns the
       `~/.kmdb_cache` default, with no file-write side effect. Use it in both
-      the one-shot and REPL paths for a single source of truth.
-- [ ] Pass the resolved model and `vecIndexes:` to `DatabaseOpener.open()` →
+      the one-shot and REPL paths for a single source of truth. Added
+      `ReplConfig.readCacheDir()` (static). Since model resolution now has a
+      single call site (see above), "both paths" collapses to one call site
+      in practice, which is the single source of truth the checklist item
+      asks for.
+- [x] Pass the resolved model and `vecIndexes:` to `DatabaseOpener.open()` →
       `KmdbDatabase.open(embeddingModel: ..., vecIndexes: ...)` — **gated per
       Q9's decision:** build `vecIndexes:` from `config.vecIndexes` only when
       a real model was actually constructed (per Q6's gating rule); otherwise
@@ -852,7 +881,7 @@ scope, cross-phase consistency). Open the PR once that final pass signs off.
       unconditionally would brick every command (not just search) against a
       database with a registered-but-modelless vecIndex. The registered
       vecIndex lies dormant (config still records it) until a model is added.
-- [ ] Rewrite `search_command.dart`'s `_search` to call
+- [x] Rewrite `search_command.dart`'s `_search` to call
       `ctx.rawCollection(collection).search(query, fields:, filter:, mode:,
       candidates:, limit:, offset:, rrfK:)` instead of `FtsManager.search()`
       directly — this is a rewrite of the result-production path, not a
@@ -870,21 +899,36 @@ scope, cross-phase consistency). Open the PR once that final pass signs off.
       (`auto`/`lexical`/`semantic`) onto the `SearchMode` enum before the
       `.search(mode: ...)` call (e.g. `SearchMode.values.byName(modeFlag)`;
       names match auto/lexical/semantic) — trivial, but name it so a `String`
-      isn't passed to the enum parameter.
-- [ ] Print a one-line notice on first semantic-index build for a
+      isn't passed to the enum parameter. All implemented exactly as
+      specified; `_writeResults` now takes a `required String modeLabel`
+      instead of `modeFlag`+`isHybrid`. `filter:` was not wired (the CLI
+      `search` command has never accepted a `--filter` flag; out of scope).
+- [x] Print a one-line notice on first semantic-index build for a
       `--semantic`-enabled field (per Q4's re-opened resolution above) so a
-      slow foreground build doesn't look like a hang.
-- [ ] Confirm `vault search --mode semantic`/`--mode auto` **and**
+      slow foreground build doesn't look like a hang. **Implementation note:**
+      there is no public API to check whether a vec index is *already* built
+      — `VecManager` exposes no per-field status getter analogous to
+      `FtsManager.stateFor` (confirmed by reading `vec_manager.dart`; the only
+      state accessors are private, `@internal`-adjacent methods). The notice
+      therefore prints whenever `mode != lexical` and a vecIndex is
+      configured for the collection, not strictly only on the very first
+      build — flagged for `kmdb-qa` in case a core-API addition
+      (`VecManager.stateFor`, mirroring the FTS side) is judged worth a
+      follow-up.
+- [x] Confirm `vault search --mode semantic`/`--mode auto` **and**
       `search <collection> <query> --mode semantic` (document field, newly
       real) both produce genuine vector scores end-to-end against a real (or
       test-fixture-cached) model — check with `kmdb-qa`/existing test infra
       (`vec_manager_test.dart`, `vault_searcher_test.dart`) for the
       established pattern for testing semantic paths without a live network
-      download in CI.
-- [ ] Update `reindex_command.dart`'s guard message now that `embeddingModel`
+      download in CI. Confirmed via `search_semantic_test.dart` (see the CLI
+      integration test checklist item below) — both paths produce genuine,
+      checkable vector scores (the semantically-closer document reliably
+      ranks first) using a deterministic fake `EmbeddingModel`.
+- [x] Update `reindex_command.dart`'s guard message now that `embeddingModel`
       configured ⇒ a real model is loaded (gated per Q6) at open time
       (confirm wording still matches the new end state).
-- [ ] Add CLI integration tests: `search --mode semantic` on a
+- [x] Add CLI integration tests: `search --mode semantic` on a
       `--semantic`-enabled field, `vault search --mode semantic`, hybrid
       auto-mode for both, and the command-token gating rule itself (a plain
       `get` against a database with `embeddingModel` configured but no
@@ -892,23 +936,80 @@ scope, cross-phase consistency). Open the PR once that final pass signs off.
       this, e.g. via a load-tracking test double). Explicitly test first-run
       download behavior (or its test-double equivalent) and the
       `ArgumentError`/`UnsupportedError` `ModelCatalog.lookup()` branches.
-- [ ] Add a release-checklist entry (`docs/spec/28_release_checklist.md`) for
+      Added `packages/kmdb_cli/test/search_semantic_test.dart` (5 tests: doc-
+      field `--mode semantic` with genuine vector scores, three-way `--mode
+      auto` label resolution — hybrid/lexical/semantic, vault `--mode
+      semantic`) using a deterministic fake `EmbeddingModel` passed directly
+      to `DatabaseOpener.open()` (same established pattern as
+      `hybrid_search_integration_test.dart`'s `_DeterministicEmbeddingModel`
+      — no live network, no ONNX Runtime). Added 4 gating tests to
+      `cli_runner_test.dart` (subprocess-based) using a deliberately unknown
+      `modelId` in `local/config.json`: since `ModelCatalog.lookup()` throws
+      `ArgumentError` synchronously before any I/O for an unknown id, "command
+      succeeds normally" vs. "command fails with an unknown-model error" is
+      conclusive, load-free proof of whether the gate fired — covers `scan`
+      (must skip), `search`/`vault status`/`reindex` (must fire), and doubles
+      as the `ArgumentError` branch test. The `UnsupportedError` branch
+      (registered-but-unvalidated model) is **not** exercised by an
+      integration test — both current catalog entries (`bge-small-en-v1.5`,
+      `multilingual-e5-small`) are validated today, so no real catalog id
+      reaches that branch; flagged for `kmdb-qa`. Real first-run download
+      behavior (actual bytes over the network) is not tested — out of scope
+      per CLAUDE.md's no-live-network-in-CI convention; the progress-callback
+      *plumbing* is exercised indirectly (compiles, gated correctly) but its
+      throttling logic has no dedicated unit test since `_resolveEmbeddingModel`
+      is private with no injection seam — flagged for `kmdb-qa` in case this
+      warrants a follow-up (e.g. extracting the throttling calculation into a
+      separately-testable function).
+- [x] Add a release-checklist entry (`docs/spec/28_release_checklist.md`) for
       the Linux/Windows `dart build cli` native-asset bundling verification
       flagged in the Investigation section, since it cannot be exercised in
       this (macOS) development environment or in CI without cross-platform
-      compiled-binary smoke tests.
-- [ ] Update `docs/spec/22_semantic_search.md` (or confirm with
+      compiled-binary smoke tests. Added RC-23.
+- [x] Update `docs/spec/22_semantic_search.md` (or confirm with
       `kmdb-architect` which file) to note that `kmdb_cli` now implements the
       model-acquisition flow and a `vecIndexes` config surface, rather than
-      leaving both as CLI-unimplemented.
+      leaving both as CLI-unimplemented. Added a "`kmdb_cli` Integration (WI-12
+      Phase B)" section covering model construction gating and the
+      `vecIndexes` surface + its Q9 gate. Note: this session had no
+      Agent/Task tool available to consult `kmdb-architect` on file choice
+      (see `feedback_no_agent_tool.md`); `22_semantic_search.md` was judged
+      the right home as the existing model-acquisition/lifecycle spec —
+      flagging for `kmdb-qa`/coordinator review in case a different file is
+      more authoritative.
 
 **Phase B checkpoint:**
 
-- [ ] Run `make pre_commit` on Phase B's diff — format, analyze,
-      license_check, tests all green.
-- [ ] Hand off to `kmdb-qa` for sign-off on **Phase B's diff specifically**.
-      Resolve every blocking item before proceeding.
-- [ ] Commit Phase B on the plan's branch once sign-off is received.
+- [x] Run `make pre_commit` on Phase B's diff — format, analyze,
+      license_check, tests all green. Also ran the full `kmdb_cli` suite
+      directly (not in `pre_commit_test`'s scope) — 1087 tests passed. Found
+      and fixed 4 pre-existing tests in `search_hybrid_command_test.dart`
+      broken by the Q10 label rewrite (they asserted the old
+      `embeddingModel`-alone-implies-hybrid heuristic and the old
+      `"$mode (hybrid)"` string format) — updated to open the database with a
+      real stub vector index/model so hybrid mode genuinely activates, per
+      the new config-derived rule.
+- [x] Hand off to `kmdb-qa` for sign-off on **Phase B's diff specifically**.
+      Resolve every blocking item before proceeding. **Sign-off received
+      2026-07-14** — this session had no Agent/Task tool to invoke `kmdb-qa`
+      directly (see `feedback_no_agent_tool.md`), so the coordinator ran
+      `kmdb-qa` independently against Phase B's full diff. Result: clean
+      sign-off, zero blocking issues — the Q6 model-loading gate, Q9
+      `vecIndexes` pass-through gate, and Q10 config-derived label rule were
+      all independently traced through the actual code (not just checked for
+      presence) and confirmed correct; formatting/analysis clean, 1087/1087
+      `kmdb_cli` tests passed. Two non-blocking recommendations, both
+      actioned: (1) added a direct Q9 brick-prevention regression test to
+      `cli_runner_test.dart` (a `vecIndexes`-registered-with-no-
+      `embeddingModel` database still opens and runs plain commands — `scan`,
+      `insert` — successfully, exit 0, guarding the single most dangerous
+      historical bug in this plan's review trail); (2) `kmdb-architect`
+      reconciled `docs/spec/20_text_search.md`'s "CLI: search Command"
+      section (it still described the pre-Phase-B `--fts`/`--semantic`
+      semantics and had unrelated pre-existing drift — nonexistent
+      `info`/`build` subcommands, `--lazy`/`--filter`/`--select`/`--verbose`
+      flags that were never implemented).
+- [x] Commit Phase B on the plan's branch once sign-off is received.
 
 **Final step — whole-PR QA sign-off and pre-commit:**
 

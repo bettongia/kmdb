@@ -31,8 +31,19 @@ import 'command.dart';
 ///
 /// This command is **vec-only** — it does not touch FTS (BM25) indexes.
 ///
+/// `reindex` is one of the command tokens `cli_runner.dart` gates real
+/// embedding-model construction on (WI-12 Phase B, Q6) — running this
+/// command against a database with `embeddingModel` configured always loads
+/// a real model first, regardless of whether any `vecIndex` is registered
+/// yet, so [CommandContext.db]'s [KmdbDatabase.vecManager] reflects genuine
+/// index state here, not a stub.
+///
 /// If no embedding model is configured in `local/config.json`, the command
-/// prints an informational message and exits with code 0.
+/// prints an informational message and exits with code 0 without attempting
+/// to load one. If a model *is* configured but no `vecIndex` has been
+/// registered (`search create --semantic`), [KmdbDatabase.reindex] itself
+/// reports zero rebuilt indexes — there's nothing to rebuild yet, not an
+/// error.
 ///
 /// ## When to use
 ///
@@ -61,11 +72,16 @@ final class ReindexCommand extends CliCommand {
   ) async {
     // When no embedding model is configured there are no vector indexes to
     // rebuild. Print an informational message and exit 0 (not an error).
+    // config.embeddingModel is checked directly (not ctx.db.vecManager)
+    // because a model with no vecIndexes registered yet is a different,
+    // non-error case — ctx.db.reindex() below already handles it correctly
+    // by reporting zero rebuilt indexes.
     if (ctx.config.embeddingModel == null) {
       ctx.out.writeln(
         'No embedding model configured — no vector indexes to rebuild.\n'
-        'Add an embeddingModel to local/config.json and reopen the database '
-        'to build vector indexes.',
+        'Add an embeddingModel to local/config.json and run reindex again '
+        'to build vector indexes (a real model is loaded automatically for '
+        'this command).',
       );
       return true;
     }

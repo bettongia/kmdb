@@ -37,6 +37,16 @@ typedef FtsIndexRecord = ({
   double b,
 });
 
+/// A single vector (semantic) index definition stored in the KMDB config.
+///
+/// Mirrors [VecIndexDefinition] from the search layer but is stored as a
+/// plain Dart record so that the config module has no dependency on internal
+/// search types — the same rationale as [FtsIndexRecord]. Unlike
+/// [FtsIndexRecord], there are no BM25-specific tuning fields (`stopWords`,
+/// `k1`, `b`) since vector search has no equivalent parameters; the only
+/// extra field is [lazy].
+typedef VecIndexRecord = ({String collection, String field, bool lazy});
+
 /// An embedding model configuration stored in the KMDB config.
 ///
 /// The model is referenced by its catalog identifier (`modelId`) so that the
@@ -60,9 +70,10 @@ typedef EmbeddingModelConfig = ({String type, String modelId});
 /// `{dbDir}/local/config.json`.
 ///
 /// The config file stores named sync remotes, secondary index definitions,
-/// FTS index definitions, and the optional embedding model path.  All I/O
-/// is delegated to a [KmdbConfigStore] so that [KmdbConfig] itself has no
-/// `dart:io` dependency and can be used on any platform.
+/// FTS index definitions, vector (semantic) index definitions, and the
+/// optional embedding model path.  All I/O is delegated to a
+/// [KmdbConfigStore] so that [KmdbConfig] itself has no `dart:io` dependency
+/// and can be used on any platform.
 ///
 /// ## Forward compatibility
 ///
@@ -88,6 +99,9 @@ typedef EmbeddingModelConfig = ({String type, String modelId});
 ///   "ftsIndexes": [
 ///     { "collection": "docs", "field": "body", "stopWords": false,
 ///       "k1": 1.2, "b": 0.75 }
+///   ],
+///   "vecIndexes": [
+///     { "collection": "docs", "field": "body", "lazy": false }
 ///   ]
 /// }
 /// ```
@@ -109,14 +123,15 @@ final class KmdbConfig {
     required this._remotes,
     required this._indexes,
     required this._ftsIndexes,
+    required this._vecIndexes,
     required this.embeddingModel,
     required this._extra,
   });
 
   /// Creates an empty [KmdbConfig] with no backing store.
   ///
-  /// All collections — remotes, indexes, ftsIndexes — start empty and
-  /// [embeddingModel] is `null`.
+  /// All collections — remotes, indexes, ftsIndexes, vecIndexes — start empty
+  /// and [embeddingModel] is `null`.
   ///
   /// Calling [save] on an instance created with this constructor will throw
   /// an [UnsupportedError] because there is no backing store to write to.
@@ -127,18 +142,20 @@ final class KmdbConfig {
       _remotes = {},
       _indexes = [],
       _ftsIndexes = [],
+      _vecIndexes = [],
       embeddingModel = null,
       _extra = {};
 
   /// Creates an empty [KmdbConfig] backed by [store].
   ///
-  /// All collections — remotes, indexes, ftsIndexes — start empty and
-  /// [embeddingModel] is `null`.  Calling [save] writes to [store].
+  /// All collections — remotes, indexes, ftsIndexes, vecIndexes — start empty
+  /// and [embeddingModel] is `null`.  Calling [save] writes to [store].
   KmdbConfig.emptyWithStore(KmdbConfigStore store)
     : _store = store,
       _remotes = {},
       _indexes = [],
       _ftsIndexes = [],
+      _vecIndexes = [],
       embeddingModel = null,
       _extra = {};
 
@@ -150,10 +167,11 @@ final class KmdbConfig {
   final Map<String, RemoteConfig> _remotes;
   final List<IndexRecord> _indexes;
   final List<FtsIndexRecord> _ftsIndexes;
+  final List<VecIndexRecord> _vecIndexes;
 
   // Unknown top-level keys from the last load, preserved for round-trip
   // forward-compatibility.  Keys in this map do not overlap with the
-  // recognised keys (remotes, indexes, ftsIndexes, embeddingModel).
+  // recognised keys (remotes, indexes, ftsIndexes, vecIndexes, embeddingModel).
   final Map<String, dynamic> _extra;
 
   /// Returns an unmodifiable view of the remotes map, keyed by name.
@@ -164,6 +182,9 @@ final class KmdbConfig {
 
   /// Returns an unmodifiable view of all FTS index definitions.
   List<FtsIndexRecord> get ftsIndexes => List.unmodifiable(_ftsIndexes);
+
+  /// Returns an unmodifiable view of all vector (semantic) index definitions.
+  List<VecIndexRecord> get vecIndexes => List.unmodifiable(_vecIndexes);
 
   /// The configured embedding model, or `null` if none has been set.
   ///
@@ -320,6 +341,44 @@ final class KmdbConfig {
       }
     }
 
+    // ── Vector (semantic) indexes ────────────────────────────────────────────
+    final vecIndexesRaw = decoded['vecIndexes'];
+    final vecIndexes = <VecIndexRecord>[];
+    if (vecIndexesRaw != null) {
+      if (vecIndexesRaw is! List) {
+        throw const FormatException(
+          "Corrupt config.json: 'vecIndexes' must be a JSON array.",
+        );
+      }
+      for (var i = 0; i < vecIndexesRaw.length; i++) {
+        final entry = vecIndexesRaw[i];
+        if (entry is! Map<String, dynamic>) {
+          throw FormatException(
+            'Corrupt config.json: vecIndexes[$i] must be a JSON object.',
+          );
+        }
+        final collection = entry['collection'];
+        final field = entry['field'];
+        if (collection is! String || collection.isEmpty) {
+          throw FormatException(
+            "Corrupt config.json: vecIndexes[$i] missing required string "
+            "field 'collection'.",
+          );
+        }
+        if (field is! String || field.isEmpty) {
+          throw FormatException(
+            "Corrupt config.json: vecIndexes[$i] missing required string "
+            "field 'field'.",
+          );
+        }
+        vecIndexes.add((
+          collection: collection,
+          field: field,
+          lazy: entry['lazy'] as bool? ?? false,
+        ));
+      }
+    }
+
     // ── Embedding model ──────────────────────────────────────────────────────
     EmbeddingModelConfig? embeddingModel;
     final emRaw = decoded['embeddingModel'];
@@ -363,7 +422,13 @@ final class KmdbConfig {
     // Capture any keys not recognised by this version of the code so they are
     // preserved verbatim on the next [save], preventing data loss when the
     // config was written by a newer client.
-    const knownKeys = {'remotes', 'indexes', 'ftsIndexes', 'embeddingModel'};
+    const knownKeys = {
+      'remotes',
+      'indexes',
+      'ftsIndexes',
+      'vecIndexes',
+      'embeddingModel',
+    };
     final extra = <String, dynamic>{
       for (final entry in decoded.entries)
         if (!knownKeys.contains(entry.key)) entry.key: entry.value,
@@ -374,6 +439,7 @@ final class KmdbConfig {
       remotes: remotes,
       indexes: indexes,
       ftsIndexes: ftsIndexes,
+      vecIndexes: vecIndexes,
       embeddingModel: embeddingModel,
       extra: extra,
     );
@@ -492,6 +558,52 @@ final class KmdbConfig {
   List<FtsIndexRecord> ftsIndexesForCollection(String collection) =>
       _ftsIndexes.where((r) => r.collection == collection).toList();
 
+  // ── Vector (semantic) index mutations ──────────────────────────────────────
+
+  /// Adds a vector (semantic) index definition for [field] on [collection].
+  ///
+  /// Throws [ArgumentError] if an identical `(collection, field)` pair already
+  /// exists in the config.
+  ///
+  /// Registering a vecIndex here does not by itself make semantic search
+  /// work — [KmdbDatabase.open] additionally requires a non-null
+  /// `embeddingModel`, since a registered-but-modelless vecIndex would
+  /// otherwise make the database unopenable (see
+  /// `DatabaseOpener.open`'s gated `vecIndexes:` pass-through, WI-12 Q9).
+  void addVecIndex(String collection, String field, {bool lazy = false}) {
+    if (_vecIndexes.any(
+      (r) => r.collection == collection && r.field == field,
+    )) {
+      throw ArgumentError(
+        "A vector index on '$collection.$field' already exists in the "
+        'config.',
+      );
+    }
+    _vecIndexes.add((collection: collection, field: field, lazy: lazy));
+  }
+
+  /// Removes the vector index definition for [field] on [collection].
+  ///
+  /// Throws [ArgumentError] if no matching definition is found.
+  void removeVecIndex(String collection, String field) {
+    final idx = _vecIndexes.indexWhere(
+      (r) => r.collection == collection && r.field == field,
+    );
+    if (idx == -1) {
+      throw ArgumentError(
+        "No vector index on '$collection.$field' found in the config.",
+      );
+    }
+    _vecIndexes.removeAt(idx);
+  }
+
+  /// Returns all vector (semantic) index definitions for [collection].
+  ///
+  /// Returns an empty list when no vector indexes are configured for the
+  /// collection.
+  List<VecIndexRecord> vecIndexesForCollection(String collection) =>
+      _vecIndexes.where((r) => r.collection == collection).toList();
+
   // ── Persistence ────────────────────────────────────────────────────────────
 
   /// Serialises this config to a JSON string.
@@ -521,6 +633,10 @@ final class KmdbConfig {
             'k1': idx.k1,
             'b': idx.b,
           },
+      ],
+      'vecIndexes': [
+        for (final idx in _vecIndexes)
+          {'collection': idx.collection, 'field': idx.field, 'lazy': idx.lazy},
       ],
       if (embeddingModel != null)
         'embeddingModel': {

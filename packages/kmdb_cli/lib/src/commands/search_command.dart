@@ -19,21 +19,40 @@ import 'package:kmdb/kmdb.dart';
 import 'package:kmdb/kmdb_config.dart';
 import 'command.dart';
 
-/// Executes search queries and manages FTS index definitions.
+/// Executes search queries and manages FTS and vector index definitions.
 ///
 /// ## Subcommands
 ///
 /// ```
 /// kmdb <db> search <collection> <query> [options]
 /// kmdb <db> search list <collection>
-/// kmdb <db> search create <collection> <field> [--stopwords] [--k1 <n>] [--b <n>]
-/// kmdb <db> search delete <collection> <field>
+/// kmdb <db> search create <collection> <field> [--fts | --semantic] [--stopwords] [--k1 <n>] [--b <n>]
+/// kmdb <db> search delete <collection> <field> [--fts | --semantic]
 /// ```
+///
+/// ## Index registration (`search create`/`search delete`)
+///
+/// `search create` registers **both** an FTS index and a vector (semantic)
+/// index for the field by default — "search create turns on search for a
+/// field" is one mental model, rather than a parallel `vecIndex create`
+/// command family. `--fts` and `--semantic` are narrowing flags: passing
+/// either alone limits registration/removal to just that type; passing both
+/// explicitly is equivalent to the no-flag default. `search list` shows both
+/// registrations for a field; `search delete` removes both by default, or
+/// just one with `--fts`/`--semantic`.
+///
+/// A vector index requires `embeddingModel` to be configured in
+/// `local/config.json` — `search create` does not hard-fail without one
+/// (config is written and stays lexical-only until a model is added), but
+/// prints a warning. Note the generic flag parser
+/// (`cli_runner._dispatchTokens`) treats `--flag <positional>` as consuming
+/// the positional as the flag's value, so `--fts`/`--semantic` must follow
+/// the positional args (same pre-existing footgun as `--stopwords`).
 ///
 /// ## Search options
 ///
-/// - `--fields <f1,f2>` — comma-separated field list; defaults to all FTS
-///   indexed fields for the collection.
+/// - `--fields <f1,f2>` — comma-separated field list; defaults to the union
+///   of FTS- and vector-indexed fields for the collection.
 /// - `--mode auto|lexical|semantic` — search strategy (default `auto`).
 ///   `auto` activates lexical search when only an FTS index is available,
 ///   semantic when only a vector index is available, and hybrid when both are
@@ -58,14 +77,14 @@ final class SearchCommand extends CliCommand {
 
   @override
   String get description =>
-      'Full-text and semantic search, plus FTS index management (list, create, delete).';
+      'Full-text and semantic search, plus FTS/vector index management (list, create, delete).';
 
   @override
   String get usage =>
       'search <collection> <query>\n'
       '       search list <collection>\n'
-      '       search create <collection> <field>\n'
-      '       search delete <collection> <field>';
+      '       search create <collection> <field> [--fts | --semantic]\n'
+      '       search delete <collection> <field> [--fts | --semantic]';
 
   @override
   void configureArgParser(ArgParser parser) {
@@ -108,10 +127,20 @@ final class SearchCommand extends CliCommand {
         help: 'Output format for search results (default: table)',
         allowed: ['table', 'json', 'ids'],
       )
+      ..addFlag('explain', negatable: false, help: 'Show search execution plan')
       ..addFlag(
-        'explain',
+        'fts',
         negatable: false,
-        help: 'Show search execution plan',
+        help:
+            "search create/delete: limit to the FTS (lexical) index only "
+            "(default: both FTS and semantic)",
+      )
+      ..addFlag(
+        'semantic',
+        negatable: false,
+        help:
+            "search create/delete: limit to the vector (semantic) index "
+            "only (default: both FTS and semantic)",
       );
   }
 
@@ -141,7 +170,7 @@ final class SearchCommand extends CliCommand {
         case 'create':
           return _create(ctx, args.sublist(1), flags);
         case 'delete':
-          return _delete(ctx, args.sublist(1));
+          return _delete(ctx, args.sublist(1), flags);
       }
     }
 
@@ -155,17 +184,18 @@ final class SearchCommand extends CliCommand {
   ///
   /// Supports `--mode lexical` (BM25), `--mode semantic` (vector cosine), and
   /// `--mode auto` (best available index). Semantic search requires
-  /// `embeddingModel` to be configured in `local/config.json`.
+  /// `embeddingModel` to be configured in `local/config.json` (and, for
+  /// document-field search specifically, a `vecIndex` registered for the
+  /// field via `search create --semantic`).
   ///
-  /// When `--mode auto` and both FTS and vector indexes are configured in the
-  /// CLI config, the output header includes a `(hybrid)` label to indicate
-  /// that Reciprocal Rank Fusion is being applied. The `--rrf-k` flag controls
-  /// the RRF smoothing constant for that path (default 60).
-  ///
-  /// Note: the CLI search command uses [FtsManager] directly and routes to
-  /// hybrid via `KmdbCollection.search()` for the output mode label; the
-  /// lexical leg is always used for the actual results since `kmdb_cli` does
-  /// not depend on `betto_inferencing`.
+  /// Calls the real [KmdbCollection.search] — genuine lexical, semantic, and
+  /// hybrid (Reciprocal Rank Fusion) scoring, not a lexical-only
+  /// approximation. The output mode label is computed deterministically from
+  /// config presence rather than read off [SearchResult], which carries no
+  /// resolved-mode field: for `--mode auto`, both an FTS and a vector index
+  /// configured for the collection ⇒ `hybrid`; FTS only ⇒ `lexical`; vector
+  /// only ⇒ `semantic`. An explicit `--mode lexical`/`--mode semantic` shows
+  /// that mode directly.
   Future<bool> _search(
     CommandContext ctx,
     List<String> args,
@@ -179,9 +209,14 @@ final class SearchCommand extends CliCommand {
     final collection = args[0];
     final query = args.sublist(1).join(' ');
 
-    // Parse and validate --mode (default: auto).
+    // Parse and validate --mode (default: auto), mapping the string flag
+    // onto the SearchMode enum before it reaches KmdbCollection.search().
+    // Names match auto/lexical/semantic exactly, so .byName is exact.
     final modeFlag = (flags['mode'] as String?)?.trim() ?? 'auto';
-    if (modeFlag != 'auto' && modeFlag != 'lexical' && modeFlag != 'semantic') {
+    final SearchMode mode;
+    try {
+      mode = SearchMode.values.byName(modeFlag);
+    } on ArgumentError {
       ctx.writeError(
         "search: unknown --mode value '$modeFlag'. "
         "Expected: auto, lexical, semantic.",
@@ -189,7 +224,11 @@ final class SearchCommand extends CliCommand {
       return false;
     }
 
-    // Determine which fields to search.
+    // Determine which fields to search — default: the union of FTS- and
+    // vector-indexed fields for the collection (mirrors
+    // KmdbCollection.search()'s own default-field-resolution logic, needed
+    // here up front for the "no indexes configured" guard and the results
+    // table header).
     final fieldsFlag = flags['fields'] as String?;
     final List<String> fields;
     if (fieldsFlag != null && fieldsFlag.trim().isNotEmpty) {
@@ -199,16 +238,22 @@ final class SearchCommand extends CliCommand {
           .where((f) => f.isNotEmpty)
           .toList();
     } else {
-      // Default: all FTS-indexed fields configured for this collection.
-      final configured = ctx.config.ftsIndexesForCollection(collection);
-      if (configured.isEmpty) {
+      final ftsFields = ctx.config
+          .ftsIndexesForCollection(collection)
+          .map((r) => r.field);
+      final vecFields = ctx.config
+          .vecIndexesForCollection(collection)
+          .map((r) => r.field);
+      final merged = {...ftsFields, ...vecFields}.toList();
+      if (merged.isEmpty) {
         ctx.writeError(
-          "search: no FTS indexes configured for collection '$collection'. "
-          "Run 'search create $collection <field>' to register an index.",
+          "search: no FTS or vector indexes configured for collection "
+          "'$collection'. Run 'search create $collection <field>' to "
+          "register one.",
         );
         return false;
       }
-      fields = configured.map((r) => r.field).toList();
+      fields = merged;
     }
 
     // Validate output format.
@@ -222,10 +267,8 @@ final class SearchCommand extends CliCommand {
     }
 
     // --mode semantic explicitly requires an embedding model to be configured.
-    // --mode auto falls back to lexical when no model is available; semantic
-    // features are enabled automatically when both an embeddingModel and a
-    // vector index are present.
-    if (modeFlag == 'semantic' && ctx.config.embeddingModel == null) {
+    // --mode auto falls back to lexical when no model/vecIndex is available.
+    if (mode == SearchMode.semantic && ctx.config.embeddingModel == null) {
       ctx.writeError(
         'Semantic search requires an embedding model; configure '
         'embeddingModel in local/config.json.\n'
@@ -249,68 +292,60 @@ final class SearchCommand extends CliCommand {
       return false;
     }
 
-    // Build FTS index definitions from config.
-    final ftsIndexDefs = _buildFtsDefs(ctx.config);
-    if (ftsIndexDefs.isEmpty) {
-      ctx.writeError(
-        "search: no FTS indexes configured for any collection. "
-        "Run 'search create <collection> <field>' to register an index.",
+    // A vector index's first query triggers a synchronous, foreground
+    // full-collection embedding pass (§18) before results appear — the same
+    // lazy-build convention ftsIndexes/vault indexes already have, just
+    // potentially slower per-document (one ONNX inference call per document).
+    // Print a one-line notice so this doesn't look like a hang. There is no
+    // public API to check whether the index is *already* built (VecManager
+    // exposes no per-field status getter, unlike FtsManager.stateFor), so
+    // this prints whenever semantic scoring might run for the collection,
+    // not strictly only on the very first build.
+    if (mode != SearchMode.lexical &&
+        ctx.config.vecIndexesForCollection(collection).isNotEmpty) {
+      ctx.err.writeln(
+        'Building semantic index for "$collection" fields if not already '
+        'current — this may take a while for large collections.',
       );
-      return false;
     }
 
-    final ftsManager = FtsManager(ctx.store, ftsIndexDefs);
-
-    // Callback that reads a document from the KvStore and decodes it.
-    Future<Map<String, dynamic>?> fetchDoc(String docId) async {
-      final bytes = await ctx.store.get(collection, docId);
-      if (bytes == null) return null;
-      // Inject _id from the docId — documents are stored without _id in
-      // the value bytes; the key is the canonical identity.
-      return await ValueCodec.decode(bytes)
-        ..['_id'] = docId;
-    }
-
-    // Determine whether hybrid mode would be active for this collection.
-    // The CLI cannot load the betto_inferencing package (ONNX Runtime), so it
-    // uses FtsManager directly for results. However, when both an FTS index
-    // and an embedding model are configured, the output indicates that a hybrid
-    // search would be active when accessed via the full database API.
-    //
-    // isHybrid = mode is auto AND embeddingModel is configured (signals that a
-    // vec index is intended) AND this collection has FTS indexes.
-    final ftsIndexedForCollection = ftsIndexDefs
-        .where((d) => d.collection == collection)
-        .isNotEmpty;
-    final isHybrid =
-        modeFlag == 'auto' &&
-        ctx.config.embeddingModel != null &&
-        ftsIndexedForCollection;
-
+    final col = ctx.rawCollection(collection);
     final SearchResult<Map<String, dynamic>> result;
     try {
-      result = await ftsManager.search<Map<String, dynamic>>(
-        namespace: collection,
-        query: query,
+      result = await col.search(
+        query,
         fields: fields,
-        fetchDoc: fetchDoc,
+        mode: mode,
+        candidates: candidates,
         limit: limit,
         offset: offset,
+        rrfK: rrfK,
       );
     } catch (e) {
       ctx.writeError('search: query failed: $e');
       return false;
     }
 
-    // Pass the resolved mode and rrfK to _writeResults so the header can
-    // display the correct mode label and hybrid indicator.
+    // Config-derived, three-way mode label (deterministic — see the class
+    // doc comment on _search for the exact rule). SearchMetadata carries no
+    // resolved-mode field to read this off of.
+    final String modeLabel;
+    if (modeFlag == 'auto') {
+      final hasFts = ctx.config.ftsIndexesForCollection(collection).isNotEmpty;
+      final hasVec = ctx.config.vecIndexesForCollection(collection).isNotEmpty;
+      modeLabel = hasFts && hasVec
+          ? 'hybrid'
+          : (hasVec ? 'semantic' : 'lexical');
+    } else {
+      modeLabel = modeFlag;
+    }
+
     _writeResults(
       ctx,
       result,
       fields,
       outputFlag,
-      modeFlag: modeFlag,
-      isHybrid: isHybrid,
+      modeLabel: modeLabel,
       rrfK: rrfK,
       candidates: candidates,
       explain: explain,
@@ -320,22 +355,22 @@ final class SearchCommand extends CliCommand {
 
   /// Writes [result] to [ctx.out] in the requested [format].
   ///
-  /// [modeFlag] is the resolved search mode string (`auto`, `lexical`, or
-  /// `semantic`). [isHybrid] is `true` when `--mode auto` and both FTS and
-  /// vector indexes are configured — in that case the table header includes a
-  /// `(hybrid)` label. [rrfK] and [candidates] are included in the JSON
-  /// output for transparency.
+  /// [modeLabel] is the fully-resolved mode label to display — `lexical`,
+  /// `semantic`, or `hybrid` — already computed by the caller (see
+  /// [_search]'s doc comment for the config-derived resolution rule). [rrfK]
+  /// is included in the JSON output only when [modeLabel] is `hybrid`.
   void _writeResults(
     CommandContext ctx,
     SearchResult<Map<String, dynamic>> result,
     List<String> fields,
     String format, {
-    String modeFlag = 'auto',
-    bool isHybrid = false,
+    required String modeLabel,
     int rrfK = 60,
     int candidates = 100,
     bool explain = false,
   }) {
+    final isHybrid = modeLabel == 'hybrid';
+
     // ── Explain block ─────────────────────────────────────────────────────────
     if (explain) {
       final meta = result.metadata;
@@ -343,7 +378,7 @@ final class SearchCommand extends CliCommand {
         final planMap = {
           '_explain': {
             'query': meta.query,
-            'mode': isHybrid ? 'hybrid' : modeFlag,
+            'mode': modeLabel,
             'searched': meta.searched,
             'skipped': meta.skipped,
             'total': meta.total,
@@ -352,9 +387,7 @@ final class SearchCommand extends CliCommand {
         ctx.out.writeln(const JsonEncoder.withIndent('  ').convert(planMap));
       } else {
         ctx.out.writeln('Search plan');
-        ctx.out.writeln(
-          '  Mode     : ${isHybrid ? "$modeFlag (hybrid)" : modeFlag}',
-        );
+        ctx.out.writeln('  Mode     : $modeLabel');
         if (meta.searched.isNotEmpty) {
           ctx.out.writeln('  Searched : ${meta.searched.join(", ")}');
         }
@@ -375,7 +408,7 @@ final class SearchCommand extends CliCommand {
       case 'json':
         final json = {
           'query': result.metadata.query,
-          'mode': isHybrid ? 'hybrid' : modeFlag,
+          'mode': modeLabel,
           if (isHybrid) 'rrfK': rrfK,
           'total': result.metadata.total,
           'searched': result.metadata.searched,
@@ -403,8 +436,6 @@ final class SearchCommand extends CliCommand {
         }
 
         // Write a mode header line before the results table.
-        // In hybrid mode, the label includes "(hybrid)" to indicate RRF.
-        final modeLabel = isHybrid ? '$modeFlag (hybrid)' : modeFlag;
         ctx.out.writeln('mode: $modeLabel');
 
         // Header row.
@@ -457,42 +488,80 @@ final class SearchCommand extends CliCommand {
 
   // ── list ───────────────────────────────────────────────────────────────────
 
-  /// Lists all configured FTS indexes for [collection] and their status.
+  /// Lists all configured FTS and vector indexes for [collection] and their
+  /// status.
+  ///
+  /// The FTS side shows real build status via [FtsManager.stateFor]. The
+  /// vector side shows only config-registration presence
+  /// ([KmdbConfig.vecIndexesForCollection]), never a build-state lookup —
+  /// [VecManager] (and the model it needs) may not be loaded during a plain
+  /// `search list` per the command-token-gated model-construction rule
+  /// (WI-12 Q6), so a `vecManager.stateFor`-style call could not run
+  /// reliably here even if one existed.
   Future<bool> _list(CommandContext ctx, List<String> args) async {
     if (args.isEmpty) {
       ctx.writeError('search list: collection name required.');
       return false;
     }
     final collection = args[0];
-    final defined = ctx.config.ftsIndexesForCollection(collection);
+    final ftsDefined = ctx.config.ftsIndexesForCollection(collection);
+    final vecDefined = ctx.config.vecIndexesForCollection(collection);
 
-    if (defined.isEmpty) {
+    if (ftsDefined.isEmpty && vecDefined.isEmpty) {
       ctx.out.writeln(
-        'No FTS indexes configured for collection "$collection".',
+        'No FTS or vector indexes configured for collection "$collection".',
       );
       return true;
     }
 
     final ftsManager = FtsManager(ctx.store, _buildFtsDefs(ctx.config));
 
-    for (final record in defined) {
-      final state = await ftsManager.stateFor(collection, record.field);
-      final statusName = state?.status.name ?? 'undefined';
-      ctx.out.writeln(
-        '${record.field}\t$statusName'
-        '\tstopWords=${record.stopWords}'
-        '\tk1=${record.k1}\tb=${record.b}',
-      );
+    // Union of fields across both index types, FTS-first (matches _search's
+    // default field-resolution order).
+    final fields = {
+      ...ftsDefined.map((r) => r.field),
+      ...vecDefined.map((r) => r.field),
+    };
+
+    for (final field in fields) {
+      final ftsRecord = ftsDefined.where((r) => r.field == field).firstOrNull;
+      final hasVec = vecDefined.any((r) => r.field == field);
+
+      final types = [if (ftsRecord != null) 'fts', if (hasVec) 'semantic'];
+
+      if (ftsRecord != null) {
+        final state = await ftsManager.stateFor(collection, field);
+        final statusName = state?.status.name ?? 'undefined';
+        ctx.out.writeln(
+          '$field\t[${types.join(",")}]\t$statusName'
+          '\tstopWords=${ftsRecord.stopWords}'
+          '\tk1=${ftsRecord.k1}\tb=${ftsRecord.b}',
+        );
+      } else {
+        // Vec-only field: config-registration presence only (see doc above).
+        ctx.out.writeln('$field\t[${types.join(",")}]\tregistered');
+      }
     }
     return true;
   }
 
   // ── create ─────────────────────────────────────────────────────────────────
 
-  /// Registers a new FTS index definition in the CLI config.
+  /// Registers a new FTS and/or vector index definition in the CLI config.
   ///
-  /// Accepts optional `--stopwords` (boolean), `--k1 <n>`, and `--b <n>` flags
-  /// to customise the BM25 parameters.
+  /// By default registers **both** an FTS index and a vector index for the
+  /// field — `--fts`/`--semantic` narrow this to just one type (see the
+  /// class-level doc comment). Accepts optional `--stopwords` (boolean),
+  /// `--k1 <n>`, and `--b <n>` flags to customise the BM25 parameters (FTS
+  /// side only).
+  ///
+  /// A vector index does not require `embeddingModel` to already be
+  /// configured — `search create` writes the config and prints a warning
+  /// rather than hard-failing, so the database stays lexical-only-searchable
+  /// until a model is added (WI-12 Q8's graceful-degradation requirement;
+  /// without this, a bare `search create` on a database with no
+  /// `embeddingModel` would make every subsequent CLI command throw once
+  /// `DatabaseOpener.open()` sees a non-empty, modelless `vecIndexes`).
   Future<bool> _create(
     CommandContext ctx,
     List<String> args,
@@ -505,12 +574,22 @@ final class SearchCommand extends CliCommand {
     final collection = args[0];
     final field = args[1];
 
+    // --fts/--semantic narrow registration to one index type; the no-flag
+    // default (and passing both explicitly) registers both (Q8).
+    final ftsFlag = flags['fts'] == true || flags['fts'] == 'true';
+    final semanticFlag =
+        flags['semantic'] == true || flags['semantic'] == 'true';
+    final registerFts = ftsFlag || !semanticFlag;
+    final registerVec = semanticFlag || !ftsFlag;
+
     final stopWords =
         flags['stopwords'] == true || flags['stopwords'] == 'true';
     final k1 = _parseDouble(flags['k1']) ?? 1.2;
     final b = _parseDouble(flags['b']) ?? 0.75;
 
-    // Validate BM25 params.
+    // Validate BM25 params (only meaningful when registering FTS, but
+    // validated unconditionally — an invalid --k1/--b with --semantic alone
+    // is still a user mistake worth catching rather than silently ignoring).
     if (k1 <= 0) {
       ctx.writeError('search create: --k1 must be a positive number.');
       return false;
@@ -520,17 +599,27 @@ final class SearchCommand extends CliCommand {
       return false;
     }
 
-    try {
-      ctx.config.addFtsIndex(
-        collection,
-        field,
-        stopWords: stopWords,
-        k1: k1,
-        b: b,
-      );
-    } on ArgumentError catch (e) {
-      ctx.writeError(e.message as String);
-      return false;
+    if (registerFts) {
+      try {
+        ctx.config.addFtsIndex(
+          collection,
+          field,
+          stopWords: stopWords,
+          k1: k1,
+          b: b,
+        );
+      } on ArgumentError catch (e) {
+        ctx.writeError(e.message as String);
+        return false;
+      }
+    }
+    if (registerVec) {
+      try {
+        ctx.config.addVecIndex(collection, field);
+      } on ArgumentError catch (e) {
+        ctx.writeError(e.message as String);
+        return false;
+      }
     }
 
     try {
@@ -540,18 +629,48 @@ final class SearchCommand extends CliCommand {
       return false;
     }
 
+    final typeLabel = [
+      if (registerFts) 'FTS',
+      if (registerVec) 'semantic',
+    ].join(' and ');
     ctx.out.writeln(
-      'FTS index on "$collection.$field" registered'
-      '${stopWords ? " (stop words enabled)" : ""}. '
+      '$typeLabel index on "$collection.$field" registered'
+      '${registerFts && stopWords ? " (stop words enabled)" : ""}. '
       'It will be built on the next search query.',
     );
+
+    // Graceful-degradation warning (Q8): a vecIndex makes embeddingModel
+    // mandatory at the *next* KmdbDatabase.open() (see DatabaseOpener.open's
+    // doc comment) — warn now so this isn't a surprise later, and so the
+    // database is never bricked: cli_runner.dart only passes vecIndexes:
+    // through when a model was actually constructed, so a registered vecIndex
+    // with no embeddingModel lies dormant rather than erroring.
+    if (registerVec && ctx.config.embeddingModel == null) {
+      ctx.out.writeln(
+        'Note: semantic index for \'$field\' registered, but no '
+        'embeddingModel is configured in local/config.json — search will '
+        'remain lexical-only until one is added.',
+      );
+    }
+
     return true;
   }
 
   // ── delete ─────────────────────────────────────────────────────────────────
 
-  /// Removes an FTS index definition from the config.
-  Future<bool> _delete(CommandContext ctx, List<String> args) async {
+  /// Removes an FTS and/or vector index definition from the config.
+  ///
+  /// By default removes **both** index types for the field —
+  /// `--fts`/`--semantic` narrow this to just one, leaving the other intact.
+  /// Only errors when *neither* the requested type(s) are actually
+  /// registered — this is a deliberate rework of the previous FTS-only hard
+  /// guard, which blocked deleting a vec-only field (one registered via
+  /// `--semantic` alone) even though nothing was wrong with the request.
+  Future<bool> _delete(
+    CommandContext ctx,
+    List<String> args,
+    Map<String, dynamic> flags,
+  ) async {
     if (args.length < 2) {
       ctx.writeError('search delete: collection name and field required.');
       return false;
@@ -559,22 +678,45 @@ final class SearchCommand extends CliCommand {
     final collection = args[0];
     final field = args[1];
 
-    final isConfigured = ctx.config
+    final ftsFlag = flags['fts'] == true || flags['fts'] == 'true';
+    final semanticFlag =
+        flags['semantic'] == true || flags['semantic'] == 'true';
+    final removeFts = ftsFlag || !semanticFlag;
+    final removeVec = semanticFlag || !ftsFlag;
+
+    final hasFts = ctx.config
         .ftsIndexesForCollection(collection)
         .any((r) => r.field == field);
+    final hasVec = ctx.config
+        .vecIndexesForCollection(collection)
+        .any((r) => r.field == field);
 
-    if (!isConfigured) {
+    final wantsFts = removeFts && hasFts;
+    final wantsVec = removeVec && hasVec;
+
+    if (!wantsFts && !wantsVec) {
       ctx.writeError(
-        "search delete: no FTS index on '$collection.$field' found in config.",
+        "search delete: no matching index on '$collection.$field' found in "
+        "config.",
       );
       return false;
     }
 
-    try {
-      ctx.config.removeFtsIndex(collection, field);
-    } on ArgumentError catch (e) {
-      ctx.writeError(e.message as String);
-      return false;
+    if (wantsFts) {
+      try {
+        ctx.config.removeFtsIndex(collection, field);
+      } on ArgumentError catch (e) {
+        ctx.writeError(e.message as String);
+        return false;
+      }
+    }
+    if (wantsVec) {
+      try {
+        ctx.config.removeVecIndex(collection, field);
+      } on ArgumentError catch (e) {
+        ctx.writeError(e.message as String);
+        return false;
+      }
     }
 
     try {
@@ -584,7 +726,13 @@ final class SearchCommand extends CliCommand {
       return false;
     }
 
-    ctx.out.writeln('FTS index on "$collection.$field" deleted from config.');
+    final typeLabel = [
+      if (wantsFts) 'FTS',
+      if (wantsVec) 'semantic',
+    ].join(' and ');
+    ctx.out.writeln(
+      '$typeLabel index on "$collection.$field" deleted from config.',
+    );
     return true;
   }
 

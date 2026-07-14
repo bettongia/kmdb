@@ -149,14 +149,17 @@ void main() {
       expect(err.toString(), contains("unknown --output value 'csv'"));
     });
 
-    test('collection with no FTS index configured prints error', () async {
-      final ok = await SearchCommand().execute(_ctx(db, out: out, err: err), [
-        'docs',
-        'hello',
-      ], {});
-      expect(ok, isFalse);
-      expect(err.toString(), contains('no FTS indexes configured'));
-    });
+    test(
+      'collection with no FTS or vector index configured prints error',
+      () async {
+        final ok = await SearchCommand().execute(_ctx(db, out: out, err: err), [
+          'docs',
+          'hello',
+        ], {});
+        expect(ok, isFalse);
+        expect(err.toString(), contains('no FTS or vector indexes configured'));
+      },
+    );
 
     test(
       'unknown subcommand is treated as collection name (falls through)',
@@ -168,7 +171,7 @@ void main() {
           'query',
         ], {});
         expect(ok, isFalse);
-        expect(err.toString(), contains('no FTS indexes configured'));
+        expect(err.toString(), contains('no FTS or vector indexes configured'));
       },
     );
 
@@ -188,9 +191,10 @@ void main() {
     });
 
     test('--candidates flag is accepted without error', () async {
-      // The --candidates flag is validated and accepted; the CLI uses lexical
-      // search regardless (semantic is a future TODO). We test that the flag
-      // does not cause an argument error.
+      // The --candidates flag is validated and accepted; this config has no
+      // vector index configured, so mode auto resolves to lexical-only
+      // (Q10's three-way rule) and --candidates is simply unused for this
+      // query. We test that the flag does not cause an argument error.
       final config = KmdbConfig.empty();
       config.addFtsIndex('docs', 'body');
       final ok = await SearchCommand().execute(
@@ -462,7 +466,7 @@ void main() {
         'docs',
       ], {});
       expect(ok, isTrue);
-      expect(out.toString(), contains('No FTS indexes'));
+      expect(out.toString(), contains('No FTS or vector indexes'));
     });
 
     test('lists configured index with its settings', () async {
@@ -601,7 +605,7 @@ void main() {
       expect(ok, isFalse);
       expect(
         err.toString(),
-        contains("no FTS index on 'docs.body' found in config"),
+        contains("no matching index on 'docs.body' found in config"),
       );
     });
 

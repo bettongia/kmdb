@@ -182,35 +182,102 @@ All text search functionality is surfaced under the `search` command:
 
 ```
 # Index management
-kmdb <db> search list   <collection> [--semantic]
-kmdb <db> search create <collection> <field> [--lazy] [--stopwords] [--semantic]
-kmdb <db> search info   <collection> <field> [--semantic]
-kmdb <db> search delete <collection> <field> [--semantic]
-kmdb <db> search build  <collection> <field> [--force] [--semantic]
+kmdb <db> search list   <collection>
+kmdb <db> search create <collection> <field> [--fts | --semantic]
+                                             [--stopwords] [--k1 <n>] [--b <n>]
+kmdb <db> search delete <collection> <field> [--fts | --semantic]
 
 # Query
 kmdb <db> search <collection> "<query terms>"
           [--fields <field1,field2,...>]
-          [--filter <json>]
-          [--select <field1,field2,...>]
           [--mode auto|lexical|semantic]   (default: auto)
-          [--candidates <n>]
-          [--limit <n>] [--offset <n>]
-          [--verbose]
-          [--output table|json]
+          [--candidates <n>]               (default: 100)
+          [--rrf-k <n>]                    (default: 60)
+          [--limit <n>] [--offset <n>]     (defaults: 10, 0)
+          [--explain]
+          [--output table|json|ids]        (default: table)
 ```
 
-The `--semantic` flag on management subcommands targets semantic (vector)
-indexes. Without it, the subcommand targets lexical (FTS) indexes.
-
-The `--stopwords` flag on `create` enables the Stopwords ISO `en` stop-word
-list for the new lexical index (Stage 3 of the preprocessing pipeline). It is
-silently ignored when `--semantic` is also present, since vector indexes have
-no stop-word filtering stage.
-
 The first positional argument after `search` is inspected: if it matches a known
-subcommand name (`list`, `create`, `info`, `delete`, `build`) the invocation is
-treated as index management; otherwise it is treated as a query.
+subcommand name (`list`, `create`, `delete`) the invocation is treated as index
+management; otherwise it is treated as a query. There are no `info` or `build`
+subcommands — an index is built lazily on its first query (see below).
+
+### Index management: `--fts` / `--semantic` are narrowing flags
+
+`search create <collection> <field>` registers **both** an FTS (lexical) index
+and a vector (semantic) index for the field by default — "turn on search for a
+field" is the mental model, rather than separate index-family commands.
+`--fts` and `--semantic` are *narrowing* flags:
+
+| Flags                | `create` / `delete` acts on          |
+| :------------------- | :----------------------------------- |
+| _(none)_             | both the FTS and the vector index    |
+| `--fts`              | the FTS (lexical) index only         |
+| `--semantic`         | the vector (semantic) index only     |
+| `--fts --semantic`   | both (equivalent to the no-flag default) |
+
+`search list <collection>` takes no narrowing flags — it always reports every
+FTS and vector registration for the collection, one row per field, annotated
+with `[fts]`, `[semantic]`, or `[fts,semantic]`. The FTS side shows real build
+status (`undefined` / `building` / `current` / `stale` / `syncing`); the vector
+side shows only registration presence (`registered`), because the embedding
+model may not be loaded during a plain `list`.
+
+`search delete` errors only when *none* of the requested index type(s) are
+actually registered for the field; deleting a field that has just one of the two
+index types (registered via `--fts` or `--semantic` alone) succeeds.
+
+### Vector index without an embedding model (graceful degradation)
+
+A vector index requires `embeddingModel` to be configured in `local/config.json`
+(for example `{ "type": "onnx", "modelId": "bge-small-en-v1.5" }`). `search
+create` does **not** hard-fail when no model is configured: it writes the
+registration and prints a note that search stays lexical-only until a model is
+added. The registration lies dormant — the CLI only activates a `vecIndex` once
+a model has actually been constructed — so a bare `search create` never bricks
+the database.
+
+### Query flags
+
+- `--fields <f1,f2,...>` — comma-separated field list to search. Defaults to the
+  union of the collection's FTS- and vector-indexed fields.
+- `--mode auto|lexical|semantic` — search strategy (default `auto`). `auto`
+  resolves to lexical when only an FTS index is available, semantic when only a
+  vector index is available, and hybrid when both are present. `--mode semantic`
+  additionally requires `embeddingModel` to be configured and errors if it is
+  not; `--mode auto` falls back to lexical when no model/vector index is
+  available.
+- `--candidates <n>` — maximum candidate documents for semantic/hybrid vector
+  scoring (default 100). Higher values improve recall at the cost of speed.
+- `--rrf-k <n>` — Reciprocal Rank Fusion smoothing constant (default 60, must be
+  ≥ 1). Only affects hybrid results; higher values reduce the advantage of very
+  top-ranked documents.
+- `--limit <n>` — maximum hits to return (default 10).
+- `--offset <n>` — number of top hits to skip (default 0).
+- `--explain` — print the resolved search plan (mode, searched fields, skipped
+  fields, and total match count) ahead of the results.
+- `--output table|json|ids` — output format (default `table`). `ids` prints one
+  document key per line; `json` includes per-hit scores and `rrfK` (hybrid only).
+
+The `--stopwords` flag on `create` enables the Stopwords ISO `en` stop-word list
+for the new lexical index (Stage 3 of the preprocessing pipeline). Together with
+`--k1 <n>` and `--b <n>` (BM25 parameters, defaults 1.2 and 0.75) it applies to
+the FTS side only; these flags are accepted but have no effect on a
+semantic-only registration.
+
+> **Flag ordering.** The generic flag parser treats `--flag <positional>` as
+> consuming the positional as the flag's value, so the bare flags
+> (`--fts`, `--semantic`, `--stopwords`) must be placed *after* the positional
+> arguments on the command line.
+
+### Resolved mode label
+
+`search` reports the mode it actually ran under. For an explicit
+`--mode lexical`/`--mode semantic` it shows that mode directly. For `--mode auto`
+the label is derived deterministically from the collection's configured indexes,
+not from a runtime heuristic: both an FTS and a vector index ⇒ `hybrid`; FTS
+only ⇒ `lexical`; vector only ⇒ `semantic`.
 
 ## Sync Behaviour
 
