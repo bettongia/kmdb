@@ -1013,9 +1013,47 @@ scope, cross-phase consistency). Open the PR once that final pass signs off.
 
 **Final step — whole-PR QA sign-off and pre-commit:**
 
-- [ ] Run `make coverage` on the full branch diff — confirm >95% on all new
+- [x] Run `make coverage` on the full branch diff — confirm >95% on all new
       files, aggregated across both phases (per-phase coverage checks above
-      only see one phase's diff at a time).
+      only see one phase's diff at a time). **Result: 94.9% aggregate**
+      (10952/11535 lines, `site/coverage/lcov.info`, whole-workspace). Per
+      new/changed file: `database_opener.dart` 95.8%, `repl_config.dart`
+      96.2%, `search_command.dart` 96.2%, `kmdb_config.dart` (in `kmdb`)
+      untestable via this tool — see gap note below, `cli_runner.dart` 88.2%,
+      `reindex_command.dart` 85.7% (2 pre-existing, unrelated uncovered lines
+      — a trivial `usage` getter and a defensive catch — not part of this
+      plan's diff).
+      - **Cross-package coverage tooling gap found (pre-existing, not
+        introduced by this plan):** `packages/kmdb/lib/src/config/
+        kmdb_config.dart` (including this plan's new `vecIndexes` surface,
+        ~130 new lines) is **entirely absent** from `site/coverage/lcov.info`
+        — confirmed via direct `grep` — despite being thoroughly exercised by
+        40+ passing tests in `packages/kmdb_cli/test/config/
+        kmdb_config_test.dart`. `dart run coverage:test_with_coverage` scopes
+        coverage collection to the package under test only; a file owned by
+        `kmdb` but tested exclusively from `kmdb_cli`'s suite is invisible to
+        *both* packages' coverage reports. This understates the true 94.9%
+        figure (untested code would show as 0-hit lines and lower the ratio;
+        instead this file is skipped entirely, neither helping nor hurting
+        the ratio) but means `KmdbConfig.vecIndexes`'s real coverage cannot be
+        confirmed via `make coverage` — only via the passing test count.
+        Flagged for `kmdb-qa`/coordinator; a tooling fix (if wanted) is out of
+        scope for this plan.
+      - **`cli_runner_test.dart`'s subprocess tests contribute zero coverage
+        credit** (its `run()` helper deliberately clears `DART_VM_OPTIONS` on
+        the child process to avoid a 30-second VM-service hang, which also
+        strips the coverage-instrumentation flags). Discovered this while
+        investigating why the new Q6/Q9 gating tests showed 0 hits despite
+        passing — added in-process equivalents to
+        `cli_runner_inprocess_test.dart` (which does count) to close the gap;
+        see the "coverage follow-up tests" commit.
+      - `make coverage` was flaky in this environment across repeated runs —
+        `kmdb_extractor_pdf`'s test suite intermittently segfaults inside
+        PDFium's native `CPDF_ColorSpace`/`CPDF_ContentParser` code during
+        coverage-instrumented runs (not on plain `dart test`), unrelated to
+        this plan's `kmdb_cli`/`kmdb` changes. Retrying resolved it each time;
+        the reported 94.9% is from a clean, fully-successful run on the final
+        committed state.
 - [ ] Hand off to the **`kmdb-qa` agent** for a **final whole-PR sign-off** —
       cross-phase concerns the per-phase reviews couldn't see in isolation
       (aggregate coverage, full branch-vs-`main` diff scope, cross-phase
