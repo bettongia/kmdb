@@ -484,6 +484,36 @@ void main() {
       expect(text, contains('k1=1.5'));
       expect(text, contains('b=0.6'));
     });
+
+    test('lists a vec-only field as "registered" (config-registration presence '
+        'only, no build-state lookup — Q6/Q8)', () async {
+      final config = KmdbConfig.empty();
+      config.addVecIndex('docs', 'summary');
+      final ok = await SearchCommand().execute(
+        _ctx(db, config: config, out: out, err: err),
+        ['list', 'docs'],
+        {},
+      );
+      expect(ok, isTrue);
+      final text = out.toString();
+      expect(text, contains('summary'));
+      expect(text, contains('[semantic]'));
+      expect(text, contains('registered'));
+    });
+
+    test('lists a field with both FTS and vector indexes labelled '
+        '[fts,semantic]', () async {
+      final config = KmdbConfig.empty();
+      config.addFtsIndex('docs', 'body');
+      config.addVecIndex('docs', 'body');
+      final ok = await SearchCommand().execute(
+        _ctx(db, config: config, out: out, err: err),
+        ['list', 'docs'],
+        {},
+      );
+      expect(ok, isTrue);
+      expect(out.toString(), contains('[fts,semantic]'));
+    });
   });
 
   // ── search create ─────────────────────────────────────────────────────────────
@@ -616,6 +646,258 @@ void main() {
 
       config.removeFtsIndex('docs', 'body');
       expect(config.ftsIndexesForCollection('docs'), isEmpty);
+    });
+  });
+
+  // ── --fts/--semantic narrowing flags (WI-12 Phase B, Q8) ───────────────────
+
+  group('SearchCommand — search create --fts/--semantic narrowing', () {
+    late KmdbDatabase db;
+    late StringBuffer out;
+    late StringBuffer err;
+    late io.Directory tmpDir;
+
+    setUp(() async {
+      db = await _openStore();
+      out = StringBuffer();
+      err = StringBuffer();
+      tmpDir = io.Directory.systemTemp.createTempSync('kmdb_sc_narrow_');
+    });
+    tearDown(() async {
+      await db.close();
+      tmpDir.deleteSync(recursive: true);
+    });
+
+    // These tests exercise the command's real config.save() path (line
+    // coverage for the addFtsIndex/addVecIndex + save flow), so — unlike
+    // most other tests in this file — they need a real disk-backed
+    // KmdbConfig rather than KmdbConfig.empty() (which throws
+    // UnsupportedError from save(), per its own doc comment).
+    Future<KmdbConfig> freshConfig() => KmdbConfig.forDatabase(tmpDir.path);
+
+    test('no flags registers both an FTS and a vector index', () async {
+      final config = await freshConfig();
+      final ok = await SearchCommand().execute(
+        _ctx(db, config: config, out: out, err: err),
+        ['create', 'docs', 'body'],
+        {},
+      );
+      expect(ok, isTrue, reason: err.toString());
+      expect(config.ftsIndexesForCollection('docs'), hasLength(1));
+      expect(config.vecIndexesForCollection('docs'), hasLength(1));
+      expect(out.toString(), contains('FTS and semantic'));
+    });
+
+    test('--fts alone registers only the FTS index', () async {
+      final config = await freshConfig();
+      final ok = await SearchCommand().execute(
+        _ctx(db, config: config, out: out, err: err),
+        ['create', 'docs', 'body'],
+        {'fts': true},
+      );
+      expect(ok, isTrue, reason: err.toString());
+      expect(config.ftsIndexesForCollection('docs'), hasLength(1));
+      expect(config.vecIndexesForCollection('docs'), isEmpty);
+      expect(out.toString(), contains('FTS index'));
+      expect(out.toString(), isNot(contains('semantic')));
+    });
+
+    test('--semantic alone registers only the vector index', () async {
+      final config = await freshConfig();
+      final ok = await SearchCommand().execute(
+        _ctx(db, config: config, out: out, err: err),
+        ['create', 'docs', 'body'],
+        {'semantic': true},
+      );
+      expect(ok, isTrue, reason: err.toString());
+      expect(config.ftsIndexesForCollection('docs'), isEmpty);
+      expect(config.vecIndexesForCollection('docs'), hasLength(1));
+      expect(out.toString(), contains('semantic index'));
+    });
+
+    test('--fts --semantic (both explicit) registers both, same as the '
+        'no-flag default', () async {
+      final config = await freshConfig();
+      final ok = await SearchCommand().execute(
+        _ctx(db, config: config, out: out, err: err),
+        ['create', 'docs', 'body'],
+        {'fts': true, 'semantic': true},
+      );
+      expect(ok, isTrue, reason: err.toString());
+      expect(config.ftsIndexesForCollection('docs'), hasLength(1));
+      expect(config.vecIndexesForCollection('docs'), hasLength(1));
+    });
+
+    test('bare "true"-string flag values (generic parser form) are '
+        'honoured the same as boolean true', () async {
+      final config = await freshConfig();
+      final ok = await SearchCommand().execute(
+        _ctx(db, config: config, out: out, err: err),
+        ['create', 'docs', 'body'],
+        {'semantic': 'true'},
+      );
+      expect(ok, isTrue, reason: err.toString());
+      expect(config.ftsIndexesForCollection('docs'), isEmpty);
+      expect(config.vecIndexesForCollection('docs'), hasLength(1));
+    });
+
+    test(
+      'duplicate FTS registration via the command returns an error',
+      () async {
+        final config = await freshConfig();
+        config.addFtsIndex('docs', 'body');
+        final ok = await SearchCommand().execute(
+          _ctx(db, config: config, out: out, err: err),
+          ['create', 'docs', 'body'],
+          {'fts': true},
+        );
+        expect(ok, isFalse);
+        expect(err.toString(), contains('docs.body'));
+      },
+    );
+
+    test('duplicate vector-index registration via the command returns an '
+        'error', () async {
+      final config = await freshConfig();
+      config.addVecIndex('docs', 'body');
+      final ok = await SearchCommand().execute(
+        _ctx(db, config: config, out: out, err: err),
+        ['create', 'docs', 'body'],
+        {'semantic': true},
+      );
+      expect(ok, isFalse);
+      expect(err.toString(), contains('docs.body'));
+    });
+
+    test('--semantic with no embeddingModel configured prints a '
+        'graceful-degradation warning rather than failing (Q8)', () async {
+      final config = await freshConfig();
+      final ok = await SearchCommand().execute(
+        _ctx(db, config: config, out: out, err: err),
+        ['create', 'docs', 'body'],
+        {'semantic': true},
+      );
+      expect(ok, isTrue, reason: err.toString());
+      expect(
+        out.toString(),
+        contains('no embeddingModel is configured in local/config.json'),
+      );
+      expect(
+        out.toString(),
+        contains('remain lexical-only until one is added'),
+      );
+    });
+
+    test('--semantic with embeddingModel already configured does not print '
+        'the graceful-degradation warning', () async {
+      final config = await freshConfig();
+      config.embeddingModel = (type: 'onnx', modelId: 'bge-small-en-v1.5');
+      final ok = await SearchCommand().execute(
+        _ctx(db, config: config, out: out, err: err),
+        ['create', 'docs', 'body'],
+        {'semantic': true},
+      );
+      expect(ok, isTrue, reason: err.toString());
+      expect(out.toString(), isNot(contains('remain lexical-only')));
+    });
+  });
+
+  group('SearchCommand — search delete --fts/--semantic narrowing', () {
+    late KmdbDatabase db;
+    late StringBuffer out;
+    late StringBuffer err;
+    late io.Directory tmpDir;
+
+    setUp(() async {
+      db = await _openStore();
+      out = StringBuffer();
+      err = StringBuffer();
+      tmpDir = io.Directory.systemTemp.createTempSync('kmdb_sc_narrow_del_');
+    });
+    tearDown(() async {
+      await db.close();
+      tmpDir.deleteSync(recursive: true);
+    });
+
+    // See the `search create` narrowing group above for why a real
+    // disk-backed KmdbConfig (not KmdbConfig.empty()) is needed here.
+    Future<KmdbConfig> freshConfig() => KmdbConfig.forDatabase(tmpDir.path);
+
+    test('no flags removes both FTS and vector registrations', () async {
+      final config = await freshConfig();
+      config.addFtsIndex('docs', 'body');
+      config.addVecIndex('docs', 'body');
+
+      final ok = await SearchCommand().execute(
+        _ctx(db, config: config, out: out, err: err),
+        ['delete', 'docs', 'body'],
+        {},
+      );
+      expect(ok, isTrue, reason: err.toString());
+      expect(config.ftsIndexesForCollection('docs'), isEmpty);
+      expect(config.vecIndexesForCollection('docs'), isEmpty);
+      expect(out.toString(), contains('FTS and semantic'));
+    });
+
+    test('--fts alone removes only the FTS registration, leaving the vector '
+        'index intact', () async {
+      final config = await freshConfig();
+      config.addFtsIndex('docs', 'body');
+      config.addVecIndex('docs', 'body');
+
+      final ok = await SearchCommand().execute(
+        _ctx(db, config: config, out: out, err: err),
+        ['delete', 'docs', 'body'],
+        {'fts': true},
+      );
+      expect(ok, isTrue, reason: err.toString());
+      expect(config.ftsIndexesForCollection('docs'), isEmpty);
+      expect(config.vecIndexesForCollection('docs'), hasLength(1));
+    });
+
+    test('--semantic alone removes only the vector registration, leaving the '
+        'FTS index intact', () async {
+      final config = await freshConfig();
+      config.addFtsIndex('docs', 'body');
+      config.addVecIndex('docs', 'body');
+
+      final ok = await SearchCommand().execute(
+        _ctx(db, config: config, out: out, err: err),
+        ['delete', 'docs', 'body'],
+        {'semantic': true},
+      );
+      expect(ok, isTrue, reason: err.toString());
+      expect(config.ftsIndexesForCollection('docs'), hasLength(1));
+      expect(config.vecIndexesForCollection('docs'), isEmpty);
+    });
+
+    test('deleting a vec-only field with no flags succeeds (rework of the old '
+        'FTS-only hard guard that used to block this)', () async {
+      final config = await freshConfig();
+      config.addVecIndex('docs', 'body');
+
+      final ok = await SearchCommand().execute(
+        _ctx(db, config: config, out: out, err: err),
+        ['delete', 'docs', 'body'],
+        {},
+      );
+      expect(ok, isTrue, reason: err.toString());
+      expect(config.vecIndexesForCollection('docs'), isEmpty);
+      expect(out.toString(), contains('semantic index'));
+    });
+
+    test('--fts on a vec-only field errors (the requested type is not '
+        'registered)', () async {
+      final config = KmdbConfig.empty();
+      config.addVecIndex('docs', 'body');
+
+      final ok = await SearchCommand().execute(
+        _ctx(db, config: config, out: out, err: err),
+        ['delete', 'docs', 'body'],
+        {'fts': true},
+      );
+      expect(ok, isFalse);
+      expect(config.vecIndexesForCollection('docs'), hasLength(1));
     });
   });
 
