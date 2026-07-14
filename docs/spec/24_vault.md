@@ -487,6 +487,34 @@ adheres to the full stored manifest schema.
 
 ## CLI
 
+### Production wiring
+
+`kmdb_cli`'s `DatabaseOpener.open()` — the entry point every CLI command opens
+its database through — constructs a `VaultStore` **unconditionally** for every
+database it opens, and passes `vaultSearch: VaultSearchConfig(...)` with
+`HtmlTextExtractor`, `MarkdownTextExtractor`, and `PdfTextExtractor` registered
+alongside the `PlainTextExtractor` `VaultSearchConfig` always auto-prepends.
+This means every vault-touching CLI command (`vault get`, `vault search`,
+`vault status`, `vault reindex`, `insert --import`, `update --vault`,
+`export`'s vault leg, `backup`) works against every database opened by the
+production `kmdb` binary — not just databases a caller explicitly opted a
+`VaultStore` into — and lexical vault content search indexes plain-text,
+HTML, Markdown, and PDF blobs by default with zero configuration. Semantic
+vault search activates automatically once an `EmbeddingModel` is supplied to
+`KmdbDatabase.open()` — `VaultSearchConfig` reuses the database-level model
+rather than carrying its own (see this file's "Vault Search Integration"
+section). `kmdb_cli` does not yet construct an `EmbeddingModel` itself; that
+CLI-side wiring, along with a `vecIndexes` configuration surface for
+document-field semantic search, is tracked separately (see §22's
+model-acquisition flow and `docs/plans/plan_0_06_wi12_vault_search_cli.md`).
+
+`kmdb_extractor_html` and `kmdb_extractor_markdown` add no native-asset
+weight (pure Dart); `kmdb_extractor_pdf` bundles a third native library
+(PDFium) alongside ONNX Runtime and Zstd in every `dart build cli` output —
+see that package's README and `packages/kmdb_cli/README.md`'s build
+instructions for the `dart build cli` bundle workflow (`dart compile exe`
+does not support native-asset build hooks).
+
 ### `insert` and `update`
 
 Both commands gain an `--import` flag accepting a path to a Zstandard package.

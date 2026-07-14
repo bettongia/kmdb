@@ -16,6 +16,9 @@ import 'dart:io' as io;
 
 import 'package:kmdb/kmdb.dart';
 import 'package:kmdb/kmdb_config.dart';
+import 'package:kmdb_extractor_html/kmdb_extractor_html.dart';
+import 'package:kmdb_extractor_markdown/kmdb_extractor_markdown.dart';
+import 'package:kmdb_extractor_pdf/kmdb_extractor_pdf.dart';
 
 /// Opens a [KmdbDatabase] from a filesystem path.
 ///
@@ -24,6 +27,21 @@ import 'package:kmdb/kmdb_config.dart';
 /// so that all write pipeline validation and augmentation (schema enforcement,
 /// secondary index maintenance, FTS updates, vault ref counts) run for every
 /// CLI write.
+///
+/// ## Vault wiring
+///
+/// A [VaultStore] is constructed unconditionally for every database this
+/// opens — vault ref counting, GC, and content commands (`vault get`,
+/// `insert --import`, `update --vault`, `export`, `backup`, ...) are
+/// production-ready from the moment a database is opened, not opt-in. Lexical
+/// vault content search is enabled by default via `vaultSearch:
+/// VaultSearchConfig()`, with [HtmlTextExtractor], [MarkdownTextExtractor],
+/// and [PdfTextExtractor] registered alongside the extractor `kmdb` always
+/// auto-prepends (`PlainTextExtractor`) — so plain-text, HTML, Markdown, and
+/// PDF vault blobs are all indexed out of the box. Semantic vault search
+/// activates automatically once an [EmbeddingModel] is supplied to
+/// [KmdbDatabase.open] (see the CLI's model-construction wiring in
+/// `cli_runner.dart`); it is not configured here.
 ///
 /// ## Two-phase open
 ///
@@ -114,6 +132,14 @@ abstract final class DatabaseOpener {
         )
         .toList();
 
+    // Construct a VaultStore unconditionally so every vault-touching CLI
+    // command (`vault get`, `insert --import`, `update --vault`, `export`,
+    // `backup`, `vault search`/`status`/`reindex`) works against every
+    // CLI-opened database, not just databases a caller opted into vault
+    // support for. This mirrors the always-on secondary-index/FTS wiring
+    // above. See the plan's Q5 decision for the full rationale.
+    final vaultStore = VaultStore(dbDir: dbPath, adapter: adapter);
+
     final db = await KmdbDatabase.open(
       path: dbPath,
       adapter: adapter,
@@ -122,6 +148,18 @@ abstract final class DatabaseOpener {
       ftsIndexes: ftsDefinitions,
       // Schemas are loaded automatically from $meta — no caller parameter needed.
       encryptionConfig: encryptionConfig,
+      vaultStore: vaultStore,
+      // Plain-text extraction is always auto-prepended by VaultSearchConfig
+      // itself (effectiveExtractors), so it does not need to be listed here.
+      // Semantic vault indexing activates automatically once an
+      // EmbeddingModel is supplied to KmdbDatabase.open (wired by Phase B).
+      vaultSearch: VaultSearchConfig(
+        extractors: [
+          HtmlTextExtractor(),
+          MarkdownTextExtractor(),
+          PdfTextExtractor(),
+        ],
+      ),
     );
 
     return (db, created);

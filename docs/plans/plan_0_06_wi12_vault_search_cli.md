@@ -1,6 +1,6 @@
 # WI-12: Vault search in `kmdb_cli`
 
-**Status**: Investigated
+**Status**: Implementing (Phase A committed; Phase B in progress)
 
 **PR link**: —
 
@@ -682,58 +682,115 @@ scope, cross-phase consistency). Open the PR once that final pass signs off.
 
 ### Phase A — wire vault into the CLI (all vault commands, lexical search)
 
-- [ ] In `database_opener.dart`, construct `VaultStore(dbDir: dbPath, adapter:
+- [x] In `database_opener.dart`, construct `VaultStore(dbDir: dbPath, adapter:
       adapter)` unconditionally and pass `vaultStore:` to
       `KmdbDatabase.open()`.
-- [ ] Same call: pass `vaultSearch: VaultSearchConfig(extractors:
+- [x] Same call: pass `vaultSearch: VaultSearchConfig(extractors:
       [HtmlTextExtractor(), MarkdownTextExtractor(), PdfTextExtractor()])`
       (per Q1, superseded decision — `PlainTextExtractor` is auto-prepended
       by `VaultSearchConfig` itself, so it does not need to be listed
       explicitly).
-- [ ] Add `kmdb_extractor_html`, `kmdb_extractor_markdown`, and
+- [x] Add `kmdb_extractor_html`, `kmdb_extractor_markdown`, and
       `kmdb_extractor_pdf` as direct dependencies of
-      `packages/kmdb_cli/pubspec.yaml`.
-- [ ] Verify `dart build cli` correctly bundles all three native libraries
+      `packages/kmdb_cli/pubspec.yaml`. (Already present in the root
+      workspace member list; `dart pub get` resolved cleanly and `dart
+      analyze` is clean.)
+- [x] Verify `dart build cli` correctly bundles all three native libraries
       together (`libonnxruntime`, `libzstd`, PDFium) once `kmdb_extractor_pdf`
       (→ `betto_pdfium`) is added — the bundling *mechanism* was verified
       generically for native-asset build hooks with two libraries during this
       plan's grounding investigation, but three together were not empirically
       tested. Confirm `bundle/lib/` contains all three dylibs and the compiled
-      binary still runs from an arbitrary working directory.
-- [ ] Confirm (add a test if not already covered) that constructing a
+      binary still runs from an arbitrary working directory. Verified
+      (macOS arm64): `dart build cli` reports "Copying 3 build assets" and
+      `bundle/lib/` contains `libonnxruntime.1.22.0.dylib`, `libpdfium.dylib`,
+      and `libzstd.dylib`; the compiled `bundle/bin/kmdb` runs correctly from
+      a scratch temp dir and from `/`, including `vault status` (exercises
+      the vault code path with all three libraries bundled). Build artifacts
+      cleaned up after the smoke check (not committed).
+- [x] Confirm (add a test if not already covered) that constructing a
       `VaultStore` and running `VaultRecovery.recover()` /
       `VaultGc` construction is cheap when no `vault/` directory exists yet on
       disk — this now runs on **every** CLI open, not just vault commands
-      (reviewer's risk note).
-- [ ] Fix `packages/kmdb_cli/README.md`'s build instructions: replace
+      (reviewer's risk note). Confirmed by reading
+      `StorageAdapterNative.listFiles`/`listFilesRecursive` (both short-circuit
+      on a single `dir.exists()` check when the target directory is absent —
+      no directory walk), and added a `Stopwatch`-based regression-guard test
+      in `database_opener_test.dart` (open() on a brand-new database stays
+      well under a generous ceiling).
+- [x] Fix `packages/kmdb_cli/README.md`'s build instructions: replace
       `dart compile exe packages/kmdb_cli/bin/kmdb.dart -o kmdb` with the
       `dart build cli` bundle workflow, and document the "ship the whole
       bundle directory, not just the binary" constraint.
-- [ ] Add a `DatabaseOpener`-level integration test using the **production**
+- [x] Add a `DatabaseOpener`-level integration test using the **production**
       open path (not a `_TestVaultStore` double) that exercises at least one
       vault write command (e.g. `insert --import` or `update --vault`) and
       confirms it no longer fails with "Vault is not available for this
       database." This is the test the reviewer flagged as missing — it is
-      what would have caught the original gap.
-- [ ] Add/update CLI integration tests exercising `vault search`, `vault
+      what would have caught the original gap. Added
+      `packages/kmdb_cli/test/database_opener_test.dart`, which opens every
+      database via `DatabaseOpener.open()` against a real, on-disk
+      `StorageAdapterNative` directory (no test double). Note: linking a
+      vault blob to a document turned out to work fine through the *public*
+      `KmdbCollection.insert`/`put` API with a `kmdb-vault://` field
+      (`KmdbDatabase.open` registers `VaultRefInterceptor` as a write
+      augmentor whenever `vaultStore` is supplied) — no need to reach for
+      `KvStoreImpl.writeBatchInternal` (an `@internal`, same-package-only
+      member that would trip `invalid_use_of_internal_member` from
+      `kmdb_cli`), despite that being the pattern the
+      `kmdb_extractor_pdf`/`html`/`markdown` integration tests deliberately
+      avoided using for a different, narrower reason (their tests stop at
+      `vaultIndexingStatus` rather than also verifying search results).
+- [x] Add/update CLI integration tests exercising `vault search`, `vault
       status`, `vault reindex` against a real (in-process) `KmdbDatabase`
       with a populated vault, confirming they no longer fail with "Vault
       search is not configured." Cover: empty vault, lexical hits over
       plain-text/HTML/Markdown/PDF blobs (one fixture per extractor), stub-blob
-      warning path (`status.stub > 0`).
-- [ ] Update `docs/spec/24_vault.md` (confirm with `kmdb-architect` if a
+      warning path (`status.stub > 0`). All added to
+      `database_opener_test.dart`. PDF fixture note: `kmdb_extractor_pdf`'s
+      `01_basic.pdf` (text: "hello") was tried first and rejected — "hello"
+      is present in `betto_lexical`'s English stop-word list and is therefore
+      never indexed; switched to `multi_column.pdf` (Greek-letter placeholder
+      text, e.g. "gamma") instead. Fixture copied to
+      `packages/kmdb_cli/test/fixtures/` with a provenance `README.md`.
+- [x] Update `docs/spec/24_vault.md` (confirm with `kmdb-architect` if a
       different file is more authoritative for the CLI wiring surface) to
       note that `kmdb_cli` now constructs a `VaultStore` and configures vault
-      search by default for every database it opens.
+      search by default for every database it opens. Added a "Production
+      wiring" subsection under `## CLI`. Note: this session had no
+      Agent/Task tool available to consult `kmdb-architect` directly (see
+      memory `feedback_no_agent_tool.md`) — `24_vault.md` was judged the
+      right home since it already has a dedicated `## CLI` section; flagging
+      for `kmdb-qa`/coordinator review in case a different file is more
+      authoritative.
 
 **Phase A checkpoint:**
 
-- [ ] Run `make pre_commit` on Phase A's diff — format, analyze,
-      license_check, tests all green.
-- [ ] Hand off to `kmdb-qa` for sign-off on **Phase A's diff specifically**
+- [x] Run `make pre_commit` on Phase A's diff — format, analyze,
+      license_check, tests all green. Ran clean (2369 `kmdb` package tests
+      passed). Also ran the full `kmdb_cli` suite directly (not in
+      `pre_commit_test`'s scope) — 1058 tests passed, including the 7 new
+      `database_opener_test.dart` tests. Re-ran after the `kmdb-qa` wording
+      fix below (one transient `sync_engine_test.dart` flake seen once under
+      full-suite parallel execution, confirmed passing in isolation and on a
+      clean re-run — not a regression from this plan's changes) — final run
+      clean.
+- [x] Hand off to `kmdb-qa` for sign-off on **Phase A's diff specifically**
       (not the whole plan). Resolve every blocking item before proceeding to
-      Phase B.
-- [ ] Commit Phase A on the plan's branch once sign-off is received.
+      Phase B. **Sign-off received 2026-07-14** — this session had no
+      Agent/Task tool to invoke `kmdb-qa` directly (see
+      `.claude/agent-memory/kmdb-plan-implement/feedback_no_agent_tool.md`),
+      so the coordinator ran `kmdb-qa` independently against Phase A's diff
+      scoped to the merge-base with `main` (`74e19f5`). Result: clean
+      sign-off — all Phase A checklist items implemented correctly, `dart
+      analyze` clean, format clean, 1058/1058 tests pass (1 skipped), doc
+      comments and README quality good. One non-blocking nit was found and
+      fixed directly by the coordinator: `docs/spec/24_vault.md`'s
+      "Production wiring" subsection overstated that Phase B's
+      model-acquisition/`vecIndexes` CLI wiring already existed; reworded to
+      accurately describe only what Phase A ships and point at this plan for
+      the Phase B tracking.
+- [x] Commit Phase A on the plan's branch once sign-off is received.
 
 ### Phase B — semantic/hybrid search (vault + document-field, real)
 

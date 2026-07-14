@@ -5,12 +5,25 @@ for Dart and Flutter.
 
 ## Installation
 
-From the workspace root:
+`kmdb_cli` (via `kmdb`) depends on packages with native-asset build hooks
+(`betto_onnxrt`, `betto_zstd`, `betto_pdfium`), so `dart compile exe` **does
+not work** — it refuses outright with `'dart compile' does not support build
+hooks, use 'dart build' instead.` Use `dart build cli` instead, from inside
+`packages/kmdb_cli`:
 
 ```bash
+cd packages/kmdb_cli
 dart pub get
-dart compile exe packages/kmdb_cli/bin/kmdb.dart -o kmdb
+dart build cli
 ```
+
+This produces `build/cli/<platform>/bundle/bin/kmdb` plus a sibling
+`bundle/lib/` directory containing the native libraries (`libonnxruntime`,
+`libzstd`, `libpdfium`, per-platform extensions). **The unit of distribution
+is the whole `bundle/` directory, not the lone binary** — copying only
+`bundle/bin/kmdb` away from its sibling `bundle/lib/` breaks native library
+loading (`dlopen` failure) at runtime. Copy or archive `bundle/` as a whole
+when distributing the CLI.
 
 Or run directly without compiling:
 
