@@ -503,10 +503,13 @@ HTML, Markdown, and PDF blobs by default with zero configuration. Semantic
 vault search activates automatically once an `EmbeddingModel` is supplied to
 `KmdbDatabase.open()` — `VaultSearchConfig` reuses the database-level model
 rather than carrying its own (see this file's "Vault Search Integration"
-section). `kmdb_cli` does not yet construct an `EmbeddingModel` itself; that
-CLI-side wiring, along with a `vecIndexes` configuration surface for
-document-field semantic search, is tracked separately (see §22's
-model-acquisition flow and `docs/plans/plan_0_06_wi12_vault_search_cli.md`).
+section). `kmdb_cli` constructs that model itself: `cli_runner.dart`'s
+`_resolveEmbeddingModel` resolves `local/config.json`'s `embeddingModel` into a
+real `OnnxEmbeddingModel`, gated on the dispatched command actually needing it,
+and a `KmdbConfig.vecIndexes` surface registers document-field vector indexes
+alongside `ftsIndexes`. See §22's "`kmdb_cli` Integration (WI-12 Phase B)"
+section for the full model-acquisition flow, gating rules, and `vecIndexes`
+configuration surface.
 
 `kmdb_extractor_html` and `kmdb_extractor_markdown` add no native-asset
 weight (pure Dart); `kmdb_extractor_pdf` bundles a third native library
