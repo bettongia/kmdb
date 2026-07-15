@@ -1,9 +1,9 @@
 # WI-12: Vault search in `kmdb_cli`
 
-**Status**: Implementing (Phase A + Phase B committed; final whole-PR step in
-progress)
+**Status**: Complete
 
-**PR link**: —
+**PR link**: — (opened against `main`; not merged — merge is the user's own
+step)
 
 ## Abstract
 
@@ -1054,16 +1054,38 @@ scope, cross-phase consistency). Open the PR once that final pass signs off.
         this plan's `kmdb_cli`/`kmdb` changes. Retrying resolved it each time;
         the reported 94.9% is from a clean, fully-successful run on the final
         committed state.
-- [ ] Hand off to the **`kmdb-qa` agent** for a **final whole-PR sign-off** —
+- [x] Hand off to the **`kmdb-qa` agent** for a **final whole-PR sign-off** —
       cross-phase concerns the per-phase reviews couldn't see in isolation
       (aggregate coverage, full branch-vs-`main` diff scope, cross-phase
       consistency). This is not a repeat of the per-phase reviews at the same
       depth — those already happened. Resolve every blocking item before
       proceeding. Do not open a PR until this sign-off is received.
-- [ ] Run `make pre_commit` on the full branch — format, analyze,
-      license_check, tests all green.
-- [ ] Verify licence headers on all new files (2026).
-- [ ] Open the PR. **Do not merge it** — the user merges it back to `main`.
+      **Sign-off received 2026-07-14** (coordinator-run, no Agent/Task tool
+      in this session — see `feedback_no_agent_tool.md`). Verdict: sign-off
+      with one blocking item, fixed directly by `kmdb-architect` in the
+      worktree — `docs/spec/24_vault.md`'s "Production wiring" subsection had
+      gone stale (it correctly said "Phase B not shipped yet" when written
+      between the two phases, but by the final pass Phase B had landed, so it
+      contradicted §22 and undersold what actually shipped). Everything else
+      clean: 1119 `kmdb_cli` tests passing (1 skipped), diff scope confirmed
+      entirely in-scope (23 files, branch vs. `main`), license headers all
+      correct, both coverage-tooling-gap explanations for the 94.9% figure
+      independently re-verified as genuine tooling artifacts (not real
+      coverage gaps) — `kmdb_config.dart`'s `vecIndexes` surface confirmed
+      absent from `lcov.info` entirely (not 0-hit, just unattributed
+      cross-package), and `cli_runner_inprocess_test.dart`'s new tests
+      confirmed to genuinely restore Q6/Q9 gating coverage in-process, not
+      just re-test the same scenarios a second way. One pre-existing,
+      unrelated flake noted (`sync_engine_test.dart` H4-FU2/FU3, byte-identical
+      to `main`, a known timing flake, not a WI-12 issue).
+- [x] Run `make pre_commit` on the full branch — format, analyze,
+      license_check, tests all green. Ran clean with the §24 fix included.
+- [x] Verify licence headers on all new files (2026). Confirmed: both new
+      `.dart` files (`database_opener_test.dart`, `search_semantic_test.dart`)
+      carry the 2026 Apache-2.0 header; the new fixture README and PDF binary
+      are exempt (docs/binary, not source) and `license_check` passed clean
+      throughout.
+- [x] Open the PR. **Do not merge it** — the user merges it back to `main`.
 
 ## Plan review (kmdb-plan-reviewer, 2026-07-10)
 
@@ -1309,4 +1331,68 @@ section pins down field-for-field.
 
 ## Summary
 
-{Dot points highlighting the work undertaken}
+Both phases landed on `20260714_plan_wi12_vault_search_cli`, across five
+commits:
+
+- **Phase A (`015c652`)** — wired vault into `kmdb_cli` generally, not just
+  vault search. `DatabaseOpener.open()` now constructs a `VaultStore`
+  unconditionally and configures lexical vault content search
+  (`HtmlTextExtractor`/`MarkdownTextExtractor`/`PdfTextExtractor`, plus the
+  always-auto-prepended `PlainTextExtractor`) by default — this fixes every
+  previously-dead vault-touching CLI command (`vault get`/`search`/`status`/
+  `reindex`, `insert --import`, `update --vault`, `export`/`backup`'s vault
+  legs), not just search, since `db.vaultStore` was always `null` in
+  production before this plan (Q5). Verified `dart build cli` bundles all
+  three native libraries (ORT, Zstd, PDFium) together and the compiled
+  binary runs correctly; fixed the CLI README's dead `dart compile exe`
+  instructions. New `database_opener_test.dart` (production-path integration
+  tests, no test double) — including the "hello" is an English stop word
+  discovery that required swapping the PDF fixture.
+- **Phase B (`e7a9f9f`, `670f46d`)** — made semantic and hybrid search
+  genuinely real for both vault content and document fields, replacing the
+  CLI's former fake `(hybrid)` label over lexical-only results. Added
+  `KmdbConfig.vecIndexes` (mirroring `ftsIndexes`), command-token-gated real
+  model construction in `cli_runner.dart` (Q6), a gated `vecIndexes:`
+  pass-through to `DatabaseOpener.open()`/`KmdbDatabase.open()` that prevents
+  a registered-but-modelless vector index from bricking every CLI command
+  (Q9 — verified via a dedicated regression test after `kmdb-qa` flagged it
+  as the single most dangerous historical bug in this plan's review trail),
+  and a config-derived, three-way search-mode label (`lexical`/`semantic`/
+  `hybrid`) since `SearchMetadata` carries no resolved-mode field to read it
+  off of (Q10). `search create`/`list`/`delete` gained `--fts`/`--semantic`
+  narrowing flags (Q8) with a graceful-degradation warning when a vector
+  index is registered before an `embeddingModel` is configured. A follow-up
+  commit (`670f46d`) closed coverage gaps found while running `make
+  coverage` — `ReplConfig.readCacheDir()` was entirely untested, the new
+  `--fts`/`--semantic` command paths were only tested via direct config
+  mutation, and the Q6/Q9 gating logic was only exercised via subprocess
+  tests that (a discovery of this plan) contribute zero coverage credit.
+- **Final commit (`858822f`, `4530093`)** — recorded `make coverage`'s
+  94.9% aggregate result and two coverage-tooling findings (cross-package
+  test scoping hides `kmdb_config.dart`'s `vecIndexes` surface from any
+  report; subprocess-based CLI tests earn no coverage credit), then a
+  `kmdb-architect` fix for a `docs/spec/24_vault.md` section that had gone
+  stale between the two phases.
+- **Process** mirrored `plan_0_08_encryption_confidentiality_reconciliation.md`:
+  one branch/worktree/PR for both phases, with a checklist-verify →
+  `make pre_commit` → `kmdb-qa` sign-off → commit checkpoint after each
+  phase, plus a final whole-PR `kmdb-qa` pass before opening the PR. This
+  session had no Agent/Task tool throughout (see
+  `.claude/agent-memory/kmdb-plan-implement/feedback_no_agent_tool.md`); the
+  coordinator ran every `kmdb-qa` pass (per-phase ×2, plus the final
+  whole-PR pass) independently and relayed results, catching a
+  `vecIndexes`/`embeddingModel` interaction bug class early (Q9), a stale
+  spec section post-Phase-B, and the coverage-tooling blind spots above —
+  the identical value a heavier-than-usual review cadence delivered for the
+  0.08 plan this process mirrors.
+
+Two genuinely novel, non-mechanical findings surfaced only during
+implementation, both documented inline and flagged for `kmdb-qa`/
+`kmdb-architect` follow-up rather than silently expanded into this plan's
+scope: the `VecManager` has no public per-field build-status getter
+analogous to `FtsManager.stateFor` (so the "first semantic-index build"
+notice can't be strictly first-build-only), and `docs/spec/20_text_search.md`'s
+"CLI: search Command" section had unrelated pre-existing drift (nonexistent
+`info`/`build` subcommands, never-implemented flags) beyond the
+`--fts`/`--semantic` staleness this plan introduced — both reconciled by
+`kmdb-architect` during the Phase B checkpoint.
