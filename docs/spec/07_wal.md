@@ -44,32 +44,39 @@ SSTable became durable would otherwise cause still-live records to be skipped
 
 ### Directory-entry durability
 
-`WalWriter.append` (and `appendBatch`) fsync the WAL file's **content** via
-`StorageAdapter.syncFile` after each write, but they do **not** `syncDir` the
-directory that holds the WAL files. WAL files live in the database root
-(`{db-dir}/wal-*.log`), while the flush path only `syncDir`s the `sst/`
-subdirectory (it makes the newly-written SSTable's directory entry durable, not
-the WAL's). On a strict-POSIX filesystem an `fsync` of a file does not persist
-its parent directory entry — that requires an `fsync` of the parent directory.
+On a strict-POSIX filesystem, `fsync`ing a file's content does not persist its
+parent directory's entry for that file — that requires a separate `fsync` of
+the parent directory. `WalWriter.append` and `appendBatch` therefore also
+`syncDir` the WAL directory (`db-dir`) the first time they write to a
+newly-active file, once per file rather than once per write, so a fresh
+`wal-{N}.log`'s directory entry is durable intrinsically rather than depending
+on some other, unrelated code path happening to `syncDir(db-dir)` first (e.g.
+the device-identity write at `open()`, Manifest rotation, or crash recovery —
+which still `syncDir(db-dir)` for their own reasons, but WAL creation no
+longer relies on them for this). The flush path's own `syncDir` remains
+scoped to `sst/` only, since SSTable durability is a separate concern.
 
-**Invariant: do not assume a freshly-created WAL file is durable from its
-content fsync alone.** A brand-new `wal-{N}.log` file's directory entry is
-guaranteed durable only after a subsequent `syncDir` on the WAL directory
-(`db-dir`). In the current engine that `syncDir(db-dir)` is incidental to the
-write path — it happens at `open()` (the device-identity write), on Manifest
-rotation, and during crash recovery — not as part of `WalWriter.append` or the
-immediate flush that rotated the WAL. The steady-state flush path `syncDir`s
-only `sst/`.
+**Verified with fault injection** (`plan_0_09_walwriter_syncdir_durability.md`):
+`packages/kmdb/test/engine/wal_test.dart`'s "directory-entry durability"
+group uses `FaultyStorageAdapter` — which models file-content durability and
+directory-entry durability as two independent dimensions, unlike
+`MemoryStorageAdapter`, which cannot exercise this class of bug at all — to
+confirm a freshly-rotated-to WAL file's first write survives a simulated
+crash, and that reverting the fix makes that same test fail.
 
-In practice this is presently benign: the retiring WAL from the previous
-generation is already durable, and any data written to the new WAL survives a
-subsequent clean flush + Manifest record. The hazard is latent — a future code
-path that writes to a fresh WAL file and relies on that file surviving power
-loss *before* the next incidental `syncDir(db-dir)` would silently lose those
-records on recovery (the directory listing in §17's "Multiple WAL Files on
-Recovery" step would not enumerate a file whose directory entry never became
-durable). See the durability-ordering rationale in §17 and the tracked
-hardening item in the active roadmap.
+**Retired-WAL deletion has the mirror-image gap, left intentionally
+untouched.** The flush path deletes the now-retired WAL file
+(`LsmEngine`'s post-flush cleanup) without `syncDir`ing `db-dir` afterward, so
+the *removal* of a WAL's directory entry is not intrinsically durable either.
+This is confirmed benign, not merely assumed: the deletion loop only removes
+WAL files with `seq < activeSequence`, and the "Multiple WAL Files on
+Recovery" replay below already either re-deletes a resurrected retired file
+(`seq < logNumber`) or idempotently replays it under HLC last-write-wins —
+the same idempotent-replay property Rotation above relies on for the
+no-boundary-marker design. A crash before that deletion's directory entry is
+durable can only resurrect an already-retired WAL, never lose data. Revisit
+only if WAL-file *absence* (not content) ever becomes load-bearing at
+recovery time, which nothing does today.
 
 ### Multiple WAL Files on Recovery
 

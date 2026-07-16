@@ -36,6 +36,18 @@ import 'wal_record.dart';
 /// call issues an fsync via [StorageAdapter.syncFile] after writing. Set false
 /// only in tests where durability is not required — this trades crash-safety
 /// for write throughput.
+///
+/// ## Directory-entry durability
+///
+/// A file's content fsync does not, on a strict-POSIX filesystem, durably
+/// persist the fact that the file exists in its parent directory — that
+/// requires a separate fsync of the parent directory. [append] and
+/// [appendBatch] therefore also `syncDir` [dirPath] the first time they write
+/// to a newly-active file (once per file, not once per write — see
+/// [_syncDirOnce]), so a freshly-created WAL file's directory entry is
+/// durable intrinsically rather than depending on some unrelated later
+/// `syncDir` call elsewhere in the engine. See §07 ("Directory-entry
+/// durability") for the full invariant.
 final class WalWriter {
   WalWriter({
     required this.dirPath,
@@ -55,6 +67,16 @@ final class WalWriter {
 
   int _sequence;
 
+  /// Whether the active file's directory entry has already been synced.
+  ///
+  /// Starts `false` for every newly-constructed [WalWriter] (even on reopen
+  /// against a file that already exists on disk — the first write after
+  /// construction pays one redundant `syncDir`, which is cheap and simpler
+  /// than tracking pre-existing durability) and is reset to `false` by
+  /// [rotate], since the next active file has not had its directory entry
+  /// synced yet.
+  bool _activeDirSynced = false;
+
   /// The sequence number of the currently active WAL file.
   int get activeSequence => _sequence;
 
@@ -65,11 +87,14 @@ final class WalWriter {
 
   /// Appends a single [record] to the active WAL file.
   ///
-  /// Optionally fsyncs after writing if [fsyncOnWrite] is true.
+  /// Optionally fsyncs after writing if [fsyncOnWrite] is true, and — the
+  /// first time this is called for a newly-active file — durably syncs the
+  /// file's directory entry too (see "Directory-entry durability" above).
   Future<void> append(WalRecord record) async {
     final bytes = record.encode();
     await adapter.appendFile(activePath, bytes);
     if (fsyncOnWrite) await adapter.syncFile(activePath);
+    await _syncDirOnce();
   }
 
   /// Writes a Put record for the given namespace, key, and value.
@@ -111,11 +136,16 @@ final class WalWriter {
   /// individual per-record fsyncs into one, which is both faster and the basis
   /// for the all-or-nothing crash guarantee — a truncated or corrupt frame is
   /// dropped whole during recovery, never partially applied (review finding H2).
+  ///
+  /// Also durably syncs the active file's directory entry the first time this
+  /// is called for a newly-active file (see "Directory-entry durability" on
+  /// the class doc comment).
   Future<void> appendBatch(List<WalRecord> records) async {
     final frame = WalBatchFrame(records);
     final bytes = frame.encode();
     await adapter.appendFile(activePath, bytes);
     if (fsyncOnWrite) await adapter.syncFile(activePath);
+    await _syncDirOnce();
   }
 
   // ── Rotation ──────────────────────────────────────────────────────────────
@@ -133,6 +163,7 @@ final class WalWriter {
   Future<String> rotate() async {
     final oldPath = activePath;
     _sequence++;
+    _activeDirSynced = false;
     return oldPath;
   }
 
@@ -140,4 +171,20 @@ final class WalWriter {
 
   String _walPath(int seq) =>
       '$dirPath/wal-${seq.toString().padLeft(5, '0')}.log';
+
+  /// Durably syncs [dirPath] the first time this is called for the current
+  /// active file, then remembers not to do it again until [rotate] resets the
+  /// flag. Must be called only after the file's content has already been
+  /// synced (via [StorageAdapter.syncFile]) — fault-injecting test adapters
+  /// treat `syncDir` as the point a path becomes durable, so calling it before
+  /// the content sync would make the path durable with empty bytes rather
+  /// than the written content.
+  ///
+  /// No-op when [fsyncOnWrite] is false, matching the existing content-fsync
+  /// skip in that mode.
+  Future<void> _syncDirOnce() async {
+    if (!fsyncOnWrite || _activeDirSynced) return;
+    await adapter.syncDir(dirPath);
+    _activeDirSynced = true;
+  }
 }

@@ -183,25 +183,16 @@ final class KvStoreImpl implements KvStore {
         // Case (c): stamp the current format version so every future open
         // takes the case (a) path.
         await meta.putFormatVersionMarker();
-        // Defensive: also syncDir(dbDir) so the marker's WAL record (which
-        // may be the very first write to a brand-new wal-00001.log —
-        // WalWriter.append only syncFile's file *content*, never syncDir's
-        // its own directory entry) is durable independent of any later
-        // write. NOT independently regression-tested: the "looksFresh"
-        // widening above already self-heals this exact scenario on the
-        // very next open (marker absent + isNewDatabase false + $meta empty
-        // still resolves to case (c), silently re-stamping the marker), so
-        // removing this line does not currently make any test fail —
-        // confirmed by reverting it locally and re-running
-        // manifest_fsync_recovery_test.dart's "fresh database create is
-        // durable" test and a targeted 50-write-then-crash probe, both of
-        // which passed regardless. Kept anyway as defense-in-depth: it
-        // makes the marker durable by construction rather than by relying
-        // on the self-heal being reachable in every future scenario (e.g. a
-        // future caller that inspects `$meta` state without going through
-        // `KvStoreImpl.open()`'s self-heal path). Harmless no-op when
-        // dbDir was already syncDir'd more recently.
-        await adapter.syncDir(dbDir);
+        // No longer needs a defensive syncDir(dbDir) here: WalWriter itself
+        // now durably syncs a newly-active file's directory entry on first
+        // write (see WalWriter's "Directory-entry durability" doc comment
+        // and §07), so the marker's WAL record — even if it's the very first
+        // write to a brand-new wal-00001.log — is covered intrinsically.
+        // Previously this call was kept as defense-in-depth despite being
+        // confirmed a no-op (the "looksFresh" widening above already
+        // self-heals the scenario it was guarding against); now it would be
+        // a guaranteed no-op with a misleading rationale, so it is removed
+        // rather than left stale.
       } else {
         // Case (b): CURRENT/manifest already existed and this directory has
         // genuine persisted content, but no format-version marker was ever

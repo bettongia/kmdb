@@ -24,6 +24,8 @@ import 'package:kmdb/src/engine/wal/wal_reader.dart';
 import 'package:kmdb/src/engine/wal/wal_record.dart';
 import 'package:kmdb/src/engine/wal/wal_writer.dart';
 
+import '../support/faulty_storage_adapter.dart';
+
 const _dir = '/db';
 final _seq1 = const Hlc(1000, 0);
 final _seq2 = const Hlc(2000, 1);
@@ -157,6 +159,126 @@ void main() {
       final records = await reader.replay(oldPath).toList();
       expect(records, hasLength(1));
       expect(records.single.type, equals(WalRecordType.put));
+    });
+  });
+
+  // ── Directory-entry durability (docs/plans/plan_0_09_walwriter_syncdir_durability.md) ──
+  //
+  // Uses FaultyStorageAdapter, not MemoryStorageAdapter: the in-memory adapter
+  // makes syncFile/syncDir no-ops and never loses buffered data, so it cannot
+  // exercise this class of bug at all (a simulated "crash" there only drops
+  // the lock). This must be a WalWriter-direct test, not a KvStore-level one:
+  // the open/write path issues several *incidental* syncDir(dbDir) calls
+  // elsewhere in the engine that would make a fresh WAL file durable even
+  // without this fix, producing a false-green that proves nothing.
+  group('WalWriter — directory-entry durability (syncDir)', () {
+    test("a freshly-rotated-to WAL file's directory entry survives a crash "
+        'immediately after its first write', () async {
+      final adapter = FaultyStorageAdapter();
+      final writer = WalWriter(
+        dirPath: _dir,
+        adapter: adapter,
+        initialSequence: 1,
+        fsyncOnWrite: true,
+      );
+
+      // Write to wal-00001.log, then rotate so the next write targets a
+      // brand-new wal-00002.log that has never existed on disk before.
+      await writer.writePut(
+        sequence: _seq1,
+        namespace: 'ns',
+        keyBytes: _key,
+        value: _value,
+      );
+      await writer.rotate();
+      expect(writer.activePath, contains('wal-00002.log'));
+
+      // First write to the fresh file: content is fsync'd (existing
+      // behaviour) and, with the fix, its directory entry is now syncDir'd
+      // too — the file's very first write is exactly the scenario the fix
+      // covers, since WalWriter has no prior opportunity to have synced
+      // this name.
+      await writer.writePut(
+        sequence: _seq2,
+        namespace: 'ns',
+        keyBytes: _key,
+        value: _value,
+      );
+
+      adapter.crash();
+
+      // Without the fix, wal-00002.log's directory entry was never
+      // promoted to durable, so crash() reverts it out of existence
+      // entirely — not just its content, the file itself. With the fix,
+      // both the file and its content survive.
+      expect(await adapter.fileExists(writer.activePath), isTrue);
+      final bytes = await adapter.readFile(writer.activePath);
+      // WalReader in this file's other tests is typed to MemoryStorageAdapter;
+      // decode the raw bytes directly here instead.
+      expect(bytes, isNotEmpty);
+      final (decoded, _) = WalRecord.tryDecode(bytes, 0)!;
+      expect(decoded.type, equals(WalRecordType.put));
+      expect(decoded.sequence, equals(_seq2));
+    });
+
+    test('a second write to the same active file does not re-syncDir '
+        '(the guard is once-per-file, not once-per-write)', () async {
+      final adapter = FaultyStorageAdapter();
+      final writer = WalWriter(
+        dirPath: _dir,
+        adapter: adapter,
+        initialSequence: 1,
+        fsyncOnWrite: true,
+      );
+
+      await writer.writePut(
+        sequence: _seq1,
+        namespace: 'ns',
+        keyBytes: _key,
+        value: _value,
+      );
+      // The file's directory entry is now durable from the first write's
+      // intrinsic syncDir. A second write's content is fsync'd directly
+      // onto an already-durable name (FaultyStorageAdapter.syncFile writes
+      // straight into `_durable` once the name itself is durable), so a
+      // crash immediately after — with no further syncDir call needed —
+      // still preserves both records.
+      await writer.writePut(
+        sequence: _seq2,
+        namespace: 'ns',
+        keyBytes: _key,
+        value: _value,
+      );
+
+      adapter.crash();
+
+      expect(await adapter.fileExists(writer.activePath), isTrue);
+      final bytes = await adapter.readFile(writer.activePath);
+      expect(bytes, isNotEmpty);
+    });
+
+    test('fsyncOnWrite: false never syncs the directory either', () async {
+      final adapter = FaultyStorageAdapter();
+      final writer = WalWriter(
+        dirPath: _dir,
+        adapter: adapter,
+        initialSequence: 1,
+        fsyncOnWrite: false,
+      );
+
+      await writer.writePut(
+        sequence: _seq1,
+        namespace: 'ns',
+        keyBytes: _key,
+        value: _value,
+      );
+
+      adapter.crash();
+
+      // Neither content nor directory entry were synced, so the file does
+      // not survive — this is the existing, documented fsyncOnWrite: false
+      // trade-off (durability for throughput), unaffected by this fix.
+      expect(await adapter.fileExists(writer.activePath), isFalse);
     });
   });
 
