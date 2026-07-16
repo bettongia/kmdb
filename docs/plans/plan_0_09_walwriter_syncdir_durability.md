@@ -1,6 +1,6 @@
 # WalWriter directory-entry durability (syncDir)
 
-**Status**: Open
+**Status**: Investigated
 
 **PR link**: —
 
@@ -59,8 +59,18 @@ in the active roadmap" — this plan is that item.
 
 ## Open questions
 
-- [ ] **Q1 — Should the retired-WAL-deletion `syncDir` gap be folded into this
-      plan?** The flush path deletes the now-retired WAL file
+- [x] **Q1 — Should the retired-WAL-deletion `syncDir` gap be folded into this
+      plan?** **Resolved (reviewer, 2026-07-16): accept the recommendation —
+      leave it out, document it in §07 as an intentionally-untouched,
+      confirmed-benign mirror case.** The reasoning below was verified against
+      the actual code: the deletion loop
+      (`lsm_engine.dart:890-897`, in `packages/kmdb/lib/src/engine/kvstore/`)
+      removes only WAL files with `seq < activeSequence`, and §17 recovery
+      already re-deletes (`seq < logNumber`) or idempotently replays any
+      resurrected file. Folding it in would add scope without closing a live
+      hazard. Revisit only if WAL-file *absence* ever becomes load-bearing at
+      recovery.
+      The flush path deletes the now-retired WAL file
       (`lsm_engine.dart:890-897`) but only `syncDir`s `sst/`
       (`lsm_engine.dart:862`), never `db-dir` — so the *removal* of a WAL's
       directory entry is, symmetrically, not intrinsically durable either.
@@ -138,26 +148,48 @@ Mirror the existing crash-assert pattern in
 a `FaultyStorageAdapter`, call `adapter.crash()` to simulate power loss,
 reopen, and assert on what survived. For this plan:
 
-1. Open a `KvStoreImpl` (or exercise `WalWriter` directly, whichever gives a
-   cleaner assertion surface — implementer's call) against a
-   `FaultyStorageAdapter`.
-2. Force a WAL rotation (write enough to trigger `rotate()`, or call it
-   directly if testing `WalWriter` in isolation) so the *next* write targets a
-   brand-new WAL file.
-3. Write one record to the new file (content `syncFile`'d, per current
-   behaviour) — **without** the fix's `syncDir` call having run yet
-   (i.e. run this against the pre-fix code path, or structure the test to
-   assert the fix's absence would lose data — implementer's call on the
-   cleanest way to express "prove the fix is necessary," e.g. a
-   before/after pair or a single test that fails without the fix applied).
+**Prefer a `WalWriter`-direct test as the primary artifact. A KvStore-level
+test is fragile here and can go false-green — see the masking hazard below.**
+
+Primary test (`WalWriter` against `FaultyStorageAdapter`, deterministic):
+
+1. Construct a `WalWriter(dirPath: dbDir, adapter: faulty, fsyncOnWrite: true)`
+   — note `dirPath` **is** the db dir in production (`crash_recovery.dart:273`
+   passes `dirPath: dbDir`), so the fix's `syncDir(dirPath)` is exactly a
+   `syncDir(dbDir)`.
+2. `append` a record to `wal-00001.log`, then `rotate()` so the next write
+   targets a brand-new `wal-00002.log`.
+3. `append` one record to the fresh file (content `syncFile`'d per current
+   behaviour; with the fix, its directory entry is now `syncDir`'d too).
 4. Call `adapter.crash()`.
-5. Reopen. Assert the record from step 3 is present (with the fix) — per the
-   `FaultyStorageAdapter` mechanics in the Investigation above, without the
+5. Reopen / re-list. Assert `wal-00002.log` still exists
+   (`adapter.fileExists`) and its bytes are intact (`readFile`). Per the
+   `FaultyStorageAdapter` mechanics in the Investigation above, **without** the
    fix the fresh file's directory entry was never promoted to `_durable`, so
    `crash()` reverts `_live` to `_durable` and the file — and therefore the
    record — disappears entirely; §17's "Multiple WAL Files on Recovery" step
-   would not even enumerate it, since the directory listing itself would not
-   show the file.
+   would not even enumerate it.
+
+**Proving necessity:** the committed test asserts survival *with* the fix (it
+passes with the fix, fails without). Do not attempt to commit a "pre-fix"
+variant — demonstrate necessity by manually reverting the fix locally once and
+confirming the test fails (mirrors the `manifest_fsync_recovery_test.dart`
+workflow); state this in the PR description. This is the "single test that fails
+without the fix" option, chosen deliberately over a before/after pair.
+
+**Masking hazard (why not a plain KvStore-level test):** the KvStore write/open
+path issues several *incidental* `syncDir(dbDir)` calls — `ensureDeviceId()`
+(`kv_store_impl.dart:437`), the format-marker self-heal (`:204`), `changeDeviceId`
+(`:357`), Manifest publish (`lsm_engine.dart:1210` / `current_file.dart:77`),
+and crash recovery (`crash_recovery.dart:108`). Any one of these firing
+*between* the fresh-WAL write and `crash()` makes the fresh file's directory
+entry durable **without the fix**, turning the test green regardless — a
+non-discriminating test that proves nothing. If an integration-level test is
+*also* wanted, the implementer must guarantee no `syncDir(dbDir)` runs between
+the fresh-WAL-creating `put()` and the crash (a single small `put()` that does
+not trigger a flush, immediately followed by `crash()`), and should assert this
+explicitly. The `WalWriter`-direct test above avoids the hazard entirely and is
+the required deliverable; the KvStore-level test is optional.
 
 ### Spec and doc-comment updates required
 
@@ -178,14 +210,30 @@ reopen, and assert on what survived. For this plan:
       the constructor; reset `false` in `rotate()`.
 - [ ] In `append` and `appendBatch`, after the existing `appendFile` +
       conditional `syncFile`, add: if `fsyncOnWrite && !_activeDirSynced`,
-      `await adapter.syncDir(dirPath); _activeDirSynced = true;`.
+      `await adapter.syncDir(dirPath); _activeDirSynced = true;`. Extract the
+      three lines into a private `_syncDirOnce()` helper rather than duplicating
+      them across both call sites (code health; keeps the two write paths in
+      lock-step).
+- [ ] Fix the now-stale/redundant defensive `syncDir(dbDir)` in
+      `kv_store_impl.dart:186-204`. Its comment (`"WalWriter.append only
+      syncFile's file *content*, never syncDir's its own directory entry"`)
+      becomes **factually wrong** once this fix lands, and the call itself
+      becomes a guaranteed no-op (the format-marker's own WAL write will have
+      `syncDir`'d the dir via `WalWriter`). At minimum rewrite the comment to
+      state that `WalWriter` now makes a fresh WAL file's directory entry
+      durable intrinsically; prefer removing the redundant call outright (the
+      comment already documents that reverting it breaks no test) to satisfy the
+      "no dead/unreachable code" standard. Do not leave the misleading comment
+      in place.
 - [ ] Add the fault-injection test described in the Investigation section,
       using `FaultyStorageAdapter` — place it alongside the existing
       WAL/durability tests (confirm exact file with `kmdb-architect` if
       `wal_writer_test.dart`'s existing structure suggests a different home,
       e.g. a crash-recovery-focused integration test file).
 - [ ] Update `docs/spec/07_wal.md`'s "Directory-entry durability" section per
-      the Investigation notes. Run `make site` after editing.
+      the Investigation notes. Run `make doc_site` after editing (`make site`
+      is a silent no-op — it names the checked-in `site/` directory, not a build
+      target; see CLAUDE.md).
 - [ ] Update `WalWriter`'s class-level and `append`/`appendBatch` doc
       comments to describe the new intrinsic behaviour.
 - [ ] Confirm no regression in WAL-heavy existing tests/benchmarks — this
@@ -196,12 +244,65 @@ reopen, and assert on what survived. For this plan:
 
 **Final step — QA sign-off and pre-commit:**
 
-- [ ] Run `make coverage` — confirm >95% on all new files.
+- [ ] Run `make coverage` — confirm >95%. Note the three branches of the new
+      guard must all be exercised: (a) `fsyncOnWrite && !_activeDirSynced` →
+      `syncDir` fires (new crash test); (b) `fsyncOnWrite && _activeDirSynced` →
+      skip on subsequent same-file writes (existing `fsyncOnWrite: true` WAL
+      tests, e.g. `wal_test.dart:527`); (c) `!fsyncOnWrite` short-circuit
+      (existing `fsyncOnWrite: false` tests, e.g. `wal_test.dart:38`).
 - [ ] Hand off to the **`kmdb-qa` agent** for sign-off (spec alignment, doc
       comments, test coverage/adequacy, code health). Resolve every blocking
       item before proceeding. Do not open a PR until sign-off is received.
 - [ ] Run `make pre_commit` — format, analyze, license_check, tests all green.
 - [ ] Verify licence headers on all new files (2026).
+
+## Reviewer assessment (kmdb-plan-reviewer, 2026-07-16)
+
+**Verdict: Investigated. Proceed.** Small, well-scoped, low-risk durability
+hardening that makes an intrinsic guarantee out of a currently-incidental one.
+All code citations were checked against `main` and are accurate:
+
+- `wal_writer.dart` line ranges (`append` 69-73, `appendBatch` 114-119,
+  `rotate()` 133-137, doc-comment ranges) — exact. `rotate()` genuinely does not
+  create the new file; lazy creation on first `appendFile` is confirmed, so the
+  design's placement of the flag-reset in `rotate()` and the `syncDir` on the
+  append path is correct.
+- `FaultyStorageAdapter` semantics (`syncFile` snapshots into `_syncedContent`;
+  `syncDir` promotes to `_durable`, else `_durable[path] ??= Uint8List(0)` at
+  line 161) — exact. The stated ordering constraint (`syncFile` before
+  `syncDir`, else the name becomes durable with empty bytes) is real and the
+  existing `appendFile → syncFile` order already satisfies it.
+- Q1 citations (`lsm_engine.dart:890-897` deletion loop, `:862` `syncDir(sst/)`)
+  — exact (file lives under `.../kvstore/`; the plan's bare filename is
+  harmless). The incidental `syncDir(dbDir)` calls the plan/§07 rely on all
+  exist: `crash_recovery.dart:108`, `current_file.dart:77`,
+  `kv_store_impl.dart:204/357/437`, `lsm_engine.dart:1210`. None fire per-write,
+  so "presently benign" holds.
+- `WalWriter.dirPath == dbDir` (`crash_recovery.dart:273`), so
+  `syncDir(dirPath)` is the correct directory.
+
+**Changes I made to reach Investigated:**
+
+1. **Resolved Q1** — accepted the recommendation (leave the retired-WAL mirror
+   gap out, document in §07). Verified the idempotent-replay reasoning against
+   the deletion loop and §17 recovery.
+2. **Closed a test-design trap** — the plan let the implementer pick
+   KvStore-level or `WalWriter`-direct freely. A KvStore-level test is prone to
+   a *masking* false-green because several open/write paths issue incidental
+   `syncDir(dbDir)` calls that would make the fresh WAL durable even without the
+   fix. The test section now mandates a `WalWriter`-direct test as the primary
+   discriminating artifact and documents the hazard for any optional
+   integration test.
+3. **Added a required cleanup** — `kv_store_impl.dart:186-204`'s defensive
+   `syncDir(dbDir)` exists *specifically* to work around this WalWriter gap; its
+   comment becomes factually wrong and the call redundant once the fix lands.
+   The plan now requires correcting/removing it so no stale, misleading comment
+   or dead defensive call is left behind.
+4. **Minor fixes** — `make site` → `make doc_site` (the former is a silent
+   no-op); added a `_syncDirOnce()` helper to avoid duplicating the guard;
+   spelled out the three-branch coverage expectation.
+
+No remaining open questions; no unresolved design decisions for the implementer.
 
 ## Summary
 
