@@ -35,3 +35,4 @@ logs/
 
 api-docs/
 spike/
+*.code-workspace
