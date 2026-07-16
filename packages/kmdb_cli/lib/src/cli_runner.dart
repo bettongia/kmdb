@@ -16,6 +16,7 @@ import 'dart:convert';
 import 'dart:io' as io;
 
 import 'package:args/command_runner.dart';
+import 'package:betto_inferencing/betto_inferencing.dart';
 import 'package:kmdb/kmdb.dart';
 
 import 'commands/collections_command.dart';
@@ -54,6 +55,7 @@ import 'commands/promote_command.dart';
 import 'package:kmdb/kmdb_config.dart';
 import 'database_opener.dart';
 import 'output/output_mode.dart';
+import 'repl/repl_config.dart';
 import 'repl/repl_runner.dart';
 
 /// @docImport 'commands/command.dart';
@@ -350,6 +352,49 @@ abstract final class KmdbCli {
       encryptionConfig = EncryptionConfig(recoveryCode: recoveryCode);
     }
 
+    // ── Resolve an embedding model, gated on the dispatched command actually
+    // needing it (WI-12 Phase B, Q6's final rule) ──────────────────────────
+    // This must happen before DatabaseOpener.open() (embeddingModel is a
+    // parameter to it), and covers both the one-shot and REPL paths — REPL
+    // mode is only entered further below, after the database is already
+    // open, so this single call site is the whole story. For REPL mode
+    // specifically, remaining[1] does not exist yet (no command has been
+    // typed), so firstToken is null and only the config.vecIndexes.isNotEmpty
+    // branch of the gate can fire — a REPL session with embeddingModel
+    // configured for vault-search-only use (no vecIndexes) will not load the
+    // model until reopened with an inline command; this is an accepted,
+    // narrow consequence of gating before the command is known, not a bug.
+    final firstToken = remaining.length > 1 ? remaining[1] : null;
+    final EmbeddingModel? embeddingModel;
+    try {
+      embeddingModel = await _resolveEmbeddingModel(config, firstToken);
+    } on ArgumentError catch (e) {
+      io.stderr.writeln('Error: ${e.message}');
+      return 1;
+    } on UnsupportedError catch (e) {
+      io.stderr.writeln('Error: ${e.message}');
+      return 1;
+    }
+
+    // vecIndexes: gated per Q9 — pass through from config only when a real
+    // model was actually constructed above. Passing a non-empty vecIndexes
+    // while embeddingModel is null makes KmdbDatabase.open() throw
+    // ArgumentError, bricking every command (not just search) against a
+    // database with a registered-but-modelless vecIndex. This is what keeps
+    // the `search create --semantic` create-time warning ("search will
+    // remain lexical-only until [a model is] added") true.
+    final vecIndexDefinitions = embeddingModel != null
+        ? config.vecIndexes
+              .map(
+                (r) => VecIndexDefinition(
+                  collection: r.collection,
+                  field: r.field,
+                  lazy: r.lazy,
+                ),
+              )
+              .toList()
+        : const <VecIndexDefinition>[];
+
     final KmdbDatabase db;
     final bool dbCreated;
     try {
@@ -357,6 +402,8 @@ abstract final class KmdbCli {
         dbPath,
         config,
         encryptionConfig: encryptionConfig,
+        embeddingModel: embeddingModel,
+        vecIndexes: vecIndexDefinitions,
       );
     } on EncryptionError catch (e) {
       io.stderr.writeln('Error: $e');
@@ -619,6 +666,73 @@ abstract final class KmdbCli {
     }
     if (buf.isNotEmpty) tokens.add(buf.toString());
     return tokens;
+  }
+
+  // ── Embedding model resolution (WI-12 Phase B) ─────────────────────────────
+
+  /// Resolves [config]'s configured embedding model into a real
+  /// [EmbeddingModel], gated on whether this invocation actually needs it.
+  ///
+  /// Returns `null` when `config.embeddingModel` is unset, or when it is set
+  /// but this invocation doesn't need it yet — [config.vecIndexes] is empty
+  /// AND [firstToken] is not one of `search`/`vault`/`reindex` (Q6's final
+  /// rule). A registered vecIndex makes the model structurally required at
+  /// *every* open of that database (mirroring the existing config-time-index
+  /// philosophy `ftsIndexes`/`indexes` already impose), regardless of the
+  /// current command; a bare `embeddingModel` with no vecIndexes only loads
+  /// for the commands that actually use it, so a plain `kmdb mydb get notes
+  /// x` never pays ONNX Runtime session init or a first-run model download.
+  ///
+  /// Throws [ArgumentError] if `config.embeddingModel!.modelId` is not a
+  /// known catalog model, or [UnsupportedError] if it is known but not yet
+  /// validated for production use (both propagated from
+  /// `ModelCatalog.lookup`) — callers should catch both and print an
+  /// actionable message rather than a raw stack trace.
+  static Future<EmbeddingModel?> _resolveEmbeddingModel(
+    KmdbConfig config,
+    String? firstToken,
+  ) async {
+    final emCfg = config.embeddingModel;
+    if (emCfg == null) return null;
+
+    final commandNeedsModel =
+        firstToken == 'search' ||
+        firstToken == 'vault' ||
+        firstToken == 'reindex';
+    if (config.vecIndexes.isEmpty && !commandNeedsModel) return null;
+
+    // Both exception branches are real: bge-small-en-v1.5 and
+    // multilingual-e5-small are validated today, but a future catalog
+    // addition may be registered-but-unvalidated (UnsupportedError), and a
+    // typo'd/stale modelId in local/config.json hits ArgumentError.
+    final spec = ModelCatalog.lookup(emCfg.modelId);
+
+    // Only resolve cacheDir (a filesystem read) once we know a model load is
+    // actually happening — see ReplConfig.readCacheDir's doc for why this
+    // must not run unconditionally (WI-12 Q2).
+    final cacheDir = await ReplConfig.readCacheDir();
+
+    // Throttle download-progress output to stderr to one line per 10% rather
+    // than one per chunk — first-run downloads are 127-470 MB and a line per
+    // chunk would flood the terminal. Q3's decision: download silently
+    // (i.e. no separate consent prompt) with a progress line, gated only by
+    // the model being configured/needed — presence of `embeddingModel` in
+    // local/config.json is itself the user's consent.
+    var lastDecile = -1;
+    return OnnxEmbeddingModel.load(
+      spec: spec,
+      cacheDir: cacheDir,
+      onProgress: (received, total) {
+        if (total <= 0) return;
+        final decile = received * 10 ~/ total;
+        if (decile == lastDecile) return;
+        lastDecile = decile;
+        io.stderr.writeln(
+          'Downloading ${emCfg.modelId}: ${decile * 10}% '
+          '($received/$total bytes)',
+        );
+      },
+    );
   }
 
   // ── File reader ───────────────────────────────────────────────────────────

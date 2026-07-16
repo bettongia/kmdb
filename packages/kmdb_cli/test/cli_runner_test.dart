@@ -594,6 +594,152 @@ void main() {
       expect(newResult.exitCode, equals(0));
     });
   });
+
+  // ── WI-12 Phase B: embedding model command-token gating (Q6) ─────────────
+  //
+  // These tests confirm the *gating* decision itself — whether
+  // cli_runner.dart's _resolveEmbeddingModel attempts model resolution at
+  // all for a given invocation — without needing a real model load (no ONNX
+  // Runtime session init, no download). The trick: configure
+  // local/config.json with a deliberately unknown modelId.
+  // ModelCatalog.lookup() throws ArgumentError synchronously, before any I/O,
+  // for an unknown id — so "the command fails with an unknown-model error"
+  // is conclusive proof resolution was attempted, and "the command succeeds
+  // normally" is conclusive proof it was not. This also covers the
+  // ModelCatalog.lookup() ArgumentError branch's actionable-message
+  // requirement. The symmetric UnsupportedError branch (registered-but-
+  // unvalidated model) is not exercised here — both current catalog entries
+  // (bge-small-en-v1.5, multilingual-e5-small) are validated today, so no
+  // real catalog id reaches that branch; the catch clause is the same shape
+  // as the ArgumentError one and is covered by dart analyze's exhaustiveness
+  // (both branches assign to the same `EmbeddingModel?` return type).
+  group('KmdbCli — embedding model command-token gating (WI-12 Phase B)', () {
+    /// Writes `local/config.json` with an `embeddingModel` whose `modelId`
+    /// is deliberately unknown to `ModelCatalog`, so any attempt to resolve
+    /// it fails fast and synchronously (no network I/O).
+    void writeBogusEmbeddingModelConfig(String dbPath) {
+      final localDir = io.Directory(p.join(dbPath, 'local'));
+      localDir.createSync(recursive: true);
+      io.File(p.join(dbPath, 'local', 'config.json')).writeAsStringSync(
+        json.encode({
+          'embeddingModel': {
+            'type': 'onnx',
+            'modelId': 'nonexistent-model-xyz',
+          },
+        }),
+      );
+    }
+
+    test('a plain scan command does not attempt to resolve the embedding '
+        'model when no vecIndexes are configured (Q6 gate skips it)', () async {
+      final dbPath = tmp.file('gating_scan_db');
+      final initResult = await run([dbPath, 'init']);
+      expect(initResult.exitCode, equals(0), reason: initResult.stderr);
+      writeBogusEmbeddingModelConfig(dbPath);
+
+      // 'scan' is not one of search/vault/reindex and vecIndexes is empty
+      // — the gate must skip model resolution entirely. If it didn't,
+      // ModelCatalog.lookup('nonexistent-model-xyz') would throw and this
+      // command would fail instead of returning an empty scan result.
+      final result = await run([dbPath, 'scan', 'notes']);
+      expect(result.exitCode, equals(0), reason: result.stderr);
+      expect(result.stderr, isNot(contains('embedding model')));
+    });
+
+    test('the search command DOES attempt to resolve the embedding model '
+        '(Q6 gate fires) and surfaces ModelCatalog.lookup()\'s ArgumentError '
+        'as an actionable message, not a raw stack trace', () async {
+      final dbPath = tmp.file('gating_search_db');
+      final initResult = await run([dbPath, 'init']);
+      expect(initResult.exitCode, equals(0), reason: initResult.stderr);
+      writeBogusEmbeddingModelConfig(dbPath);
+
+      final result = await run([dbPath, 'search', 'docs', 'hello']);
+      expect(result.exitCode, equals(1));
+      expect(result.stderr, contains('Unknown embedding model'));
+      expect(result.stderr, isNot(contains('#0')));
+    });
+
+    test('the vault command DOES attempt to resolve the embedding model '
+        '(Q6 gate fires, coarse-grained per the Investigation note)', () async {
+      final dbPath = tmp.file('gating_vault_db');
+      final initResult = await run([dbPath, 'init']);
+      expect(initResult.exitCode, equals(0), reason: initResult.stderr);
+      writeBogusEmbeddingModelConfig(dbPath);
+
+      final result = await run([dbPath, 'vault', 'status']);
+      expect(result.exitCode, equals(1));
+      expect(result.stderr, contains('Unknown embedding model'));
+    });
+
+    test('the reindex command DOES attempt to resolve the embedding model '
+        '(Q6 gate fires)', () async {
+      final dbPath = tmp.file('gating_reindex_db');
+      final initResult = await run([dbPath, 'init']);
+      expect(initResult.exitCode, equals(0), reason: initResult.stderr);
+      writeBogusEmbeddingModelConfig(dbPath);
+
+      final result = await run([dbPath, 'reindex']);
+      expect(result.exitCode, equals(1));
+      expect(result.stderr, contains('Unknown embedding model'));
+    });
+
+    test('a vecIndex registered with no embeddingModel configured does not '
+        'brick the database — plain commands still exit 0 (Q9 '
+        'brick-prevention regression guard)', () async {
+      // This is the single most dangerous historical bug in this plan's
+      // review trail (Q9): KmdbDatabase.open() throws ArgumentError
+      // ("embeddingModel is required when vecIndexes is non-empty") if
+      // vecIndexes is non-empty and embeddingModel is null. If
+      // DatabaseOpener.open() ever passed config.vecIndexes through
+      // unconditionally instead of gating it on a real model having been
+      // constructed, a database with a registered-but-modelless vecIndex
+      // (the exact state `search create <c> <f> --semantic` leaves behind
+      // when no embeddingModel is configured yet) would become unopenable
+      // via every CLI command, not just search — contradicting the
+      // create-time promise that search "will remain lexical-only until
+      // [a model is] added".
+      final dbPath = tmp.file('gating_q9_brick_db');
+      final initResult = await run([dbPath, 'init']);
+      expect(initResult.exitCode, equals(0), reason: initResult.stderr);
+
+      // local/config.json has a vecIndexes entry but deliberately NO
+      // embeddingModel — the exact combination Q9 is about.
+      final localDir = io.Directory(p.join(dbPath, 'local'));
+      localDir.createSync(recursive: true);
+      io.File(p.join(dbPath, 'local', 'config.json')).writeAsStringSync(
+        json.encode({
+          'vecIndexes': [
+            {'collection': 'docs', 'field': 'body', 'lazy': false},
+          ],
+        }),
+      );
+
+      // A plain command with no embedding model needed — must still open
+      // and run successfully. If the vecIndexes gate were broken, this
+      // would fail with "Error opening database: ... embeddingModel is
+      // required when vecIndexes is non-empty" instead of exit 0.
+      final result = await run([dbPath, 'scan', 'docs']);
+      expect(result.exitCode, equals(0), reason: result.stderr);
+      expect(result.stderr, isNot(contains('embeddingModel is required')));
+
+      // insert/get round-trip also confirms normal write/read paths are
+      // fully functional, not just that scan happens to tolerate a null
+      // db reference.
+      final insertResult = await run([
+        dbPath,
+        'insert',
+        'docs',
+        '--value',
+        '{"body":"hello"}',
+      ]);
+      expect(insertResult.exitCode, equals(0), reason: insertResult.stderr);
+      expect(
+        insertResult.stderr,
+        isNot(contains('embeddingModel is required')),
+      );
+    });
+  });
 }
 
 class _TmpDir {

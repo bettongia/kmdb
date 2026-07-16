@@ -16,6 +16,9 @@ import 'dart:io' as io;
 
 import 'package:kmdb/kmdb.dart';
 import 'package:kmdb/kmdb_config.dart';
+import 'package:kmdb_extractor_html/kmdb_extractor_html.dart';
+import 'package:kmdb_extractor_markdown/kmdb_extractor_markdown.dart';
+import 'package:kmdb_extractor_pdf/kmdb_extractor_pdf.dart';
 
 /// Opens a [KmdbDatabase] from a filesystem path.
 ///
@@ -24,6 +27,33 @@ import 'package:kmdb/kmdb_config.dart';
 /// so that all write pipeline validation and augmentation (schema enforcement,
 /// secondary index maintenance, FTS updates, vault ref counts) run for every
 /// CLI write.
+///
+/// ## Vault wiring
+///
+/// A [VaultStore] is constructed unconditionally for every database this
+/// opens — vault ref counting, GC, and content commands (`vault get`,
+/// `insert --import`, `update --vault`, `export`, `backup`, ...) are
+/// production-ready from the moment a database is opened, not opt-in. Lexical
+/// vault content search is enabled by default via `vaultSearch:
+/// VaultSearchConfig()`, with [HtmlTextExtractor], [MarkdownTextExtractor],
+/// and [PdfTextExtractor] registered alongside the extractor `kmdb` always
+/// auto-prepends (`PlainTextExtractor`) — so plain-text, HTML, Markdown, and
+/// PDF vault blobs are all indexed out of the box. Semantic vault search
+/// activates automatically once an [EmbeddingModel] is supplied via the
+/// [embeddingModel] parameter — resolved from `config.embeddingModel` by
+/// `cli_runner.dart`'s command-token-gated construction logic (WI-12 Phase B,
+/// Q6) before this method is called, not inside this method itself.
+///
+/// ## Document-field semantic search (`vecIndexes`)
+///
+/// Unlike secondary indexes and FTS indexes (always derived from `config`
+/// internally), [vecIndexes] is an explicit parameter the caller must build
+/// from `config.vecIndexes` themselves, and must gate on [embeddingModel]
+/// actually being non-null before doing so: passing a non-empty [vecIndexes]
+/// while [embeddingModel] is `null` makes [KmdbDatabase.open] throw
+/// [ArgumentError] (WI-12 Q9) — that would brick *every* CLI command against
+/// a database with a registered-but-modelless vecIndex, not just search.
+/// `cli_runner.dart` enforces this gate before calling [open].
 ///
 /// ## Two-phase open
 ///
@@ -55,16 +85,33 @@ abstract final class DatabaseOpener {
   /// `$meta` and derives the DEK; if the database is not encrypted an
   /// [EncryptionError] is thrown.
   ///
+  /// [embeddingModel] is the real, already-constructed model to use for
+  /// semantic vault search and document-field vector search — or `null` when
+  /// no model is configured or the dispatched command doesn't need one (see
+  /// `cli_runner.dart`'s command-token-gated construction logic, WI-12 Phase
+  /// B Q6). This method does not construct a model itself.
+  ///
+  /// [vecIndexes] is the list of document-field vector index definitions to
+  /// register, built by the caller from `config.vecIndexes` — but **only**
+  /// when [embeddingModel] is non-null (see the class-level "Document-field
+  /// semantic search" section for why this gate matters). Defaults to an
+  /// empty list.
+  ///
   /// Creates the directory if it does not exist.
   ///
   /// Throws [LockException] if another process has the database open.
   /// Throws [EncryptionError] if the encryption state mismatches the supplied
   /// config.
-  /// Throws [ArgumentError] if [dbPath] is empty.
+  /// Throws [ArgumentError] if [dbPath] is empty, or if [vecIndexes] is
+  /// non-empty while [embeddingModel] is `null` (propagated from
+  /// [KmdbDatabase.open] — see [vecIndexes]'s doc for why callers must avoid
+  /// this combination).
   static Future<(KmdbDatabase, bool created)> open(
     String dbPath,
     KmdbConfig config, {
     EncryptionConfig? encryptionConfig,
+    EmbeddingModel? embeddingModel,
+    List<VecIndexDefinition> vecIndexes = const [],
   }) async {
     if (dbPath.isEmpty) {
       throw ArgumentError.value(
@@ -114,6 +161,14 @@ abstract final class DatabaseOpener {
         )
         .toList();
 
+    // Construct a VaultStore unconditionally so every vault-touching CLI
+    // command (`vault get`, `insert --import`, `update --vault`, `export`,
+    // `backup`, `vault search`/`status`/`reindex`) works against every
+    // CLI-opened database, not just databases a caller opted into vault
+    // support for. This mirrors the always-on secondary-index/FTS wiring
+    // above. See the plan's Q5 decision for the full rationale.
+    final vaultStore = VaultStore(dbDir: dbPath, adapter: adapter);
+
     final db = await KmdbDatabase.open(
       path: dbPath,
       adapter: adapter,
@@ -122,6 +177,22 @@ abstract final class DatabaseOpener {
       ftsIndexes: ftsDefinitions,
       // Schemas are loaded automatically from $meta — no caller parameter needed.
       encryptionConfig: encryptionConfig,
+      vaultStore: vaultStore,
+      // Plain-text extraction is always auto-prepended by VaultSearchConfig
+      // itself (effectiveExtractors), so it does not need to be listed here.
+      // Semantic vault indexing activates automatically once embeddingModel
+      // is non-null (below) — VaultSearchConfig has no separate model param.
+      vaultSearch: VaultSearchConfig(
+        extractors: [
+          HtmlTextExtractor(),
+          MarkdownTextExtractor(),
+          PdfTextExtractor(),
+        ],
+      ),
+      // Both resolved by the caller — see this method's doc comment for the
+      // embeddingModel-null-implies-empty-vecIndexes gate (WI-12 Q9).
+      embeddingModel: embeddingModel,
+      vecIndexes: vecIndexes,
     );
 
     return (db, created);

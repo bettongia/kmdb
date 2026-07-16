@@ -12,6 +12,20 @@ dependencies:
   kmdb:
   kmdb_google_drive:
 
+  # Vault content extractors — registered by default in DatabaseOpener.open()
+  # so every CLI-opened database can index plain text, HTML, Markdown, and PDF
+  # blobs for vault search out of the box (see docs/plans/plan_0_06_wi12_vault_search_cli.md).
+  kmdb_extractor_html:
+  kmdb_extractor_markdown:
+  kmdb_extractor_pdf:
+
+  # Model construction for semantic/hybrid search (vault + document-field).
+  # kmdb.dart re-exports only EmbeddingModel/EmbeddingKind from
+  # betto_inferencing, not OnnxEmbeddingModel/ModelCatalog/DownloadProgress —
+  # cli_runner.dart needs those directly to resolve KmdbConfig.embeddingModel
+  # into a real model (WI-12 Phase B).
+  betto_inferencing:
+
   # Supports the use of the Google Drive storage adapter for sync
   googleapis_auth: ^2.0.0
   http: ^1.0.0

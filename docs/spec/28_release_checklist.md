@@ -791,6 +791,49 @@ contention test that exercises the lease protocol.
   `packages/kmdb/lib/src/engine/kvstore/kv_store.dart`
   (`LegacyDatabaseFormatException`).
 
+### RC-23 — `dart build cli` native-asset bundling on Linux and Windows
+
+- **Area:** platform / packaging
+- **Validates:** that `dart build cli` correctly stages all three native
+  libraries `kmdb_cli` now bundles (`libonnxruntime`, `libzstd`, PDFium) into
+  `bundle/lib/` on Linux and Windows, and that the compiled binary loads and
+  runs correctly on those platforms — not just macOS arm64, the only platform
+  this was verified on during development.
+- **Why not automated:** this development environment and CI both run on
+  macOS; verifying a `dart build cli` compiled-binary artifact on Linux/Windows
+  requires a real machine or CI runner for those platforms, which was not
+  available here. `betto_onnxrt`'s loader
+  (`betto_onnxrt/lib/src/runtime.dart`) has separate, architecturally distinct
+  code paths for each platform (Linux: `DynamicLibrary.open('libonnxruntime.so')`
+  relying on the dynamic linker finding the bundled `.so`; Windows:
+  adjacent-to-exe absolute path) that are sound by inspection but unverified
+  in a real `dart build cli` bundle on those platforms.
+- **Applies when:** before any release that ships a compiled `kmdb_cli`
+  binary for Linux or Windows, and after any change to `kmdb_extractor_pdf`,
+  `betto_pdfium`, `betto_onnxrt`, or `betto_zstd`'s native-asset build hooks.
+- **Prerequisites:** a Linux (x64) and a Windows (x64) machine or CI runner
+  with the Dart SDK installed; no other credentials needed.
+- **Steps:**
+  1. From `packages/kmdb_cli`, run `dart pub get` then `dart build cli`.
+  2. Confirm the build log reports "Copying 3 build assets" (or equivalent)
+     and that `build/cli/<platform>/bundle/lib/` contains the platform's
+     three native libraries (e.g. `libonnxruntime.so`/`libzstd.so`/
+     `libpdfium.so` on Linux; `onnxruntime.dll`/`zstd.dll`/`pdfium.dll` on
+     Windows).
+  3. Copy the whole `bundle/` directory to a scratch location (not just
+     `bundle/bin/`) and run the binary from an arbitrary working directory:
+     `kmdb --version`, then `kmdb <scratch-db> vault status` (exercises the
+     vault code path, which loads PDFium indirectly via `kmdb_extractor_pdf`).
+  4. Confirm both commands succeed with no `dlopen`/`LoadLibrary` failures.
+- **Expected result:** the compiled binary runs correctly on both platforms
+  from an arbitrary working directory, with all three native libraries
+  loading successfully — matching the macOS arm64 result already verified
+  during development (see `docs/plans/completed/
+  plan_0_06_wi12_vault_search_cli.md`, Phase A).
+- **Related:** `docs/plans/completed/plan_0_06_wi12_vault_search_cli.md`
+  (Phase A native-assets investigation), `packages/kmdb_cli/README.md`
+  (`dart build cli` bundle workflow).
+
 ---
 
 ## Release log

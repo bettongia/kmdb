@@ -171,9 +171,10 @@ to catalog-registered models:
    crash during download leaves no corrupt files in the cache.
 3. On subsequent opens, the cached files are verified by SHA-256 before use.
 
-The cache directory is configured per-REPL session in `~/.kmdbrc`
-(`cacheDir` key) and not in `KmdbConfig` or `KvStoreConfig` — it is a local
-client preference, not a per-database setting.
+The cache directory is configured in `~/.kmdbrc` (`cacheDir` key) and not in
+`KmdbConfig` or `KvStoreConfig` — it is a local client preference, not a
+per-database setting. See "`kmdb_cli` Integration" below for how `kmdb_cli`
+resolves this and constructs the model concretely.
 
 ## Model Lifecycle and Identity
 
@@ -211,6 +212,70 @@ already in `current` or `syncing` state are skipped. Returns the count of
 indexes rebuilt. Returns `0` when no vector manager is configured.
 
 The CLI surface is `kmdb <db> reindex`.
+
+## `kmdb_cli` Integration (WI-12 Phase B)
+
+`kmdb_cli` implements the full model-acquisition flow and a `vecIndexes`
+configuration surface directly — both the CLI-side pieces this section
+previously described only at the library-API level are now real, not just
+available for a hypothetical caller of `package:kmdb`.
+
+### Model construction
+
+`cli_runner.dart` resolves `local/config.json`'s `embeddingModel` into a real
+`OnnxEmbeddingModel` via `ModelCatalog.lookup(modelId)` +
+`OnnxEmbeddingModel.load(spec:, cacheDir:, onProgress:)`, gated on the
+dispatched command actually needing it — not unconditionally on every CLI
+invocation, which would force ONNX Runtime session init (and, on first use, a
+127–470 MB download) onto a plain `kmdb mydb get notes x`. The exact gate:
+
+```
+config.embeddingModel != null AND
+  (config.vecIndexes.isNotEmpty OR firstToken is search/vault/reindex)
+```
+
+A registered `vecIndex` makes the model structurally required at *every* open
+of that database (mirroring the existing config-time-index philosophy
+`ftsIndexes`/`indexes` already impose); a bare `embeddingModel` with no
+`vecIndexes` (e.g. configured only for vault search) loads only for the
+commands that actually use it. `ModelCatalog.lookup()`'s two exception
+branches — `ArgumentError` (unknown `modelId`) and `UnsupportedError`
+(registered but unvalidated model) — are caught and rewrapped as actionable
+CLI error messages rather than surfacing a raw stack trace. Download progress
+is reported to stderr (one line per 10%) via the `onProgress` callback;
+presence of `embeddingModel` in `local/config.json` is itself the user's
+consent to a first-run download — there is no separate consent subcommand.
+
+The model cache directory (`~/.kmdbrc`'s `cacheDir` key, defaulting to
+`~/.kmdb_cache`) is resolved via `ReplConfig.readCacheDir()` — a
+side-effect-free static reader used by both the one-shot and REPL paths, in
+contrast to `ReplConfig.load()`, which requires a `SessionState` and writes a
+defaults file to `~/.kmdbrc` on first run (a side effect not appropriate to
+trigger just to resolve a cache directory).
+
+### `vecIndexes` configuration surface
+
+`KmdbConfig.vecIndexes` (a `VecIndexRecord = ({String collection, String
+field, bool lazy})` list) mirrors the existing `ftsIndexes` surface field-for-
+field, with `addVecIndex`/`removeVecIndex`/`vecIndexesForCollection` and the
+same JSON round-trip machinery. `search create <collection> <field>`
+registers **both** an FTS index and a vector index by default; `--fts`/
+`--semantic` narrow registration to just one type. `search list`/`search
+delete` manage both registrations together, and `search <collection> <query>
+--mode semantic`/`--mode auto` now perform genuine document-field vector/
+hybrid search via `KmdbCollection.search()` — not the CLI's former fake
+`(hybrid)` label over lexical-only results.
+
+`DatabaseOpener.open()` passes `vecIndexes:` (built from
+`config.vecIndexes`) to `KmdbDatabase.open()` **only when a real model was
+actually constructed** above — otherwise it passes `vecIndexes: const []`.
+This is a deliberate gate: `KmdbDatabase.open()` throws `ArgumentError` when
+`vecIndexes` is non-empty and `embeddingModel` is `null`, so passing the
+config's `vecIndexes` unconditionally would brick every CLI command (not just
+search) against a database with a registered-but-modelless vector index. A
+`vecIndex` registered via `search create --semantic` with no `embeddingModel`
+configured yet therefore lies dormant — the database stays fully usable in
+lexical-only mode — until a model is added.
 
 ## Tokenisation Pipeline
 

@@ -611,4 +611,94 @@ void main() {
       expect(result.code, equals(0));
     });
   });
+
+  // ── WI-12 Phase B: embedding model command-token gating (Q6/Q9) ──────────
+  //
+  // In-process equivalents of the gating scenarios in cli_runner_test.dart's
+  // "embedding model command-token gating" group. That file uses real
+  // subprocesses (`Process.run`/`Process.start`) and deliberately clears
+  // `DART_VM_OPTIONS` on the child to avoid a 30-second VM-service hang (see
+  // its `run()` helper's doc comment) — which also means those subprocess
+  // tests contribute **zero** coverage credit for `cli_runner.dart`, since
+  // `dart run coverage:test_with_coverage`'s instrumentation cannot see a
+  // child process whose coverage-enabling VM flags were explicitly stripped.
+  // These in-process versions (via `_run`/`IOOverrides.runZoned`, this
+  // file's established pattern) exercise the identical `_resolveEmbeddingModel`
+  // gating logic and DO count toward `cli_runner.dart`'s measured coverage.
+  group('embedding model command-token gating (WI-12 Phase B)', () {
+    /// Writes `local/config.json` with an `embeddingModel` whose `modelId`
+    /// is deliberately unknown to `ModelCatalog`, so any attempt to resolve
+    /// it fails fast and synchronously (no network I/O) — see
+    /// cli_runner_test.dart's identical helper for the full rationale.
+    void writeBogusEmbeddingModelConfig(String dbPath) {
+      io.Directory('$dbPath/local').createSync(recursive: true);
+      io.File('$dbPath/local/config.json').writeAsStringSync(
+        jsonEncode({
+          'embeddingModel': {
+            'type': 'onnx',
+            'modelId': 'nonexistent-model-xyz',
+          },
+        }),
+      );
+    }
+
+    test('a plain scan command does not attempt to resolve the embedding '
+        'model when no vecIndexes are configured (Q6 gate skips it)', () async {
+      final dbPath = tmp.file('gating_scan_db');
+      writeBogusEmbeddingModelConfig(dbPath);
+
+      final result = await _run([dbPath, 'scan', 'notes']);
+      expect(result.code, equals(0), reason: result.err);
+      expect(result.err, isNot(contains('embedding model')));
+    });
+
+    test('the search command DOES attempt to resolve the embedding model '
+        '(Q6 gate fires) and surfaces ModelCatalog.lookup()\'s ArgumentError '
+        'as an actionable message', () async {
+      final dbPath = tmp.file('gating_search_db');
+      writeBogusEmbeddingModelConfig(dbPath);
+
+      final result = await _run([dbPath, 'search', 'docs', 'hello']);
+      expect(result.code, equals(1));
+      expect(result.err, contains('Unknown embedding model'));
+    });
+
+    test('the vault command DOES attempt to resolve the embedding model '
+        '(Q6 gate fires, coarse-grained per the Investigation note)', () async {
+      final dbPath = tmp.file('gating_vault_db');
+      writeBogusEmbeddingModelConfig(dbPath);
+
+      final result = await _run([dbPath, 'vault', 'status']);
+      expect(result.code, equals(1));
+      expect(result.err, contains('Unknown embedding model'));
+    });
+
+    test('the reindex command DOES attempt to resolve the embedding model '
+        '(Q6 gate fires)', () async {
+      final dbPath = tmp.file('gating_reindex_db');
+      writeBogusEmbeddingModelConfig(dbPath);
+
+      final result = await _run([dbPath, 'reindex']);
+      expect(result.code, equals(1));
+      expect(result.err, contains('Unknown embedding model'));
+    });
+
+    test('a vecIndex registered with no embeddingModel configured does not '
+        'brick the database — plain commands still exit 0 (Q9 '
+        'brick-prevention regression guard)', () async {
+      final dbPath = tmp.file('gating_q9_brick_db');
+      io.Directory('$dbPath/local').createSync(recursive: true);
+      io.File('$dbPath/local/config.json').writeAsStringSync(
+        jsonEncode({
+          'vecIndexes': [
+            {'collection': 'docs', 'field': 'body', 'lazy': false},
+          ],
+        }),
+      );
+
+      final result = await _run([dbPath, 'scan', 'docs']);
+      expect(result.code, equals(0), reason: result.err);
+      expect(result.err, isNot(contains('embeddingModel is required')));
+    });
+  });
 }

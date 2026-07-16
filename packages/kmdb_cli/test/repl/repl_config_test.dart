@@ -287,4 +287,97 @@ void main() {
       expect(config.cacheDir, endsWith('.kmdb_cache'));
     });
   });
+
+  // ── ReplConfig.readCacheDir() (WI-12 Phase B, Q2) ──────────────────────────
+  //
+  // Unlike the `cacheDir` getter above (which requires `load()` to have run
+  // first, and `load()` writes a `~/.kmdbrc` defaults file as a side effect
+  // when the file is absent), `readCacheDir()` is a static, side-effect-free
+  // reader used by the one-shot CLI path so resolving a cache directory never
+  // implicitly creates `~/.kmdbrc`.
+  group('ReplConfig.readCacheDir()', () {
+    test('returns the default when the file does not exist', () async {
+      // configPath's file is never written in this test.
+      final dir = await ReplConfig.readCacheDir(filePath: configPath);
+      expect(dir, endsWith('.kmdb_cache'));
+    });
+
+    test('does not create the config file as a side effect', () async {
+      await ReplConfig.readCacheDir(filePath: configPath);
+      expect(io.File(configPath).existsSync(), isFalse);
+    });
+
+    test('returns the configured cacheDir when present', () async {
+      const customDir = '/custom/model/cache';
+      await io.File(
+        configPath,
+      ).writeAsString(jsonEncode({'cacheDir': customDir}));
+
+      final dir = await ReplConfig.readCacheDir(filePath: configPath);
+      expect(dir, equals(customDir));
+    });
+
+    test('falls back to the default when cacheDir is absent from a '
+        'well-formed config', () async {
+      await io.File(configPath).writeAsString(jsonEncode({'bail': true}));
+
+      final dir = await ReplConfig.readCacheDir(filePath: configPath);
+      expect(dir, endsWith('.kmdb_cache'));
+    });
+
+    test(
+      'falls back to the default when cacheDir is an empty string',
+      () async {
+        await io.File(configPath).writeAsString(jsonEncode({'cacheDir': ''}));
+
+        final dir = await ReplConfig.readCacheDir(filePath: configPath);
+        expect(dir, endsWith('.kmdb_cache'));
+      },
+    );
+
+    test(
+      'falls back to the default when cacheDir is whitespace-only',
+      () async {
+        await io.File(
+          configPath,
+        ).writeAsString(jsonEncode({'cacheDir': '   '}));
+
+        final dir = await ReplConfig.readCacheDir(filePath: configPath);
+        expect(dir, endsWith('.kmdb_cache'));
+      },
+    );
+
+    test(
+      'falls back to the default when cacheDir has the wrong type',
+      () async {
+        await io.File(configPath).writeAsString(jsonEncode({'cacheDir': 42}));
+
+        final dir = await ReplConfig.readCacheDir(filePath: configPath);
+        expect(dir, endsWith('.kmdb_cache'));
+      },
+    );
+
+    test('falls back to the default on corrupt JSON (fail-open, matching '
+        'load()\'s policy)', () async {
+      await io.File(configPath).writeAsString('not json at all');
+
+      final dir = await ReplConfig.readCacheDir(filePath: configPath);
+      expect(dir, endsWith('.kmdb_cache'));
+    });
+
+    test('falls back to the default when the file is a JSON array, not an '
+        'object', () async {
+      await io.File(configPath).writeAsString('[1, 2, 3]');
+
+      final dir = await ReplConfig.readCacheDir(filePath: configPath);
+      expect(dir, endsWith('.kmdb_cache'));
+    });
+
+    test('uses the default ~/.kmdbrc path when filePath is omitted', () async {
+      // No filePath supplied — reads the real ~/.kmdbrc (or its absence).
+      // Just confirm it returns *a* usable string without throwing.
+      final dir = await ReplConfig.readCacheDir();
+      expect(dir, isNotEmpty);
+    });
+  });
 }

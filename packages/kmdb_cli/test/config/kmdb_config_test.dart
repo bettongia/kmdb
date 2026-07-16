@@ -814,4 +814,277 @@ void main() {
       expect(config.ftsIndexesForCollection('notes'), isEmpty);
     });
   });
+
+  // ── vecIndexes load error paths (WI-12 Phase B) ────────────────────────────
+
+  group('KmdbConfig — vecIndexes empty', () {
+    test('empty() has no vecIndexes', () {
+      expect(KmdbConfig.empty().vecIndexes, isEmpty);
+    });
+
+    test('load returns empty vecIndexes when key absent', () async {
+      // Backwards-compatible: a config file without "vecIndexes" (e.g. one
+      // written before Phase B) should load fine.
+      final localDir = io.Directory('${tmpDir.path}/local');
+      localDir.createSync();
+      final file = io.File('${tmpDir.path}/local/config.json');
+      file.writeAsStringSync(
+        jsonEncode({
+          'remotes': {
+            'origin': {'type': 'local', 'path': '/mnt/nas/sync'},
+          },
+        }),
+      );
+
+      final config = await KmdbConfig.forDatabase(tmpDir.path);
+      expect(config.vecIndexes, isEmpty);
+    });
+  });
+
+  group('KmdbConfig — vecIndexes load', () {
+    test('round-trips vecIndexes through save/load', () async {
+      final config = await KmdbConfig.forDatabase(tmpDir.path);
+      config.addVecIndex('docs', 'body');
+      config.addVecIndex('docs', 'title', lazy: true);
+      await config.save();
+
+      final reloaded = await KmdbConfig.forDatabase(tmpDir.path);
+      expect(reloaded.vecIndexes, hasLength(2));
+      expect(reloaded.vecIndexes[0].collection, equals('docs'));
+      expect(reloaded.vecIndexes[0].field, equals('body'));
+      expect(reloaded.vecIndexes[0].lazy, isFalse);
+      expect(reloaded.vecIndexes[1].field, equals('title'));
+      expect(reloaded.vecIndexes[1].lazy, isTrue);
+    });
+
+    test('throws FormatException when vecIndexes is not a list', () async {
+      final localDir = io.Directory('${tmpDir.path}/local');
+      localDir.createSync();
+      io.File(
+        '${tmpDir.path}/local/config.json',
+      ).writeAsStringSync(jsonEncode({'vecIndexes': 'bad'}));
+      expect(
+        () => KmdbConfig.forDatabase(tmpDir.path),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains("'vecIndexes' must be a JSON array"),
+          ),
+        ),
+      );
+    });
+
+    test(
+      'throws FormatException when a vecIndex entry is not an object',
+      () async {
+        final localDir = io.Directory('${tmpDir.path}/local');
+        localDir.createSync();
+        io.File('${tmpDir.path}/local/config.json').writeAsStringSync(
+          jsonEncode({
+            'vecIndexes': ['not-an-object'],
+          }),
+        );
+        expect(
+          () => KmdbConfig.forDatabase(tmpDir.path),
+          throwsA(isA<FormatException>()),
+        );
+      },
+    );
+
+    test(
+      'throws FormatException when vecIndex entry missing collection',
+      () async {
+        final localDir = io.Directory('${tmpDir.path}/local');
+        localDir.createSync();
+        io.File('${tmpDir.path}/local/config.json').writeAsStringSync(
+          jsonEncode({
+            'vecIndexes': [
+              {'field': 'body'},
+            ],
+          }),
+        );
+        expect(
+          () => KmdbConfig.forDatabase(tmpDir.path),
+          throwsA(
+            isA<FormatException>().having(
+              (e) => e.message,
+              'message',
+              contains("missing required string field 'collection'"),
+            ),
+          ),
+        );
+      },
+    );
+
+    test('throws FormatException when vecIndex entry missing field', () async {
+      final localDir = io.Directory('${tmpDir.path}/local');
+      localDir.createSync();
+      io.File('${tmpDir.path}/local/config.json').writeAsStringSync(
+        jsonEncode({
+          'vecIndexes': [
+            {'collection': 'docs'},
+          ],
+        }),
+      );
+      expect(
+        () => KmdbConfig.forDatabase(tmpDir.path),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains("missing required string field 'field'"),
+          ),
+        ),
+      );
+    });
+
+    test('defaults lazy to false when absent from JSON', () async {
+      final localDir = io.Directory('${tmpDir.path}/local');
+      localDir.createSync();
+      io.File('${tmpDir.path}/local/config.json').writeAsStringSync(
+        jsonEncode({
+          'vecIndexes': [
+            {'collection': 'docs', 'field': 'body'},
+          ],
+        }),
+      );
+      final config = await KmdbConfig.forDatabase(tmpDir.path);
+      expect(config.vecIndexes.single.lazy, isFalse);
+    });
+  });
+
+  // ── addVecIndex / removeVecIndex / vecIndexesForCollection ────────────────
+
+  group('addVecIndex', () {
+    test('adds a vector index', () {
+      final config = KmdbConfig.empty();
+      config.addVecIndex('docs', 'body');
+      expect(config.vecIndexes, hasLength(1));
+      expect(config.vecIndexes.first.collection, 'docs');
+      expect(config.vecIndexes.first.field, 'body');
+    });
+
+    test('defaults lazy=false', () {
+      final config = KmdbConfig.empty();
+      config.addVecIndex('docs', 'body');
+      expect(config.vecIndexes.first.lazy, isFalse);
+    });
+
+    test('accepts lazy: true', () {
+      final config = KmdbConfig.empty();
+      config.addVecIndex('docs', 'body', lazy: true);
+      expect(config.vecIndexes.first.lazy, isTrue);
+    });
+
+    test('throws on duplicate (collection, field) pair', () {
+      final config = KmdbConfig.empty();
+      config.addVecIndex('docs', 'body');
+      expect(
+        () => config.addVecIndex('docs', 'body'),
+        throwsA(
+          isA<ArgumentError>().having(
+            (e) => e.message,
+            'message',
+            contains('docs.body'),
+          ),
+        ),
+      );
+    });
+  });
+
+  group('removeVecIndex', () {
+    test('removes an existing vector index', () {
+      final config = KmdbConfig.empty();
+      config.addVecIndex('docs', 'body');
+      config.removeVecIndex('docs', 'body');
+      expect(config.vecIndexes, isEmpty);
+    });
+
+    test('throws when vector index does not exist', () {
+      final config = KmdbConfig.empty();
+      expect(
+        () => config.removeVecIndex('docs', 'body'),
+        throwsA(
+          isA<ArgumentError>().having(
+            (e) => e.message,
+            'message',
+            contains("No vector index on 'docs.body' found"),
+          ),
+        ),
+      );
+    });
+
+    test('addVecIndex/removeVecIndex round-trip', () {
+      final config = KmdbConfig.empty();
+      config.addVecIndex('docs', 'title');
+      config.addVecIndex('docs', 'body');
+      config.removeVecIndex('docs', 'title');
+      expect(config.vecIndexes, hasLength(1));
+      expect(config.vecIndexes.first.field, 'body');
+    });
+  });
+
+  group('vecIndexesForCollection', () {
+    test('returns empty list when no vector indexes configured', () {
+      expect(KmdbConfig.empty().vecIndexesForCollection('docs'), isEmpty);
+    });
+
+    test('returns only indexes for the requested collection', () {
+      final config = KmdbConfig.empty();
+      config.addVecIndex('docs', 'body');
+      config.addVecIndex('docs', 'title');
+      config.addVecIndex('notes', 'content');
+
+      final docsIndexes = config.vecIndexesForCollection('docs');
+      expect(docsIndexes, hasLength(2));
+      expect(docsIndexes.map((r) => r.field), containsAll(['body', 'title']));
+    });
+
+    test('returns empty list for unknown collection', () {
+      final config = KmdbConfig.empty();
+      config.addVecIndex('docs', 'body');
+      expect(config.vecIndexesForCollection('notes'), isEmpty);
+    });
+  });
+
+  group('ftsIndexes and vecIndexes are independent', () {
+    test('a field can have an FTS index, a vec index, both, or neither', () {
+      final config = KmdbConfig.empty();
+      config.addFtsIndex('docs', 'ftsOnly');
+      config.addVecIndex('docs', 'vecOnly');
+      config.addFtsIndex('docs', 'both');
+      config.addVecIndex('docs', 'both');
+
+      expect(
+        config.ftsIndexesForCollection('docs').map((r) => r.field),
+        containsAll(['ftsOnly', 'both']),
+      );
+      expect(
+        config.vecIndexesForCollection('docs').map((r) => r.field),
+        containsAll(['vecOnly', 'both']),
+      );
+      expect(
+        config.ftsIndexesForCollection('docs').map((r) => r.field),
+        isNot(contains('vecOnly')),
+      );
+      expect(
+        config.vecIndexesForCollection('docs').map((r) => r.field),
+        isNot(contains('ftsOnly')),
+      );
+    });
+
+    test(
+      'removing an FTS index leaves a vec index on the same field intact',
+      () {
+        final config = KmdbConfig.empty();
+        config.addFtsIndex('docs', 'body');
+        config.addVecIndex('docs', 'body');
+        config.removeFtsIndex('docs', 'body');
+
+        expect(config.ftsIndexesForCollection('docs'), isEmpty);
+        expect(config.vecIndexesForCollection('docs'), hasLength(1));
+      },
+    );
+  });
 }
