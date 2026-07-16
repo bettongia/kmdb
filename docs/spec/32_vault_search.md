@@ -461,7 +461,7 @@ kmdb <db> vault status
 When the database is opened with an `EncryptionConfig` (see §31), vault blobs
 are stored encrypted on disk. Vault search handles encryption transparently,
 and — as of the Encryption confidentiality reconciliation plan
-(`docs/roadmap/0_08.md`) — every derived vault-search artifact, filesystem
+(`docs/roadmap/completed/0_08.md`) — every derived vault-search artifact, filesystem
 files *and* LSM values alike, is also encrypted when a provider is configured:
 
 1. `VaultStore.getBytes()` decrypts the blob before returning bytes to the

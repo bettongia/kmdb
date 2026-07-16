@@ -764,7 +764,7 @@ contention test that exercises the lease protocol.
   the automated suite has no such artifact and constructing one requires a
   human to have kept (or be willing to regenerate) a pre-plan database.
 - **Applies when:** before the first release that ships the Encryption
-  confidentiality reconciliation plan (`docs/roadmap/0_08.md`); a reminder
+  confidentiality reconciliation plan (`docs/roadmap/completed/0_08.md`); a reminder
   for anyone with a pre-existing dev/test database directory created before
   this plan landed.
 - **Prerequisites:** a database directory created by a `kmdb` build from

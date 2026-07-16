@@ -337,7 +337,7 @@ _enc:blob Structure_ above). The vault-search writers
 encrypted at the `VaultSearchManager` call site. **This closes what was
 previously documented here as a known gap** (`FtsManager`/`VecManager`
 writing raw `cbor.encode()`) — see the Encryption confidentiality
-reconciliation plan (`docs/roadmap/0_08.md`), Gap 1.
+reconciliation plan (`docs/roadmap/completed/0_08.md`), Gap 1.
 
 Beyond value encryption, the `$$fts:`/`$$index:`/`$$vault:fts:` namespace
 _names_ themselves are also protected when a provider is configured: the
@@ -588,10 +588,10 @@ local SSTable access. The same defect extended to the vault-search writers
 serialised `$$vault:fts:`, `$$vault:vec:idx:{sha256}`, and
 `$$vault:extract:{sha256}` the same unencrypted way — including
 `$$vault:vec:idx:`, the per-chunk SQ8 vector index missed by the original
-WI-3 audit (see `docs/roadmap/0_06.md`'s correction).
+WI-3 audit (see `docs/roadmap/completed/0_06.md`'s correction).
 
 **Resolved** by the Encryption confidentiality reconciliation plan's Phase 1
-(`docs/roadmap/0_08.md`, Gap 1; see `docs/plans/completed/
+(`docs/roadmap/completed/0_08.md`, Gap 1; see `docs/plans/completed/
 plan_0_08_encryption_confidentiality_reconciliation.md`). The FTS, Vec, and
 vault-search write paths now route every index value through
 `EncryptionEnvelope` (scalar/opaque values — term-frequency ints, SQ8
@@ -620,7 +620,7 @@ local-only and never uploaded; the threat is a compromised local
 filesystem.)
 
 **Resolved for encrypted databases** by the Encryption confidentiality
-reconciliation plan's Phase 4 (`docs/roadmap/0_08.md`, Gap 2): when a
+reconciliation plan's Phase 4 (`docs/roadmap/completed/0_08.md`, Gap 2): when a
 database `EncryptionProvider` is configured, `{token}` is an HMAC-SHA256
 token derived via `EncryptionProvider.indexToken` — a sub-key distinct from
 (but derived from) the DEK via HKDF-SHA256 (`info = "kmdb-index-token"`),
@@ -735,7 +735,7 @@ previously-undocumented gap: these values reveal **operational metadata**
 identity, timing) but **not document content**.
 
 **Resolved** by the Encryption confidentiality reconciliation plan's Phase 2
-(`docs/roadmap/0_08.md`, Gap 3): every general `$meta` accessor now routes
+(`docs/roadmap/completed/0_08.md`, Gap 3): every general `$meta` accessor now routes
 through `EncryptionEnvelope` when a provider is configured. This introduced
 a database-level format-version marker gate at `KvStoreImpl.open()` (a
 `$meta` write itself, so it must precede every other `$meta` read/write) to
@@ -751,7 +751,7 @@ sync, containing `schemaVersion`, `sha256`, `size`, `crc32c`, `mediaType`,
 `originalName`, `createdAt`, and (when encryption is active) `encrypted`.
 
 **Resolved for `originalName`** by the Encryption confidentiality
-reconciliation plan's Phase 3 (`docs/roadmap/0_08.md`, Gap 4):
+reconciliation plan's Phase 3 (`docs/roadmap/completed/0_08.md`, Gap 4):
 `originalName` is now encrypted in place when a database
 `EncryptionProvider` is configured. `VaultStore.ingest` wraps it with
 `EncryptionEnvelope` and base64-encodes the result before it is written
@@ -909,7 +909,7 @@ tracked here, not there.)
 Encryption gives a strong guarantee about **document value confidentiality**
 against a cloud provider or a passphrase-less device thief, and — for
 encrypted databases as of the Encryption confidentiality reconciliation
-plan (`docs/roadmap/0_08.md`) — about **index value and namespace-name
+plan (`docs/roadmap/completed/0_08.md`) — about **index value and namespace-name
 confidentiality** too: FTS/Vec/vault-search index values (gap 1), FTS and
 secondary-index namespace tokens (gaps 2/3), `$meta` operational metadata
 (gap 4), and vault manifest `originalName` (gap 5) are all encrypted or

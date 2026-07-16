@@ -134,7 +134,7 @@ EncryptionEnvelope
   `ValueCodec` does not apply — every `$meta` value (Gap 3), FTS/Vec/vault
   term-frequency ints and SQ8 vectors (Gap 1), and WI-10's `extract/` file
   framing. Introduced by the Encryption confidentiality reconciliation plan
-  (`docs/roadmap/0_08.md`); `ValueCodec` remains the primitive for `Map`-shaped
+  (`docs/roadmap/completed/0_08.md`); `ValueCodec` remains the primitive for `Map`-shaped
   values. See §31.
 
 enc:blob
