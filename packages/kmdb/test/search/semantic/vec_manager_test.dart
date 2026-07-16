@@ -753,6 +753,66 @@ void main() {
       expect(disposeCalled, isTrue);
     });
   });
+
+  // ── Corrupted encrypted SQ8 entry at query time (docs/roadmap/0_09.md) ────
+  //
+  // The corruption guard (`unwrapped.length != expectedByteLen` in
+  // `VecManager._scoreField`) is unit-tested against `EncryptionEnvelope`
+  // directly elsewhere, but nothing seeds a genuinely-corrupted *encrypted*
+  // SQ8 entry into a real index and exercises the full integration path —
+  // encrypted-index query -> corrupted entry -> skip, not crash -- end to
+  // end. This closes that gap.
+  group('corrupted encrypted SQ8 entry at query time', () {
+    test('search skips a corrupted encrypted vector entry without throwing, '
+        'and still returns the valid one', () async {
+      final result = await EncryptionConfig.createResult(
+        passphrase: 'test-passphrase-123',
+      );
+      final db = await KmdbDatabase.open(
+        path: 'vec_corrupt_enc_${Object().hashCode}',
+        adapter: MemoryStorageAdapter(),
+        vecIndexes: [VecIndexDefinition(collection: 'docs', field: 'body')],
+        embeddingModel: _FakeEmbeddingModel(),
+        encryptionConfig: result.config,
+      );
+      final col = db.collection(name: 'docs', codec: _codec);
+
+      final validDoc = await col.insert({
+        'body': 'a valid searchable document',
+      });
+      final validId = validDoc['_id'] as String;
+      final corruptDoc = await col.insert({'body': 'a document to corrupt'});
+      final corruptId = corruptDoc['_id'] as String;
+
+      // Build the index for real first — corrupting before the build would
+      // just be overwritten by it. Only then overwrite the corrupt
+      // document's real (encrypted) vector entry with garbage bytes that
+      // are undecodable by EncryptionEnvelope.unwrap, simulating on-disk
+      // corruption of an already-encrypted entry.
+      await db.reindex();
+      final vecNamespace = VecIndexState.vecNamespace('docs', 'body');
+      // KvStoreImpl.put() rejects writes to `$`-prefixed system namespaces;
+      // writeBatchInternal() is the same internal escape hatch the Query
+      // Layer itself uses for index writes (and other corruption tests in
+      // this suite, e.g. fts_manager_test.dart, already rely on).
+      await db.store.writeBatchInternal(
+        WriteBatch()
+          ..put(vecNamespace, corruptId, Uint8List.fromList([1, 2, 3, 4, 5])),
+      );
+
+      final searchResult = await col.search(
+        'valid searchable document',
+        fields: ['body'],
+        mode: SearchMode.semantic,
+      );
+
+      final ids = searchResult.hits.map((h) => h.id).toList();
+      expect(ids, contains(validId));
+      expect(ids, isNot(contains(corruptId)));
+
+      await db.close();
+    });
+  });
 }
 
 // ── Configurable-id model for identity tests ──────────────────────────────────

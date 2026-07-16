@@ -864,6 +864,46 @@ confidentiality reconciliation, Q7) — a future CLI-hardening item (OS
 keychain storage for CLI credentials) is the appropriate place to close
 this, not database-level encryption.
 
+#### 10. `MetaStore.appendTombstoneFloorAdvance` writes unencrypted (accepted, dead code)
+
+`getTombstoneFloor` decrypts via `EncryptionEnvelope.unwrap` (Encryption
+confidentiality reconciliation, Gap 3), but its `WriteBatch`-based
+counterpart, `appendTombstoneFloorAdvance`, still writes raw, unencrypted
+bytes. This is deliberate, not an oversight: the method has zero production
+call sites today — `LsmEngine._compactAll` calls the standalone
+`setTombstoneFloor`, which does encrypt, directly. Wiring encryption into
+unreachable code was judged premature. A doc comment on
+`appendTombstoneFloorAdvance` (`packages/kmdb/lib/src/engine/kvstore/meta_store.dart`)
+records this asymmetry so that whoever gives the method its first real
+caller is warned to add encryption at that point — otherwise a future
+encrypted-database read of a batch-written tombstone floor would silently
+misparse. (Identified during Phase 2 QA of Encryption confidentiality
+reconciliation, 2026-07-11; re-verified 2026-07-16 — still zero callers,
+still documented. Closed out as will-not-fix in `docs/roadmap/0_09.md`'s
+Housekeeping section — tracked here, not there.)
+
+#### 11. `EncryptionProvider.indexToken`'s domain separator has a theoretical concatenation ambiguity (accepted, low risk)
+
+FTS/index HMAC token domains are built as `"{ns}:{field}:" + term` /
+`"{ns}:{path}:" + value` (Encryption confidentiality reconciliation, Gap 2);
+the components are not escaped against an embedded literal `:`, so in
+principle a collection namespace or FTS term containing a literal colon
+could collide with a different `(ns, field, term)` triple that produces the
+same concatenated string. Vault-FTS (fixed 64-hex `sha256` domain) and
+secondary-index (hex-encoded final component) domains are structurally
+immune; only the FTS `ns`/`field`/raw-term domain is theoretically exposed.
+Documented as an acknowledged, deliberately-unfixed limitation in
+`EncryptionProvider.indexToken`'s doc comment
+(`packages/kmdb/lib/src/encryption/encryption_provider.dart`), since KMDB
+namespace names are developer-controlled (not user input) and FTS terms are
+post-tokenisation (unlikely to contain a raw `:`) — low practical risk.
+Worth a proper escaping scheme (e.g. length-prefixing each component) if
+this primitive is ever reused for a domain where either constraint doesn't
+hold. (Identified during Phase 4 QA of Encryption confidentiality
+reconciliation, 2026-07-13; re-verified 2026-07-16 — still accurate. Closed
+out as will-not-fix in `docs/roadmap/0_09.md`'s Housekeeping section —
+tracked here, not there.)
+
 ### Summary
 
 Encryption gives a strong guarantee about **document value confidentiality**

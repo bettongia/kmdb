@@ -15,9 +15,8 @@
 import 'dart:typed_data';
 
 import 'package:kmdb/kmdb.dart';
+import 'package:kmdb/test_support.dart';
 import 'package:test/test.dart';
-
-import '../support/gated_sync_adapter.dart';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

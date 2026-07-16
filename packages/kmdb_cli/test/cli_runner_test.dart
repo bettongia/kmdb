@@ -595,6 +595,52 @@ void main() {
     });
   });
 
+  // ── --recovery-code success path (subprocess) ─────────────────────────────
+  //
+  // The wrong-code → exit 1 case and an in-process success-path check already
+  // exist in cli_runner_inprocess_test.dart. This adds the missing true
+  // subprocess coverage (docs/roadmap/0_09.md Housekeeping) for the success
+  // path — a correct recovery code actually opening an encrypted database via
+  // the real `bin/kmdb.dart` entry point and exiting 0.
+  group('KmdbCli — --recovery-code success path (subprocess)', () {
+    test('valid recovery code opens an encrypted DB and exits 0', () async {
+      final dbPath = tmp.file('recovery_code_success_db');
+
+      // Create an encrypted DB with a passphrase; capture the printed
+      // recovery code from stderr.
+      final initResult = await run([
+        dbPath,
+        'init',
+        '--passphrase',
+        'secret123',
+      ]);
+      expect(initResult.exitCode, equals(0), reason: initResult.stderr);
+
+      final recoveryCode = (initResult.stderr as String)
+          .split('\n')
+          .firstWhere((l) => l.contains('Recovery code:'), orElse: () => '')
+          .split('Recovery code:')
+          .last
+          .trim();
+      expect(
+        recoveryCode,
+        isNotEmpty,
+        reason: 'No recovery code found in init output: ${initResult.stderr}',
+      );
+
+      // Open the encrypted DB with the recovery code instead of the
+      // passphrase — this is the credential-recovery path.
+      final result = await run([
+        '--recovery-code',
+        recoveryCode,
+        dbPath,
+        'scan',
+        'ns',
+      ]);
+      expect(result.exitCode, equals(0), reason: result.stderr);
+    });
+  });
+
   // ── WI-12 Phase B: embedding model command-token gating (Q6) ─────────────
   //
   // These tests confirm the *gating* decision itself — whether
