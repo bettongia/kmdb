@@ -1115,26 +1115,45 @@ void main() {
         await storeB.flush();
 
         // Device A deletes the key and arranges for the tombstone to be
-        // physically dropped from A's local store. As in the resurrection-
-        // guard test, two extra advance-pushes are required: the first
-        // raises the cloud HWM above the tombstone, and the second's
-        // flush-compaction observes that raised HWM and drops the
-        // tombstone. Without the second push the tombstone would remain
-        // in A's local SSTable and shadow B's old put on ingest — masking
-        // the resurrection this test is designed to expose.
+        // physically dropped from A's local store. The tombstone only
+        // becomes droppable once A's own on-disk HWM `currentHlc` — which is
+        // what `minCurrentHlcAcrossDevices` uses as the horizon here, since
+        // B's HWM is always excluded as stale — has advanced *strictly past*
+        // the tombstone's HLC (`tombstoneHlc.compareTo(horizon) < 0` in
+        // reclamation_policy.dart). A fixed number of "advance" pushes is
+        // not a reliable way to guarantee that: the exact HLC gap created by
+        // each push depends on real wall-clock timing (HLC's physical
+        // component), so a hardcoded count of 2 was observed to flake
+        // (~1-in-8 on a full-file run, reproduced by running this file 25x
+        // in a loop) when the test ran under load. Poll
+        // `meta.getTombstoneFloor()` instead — it only advances when a
+        // compaction actually drops a tombstone — until it moves past its
+        // pre-delete value, with a generous bounded retry count so a genuine
+        // regression still fails loudly instead of hanging.
         await storeA.delete('ns', resurrectionKey);
         await storeA.flush();
         await engineA.push();
 
-        const advanceKey1 = '00000000000070008b00ccc000000002';
-        await storeA.put('ns', advanceKey1, Uint8List.fromList([1]));
-        await storeA.flush();
-        await engineA.push();
-
-        const advanceKey2 = '00000000000070008b00ccc000000022';
-        await storeA.put('ns', advanceKey2, Uint8List.fromList([2]));
-        await storeA.flush();
-        await engineA.push();
+        final floorBeforeAdvance = await storeA.meta.getTombstoneFloor();
+        var floorAdvanced = false;
+        for (var i = 0; i < 10 && !floorAdvanced; i++) {
+          final advanceKey =
+              '00000000000070008b00ccc0000000${i.toRadixString(16).padLeft(2, '0')}';
+          await storeA.put('ns', advanceKey, Uint8List.fromList([i]));
+          await storeA.flush();
+          await engineA.push();
+          final floor = await storeA.meta.getTombstoneFloor();
+          floorAdvanced = floor.compareTo(floorBeforeAdvance) > 0;
+        }
+        expect(
+          floorAdvanced,
+          isTrue,
+          reason:
+              'Tombstone GC floor never advanced past its pre-delete value '
+              'after 10 advance-push attempts — the tombstone-drop path may '
+              'be broken (this is a precondition check, not the assertion '
+              'under test).',
+        );
 
         expect(await storeA.get('ns', resurrectionKey), isNull);
 
