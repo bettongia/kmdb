@@ -141,7 +141,16 @@ final class StorageAdapterNative implements StorageAdapter {
       await File(path).delete();
     } on FileSystemException catch (e) {
       // Ignore "not found" — delete is specified as a no-op in that case.
-      if (e.osError?.errorCode == 2 /* ENOENT */ ) return;
+      // POSIX reports ENOENT (2) whether the file itself or an ancestor
+      // directory is missing. Windows distinguishes the two:
+      // ERROR_FILE_NOT_FOUND (2) when the parent directory exists but the
+      // file doesn't, vs ERROR_PATH_NOT_FOUND (3) when the parent directory
+      // itself doesn't exist (e.g. deleting a tombstone in a hash directory
+      // that was never created) — both must be treated as "not found" to
+      // honour the no-op contract on Windows.
+      final code = e.osError?.errorCode;
+      if (code == 2 /* ENOENT / ERROR_FILE_NOT_FOUND */ ) return;
+      if (Platform.isWindows && code == 3 /* ERROR_PATH_NOT_FOUND */ ) return;
       throw StorageException(e.message, path: path); // coverage:ignore-line
     }
   }
