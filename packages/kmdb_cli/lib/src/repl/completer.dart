@@ -33,7 +33,7 @@ import 'dot_command.dart';
 /// | After `--order-by`                     | Field names from active/named collection      |
 /// | After `.mode`                          | Mode names                                    |
 /// | After `.collection`                    | Collection names                              |
-/// | After `vault`                          | `get`                                         |
+/// | After `vault`                          | `get export search reindex status`            |
 /// | After `remote`                         | `add list remove`                             |
 abstract class CompletionProvider {
   /// Returns completion candidates for the current [text] at [cursorPos].
@@ -200,7 +200,13 @@ final class LiveCompletionProvider implements CompletionProvider {
 
     // vault
     if (first == 'vault' && tokens.length == 2) {
-      return _filterPrefix(['get'], second);
+      return _filterPrefix([
+        'get',
+        'export',
+        'search',
+        'reindex',
+        'status',
+      ], second);
     }
 
     // remote

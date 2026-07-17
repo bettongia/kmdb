@@ -1,8 +1,9 @@
 # Vault file export
 
-**Status**: Investigated
+**Status**: Complete
 
-**PR link**: —
+**PR link**: — (implemented directly on `main`, no worktree/branch/PR — small
+plan, per explicit instruction)
 
 ## Problem statement
 
@@ -47,7 +48,7 @@ ambiguity for future readers.
 
 ## Open questions
 
-- [ ] **Q1 — Is `--output` required?** `vault get` treats `--output` as
+- [x] **Q1 — Is `--output` required? DONE — accepted recommendation.** `vault get` treats `--output` as
       optional (defaults to writing raw bytes to stdout). For `vault export`,
       writing binary blob content to stdout when `--output` is omitted is a
       poor "export" default (no directory-vs-file behavior is meaningful
@@ -55,21 +56,22 @@ ambiguity for future readers.
       export` and error clearly if it's missing, deliberately deviating from
       `vault get`'s optional-output convention. Document the deviation in the
       command's doc comment so it doesn't read as an inconsistency bug later.
-- [ ] **Q2 — Overwrite behavior.** Neither `vault get --output` nor
+- [x] **Q2 — Overwrite behavior. DONE — accepted recommendation.** Neither `vault get --output` nor
       `export_command.dart` appears to guard against overwriting an existing
       file at the target path (needs a quick confirmation read of
       `export_command.dart` during implementation). Recommendation: match
       existing convention (silently overwrite) for consistency rather than
       introducing a new `--force`/confirmation flag that no sibling command
       has.
-- [ ] **Q3 — Missing parent directory.** If `--output` names a path whose
+- [x] **Q3 — Missing parent directory. DONE — accepted recommendation.** If `--output` names a path whose
       parent directory doesn't exist (e.g. `--output
       /tmp/nonexistent/photo.jpg`), should the command create it, or fail
       with a clear error? Recommendation: fail with a clear error (matches
       `vault get`'s current behavior of letting `io.File.writeAsBytes` throw)
       rather than silently creating directory structure — a `vault export`
       into a typo'd path should not leave a surprising new directory behind.
-- [ ] **Q4 — Trailing-slash-but-nonexistent directory.** If `--output` ends
+- [x] **Q4 — Trailing-slash-but-nonexistent directory. DONE — accepted
+      recommendation.** If `--output` ends
       in `/` but the directory doesn't exist yet, is that "obviously a
       directory, create it" or just another missing-parent error per Q3?
       Recommendation: treat it as covered by Q3 (fail) for a first pass —
@@ -252,64 +254,105 @@ moment `export` ships.
 
 ## Implementation plan
 
-- [ ] Resolve Q1–Q4 (or accept the stated recommendations) before writing
-      code.
-- [ ] Fix the `vault help` / guard-ordering bug in `vault_command.dart`:
+- [x] Resolve Q1–Q4 (or accept the stated recommendations) before writing
+      code. **DONE** — all four accepted as recommended.
+- [x] Fix the `vault help` / guard-ordering bug in `vault_command.dart`:
       move the help/no-args handling ahead of the `vaultStore == null` check;
-      print each subcommand's `name`/`usage`/`description`.
-- [ ] Promote `path` from `dev_dependencies` to `dependencies` in
+      print each subcommand's `name`/`usage`/`description`. **DONE** —
+      `args.isEmpty || args[0] == 'help'` now short-circuits before the
+      vault-store guard and prints every sub-command's `usage` +
+      `description` (not just names).
+- [x] Promote `path` from `dev_dependencies` to `dependencies` in
       `packages/kmdb_cli/pubspec.yaml` (needed at runtime by
-      `vault_export_command.dart`, not just in tests).
-- [ ] Add `packages/kmdb_cli/lib/src/commands/vault/vault_export_command.dart`
-      (`VaultExportCommand`), modeled on `VaultGetCommand`:
-  - Positional `<uri>` argument (same `VaultRef` validation).
-  - Required `--output <path>` flag (error per Q1 if absent).
-  - Existence/hydration checks reused verbatim from `vault get`'s pattern.
-  - Fetch the manifest via `VaultStore.getManifest(sha256)` (never
-    `VaultManifest.fromJson` — must be the decrypted `originalName` on an
-    encrypted database), resolve the final write path per the
-    directory-vs-file logic above, sanitising the directory-mode filename
-    with `p.basename(manifest.originalName)` (fallback `blob` if empty) per
-    Q6 — never join the raw `originalName` onto `outputPath`.
-  - Write bytes; report success via `ctx.writeValue({...})` including the
-    resolved output path (mirroring `vault get`'s success payload shape:
-    `uri`, `sha256`, `size`, `output`).
-- [ ] Register `VaultExportCommand` in `vault_command.dart`'s `_subCommands`
-      map and update the class doc comment's subcommand list.
-- [ ] Fix `completer.dart`'s vault subcommand completion list and the
-      matching README completion table row (see Investigation).
-- [ ] Update `docs/spec/24_vault.md`: add a `### vault export` subsection
-      mirroring the existing `### vault get` one (~line 542), and correct
-      line 571's `` `vault export` `` reference to `` `export --vault` ``.
-      Run `make site` after editing spec files.
-- [ ] Update `packages/kmdb_cli/README.md`'s vault section (if any beyond the
-      completion table) to mention `export`.
-- [ ] Tests:
-  - New `vault_export_command_test.dart`: file-path target; directory target
-    (filename derived from `originalName`); directory target with an
-    **absolute** `originalName` (e.g. `/etc/passwd`) confirming the write
-    stays inside `outputPath` and uses the basename, not the absolute path
-    (Q6); directory target with a **path-traversal** `originalName` (e.g.
-    `../../evil`) confirming the same containment; directory target with an
-    empty/whitespace `originalName` falling back to `blob`; not-hydrated
-    (stub) error; not-found error; missing `--output` error;
-    vault-uninitialised error (unit-level only — per Q5, this state is no
-    longer reachable via `DatabaseOpener`/the shipped binary, but the guard
-    is still worth testing directly against a `CommandContext` built with a
-    null `vaultStore`).
-  - New `vault_command_test.dart` (none currently exists — subcommand tests
-    are per-file today): `vault help` succeeds with no vault configured and
-    lists all subcommands including `export`; `vault` with no args behaves
-    the same as `vault help`; unknown subcommand still errors correctly.
+      `vault_export_command.dart`, not just in tests). **DONE**.
+- [x] Add `packages/kmdb_cli/lib/src/commands/vault/vault_export_command.dart`
+      (`VaultExportCommand`), modeled on `VaultGetCommand`. **DONE** — all
+      sub-bullets implemented as specified, including `p.basename(...).trim()`
+      sanitisation (the `.trim()` was an implementation-time addition beyond
+      the plan's literal expression, needed so a whitespace-only
+      `originalName` also falls back to `blob`, not just a literal empty
+      string).
+- [x] Register `VaultExportCommand` in `vault_command.dart`'s `_subCommands`
+      map and update the class doc comment's subcommand list. **DONE**.
+- [x] Fix `completer.dart`'s vault subcommand completion list and the
+      matching README completion table row (see Investigation). **DONE** —
+      also fixed the stale doc-comment completion table inside
+      `completer.dart` itself (`| After \`vault\` | \`get\` |`), which the
+      plan didn't explicitly call out but was the same drift.
+- [x] Update `docs/spec/24_vault.md`: add a `### vault export` subsection
+      mirroring the existing `### vault get` one, and correct the
+      `` `vault export` `` → `` `export --vault` `` naming-collision
+      reference. **DONE** — ran `make site/spec.html` (not `make site`,
+      which silently no-ops, nor `make doc_site`, which re-runs full
+      coverage) to rebuild the spec HTML.
+- [x] Update `packages/kmdb_cli/README.md`'s vault section (if any beyond the
+      completion table) to mention `export`. **DONE** — only the completion
+      table existed; updated.
+- [x] Tests. **DONE**, plus two adjacent fixes surfaced by the full-suite
+      run:
+  - `vault_export_command_test.dart` (18 tests) — all listed cases, plus
+    manifest-read-failure and blob-read-failure catches (via a toggleable
+    failure-injection `VaultStore` subclass reused from the same `setUp`,
+    not a second `KmdbDatabase.open()` — see note below) and a
+    write-time-`IOException` case (directory-name collision) distinct from
+    the earlier parent-missing guard, plus a command-metadata test.
+  - `vault_command_test.dart` (6 tests) — all listed cases plus a
+    known-sub-command dispatch test.
+  - **Pre-existing test updated**: `test/restore_verify_test.dart` had an
+    older `VaultCommand` test asserting the *old* (buggy) no-args behavior
+    (`returns false ... requires a sub-command`). Updated it to assert the
+    new, correct behavior (`vault` with no args succeeds and prints the same
+    summary as `vault help`) — this was a real pre-existing test my change
+    would otherwise have broken, caught by the full-suite `make coverage`
+    run, not by my own new test files.
+  - **Pre-existing test updated**: `test/command_metadata_test.dart` — a
+    metadata-contract test enumerating every `CliCommand` subclass was
+    missing `VaultExportCommand`; added it.
+  - **Design note on failure-injection tests**: initially tried opening a
+    second, freshly-created `KmdbDatabase` wired to a throwing `VaultStore`
+    subclass to test the manifest/blob-read catches. This broke: opening a
+    brand-new empty KV store against a `VaultStore` holding an
+    already-ingested-but-unreferenced blob triggers vault ref-count GC on
+    `open()` (per §24's crash-recovery orphan sweep), reclaiming the blob
+    before the test could exercise the throwing behavior — confirmed
+    correct, documented, production-safe behavior by `kmdb-qa`, not a bug.
+    Fixed by using one `_ToggleableVaultStore` (mutable
+    `throwOnGetManifest`/`throwOnGetBytes` flags) reused for the whole test
+    group via the normal `setUp`, flipping the flag immediately before the
+    assertion, avoiding a second `open()` entirely.
 
 **Final step — QA sign-off and pre-commit:**
 
-- [ ] Run `make coverage` — confirm >95% on all new files.
-- [ ] Hand off to the **`kmdb-qa` agent** for sign-off (spec alignment, doc
+- [x] Run `make coverage` — confirm >95% on all new files. **DONE** — both
+      `vault_export_command.dart` and `vault_command.dart` at 100% line
+      coverage; overall repo coverage held at 95.0%.
+- [x] Hand off to the **`kmdb-qa` agent** for sign-off (spec alignment, doc
       comments, test coverage/adequacy, code health). Resolve every blocking
       item before proceeding. Do not open a PR until sign-off is received.
-- [ ] Run `make pre_commit` — format, analyze, license_check, tests all green.
-- [ ] Verify licence headers on all new files (2026).
+      **DONE** — zero blocking issues. One WARN flagged and resolved (see
+      below).
+- [x] Run `make pre_commit` — format, analyze, license_check, tests all green.
+      **DONE**, via the `kmdb-pre-commit` agent. Note: `make pre_commit`'s
+      `pre_commit_test` Melos script is scoped to the `kmdb` package only —
+      it does not exercise `kmdb_cli`, where every file in this plan lives.
+      The agent additionally ran `kmdb_cli`'s full test suite directly
+      (1148 passed, 1 skipped e2e, 0 failed) to actually validate the
+      change; `make pre_commit` passing alone would not have.
+- [x] Verify licence headers on all new files (2026). **DONE**.
+
+**QA-flagged plan-fidelity divergence (resolved before finalizing).** The
+first QA pass caught that my initial implementation had bare `vault` (no
+args) *error* ("requires a sub-command", returning `false`) rather than
+behaving identically to `vault help` (print the summary, return `true`) as
+this plan's Investigation (`vault help` bug section) and testing strategy
+explicitly specify. Root cause: I initially treated `args.isEmpty` and
+`args[0] == 'help'` as two separate branches with different outcomes: fixed
+by unifying them into one `args.isEmpty || args[0] == 'help'` branch per the
+plan's exact wording, and enriching the printed summary to each
+sub-command's `usage` + `description` (the plan's stated requirement — my
+first pass printed only sub-command names). This also required updating the
+pre-existing `restore_verify_test.dart` test noted above, which had encoded
+the old, incorrect behavior.
 
 ## Reviewer feedback (2026-07-16)
 
@@ -414,4 +457,54 @@ implementation time. Nothing else blocks mechanical execution. Ready for
 
 ## Summary
 
-{Dot points highlighting the work undertaken}
+- Added `vault export <uri> --output <path>` to `kmdb_cli`
+  (`vault_export_command.dart`), modeled on `vault get` but with `--output`
+  required (no stdout fallback) and a new directory-vs-file target
+  resolution: an existing-directory target derives its filename from the
+  vault manifest's `originalName`, sanitised via `p.basename(...).trim()`
+  with a `blob` fallback (defends against absolute-path/traversal/blank
+  metadata originating from another device); a non-directory target is
+  written to exactly, requiring the parent directory to already exist
+  (fails clearly, no auto-create) and silently overwriting any existing
+  file.
+- Fixed the `vault help` / guard-ordering bug in `vault_command.dart`: bare
+  `vault` and `vault help` are now identical, unconditionally-answered
+  branches (print every sub-command's `usage` + `description`, return
+  `true`) that run before the `vaultStore == null` guard — previously the
+  guard ran first, and `'help'` wasn't even a registered sub-command.
+- Promoted `package:path` from `dev_dependencies` to `dependencies` in
+  `kmdb_cli/pubspec.yaml` (now used at runtime).
+- Fixed stale vault sub-command drift in `completer.dart` (tab-completion
+  list and its own doc-comment table) and `README.md`'s completion table,
+  both hardcoded to `['get']` only.
+- Updated `docs/spec/24_vault.md`: added a `### vault export` subsection
+  mirroring `### vault get`; corrected a pre-existing naming collision where
+  a sentence about the unrelated top-level `export --vault` KVLT-archive
+  flag said "`vault export`" instead.
+- Added `vault_export_command_test.dart` (18 tests, 100% line coverage of
+  the new file) and `vault_command_test.dart` (6 tests, 100% line coverage
+  of the changed file), including absolute-path and path-traversal
+  `originalName` containment tests that assert the filesystem outcome
+  directly (e.g. confirming `/etc/passwd` itself is untouched), not just a
+  return code.
+- Caught and fixed two pre-existing tests that a narrower "just run my new
+  test files" check would have missed: `restore_verify_test.dart` asserted
+  the old, incorrect `vault` no-args behavior, and `command_metadata_test.dart`
+  (a contract test enumerating every `CliCommand` subclass) was missing the
+  new `VaultExportCommand`. Both surfaced only via the full `kmdb_cli` suite
+  run, reinforcing why that full run — not just the new files — is part of
+  this workflow.
+- QA sign-off caught one real plan-fidelity divergence pre-finalization (see
+  "QA-flagged plan-fidelity divergence" above) and confirmed the
+  failure-injection test design's GC-on-open behavior is correct, documented
+  §24 behavior, not a bug being papered over.
+- Verification: `kmdb_cli` full suite 1148/1148 passing (0 regressions,
+  1 e2e test skipped by default as expected); overall repo coverage held at
+  95.0%; `vault_export_command.dart` and `vault_command.dart` both at 100%
+  line coverage; `kmdb-qa` signed off with zero blocking issues;
+  `make pre_commit` green (format/analyze/license clean across all
+  packages; `kmdb_cli`'s own suite additionally run directly since
+  `pre_commit_test` is scoped to the `kmdb` package only and wouldn't have
+  exercised this change).
+- Implemented directly on `main` per explicit instruction (small,
+  well-scoped plan) — no worktree, branch, or PR.

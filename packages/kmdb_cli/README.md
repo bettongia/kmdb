@@ -140,7 +140,7 @@ session. Diagnostic, maintenance, and setup commands (`flush`, `compact`,
 | After `--order-by` | Field names sampled from the collection |
 | After `.mode` | Output mode names |
 | After `.collection` | Collection names |
-| After `vault` | `get` |
+| After `vault` | `get export search reindex status` |
 | After `remote` | `add list remove` |
 
 ### Command history

@@ -584,6 +584,28 @@ Retrieves the vault object (triggering on-demand hydration if only a stub is
 present) and writes the binary content to stdout. The global `--output`
 parameter saves the result to a file instead.
 
+### `vault export`
+
+```sh
+kmdb {db} vault export {uri} --output {path}
+kmdb {db} vault export kmdb-vault://sha256/dd92c2600e28b5f44e9c7de81a629e1dd4cfd2eff61a68ddb53777357d3414b8 --output ./downloads/
+```
+
+Retrieves a single vault object and writes it to a file, unlike `vault get`
+`--output` is **required** — there is no stdout fallback, since writing to a
+file is this command's sole purpose.
+
+- If `--output` names an existing directory, the object is written inside it
+  under a filename derived from the manifest's `originalName`, sanitised to
+  its basename (stripping any path segments an untrusted `originalName` might
+  carry, e.g. an absolute path or `../` traversal) and trimmed — falling back
+  to `blob` when `originalName` is empty, all whitespace, or has no basename
+  component.
+- Otherwise `--output` is treated as an exact file path and is written to
+  verbatim, silently overwriting any existing file. The parent directory must
+  already exist; the command fails with a clear error rather than
+  auto-creating it.
+
 ## Encryption
 
 When the database is opened with an `EncryptionConfig` (see §31), vault blobs are
@@ -618,10 +640,13 @@ encryption provider is available, a `StateError` is thrown.
 
 ### KVLT and Encryption
 
-KVLT archive export (`vault export`) decrypts blobs to plaintext before packing
-them into the archive. KVLT import re-encrypts blobs if the destination database
-has encryption active. This ensures KVLT archives are always portable plaintext
-containers and not silently tied to a specific DEK.
+KVLT archive export (`export --vault`) decrypts blobs to plaintext before
+packing them into the archive. KVLT import re-encrypts blobs if the
+destination database has encryption active. This ensures KVLT archives are
+always portable plaintext containers and not silently tied to a specific DEK.
+
+This is distinct from `vault export`, which writes a single object's raw
+(decrypted) bytes to a file and never produces a KVLT archive.
 
 ## Vault Search Integration
 

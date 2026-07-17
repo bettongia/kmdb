@@ -371,27 +371,31 @@ void main() {
       expect(err.toString(), contains('Vault is not available'));
     });
 
-    test(
-      'returns false when no sub-command is given (with vault configured)',
-      () async {
-        final dbPath = '/testdb_vault_cmd_${_dbCounter++}';
-        final adapter = MemoryStorageAdapter();
-        final vault = _TestVaultStore(adapter, dbPath);
-        final db = await KmdbDatabase.open(
-          path: dbPath,
-          adapter: MemoryStorageAdapter(),
-          config: KvStoreConfig.forTesting(),
-          vaultStore: vault,
-        );
-        addTearDown(() => db.close());
-        final err = StringBuffer();
+    test('behaves the same as vault help when no sub-command is given '
+        '(with vault configured)', () async {
+      final dbPath = '/testdb_vault_cmd_${_dbCounter++}';
+      final adapter = MemoryStorageAdapter();
+      final vault = _TestVaultStore(adapter, dbPath);
+      final db = await KmdbDatabase.open(
+        path: dbPath,
+        adapter: MemoryStorageAdapter(),
+        config: KvStoreConfig.forTesting(),
+        vaultStore: vault,
+      );
+      addTearDown(() => db.close());
+      final out = StringBuffer();
+      final err = StringBuffer();
 
-        final ok = await VaultCommand().execute(_ctx(db, err: err), [], {});
+      final ok = await VaultCommand().execute(
+        _ctx(db, out: out, err: err),
+        [],
+        {},
+      );
 
-        expect(ok, isFalse);
-        expect(err.toString(), contains('requires a sub-command'));
-      },
-    );
+      expect(ok, isTrue);
+      expect(err.toString(), isEmpty);
+      expect(out.toString(), contains('vault get <uri>'));
+    });
 
     test(
       'returns false for unknown sub-command (with vault configured)',
