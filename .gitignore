@@ -10,6 +10,7 @@ sandbox/
 .claude/settings.local.json
 .claude/worktrees/
 .claude/agent-memory/
+**/.claude/agent-memory/
 
 coverage
 coverage_orig
