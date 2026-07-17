@@ -202,7 +202,11 @@ melos run analyze
 make format
 melos format
 
-# Coverage (writes site/coverage/lcov.info and per-package summaries)
+# Coverage (writes site/coverage/lcov.info and per-package summaries).
+# This already runs the full test suite under instrumentation and reports
+# pass/fail per test — don't precede it with a separate full `dart test`
+# pass, that just re-runs everything. Use plain `dart test <file>` only for
+# fast, targeted feedback while iterating on specific tests.
 make coverage
 
 # Build docs site (requires pandoc) — `site` itself is not a real make
@@ -230,6 +234,14 @@ cd packages/kmdb && dart run benchmark/main.dart
 > `make` / `melos` targets use `melos exec`, which runs `dart test` in each
 > package dir, so prefer them over raw `dart test <path>`. The warm artifact
 > is `.dart_tool/native_assets.yaml`.
+
+> **`make pre_commit`'s test step is `kmdb`-only.** The `pre_commit_test`
+> Melos script it runs is scoped to `packages/kmdb` (`scope: [kmdb]` in the
+> root `pubspec.yaml`) — it never runs `kmdb_cli` or any other package's
+> tests, regardless of what changed. A green `make pre_commit` does **not**
+> validate a change confined to another package. For those, additionally run
+> that package's own tests (`cd packages/<pkg> && dart test`, or `make
+> coverage` for the full picture) before considering the change verified.
 
 ## Implementation Status
 
