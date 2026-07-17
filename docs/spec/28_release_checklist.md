@@ -834,6 +834,55 @@ contention test that exercises the lease protocol.
   (Phase A native-assets investigation), `packages/kmdb_cli/README.md`
   (`dart build cli` bundle workflow).
 
+### RC-24 — `kmdb_cli` credential store: real-OS permission verification
+
+- **Area:** platform / `kmdb_cli`
+- **Validates:** that `DirectoryCredentialStore` actually produces the
+  permissions its design claims on a real OS, not just under this
+  development environment's sandboxed `chmod`/`stat()` calls — macOS and
+  Linux should show the credential file at `600` and its `local/` parent at
+  `700`; Windows should show the credentials file landing under the user's
+  own profile-inherited ACLs with no separate enforcement attempted.
+- **Why not automated:** the automated suite (`packages/kmdb_cli/test/config/
+  credential_store/directory_credential_store_test.dart`) already exercises
+  the `chmod`/`stat()` logic deterministically on whichever POSIX OS runs the
+  test (this development environment and CI both run on macOS — see RC-23),
+  and the Windows no-op behaviour is `skip:`-guarded to run for real only on
+  a Windows machine. What is not automatable anywhere is an independent,
+  real-`ls -la`/`icacls` visual confirmation that the bits actually landed as
+  claimed outside of Dart's own `stat()` view of them — the kind of
+  "trust but verify with a second tool" check this checklist exists for.
+- **Applies when:** before any release, and after any change to
+  `packages/kmdb_cli/lib/src/config/credential_store/
+  directory_credential_store.dart`.
+- **Prerequisites:** a macOS, a Linux, and (optionally) a Windows machine or
+  CI runner; no cloud credentials needed — a `google-drive` remote can be
+  registered with dummy `--client-id`/`--client-secret` values since the
+  check only needs the credential file to exist, not a completed OAuth flow.
+- **Steps:**
+  1. On macOS and Linux: run `kmdb <db> remote add gdrive --type google-drive
+     --folder x --client-id x --client-secret x` and complete (or Ctrl-C
+     after) the browser consent step once the credentials file has been
+     written, or, more simply, run any command that write-through-refreshes
+     an already-present credentials file.
+  2. Run `ls -la {dbDir}/local/` and confirm `google_credentials.json` shows
+     `-rw-------` (`600`) and the `local/` directory itself shows `drwx------`
+     (`700`).
+  3. On Windows: run the same `remote add` flow, then confirm via `icacls
+     {dbDir}\local\google_credentials.json` that the effective permissions
+     are inherited from the user's profile (owner + Administrators/SYSTEM
+     only) — no `kmdb_cli`-set ACL should be present.
+  4. Deliberately loosen the file with `chmod 644` (macOS/Linux) and re-run a
+     `push`/`pull`/`sync` against that remote; confirm the CLI hard-refuses
+     with a one-line `Error: ... Fix with: chmod 600 ...` message (no stack
+     trace) rather than silently syncing.
+- **Expected result:** `600`/`700` on macOS and Linux, no `kmdb_cli`-added ACL
+  on Windows, and a clean hard-refusal on a deliberately loosened file —
+  matching `docs/spec/33_cli_credential_store.md`'s documented permission
+  model.
+- **Related:** `docs/spec/33_cli_credential_store.md`,
+  `docs/plans/completed/plan_0_09_cli_keychain_credentials.md`.
+
 ---
 
 ## Release log

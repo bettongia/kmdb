@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'package:kmdb/kmdb.dart' show SyncStorageAdapter;
 import 'package:kmdb/kmdb_config.dart' show RemoteConfig;
 
+import '../config/credential_store.dart';
 import '../config/remote_config.dart' show adapterFor;
 import 'command.dart';
 import 'sync_helpers.dart';
@@ -93,7 +95,21 @@ final class PullCommand extends CliCommand {
       return false;
     }
 
-    final syncAdapter = await adapterFor(remote, dbDir: dbDir);
+    // adapterFor is wrapped in its own try: a loose-permission credential
+    // (CredentialPermissionException) or missing-credentials (StateError)
+    // failure here must render as a clean one-line CLI error, not the
+    // stack-trace-printing generic handler in cli_runner.dart — this call
+    // site was previously unwrapped, so both exceptions propagated there.
+    final SyncStorageAdapter syncAdapter;
+    try {
+      syncAdapter = await adapterFor(remote, dbDir: dbDir);
+    } on CredentialPermissionException catch (e) {
+      ctx.writeError(e.toString());
+      return false;
+    } on StateError catch (e) {
+      ctx.writeError(e.message);
+      return false;
+    }
 
     try {
       await ctx.db.pull(syncAdapter: syncAdapter, syncNamespaces: collections);

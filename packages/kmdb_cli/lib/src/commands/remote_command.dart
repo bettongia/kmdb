@@ -13,12 +13,12 @@
 // limitations under the License.
 
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:googleapis_auth/auth_io.dart';
 import 'package:kmdb/kmdb_config.dart';
 import 'package:kmdb_google_drive/kmdb_google_drive.dart' show kDriveFileScope;
 
+import '../config/credential_store.dart';
 import 'command.dart';
 
 /// Manages named sync remotes for a KMDB database.
@@ -62,8 +62,15 @@ final class RemoteCommand extends CliCommand {
   Future<bool> execute(
     CommandContext ctx,
     List<String> args,
-    Map<String, dynamic> flags,
-  ) async {
+    Map<String, dynamic> flags, {
+    // Injectable credential store, used by tests to avoid exercising the
+    // real permission-hardened filesystem store. Not part of the
+    // `CliCommand.execute` contract — an override method may add extra
+    // *optional* parameters beyond its superclass signature, so callers that
+    // go through the `CliCommand` interface (e.g. `cli_runner.dart`) are
+    // unaffected and simply omit it, defaulting to null (the real store).
+    CredentialStore? credentialStoreOverride,
+  }) async {
     if (args.isEmpty) {
       ctx.writeError(
         'remote: subcommand required (add, remove, list).\n'
@@ -75,9 +82,18 @@ final class RemoteCommand extends CliCommand {
     final subcommand = args[0];
     switch (subcommand) {
       case 'add':
-        return _add(ctx, args.sublist(1), flags);
+        return _add(
+          ctx,
+          args.sublist(1),
+          flags,
+          credentialStoreOverride: credentialStoreOverride,
+        );
       case 'remove':
-        return _remove(ctx, args.sublist(1));
+        return _remove(
+          ctx,
+          args.sublist(1),
+          credentialStoreOverride: credentialStoreOverride,
+        );
       case 'list':
         return _list(ctx);
       default:
@@ -94,8 +110,9 @@ final class RemoteCommand extends CliCommand {
   Future<bool> _add(
     CommandContext ctx,
     List<String> args,
-    Map<String, dynamic> flags,
-  ) async {
+    Map<String, dynamic> flags, {
+    CredentialStore? credentialStoreOverride,
+  }) async {
     if (args.isEmpty) {
       ctx.writeError('remote add: remote name required.');
       return false;
@@ -147,6 +164,7 @@ final class RemoteCommand extends CliCommand {
           clientId: clientId,
           clientSecret: clientSecret,
           credentialsPath: credPath,
+          credentialStoreOverride: credentialStoreOverride,
         );
         if (!authorised) return false;
 
@@ -194,7 +212,11 @@ final class RemoteCommand extends CliCommand {
 
   // ── remove ─────────────────────────────────────────────────────────────────
 
-  Future<bool> _remove(CommandContext ctx, List<String> args) async {
+  Future<bool> _remove(
+    CommandContext ctx,
+    List<String> args, {
+    CredentialStore? credentialStoreOverride,
+  }) async {
     if (args.isEmpty) {
       ctx.writeError('remote remove: remote name required.');
       return false;
@@ -210,6 +232,11 @@ final class RemoteCommand extends CliCommand {
       return false;
     }
 
+    // Look up the remote *before* removing it from the config, so a
+    // GoogleDriveRemoteConfig's credentialsPath is still available afterwards
+    // to delete the stored credentials file.
+    final removedRemote = config.remotes[name];
+
     try {
       config.removeRemote(name);
     } on ArgumentError catch (e) {
@@ -224,6 +251,15 @@ final class RemoteCommand extends CliCommand {
       ctx.writeError('remote remove: failed to save config: $e');
       return false;
       // coverage:ignore-end
+    }
+
+    // Closes the leak where `remote remove` deleted the config.json entry
+    // but left the credentials file behind: a stale, still-valid OAuth token
+    // orphaned in {dbDir}/local/ with no config entry pointing at it.
+    if (removedRemote case GoogleDriveRemoteConfig(:final credentialsPath)) {
+      final store =
+          credentialStoreOverride ?? CredentialStore.forPlatform(dbDir: dbDir);
+      await store.delete(credentialsPath);
     }
 
     ctx.out.writeln("Remote '$name' removed.");
@@ -268,8 +304,12 @@ final class RemoteCommand extends CliCommand {
   ///
   /// Opens the user's browser to the Google consent page, starts a transient
   /// HTTP server on `localhost` to capture the callback, and writes the
-  /// resulting [AccessCredentials] (plus the client ID) to
-  /// `{dbDir}/local/{credentialsPath}`.
+  /// resulting [AccessCredentials] (plus the client ID) to the
+  /// permission-hardened credential store at `{dbDir}/local/{credentialsPath}`.
+  ///
+  /// [credentialStoreOverride] — an injectable [CredentialStore]; defaults to
+  /// `null`, in which case [CredentialStore.forPlatform] resolves the real
+  /// store rooted at [dbDir].
   ///
   /// Returns `true` on success, `false` if the flow fails.
   // Requires a real browser and live Google OAuth endpoint; untestable.
@@ -280,6 +320,7 @@ final class RemoteCommand extends CliCommand {
     required String clientId,
     required String clientSecret,
     required String credentialsPath,
+    CredentialStore? credentialStoreOverride,
   }) async {
     ctx.out.writeln(
       '\nStarting Google Drive authorisation flow...\n'
@@ -301,17 +342,15 @@ final class RemoteCommand extends CliCommand {
     }
 
     // Persist the credentials for future use, including the client ID so
-    // future refresh calls can re-use it.
+    // future refresh calls can re-use it. Routed through the credential
+    // store so the write is permission-hardened (chmod 700 dir / 600 file
+    // on POSIX) rather than landing at the process's default umask.
     final credentials = authClient.credentials;
-    final fullPath = [
-      dbDir,
-      'local',
-      credentialsPath,
-    ].join(Platform.pathSeparator);
+    final store =
+        credentialStoreOverride ?? CredentialStore.forPlatform(dbDir: dbDir);
     try {
-      final file = File(fullPath);
-      await file.parent.create(recursive: true);
-      await file.writeAsString(
+      await store.write(
+        credentialsPath,
         jsonEncode({
           ...credentials.toJson(),
           'client_id': clientId,
@@ -320,7 +359,8 @@ final class RemoteCommand extends CliCommand {
       );
     } catch (e) {
       ctx.writeError(
-        'Failed to save Google Drive credentials to $fullPath: $e',
+        'Failed to save Google Drive credentials to '
+        '$dbDir/local/$credentialsPath: $e',
       );
       authClient.close();
       return false;

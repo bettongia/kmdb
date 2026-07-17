@@ -50,6 +50,31 @@ String _validCredentialsJson({
   });
 }
 
+/// Writes [content] to [file] and, on POSIX, hardens the file to `600` and
+/// [localDir] to `700` — matching the permissions `DirectoryCredentialStore
+/// .write` establishes in production.
+///
+/// Fixtures written directly via `File.writeAsStringSync` (bypassing
+/// `DirectoryCredentialStore`) land at the process umask, typically `644`
+/// (group/world-readable). Under the hard-refuse read path, `adapterFor`
+/// would throw `CredentialPermissionException` instead of exercising the
+/// behaviour each test actually wants to assert on, so every fixture that
+/// reaches `adapterFor` must be hardened immediately after writing. This is
+/// a no-op on Windows, where `DirectoryCredentialStore` performs no
+/// chmod/stat checks at all.
+void _writeHardenedFixture(File file, String content, Directory localDir) {
+  file.writeAsStringSync(content);
+  if (Platform.isWindows) return;
+  final dirResult = Process.runSync('chmod', ['700', localDir.path]);
+  if (dirResult.exitCode != 0) {
+    throw StateError('chmod 700 ${localDir.path} failed: ${dirResult.stderr}');
+  }
+  final fileResult = Process.runSync('chmod', ['600', file.path]);
+  if (fileResult.exitCode != 0) {
+    throw StateError('chmod 600 ${file.path} failed: ${fileResult.stderr}');
+  }
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 void main() {
@@ -100,7 +125,7 @@ void main() {
       () async {
         // Write valid (non-expired) credentials to the expected path.
         final credFile = File('${localDir.path}/google_credentials.json');
-        credFile.writeAsStringSync(_validCredentialsJson());
+        _writeHardenedFixture(credFile, _validCredentialsJson(), localDir);
 
         final config = GoogleDriveRemoteConfig(syncRoot: 'kmdb-sync');
         // adapterFor reads the credentials file, sees the token has not
@@ -114,7 +139,7 @@ void main() {
     test('uses custom credentialsPath from config', () async {
       const customCreds = 'my_creds.json';
       final credFile = File('${localDir.path}/$customCreds');
-      credFile.writeAsStringSync(_validCredentialsJson());
+      _writeHardenedFixture(credFile, _validCredentialsJson(), localDir);
 
       final config = GoogleDriveRemoteConfig(
         syncRoot: 'kmdb-sync',
@@ -126,7 +151,11 @@ void main() {
 
     test('StateError when credentials file contains invalid JSON', () async {
       final credFile = File('${localDir.path}/google_credentials.json');
-      credFile.writeAsStringSync('{ invalid json }}');
+      // Hardened even though this fixture is deliberately invalid JSON: an
+      // un-hardened (umask-default) file would trip the permission refusal
+      // before ever reaching the JSON parse, masking the behaviour this test
+      // actually wants to assert on (FormatException -> StateError).
+      _writeHardenedFixture(credFile, '{ invalid json }}', localDir);
 
       final config = GoogleDriveRemoteConfig(syncRoot: 'kmdb-sync');
       await expectLater(

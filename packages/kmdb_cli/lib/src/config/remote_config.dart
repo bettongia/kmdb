@@ -22,6 +22,8 @@ import 'package:kmdb/kmdb.dart';
 import 'package:kmdb/kmdb_config.dart';
 import 'package:kmdb_google_drive/kmdb_google_drive.dart';
 
+import 'credential_store.dart';
+
 // Re-export the config types so existing CLI imports of this file continue to
 // resolve without change.  New code should import from
 // `package:kmdb/kmdb_config.dart` directly.
@@ -43,11 +45,19 @@ export 'package:kmdb/kmdb_config.dart'
 /// [dbDir] — the local database directory.  Used to locate the Google Drive
 /// credentials file at `{dbDir}/local/{credentialsPath}`.
 ///
+/// [credentialStoreOverride] — an injectable [CredentialStore], used by tests
+/// to avoid exercising the real permission-hardened filesystem store.
+/// Defaults to `null`, in which case [CredentialStore.forPlatform] resolves
+/// the real store rooted at [dbDir].
+///
 /// Throws [StateError] if Google Drive credentials are missing (i.e. the user
-/// has not yet run `kmdb <db> remote add --type google-drive`).
+/// has not yet run `kmdb <db> remote add --type google-drive`). Throws
+/// [CredentialPermissionException] if the stored credentials are found with
+/// looser-than-expected POSIX permissions.
 Future<SyncStorageAdapter> adapterFor(
   RemoteConfig remote, {
   required String dbDir,
+  CredentialStore? credentialStoreOverride,
 }) async {
   switch (remote) {
     case LocalRemoteConfig(:final path):
@@ -57,6 +67,7 @@ Future<SyncStorageAdapter> adapterFor(
       final authClient = await _loadGoogleDriveAuthClient(
         dbDir: dbDir,
         credentialsPath: credentialsPath,
+        credentialStoreOverride: credentialStoreOverride,
       );
       return GoogleDriveAdapter(authClient, syncRoot: syncRoot);
   }
@@ -71,19 +82,31 @@ Future<SyncStorageAdapter> adapterFor(
 /// after a successful OAuth consent flow.  The format is the JSON returned by
 /// [AccessCredentials.toJson].
 ///
-/// Throws [StateError] if the credentials file is absent.
+/// [credentialStoreOverride] — an injectable [CredentialStore]; defaults to
+/// `null`, in which case [CredentialStore.forPlatform] resolves the real
+/// store rooted at [dbDir].
+///
+/// Throws [StateError] if the credentials file is absent. Throws
+/// [CredentialPermissionException] if the stored credentials are found with
+/// looser-than-expected POSIX permissions.
 Future<AuthClient> _loadGoogleDriveAuthClient({
   required String dbDir,
   required String credentialsPath,
+  CredentialStore? credentialStoreOverride,
 }) async {
+  final store =
+      credentialStoreOverride ?? CredentialStore.forPlatform(dbDir: dbDir);
   final fullPath = [
     dbDir,
     'local',
     credentialsPath,
   ].join(Platform.pathSeparator);
-  final file = File(fullPath);
 
-  if (!await file.exists()) {
+  // read() returns null when the credentials file is absent, distinct from
+  // permission failures (which throw CredentialPermissionException) or
+  // successful reads (which return the secret JSON).
+  final secretJson = await store.read(credentialsPath);
+  if (secretJson == null) {
     throw StateError(
       'Google Drive credentials not found at $fullPath.\n'
       "Run 'kmdb <db> remote add --type google-drive <name> --folder <name> "
@@ -92,7 +115,7 @@ Future<AuthClient> _loadGoogleDriveAuthClient({
   }
 
   try {
-    final json = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+    final json = jsonDecode(secretJson) as Map<String, dynamic>;
     final credentials = AccessCredentials.fromJson(json);
     final base = http.Client();
 
@@ -105,8 +128,14 @@ Future<AuthClient> _loadGoogleDriveAuthClient({
       final clientId = _clientIdFromCredentials(json) ?? ClientId('', '');
       final refreshed = await refreshCredentials(clientId, credentials, base);
 
-      // Persist the refreshed token so future runs skip the refresh round-trip.
-      await File(fullPath).writeAsString(
+      // Persist the refreshed token through the same store used to read it,
+      // so the rewritten file re-asserts the store's permission model
+      // (chmod 600) rather than relying on File.writeAsString preserving the
+      // existing mode. writeAsString on an existing file does preserve its
+      // mode in practice, so this is belt-and-braces, but routing through
+      // `store.write` keeps a single source of truth for the invariant.
+      await store.write(
+        credentialsPath,
         jsonEncode({...refreshed.toJson(), ..._clientIdJson(clientId)}),
       );
 

@@ -443,6 +443,65 @@ kmdb mydb restore --input backup.ndjson
 
 ---
 
+### Sync and remote management commands
+
+#### `remote add <name> --type local --path <path> [--force]`
+
+#### `remote add <name> --type google-drive --folder <name> --client-id <id> --client-secret <secret> [--credentials <file>] [--force]`
+
+Registers a named sync remote in `{dbDir}/local/config.json`, used by `push`,
+`pull`, and `sync`.
+
+| Flag                    | Description                                                    |
+| ----------------------- | ---------------------------------------------------------------|
+| `--type <type>`         | `local` (default) or `google-drive`                            |
+| `--path <path>`         | Sync folder path (`local` type; required)                      |
+| `--folder <name>`       | Google Drive folder name used as the sync root (`google-drive` type; required) |
+| `--client-id <id>`      | Google OAuth client ID (`google-drive` type; required)         |
+| `--client-secret <s>`   | Google OAuth client secret (`google-drive` type)                |
+| `--credentials <file>`  | Credential filename within `local/` (`google-drive` type; default `google_credentials.json`) |
+| `--force`                | Overwrite an existing remote with the same name                |
+
+```bash
+kmdb mydb remote add origin --type local --path /Volumes/Backup/kmdb-sync
+kmdb mydb remote add gdrive --type google-drive --folder kmdb-sync \
+  --client-id <oauth-client-id> --client-secret <oauth-client-secret>
+```
+
+`--type google-drive` runs an interactive OAuth consent flow (opens a
+browser). On success, the resulting OAuth token is written to
+`{dbDir}/local/{credentialsPath}` through the CLI's credential store — a
+per-machine, non-synced secret that lives entirely outside the database
+encryption boundary (see `docs/spec/33_cli_credential_store.md`). On POSIX
+platforms (macOS, Linux, and other Unix), the containing `local/` directory is
+hardened to `700` and the credential file to `600`; a later `push`/`pull`/
+`sync` **hard-refuses** to use a credential whose permissions have since been
+loosened, printing the exact `chmod` command to fix it rather than silently
+reading a file it can no longer vouch for. Windows relies on the default NTFS
+ACL inheritance from the user's profile directory and performs no separate
+permission enforcement.
+
+#### `remote remove <name>`
+
+Removes a named remote from `{dbDir}/local/config.json`. For a `google-drive`
+remote, this also deletes its stored credentials file from `local/` — a
+remote you no longer use does not leave a live OAuth token behind.
+
+```bash
+kmdb mydb remote remove gdrive
+```
+
+#### `remote list`
+
+Lists all configured remotes with their type and key identifying field (path
+or Drive folder name).
+
+```bash
+kmdb mydb remote list
+```
+
+---
+
 ### Maintenance commands
 
 #### `flush`

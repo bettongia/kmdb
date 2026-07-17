@@ -161,8 +161,10 @@ final class GoogleDriveRemoteConfig extends RemoteConfig {
   /// Creates a [GoogleDriveRemoteConfig].
   ///
   /// [syncRoot] — the name of the top-level Drive folder used for sync.
-  /// [credentialsPath] — relative path under `{dbDir}/local/` where the
-  /// OAuth credentials are cached.  Defaults to `google_credentials.json`.
+  /// [credentialsPath] — the credential filename within the
+  /// permission-hardened `{dbDir}/local/` directory (see the `kmdb_cli`
+  /// `CredentialStore`/`DirectoryCredentialStore` design).  Defaults to
+  /// `google_credentials.json`.
   GoogleDriveRemoteConfig({
     required this.syncRoot,
     this.credentialsPath = 'google_credentials.json',
@@ -173,10 +175,17 @@ final class GoogleDriveRemoteConfig extends RemoteConfig {
   /// The folder is created lazily on first sync if it does not exist.
   final String syncRoot;
 
-  /// Path to the cached OAuth credentials file, relative to `{dbDir}/local/`.
+  /// The credential filename within the permission-hardened `local/`
+  /// directory (`{dbDir}/local/{credentialsPath}`), relative to `local/`.
   ///
   /// The file is created by `kmdb remote add --type google-drive` after a
-  /// successful OAuth consent flow.  It is never synced to the cloud.
+  /// successful OAuth consent flow, via `kmdb_cli`'s `CredentialStore`
+  /// (`DirectoryCredentialStore` on all platforms today — see
+  /// `docs/spec/` for the CLI credential store design and `docs/roadmap/
+  /// 9_99.md` for the deferred OS-native-keychain alternative). It is
+  /// never synced to the cloud. This field is what lets two `google-drive`
+  /// remotes on the same database (each with an explicit `--credentials`)
+  /// address distinct files within the same `local/` directory.
   final String credentialsPath;
 
   @override

@@ -850,19 +850,28 @@ natural time order — but it has a confidentiality consequence not otherwise
 framed in this section: anyone who can see a document key can recover the
 document's creation time to the millisecond.
 
-#### 9. `kmdb_cli` cloud sync credentials are plaintext (accepted, out of scope)
+#### 9. `kmdb_cli` cloud sync credentials are plaintext (resolved — CLI credential store)
 
 `remote_config.dart` stores `AccessCredentials.toJson()` (Google Drive OAuth
-tokens) as plaintext JSON under `local/` — a per-machine, non-synced,
-CLI-only directory (see _Local Directory Layout_ in §03/§06). These
-credentials live **entirely outside the database encryption boundary**:
-never synced, never written into an SSTable, and not reachable from any
+tokens) as JSON under `local/` — a per-machine, non-synced, CLI-only
+directory (see _Local Directory Layout_ in §03/§06). These credentials live
+**entirely outside the database encryption boundary**: never synced, never
+written into an SSTable, and not reachable from any
 `EncryptionProvider`-protected code path, so there is no `enc:blob`/DEK
-relationship to leverage even in principle. Accepted as a distinct,
-local-secret-at-rest surface rather than addressed by this plan (Encryption
-confidentiality reconciliation, Q7) — a future CLI-hardening item (OS
-keychain storage for CLI credentials) is the appropriate place to close
-this, not database-level encryption.
+relationship to leverage even in principle. This was originally accepted as a
+distinct, local-secret-at-rest surface out of scope for the Encryption
+confidentiality reconciliation plan (Q7), naming a future CLI-hardening item
+as the right place to close it.
+
+That item shipped as the `kmdb_cli` credential store (§33): rather than
+database-level encryption, the file and its containing `local/` directory are
+now permission-hardened (POSIX: `chmod 700`/`600`, hard-refuse on read if
+either has drifted looser — the OpenSSH/`gcloud` model) via
+`CredentialStore`/`DirectoryCredentialStore`. This closes the "plaintext,
+no protection at all" gap the file's contents (a live OAuth token) had before;
+see §33 for the full design, including why directory-permission hardening was
+chosen over OS-native keychain integration (deferred, see
+`docs/roadmap/9_99.md`).
 
 #### 10. `MetaStore.appendTombstoneFloorAdvance` writes unencrypted (accepted, dead code)
 

@@ -20,6 +20,8 @@ import 'package:kmdb_cli/src/commands/remote_command.dart';
 import 'package:kmdb/kmdb_config.dart';
 import 'package:test/test.dart';
 
+import '../support/fake_credential_store.dart';
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /// Opens a native-backed database in [dir].
@@ -188,6 +190,82 @@ void main() {
 
     final config = await KmdbConfig.forDatabase(dbDir.path);
     expect(config.remotes, isEmpty);
+  });
+
+  // ── remove: Google Drive credential cleanup (closes the leak) ────────────────
+  //
+  // Prior to this plan, `remote remove` deleted the config.json entry but
+  // left the credentials file behind — a stale, still-valid OAuth token
+  // orphaned in {dbDir}/local/ with no config entry pointing at it.
+
+  test(
+    'remove: deletes the stored credential for a google-drive remote',
+    () async {
+      // Add a GoogleDriveRemoteConfig directly (bypassing the untestable
+      // OAuth flow), then seed the fake store as if `remote add` had run.
+      final config = await KmdbConfig.forDatabase(dbDir.path);
+      config.addRemote(
+        'gdrive',
+        GoogleDriveRemoteConfig(
+          syncRoot: 'kmdb-sync',
+          credentialsPath: 'google_credentials.json',
+        ),
+      );
+      await config.save();
+
+      final fakeStore = FakeCredentialStore()
+        ..secrets['google_credentials.json'] = '{"token":"abc"}';
+
+      final ctx = _ctx(db, out: out, err: err);
+      final ok = await cmd.execute(
+        ctx,
+        ['remove', 'gdrive'],
+        {},
+        credentialStoreOverride: fakeStore,
+      );
+
+      expect(ok, isTrue);
+      expect(fakeStore.deleteCalls, ['google_credentials.json']);
+      expect(fakeStore.secrets.containsKey('google_credentials.json'), isFalse);
+    },
+  );
+
+  test(
+    'remove: does not attempt credential deletion for a local remote',
+    () async {
+      final ctx1 = _ctx(db, out: out, err: err);
+      await cmd.execute(ctx1, ['add', 'origin'], {'path': '/tmp/sync'});
+
+      final fakeStore = FakeCredentialStore();
+      final ctx2 = _ctx(db, out: out, err: err);
+      final ok = await cmd.execute(
+        ctx2,
+        ['remove', 'origin'],
+        {},
+        credentialStoreOverride: fakeStore,
+      );
+
+      expect(ok, isTrue);
+      expect(fakeStore.deleteCalls, isEmpty);
+    },
+  );
+
+  test('remove: actually deletes the credentials file on disk (real store, no '
+      'injection)', () async {
+    final config = await KmdbConfig.forDatabase(dbDir.path);
+    config.addRemote('gdrive', GoogleDriveRemoteConfig(syncRoot: 'kmdb-sync'));
+    await config.save();
+
+    final localDir = io.Directory('${dbDir.path}/local')
+      ..createSync(recursive: true);
+    final credFile = io.File('${localDir.path}/google_credentials.json')
+      ..writeAsStringSync('{"token":"abc"}');
+
+    final ctx = _ctx(db, out: out, err: err);
+    final ok = await cmd.execute(ctx, ['remove', 'gdrive'], {});
+
+    expect(ok, isTrue);
+    expect(credFile.existsSync(), isFalse);
   });
 
   // ── list ─────────────────────────────────────────────────────────────────────

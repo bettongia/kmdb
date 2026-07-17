@@ -12,9 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'dart:convert';
+
+import 'package:googleapis_auth/googleapis_auth.dart';
 import 'package:kmdb/kmdb.dart';
+import 'package:kmdb_cli/src/config/credential_store.dart';
 import 'package:kmdb_cli/src/config/remote_config.dart';
 import 'package:test/test.dart';
+
+import '../support/fake_credential_store.dart';
+
+/// Creates a valid (non-expired) [AccessCredentials] JSON payload for use in
+/// test credential fixtures.
+String _validCredentialsJson() {
+  final creds = AccessCredentials(
+    AccessToken(
+      'Bearer',
+      'test-access-token',
+      DateTime.now().add(const Duration(hours: 1)).toUtc(),
+    ),
+    'test-refresh-token',
+    ['https://www.googleapis.com/auth/drive.file'],
+  );
+  return jsonEncode({
+    ...creds.toJson(),
+    'client_id': 'test-client-id',
+    'client_secret': 'test-client-secret',
+  });
+}
 
 void main() {
   group('RemoteConfig.fromJson', () {
@@ -200,6 +225,73 @@ void main() {
         await expectLater(
           adapterFor(config, dbDir: '/tmp/nonexistent-db'),
           throwsStateError,
+        );
+      },
+    );
+  });
+
+  // ── adapterFor — credentialStoreOverride injection seam ───────────────────
+  //
+  // These tests exercise the same paths as the ones above, but via an
+  // injected FakeCredentialStore rather than the real filesystem, proving
+  // adapterFor's optional override parameter actually plumbs through to
+  // _loadGoogleDriveAuthClient rather than always resolving the real store.
+
+  group('adapterFor — credentialStoreOverride', () {
+    test('returns GoogleDriveAdapter when the injected store has a '
+        'non-expired credential', () async {
+      final fakeStore = FakeCredentialStore()
+        ..secrets['google_credentials.json'] = _validCredentialsJson();
+      final config = GoogleDriveRemoteConfig(syncRoot: 'kmdb-sync');
+
+      final adapter = await adapterFor(
+        config,
+        dbDir: '/tmp/unused-with-override',
+        credentialStoreOverride: fakeStore,
+      );
+
+      expect(adapter, isA<SyncStorageAdapter>());
+    });
+
+    test('throws StateError when the injected store has no credential for '
+        'the account', () async {
+      final fakeStore = FakeCredentialStore();
+      final config = GoogleDriveRemoteConfig(syncRoot: 'kmdb-sync');
+
+      await expectLater(
+        adapterFor(
+          config,
+          dbDir: '/tmp/unused-with-override',
+          credentialStoreOverride: fakeStore,
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('remote add'),
+          ),
+        ),
+      );
+    });
+
+    test(
+      'propagates CredentialPermissionException from the injected store',
+      () async {
+        final fakeStore = FakeCredentialStore()
+          ..readError = CredentialPermissionException(
+            path: '/db/local/google_credentials.json',
+            actualMode: 0x1A4,
+            expectedMode: 0x180,
+          );
+        final config = GoogleDriveRemoteConfig(syncRoot: 'kmdb-sync');
+
+        await expectLater(
+          adapterFor(
+            config,
+            dbDir: '/tmp/unused-with-override',
+            credentialStoreOverride: fakeStore,
+          ),
+          throwsA(isA<CredentialPermissionException>()),
         );
       },
     );

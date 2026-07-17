@@ -218,4 +218,79 @@ void main() {
     expect(ok, isFalse);
     expect(err.toString(), contains('system collection'));
   });
+
+  // ── Credential permission errors (N8 surfacing) ───────────────────────────
+  //
+  // adapterFor's call site in push_command.dart wraps CredentialPermissionException
+  // (and the pre-existing missing-credentials StateError) so both render as a
+  // clean one-line CLI error rather than propagating to cli_runner.dart's
+  // generic, stack-trace-printing handler.
+
+  test(
+    'a loose-permission Google Drive credential renders a clean one-line '
+    'error, not a stack trace',
+    () async {
+      // push short-circuits to "nothing to push" before ever reaching
+      // adapterFor when there are no user collections, so write a document
+      // first to ensure the credential-resolution path is actually reached.
+      await db.store.put(
+        'notes',
+        _key(),
+        await ValueCodec.encode({'title': 'Hello'}),
+      );
+
+      final config = await KmdbConfig.forDatabase(dbDir.path);
+      config.addRemote(
+        'gdrive',
+        GoogleDriveRemoteConfig(syncRoot: 'kmdb-sync'),
+      );
+      await config.save();
+
+      // Write the credentials file directly (bypassing the OAuth flow,
+      // which is untestable) at umask-default permissions — i.e. loose.
+      final localDir = io.Directory('${dbDir.path}/local')
+        ..createSync(recursive: true);
+      final credFile = io.File('${localDir.path}/google_credentials.json')
+        ..writeAsStringSync('{}');
+      io.Process.runSync('chmod', ['644', credFile.path]);
+
+      final ctx = _ctx(db, out: out, err: err);
+      final ok = await pushCmd.execute(ctx, ['gdrive'], {});
+
+      expect(ok, isFalse);
+      final errText = err.toString();
+      expect(errText, startsWith('Error: '));
+      expect(errText, contains('chmod 600'));
+      // No stack trace: cli_runner.dart's generic handler would include
+      // "Error executing" plus a multi-line trace; ctx.writeError does not.
+      expect(errText, isNot(contains('Error executing')));
+      expect(errText, isNot(contains('#0')));
+    },
+    skip: io.Platform.isWindows
+        ? 'POSIX-only: DirectoryCredentialStore performs no permission '
+              'checks on Windows.'
+        : false,
+  );
+
+  test('missing Google Drive credentials render a clean one-line error, not '
+      'a stack trace', () async {
+    await db.store.put(
+      'notes',
+      _key(),
+      await ValueCodec.encode({'title': 'Hello'}),
+    );
+
+    final config = await KmdbConfig.forDatabase(dbDir.path);
+    config.addRemote('gdrive', GoogleDriveRemoteConfig(syncRoot: 'kmdb-sync'));
+    await config.save();
+
+    final ctx = _ctx(db, out: out, err: err);
+    final ok = await pushCmd.execute(ctx, ['gdrive'], {});
+
+    expect(ok, isFalse);
+    final errText = err.toString();
+    expect(errText, startsWith('Error: '));
+    expect(errText, contains('remote add'));
+    expect(errText, isNot(contains('Error executing')));
+  });
 }

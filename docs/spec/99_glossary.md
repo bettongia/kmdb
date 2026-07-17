@@ -83,6 +83,17 @@ Corpus stats
   counts). Stored under `$$fts:corpus:{ns}:{field}`. Used to compute `avgdl`
   at query time and `IDF` in BM25 scoring.
 
+CredentialStore
+
+: The `kmdb_cli`-only storage abstraction for CLI-managed cloud sync
+  credentials (currently: the Google Drive OAuth blob written by `kmdb remote
+  add --type google-drive`). The one implementation shipped,
+  `DirectoryCredentialStore`, hardens `{dbDir}/local/` with POSIX permissions
+  (`chmod 700` directory, `chmod 600` file) and hard-refuses reads when either
+  has drifted looser — the OpenSSH/`gcloud` directory-permission model, not an
+  OS-native keychain. Per-machine, non-synced; entirely outside the database
+  encryption boundary. See §33.
+
 CRC32C
 
 : A variant of the CRC32 checksum using the Castagnoli polynomial. Used by
