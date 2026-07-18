@@ -1,7 +1,7 @@
 name: kmdb_cli
 description: Command-line interface for the KMDB database engine.
-version: 0.1.0
-publish_to: none
+version: 0.1.0-dev.1
+repository: https://github.com/bettongia/kmdb
 
 environment:
   sdk: ^3.12.0
@@ -9,29 +9,29 @@ environment:
 resolution: workspace
 
 dependencies:
-  kmdb:
-  kmdb_google_drive:
+  kmdb: ^0.1.0-dev.1
+  kmdb_google_drive: ^0.1.0-dev.1
 
   # Vault content extractors — registered by default in DatabaseOpener.open()
   # so every CLI-opened database can index plain text, HTML, Markdown, and PDF
   # blobs for vault search out of the box (see docs/plans/plan_0_06_wi12_vault_search_cli.md).
-  kmdb_extractor_html:
-  kmdb_extractor_markdown:
-  kmdb_extractor_pdf:
+  kmdb_extractor_html: ^0.1.0-dev.1
+  kmdb_extractor_markdown: ^0.1.0-dev.1
+  kmdb_extractor_pdf: ^0.1.0-dev.1
 
   # Model construction for semantic/hybrid search (vault + document-field).
   # kmdb.dart re-exports only EmbeddingModel/EmbeddingKind from
   # betto_inferencing, not OnnxEmbeddingModel/ModelCatalog/DownloadProgress —
   # cli_runner.dart needs those directly to resolve KmdbConfig.embeddingModel
   # into a real model (WI-12 Phase B).
-  betto_inferencing:
+  betto_inferencing: ^0.1.0-dev.3
 
   # Supports the use of the Google Drive storage adapter for sync
   googleapis_auth: ^2.0.0
   http: ^1.0.0
   args: ^2.6.0
   path: ^1.9.0
-  uuid:
+  uuid: ^4.5.3
 
 dev_dependencies:
   lints: ^6.1.0

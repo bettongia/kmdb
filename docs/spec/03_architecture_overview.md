@@ -49,6 +49,18 @@ file I/O) but do not participate in SSTable sync.
 retrieves opaque `Uint8List` — it has no knowledge of document structure at any
 point. See §5 for the full value encoding pipeline.
 
+**Encryption is a cross-cutting transform, not a layer of its own.** When
+enabled, it applies at the same value-encoding seam CBOR does — values are
+plaintext above the Cache Layer and encrypted (AES-256-GCM) before they reach
+`KvStore`, so the LSM Engine, SSTables, and Sync Layer in the diagram above all
+operate on opaque ciphertext regardless of whether encryption is active. See
+§1 for the narrative overview and §31 for the full specification.
+
+**Document versioning (§26)** is likewise not a separate layer: it is a
+`WriteAugmentor` in the Query Layer's write pipeline, alongside the secondary
+index, FTS, vector, and vault-ref augmentors, adding a companion `$ver:` entry
+to the same `WriteBatch` as each document write.
+
 **The Query Layer** never touches the LSM directly — it always operates through
 the KvStore public API. It is also the only layer that maintains secondary
 indexes, intercepting writes to keep index entries consistent (§16).
@@ -141,23 +153,19 @@ are device-scoped. See §24 for the full vault sync design.
 
 ## Why LSM, Not SQLite?
 
-SQLite is the industry default for embedded local-first databases. The decision
-to use a custom LSM engine instead is driven by a single constraint:
-multi-device sync via commodity cloud storage without a central server.
-
-SQLite files cannot be safely shared via cloud sync. SQLite in WAL mode uses two
-files (the database and the \-wal journal) that must be in transactional
-lockstep; cloud services sync them independently. File-region locking
-(fcntl/LockFileEx) is not replicated by cloud sync clients. Two devices opening
-the same SQLite file will both believe they hold exclusive locks, producing
-divergent states. Google Drive responds by creating conflict copies (database
-(1).db), forking state with no automated merge path.
-
-The LSM architecture avoids this entirely. SSTables are immutable once written —
-a receiving device either sees the complete file or does not see it at all. File
-creation is the atomic primitive in cloud storage, and SSTables map directly
-onto that primitive. The WAL remains a local implementation detail for crash
-recovery, never exposed to the sync layer.
+See §1 for the narrative version of this rationale (the sync-without-a-server
+constraint, and why a mutable SQLite file can't satisfy it). The mechanical
+detail worth stating here: SQLite in WAL mode uses two files (the database and
+the `-wal` journal) that must stay in transactional lockstep, but cloud sync
+clients sync them independently, and file-region locking (`fcntl`/`LockFileEx`)
+is not replicated across devices — two devices opening the same SQLite file
+both believe they hold exclusive locks, and cloud storage responds to the
+resulting conflict by forking a `database (1).db` copy with no automated merge
+path. SSTables avoid this because they are immutable once written: a receiving
+device either sees the complete file or does not see it at all, and file
+creation (not mutation) is the atomic primitive cloud storage actually
+guarantees. The WAL remains a local implementation detail for crash recovery,
+never exposed to the sync layer.
 
 ## Architectural Decision Record
 

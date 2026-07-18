@@ -1,8 +1,8 @@
 name: kmdb_extractor_html
 description: HTML text extractor for KMDB vault search — implements
   VaultTextExtractor for text/html blobs by walking the html package's DOM.
-version: 0.1.0
-publish_to: none
+version: 0.1.0-dev.1
+repository: https://github.com/bettongia/kmdb
 
 environment:
   sdk: ^3.12.0
@@ -10,7 +10,7 @@ environment:
 resolution: workspace
 
 dependencies:
-  kmdb:
+  kmdb: ^0.1.0-dev.1
   html: ^0.15.6
 
 dev_dependencies:

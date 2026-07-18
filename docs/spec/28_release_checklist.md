@@ -30,6 +30,12 @@ For each release:
 3. A release is not cut until every applicable entry passes or has a documented,
    accepted waiver.
 
+See [docs/releasing/README.md](../releasing/README.md) for the full release
+*process* — package publish order, version-bump rules, and the per-release
+checklist convention that consumes this list. This list is not duplicated
+there; each per-release checklist file references the current entries here
+by ID.
+
 ## Entry template
 
 ```

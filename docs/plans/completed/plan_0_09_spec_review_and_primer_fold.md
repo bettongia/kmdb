@@ -1,6 +1,6 @@
 # Specification review, front-matter reconciliation & primer fold
 
-**Status**: Investigated
+**Status**: Complete
 
 **PR link**: —
 
@@ -173,62 +173,90 @@ a vague tidy-up.
 
 ## Implementation plan
 
-- [ ] Fix `docs/spec/00_index.md`: extend the abstract through the highest
-      section present at implementation time (per **Q4** — do not hard-code
-      §32; §33 already exists), resolve
-      the scale-target conflict with `02_target_workload_profile.md` (defer to
-      §02's figure), add the Part-grouping structure, add the subsystem →
+- [x] Fix `docs/spec/00_index.md`: extend the abstract through the highest
+      section present at implementation time (§33, confirmed landed on `main`
+      at implementation time), resolve the scale-target conflict with
+      `02_target_workload_profile.md` (deferred to §02's 100,000-document
+      figure), added the Part-grouping structure, added the subsystem →
       section → status table.
-- [ ] Rewrite `docs/spec/01_overview.md` as the expanded System Overview:
-      absorb the primer's accurate framing, apply the **Q5** row-by-row
-      disposition of the "Open Questions" table (three shipped rows removed —
-      full-text search, iCloud, stale-device tombstone threshold — three
-      genuinely-open rows kept or relocated to a Future-work note), add
-      encryption and versioning coverage.
-- [ ] Update `docs/spec/03_architecture_overview.md`: add the encryption
-      cross-cutting seam to the layer stack, add a document-versioning
-      mention, de-duplicate prose that now lives in the expanded §01.
-- [ ] Normalise the 4 stray single-`$` namespace tokens (3 in
-      `22_semantic_search.md`, 1 in `26_document_versioning.md`) to `$$`.
-- [ ] Re-validate the two divergence candidates against current code and
-      correct the spec (or file a follow-up if code needs to change):
-      - `31_encryption.md`'s claims about `$$fts`/`$$vec` value encryption
-        post-0.08 reconciliation.
-      - `05_value_encoding.md`'s web Zstd-compression claim.
-- [ ] Leave `14_reactivity.md` standalone per Q1; tidy its cross-links with
-      §13 for clarity.
-- [ ] Leave §31/§32 (and §33, per Q4) numbered as-is per Q2; express topical
-      grouping only through the `00_index.md` Part structure.
-- [ ] Retire `docs/primer.md`, having first moved its "Navigating the Code"
-      table (per Q3) into the expanded `01_overview.md` (or a short dedicated
-      subsection near it), refreshing any drifted file paths in the process.
-- [ ] Update the doc-site build to match: `make_site.mk` builds
-      `$(SITE_DIR)/primer.html` as its own pandoc target and lists it as a
-      hard dependency of `doc_site_html` — remove both if the primer is
-      retired. `docs/template/header.html:101` has a nav link
-      (`<a href="primer.html">Primer</a>`) to remove/repoint. Confirm nothing
-      else in `docs/template/` (e.g. `_index.md`) references `primer.html`.
-- [ ] Update `CONTRIBUTING.md:14`, which currently points to
-      `docs/primer.md` ("See the [LSM Primer](docs/primer.md) for a
-      high-level overview…") — repoint to the new `01_overview.md` section
-      (or wherever the System Overview lands) once it's part of `spec.html`.
-- [ ] Sweep the rest of `docs/spec/` for any other implementation-status
-      claims that have drifted since each file was last touched (spot-check
-      against the CLAUDE.md Implementation Status table and recent roadmap
-      entries).
-- [ ] Update any repo-root references to `docs/primer.md` (e.g. `README.md`,
-      `CLAUDE.md`) if it is retired.
-- [ ] Run `make doc_site` to confirm the site builds cleanly with the new
-      structure (broken cross-refs, pandoc errors).
+- [x] Rewrote `docs/spec/01_overview.md` as the expanded System Overview:
+      absorbed the primer's accurate framing (sync-without-a-server
+      constraint, layer-by-layer walkthrough, encryption-as-value-seam),
+      applied the **Q5** row-by-row disposition (three shipped rows removed;
+      pagination cursors, type-safe field paths, array root documents moved
+      into a "Future Work" section), added Encryption and Document Versioning
+      sections, added the "Navigating the Code" table (Q3, all 16 file paths
+      re-verified against current `packages/kmdb/` layout), and cross-links
+      §99 for terminology instead of duplicating the primer's Key Terms table.
+- [x] Updated `docs/spec/03_architecture_overview.md`: added the encryption
+      cross-cutting-transform paragraph and a document-versioning paragraph
+      after the layer-stack diagram; trimmed the "Why LSM, Not SQLite?"
+      section to the mechanical SQLite-lock detail only, deferring the
+      narrative rationale to the new §1.
+- [x] Normalised the 4 stray single-`$` namespace tokens (3 in
+      `22_semantic_search.md`'s Index Structure block, 1 in
+      `26_document_versioning.md`'s write-path diagram) to `$$`. Verified via
+      grep sweep that no stray tokens remain across `docs/spec/`.
+- [x] Re-validated both divergence candidates against current code — **both
+      already accurate, no spec change needed**:
+      - `31_encryption.md` already documents (Gap 1, resolved) that
+        `$$fts`/`$$vec` values are encrypted post-0.08 reconciliation.
+      - `05_value_encoding.md` already reads "Zstd (native and web)",
+        matching `compression_flag.dart`'s `zstd = 0x01`.
+- [x] Left `14_reactivity.md` standalone per Q1; added a cross-link from §13's
+      `watch()` terminal-method row to §14, and a reciprocal cross-link at the
+      top of §14 back to §13.
+- [x] Left §31/§32/§33 numbered as-is per Q2; topical grouping expressed only
+      through the `00_index.md` Part structure (§33 added to Part 7 per Q4).
+- [x] Retired `docs/primer.md` — its "Navigating the Code" table (per Q3) was
+      moved into the expanded `01_overview.md` with refreshed
+      `../../packages/kmdb/...` relative paths (all 16 verified to exist); the
+      rest of the primer's content was rewritten (not copied verbatim) into
+      the System Overview, correcting the stale single-`$` namespaces,
+      "Deflate on web", 1-byte prefix, and "kmdb_flutter forthcoming" claims
+      along the way. The file itself is deleted.
+- [x] Updated the doc-site build to match: removed `make_site.mk`'s
+      `$(SITE_DIR)/primer.html` pandoc target and its dependency in
+      `doc_site_html`; removed the nav link in `docs/template/header.html`;
+      confirmed via grep that nothing else in `docs/template/` referenced
+      `primer.html`.
+- [x] Updated `CONTRIBUTING.md`'s primer link to point to
+      `docs/spec/01_overview.md` (§1 System Overview) instead.
+- [x] Swept the rest of `docs/spec/` for stale implementation-status markers
+      (`forthcoming`, `TODO`, `FIXME`, `TBD`, etc.) — the only hits found
+      (§13's intentionally-deferred JSONPath features, §28's references to
+      real `TODO` comments in code, §30's genuinely-pending propagation-delay
+      measurement) are all accurate as written; no changes needed.
+- [x] Confirmed via grep that no repo-root files (`README.md`, `CLAUDE.md`)
+      referenced `docs/primer.md` — this was already a no-op as the reviewer
+      predicted.
+- [x] Ran `make -f make_site.mk doc_site_html` to confirm the site builds
+      cleanly with the new structure — `spec.html` (1MB), `index.html`, and
+      `roadmap.html` all regenerated with no pandoc errors or warnings; spot-
+      checked the built HTML for the new "Navigating the Code"/"Future Work"/
+      "Document Versioning" headings and confirmed no dangling
+      `packages/kmdb/lib/...` link paths. Removed the stale, gitignored
+      `site/primer.html` build artifact left over from before retirement. The
+      full `make doc_site` target additionally runs `make coverage` across the
+      whole test suite — skipped here as it doesn't validate a docs-only
+      change (no test/coverage-affecting code changed); `kmdb-qa` can re-run
+      it if it wants full-suite confirmation.
 
 **Final step — QA sign-off and pre-commit:**
 
-- [ ] Hand off to the **`kmdb-qa` agent** for sign-off (spec alignment
-      against actual code, doc quality, no dangling cross-references).
-      Resolve every blocking item before proceeding. Do not open a PR until
-      sign-off is received.
-- [ ] Run `make pre_commit` — format, analyze, license_check, tests all green.
-- [ ] Verify licence headers on all new/retired files as applicable.
+- [x] Handed off to the **`kmdb-qa` agent** for sign-off — cleared, with one
+      non-blocking WARN (dangling `docs/roadmap/` primer links) found and
+      fixed; see Summary. No PR opened, per the earlier agreement to work
+      directly on `main` for this docs-only plan (no branch/worktree).
+- [x] Ran `make pre_commit` — format_check, analyze, license_check, and the
+      full `kmdb` test suite (2373/2373) all green. Run jointly with
+      `plan_0_09_release_process_doc.md`'s changes present in the working
+      tree at the same time (per the user's request to implement both before
+      QA), so this is a real cross-check that neither plan's changes conflict.
+- [x] No new files carrying license-header requirements were added by this
+      plan (spec/doc markdown files don't carry headers in this repo's
+      convention); `docs/primer.md` was deleted, not added. `melos licenses`
+      passed with no findings.
 
 ## Reviewer assessment (kmdb-plan-reviewer, 2026-07-17)
 
@@ -373,4 +401,38 @@ decisions.
 
 ## Summary
 
-{To be completed once implemented.}
+- Rewrote `docs/spec/00_index.md`'s abstract to cover §26/§29–§33 (previously
+  invisible in the index), added a Part-grouping table of contents and a
+  subsystem → section → implementation-status table, and resolved the
+  100K/500K scale-target conflict in favour of §02's authoritative figure.
+- Rewrote `docs/spec/01_overview.md` as the expanded System Overview: folded
+  in the primer's accurate framing (rewritten, not copied — the primer's
+  stale/wrong claims about `$$` sync exclusion, web compression, and
+  `kmdb_flutter` status were corrected along the way), added Encryption and
+  Document Versioning sections, applied the full six-row disposition of the
+  old "Open Questions" table (three shipped rows removed, three genuinely
+  open ones moved to a new "Future Work" section), and added the
+  "Navigating the Code" table with all 16 file paths re-verified.
+- Updated `docs/spec/03_architecture_overview.md` with an encryption
+  cross-cutting note and a document-versioning note, and trimmed its
+  duplicated "Why LSM" narrative now that §01 carries it.
+- Normalised 4 stray single-`$` namespace tokens; re-validated both
+  spec/code divergence candidates (§31 encryption, §05 web compression) and
+  found both already accurate — no code or further spec changes needed.
+- Retired `docs/primer.md` and its build wiring (`make_site.mk`'s
+  `primer.html` target, the nav link in `header.html`, the `CONTRIBUTING.md`
+  reference).
+- Verified the full `spec.html` doc site builds cleanly with the new
+  structure, and that `make pre_commit` (format, analyze, license_check,
+  2373/2373 `kmdb` tests) passes.
+- **`kmdb-qa` sign-off received** (2026-07-17) — both this plan and the
+  sibling `plan_0_09_release_process_doc.md` cleared, with spot-checks of
+  the new encryption/versioning prose against actual code confirming
+  accuracy. One WARN raised: `docs/roadmap/0_09.md` and `docs/roadmap/0_10.md`
+  still linked `../primer.md` — the checklist's dangling-reference sweep only
+  checked `README.md`/`CLAUDE.md`, missing `docs/roadmap/`. Fixed: both now
+  link `docs/spec/01_overview.md` and describe the fold in past tense.
+  Rebuilt `roadmap.html` to confirm clean; re-swept the whole tree and found
+  no other dangling `primer.md`/`primer.html` references outside historical
+  `docs/plans/completed/` records (correctly untouched) and other agents'
+  worktrees/gitignored build output.

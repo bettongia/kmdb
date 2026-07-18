@@ -16,7 +16,7 @@ vault, and sync mechanics.
 
 This is one of three plans split out of a single combined roadmap item at the
 `kmdb-architect` agent's recommendation — see
-[plan_0_09_spec_review_and_primer_fold.md](plan_0_09_spec_review_and_primer_fold.md)
+[plan_0_09_spec_review_and_primer_fold.md](completed/plan_0_09_spec_review_and_primer_fold.md)
 for the full split rationale. This plan is the heaviest and riskiest of the
 three: unlike the other two (docs-only), it requires real, tested application
 code (the sample app) in addition to the guide prose. Because of that weight,
@@ -26,7 +26,7 @@ its roadmap item has since moved out to its own roadmap,
 to `plan_0_10_integration_guide.md` to match (all cross-references from its
 former `0_09` siblings were updated accordingly).
 
-**Dependency: [plan_0_09_spec_review_and_primer_fold.md](plan_0_09_spec_review_and_primer_fold.md)
+**Dependency: [plan_0_09_spec_review_and_primer_fold.md](completed/plan_0_09_spec_review_and_primer_fold.md)
 is now a prerequisite, not just a nice-to-have cross-check.** The guide cites
 spec section numbers throughout (§16, §17, §20–23, §24, §25, §31, etc.) — the
 spec-review plan is what confirms those sections are correct, complete, and
@@ -345,7 +345,7 @@ temp dirs where native file behaviour matters, i.e. vault and sync):
       section cross-referencing the relevant spec section number against the
       **post-spec-review** state of `docs/spec/` (per the prerequisite noted
       in the Problem statement —
-      [plan_0_09_spec_review_and_primer_fold.md](plan_0_09_spec_review_and_primer_fold.md)
+      [plan_0_09_spec_review_and_primer_fold.md](completed/plan_0_09_spec_review_and_primer_fold.md)
       must have landed on `main` before this step). Note hybrid/semantic
       search and `PdfTextExtractor` as "going further" callouts, not demoed
       paths.

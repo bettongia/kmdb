@@ -364,9 +364,9 @@ Three key types are written to the KV store, all exempt from the session object
 cache and materialised view cache (§15):
 
 ```
-$vec:{ns}:{field}:{docId}           →  Uint8List (D bytes, SQ8 quantized)
-$vec:corpus:{ns}:{field}            →  { n: int }
-$vec:truncated:{ns}:{field}:{docId} →  (empty — key presence = truncation marker)
+$$vec:{ns}:{field}:{docId}           →  Uint8List (D bytes, SQ8 quantized)
+$$vec:corpus:{ns}:{field}            →  { n: int }
+$$vec:truncated:{ns}:{field}:{docId} →  (empty — key presence = truncation marker)
 ```
 
 where `D = EmbeddingModel.dimensions` (384 for both currently-registered

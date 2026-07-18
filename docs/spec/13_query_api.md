@@ -445,7 +445,8 @@ final (results, plan) = await collection.explainedGet(
 returned as a `Future<List<T>>`. No LSM snapshot is held open. This is
 sufficient at KMDB's target scale (≤100K documents); a lazy cursor with
 ref-counted SSTable retention can be introduced if larger scale demands it.
-Prefer `watch()` for reactive UI lists.
+Prefer `watch()` for reactive UI lists — see §14 for the full debounce and
+invalidation semantics.
 
 **`orderBy('_id')`** maps directly to `KvStore.scan(descending:)` and avoids
 an in-memory sort — the only `orderBy` with this optimisation. All other fields

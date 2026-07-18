@@ -1,5 +1,8 @@
 # Watch / Reactivity
 
+See §13 for the full `KmdbQuery<T>` terminal-method API, of which `watch()` is
+one; this section covers only its debounce and invalidation semantics.
+
 watch() returns a broadcast Stream that re-emits query results when relevant
 writes occur. The implementation uses debounced re-execution:
 

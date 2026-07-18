@@ -11,8 +11,8 @@ carry on.
 
 ## The Codebase
 
-See the [LSM Primer](docs/primer.md) for a high-level overview of the storage
-engine.
+See [§1 System Overview](docs/spec/01_overview.md) for a high-level overview of
+the storage engine and the rest of the system.
 
 - The [`Makefile`](Makefile) encapsulates the main tasks such as building the
   project, running tests, building the docs etc.

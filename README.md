@@ -222,4 +222,6 @@ Supported JSON Schema keywords: `type`, `required`, `properties`,
 
 ## Additional information
 
-Refer to [docs](docs/index.md) for the full specification.
+Refer to [docs](docs/index.md) for the full specification. See
+[docs/releasing](docs/releasing/README.md) for how KMDB packages are
+published.

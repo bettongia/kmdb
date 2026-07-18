@@ -106,7 +106,7 @@ contains:
 ```
 document write  ← main namespace put (or delete tombstone)
 $ver: entry     ← VersionEntry for this write
-$index: entries ← secondary index augmentor
+$$index: entries ← secondary index augmentor
 vault refs      ← VaultRefInterceptor augmentor
 meta updates    ← dirty flag, gen counter, namespace registry
 ```

@@ -1,9 +1,8 @@
 name: kmdb
 description:
   A local-first document database for Dart/Flutter with multi-device sync.
-version: 0.1.0
+version: 0.1.0-dev.1
 repository: https://github.com/bettongia/kmdb
-publish_to: none
 
 environment:
   sdk: ^3.12.0
@@ -11,19 +10,19 @@ environment:
 resolution: workspace
 
 dependencies:
-  cbor:
-  betto_schema:
-  betto_zstd:
-  betto_mediatype_detector:
-  betto_common:
-  meta: any
-  betto_lexical:
-  betto_inferencing:
-  betto_charset_detector:
-  betto_lang_detector:
-  charset:
-  uuid:
-  web:
+  cbor: ^6.5.1
+  betto_schema: ^0.1.0-dev.2
+  betto_zstd: ^0.1.0-dev.3
+  betto_mediatype_detector: ^0.1.0-dev.1
+  betto_common: ^0.1.0-dev.2
+  meta: ^1.18.3
+  betto_lexical: ^0.1.0-dev.2
+  betto_inferencing: ^0.1.0-dev.3
+  betto_charset_detector: ^0.1.0-dev.2
+  betto_lang_detector: ^0.1.0-dev.1
+  charset: ^2.0.1
+  uuid: ^4.5.3
+  web: ^1.1.0
   intl: ^0.20.2
 
   # AES-256-GCM encryption, Argon2id KDF, HKDF (pure-Dart; no Flutter dependency).

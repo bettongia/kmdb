@@ -2,8 +2,8 @@ name: kmdb_extractor_pdf
 description: PDF text extractor for KMDB vault search — implements
   VaultTextExtractor for application/pdf blobs by wrapping betto_pdfium
   (PDFium FFI).
-version: 0.1.0
-publish_to: none
+version: 0.1.0-dev.1
+repository: https://github.com/bettongia/kmdb
 
 environment:
   sdk: ^3.12.0
@@ -11,7 +11,7 @@ environment:
 resolution: workspace
 
 dependencies:
-  kmdb:
+  kmdb: ^0.1.0-dev.1
   betto_pdfium: ^0.1.0-dev.3
 
 dev_dependencies:

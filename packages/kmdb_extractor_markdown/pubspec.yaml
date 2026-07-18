@@ -2,8 +2,8 @@ name: kmdb_extractor_markdown
 description: Markdown text extractor for KMDB vault search — implements
   VaultTextExtractor for text/markdown blobs by walking the markdown
   package's AST.
-version: 0.1.0
-publish_to: none
+version: 0.1.0-dev.1
+repository: https://github.com/bettongia/kmdb
 
 environment:
   sdk: ^3.12.0
@@ -11,7 +11,7 @@ environment:
 resolution: workspace
 
 dependencies:
-  kmdb:
+  kmdb: ^0.1.0-dev.1
   markdown: ^7.3.1
 
 dev_dependencies:
