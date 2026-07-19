@@ -244,7 +244,7 @@ void main() {
 
     test('returns false when attachment is not referenced in document', () async {
       final attachBytes = Uint8List.fromList(utf8.encode('unref-file'));
-      final sha256 = VaultStore.computeSha256ForTest(attachBytes);
+      final sha256 = VaultStore.computeSha256(attachBytes);
       final docWithNoRef = {'t': 'z'};
       final packageBytes = VaultPackage.write(
         documentJson: docWithNoRef,

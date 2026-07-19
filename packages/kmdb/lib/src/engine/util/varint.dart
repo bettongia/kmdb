@@ -88,8 +88,19 @@ final class Varint {
   ///
   /// Returns a record `(value, bytesConsumed)`.
   ///
-  /// Throws [FormatException] if the varint spans more than [maxBytes] or if
-  /// [buf] ends prematurely.
+  /// Throws [FormatException] if the varint spans more than [maxBytes], if
+  /// [buf] ends prematurely, or if the encoded value would not fit in a
+  /// non-negative 64-bit [int].
+  ///
+  /// ## Security note (S-1 / S-3)
+  ///
+  /// Every caller of this method treats the returned value as a length or
+  /// offset. Prior to this hardening, a 10-byte varint whose final byte
+  /// contributed a bit at shift 63 could set the sign bit, silently producing
+  /// a **negative** "length" that downstream slicing code did not expect (see
+  /// the 2026-07-18 release-readiness review, finding S-1). This is rejected
+  /// explicitly below rather than relying on callers to bounds-check a
+  /// value that should never have been negative in the first place.
   static (int value, int bytesConsumed) decode(Uint8List buf, int offset) {
     var result = 0;
     var shift = 0;
@@ -107,7 +118,19 @@ final class Varint {
         );
       }
       final byte = buf[pos++];
-      result |= (byte & 0x7F) << shift;
+      final chunk = byte & 0x7F;
+      // At shift 63, any non-zero contribution would set bit 63 (the sign
+      // bit) or shift entirely out of a 64-bit value. Every legitimate
+      // encoder in this codebase only ever encodes non-negative Dart `int`s
+      // (effectively 63 usable bits), so a non-zero chunk here can only be
+      // the product of a corrupted or adversarial encoding — reject it
+      // rather than silently wrapping into a negative "length".
+      if (shift == 63 && chunk != 0) {
+        throw FormatException(
+          'Varint overflows a non-negative 64-bit int at offset $offset',
+        );
+      }
+      result |= chunk << shift;
       if ((byte & 0x80) == 0) break;
       shift += 7;
     }

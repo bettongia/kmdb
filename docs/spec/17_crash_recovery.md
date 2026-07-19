@@ -69,6 +69,7 @@
 | After compaction VersionEdit, before input SSTable deletion | The compaction's `VersionEdit` is fsynced and the output's directory entry `syncDir`'d before any input is deleted, so the durable manifest already names the output. Old inputs in `remove` entries are deleted on open. | None. |
 | Process killed without clean close | Dirty-open flag in `$meta` set on next open. Reported in `OpenResult.hadUnclosedSession`. Writes since the last flush are replayed from the WAL. | None (WAL is durable). |
 | During sync upload | Local state intact. SSTable is re-uploaded on next sync cycle. | None locally. |
+| `close()` called while the vault-indexing isolate is hung or dead (D-1) | `KmdbDatabase.close()` flushes the memtable *before* shutting down the vault search isolate — see §18 "The Vault Indexing Isolate". The isolate shutdown step may itself fail or time out, but only *after* the flush has already completed. | None (flush already ran). |
 
 > **Durability ordering (review findings C2 / H1 / M3, now enforced).** The
 > "None" guarantees above hold because every operation that replaces durable

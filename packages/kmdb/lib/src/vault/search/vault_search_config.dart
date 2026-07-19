@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/// @docImport '../../encoding/value_codec.dart';
+/// @docImport '../vault_store.dart';
+library;
+
 import 'plain_text_extractor.dart';
 import 'vault_text_extractor.dart';
 
@@ -74,6 +78,7 @@ final class VaultSearchConfig {
     this.extractors = const [],
     this.chunkSize = 300,
     this.chunkOverlap = 50,
+    this.maxBlobBytes = 200 * 1024 * 1024,
   }) : assert(chunkSize > 0, 'chunkSize must be > 0'),
        assert(chunkOverlap >= 0, 'chunkOverlap must be >= 0'),
        assert(chunkOverlap < chunkSize, 'chunkOverlap must be < chunkSize');
@@ -102,6 +107,23 @@ final class VaultSearchConfig {
   /// Overlap ensures that phrases spanning a chunk boundary are not missed by
   /// either chunk's BM25 or semantic scoring. Default: 50.
   final int chunkOverlap;
+
+  /// Maximum blob size, in bytes, that will be handed to an extractor.
+  ///
+  /// Blobs are attachments, not documents — §02's 50 MB "legitimate large
+  /// attachment" example is well within this default, unlike
+  /// [ValueCodec.kMaxDecodedValueBytes] which bounds *document* values. A
+  /// blob larger than this is recorded as a failed extraction
+  /// (`VaultExtractionState.failed`) rather than sent to an extractor; the
+  /// blob itself is untouched and remains retrievable via
+  /// [VaultStore.getBytes] — only indexing is skipped.
+  ///
+  /// This is a distinct, deliberately much larger bound than
+  /// [ValueCodec.kMaxDecodedValueBytes] (2026-07-18 release-readiness review,
+  /// S-2): a bound sized for documents would reject legitimate attachments,
+  /// and one sized for attachments would be useless against a document-sized
+  /// decompression bomb. Default: 200 MiB.
+  final int maxBlobBytes;
 
   /// Returns the effective extractor list: [PlainTextExtractor] prepended to
   /// [extractors], deduplicating by media type (callers who supply their own

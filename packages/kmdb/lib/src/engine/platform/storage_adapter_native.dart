@@ -48,6 +48,23 @@ final class StorageAdapterNative implements StorageAdapter {
     RandomAccessFile? raf;
     try {
       raf = await File(path).open();
+      // S-1: validate the requested range against the file's *actual* size
+      // before allocating the destination buffer. Unlike MemoryStorageAdapter
+      // (which already bounds-checks), this method previously allocated
+      // `Uint8List(length)` unconditionally — an attacker-controlled length
+      // read from an untrusted SSTable footer/index (e.g. `filterSize =
+      // 1<<40`) reached `malloc` before any check could reject it, yielding
+      // an uncatchable `OutOfMemoryError` (PROBE1 in the 2026-07-18
+      // release-readiness review). A negative offset is rejected here too,
+      // rather than relying on `setPosition` to fail after the allocation.
+      final fileLength = await raf.length();
+      if (offset < 0 || length < 0 || offset + length > fileLength) {
+        throw StorageException(
+          'Requested range [$offset, ${offset + length}) exceeds file size '
+          '$fileLength',
+          path: path,
+        );
+      }
       await raf.setPosition(offset);
       final buf = Uint8List(length);
       final read = await raf.readInto(buf);

@@ -500,13 +500,30 @@ final class _ByteReader {
   }
 
   /// Reads a big-endian 8-byte unsigned integer.
+  ///
+  /// Throws [FormatException] if the encoded value would not fit in a
+  /// non-negative 64-bit [int] (S-3).
   int readUint64() {
     _checkAvailable(8);
     // Dart integers are 64-bit; this is safe for file sizes up to 2^63.
     final hi = _data.getUint32(_pos, Endian.big);
     final lo = _data.getUint32(_pos + 4, Endian.big);
     _pos += 8;
-    return (hi << 32) | lo;
+    final value = (hi << 32) | lo;
+    // S-3: when `hi >= 0x8000_0000`, the shift sets bit 63 and `value` comes
+    // out negative. `_checkAvailable` on a subsequent `readBytes(negative)`
+    // call would then pass trivially (`_pos + negative` is smaller than the
+    // buffer length), bypassing the guard entirely and letting `sublist`
+    // throw a bare `RangeError` instead of the `FormatException` a caller
+    // expects to catch when rejecting a malformed package. Reject here,
+    // where the sign-overflow actually occurs, rather than downstream.
+    if (value < 0) {
+      throw FormatException(
+        'Vault package: uint64 value overflows a non-negative 64-bit int '
+        '(hi=0x${hi.toRadixString(16)}, lo=0x${lo.toRadixString(16)})',
+      );
+    }
+    return value;
   }
 
   void _checkAvailable(int count) {

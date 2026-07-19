@@ -85,7 +85,7 @@ void main() {
     // ── vaultObjectExists ─────────────────────────────────────────────────
 
     test('vaultObjectExists returns false when object is absent', () async {
-      final sha256 = VaultStore.computeSha256ForTest(_kContent);
+      final sha256 = VaultStore.computeSha256(_kContent);
       expect(await adapter.vaultObjectExists(sha256), isFalse);
     });
 
@@ -203,7 +203,7 @@ void main() {
     test(
       'syncVaultMetadata throws StateError when remote manifest missing',
       () async {
-        final sha256 = VaultStore.computeSha256ForTest(_kContent);
+        final sha256 = VaultStore.computeSha256(_kContent);
         await expectLater(
           adapter.syncVaultMetadata(sha256),
           throwsA(isA<StateError>()),
@@ -248,10 +248,62 @@ void main() {
       },
     );
 
+    test('hydrateVaultBlob rejects a substituted remote blob (S-4) — content '
+        'that does not hash to the requested address is never written to the '
+        'local final blob path', () async {
+      // Upload legitimate content from device A.
+      final ref = await localStore.ingest(
+        bytes: _kContent,
+        hlcTimestamp: '0000000000000001',
+      );
+      await adapter.uploadVaultObject(ref.sha256);
+
+      // Attacker substitutes the remote blob's bytes in place — simulating
+      // a compromised provider (T1) or malicious peer (T3) with write
+      // access to the sync folder. The manifest (sha256, crc32c) is left
+      // untouched, so this is exactly the "whatever the sync folder holds
+      // becomes the local blob for that address" scenario the review's
+      // S-4 finding describes.
+      final prefix = ref.sha256.substring(0, 2);
+      final suffix = ref.sha256.substring(2);
+      // Prefixed with EncryptionFlag.none (0x00) so the substituted bytes
+      // parse as a well-formed (unencrypted) EncryptionEnvelope — this test
+      // is specifically about the SHA-256 content-address check, not
+      // envelope parsing.
+      final remoteBlobPath = '${syncRoot.path}/vault/$prefix/$suffix/blob';
+      await File(
+        remoteBlobPath,
+      ).writeAsBytes([0x00, ...utf8.encode('attacker-substituted-content')]);
+
+      // Device B syncs metadata (stub) then attempts hydration.
+      final deviceBAdapter = MemoryStorageAdapter();
+      final deviceBStore = _MemVaultStore(
+        deviceBAdapter,
+        '/device_b_substitution',
+      );
+      final deviceBKvStore = TestKvStore()..setRefCount(ref.sha256, 1);
+      final adapterB = LocalDirectoryVaultAdapter(
+        syncRoot: syncRoot.path,
+        localStore: deviceBStore,
+        kvStore: deviceBKvStore,
+      );
+      await adapterB.syncVaultMetadata(ref.sha256);
+
+      await expectLater(
+        adapterB.hydrateVaultBlob(ref.sha256),
+        throwsA(isA<VaultContentMismatchException>()),
+      );
+
+      // The substituted content must never have reached the local final
+      // blob path — the object must still read as a stub, not a hydrated
+      // (and now-poisoned) local blob.
+      expect(await deviceBStore.isHydrated(ref.sha256), isFalse);
+    });
+
     test(
       'hydrateVaultBlob throws StateError when remote object does not exist',
       () async {
-        final sha256 = VaultStore.computeSha256ForTest(_kContent);
+        final sha256 = VaultStore.computeSha256(_kContent);
         await expectLater(
           adapter.hydrateVaultBlob(sha256),
           throwsA(isA<StateError>()),
@@ -263,7 +315,7 @@ void main() {
       'hydrateVaultBlob throws StateError when remote blob is absent',
       () async {
         // Create a remote manifest without a blob (simulates a stub-only remote).
-        final sha256 = VaultStore.computeSha256ForTest(_kContent);
+        final sha256 = VaultStore.computeSha256(_kContent);
         final crc32c = VaultStore.computeCrc32cForTest(_kContent);
         final prefix = sha256.substring(0, 2);
         final suffix = sha256.substring(2);

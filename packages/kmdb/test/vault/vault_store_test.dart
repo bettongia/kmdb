@@ -67,7 +67,7 @@ final class _NoOpDetector implements MediaTypeDetector {
 Uint8List _bytes(String content) => Uint8List.fromList(content.codeUnits);
 
 /// Returns a 64-char lower-case hex hash of [data] using VaultStore.
-String _sha256Of(Uint8List data) => VaultStore.computeSha256ForTest(data);
+String _sha256Of(Uint8List data) => VaultStore.computeSha256(data);
 
 /// Returns the 8-char CRC32C of [data].
 String _crc32cOf(Uint8List data) => VaultStore.computeCrc32cForTest(data);

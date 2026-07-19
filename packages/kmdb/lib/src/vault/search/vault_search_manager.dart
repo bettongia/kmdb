@@ -576,6 +576,24 @@ final class VaultSearchManager {
       return;
     }
 
+    // S-2: bound the blob size before it is ever sent to an extractor or the
+    // indexing isolate. Extractors (PDF in particular) have no size bound of
+    // their own (S-8), so an oversized blob would otherwise reach a large
+    // native parser unbounded. This is a distinct, much larger bound than
+    // ValueCodec.kMaxDecodedValueBytes — see VaultSearchConfig.maxBlobBytes.
+    if (bytes.length > _config.maxBlobBytes) {
+      await _writeExtractStatusToKv(
+        sha256,
+        VaultExtractionState.failed(
+          sha256,
+          'Blob size ${bytes.length} exceeds maxBlobBytes '
+          '(${_config.maxBlobBytes}); skipping extraction',
+        ),
+      );
+      await _emitStatus();
+      return;
+    }
+
     // Step 2: Send work item to the isolate.
     _isolate ??= await VaultIndexingIsolate.spawn(_config.effectiveExtractors);
     final item = VaultWorkItem(

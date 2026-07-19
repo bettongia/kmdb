@@ -101,6 +101,39 @@ void main() {
       final buf = Uint8List.fromList([0x80]);
       expect(() => Varint.decode(buf, 0), throwsA(isA<FormatException>()));
     });
+
+    test('10-byte varint whose final byte sets the sign bit throws '
+        'FormatException instead of decoding to a negative int (S-1/S-3)', () {
+      // 9 continuation bytes (all 0xFF, contributing 63 low bits set)
+      // followed by a 10th byte with the continuation bit clear and a
+      // non-zero low 7 bits — at shift 63 any non-zero contribution would
+      // set bit 63 (the sign bit) of the decoded int. Every caller in this
+      // codebase treats the result as a length or offset, so a silent
+      // negative value here is exactly the S-1 defect: prior to this
+      // hardening, `(byte & 0x7F) << 63` overflowed silently and the guard
+      // (`shift >= 64`) never fired because it only checked *before*
+      // decoding the 10th byte, not the sign-bit contribution itself.
+      final buf = Uint8List.fromList([
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // 9 bytes
+        0x01, // 10th byte: continuation bit clear, low bit set
+      ]);
+      expect(() => Varint.decode(buf, 0), throwsA(isA<FormatException>()));
+    });
+
+    test('a 10-byte varint whose final byte is exactly 0x00 still decodes '
+        '(no spurious rejection of legitimately-encoded values)', () {
+      // A well-formed encoder never emits a trailing zero byte (it would
+      // stop one byte earlier), but this confirms the shift-63 guard
+      // rejects only a *non-zero* contribution, not the presence of a
+      // 10th byte per se.
+      final buf = Uint8List.fromList([
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // 9 bytes
+        0x00, // 10th byte: continuation bit clear, zero contribution
+      ]);
+      final (value, consumed) = Varint.decode(buf, 0);
+      expect(consumed, equals(10));
+      expect(value, greaterThanOrEqualTo(0));
+    });
   });
 
   group('decodeMany', () {

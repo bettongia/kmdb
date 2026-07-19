@@ -14,6 +14,69 @@ of both crash safety and sync safety.
 | Index block  | One entry per data block: (last key, block offset, block size).                              |
 | Footer (48B) | Filter block offset/size, index block offset/size, entry count, XXH64 checksum. Note: min/max key are **not** stored in the footer — `maxKey` is available as `index.last.lastKey` (the last key of the last data block), and `minKey` requires reading the first data block's first entry. Both are recorded in the Manifest's `SstableMeta` for each file (see §10). |
 
+## Untrusted-Input Validation (S-1, S-2)
+
+The SSTable is the **only** on-disk format that crosses a trust boundary — it
+is written locally, but also ingested from peers via sync. The footer's XXH64
+checksum defends against accidental corruption, but it is **not
+cryptographic**: a party who controls a file's body (an untrusted cloud
+provider, or a malicious peer under the T1/T3 threat model — see §31) can
+simply recompute the checksum after tampering with any field, so a
+checksum-valid file carries no guarantee of authenticity. `SstableReader`
+therefore validates every length and offset field against the actual buffer
+before it is used to allocate or slice, rather than trusting the format to be
+well-formed:
+
+- **Footer fields** (`filterOffset`, `filterSize`, `indexOffset`, `indexSize`)
+  must each be non-negative, and `offset + size` must not exceed the file's
+  actual size. Violations reject the file with `CorruptedSstableException`
+  before either field is used to seek or allocate.
+- **Index entries**: each entry's `keyLen` (a varint) is bounds-checked
+  against the remaining index-block bytes before it sizes a slice.
+- **Data block entries**: `shared` (the shared-key-prefix length) is
+  bounds-checked against the length of the key reconstructed so far — a data
+  block's very first entry is always a restart point with `shared = 0`, so any
+  non-zero value there is immediately invalid. `unsharedLen` and `valueLen`
+  are bounds-checked against the remaining block bytes. All three checks run
+  **before** the entry's key/value reconstruction allocates a buffer.
+- **Varint decoding**: a 64-bit varint whose tenth (final) byte would set bit
+  63 is rejected outright (`FormatException`) rather than silently decoding to
+  a negative `int` — every caller treats a decoded varint as a length or
+  offset, and a negative one is never valid.
+- **Range reads**: `StorageAdapterNative.readFileRange` bounds every requested
+  `[offset, offset + length)` range against the file's real size *before*
+  allocating the destination buffer, so an attacker-declared length read from
+  an untrusted footer/index field cannot reach `malloc` unbounded.
+
+Any structural failure surfaces uniformly as `CorruptedSstableException` — the
+one type every ingest call site (`SyncEngine.pull`, `LsmEngine.ingestAt0`,
+`ConsolidationCoordinator.consolidate`) treats as "reject this file."
+`SstableReader.open` and `_readBlock` (the `get`/`scan`/`firstKey` path)
+achieve this by catching every other structural-failure type that validation
+can still let through — `RangeError`, `FormatException` (varint overflow), and
+`StorageException` (an out-of-file-bounds `readFileRange`, e.g. an index
+entry's `blockOffset`/`blockSize` that individually pass validation but
+together exceed the file) — and rethrowing each as
+`CorruptedSstableException`. This closes a confirmed gap: an earlier version
+of this hardening converted only `RangeError`, leaving `FormatException` and
+`StorageException` free to escape uncaught through
+`ConsolidationCoordinator.consolidate` specifically, since it is the one call
+site that does not separately catch either type. A rejected peer file's
+high-water mark still advances past it (`SyncEngine.pull`) so it is
+quarantined rather than re-downloaded and re-rejected on every subsequent sync
+cycle.
+
+**Decompressed-value size bound.** Independently of SSTable-level validation,
+a value's *decoded* size — after decompression, before CBOR-decode — is
+bounded by `ValueCodec.kMaxDecodedValueBytes` (1 MiB; see §5 and §18). This
+guards against a Zstd decompression bomb sitting inert inside an otherwise
+well-formed SSTable: neither `LsmEngine.ingestAt0` nor `CompactionJob` ever
+decode values (both touch only keys), so the bomb cannot detonate on ingest or
+compaction — only a `get`, `scan`, or full-collection operation (`dump`,
+`export`, `verify`) that actually decodes the value can trigger it, and those
+call sites treat a single oversized/corrupt value as a per-document failure
+rather than aborting the whole operation.
+
 ## SSTable Naming Convention
 
 SSTable filenames encode origin device, HLC range, and — for consolidation

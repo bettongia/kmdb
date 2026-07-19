@@ -177,7 +177,7 @@ void main() {
       () async {
         // Build a package where document.json does not reference the attachment.
         final attachBytes = Uint8List.fromList(utf8.encode('extra-file'));
-        final sha256 = VaultStore.computeSha256ForTest(attachBytes);
+        final sha256 = VaultStore.computeSha256(attachBytes);
         final docWithNoRef = {'title': 'no vault refs'};
         final packageBytes = VaultPackage.write(
           documentJson: docWithNoRef,

@@ -171,6 +171,21 @@ final class VaultIndexResult {
 /// Shutdown sentinel message sent to the isolate to request graceful exit.
 const _kShutdownMessage = 'shutdown';
 
+/// Placeholder result substituted when in-flight work is abandoned during
+/// [VaultIndexingIsolate.shutdown] — either because it errored or because
+/// [VaultIndexingIsolate.kShutdownDrainTimeout] elapsed before it completed.
+/// The caller ([VaultSearchManager]) never sees this value: `shutdown()`
+/// discards it, it exists only so the `.timeout`/`.catchError` chain has a
+/// value to resolve with instead of propagating an exception out of
+/// `shutdown()` itself.
+const _kAbandonedResult = VaultIndexResult(
+  sha256: '',
+  extractedText: null,
+  chunks: [],
+  termFrequencies: [],
+  charset: null,
+);
+
 /// Manages the background Dart [Isolate] used for vault text extraction,
 /// chunking, and tokenisation.
 ///
@@ -193,16 +208,45 @@ final class VaultIndexingIsolate {
     SendPort sendPort,
     Isolate isolate,
     RawReceivePort rawPort,
+    RawReceivePort errorExitPort,
   ) : _sendPort = sendPort,
       _isolate = isolate,
-      _rawPort = rawPort;
+      _rawPort = rawPort,
+      _errorExitPort = errorExitPort;
 
   final SendPort _sendPort;
   final Isolate _isolate;
   final RawReceivePort _rawPort;
+  final RawReceivePort _errorExitPort;
 
   // Completer for the in-flight work item (at most one at a time).
   _PendingWork? _inflight;
+
+  /// Set once the isolate has died (uncaught error or exit) — see
+  /// [_onIsolateDeath]. Once `true`, [sendWork] fails fast instead of sending
+  /// work to an isolate that can no longer respond.
+  bool _dead = false;
+
+  /// Maximum time [sendWork] waits for a single work item's result before
+  /// treating the isolate as unresponsive (D-1, 2026-07-18 release-readiness
+  /// review).
+  ///
+  /// Indexing is best-effort — no blob is worth blocking a close
+  /// indefinitely. A native crash inside an extractor (e.g. PDFium on a
+  /// malformed PDF, S-8) or an unbounded extraction (S-2/S-8) are exactly the
+  /// triggers this guards against; [onError]/[onExit] handle the "isolate
+  /// actually died" case, and this timeout is the backstop for "isolate is
+  /// alive but hung," which those ports do not observe.
+  static const Duration kWorkTimeout = Duration(seconds: 30);
+
+  /// Maximum time [shutdown] waits for in-flight work to drain before
+  /// abandoning it and killing the isolate outright.
+  ///
+  /// Deliberately shorter than [kWorkTimeout]: a close/shutdown path should
+  /// resolve quickly, and derived vault-search state is rebuildable — unlike
+  /// the memtable flush, which must not be gated on this at all (see the
+  /// `KmdbDatabase.close()` reordering note in the sync-trust-boundary plan).
+  static const Duration kShutdownDrainTimeout = Duration(seconds: 5);
 
   /// Creates and starts the indexing isolate.
   ///
@@ -214,6 +258,11 @@ final class VaultIndexingIsolate {
     // ReceivePort.skip() does not work correctly as it creates a non-broadcast
     // stream that conflicts with the .first await.
     final rawPort = RawReceivePort();
+    // A dedicated port for onError/onExit (D-1): without these, nothing
+    // observes isolate death, and a dead isolate's in-flight completer would
+    // never resolve — which is exactly the hang the review found gates
+    // KmdbDatabase.close() behind the memtable flush.
+    final errorExitPort = RawReceivePort();
     final sendPortCompleter = Completer<SendPort>();
     VaultIndexingIsolate? instance;
 
@@ -227,18 +276,34 @@ final class VaultIndexingIsolate {
       }
     };
 
+    errorExitPort.handler = (dynamic message) {
+      // Fires on an uncaught error in the isolate (`onError`; message is a
+      // 2-element `[error, stackTrace]` list per the Isolate.spawn contract)
+      // or when the isolate exits for any reason (`onExit`; message is
+      // whatever value was registered, here always `null`). Either way the
+      // isolate can no longer service work.
+      instance?._onIsolateDeath(message);
+    };
+
     // The isolate entry point is a top-level function (required by Dart).
     // We pass the extractors and the reply port as the initial message.
     final isolate = await Isolate.spawn(
       _isolateEntryPoint,
       _IsolateInit(replyPort: rawPort.sendPort, extractors: extractors),
       debugName: 'VaultIndexingIsolate',
+      onError: errorExitPort.sendPort,
+      onExit: errorExitPort.sendPort,
     );
 
     // Wait for the isolate to send back its own SendPort.
     final sendPort = await sendPortCompleter.future;
 
-    instance = VaultIndexingIsolate._(sendPort, isolate, rawPort);
+    instance = VaultIndexingIsolate._(
+      sendPort,
+      isolate,
+      rawPort,
+      errorExitPort,
+    );
 
     return instance;
   }
@@ -248,39 +313,62 @@ final class VaultIndexingIsolate {
   ///
   /// MUST NOT be called while another work item is in-flight. The caller
   /// ([VaultSearchManager]) is responsible for enforcing this invariant.
+  ///
+  /// Fails fast with [StateError] if the isolate has already died. Times out
+  /// after [kWorkTimeout] if the isolate is alive but unresponsive (D-1) —
+  /// the returned future then completes with a [StateError] rather than
+  /// hanging forever.
   Future<VaultIndexResult> sendWork(VaultWorkItem item) {
     assert(_inflight == null, 'Another work item is already in-flight');
+    if (_dead) {
+      return Future<VaultIndexResult>.error(
+        StateError('VaultIndexingIsolate is no longer running'),
+      );
+    }
     final pending = _PendingWork();
     _inflight = pending;
     _sendPort.send(item);
-    return pending.completer.future;
+    return pending.completer.future.timeout(
+      kWorkTimeout,
+      onTimeout: () {
+        // The isolate is unresponsive — hung, deadlocked, or (rarely) a
+        // native crash that did not trigger `onError` on this platform.
+        // Clear the in-flight slot so a subsequent shutdown()/sendWork() is
+        // not itself blocked waiting on the same, now-abandoned future. Any
+        // late result that eventually arrives from the isolate finds
+        // `_inflight == null` in `_onResult` and is silently discarded.
+        _inflight = null;
+        throw StateError(
+          'VaultIndexingIsolate.sendWork timed out after $kWorkTimeout',
+        );
+      },
+    );
   }
 
   /// Sends the shutdown signal and kills the isolate after the current work
-  /// item completes.
+  /// item completes, or after [kShutdownDrainTimeout] elapses — whichever
+  /// comes first.
   ///
   /// After [shutdown] returns, this instance must not be used again.
   Future<void> shutdown() async {
-    // Wait for any in-flight work to complete before sending shutdown.
-    // This prevents torn filesystem artifacts (graceful close protocol).
+    // Wait for any in-flight work to complete before sending shutdown, but
+    // bounded (D-1): an unresponsive isolate must not be allowed to hang
+    // shutdown() indefinitely. This prevents torn filesystem artifacts in the
+    // common case (graceful close protocol) while still guaranteeing
+    // shutdown() itself returns.
     final inflight = _inflight;
     if (inflight != null) {
-      await inflight.completer.future.catchError(
-        (_) => const VaultIndexResult(
-          sha256: '',
-          extractedText: null,
-          chunks: [],
-          termFrequencies: [],
-          charset: null,
-        ),
-      );
+      await inflight.completer.future
+          .timeout(kShutdownDrainTimeout, onTimeout: () => _kAbandonedResult)
+          .catchError((_) => _kAbandonedResult);
     }
     _sendPort.send(_kShutdownMessage);
     // Give the isolate a moment to exit cleanly, then kill it.
     await Future<void>.delayed(const Duration(milliseconds: 100));
     _isolate.kill(priority: Isolate.beforeNextEvent);
-    // Close our receive port so the Dart VM can GC the isolate's memory.
+    // Close our receive ports so the Dart VM can GC the isolate's memory.
     _rawPort.close();
+    _errorExitPort.close();
   }
 
   void _onResult(dynamic message) {
@@ -293,6 +381,22 @@ final class VaultIndexingIsolate {
         StateError('Unexpected message from indexing isolate: $message'),
       );
     }
+  }
+
+  /// Handles an `onError`/`onExit` notification from the isolate (D-1).
+  ///
+  /// Marks the isolate as dead and, if a work item was in-flight, completes
+  /// its completer with an error instead of leaving it to hang forever —
+  /// this is the fix for the confirmed `close()` hang: without it, nothing
+  /// ever resolves the future that `VaultSearchManager._processNextItem`
+  /// (and ultimately `close()`) is awaiting.
+  void _onIsolateDeath(dynamic message) {
+    _dead = true;
+    final pending = _inflight;
+    _inflight = null;
+    pending?.completer.completeError(
+      StateError('VaultIndexingIsolate died: $message'),
+    );
   }
 
   /// Exposes [_processWorkItem] for unit testing without spawning a real

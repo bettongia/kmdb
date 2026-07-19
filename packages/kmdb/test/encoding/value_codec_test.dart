@@ -370,6 +370,43 @@ void main() {
     );
   });
 
+  // ── decompression-bomb bound (S-2) ────────────────────────────────────────
+
+  group('ValueCodec.kMaxDecodedValueBytes (S-2)', () {
+    test(
+      'decode() rejects a payload whose decompressed size exceeds the bound',
+      () async {
+        // Highly compressible so the encoded bytes stay tiny while the
+        // decompressed CBOR comfortably exceeds the 1 MiB bound.
+        final huge = {'bomb': 'A' * (ValueCodec.kMaxDecodedValueBytes + 1024)};
+        final encoded = await ValueCodec.encode(huge);
+
+        await expectLater(
+          ValueCodec.decode(encoded),
+          throwsA(isA<DecodedValueTooLargeException>()),
+        );
+      },
+    );
+
+    test('DecodedValueTooLargeException.toString() names both the actual size '
+        'and the limit', () {
+      const e = DecodedValueTooLargeException(
+        decodedSize: 2000000,
+        limit: 1048576,
+      );
+      final s = e.toString();
+      expect(s, contains('2000000'));
+      expect(s, contains('1048576'));
+    });
+
+    test('a document safely under the bound round-trips normally', () async {
+      final doc = {'text': 'well under the limit'};
+      final encoded = await ValueCodec.encode(doc);
+      final decoded = await ValueCodec.decode(encoded);
+      expect(decoded['text'], equals('well under the limit'));
+    });
+  });
+
   // ── idempotency ──────────────────────────────────────────────────────────────
 
   group('ValueCodec idempotency', () {

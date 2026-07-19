@@ -219,7 +219,7 @@ void main() {
     // ── Stub (manifest present, blob absent) ──────────────────────────────
 
     test('returns false for a stub object', () async {
-      final sha256 = VaultStore.computeSha256ForTest(_kBytes);
+      final sha256 = VaultStore.computeSha256(_kBytes);
       final crc32c = VaultStore.computeCrc32cForTest(_kBytes);
       final dir = vault.hashDir(sha256);
       await vault.adapter.createDirectory(dir);
@@ -249,7 +249,7 @@ void main() {
 
     test('writes blob to an exact --output file path', () async {
       final uri = await _ingest(vault, _kBytes);
-      final sha256 = VaultStore.computeSha256ForTest(_kBytes);
+      final sha256 = VaultStore.computeSha256(_kBytes);
       final dir = _tempDir('kmdb_vault_export_file_');
       final targetPath = '${dir.path}/out.bin';
 
@@ -312,7 +312,7 @@ void main() {
       () async {
         final dir = _tempDir('kmdb_vault_export_dir_');
         final uri = await _ingest(vault, _kBytes, name: 'photo.jpg');
-        final sha256 = VaultStore.computeSha256ForTest(_kBytes);
+        final sha256 = VaultStore.computeSha256(_kBytes);
 
         final ctx = _ctx(db, out: out, err: err);
         final ok = await VaultExportCommand().execute(

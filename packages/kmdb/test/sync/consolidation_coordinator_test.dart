@@ -26,6 +26,8 @@ import 'package:kmdb/src/sync/sync_context.dart';
 import 'package:kmdb/src/sync/sync_storage_adapter.dart';
 import 'package:test/test.dart';
 
+import '../util/hostile_sstable.dart';
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /// Builds a minimal valid SSTable with [count] entries and returns its bytes.
@@ -123,6 +125,7 @@ void main() {
   group('ConsolidationCoordinator', () {
     const syncRoot = 'sync';
     const deviceId = 'a1b2c3d4';
+    const dbDir = '/db';
     late MemorySyncAdapter cloudAdapter;
     late MemoryStorageAdapter localAdapter;
     late ConsolidationCoordinator coordinator;
@@ -136,6 +139,7 @@ void main() {
         cloudAdapter: cloudAdapter,
         localAdapter: localAdapter,
         syncRoot: syncRoot,
+        dbDir: dbDir,
         config: ConsolidationConfig.forTesting(), // threshold=3
       );
     });
@@ -291,6 +295,7 @@ void main() {
           cloudAdapter: cloudAdapter,
           localAdapter: localAdapter,
           syncRoot: syncRoot,
+          dbDir: dbDir,
           config: ConsolidationConfig.forTesting(),
           wallClock: clockBackwards.call,
         );
@@ -319,6 +324,7 @@ void main() {
         cloudAdapter: cloudAdapter,
         localAdapter: localAdapter,
         syncRoot: syncRoot,
+        dbDir: dbDir,
         config: ConsolidationConfig.forTesting(),
         wallClock: fixedClock.call,
       );
@@ -347,6 +353,7 @@ void main() {
         cloudAdapter: cloudAdapter,
         localAdapter: localAdapter,
         syncRoot: syncRoot,
+        dbDir: dbDir,
         config: ConsolidationConfig.forTesting(),
         wallClock: fixedClock.call,
       );
@@ -417,6 +424,9 @@ void main() {
 
     test('consolidate skips missing input files gracefully', () async {
       // Lease references a file that doesn't exist in the sync folder.
+      // Well-formed (passes SstableInfo.parse) but simply absent — distinct
+      // from an *invalid* filename, which is rejected outright (S-6; see
+      // the malicious-lease tests below).
       final f1 = await _uploadSst(
         cloudAdapter,
         syncRoot,
@@ -424,13 +434,18 @@ void main() {
         const Hlc(1000, 0),
         const Hlc(1001, 0),
       );
+      final missingFilename = SstableInfo.flushName(
+        'peer0002',
+        const Hlc(2000, 0),
+        const Hlc(2001, 0),
+      );
 
       final lease = ConsolidationLease(
         holder: deviceId,
         acquiredAt: DateTime.now().millisecondsSinceEpoch,
         expiresAt: DateTime.now().millisecondsSinceEpoch + 60000,
         epoch: DateTime.now().millisecondsSinceEpoch,
-        inputFiles: [f1, 'nonexistent-peer-000000000000-000000000001.sst'],
+        inputFiles: [f1, missingFilename],
       );
 
       // Should complete without throwing.
@@ -487,15 +502,177 @@ void main() {
     });
 
     test('commit is resilient to already-deleted input files', () async {
+      // Well-formed (passes SstableInfo.parse) but absent from this device's
+      // own sstables/ listing — the cross-check (S-6 fix item 3) skips it
+      // without deleting or throwing.
+      final alreadyGone = SstableInfo.flushName(
+        'deadbeef',
+        const Hlc(9999, 0),
+        const Hlc(9999, 1),
+      );
       final lease = ConsolidationLease(
         holder: deviceId,
         acquiredAt: DateTime.now().millisecondsSinceEpoch,
         expiresAt: DateTime.now().millisecondsSinceEpoch + 60000,
         epoch: 1,
-        inputFiles: ['already-gone.sst'],
+        inputFiles: [alreadyGone],
       );
       // Should not throw even if the file is already gone.
       await expectLater(coordinator.commit(lease, 'out.sst'), completes);
+    });
+
+    // ── malicious lease (S-6) ─────────────────────────────────────────────────
+    //
+    // The lease file is an unauthenticated JSON document in the sync folder —
+    // any peer device (T3) can write one. `commit()` must never act on an
+    // `inputFiles` entry it has not itself validated as a well-formed,
+    // in-directory SSTable name; see the 2026-07-18 release-readiness
+    // review's S-6 finding ("a malicious lease turns any consolidating device
+    // into a deletion weapon").
+
+    group('malicious lease (S-6)', () {
+      test(
+        'commit rejects a lease containing a "../" path-traversal entry and '
+        'deletes nothing at all — not even legitimate co-listed entries',
+        () async {
+          final legit = await _uploadSst(
+            cloudAdapter,
+            syncRoot,
+            'peer0001',
+            const Hlc(1000, 0),
+            const Hlc(1001, 0),
+          );
+          // Also upload a decoy file at the path the traversal targets, so a
+          // failure to reject would be observable as a deletion.
+          const victimPath = '$syncRoot/highwater/victim-device.hwm';
+          await cloudAdapter.upload(victimPath, Uint8List.fromList([1, 2, 3]));
+
+          final lease = ConsolidationLease(
+            holder: deviceId,
+            acquiredAt: DateTime.now().millisecondsSinceEpoch,
+            expiresAt: DateTime.now().millisecondsSinceEpoch + 60000,
+            epoch: 1,
+            inputFiles: [legit, '../highwater/victim-device.hwm'],
+          );
+
+          await coordinator.commit(lease, 'output.sst');
+
+          // Nothing was deleted — not the legitimate co-listed entry, not
+          // the path-traversal target, and not the lease file itself (the
+          // whole lease was rejected before any deletion was attempted).
+          expect(
+            cloudAdapter.containsFile('$syncRoot/sstables/$legit'),
+            isTrue,
+          );
+          expect(cloudAdapter.containsFile(victimPath), isTrue);
+          expect(
+            cloudAdapter.containsFile('$syncRoot/.consolidation-lease'),
+            isFalse, // was never written in this test — confirms no-op
+          );
+        },
+      );
+
+      test('commit rejects a lease containing a non-SSTable-format entry and '
+          'deletes nothing', () async {
+        final legit = await _uploadSst(
+          cloudAdapter,
+          syncRoot,
+          'peer0001',
+          const Hlc(1000, 0),
+          const Hlc(1001, 0),
+        );
+        final lease = ConsolidationLease(
+          holder: deviceId,
+          acquiredAt: DateTime.now().millisecondsSinceEpoch,
+          expiresAt: DateTime.now().millisecondsSinceEpoch + 60000,
+          epoch: 1,
+          inputFiles: [legit, 'not-an-sstable-name.sst'],
+        );
+
+        await coordinator.commit(lease, 'output.sst');
+
+        expect(cloudAdapter.containsFile('$syncRoot/sstables/$legit'), isTrue);
+      });
+
+      test('consolidate rejects a lease containing a "../" entry before '
+          'downloading anything, returning null', () async {
+        await _uploadSst(
+          cloudAdapter,
+          syncRoot,
+          'peer0001',
+          const Hlc(1000, 0),
+          const Hlc(1001, 0),
+        );
+        final lease = ConsolidationLease(
+          holder: deviceId,
+          acquiredAt: DateTime.now().millisecondsSinceEpoch,
+          expiresAt: DateTime.now().millisecondsSinceEpoch + 60000,
+          epoch: 1,
+          inputFiles: ['../vault/ab/cdef.../blob'],
+        );
+
+        final result = await coordinator.consolidate(lease);
+        expect(result, isNull);
+      });
+    });
+
+    // ── hostile input at the consolidation call site (S-1, QA finding B1) ────
+    //
+    // A hostile SSTable that `SyncEngine.pull()` quarantines (advances the HWM
+    // past it) is NOT deleted from the sync folder — it remains eligible as a
+    // consolidation input on the *second* affected call site the review's S-1
+    // fix item 7 names. Before this fix, `SstableReader.open()` only wrapped
+    // `RangeError` as `CorruptedSstableException`; a `FormatException` (varint
+    // overflow) or `StorageException` (an out-of-file-bounds `readFileRange`)
+    // escaped uncaught, and `consolidate()` only ever caught
+    // `CorruptedSstableException` — so a hostile file reaching this path
+    // crashed `consolidate()` (and therefore `_maybeConsolidate`/`sync()`)
+    // instead of being skipped.
+
+    group('hostile input reaching consolidate() (S-1, QA finding B1)', () {
+      test('a checksum-valid, structurally hostile SSTable named as a lease '
+          'input is skipped, not thrown, during the N-way merge', () async {
+        // A legitimate file, so the merge has something to produce output
+        // from even after the hostile one is skipped.
+        final legit = await _uploadSst(
+          cloudAdapter,
+          syncRoot,
+          'peer0001',
+          const Hlc(1000, 0),
+          const Hlc(1001, 0),
+        );
+
+        // A checksum-valid, structurally hostile file — the same corruption
+        // class as PROBE2 (negative footer offset), which previously
+        // escaped consolidate() as a bare StorageException.
+        final hostileFilename = SstableInfo.flushName(
+          'peer0002',
+          const Hlc(2000, 0),
+          const Hlc(2001, 0),
+        );
+        final hostileBytes = patchFooterField(
+          buildValidSstable(basePhysical: 2000),
+          field: FooterField.filterOffset,
+          value: -4096,
+        );
+        await cloudAdapter.upload(
+          '$syncRoot/sstables/$hostileFilename',
+          hostileBytes,
+        );
+
+        final lease = ConsolidationLease(
+          holder: deviceId,
+          acquiredAt: DateTime.now().millisecondsSinceEpoch,
+          expiresAt: DateTime.now().millisecondsSinceEpoch + 60000,
+          epoch: 1,
+          inputFiles: [legit, hostileFilename],
+        );
+
+        // Must complete without throwing, and still produce output from
+        // the surviving legitimate input.
+        final result = await coordinator.consolidate(lease);
+        expect(result, isNotNull);
+      });
     });
 
     // ── runIfNeeded: full end-to-end ──────────────────────────────────────────
@@ -567,6 +744,7 @@ void main() {
   group('ConsolidationCoordinator gating on non-atomic CAS (H5)', () {
     const syncRoot = 'sync';
     const deviceId = 'a1b2c3d4';
+    const dbDir = '/db';
     late _NonAtomicCloudAdapter cloudAdapter;
     late MemoryStorageAdapter localAdapter;
     late ConsolidationCoordinator coordinator;
@@ -580,6 +758,7 @@ void main() {
         cloudAdapter: cloudAdapter,
         localAdapter: localAdapter,
         syncRoot: syncRoot,
+        dbDir: dbDir,
         config: ConsolidationConfig.forTesting(),
       );
     });
@@ -640,6 +819,7 @@ void main() {
           cloudAdapter: atomicAdapter,
           localAdapter: localAdapter,
           syncRoot: syncRoot,
+          dbDir: dbDir,
           config: ConsolidationConfig.forTesting(),
         );
         // First, set a skipReason via the non-atomic path.

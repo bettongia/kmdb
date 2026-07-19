@@ -1299,6 +1299,19 @@ final class LsmEngine {
       } on Exception {
         // First-block read failed — fall back to empty string. The ingest
         // itself is unaffected; only the diagnostic minKey field is missing.
+      } on RangeError {
+        // S-1: a structural bounds violation in the first data block. Most
+        // such failures are now converted to CorruptedSstableException (an
+        // Exception) inside SstableReader itself, but this is kept as
+        // belt-and-suspenders — `firstKey()`'s own doc comment promises a
+        // failure here "must never abort an ingest that has already passed
+        // its correctness checks", and prior to this hardening a bare
+        // `RangeError` (an `Error`, not caught by `on Exception` above) broke
+        // that promise silently.
+      } on OutOfMemoryError {
+        // `OutOfMemoryError` is an `Error`, not an `Exception` — see the
+        // `on RangeError` note above. Caught explicitly, never via a bare
+        // `catch`, so unrelated `Error` subtypes still propagate normally.
       }
     }
 

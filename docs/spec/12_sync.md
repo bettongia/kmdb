@@ -519,6 +519,42 @@ its absence means no client holds the lock. The lease file is never appended to
 }
 ```
 
+#### `inputFiles` validation (S-6, S-7)
+
+The lease file is an **unauthenticated** JSON document in the sync folder —
+under the T1/T3 threat model (§31), any peer with write access can write one.
+A crafted `inputFiles` entry naming a path outside `sstables/` (e.g.
+`../highwater/victim-device.hwm`) would otherwise let a consolidating device
+become a confused-deputy deletion weapon: `commit()` deletes every path it is
+told to, using its own credentials, and the review confirmed this reaches a
+real device with real write access, not just a theoretical attacker.
+
+Every `inputFiles` entry is therefore validated before it is used for
+anything, in both `consolidate()` (before downloading) and `commit()` (before
+deleting — a separate check, since `commit()` is reachable independently of
+`consolidate()`):
+
+1. The entry must contain no path separator (`/` or `\`) or `..` component.
+2. The entry must parse as a well-formed SSTable filename (§8's naming
+   convention).
+
+**If any single entry fails either check, the whole lease is rejected** — no
+inputs are downloaded or deleted, not even the well-formed entries listed
+alongside the bad one. A lease is not a place for best-effort tolerance of
+individually-invalid entries.
+
+`commit()` additionally cross-checks each validated entry against this
+device's own listing of `sstables/` before deleting it — the lease's word for
+what exists is never trusted on its own — and logs (rather than silently
+discards) any deletion failure.
+
+**Staging path.** Downloaded input SSTables are staged at an adapter-derived,
+unique-per-run path (`{dbDir}/tmp/consolidation/{timestamp}-{filename}`)
+rather than a hardcoded `/tmp/kmdb-consolidation-{filename}` — the latter does
+not exist on Windows, is not unique across concurrent consolidations, and
+bypasses the `StorageAdapter` abstraction entirely. This mirrors
+`hydrateVaultBlob`'s `{dbDir}/vault/staging/{uuid}` pattern (§24).
+
 _Why epoch rather than a UUID?_
 
 An ever-increasing epoch over the single lease-file slot gives the fencing token

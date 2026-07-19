@@ -85,6 +85,14 @@ final class VaultManifest {
   /// Used as a secondary identity discriminator (ISS pattern). If two blobs
   /// share the same SHA-256 and size but differ in CRC32C, they are treated as
   /// distinct objects and the incoming blob is rejected.
+  ///
+  /// **CRC32C is a corruption check only, never an integrity/authenticity
+  /// control** (2026-07-18 release-readiness review, S-4). It is a
+  /// non-cryptographic checksum: a party who can write the manifest can
+  /// trivially recompute it after tampering with the blob, so it proves
+  /// nothing about authenticity. The actual integrity guarantee for vault
+  /// content comes from [sha256] itself — [VaultStore.getBytes] verifies the
+  /// (decrypted) blob bytes hash to [sha256] on every read.
   final String crc32c;
 
   /// The detected MIME type of the blob (e.g. `"image/jpeg"`).

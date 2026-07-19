@@ -306,8 +306,16 @@ final class ScanCommand extends CliCommand {
         startKey: keyPrefix,
       )) {
         count++;
-        final doc = await ValueCodec.decode(entry.value)
-          ..['_id'] = entry.key;
+        // A single poisoned/oversized value (S-2) must not abort the whole
+        // scan — skip it and keep going, consistent with the Query Layer's
+        // own full-scan path (kmdb_query.dart's `_fullScan`).
+        final Map<String, dynamic> doc;
+        try {
+          doc = await ValueCodec.decode(entry.value);
+        } catch (_) {
+          continue;
+        }
+        doc['_id'] = entry.key;
         if (filter != null && !filter.evaluate(doc)) continue;
         docs.add(doc);
       }

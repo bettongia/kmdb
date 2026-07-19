@@ -234,20 +234,23 @@ class VaultStore {
       return _makeRef(sha256);
     }
 
-    // Step 3: optionally encrypt the blob bytes before writing to staging.
-    // When encryption is active, the stored bytes are [nonce][ciphertext][tag]
-    // produced by EncryptionProvider.encrypt. The content address (sha256,
-    // crc32c) was computed above over the plaintext.
-    final Uint8List storedBytes;
-    final bool isEncrypted;
+    // Step 3: always wrap the blob through EncryptionEnvelope, whether or not
+    // encryption is active (S-4, 2026-07-18 release-readiness review).
+    //
+    // Previously, the blob was stored as raw `enc.encrypt(bytes)` ciphertext
+    // (or raw plaintext when `enc` was null), and whether [getBytes] decrypted
+    // it was decided entirely by `manifest.encrypted` — a boolean read from
+    // `manifest.json`, which for blobs synced from a peer is attacker-
+    // controlled. That let an attacker who substituted the blob's content
+    // also set `encrypted: false` in the manifest, switching off the one
+    // check (GCM authentication) that would otherwise have caught the
+    // substitution. Wrapping through [EncryptionEnvelope] makes the blob
+    // self-describing: its own leading flag byte says whether it is
+    // ciphertext, so [getBytes] never needs to consult the manifest to decide.
+    // The on-disk cost is one byte per blob when encryption is inactive.
     final enc = encryption;
-    if (enc != null) {
-      storedBytes = await enc.encrypt(bytes);
-      isEncrypted = true;
-    } else {
-      storedBytes = bytes;
-      isEncrypted = false;
-    }
+    final storedBytes = await EncryptionEnvelope.wrap(bytes, enc);
+    final isEncrypted = enc != null;
 
     // Step 4: write (encrypted or plaintext) bytes to staging.
     final uuid = _uuidGen();
@@ -324,10 +327,15 @@ class VaultStore {
 
   /// Returns the plaintext blob bytes for [sha256].
   ///
-  /// If the blob is stored as AES-256-GCM ciphertext (manifest has
-  /// `encrypted: true`), the blob is decrypted before returning. The
-  /// [EncryptionProvider] supplied at construction must be active — if the
-  /// manifest is encrypted but no provider is set, a [StateError] is thrown.
+  /// Whether the blob is AES-256-GCM ciphertext is inferred from the blob's
+  /// own leading [EncryptionEnvelope] flag byte — **never** from the synced
+  /// manifest's `encrypted` field (S-4, 2026-07-18 release-readiness review):
+  /// that field is attacker-controlled for a blob synced from a peer, and
+  /// gating decryption on it would let an attacker who substitutes the blob's
+  /// content also disable the one check (GCM authentication) that would
+  /// otherwise catch the substitution. The [EncryptionProvider] supplied at
+  /// construction must be active if the blob turns out to be ciphertext — if
+  /// not, [EncryptionEnvelope.unwrap] throws [StateError].
   ///
   /// If the object is a stub (manifest present, blob absent), triggers
   /// on-demand hydration via [syncAdapter]. Throws [StateError] if no sync
@@ -335,6 +343,12 @@ class VaultStore {
   ///
   /// Throws [VaultObjectNotFoundException] if neither the blob nor the manifest
   /// exists locally.
+  ///
+  /// Throws [VaultContentMismatchException] if the (decrypted) bytes do not
+  /// hash to [sha256] — a content-addressable store's entire integrity
+  /// guarantee rests on this check, so it runs on **every** read, not only
+  /// for blobs known to have arrived via sync (blob provenance is not tracked
+  /// anywhere, and SHA-256 over bytes already being returned is cheap).
   Future<Uint8List> getBytes(String sha256) async {
     if (!await isHydrated(sha256)) {
       if (!await exists(sha256)) {
@@ -352,22 +366,13 @@ class VaultStore {
       await adapter.hydrateVaultBlob(sha256);
     }
     final raw = await _adapter.readFile(blobPath(sha256));
+    final plaintext = await EncryptionEnvelope.unwrap(raw, encryption);
 
-    // Decrypt if the manifest says the blob is encrypted.
-    // Read the manifest to check the encrypted flag.
-    final manifest = await getManifest(sha256);
-    if (manifest.encrypted) {
-      final enc = encryption;
-      if (enc == null) {
-        throw StateError(
-          'VaultStore.getBytes($sha256): blob is encrypted but no '
-          'EncryptionProvider is configured. Open the database with an '
-          'EncryptionConfig.',
-        );
-      }
-      return enc.decrypt(raw);
+    final actual = computeSha256(plaintext);
+    if (actual != sha256) {
+      throw VaultContentMismatchException(expected: sha256, actual: actual);
     }
-    return raw;
+    return plaintext;
   }
 
   /// Returns the [VaultManifest] for [sha256].
@@ -687,12 +692,18 @@ class VaultStore {
   Future<List<String>> listFilesRecursive(String dirPath) =>
       _adapter.listFilesRecursive(dirPath);
 
-  // ── Test-visible hash helpers ─────────────────────────────────────────────
+  // ── Content-address verification ──────────────────────────────────────────
 
   /// Computes the SHA-256 hex string for [bytes].
   ///
-  /// Exposed for tests that need to predict the hash of known content.
-  static String computeSha256ForTest(Uint8List bytes) => _computeSha256(bytes);
+  /// This is the production entry point used to verify blob content against
+  /// its claimed content address (S-4) — see [getBytes] and
+  /// [VaultStorageAdapter.hydrateVaultBlob]'s `LocalDirectoryVaultAdapter`
+  /// implementation. Also exposed for tests that need to predict the hash of
+  /// known content.
+  static String computeSha256(Uint8List bytes) => _computeSha256(bytes);
+
+  // ── Test-visible hash helpers ─────────────────────────────────────────────
 
   /// Computes the CRC32C hex string for [bytes].
   ///
@@ -990,6 +1001,36 @@ final class VaultCrcMismatchException implements Exception {
       '(existing CRC32C: $existingCrc32c, incoming: $incomingCrc32c). '
       'The incoming file has the same SHA-256 hash but different content — '
       'it cannot be stored.';
+}
+
+/// Thrown when a vault blob's bytes do not hash to its claimed content
+/// address (S-4, 2026-07-18 release-readiness review).
+///
+/// A content-addressable store's entire integrity guarantee rests on the
+/// claim that the bytes at address `H` hash to `H`. This is verified on
+/// every [VaultStore.getBytes] call and on hydration
+/// (`LocalDirectoryVaultAdapter.hydrateVaultBlob`) — a mismatch means the
+/// bytes at this address were substituted, whether by a compromised sync
+/// provider, a malicious peer, or local corruption.
+final class VaultContentMismatchException implements Exception {
+  /// Creates a [VaultContentMismatchException].
+  const VaultContentMismatchException({
+    required this.expected,
+    required this.actual,
+  });
+
+  /// The SHA-256 hash the object was requested/stored under.
+  final String expected;
+
+  /// The SHA-256 hash actually computed over the (decrypted) bytes.
+  final String actual;
+
+  @override
+  String toString() =>
+      'VaultContentMismatchException: expected content to hash to '
+      '${expected.substring(0, 8)}..., but it hashes to '
+      '${actual.substring(0, 8)}.... The blob at this address has been '
+      'substituted or corrupted.';
 }
 
 /// Thrown when a requested vault object does not exist locally.
