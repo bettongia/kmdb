@@ -1,13 +1,13 @@
 # Harden the sync trust boundary: validate untrusted input
 
-**Status**: Implementing
+**Status**: Complete
 
 > **Scope narrowed 2026-07-19** following the plan review. Authentication (T1)
 > and value AAD (E-2) moved to sibling plans — see "Plan split" below. This plan
 > is now **validation and robustness only**, and every finding in it is worth
 > fixing regardless of how the threat model lands.
 
-**PR link**: _(none yet)_
+**PR link**: [bettongia/kmdb#61](https://github.com/bettongia/kmdb/pull/61)
 
 > **Provenance.** This plan implements Groups **A** and **B** of the
 > [2026-07-18 release-readiness review](../reviews/release-readiness-review-2026-07-18.md)
@@ -1087,4 +1087,93 @@ one. Keep that section in whichever plans result from the split.
 
 ## Summary
 
-_To be completed when the work is done._
+Implemented Groups A+B of the 2026-07-18 release-readiness review (Phases 1-4,
+8-9) on branch `20260719_plan_0_10_01_sync_trust_boundary`
+([PR #61](https://github.com/bettongia/kmdb/pull/61)).
+
+- **Phase 1 (S-1, S-3)** — `SstableReader` validates every footer/index/
+  block-entry offset and length against the actual buffer before allocating
+  or slicing; `Varint.decode` rejects sign-bit overflow; `_ByteReader.readUint64`
+  rejects the same class in KVLT parsing; `StorageAdapterNative.readFileRange`
+  bounds allocations by real file size; `SyncEngine.pull`/`LsmEngine.ingestAt0`
+  catches enumerate `RangeError`/`StorageException`/`FormatException`/
+  `OutOfMemoryError` explicitly (never a bare `catch`, to avoid swallowing
+  `SyncCancelledException`); a rejected peer file quarantines (HWM advances)
+  instead of retrying forever, on both affected call sites — the
+  `ConsolidationCoordinator.consolidate` gap here was a `kmdb-qa` blocking
+  finding (B1) caught and fixed in a review round (see below).
+- **Phase 2 (S-2)** — `ValueCodec.kMaxDecodedValueBytes` (1 MiB) bounds
+  decompressed values post-decompress, throwing `DecodedValueTooLargeException`;
+  per-document handling added to `kmdb_cli`'s `dump`/`export`/`scan`;
+  `VaultSearchConfig.maxBlobBytes` (200 MiB) bounds vault blob extraction
+  separately. The upstream `betto_zstd` frame-size-cap half is out of scope
+  for this repo (no public seam exists yet) and is tracked as a follow-up.
+- **Phase 3 (S-4)** — vault blobs always route through `EncryptionEnvelope`
+  (self-describing, never gated on the attacker-controlled manifest
+  `encrypted` field); `VaultStore.getBytes`/`hydrateVaultBlob` verify SHA-256
+  on every read, throwing `VaultContentMismatchException`; `crc32c` documented
+  as corruption-check-only.
+- **Phase 3b (D-1)** — `VaultIndexingIsolate` gets `onError`/`onExit` handling,
+  a `sendWork` timeout, and a bounded `shutdown()`; `KmdbDatabase.close()` now
+  flushes before shutting down vault search, wrapped in a `try`/`catch` so a
+  post-flush shutdown failure can't escape `close()` (QA one-liner A2).
+- **Phase 4 (S-6, S-7)** — `ConsolidationCoordinator` validates every lease
+  `inputFiles` entry (rejecting the whole lease on any bad entry), cross-checks
+  against its own `sstables/` listing, logs deletion failures, and stages
+  downloads at an adapter-derived unique path instead of a hardcoded `/tmp`
+  path.
+- **Phase 8** — new `test/util/hostile_sstable.dart` checksum-valid hostile-
+  SSTable generator; regression tests reproducing PROBE1-3/PEER-A/B; a
+  native-adapter recovery test proving the HWM advances and a subsequent
+  `pull()` still ingests new data; a `FaultyStorageAdapter` ingest test; a
+  vault substitution test; malicious-lease tests; an isolate-death test.
+- **Phase 9** — spec updates to §05, §08, §12, §17, §18, §24, plus release-
+  checklist entry RC-25.
+
+**`kmdb-qa` review round (2026-07-20).** One blocking finding (B1): the parser
+hardening did not actually close the second affected call site
+(`ConsolidationCoordinator.consolidate`) — `SstableReader.open`/`_readBlock`
+still let `FormatException`/`StorageException` escape uncaught, and
+`consolidate()` only caught `CorruptedSstableException`. Fixed by adding the
+missing catch clauses (with `_readBlock`'s `readFileRange` call moved inside
+its try, where it previously ran outside), new corpus cases
+(`patchIndexBlockOffsetOrSize`, `patchIndexVarintOverflow`), and a dedicated
+end-to-end regression test reproducing the exact `consolidate()` path. Also
+folded in three smaller QA findings: A1 (a stale doc comment describing the
+pre-reordering `close()` sequence), A4 (collapsed the now-duplicate
+`VaultStore.computeSha256`/`computeSha256ForTest`, renaming 11 call sites
+across both `kmdb` and `kmdb_cli` test suites), and A2 (wrapped the vault
+search shutdown in `try`/`catch` per the review's "reorder or wrap"
+recommendation — both are now in place).
+
+**Key decisions / deviations from the plan:**
+
+- Phase 2's `betto_zstd` frame-size-cap item is deferred — `_getFrameContentSize`
+  is not exported from the currently-published package, so there is no seam
+  to call into; the KMDB-side cap enforces post-decompress instead.
+- Phase 3 deliberately did not touch `originalName`'s existing encoding —
+  it isn't part of the S-4 attack surface and changing it would have been
+  unrelated scope creep with real test blast radius.
+- Phase 8's "run the sync tests against `StorageAdapterNative`" item was
+  implemented as new, separate, native-adapter-targeted test files rather
+  than a full parameterised refactor of the existing ~30-test
+  `MemorySyncAdapter`-based suite — recorded as a deviation in Phase 8's
+  checklist for a future pass to reconsider.
+- The isolate-death test validates the combined system property (`close()`
+  returns, flush survives) rather than isolating the `close()`-reordering
+  fix's marginal contribution in mechanical test form — verified
+  experimentally and judged acceptable by `kmdb-qa` (the reordering is
+  correct by inspection and now specified in §17/§18).
+
+**Test coverage:** `kmdb` full suite 2398 pass / 12 skipped (was 2373/12
+before this work), `kmdb_cli` 1176 pass. Overall coverage 94.8%. `dart
+analyze`, `dart format`, and `make pre_commit` all clean.
+
+**Branch / worktree:** `20260719_plan_0_10_01_sync_trust_boundary`,
+`.worktrees/20260719_plan_0_10_01_sync_trust_boundary`.
+
+**Not closed by this plan** (tracked separately, per the roadmap): T1 sync
+authentication (`plan_0_10_01_sync_authentication.md`) and E-2 value AAD
+(`plan_0_10_01_value_aad.md`); the review's W1 (spec conformance) and W4
+(concurrency/durability) workstreams, which were never executed and remain
+the 0.10.01 track's next callback item.
