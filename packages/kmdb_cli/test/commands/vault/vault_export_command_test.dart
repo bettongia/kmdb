@@ -19,6 +19,7 @@ import 'dart:typed_data';
 import 'package:kmdb/kmdb.dart';
 import 'package:kmdb_cli/src/commands/command.dart';
 import 'package:kmdb_cli/src/commands/vault/vault_export_command.dart';
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
@@ -264,7 +265,11 @@ void main() {
       final summary = out.toString();
       expect(summary, contains(sha256));
       expect(summary, contains(uri));
-      expect(summary, contains(targetPath));
+      // Decode rather than substring-match: on Windows, targetPath contains
+      // backslashes, which JsonEncoder escapes (`\\`) — a raw `contains`
+      // check would never match the doubled-up escaped form.
+      final decoded = jsonDecode(summary) as Map<String, dynamic>;
+      expect(decoded['output'], targetPath);
     });
 
     test('overwrites an existing file at the exact --output path', () async {
@@ -317,11 +322,15 @@ void main() {
         );
 
         expect(ok, isTrue);
-        final expectedPath = '${dir.path}/photo.jpg';
+        final expectedPath = p.join(dir.path, 'photo.jpg');
         expect(io.File(expectedPath).readAsBytesSync(), equals(_kBytes));
         final summary = out.toString();
         expect(summary, contains(sha256));
-        expect(summary, contains(expectedPath));
+        // Decode rather than substring-match: on Windows, expectedPath
+        // contains backslashes, which JsonEncoder escapes (`\\`) — a raw
+        // `contains` check would never match the doubled-up escaped form.
+        final decoded = jsonDecode(summary) as Map<String, dynamic>;
+        expect(decoded['output'], expectedPath);
       },
     );
 
@@ -329,6 +338,9 @@ void main() {
       'sanitises an absolute originalName to its basename under an --output directory',
       () async {
         final dir = _tempDir('kmdb_vault_export_absolute_');
+        // '/etc/passwd' is a POSIX absolute path; on Windows it is merely a
+        // relative-looking name rooted at '\', so p.basename still isolates
+        // 'passwd' — the sanitisation logic under test is platform-agnostic.
         final uri = await _ingest(vault, _kBytes, name: '/etc/passwd');
 
         final ctx = _ctx(db, out: out, err: err);
@@ -340,9 +352,14 @@ void main() {
 
         expect(ok, isTrue);
         // Must be contained within dir.path, never write outside it.
-        final expectedPath = '${dir.path}/passwd';
+        final expectedPath = p.join(dir.path, 'passwd');
         expect(io.File(expectedPath).readAsBytesSync(), equals(_kBytes));
-        expect(io.File('/etc/passwd').readAsBytesSync(), isNot(_kBytes));
+        // Confirm nothing was written to the real absolute path — only
+        // meaningful where '/etc/passwd' actually exists (POSIX systems);
+        // Windows has no such file to accidentally clobber.
+        if (!io.Platform.isWindows) {
+          expect(io.File('/etc/passwd').readAsBytesSync(), isNot(_kBytes));
+        }
       },
     );
 

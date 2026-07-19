@@ -243,6 +243,20 @@ cd packages/kmdb && dart run benchmark/main.dart
 > that package's own tests (`cd packages/<pkg> && dart test`, or `make
 > coverage` for the full picture) before considering the change verified.
 
+> **Cross-platform paths.** Always build and compare paths with `package:path`
+> (`p.join`, `p.dirname`, `p.basename`) — never concatenate with a literal
+> `/`. This applies to test code too: constructing an "expected path" via
+> `'${dir.path}/name'` silently passes on macOS/Linux but breaks on Windows,
+> where `dir.path` already uses `\` separators. When asserting a path against
+> JSON-encoded command output, decode the JSON and compare the field directly
+> rather than using `contains()` — `JsonEncoder` escapes `\` to `\\`, so a raw
+> Windows path never appears verbatim in the JSON text. Avoid hardcoding
+> POSIX-only paths (e.g. `/etc/passwd`) in tests that run on Windows CI; guard
+> platform-specific assertions with `io.Platform.isWindows` instead. This
+> class of bug has slipped past local (macOS) testing and only surfaced on
+> the Windows CI job more than once — see the `vault_export_command_test.dart`
+> fix (2026-07-19) for the reference case.
+
 ## Implementation Status
 
 | Phase | Scope                                                                                            | Status      |
