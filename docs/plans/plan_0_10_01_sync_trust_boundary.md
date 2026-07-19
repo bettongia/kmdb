@@ -9,7 +9,7 @@
 
 **PR link**: _(none yet)_
 
-> **Provenance.** This plan implements Groups **A**, **B**, and **C** of the
+> **Provenance.** This plan implements Groups **A** and **B** of the
 > [2026-07-18 release-readiness review](../reviews/release-readiness-review-2026-07-18.md)
 > (§10), under the [0.10.01 hardening track](../roadmap/0_10_01.md). The review
 > is the authoritative record of the findings; this plan does not restate their
@@ -41,7 +41,10 @@ Five critical findings follow from this one assumption:
 | **S-2** | A Zstd frame declares its own decompressed size; ~32,000× amplification measured, no cap anywhere. Detonates on read, rendering a collection permanently unreadable. |
 | **S-4** | The content-addressable vault never verifies content against its address, and the `encrypted` flag gating decryption is itself attacker-supplied. |
 | **S-6** | `commit()` deletes every path named in an unauthenticated lease, using the victim's own credentials — a confused deputy. |
-| **E-2** | AES-GCM with no AAD: ciphertext is not bound to its key, namespace, or version. |
+| **E-2** | AES-GCM with no AAD: ciphertext is not bound to its key, namespace, or version. *(Owned by [plan_0_10_01_value_aad.md](plan_0_10_01_value_aad.md) — listed here only to show the shared root cause.)* |
+
+**This plan owns S-1, S-2, S-3, S-4, S-6, S-7 and D-1.** E-2 and the T1
+authentication work are siblings — see "Plan split" below.
 
 The tests cannot catch any of this, and the reason is structural: **every parser
 test feeds the parser well-formed output this codebase produced**, and
@@ -298,30 +301,61 @@ peers, and malformed PDFs exist without any attacker.
       `CorruptedSstableException` — callers already handle that type.
 - [ ] Bound `readFileRange` allocations by actual file size in
       `StorageAdapterNative`.
-- [ ] Broaden `SyncEngine.pull()` and `LsmEngine.ingestAt0` catches to match what
-      can actually be thrown; quarantine a bad peer file rather than letting it
-      re-poison every subsequent pull.
+- [ ] Broaden `SyncEngine.pull()` and `LsmEngine.ingestAt0` catches. **Enumerated:**
+      `RangeError`, `StorageException`, `FormatException`, `OutOfMemoryError`.
+      > ⚠️ **Trap:** catching `OutOfMemoryError` needs `on Error` or a bare
+      > `catch` — and a bare `catch` here will also swallow
+      > `SyncCancelledException`, which the engine deliberately does *not* catch.
+      > Re-throw it explicitly.
+- [ ] Quarantine a bad peer file **and advance the HWM past it**, so it is not
+      re-fetched every cycle. This is the fix for the *persistent* half of S-1;
+      rejection alone leaves the denial-of-sync in place.
 - [ ] Apply the same to `ConsolidationCoordinator`'s `SstableReader.open`
       (second affected call site).
 
-### Phase 2 — Decompression bounds (S-2)
+### Phase 2 — Decompression bounds (S-2) — *R-6 closed 2026-07-19*
+
+**Two bounds, not one**, and the cap fires on **read**, not ingest — `ingestAt0`
+and `CompactionJob` touch keys only, never values (verified in the review's S-2
+"Detonation point"). An earlier draft said "surface as
+`CorruptedSstableException` on the ingest path", which would have sent an
+implementer looking for a decode hook that does not exist.
+
+| Bound | Value | Justification |
+| :--- | :--- | :--- |
+| `kMaxDecodedValueBytes` | **1 MiB** | §02 documents an average document of 1–4 KB and a **64 KB upper bound** — 16× headroom over the documented maximum, while stopping a 256 MB bomb dead |
+| `kMaxVaultBlobBytes` | **configurable, default generous** | Attachments are legitimately large; a 50 MB PDF is normal. A bound sized for documents would break them, and one sized for attachments is useless for documents |
 
 - [ ] Add a `maxDecompressedSize` parameter to `ZstdSimple.decompress` in
       `betto_zstd`; reject frames whose **declared** size exceeds it *before*
       allocating, and reject negative declared sizes explicitly.
-- [ ] Enforce a maximum decoded-value size in `ValueCodec`; surface a violation
-      as `CorruptedSstableException` on the ingest path.
-- [ ] Handle a decode failure **per document** on the read path so one poisoned
-      value cannot abort a whole collection scan.
-- [ ] Apply the same bound to vault blob extraction.
-- [ ] `betto_zstd` requires its own release; coordinate with the Group D gate.
+- [ ] Add `kMaxDecodedValueBytes` as a `static const` on `ValueCodec`.
+      `ValueCodec` is a `final class` with only static members and no injection
+      seam, and `KvStoreConfig` sits *below* it in the stack, so a const is the
+      honest home — not a config knob pretending to be injectable.
+- [ ] Enforce it on the **read** path (`decode`), surfacing a violation as a
+      distinct, catchable exception.
+- [ ] Handle that failure **per document** so one poisoned value cannot abort a
+      whole collection scan, `dump`, `export`, or `verify`.
+- [ ] Separate `kMaxVaultBlobBytes` for blob extraction — *not* the same bound.
+- [ ] **Phase 2 lands in two pieces.** `betto_zstd` is a separate repo needing
+      its own PR, publish, and pin bump (Group D gate). The KMDB-side cap must
+      therefore **degrade sanely against the currently published `betto_zstd`** —
+      i.e. enforce the decoded-size limit locally even when the underlying
+      decompressor has no cap yet.
 
-### Phase 3 — Vault integrity (S-4)
+### Phase 3 — Vault integrity (S-4) — *R-8 closed 2026-07-19*
 
 - [ ] Hash blob bytes on hydration; reject if the digest ≠ the requested address.
-- [ ] Verify on read for blobs that arrived via sync.
-- [ ] Stop trusting the synced manifest's `encrypted` flag — take it from a
-      local record, or infer it from the ciphertext envelope.
+- [ ] **Verify on every read**, not only for blobs "that arrived via sync" — blob
+      provenance is **not recorded anywhere** today, so the conditional version
+      cannot be implemented without inventing new state. SHA-256 over bytes you
+      were about to return anyway is cheap; measure it, and only add a provenance
+      record if the measurement actually justifies one.
+- [ ] Stop trusting the synced manifest's `encrypted` flag — **infer it from the
+      `EncryptionEnvelope`** (the primitive added by the 0.08 reconciliation).
+      Chosen over a local record because it needs no new state and cannot drift
+      out of sync with reality.
 - [ ] Document `crc32c` as a corruption check only, never an integrity control.
 
 ### Phase 3b — Indexing-isolate lifecycle (D-1) — *added 2026-07-19 from W4*
@@ -357,38 +391,79 @@ belongs in *this* plan rather than the smaller-independents group.
 - [ ] Log deletion failures instead of discarding them.
 - [ ] Replace `/tmp/kmdb-consolidation-{filename}` with an adapter-derived,
       unique-per-run staging directory, cleaned up in a `finally`. Fixes Windows.
+      **Precedent to follow:** `hydrateVaultBlob`'s
+      `stagingPath(microsecondsSinceEpoch)` in
+      `local_directory_vault_adapter.dart` already does this correctly.
 
-### Phase 8 — Tests (the point of the exercise, not an afterthought)
+### Phase 8 — Tests (the point of the exercise, not an afterthought) — *R-10 closed 2026-07-19*
 
-- [ ] Build a corpus of **checksum-valid, structurally hostile** SSTables:
-      out-of-range footer fields, negative offsets, oversized index `keyLen`,
-      huge `shared`, and decompression bombs.
+> AAD and sync-authentication tests were removed from this list in the plan
+> split — they belong to
+> [plan_0_10_01_value_aad.md](plan_0_10_01_value_aad.md) and
+> [plan_0_10_01_sync_authentication.md](plan_0_10_01_sync_authentication.md).
+
+**The hostile corpus is a generator, not fixtures.** Create
+`test/util/hostile_sstable.dart` exposing helpers that build a *valid* SSTable,
+patch one named field, and **recompute the XXH64** so the file stays
+checksum-valid. Checked-in binary fixtures rot silently when the format changes;
+a generator does not.
+
+- [ ] `test/util/hostile_sstable.dart` — one helper per corruption class:
+      out-of-range footer offset/size, negative offset, oversized index `keyLen`,
+      huge block `shared`, and a decompression-bomb value.
 - [ ] Regression tests reproducing the review's confirmed probes (PROBE 1–3,
-      PEER-A/B).
-- [ ] **Run the sync tests against `StorageAdapterNative`, not only
-      `MemoryStorageAdapter`.** Without this the most severe form of S-1 stays
-      invisible.
+      PEER-A/B), using that generator.
+- [ ] **Unit-level:** `Varint.decode` rejects the 10-byte sign-bit case directly,
+      not only via SSTable parsing.
+- [ ] **🔴 The load-bearing test — recovery, not just rejection.** Every other
+      test here asserts a hostile file is *rejected*. S-1's actual harm is
+      **persistent denial-of-sync**, so assert that after rejection **the HWM
+      advances and the next `pull()` succeeds.** Without this the quarantine
+      behaviour in Phase 1 is untested and the real bug can survive a green
+      suite.
+- [ ] **Run the sync tests against `StorageAdapterNative`.** The suites hardcode
+      `MemoryStorageAdapter` in `setUp`
+      (`test/sync/consolidation_coordinator_test.dart:132`, `sync_engine_test.dart`,
+      ~30 tests). **Mechanism:** extract the shared test body into a helper and
+      run it from a group parameterised over a `StorageAdapter` factory. **Scope:**
+      the ingest paths at minimum — that is where S-1 lives and where the memory
+      adapter's bounds-checking hides it.
+- [ ] Use `FaultyStorageAdapter` for the ingest path — it is the fault-injection
+      harness the 0.02.01 track built for exactly this, and per review **D-3** no
+      sync test currently uses it.
 - [ ] Vault substitution test: swap blob bytes, assert rejection.
 - [ ] Malicious-lease test: `..` entries, non-SSTable names, assert no deletion.
-- [ ] AAD relocation test: move a valid ciphertext to another key, assert
-      authentication failure.
-- [ ] Sync-auth tests: forged artefact rejected; enrollment round-trip; key
-      survives `new-device-id`.
+- [ ] Isolate-death test (Phase 3b): kill mid-work, assert `close()` returns and
+      the flush still happens.
+
+> **Coverage goal is corpus coverage, not line coverage.** Per the review's §9,
+> high line coverage on parser files is *actively misleading* when every test
+> feeds well-formed input. The question to answer is "is every corruption class
+> exercised", not "is every line hit".
 
 ### Phase 9 — Spec and docs
 
-- [ ] Rewrite §31's "Threat Model" for the T1-active adversary; state plainly
-      what is and is not covered, and that T3 is out of scope with a pointer to
-      the proposal.
-- [ ] New spec section for sync authentication (take the next available `NN`).
-- [ ] Update §12 (sync), §24 (vault), §33 (credential store).
-- [ ] Add release-checklist entries for anything untestable in CI (cross-device
-      enrollment, real-provider authenticated sync).
-- [ ] Update `CLAUDE.md` if the package layout changes.
+> The §31 threat-model rewrite and the new sync-authentication spec section
+> (**§34**) belong to
+> [plan_0_10_01_sync_authentication.md](plan_0_10_01_sync_authentication.md),
+> not here — removed in the plan split.
+
+- [ ] **§24 (vault)** — document that blob content is verified against its
+      address on every read, and that `crc32c` is a corruption check only.
+- [ ] **§08 (SSTable)** — document the parser's validation rules, so the
+      constraints are specified rather than merely implemented.
+- [ ] **§06 / §18** — document the decoded-value and vault-blob size bounds and
+      their rationale (§02's 64 KB documented maximum).
+- [ ] **§17 / §18** — document that derived-index shutdown must never gate the
+      memtable flush (Phase 3b).
+- [ ] Release-checklist entries for anything untestable in CI. Next free ID is
+      **RC-25**.
 
 **Final step — QA sign-off and pre-commit:**
 
-- [ ] Run `make coverage` — confirm >95% on all new files.
+- [ ] Run `make coverage` — project floor is 90%, baseline 95%. Parser and
+      bounds-checking code should be nearer 100%. **But judge this by corpus
+      coverage, not line coverage** — see the note at the end of Phase 8.
 - [ ] Hand off to the **`kmdb-qa` agent** for sign-off (spec alignment, doc
       comments, test coverage/adequacy, code health). Resolve every blocking
       item before proceeding. Do not open a PR until sign-off is received.
