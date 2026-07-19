@@ -361,8 +361,12 @@ downloaded until the user requests the file or pins it.
 configured, it triggers `hydrateVaultBlob`, which:
 
 1. Calls `vaultObjectExists` to confirm the remote has the blob.
-2. Writes the blob from the remote to `vault/staging/{uuidv4}`.
-3. Verifies the SHA-256 hash.
+2. Downloads the remote blob's bytes and **verifies them against the
+   requested content address before any of them reach local disk** — see
+   "Content verification" under Encryption below. A mismatch throws
+   `VaultContentMismatchException` and the download is discarded; nothing is
+   ever written to `vault/staging/` for a failed verification.
+3. Writes the (verified, still-wrapped) blob bytes to `vault/staging/{uuidv4}`.
 4. Renames the staging file to the final `blob` path.
 
 ## Pinned Objects
@@ -612,20 +616,28 @@ When the database is opened with an `EncryptionConfig` (see §31), vault blobs a
 stored encrypted on disk. Encryption is applied by `VaultStore` at ingest time:
 
 1. The SHA-256 content address and CRC32C checksum are computed over the **plaintext** bytes — preserving the deduplication guarantee (the same plaintext always maps to the same hash, regardless of encryption).
-2. The blob is encrypted with AES-256-GCM using the database DEK:
+2. The blob is wrapped with `EncryptionEnvelope` (§31), **unconditionally** —
+   whether or not encryption is active:
    ```
-   stored_bytes = nonce(12B) || AES-256-GCM(dek, plaintext) || tag(16B)
+   stored_bytes = EncryptionFlag(1B) || (nonce(12B) || AES-256-GCM(dek, plaintext) || tag(16B))   [encrypted]
+   stored_bytes = EncryptionFlag(1B) || plaintext                                                 [unencrypted]
    ```
-3. The `manifest.json` gains `"encrypted": true`.
+   The blob is therefore self-describing: whether it is ciphertext is
+   determined by its own leading flag byte, not by any external record.
+3. The `manifest.json` gains `"encrypted": true`, for descriptive/informational
+   purposes — see the "Content verification" note below for why this field is
+   never trusted operationally.
 4. The `originalName` field is encrypted in place (Encryption confidentiality
-   reconciliation, Gap 4). `VaultStore.ingest` wraps the filename with
-   `EncryptionEnvelope` and base64-encodes the result before writing it into
-   `manifest.json`, keeping the manifest's JSON shape stable (the field remains
-   a JSON string — ciphertext rather than plaintext). `VaultStore.getManifest`
-   is the sole decryption point and transparently returns the plaintext name to
-   every caller. The `encrypted` flag governs the blob ciphertext and
-   `originalName` together — a database is either born encrypted or never
-   encrypted, so both are always set in lockstep.
+   reconciliation, Gap 4), independently of the blob's own wrapping.
+   `VaultStore.ingest` wraps the filename with `EncryptionEnvelope` and
+   base64-encodes the result before writing it into `manifest.json`, keeping
+   the manifest's JSON shape stable (the field remains a JSON string —
+   ciphertext rather than plaintext). `VaultStore.getManifest` is the sole
+   decryption point and transparently returns the plaintext name to every
+   caller. `originalName`'s own encoding is still gated on the manifest's
+   `encrypted` field — it is a lower-stakes, informational field (not a
+   content-integrity boundary), so this is safe: at worst an attacker who
+   flips it forces a decode error, not a confidentiality or integrity breach.
 
 The remaining `manifest.json` fields — `sha256`, `size`, `crc32c`,
 `mediaType`, and `createdAt` — stay **intentionally plaintext**, each for a
@@ -634,9 +646,37 @@ selection); see §31 gap 5 for the per-field reasoning. These leak metadata
 *about* a stored object (its type, size, and content address) but never its
 name or content.
 
-On read, `VaultStore.getBytes()` inspects the `encrypted` field. If `true`, it
-decrypts the raw bytes before returning them. If `encrypted: true` but no
-encryption provider is available, a `StateError` is thrown.
+### Content verification (not gated on the synced manifest)
+
+`VaultStore.getBytes()` unwraps the blob via `EncryptionEnvelope.unwrap`,
+which reads the flag byte **on the blob itself** to decide whether to decrypt
+— it never consults `manifest.json`'s `encrypted` field for this decision.
+This is a deliberate hardening (2026-07-18 release-readiness review, S-4): the
+synced manifest is attacker-controlled input for a blob that arrived via sync,
+and gating decryption on it would let an attacker who substitutes a blob's
+content also flip `encrypted: false` in the manifest, switching off the one
+check (GCM authentication) that would otherwise have caught the substitution.
+
+After unwrapping, `getBytes()` computes the SHA-256 of the resulting plaintext
+and rejects the read (`VaultContentMismatchException`) if it does not match
+the requested address. This runs on **every** read, not only for blobs known
+to have arrived via sync — blob provenance is not tracked anywhere, and
+hashing bytes that are about to be returned anyway is cheap.
+`LocalDirectoryVaultAdapter.hydrateVaultBlob` performs the same verification
+before ever staging the downloaded bytes under the local blob path, so a
+substituted remote blob never reaches local disk as if it were legitimate.
+
+**`crc32c` is a corruption check only, never an integrity or authenticity
+control.** It is a non-cryptographic checksum: a party who can write
+`manifest.json` (which includes any peer or provider under the T1/T3 threat
+model) can trivially recompute it after tampering with the blob, so it proves
+nothing about authenticity. The content-addressing guarantee — that the bytes
+at address `H` actually hash to `H` — comes solely from the SHA-256
+verification above.
+
+If the unwrapped bytes turn out to be `EncryptionFlag.aesGcm`-flagged but no
+`EncryptionProvider` is configured, a `StateError` is thrown (before any hash
+comparison is attempted).
 
 ### KVLT and Encryption
 

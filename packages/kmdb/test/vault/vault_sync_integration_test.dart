@@ -250,7 +250,7 @@ void main() {
     test(
       'vaultObjectExists returns false for SHA-256 not in sync vault',
       () async {
-        final sha256 = VaultStore.computeSha256ForTest(
+        final sha256 = VaultStore.computeSha256(
           Uint8List.fromList(utf8.encode('not-uploaded')),
         );
         expect(await deviceAAdapter2.vaultObjectExists(sha256), isFalse);
@@ -258,7 +258,7 @@ void main() {
     );
 
     test('syncVaultMetadata throws for SHA-256 not in sync vault', () async {
-      final sha256 = VaultStore.computeSha256ForTest(
+      final sha256 = VaultStore.computeSha256(
         Uint8List.fromList(utf8.encode('not-in-sync')),
       );
       await expectLater(

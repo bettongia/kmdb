@@ -463,6 +463,17 @@ final class SyncEngine {
         continue; // Defensive: skip corrupted remote files.
       } on FormatException {
         continue; // Defensive: skip files with invalid names.
+      } on RangeError {
+        // S-1: same structural-bounds-violation class as SyncEngine.pull —
+        // see the enumerated-types note there.
+        continue;
+      } on StorageException {
+        continue;
+      } on OutOfMemoryError {
+        // `OutOfMemoryError` is an `Error`, not an `Exception` — caught
+        // explicitly rather than via a bare `catch`, which would also
+        // swallow `SyncCancelledException` (see the note in [pull]).
+        continue;
       }
       // StaleSstableIngestException should not occur here because the floor was
       // reset to zero above. If it does fire (e.g. a concurrent compaction ran
@@ -542,19 +553,63 @@ final class SyncEngine {
       if (bytes == null) continue; // file removed between list and download
 
       // Validate footer checksum before ingestion.
+      //
+      // ## Quarantine, don't just reject (S-1)
+      //
+      // A peer SSTable can fail to ingest for two very different reasons:
+      // genuine transient corruption (e.g. a partial upload still in
+      // flight — rare, since cloud object stores generally do not expose a
+      // partially-written object to `download`), or a structurally hostile
+      // file crafted by an untrusted provider or malicious peer. The
+      // original behaviour treated every failure as the former and never
+      // advanced the peer HWM, which the review confirmed (PEER-A/B) turns
+      // a single hostile file into a **permanent** denial of sync: the same
+      // poisoned file is re-downloaded and re-rejected on every subsequent
+      // pull, forever. `info.maxHlc` is already known at this point (parsed
+      // from the *filename*, before any of the file's untrusted body content
+      // was touched) — advancing the peer HWM past it quarantines the file:
+      // it is not re-fetched, and the sync cycle can complete. The exception
+      // types below are the complete enumeration of what
+      // `KvStore.ingestSstable` can throw for a structurally-invalid file;
+      // see the type-by-type notes for why each is included.
+      var rejected = false;
       try {
         await _store.ingestSstable(filename, bytes);
-      } on CorruptedSstableException {
-        // Corrupted SSTable — log and skip. Do not update HWM so we retry
-        // on the next pull (the file may be partially uploaded).
-        continue;
-      } on FormatException {
-        continue; // Invalid filename format — skip.
+      } on CorruptedSstableException catch (e) {
+        _logRejectedSstable(filename, e);
+        rejected = true;
+      } on FormatException catch (e) {
+        _logRejectedSstable(filename, e);
+        rejected = true;
+      } on RangeError catch (e) {
+        // A structural bounds violation that slipped past SstableReader's
+        // own validation (belt-and-suspenders — see sstable_reader.dart).
+        _logRejectedSstable(filename, e);
+        rejected = true;
+      } on StorageException catch (e) {
+        // Raised by StorageAdapterNative.readFileRange when a footer/index
+        // field points past the end of the file (S-1 PROBE2).
+        _logRejectedSstable(filename, e);
+        rejected = true;
+      } on OutOfMemoryError catch (e) {
+        // `OutOfMemoryError` is an `Error`, not an `Exception` — a bare
+        // `on Exception` clause does not see it (S-1 PROBE1: an attacker-
+        // declared `filterSize`/`indexSize` reaching `malloc` before any
+        // bounds check could reject it). Caught explicitly here, and only
+        // here — never via a catch-all `catch (e)`, which would also
+        // swallow `SyncCancelledException` (deliberately uncaught elsewhere
+        // in this class so cooperative cancellation always propagates).
+        _logRejectedSstable(filename, e);
+        rejected = true;
       } on StaleSstableIngestException catch (e) {
         // The SSTable's maxHlc is at or below the local GC floor (H4-FU3).
         // Ingesting it could resurrect tombstone-GC'd data. Skip without
         // advancing the peer HWM so the file is reconsidered on the next
         // pull cycle (e.g. after consolidation has produced post-floor output).
+        // Unlike the quarantine cases above, this is not corruption — the
+        // file is well-formed and will very likely become ingestable again
+        // once a newer consolidated file supersedes it, so retry-forever is
+        // the correct behaviour here, not quarantine.
         //
         // Log at WARN: filename, sub-floor HLC, and current floor.
         // ignore: avoid_print — structured logging deferred (Q8 decision).
@@ -566,7 +621,17 @@ final class SyncEngine {
         continue;
       }
 
-      // Track the highest ingested HLC for this peer.
+      // Track the highest ingested (or quarantined) HLC for this peer. On
+      // the quarantine path, `info.maxHlc` was parsed from the filename
+      // before the untrusted body was ever read — this is safe to use even
+      // though the file itself was rejected.
+      if (rejected) {
+        // ignore: avoid_print — structured logging deferred (Q8 decision).
+        print(
+          'WARN [SyncEngine.pull] Quarantining $filename: HWM advanced past '
+          'maxHlc=${info.maxHlc.toHex()} without ingesting its contents.',
+        );
+      }
       final existing = peerMaxHlc[peerDeviceId];
       if (existing == null || info.maxHlc > existing) {
         peerMaxHlc[peerDeviceId] = info.maxHlc;
@@ -605,6 +670,7 @@ final class SyncEngine {
       cloudAdapter: _cloudAdapter,
       localAdapter: _localAdapter,
       syncRoot: _syncRoot,
+      dbDir: _dbDir,
       config: _consolidationConfig,
       ctx: _ctx,
     );
@@ -621,5 +687,12 @@ final class SyncEngine {
     } catch (_) {
       return '';
     }
+  }
+
+  /// Logs that [filename] was rejected during ingest, for any of the
+  /// structural-failure types enumerated in [pull] (S-1).
+  // ignore: avoid_print — structured logging deferred (Q8 decision).
+  static void _logRejectedSstable(String filename, Object error) {
+    print('WARN [SyncEngine.pull] Rejected SSTable $filename: $error');
   }
 }

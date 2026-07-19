@@ -208,7 +208,7 @@ void main() {
 
     test('--vault skips stub vault objects and reports stubsSkipped', () async {
       // Create a stub: manifest present, no blob file.
-      final sha256 = VaultStore.computeSha256ForTest(_kFileBytes);
+      final sha256 = VaultStore.computeSha256(_kFileBytes);
       final crc32c = VaultStore.computeCrc32cForTest(_kFileBytes);
       final dir = vault.hashDir(sha256);
       await vault.adapter.createDirectory(dir);
@@ -245,7 +245,7 @@ void main() {
     test('--vault writes KVLT package file for document with vault ref', () async {
       // Ingest a file into the vault.
       final vaultUri = await _ingest(vault, _kFileBytes, name: 'data.bin');
-      final sha256 = VaultStore.computeSha256ForTest(_kFileBytes);
+      final sha256 = VaultStore.computeSha256(_kFileBytes);
 
       // Store a document containing the vault URI.
       // IMPORTANT: documents with vault URIs exceed the Zstd compression

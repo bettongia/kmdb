@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/// @docImport '../engine/kvstore/kv_store.dart';
+/// @docImport '../vault/search/vault_search_config.dart';
+library;
+
 import 'dart:typed_data';
 
 import 'package:cbor/cbor.dart';
@@ -77,6 +81,45 @@ const int _kCompressionThreshold = 64;
 /// [Future]s and do not mutate shared state.
 final class ValueCodec {
   const ValueCodec._();
+
+  /// Maximum decoded (post-decompression, pre-CBOR-decode) payload size, in
+  /// bytes, accepted by [decode].
+  ///
+  /// ## Rationale (2026-07-18 release-readiness review, S-2)
+  ///
+  /// A Zstd frame declares its own decompressed size; the review measured
+  /// ~32,000× amplification on ordinary compressible input, with no cap
+  /// anywhere in the stack — an ~8 KB value can therefore expand to ~256 MB,
+  /// and a value inside an untrusted peer SSTable is fully attacker-
+  /// controlled input (S-1 shows crafting one is practical). §02 documents an
+  /// average document of 1–4 KB with a **64 KB documented upper bound**; 1 MiB
+  /// gives 16× headroom over that maximum while stopping a multi-hundred-MB
+  /// bomb dead.
+  ///
+  /// [ValueCodec] is a `final class` with only `static` members and no
+  /// injection seam, and [KvStoreConfig] sits *below* [ValueCodec] in the
+  /// stack (values are decoded by callers *above* `KvStore`, not by the
+  /// engine itself) — a `static const` is therefore the honest home for this
+  /// bound rather than a config knob pretending to be injectable.
+  ///
+  /// This is deliberately a **different, much smaller** bound than
+  /// [VaultSearchConfig.maxBlobBytes] — vault blobs are attachments (a 50 MB
+  /// PDF is legitimate) and are never compressed by this codec.
+  ///
+  /// ## Two-piece landing (Phase 2 of the sync-trust-boundary hardening plan)
+  ///
+  /// `betto_zstd`'s `decompress` has no `maxDecompressedSize` parameter as of
+  /// the currently-published version — adding one is a separate `betto_zstd`
+  /// PR/release. This constant therefore enforces the bound **after**
+  /// decompression completes rather than before the allocation inside
+  /// `decompress` — it stops a survivable-but-oversized bomb from being
+  /// accepted as a document, and callers on the read path
+  /// (`scan`/`dump`/`export`/`verify`) already treat a single failed
+  /// [decode] as a per-document, not per-collection, failure. A frame large
+  /// enough to exhaust memory *during* decompression (rather than merely
+  /// producing an oversized-but-allocatable result) is not caught by this
+  /// check — that requires the upstream `betto_zstd` fix.
+  static const int kMaxDecodedValueBytes = 1024 * 1024;
 
   // ── Encode ──────────────────────────────────────────────────────────────────
 
@@ -173,6 +216,7 @@ final class ValueCodec {
       final compressionFlag = CompressionFlag.fromByte(plaintext[0]);
       final payload = plaintext.sublist(1);
       final cborBytes = decompress(compressionFlag, payload);
+      _checkDecodedSize(cborBytes);
       return _fromCbor(cborBytes);
     }
 
@@ -192,10 +236,26 @@ final class ValueCodec {
     final compressionFlag = CompressionFlag.fromByte(bytes[1]);
     final payload = bytes.sublist(2);
     final cborBytes = decompress(compressionFlag, payload);
+    _checkDecodedSize(cborBytes);
     return _fromCbor(cborBytes);
   }
 
   // ── CBOR helpers ────────────────────────────────────────────────────────────
+
+  /// Rejects [cborBytes] whose length exceeds [kMaxDecodedValueBytes] (S-2).
+  ///
+  /// Called immediately after [decompress] on both the encrypted and
+  /// plaintext branches of [decode], before CBOR-decoding — there is no
+  /// reason to spend time decoding a payload that is already known to be
+  /// invalid.
+  static void _checkDecodedSize(Uint8List cborBytes) {
+    if (cborBytes.length > kMaxDecodedValueBytes) {
+      throw DecodedValueTooLargeException(
+        decodedSize: cborBytes.length,
+        limit: kMaxDecodedValueBytes,
+      );
+    }
+  }
 
   static Uint8List _toCbor(Map<String, dynamic> value) {
     final encoded = cbor.encode(CborValue(value));
@@ -244,4 +304,32 @@ final class ValueCodec {
     out.setAll(1, payload);
     return out;
   }
+}
+
+/// Thrown by [ValueCodec.decode] when the decompressed payload exceeds
+/// [ValueCodec.kMaxDecodedValueBytes] (2026-07-18 release-readiness review,
+/// S-2 — decompression-bomb bound).
+///
+/// A single document exceeding this bound does not imply the rest of a
+/// collection is unreadable: callers performing a multi-document operation
+/// (`scan`, `dump`, `export`, `verify`) should catch this per-document and
+/// continue, rather than letting it abort the whole operation.
+final class DecodedValueTooLargeException implements Exception {
+  /// Creates a [DecodedValueTooLargeException].
+  const DecodedValueTooLargeException({
+    required this.decodedSize,
+    required this.limit,
+  });
+
+  /// The actual size, in bytes, of the decompressed (pre-CBOR-decode) payload.
+  final int decodedSize;
+
+  /// The limit that was exceeded ([ValueCodec.kMaxDecodedValueBytes]).
+  final int limit;
+
+  @override
+  String toString() =>
+      'DecodedValueTooLargeException: decoded value is $decodedSize bytes, '
+      'exceeding the $limit-byte limit. This may be a corrupted or hostile '
+      'value (see the 2026-07-18 release-readiness review, finding S-2).';
 }

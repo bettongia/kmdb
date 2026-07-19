@@ -1,6 +1,6 @@
 # Harden the sync trust boundary: validate untrusted input
 
-**Status**: Investigated
+**Status**: Implementing
 
 > **Scope narrowed 2026-07-19** following the plan review. Authentication (T1)
 > and value AAD (E-2) moved to sibling plans — see "Plan split" below. This plan
@@ -286,32 +286,71 @@ peers, and malformed PDFs exist without any attacker.
 
 ## Implementation plan
 
-### Phase 1 — Parser hardening (S-1, S-3)
+### Phase 1 — Parser hardening (S-1, S-3) — **Complete 2026-07-20**
 
-- [ ] Validate every `SstableFooter` field on parse: offsets and sizes
+- [x] Validate every `SstableFooter` field on parse: offsets and sizes
       non-negative, and `offset + size <= fileSize`. Reject with
-      `CorruptedSstableException`.
-- [ ] Bounds-check `keyLen`, `blockOffset`, `blockSize` in `_parseIndex` against
+      `CorruptedSstableException`. — `_validateFooterBounds` in
+      `sstable_reader.dart`.
+- [x] Bounds-check `keyLen`, `blockOffset`, `blockSize` in `_parseIndex` against
       the enclosing buffer before use.
-- [ ] Bounds-check `shared`, `unsharedLen`, `valueLen` in `_decodeBlock`; cap
+- [x] Bounds-check `shared`, `unsharedLen`, `valueLen` in `_decodeBlock`; cap
       `shared` at `currentKey.length` **before** it sizes the allocation.
-- [ ] `Varint.decode`: reject values that do not fit a non-negative 64-bit int.
-- [ ] `_ByteReader.readUint64`: reject negative/absurd lengths (S-3).
-- [ ] Wrap the whole SSTable parse so any structural failure surfaces as
-      `CorruptedSstableException` — callers already handle that type.
-- [ ] Bound `readFileRange` allocations by actual file size in
+- [x] `Varint.decode`: reject values that do not fit a non-negative 64-bit int.
+- [x] `_ByteReader.readUint64`: reject negative/absurd lengths (S-3).
+- [x] Wrap the whole SSTable parse so any structural failure surfaces as
+      `CorruptedSstableException` — callers already handle that type. Also
+      applied to `_readBlock` (the `get()`/`scan()`/`firstKey()` path, which
+      runs *after* `open()` on already-ingested peer data).
+- [x] Bound `readFileRange` allocations by actual file size in
       `StorageAdapterNative`.
-- [ ] Broaden `SyncEngine.pull()` and `LsmEngine.ingestAt0` catches. **Enumerated:**
+- [x] Broaden `SyncEngine.pull()` and `LsmEngine.ingestAt0` catches. **Enumerated:**
       `RangeError`, `StorageException`, `FormatException`, `OutOfMemoryError`.
       > ⚠️ **Trap:** catching `OutOfMemoryError` needs `on Error` or a bare
       > `catch` — and a bare `catch` here will also swallow
       > `SyncCancelledException`, which the engine deliberately does *not* catch.
-      > Re-throw it explicitly.
-- [ ] Quarantine a bad peer file **and advance the HWM past it**, so it is not
+      > Re-throw it explicitly. — done via explicit `on OutOfMemoryError` /
+      > `on RangeError` / `on StorageException` clauses, never a bare catch.
+      > Also applied to `SyncEngine._fullResync`'s ingest loop for consistency.
+- [x] Quarantine a bad peer file **and advance the HWM past it**, so it is not
       re-fetched every cycle. This is the fix for the *persistent* half of S-1;
-      rejection alone leaves the denial-of-sync in place.
-- [ ] Apply the same to `ConsolidationCoordinator`'s `SstableReader.open`
+      rejection alone leaves the denial-of-sync in place. Updated
+      `sync_engine_test.dart`'s pre-existing regression test, which asserted
+      the old (buggy) non-advancing behaviour.
+- [x] Apply the same to `ConsolidationCoordinator`'s `SstableReader.open`
       (second affected call site).
+      **Correction (`kmdb-qa`, 2026-07-20 — B1, blocking):** the first pass of
+      this item was checked off on a false claim of "automatic coverage."
+      `open()`'s try block originally converted only `RangeError` to
+      `CorruptedSstableException`; a `FormatException` (varint overflow) or
+      `StorageException` (an out-of-file-bounds `readFileRange` — e.g. an
+      index `blockOffset`/`blockSize` that individually pass validation but
+      together exceed the file) still escaped uncaught, and
+      `ConsolidationCoordinator.consolidate()`'s try only ever caught
+      `CorruptedSstableException` — so a hostile file quarantined by
+      `SyncEngine.pull()` (which advances the HWM but does not delete the file
+      from `sstables/`) remained eligible as a consolidation input and could
+      crash `consolidate()`/`_maybeConsolidate()`/`sync()` when reached. Fixed
+      by adding `on FormatException` and `on StorageException` clauses
+      (rethrowing as `CorruptedSstableException`) to both `open()`'s try and
+      `_readBlock`'s try (which previously called `readFileRange` *outside*
+      its try entirely — a `StorageException` there was not caught at all).
+      Per QA's confirmation, `adapter.fileSize(path)` still runs *before* the
+      try block, so a genuine file-not-found `StorageException` is unaffected.
+      New corpus cases added to `hostile_sstable.dart` (index `blockOffset`/
+      `blockSize` overflow via `patchIndexBlockOffsetOrSize`, and a malformed
+      10-byte varint reached through index parsing via
+      `patchIndexVarintOverflow`) plus regression tests in
+      `sstable_hostile_parsing_test.dart` and a dedicated end-to-end test in
+      `consolidation_coordinator_test.dart` reproducing the exact
+      `consolidate()` path QA identified. QA's own framing: *"the corpus gap
+      and the code gap are the same gap"* — the missing catch clauses and the
+      missing test cases were the same finding, not two.
+
+Verified: `dart test test/engine/ test/sync/ test/vault/vault_package_test.dart`
+— 828 + 17 tests pass, zero regressions. `dart analyze` clean on all changed
+files. *(Re-verified after the B1 fix — see the final verification note at the
+end of this plan.)*
 
 ### Phase 2 — Decompression bounds (S-2) — *R-6 closed 2026-07-19*
 
@@ -328,35 +367,82 @@ implementer looking for a decode hook that does not exist.
 
 - [ ] Add a `maxDecompressedSize` parameter to `ZstdSimple.decompress` in
       `betto_zstd`; reject frames whose **declared** size exceeds it *before*
-      allocating, and reject negative declared sizes explicitly.
-- [ ] Add `kMaxDecodedValueBytes` as a `static const` on `ValueCodec`.
+      allocating, and reject negative declared sizes explicitly. **Deferred —
+      see note below**: `betto_zstd` is a separate repository/release and is
+      out of scope for this plan-implement session; `_getFrameContentSize` is
+      not exported from the currently-published `betto_zstd` (confirmed by
+      reading `zstd_native.dart` in the pub cache), so there is no seam to call
+      into from KMDB today. Tracked as follow-up work against the `betto_zstd`
+      repo, not blocking this plan.
+- [x] Add `kMaxDecodedValueBytes` as a `static const` on `ValueCodec`.
       `ValueCodec` is a `final class` with only static members and no injection
       seam, and `KvStoreConfig` sits *below* it in the stack, so a const is the
       honest home — not a config knob pretending to be injectable.
-- [ ] Enforce it on the **read** path (`decode`), surfacing a violation as a
-      distinct, catchable exception.
-- [ ] Handle that failure **per document** so one poisoned value cannot abort a
-      whole collection scan, `dump`, `export`, or `verify`.
-- [ ] Separate `kMaxVaultBlobBytes` for blob extraction — *not* the same bound.
-- [ ] **Phase 2 lands in two pieces.** `betto_zstd` is a separate repo needing
+- [x] Enforce it on the **read** path (`decode`), surfacing a violation as a
+      distinct, catchable exception (`DecodedValueTooLargeException`).
+- [x] Handle that failure **per document** so one poisoned value cannot abort a
+      whole collection scan, `dump`, `export`, or `verify`. `verify` and the
+      Query Layer's `_fullScan`/index-scan candidate loop (`kmdb_query.dart`)
+      already had this pattern (`catch (_) { continue; }`); added the same
+      guard to `kmdb_cli`'s `dump`, `export`, and `scan --key-prefix` (the
+      only call sites that decode directly via `ctx.store.scan()` outside the
+      Query Layer).
+- [x] Separate `kMaxVaultBlobBytes` for blob extraction — *not* the same
+      bound. Added as `VaultSearchConfig.maxBlobBytes` (default 200 MiB,
+      configurable), enforced in `VaultSearchManager._processNextItem` before
+      a blob is ever handed to an extractor or the indexing isolate.
+- [x] **Phase 2 lands in two pieces.** `betto_zstd` is a separate repo needing
       its own PR, publish, and pin bump (Group D gate). The KMDB-side cap must
       therefore **degrade sanely against the currently published `betto_zstd`** —
       i.e. enforce the decoded-size limit locally even when the underlying
-      decompressor has no cap yet.
+      decompressor has no cap yet. Implemented: `kMaxDecodedValueBytes` is
+      checked *after* `decompress()` returns, which stops a
+      survivable-but-oversized bomb from being accepted as a document even
+      though it cannot stop an allocation large enough to OOM the process
+      during decompression itself — that half requires the upstream
+      `betto_zstd` fix (tracked above, not blocking).
 
-### Phase 3 — Vault integrity (S-4) — *R-8 closed 2026-07-19*
+Verified: `dart test test/encoding/ test/vault/search/` (kmdb) and
+`dart test test/commands_test.dart test/explain_test.dart
+test/commands/dump_command_test.dart test/commands/export_command_test.dart`
+(kmdb_cli) — all pass, zero regressions. `dart analyze` clean on all changed
+files.
 
-- [ ] Hash blob bytes on hydration; reject if the digest ≠ the requested address.
-- [ ] **Verify on every read**, not only for blobs "that arrived via sync" — blob
+### Phase 3 — Vault integrity (S-4) — *R-8 closed 2026-07-19* — **Complete 2026-07-20**
+
+- [x] Hash blob bytes on hydration; reject if the digest ≠ the requested address.
+      `LocalDirectoryVaultAdapter.hydrateVaultBlob` now unwraps and verifies
+      before ever staging the bytes, throwing `VaultContentMismatchException`.
+- [x] **Verify on every read**, not only for blobs "that arrived via sync" — blob
       provenance is **not recorded anywhere** today, so the conditional version
       cannot be implemented without inventing new state. SHA-256 over bytes you
       were about to return anyway is cheap; measure it, and only add a provenance
-      record if the measurement actually justifies one.
-- [ ] Stop trusting the synced manifest's `encrypted` flag — **infer it from the
+      record if the measurement actually justifies one. Implemented
+      unconditionally in `VaultStore.getBytes` — no provenance record added (the
+      measurement wasn't warranted: every existing test suite passed with no
+      observable slowdown).
+- [x] Stop trusting the synced manifest's `encrypted` flag — **infer it from the
       `EncryptionEnvelope`** (the primitive added by the 0.08 reconciliation).
       Chosen over a local record because it needs no new state and cannot drift
-      out of sync with reality.
-- [ ] Document `crc32c` as a corruption check only, never an integrity control.
+      out of sync with reality. **Breaking format change** (no migration, per
+      the plan's own decision): `VaultStore.ingest` now always wraps the blob
+      via `EncryptionEnvelope.wrap` (a 1-byte flag prefix even when
+      unencrypted) instead of raw `enc.encrypt(bytes)`/plaintext gated by
+      `manifest.encrypted`; `getBytes` and `hydrateVaultBlob` infer via
+      `EncryptionEnvelope.unwrap` instead of consulting the manifest. Scope
+      note: `originalName`'s existing (already-`EncryptionEnvelope`-based)
+      encoding was **not** touched — it isn't part of the S-4 substitution
+      attack (it doesn't gate content decryption or hash verification), so
+      changing it would have been unrelated scope creep with real test-suite
+      blast radius.
+- [x] Document `crc32c` as a corruption check only, never an integrity control —
+      `VaultManifest.crc32c`'s doc comment now states this explicitly.
+
+Verified: `dart test test/vault/ test/encryption/` — 596 pass, 12 pre-existing
+skips, zero regressions/failures. Confirmed via grep that no code outside
+`vault_store.dart`/`local_directory_vault_adapter.dart` reads a blob path
+directly, so the format change is fully contained behind `VaultStore.getBytes`.
+`dart analyze` clean on all changed files.
 
 ### Phase 3b — Indexing-isolate lifecycle (D-1) — *added 2026-07-19 from W4*
 
@@ -366,36 +452,67 @@ the memtable is never flushed. S-2 and S-8 supply the trigger — an unbounded
 extraction OOMs, or PDFium segfaults on a malformed blob — which is why this
 belongs in *this* plan rather than the smaller-independents group.
 
-- [ ] Pass `onError:` / `onExit:` ports to `Isolate.spawn`; complete the
-      in-flight completer with an error when either fires.
-- [ ] Add a timeout to `VaultIndexingIsolate.sendWork`. Indexing is best-effort;
-      no blob is worth blocking a close.
-- [ ] Bound `shutdown()` — drain in-flight work, but abandon after a deadline
-      and kill the isolate.
-- [ ] **Reorder `KmdbDatabase.close()` so the flush is not sequenced behind
+- [x] Pass `onError:` / `onExit:` ports to `Isolate.spawn`; complete the
+      in-flight completer with an error when either fires. Both ports route
+      to `_onIsolateDeath`, which also latches `_dead` so a subsequent
+      `sendWork` fails fast instead of sending work to a corpse.
+- [x] Add a timeout to `VaultIndexingIsolate.sendWork`. Indexing is best-effort;
+      no blob is worth blocking a close. `kWorkTimeout` (30s) — covers the
+      "alive but hung" case that `onError`/`onExit` cannot observe.
+- [x] Bound `shutdown()` — drain in-flight work, but abandon after a deadline
+      and kill the isolate. `kShutdownDrainTimeout` (5s, deliberately shorter
+      than `kWorkTimeout` — a close path should resolve quickly).
+- [x] **Reorder `KmdbDatabase.close()` so the flush is not sequenced behind
       best-effort index work**, or isolate the vault-search close so a hang
       cannot reach the durability path. Derived indexes are rebuildable; the
       memtable is not. *This is the load-bearing fix — the others reduce the
-      likelihood, this one removes the data-durability consequence.*
-- [ ] Test: kill the isolate mid-work, assert `close()` still returns and the
-      flush still happens.
+      likelihood, this one removes the data-durability consequence.* Done:
+      `_cache.close(flush: flush)` now runs before `_vaultSearchManager?.close()`.
+- [x] Test: kill the isolate mid-work, assert `close()` still returns and the
+      flush still happens. See Phase 8 (`kmdb_database_close_isolate_death_test.dart`).
 
-### Phase 4 — Lease validation and staging (S-6, S-7)
+Verified: `dart test` (full `kmdb` suite) — 2373 pass, 12 pre-existing skips,
+zero regressions. `dart analyze` clean on all changed files.
 
-- [ ] Validate every `inputFiles` entry with `SstableInfo.parse` before use;
-      reject the whole lease if any entry fails.
-- [ ] Reject entries containing a path separator or `..`; join via a helper that
-      refuses to escape `sstablesDir`.
-- [ ] Cross-check each named input against the device's own listing of
-      `sstables/` before deleting it.
-- [ ] Log deletion failures instead of discarding them.
-- [ ] Replace `/tmp/kmdb-consolidation-{filename}` with an adapter-derived,
+### Phase 4 — Lease validation and staging (S-6, S-7) — **Complete 2026-07-20**
+
+- [x] Validate every `inputFiles` entry with `SstableInfo.parse` before use;
+      reject the whole lease if any entry fails. Implemented as
+      `_safeSstablePath`, applied in both `consolidate()` (before downloading)
+      and `commit()` (before deleting) — `commit()` is public API called
+      independently of `consolidate()` in several existing tests, so it cannot
+      rely on a caller having already validated.
+- [x] Reject entries containing a path separator or `..`; join via a helper that
+      refuses to escape `sstablesDir`. Same `_safeSstablePath` helper.
+- [x] Cross-check each named input against the device's own listing of
+      `sstables/` before deleting it. `commit()` now lists `sstables/` itself
+      and only deletes paths present in that listing.
+- [x] Log deletion failures instead of discarding them. Both the per-file
+      delete loop and the lease-file delete now `print` a `WARN` on failure
+      rather than a bare `catch (_) {}`.
+- [x] Replace `/tmp/kmdb-consolidation-{filename}` with an adapter-derived,
       unique-per-run staging directory, cleaned up in a `finally`. Fixes Windows.
       **Precedent to follow:** `hydrateVaultBlob`'s
       `stagingPath(microsecondsSinceEpoch)` in
       `local_directory_vault_adapter.dart` already does this correctly.
+      Implemented as `ConsolidationCoordinator._stagingDir`
+      (`{dbDir}/tmp/consolidation`) — required a new `dbDir` constructor
+      parameter, threaded from `SyncEngine._dbDir`; updated the 6 direct
+      test constructions accordingly.
 
-### Phase 8 — Tests (the point of the exercise, not an afterthought) — *R-10 closed 2026-07-19*
+Two pre-existing tests used filenames that were well-formed enough for the old
+sort-comparator's `try/catch` fallback but not valid `SstableInfo` names
+(`nonexistent-peer-....sst`, `already-gone.sst`) — under the new validation
+these are indistinguishable from a hostile entry and are rejected outright.
+Updated both to use `SstableInfo.flushName(...)`-generated, well-formed-but-
+absent filenames, which is what those tests actually intended to exercise
+("missing file", not "invalid filename" — the latter is now covered
+separately by the Phase 8 malicious-lease tests).
+
+Verified: `dart test test/sync/` — 244 pass, zero regressions. `dart analyze`
+clean on all changed files.
+
+### Phase 8 — Tests (the point of the exercise, not an afterthought) — *R-10 closed 2026-07-19* — **Complete 2026-07-20**
 
 > AAD and sync-authentication tests were removed from this list in the plan
 > split — they belong to
@@ -408,70 +525,277 @@ patch one named field, and **recompute the XXH64** so the file stays
 checksum-valid. Checked-in binary fixtures rot silently when the format changes;
 a generator does not.
 
-- [ ] `test/util/hostile_sstable.dart` — one helper per corruption class:
+- [x] `test/util/hostile_sstable.dart` — one helper per corruption class:
       out-of-range footer offset/size, negative offset, oversized index `keyLen`,
-      huge block `shared`, and a decompression-bomb value.
-- [ ] Regression tests reproducing the review's confirmed probes (PROBE 1–3,
-      PEER-A/B), using that generator.
-- [ ] **Unit-level:** `Varint.decode` rejects the 10-byte sign-bit case directly,
-      not only via SSTable parsing.
-- [ ] **🔴 The load-bearing test — recovery, not just rejection.** Every other
+      huge block `shared`, and a decompression-bomb value. Reuses the real
+      `ValueCodec.encode`/`ZstdSimple` compressor for the bomb value rather than
+      hand-crafting a Zstd frame header — smaller, simpler, and it's what
+      actually flows through the write path being tested.
+- [x] Regression tests reproducing the review's confirmed probes (PROBE 1–3,
+      PEER-A/B), using that generator —
+      `test/engine/sstable_hostile_parsing_test.dart` (PROBE1–3 + block-shared
+      + decompression-bomb, direct against `SstableReader` on
+      `StorageAdapterNative`) and `test/sync/sync_engine_native_adapter_test.dart`
+      (PEER-A/B equivalent, end-to-end through `SyncEngine.pull()`).
+- [x] **Unit-level:** `Varint.decode` rejects the 10-byte sign-bit case directly,
+      not only via SSTable parsing — added to `test/engine/varint_test.dart`
+      (plus a paired "0x00 final byte still decodes" test guarding against
+      over-rejection).
+- [x] **🔴 The load-bearing test — recovery, not just rejection.** Every other
       test here asserts a hostile file is *rejected*. S-1's actual harm is
       **persistent denial-of-sync**, so assert that after rejection **the HWM
       advances and the next `pull()` succeeds.** Without this the quarantine
       behaviour in Phase 1 is untested and the real bug can survive a green
-      suite.
-- [ ] **Run the sync tests against `StorageAdapterNative`.** The suites hardcode
+      suite. Implemented as `sync_engine_native_adapter_test.dart`'s "recovery
+      after quarantine" test: asserts the HWM advances past the hostile file,
+      *and* that a subsequent `pull()` still ingests new legitimate data from
+      the same peer (proving the earlier hostile file didn't permanently wedge
+      sync with that peer) — plus the pre-existing `sync_engine_test.dart`
+      regression test, updated from its old (buggy) "HWM must NOT advance"
+      assertion.
+- [x] **Run the sync tests against `StorageAdapterNative`.** The suites hardcode
       `MemoryStorageAdapter` in `setUp`
       (`test/sync/consolidation_coordinator_test.dart:132`, `sync_engine_test.dart`,
       ~30 tests). **Mechanism:** extract the shared test body into a helper and
       run it from a group parameterised over a `StorageAdapter` factory. **Scope:**
       the ingest paths at minimum — that is where S-1 lives and where the memory
       adapter's bounds-checking hides it.
-- [ ] Use `FaultyStorageAdapter` for the ingest path — it is the fault-injection
+      **Deviation, recorded honestly:** implemented as a **new, separate** test
+      file (`sync_engine_native_adapter_test.dart`) targeting the ingest path,
+      rather than parameterising the existing ~30-test suite over an adapter
+      factory. The existing suite's setup (multi-device HWM/consolidation
+      scenarios, `MemorySyncAdapter` for the *cloud* side throughout) is large
+      enough that a full parameterised refactor was judged higher-risk than
+      value for this pass — the goal ("make the OOM-class bug visible to the
+      suite") is achieved either way. Flagging this so a future pass can decide
+      whether the fuller refactor is still wanted.
+- [x] Use `FaultyStorageAdapter` for the ingest path — it is the fault-injection
       harness the 0.02.01 track built for exactly this, and per review **D-3** no
-      sync test currently uses it.
-- [ ] Vault substitution test: swap blob bytes, assert rejection.
-- [ ] Malicious-lease test: `..` entries, non-SSTable names, assert no deletion.
-- [ ] Isolate-death test (Phase 3b): kill mid-work, assert `close()` returns and
-      the flush still happens.
+      sync test currently uses it. Added
+      `test/sync/kv_store_ingest_faulty_adapter_test.dart`: ingest a hostile
+      SSTable (rejected), `crash()` immediately after, reopen, and confirm the
+      database is still healthy (a subsequent legitimate ingest succeeds).
+- [x] Vault substitution test: swap blob bytes, assert rejection. Added to
+      `test/vault/vault_storage_adapter_test.dart`: an attacker substitutes the
+      remote blob's bytes in place (manifest untouched); `hydrateVaultBlob`
+      throws `VaultContentMismatchException` and the substituted content never
+      reaches the local final blob path (`isHydrated` stays `false`).
+- [x] Malicious-lease test: `..` entries, non-SSTable names, assert no deletion.
+      Added a `malicious lease (S-6)` group to
+      `test/sync/consolidation_coordinator_test.dart`: a `../` traversal entry
+      and a non-SSTable-format entry each cause the *whole* lease to be
+      rejected — including a legitimate co-listed entry, which is also left
+      undeleted (proving "reject the whole lease," not "skip the bad entry").
+- [x] Isolate-death test (Phase 3b): kill mid-work, assert `close()` returns and
+      the flush still happens. Added
+      `test/query/kmdb_database_close_isolate_death_test.dart`: a custom
+      extractor whose `extract()` never returns; `close()` still returns within
+      the bounded shutdown-drain window, and the reopened database still has
+      the document written before `close()`.
+      **Honest caveat, worth recording:** verified experimentally (temporarily
+      reverting the `close()` reordering and re-running this test) that the
+      test **also passes under the old ordering**, because Phase 3b's bounded
+      `sendWork`/`shutdown` timeouts alone are sufficient to bound the hang in
+      this scenario. The reordering's specific, additional value — the flush
+      no longer depends on `_vaultSearchManager.close()` succeeding *at all*,
+      bounded or not — is a structural guarantee that isn't independently
+      observable by a mechanical test without deliberately breaking the
+      bounding mechanism too. Both fixes are still correct and complementary
+      (defense in depth per the plan's own framing); this test validates the
+      combined system property ("close() returns and the flush survives"),
+      not the reordering in isolation.
 
 > **Coverage goal is corpus coverage, not line coverage.** Per the review's §9,
 > high line coverage on parser files is *actively misleading* when every test
 > feeds well-formed input. The question to answer is "is every corruption class
 > exercised", not "is every line hit".
 
-### Phase 9 — Spec and docs
+Verified: `dart test` (full `kmdb` suite) — 2389 pass, 12 pre-existing skips,
+zero regressions or flakes across three consecutive runs. `dart analyze` and
+`dart format` clean across the whole package.
+
+### Phase 9 — Spec and docs — **Complete 2026-07-20**
 
 > The §31 threat-model rewrite and the new sync-authentication spec section
 > (**§34**) belong to
 > [plan_0_10_01_sync_authentication.md](plan_0_10_01_sync_authentication.md),
 > not here — removed in the plan split.
 
-- [ ] **§24 (vault)** — document that blob content is verified against its
+- [x] **§24 (vault)** — document that blob content is verified against its
       address on every read, and that `crc32c` is a corruption check only.
-- [ ] **§08 (SSTable)** — document the parser's validation rules, so the
-      constraints are specified rather than merely implemented.
-- [ ] **§06 / §18** — document the decoded-value and vault-blob size bounds and
-      their rationale (§02's 64 KB documented maximum).
-- [ ] **§17 / §18** — document that derived-index shutdown must never gate the
-      memtable flush (Phase 3b).
-- [ ] Release-checklist entries for anything untestable in CI. Next free ID is
-      **RC-25**.
+      Added a "Content verification" subsection under Encryption; updated the
+      on-demand-hydration steps and the encryption pipeline description
+      (blob storage now always routes through `EncryptionEnvelope`, self-
+      describing rather than gated on the manifest's `encrypted` field).
+- [x] **§08 (SSTable)** — document the parser's validation rules, so the
+      constraints are specified rather than merely implemented. New
+      "Untrusted-Input Validation (S-1, S-2)" section.
+- [x] **§05 / §18** — document the decoded-value and vault-blob size bounds and
+      their rationale (§02's 64 KB documented maximum). *(Landed in §05, not
+      §06 as originally scoped — §05 "Value Encoding" is where `ValueCodec`
+      and the compression pipeline are actually documented; §06 covers the
+      storage engine's write/read/compaction paths and has no natural home
+      for a codec-level bound.)*
+- [x] **§17 / §18** — document that derived-index shutdown must never gate the
+      memtable flush (Phase 3b). New "The Vault Indexing Isolate (a Bounded
+      Exception, D-1)" section in §18; a new failure-scenario row in §17's
+      table.
+- [x] Release-checklist entries for anything untestable in CI. Next free ID is
+      **RC-25** — added, covering a genuine native-crash (not just a Dart-level
+      hang) inside a vault text extractor, distinct from RC-21's existing
+      process-level-SIGKILL coverage.
+- [x] **§12 (sync)** — documented the `inputFiles` validation rules (S-6) and
+      the staging-path fix (S-7) under the lease file schema. *(Not
+      originally listed in this phase's checklist, but Phase 4's own fixes
+      needed a spec home and §12 is where the lease protocol is
+      specified.)*
 
 **Final step — QA sign-off and pre-commit:**
 
-- [ ] Run `make coverage` — project floor is 90%, baseline 95%. Parser and
+- [x] Run `make coverage` — project floor is 90%, baseline 95%. Parser and
       bounds-checking code should be nearer 100%. **But judge this by corpus
       coverage, not line coverage** — see the note at the end of Phase 8.
+      Result: **94.8%** overall (11167/11783 lines), all touched files
+      individually ≥88%, and every corruption class named in Phase 8 has a
+      dedicated regression test — see the per-file breakdown and follow-up
+      tests recorded in this session (added `unsharedLen`/`valueLen`
+      overflow tests to `hostile_sstable.dart` and a
+      `DecodedValueTooLargeException`/bound-boundary test group to
+      `value_codec_test.dart` specifically to close gaps found while
+      reviewing coverage).
 - [ ] Hand off to the **`kmdb-qa` agent** for sign-off (spec alignment, doc
       comments, test coverage/adequacy, code health). Resolve every blocking
       item before proceeding. Do not open a PR until sign-off is received.
-- [ ] Run `make pre_commit` — format, analyze, license_check, tests all green.
-- [ ] Verify licence headers on all new files (2026).
+      **⚠️ Not completed — this implementation session had no Agent/Task tool
+      available to invoke `kmdb-qa`.** All implementable work is complete and
+      verified (tests, coverage, docs, mechanical pre-commit gate below); this
+      step is paused here awaiting the orchestrator/user to run `kmdb-qa`
+      before any commit/PR.
+- [x] Run `make pre_commit` — format, analyze, license_check, tests all green.
+      Ran directly via Bash (no `kmdb-pre-commit` agent available either) —
+      `format_check`, `analyze`, `license_check`, and the scoped
+      `pre_commit_test` (2394 `kmdb` tests) all passed.
+- [x] Verify licence headers on all new files (2026). Confirmed on all 5 new
+      test files.
 
 > **Note:** `make pre_commit` is scoped to `packages/kmdb` only. This plan
 > touches `kmdb_cli` and `betto_zstd` as well — run those suites explicitly.
+> `kmdb_cli`'s full suite (1176 tests) was run explicitly and passes; the
+> `betto_zstd` checklist item was deferred (see Phase 2) and has no local
+> changes to test.
+
+> **⚠️ Session handoff note.** This implementation session's toolset did not
+> include an Agent/Task tool, so `kmdb-qa` and `kmdb-pre-commit` could not be
+> invoked as subagents. `make pre_commit` was run directly via Bash instead
+> (see above) and is green. **`kmdb-qa` sign-off is still outstanding** and
+> must happen before this branch is committed, pushed, or opened as a PR —
+> per the project's mandatory workflow. All implementation, tests, coverage,
+> and docs are complete and ready for that review.
+
+## `kmdb-qa` review — 2026-07-20 — round 1
+
+**Verdict: not signed off, one blocking item (B1).** The coordinator relayed
+`kmdb-qa`'s findings; S-4, S-6, S-7, S-3, and D-1 were confirmed closed, the
+spec work was called out as unusually good, and the isolate-death test's
+self-reported caveat (recorded above) was judged acceptable as-is — no
+further test needed, since the seam doesn't exist and the reordering is
+correct by inspection and now specified in §17/§18.
+
+### B1 🔴 blocking — the consolidation call site was not actually fixed
+
+QA verified that `SstableReader.open()`'s try block converted only
+`RangeError` to `CorruptedSstableException`; `FormatException` (varint
+overflow) and `StorageException` (an out-of-file-bounds `readFileRange`, e.g.
+an index `blockOffset`/`blockSize` that individually pass validation but
+together exceed the file) still escaped uncaught. `_readBlock` had the same
+gap, compounded by calling `readFileRange` *outside* its own try block
+entirely. `ConsolidationCoordinator.consolidate()`'s try only ever caught
+`CorruptedSstableException`, so a hostile file that `SyncEngine.pull()`
+quarantines (advances the HWM past it, but does **not** delete it from
+`sstables/`) remained eligible as a consolidation input and could crash
+`consolidate()`/`_maybeConsolidate()`/`sync()` when reached — the second
+affected call site the review's S-1 fix item 7 explicitly names, which the
+first pass of Phase 1 claimed (falsely) was "automatically covered."
+
+QA's sharpest observation: **the corpus gap and the code gap were the same
+gap.** Phase 1 said to bounds-check `keyLen`, `blockOffset`, and `blockSize`,
+but only `keyLen` was checked directly in `_parseIndex` — the other two
+delegate to `readFileRange`, which raises `StorageException`. There was no
+corpus case for either, nor for varint overflow reached *through* SSTable
+parsing (as opposed to `Varint.decode`'s own direct unit test). Had those
+cases existed, they would have caught B1 before it shipped.
+
+**Fix:**
+
+- [x] Added `on FormatException` and `on StorageException` clauses to
+      `SstableReader.open()`'s try (rethrowing as `CorruptedSstableException`)
+      and moved `_readBlock`'s `readFileRange` call *inside* its try, adding
+      the same two clauses there. `adapter.fileSize(path)` still runs before
+      `open()`'s try block, so the documented "throws `StorageException` if
+      the file does not exist" contract is unaffected — confirmed by QA's own
+      review of the fix.
+- [x] Added `patchIndexBlockOffsetOrSize` (blockOffset/blockSize overflow, via
+      an index-block rebuild since the oversized value doesn't fit the
+      original varint width) and `patchIndexVarintOverflow` (a malformed
+      10-byte sign-bit-overflowing varint reached through index parsing) to
+      `hostile_sstable.dart`, plus regression tests in
+      `sstable_hostile_parsing_test.dart`.
+- [x] Added a dedicated end-to-end test in `consolidation_coordinator_test.dart`
+      (`hostile input reaching consolidate() (S-1, QA finding B1)`) reproducing
+      the exact real-world path QA identified: a hostile file named as a lease
+      input is skipped during the N-way merge, not thrown, and the merge still
+      produces output from the surviving legitimate input.
+- [x] Reworded the Phase 1 consolidation checkbox (above) to record what
+      actually happened rather than asserting coverage.
+- [x] Corrected §08's wording: it previously claimed uniform
+      `CorruptedSstableException` surfacing "(or, for varint overflow
+      specifically, `FormatException`)" — omitting `StorageException`
+      entirely — and asserted `consolidate()` already treated
+      `FormatException` as "reject this file," which it did not. Rewritten to
+      describe the actual (now-corrected) catch clauses and name B1 as the
+      confirmed gap that motivated them.
+
+### One-liners folded in
+
+- [x] **A1** — `kmdb_database.dart`'s `close()` doc comment said
+      `EmbeddingModel.dispose()` runs "after all other cleanup," which the
+      Phase 3b/D-1 reordering made false (`dispose()` now runs *before* the
+      vault search isolate shutdown, not after). Corrected to describe the
+      actual order: flush → `dispose()` → vault search shutdown.
+- [x] **A4** — `VaultStore.computeSha256` and `computeSha256ForTest` did the
+      same thing (the latter was an alias added during Phase 3, made
+      redundant once `computeSha256` became the production entry point for
+      hydration verification too). Collapsed: `computeSha256ForTest` removed,
+      all call sites (across both `kmdb` and `kmdb_cli` test suites — 11 files
+      total, the `kmdb_cli` half missed in the initial grep) renamed to
+      `computeSha256`.
+- [x] **A2** (cheap, not blocking) — `_vaultSearchManager?.close()` was the
+      last, unguarded statement in `close()`, so it could throw *after* a
+      successful flush. Wrapped in a `try`/`catch` that logs (does not
+      silently discard) any failure — the review's own recommendation was
+      "reorder **or** wrap"; the reordering delivers the durability guarantee,
+      this delivers the rest, matching QA's framing exactly.
+
+**Explicitly not actioned per QA's instruction:** A3 (surfacing quarantine
+programmatically) and A5 (CHANGELOG) — tracked by QA as separate follow-ups,
+not part of this plan.
+
+**Verification after the B1 fix and one-liners:**
+
+- `dart test` (full `kmdb` suite): **2398 pass**, 12 pre-existing skips (up
+  from 2394 — 4 new regression tests: 3 in `sstable_hostile_parsing_test.dart`,
+  1 in `consolidation_coordinator_test.dart`).
+- `dart test` (full `kmdb_cli` suite): **1176 pass** (unchanged count; the
+  `computeSha256ForTest` → `computeSha256` rename touched 6 additional files
+  here that the initial A4 pass missed).
+- `make coverage`: **94.8%** overall (11181/11800 lines) — consistent with
+  the pre-fix baseline.
+- `make pre_commit`: green (`format_check`, `analyze`, `license_check`, scoped
+  `pre_commit_test`).
+
+Per QA's closing note, this round does not require re-review once these items
+land — the branch is ready for the pre-commit/commit/PR steps once the
+orchestrator confirms.
 
 ## Plan review — 2026-07-19 (`kmdb-plan-reviewer`)
 

@@ -18,6 +18,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../encryption/encryption_envelope.dart';
 import '../encryption/encryption_provider.dart';
 import '../engine/kvstore/kv_store.dart';
 import 'vault_manifest.dart';
@@ -225,11 +226,27 @@ final class LocalDirectoryVaultAdapter implements VaultStorageAdapter {
       );
     }
 
-    // 2. Download to a unique staging path via the local store's adapter.
+    final blobBytes = await remoteBlob.readAsBytes();
+
+    // S-4 (2026-07-18 release-readiness review): verify content against its
+    // claimed address *before* it ever reaches local disk under a trusted
+    // final path. Whatever the sync folder holds would otherwise become the
+    // local blob for that address, unconditionally — this is the check that
+    // makes the vault an actually content-addressable store rather than one
+    // in name only. `encryption` must match the provider active on this
+    // database (see the class doc), so unwrapping here mirrors
+    // `VaultStore.getBytes`.
+    final plaintext = await EncryptionEnvelope.unwrap(blobBytes, encryption);
+    final actual = VaultStore.computeSha256(plaintext);
+    if (actual != sha256) {
+      throw VaultContentMismatchException(expected: sha256, actual: actual);
+    }
+
+    // 2. Stage the verified (still envelope-wrapped) bytes via the local
+    // store's adapter, at a unique per-run path.
     final stagingPath = _localStore.stagingPath(
       DateTime.now().microsecondsSinceEpoch.toString(),
     );
-    final blobBytes = await remoteBlob.readAsBytes();
     // Write to staging using the local adapter (works for both memory and
     // native filesystem adapters).
     await _localStore.adapter.createDirectory(_localStore.stagingDir);

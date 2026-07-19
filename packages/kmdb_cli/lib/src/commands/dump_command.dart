@@ -85,10 +85,19 @@ final class DumpCommand extends CliCommand {
     for (final coll in collections) {
       ctx.out.writeln('# collection: $coll');
       await for (final entry in ctx.store.scan(coll)) {
+        // A single poisoned/oversized value (S-2) must not abort the whole
+        // dump — report it and keep going, rather than losing every document
+        // that would otherwise have been dumped after it.
+        final Map<String, dynamic> doc;
+        try {
+          doc = await ValueCodec.decode(entry.value);
+        } catch (e) {
+          ctx.writeError('Skipping ${entry.key} in "$coll": $e');
+          continue;
+        }
         // Inject _id from the entry key — documents are stored without _id in
         // the value bytes; the key is the canonical identity.
-        final doc = await ValueCodec.decode(entry.value)
-          ..['_id'] = entry.key;
+        doc['_id'] = entry.key;
         ctx.out.writeln(enc.convert(doc));
       }
     }
@@ -133,8 +142,16 @@ final class DumpCommand extends CliCommand {
       final collDir = io.Directory('$vaultDirPath/$coll');
 
       await for (final entry in ctx.store.scan(coll)) {
-        final doc = await ValueCodec.decode(entry.value)
-          ..['_id'] = entry.key;
+        // A single poisoned/oversized value (S-2) must not abort the whole
+        // dump — see the note in the non-vault dump path above.
+        final Map<String, dynamic> doc;
+        try {
+          doc = await ValueCodec.decode(entry.value);
+        } catch (e) {
+          ctx.writeError('Skipping ${entry.key} in "$coll": $e');
+          continue;
+        }
+        doc['_id'] = entry.key;
         final docId = entry.key;
 
         ctx.out.writeln(enc.convert(doc));

@@ -95,6 +95,44 @@ well — already-compressed images, encrypted blobs — are stored raw with flag
 `0x00`. The minimum document size for compression is 64 bytes (smaller documents
 are always stored as `0x00`).
 
+## Decompressed-Size Bound (S-2)
+
+A Zstd frame declares its own decompressed size in its header — data the
+producer controls. For a value arriving from an untrusted peer or cloud
+provider (T1/T3, see §31), this is a decompression-bomb vector: the
+2026-07-18 release-readiness review measured ~32,000× amplification on
+ordinary compressible input (e.g. a run of zero bytes), meaning an ~8 KB value
+can expand to ~256 MB on decode with no cap anywhere in the stack.
+
+`ValueCodec.decode` enforces `kMaxDecodedValueBytes` (1 MiB) on the
+decompressed-but-not-yet-CBOR-decoded payload, on both the encrypted and
+plaintext branches, immediately after `decompress()` returns and before any
+CBOR decoding is attempted. §02's documented workload profile puts an average
+document at 1–4 KB with a 64 KB documented upper bound; 1 MiB gives 16×
+headroom over that maximum while still stopping a multi-hundred-MB bomb from
+being accepted as a document. A violation throws
+`DecodedValueTooLargeException` — a distinct type from `FormatException`, so
+callers performing a multi-document operation (`scan`, `dump`, `export`,
+`verify`) can catch it per-document rather than aborting the whole operation.
+
+This bound is a `static const` on `ValueCodec`, not a `KvStoreConfig` field:
+`ValueCodec` is a `final class` with only static members and no injection
+seam, and `KvStoreConfig` sits *below* `ValueCodec` in the stack (values are
+decoded by callers above `KvStore`, not by the storage engine itself).
+
+**What this bound does not cover.** It fires *after* `betto_zstd`'s
+`decompress()` call returns — as of the currently-published `betto_zstd`,
+there is no way to inspect a frame's declared size and reject it *before*
+the corresponding allocation, because that internal frame-inspection function
+is not part of the package's public API. So a frame whose declared size is
+large enough to exhaust memory *during* decompression (rather than merely
+producing an oversized-but-allocatable result) is not caught by this bound —
+closing that gap requires an upstream `betto_zstd` change (tracked
+separately, not yet landed). Vault blobs are **not** compressed by this codec
+at all and are bounded separately and much more generously
+(`VaultSearchConfig.maxBlobBytes`, §24) — they are attachments, and a 50 MB
+PDF is a legitimate size that a document-sized bound would incorrectly reject.
+
 ## Cross-Platform Reads
 
 Both native and web clients write Zstd (`0x01`) for compressible documents, and

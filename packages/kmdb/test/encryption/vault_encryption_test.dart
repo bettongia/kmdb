@@ -165,7 +165,7 @@ void main() {
         final ref = await store.ingest(bytes: data, hlcTimestamp: _hlc);
 
         // Compute the expected hash over the PLAINTEXT.
-        final expectedSha256 = VaultStore.computeSha256ForTest(data);
+        final expectedSha256 = VaultStore.computeSha256(data);
         expect(ref.sha256, equals(expectedSha256));
 
         // Also verify the stored blob is NOT the data itself (it's ciphertext).

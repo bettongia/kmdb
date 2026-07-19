@@ -999,18 +999,50 @@ final class KmdbDatabase {
   /// Closes the database, optionally flushing the active memtable and
   /// releasing the lock.
   ///
-  /// If an [embeddingModel] was supplied to [open], its [EmbeddingModel.dispose]
-  /// equivalent is called after all other cleanup so that native ORT resources
-  /// are released. After [close] returns, this instance must not be used again.
+  /// Cleanup order (see the "Ordering (D-1)" note in the implementation): the
+  /// memtable flush runs **first**, then — if an [embeddingModel] was
+  /// supplied to [open] — its [EmbeddingModel.dispose] equivalent releases
+  /// native ORT resources, and the vault search isolate is shut down
+  /// **last**. After [close] returns, this instance must not be used again.
   Future<void> close({bool flush = true}) async {
-    // Gracefully shut down the vault search isolate (drains in-flight work)
-    // before closing the store — the isolate sends results back that need
-    // to be committed via the store.
-    await _vaultSearchManager?.close();
+    // ## Ordering (D-1, 2026-07-18 release-readiness review)
+    //
+    // The memtable flush is durability-critical; vault-search indexing is
+    // derived state and fully rebuildable from the synced document data
+    // (reindexVault()). This method therefore flushes **first** and shuts
+    // the vault search isolate down **last** — the reverse of the original
+    // ordering, which awaited the isolate before touching the store.
+    //
+    // The review confirmed that a dead or hung indexing isolate (triggered
+    // by, e.g., an unbounded extraction OOMing (S-2) or a native extractor
+    // crashing on a malformed blob (S-8)) hung this method indefinitely
+    // *before* the flush ran — so a forced kill after that hang lost
+    // whatever was still in the memtable. `VaultIndexingIsolate` now bounds
+    // that hang on its own (onError/onExit handling, sendWork/shutdown
+    // timeouts — see vault_indexing_isolate.dart), which reduces how often
+    // this matters. But bounding the hang only shrinks the window; it does
+    // not remove the consequence. This reordering is what actually removes
+    // it: even in the worst case (the isolate never responds and
+    // `_vaultSearchManager.close()` eventually times out or throws), the
+    // flush has already completed by the time that happens.
     await _cache.close(flush: flush);
     // Release native embedding model resources (no-op when embeddingModel is
     // null or when the implementation's dispose() is a no-op).
     _embeddingModel?.dispose();
+    // Best-effort, and now strictly after the durability-critical work above:
+    // a hang or failure shutting down the vault search isolate can no longer
+    // prevent the flush that already happened. It is still wrapped so that a
+    // failure here (e.g. `VaultIndexingIsolate.shutdown()` throwing after its
+    // own bounded drain) cannot escape `close()` and be mistaken by a caller
+    // for a failure of the durability-critical work above, which has already
+    // succeeded by this point (review recommendation: "reorder or wrap" — the
+    // reordering delivers the durability guarantee, this delivers the rest).
+    try {
+      await _vaultSearchManager?.close();
+    } catch (e) {
+      // ignore: avoid_print — structured logging deferred (Q8 decision).
+      print('WARN [KmdbDatabase.close] Vault search shutdown failed: $e');
+    }
   }
 
   // ── Text search ────────────────────────────────────────────────────────────

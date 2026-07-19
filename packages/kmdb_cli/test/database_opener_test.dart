@@ -358,7 +358,7 @@ void main() {
       // first via the same interceptor path _ingestAndLink uses, then swap
       // in a manifest-only stub in place of the real (fully-ingested) blob.
       final bytes = Uint8List.fromList(utf8.encode('stub source content'));
-      final sha256 = VaultStore.computeSha256ForTest(bytes);
+      final sha256 = VaultStore.computeSha256(bytes);
       final col = db.rawCollection('docs');
 
       // Establish a positive $vault ref via the public write path — see

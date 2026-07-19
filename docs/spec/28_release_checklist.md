@@ -891,6 +891,59 @@ contention test that exercises the lease protocol.
 
 ---
 
+### RC-25 — Vault indexing isolate: real native crash recovery (D-1)
+
+- **Area:** vault search / durability
+- **Validates:** that a genuine native crash inside a text extractor (e.g.
+  `kmdb_extractor_pdf`'s PDFium segfaulting on a malformed PDF — S-8) — not
+  merely a Dart-level hang — actually fires `Isolate.spawn`'s `onExit` port,
+  that `KmdbDatabase.close()` still returns and flushes the memtable while
+  that isolate is dying, and that `VaultSearchManager.recover()` correctly
+  resets the in-flight blob to `pending` on the next open rather than
+  wedging in `extracting` forever.
+- **Why not automated:** the automated suite
+  (`test/query/kmdb_database_close_isolate_death_test.dart`) exercises the
+  Dart-level contract deterministically — an extractor whose `extract()`
+  never returns — and confirms `close()` is bounded and the flush survives.
+  It cannot reproduce an actual OS-level segfault/native-crash signal
+  crossing the isolate boundary, since that requires a real native extractor
+  processing genuinely malformed input (a PDFium crash is not something a
+  portable Dart test can trigger reliably or safely), and platform behaviour
+  for whether `onExit` fires on every kind of native crash is not
+  guaranteed to be uniform across macOS/Linux/Windows/web.
+- **Applies when:** before any release that ships `kmdb_extractor_pdf` (or any
+  other native-backed `VaultTextExtractor`) alongside vault search; re-verify
+  after any change to `VaultIndexingIsolate`'s spawn/error/exit wiring.
+- **Prerequisites:** a native-platform machine; `kmdb_extractor_pdf` (or
+  another native extractor) registered via `VaultSearchConfig.extractors`; a
+  small corpus of malformed/fuzzed PDFs known to crash PDFium (or another
+  native parser known to crash on adversarial input — this need not be a
+  specific curated corpus, any input that reliably reproduces a native crash
+  in the extractor under test suffices).
+- **Steps:**
+  1. Open a database with vault search configured, including the native
+     extractor under test.
+  2. Ingest a blob crafted (or fuzzed) to crash the native extractor during
+     `extract()`.
+  3. Confirm the process does not itself crash (the isolate boundary
+     contains the native fault) and that `KmdbDatabase.close()` returns
+     within `VaultIndexingIsolate.kShutdownDrainTimeout` (5s) of being
+     called, even while the crashed isolate is being torn down.
+  4. Confirm a document written immediately before `close()` is present
+     after reopening (the flush ran).
+  5. Confirm the crashed blob's `$$vault:extract:{sha256}` status resets to
+     `pending` (not stuck in `extracting`) and that `reindexVault()` or the
+     normal startup recovery path re-attempts it.
+- **Expected result:** no process crash, `close()` bounded and the memtable
+  flush intact, and the crashed blob self-heals to a re-indexable state
+  rather than wedging.
+- **Related:** `docs/plans/plan_0_10_01_sync_trust_boundary.md` (Phase 3b,
+  D-1), `docs/reviews/release-readiness-review-2026-07-18.md` §6 (D-1),
+  `docs/spec/18_concurrency.md` ("The Vault Indexing Isolate"), RC-21 (the
+  related but distinct process-level-SIGKILL crash recovery check).
+
+---
+
 ## Release log
 
 | Version      | Date         | Tester | Checks run  | Result      | Notes              |

@@ -494,32 +494,64 @@ void main() {
       await expectLater(engine.pull(), completes);
     });
 
-    test('pull skips corrupted remote SSTable without updating HWM', () async {
-      const peerId = 'peer0001';
-      final peerFilename = SstableInfo.flushName(
-        peerId,
-        const Hlc(5000, 0),
-        const Hlc(5001, 0),
-      );
-      // Upload garbage bytes.
-      await cloudAdapter.upload(
-        '$_syncRoot/sstables/$peerFilename',
-        Uint8List.fromList(List.filled(64, 0xAB)),
-      );
+    test(
+      'pull quarantines a corrupted remote SSTable and advances the HWM '
+      'past it (S-1) — the file is not re-fetched on the next pull',
+      () async {
+        const peerId = 'peer0001';
+        final peerFilename = SstableInfo.flushName(
+          peerId,
+          const Hlc(5000, 0),
+          const Hlc(5001, 0),
+        );
+        // Upload garbage bytes — fails the footer checksum, which the reader
+        // validates before any other parsing (CorruptedSstableException).
+        await cloudAdapter.upload(
+          '$_syncRoot/sstables/$peerFilename',
+          Uint8List.fromList(List.filled(64, 0xAB)),
+        );
 
-      final engine = _makeEngine(store, cloudAdapter, localAdapter, 'dev00001');
-      await engine.pull();
+        final engine = _makeEngine(
+          store,
+          cloudAdapter,
+          localAdapter,
+          'dev00001',
+        );
+        await engine.pull();
 
-      // HWM should not record this peer (ingestion failed).
-      final hwm = await HighwaterMark.load(
-        '$_syncRoot/highwater/dev00001.hwm',
-        cloudAdapter,
-      );
-      // HWM may be null (nothing to save) or not contain the peer.
-      if (hwm != null) {
-        expect(hwm.peers.containsKey(peerId), isFalse);
-      }
-    });
+        // S-1 fix: the peer HWM must advance past the rejected file's maxHlc
+        // so it is quarantined rather than re-fetched every cycle — the
+        // pre-fix behaviour left the HWM untouched, which is exactly the
+        // *persistent* denial-of-sync the review confirmed (PEER-A/B).
+        final hwm = await HighwaterMark.load(
+          '$_syncRoot/highwater/dev00001.hwm',
+          cloudAdapter,
+        );
+        expect(hwm, isNotNull);
+        expect(hwm!.peers[peerId], equals(const Hlc(5001, 0)));
+
+        // Note: the raw bytes are written to local `sst/` *before*
+        // `ingestAt0` validates them (see `KvStoreImpl.ingestSstable`) — this
+        // is a documented, pre-existing crash-safety ordering (the directory
+        // entry must be durably linked before the Manifest records it) and is
+        // out of this fix's scope. The file is never registered in the
+        // Manifest, so it is inert; only ingestion (this test's actual
+        // subject) is asserted here.
+
+        // The load-bearing assertion (Phase 8): a subsequent pull() must
+        // succeed and must not attempt to re-download the quarantined file.
+        // Re-uploading the *same* garbage bytes at the same path would just
+        // repeat this test, so instead assert the quarantine is durable by
+        // confirming the peer's HWM entry is unchanged by a second pull with
+        // no new remote activity.
+        await engine.pull();
+        final hwmAfterSecondPull = await HighwaterMark.load(
+          '$_syncRoot/highwater/dev00001.hwm',
+          cloudAdapter,
+        );
+        expect(hwmAfterSecondPull!.peers[peerId], equals(const Hlc(5001, 0)));
+      },
+    );
 
     test('pull skips peer SSTable already covered by HWM', () async {
       const peerId = 'peer0001';

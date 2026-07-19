@@ -64,6 +64,46 @@ bound. This was removed for the following reasons:
    This was a meaningful source of implementation risk for marginal gain at
    this scale.
 
+## The Vault Indexing Isolate (a Bounded Exception, D-1)
+
+§20's vault content search (`VaultSearchManager`) is the one genuine
+background isolate in the system — text extraction, chunking, and
+tokenisation run on `VaultIndexingIsolate`, off the main isolate. This does
+**not** violate the synchronous model above: the isolate touches no `KvStore`,
+`WriteBatch`, or compaction state; it receives only raw decrypted bytes and
+returns only extracted text, chunk metadata, and term-frequency maps.
+Embedding, `WriteBatch` commits, and all filesystem artefact writes still
+happen synchronously on the main isolate, exactly as every other write does.
+The 2026-07-18 release-readiness review's O-4 finding confirmed this boundary
+is correctly designed: no code path lets the isolate write storage directly.
+
+**Lifecycle bounds (D-1).** A background isolate introduces one genuine risk
+the rest of this model doesn't have: it can die or hang. `VaultIndexingIsolate`
+bounds this on three axes:
+
+- `Isolate.spawn` is given `onError`/`onExit` ports; either firing completes
+  any in-flight work item with an error rather than leaving it to hang
+  forever.
+- `sendWork` times out (`kWorkTimeout`, 30s) if the isolate is alive but
+  unresponsive — covering the case `onError`/`onExit` cannot observe (e.g. a
+  native crash that doesn't propagate as a Dart error on every platform).
+- `shutdown()` bounds how long it waits to drain in-flight work
+  (`kShutdownDrainTimeout`, 5s) before abandoning it and killing the isolate
+  outright.
+
+**The load-bearing guarantee is ordering, not the bounds above.**
+`KmdbDatabase.close()` flushes the memtable via `_cache.close(flush: flush)`
+**before** shutting down the vault search isolate, not after. Vault-search
+indexing is derived state, fully rebuildable via `reindexVault()`; the
+memtable is not. A dead or hung indexing isolate can therefore delay or fail
+the isolate shutdown step, but it can never prevent — or even delay — the
+flush, which has already completed by the time any isolate-shutdown problem
+would surface. This ordering is the actual fix for the review's confirmed
+finding (a hung isolate previously blocked `close()` *before* the flush ran,
+so a forced process kill after that hang lost whatever was still in the
+memtable); the bounds above reduce how often a hang happens at all, but do not
+by themselves remove the durability consequence of one.
+
 ## Read Cost Bound (M1 — TableCache)
 
 Before M1, every `get()` or `scan()` call on an SSTable re-opened the file from

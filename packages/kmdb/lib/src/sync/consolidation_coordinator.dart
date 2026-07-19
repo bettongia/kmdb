@@ -196,6 +196,9 @@ final class ConsolidationLease {
 final class ConsolidationCoordinator {
   /// Creates a [ConsolidationCoordinator].
   ///
+  /// [dbDir] is the local database directory, used to derive a staging
+  /// directory for downloaded input SSTables (S-7) — see [_stagingDir].
+  ///
   /// [ctx] is the optional per-sync-run cancellation/deadline context,
   /// forwarded to every adapter call site.
   ConsolidationCoordinator({
@@ -203,6 +206,7 @@ final class ConsolidationCoordinator {
     required this.cloudAdapter,
     required this.localAdapter,
     required this.syncRoot,
+    required this.dbDir,
     this._config = const ConsolidationConfig(),
     int Function()? wallClock,
     this._ctx,
@@ -219,6 +223,9 @@ final class ConsolidationCoordinator {
 
   /// Root path of the sync folder (e.g. `'kmdb-sync'`).
   final String syncRoot;
+
+  /// The local database directory. Used only to derive [_stagingDir].
+  final String dbDir;
 
   final ConsolidationConfig _config;
   final int Function() _wallClock;
@@ -258,6 +265,26 @@ final class ConsolidationCoordinator {
   /// Same empty-root handling as [_leasePath].
   String get _sstablesDir =>
       syncRoot.isEmpty ? 'sstables' : '$syncRoot/sstables';
+
+  /// The local staging directory for downloaded input SSTables:
+  /// `{dbDir}/tmp/consolidation`.
+  ///
+  /// S-7 (2026-07-18 release-readiness review): replaces a hardcoded,
+  /// predictable `/tmp/kmdb-consolidation-{filename}` path, which is not
+  /// cross-platform (`/tmp` does not exist on Windows), is not unique per
+  /// run (two concurrent consolidations, or a symlink pre-created by another
+  /// user on a multi-user host, collide), and bypassed [localAdapter]
+  /// entirely. Mirrors `VaultStore.stagingPath`'s
+  /// `{dbDir}/vault/staging/{uuid}` pattern — the existing, correct
+  /// precedent for exactly this kind of scratch file.
+  String get _stagingDir => '$dbDir/tmp/consolidation';
+
+  /// Returns a unique staging path for [filename] under [_stagingDir].
+  ///
+  /// Uniqueness comes from the microsecond wall-clock reading, matching
+  /// `LocalDirectoryVaultAdapter.hydrateVaultBlob`'s staging-path pattern.
+  String _stagingPathFor(String filename) =>
+      '$_stagingDir/${DateTime.now().microsecondsSinceEpoch}-$filename';
 
   // ── Public API ─────────────────────────────────────────────────────────────
 
@@ -401,13 +428,34 @@ final class ConsolidationCoordinator {
   /// chosen output filename.
   ///
   /// Returns the output filename on success, or `null` if the lease expired
-  /// before the merge completed.
+  /// before the merge completed, or if [lease] fails validation (S-6).
   Future<String?> consolidate(ConsolidationLease lease) async {
     _state = ConsolidationState.consolidating;
     final nowMs = _wallClock();
     if (lease.isExpired(nowMs)) {
       _state = ConsolidationState.leaseExpired;
       return null;
+    }
+
+    // S-6 (2026-07-18 release-readiness review): validate every inputFiles
+    // entry *before* downloading anything. The lease file is an
+    // unauthenticated JSON document in the sync folder — a crafted entry
+    // (e.g. `../highwater/victim-device.hwm`) must be rejected outright, not
+    // tolerated on a best-effort basis. A lease with even one invalid entry
+    // is treated as corrupt in its entirety; see `_safeSstablePath`.
+    final safeInputPaths = <String, String>{};
+    for (final filename in lease.inputFiles) {
+      final path = _safeSstablePath(filename);
+      if (path == null) {
+        // ignore: avoid_print — structured logging deferred (Q8 decision).
+        print(
+          'WARN [ConsolidationCoordinator.consolidate] Rejecting lease '
+          '(epoch=${lease.epoch}): invalid inputFiles entry "$filename"',
+        );
+        _state = ConsolidationState.leaseExpired;
+        return null;
+      }
+      safeInputPaths[filename] = path;
     }
 
     // Download all input SSTables and open readers using an in-memory adapter.
@@ -433,13 +481,15 @@ final class ConsolidationCoordinator {
       for (final filename in sortedInputs.reversed) {
         // Download from sync folder.
         final bytes = await cloudAdapter.download(
-          '$_sstablesDir/$filename',
+          safeInputPaths[filename]!,
           ctx: _ctx,
         );
         if (bytes == null) continue; // file deleted by another device
 
-        // Write to a temporary path via the local adapter.
-        final tmpPath = '/tmp/kmdb-consolidation-$filename';
+        // Write to a unique-per-run staging path via the local adapter (S-7:
+        // no hardcoded, predictable /tmp path — see _stagingDir).
+        final tmpPath = _stagingPathFor(filename);
+        await localAdapter.createDirectory(_stagingDir);
         await localAdapter.writeFile(tmpPath, bytes);
         tmpPaths.add(tmpPath);
 
@@ -515,37 +565,121 @@ final class ConsolidationCoordinator {
   /// was already uploaded by [consolidate].
   ///
   /// Commit sequence:
-  /// 1. Delete each input SSTable from the sync folder (failures are non-fatal
-  ///    — a file may already have been removed by a previous partial commit).
-  /// 2. Delete the lease file so other devices may proceed.
+  /// 1. **Validate every `inputFiles` entry** (S-6); if any entry is invalid,
+  ///    reject the whole lease and delete nothing at all.
+  /// 2. **Cross-check** each validated entry against this device's own
+  ///    listing of `sstables/` — never take the lease's word for what
+  ///    exists; only delete files this device actually observed.
+  /// 3. Delete each surviving input SSTable from the sync folder (failures
+  ///    are logged, not silently discarded, but remain non-fatal — a file
+  ///    may already have been removed by a previous partial commit).
+  /// 4. Delete the lease file so other devices may proceed.
   ///
   /// The output SSTable was uploaded by [consolidate] before this method is
   /// called, so it is safe to delete inputs. The lease is released last.
+  ///
+  /// ## Why validate here too, when [consolidate] already did
+  ///
+  /// [commit] is public API and may be called independently of [consolidate]
+  /// (as several tests do) — it must not rely on a caller having already
+  /// validated the lease. Rejecting is cheap; trusting is not.
   ///
   /// Note: the spec also describes a `.consolidation-manifest` file for crash
   /// recovery of the commit step (§12 sync folder structure). That file is not
   /// written in this implementation; instead, idempotent deletion makes partial
   /// commits safe to retry without a manifest.
   Future<void> commit(ConsolidationLease lease, String outputFilename) async {
-    // Delete input SSTables from the sync folder.
+    // S-6: validate every inputFiles entry before deleting anything. A
+    // crafted lease is a confused-deputy weapon — this device would
+    // otherwise delete whatever path an attacker named, using its own
+    // credentials. Reject the whole lease (no deletions at all) rather than
+    // silently skipping the bad entries and proceeding with the rest.
+    final safePaths = <String>[];
     for (final filename in lease.inputFiles) {
+      final path = _safeSstablePath(filename);
+      if (path == null) {
+        // ignore: avoid_print — structured logging deferred (Q8 decision).
+        print(
+          'WARN [ConsolidationCoordinator.commit] Rejecting lease '
+          '(epoch=${lease.epoch}): invalid inputFiles entry "$filename". '
+          'No inputs deleted.',
+        );
+        return;
+      }
+      safePaths.add(path);
+    }
+
+    // Cross-check: only delete files this device actually observed in its
+    // own listing of sstables/ — never take the lease's word for what
+    // exists (S-6 fix item 3).
+    final actualFiles = await cloudAdapter.list(
+      _sstablesDir,
+      extension: '.sst',
+      ctx: _ctx,
+    );
+    final actualPaths = actualFiles.map((f) => '$_sstablesDir/$f').toSet();
+
+    // Delete input SSTables from the sync folder.
+    for (final path in safePaths) {
+      if (!actualPaths.contains(path)) {
+        // ignore: avoid_print — structured logging deferred (Q8 decision).
+        print(
+          'WARN [ConsolidationCoordinator.commit] Skipping delete of "$path": '
+          'not present in this device\'s own sstables/ listing.',
+        );
+        continue;
+      }
       try {
-        await cloudAdapter.delete('$_sstablesDir/$filename', ctx: _ctx);
-      } catch (_) {
-        // Deletion failure is non-fatal — the file may have already been
-        // removed by another device or a previous partial commit.
+        await cloudAdapter.delete(path, ctx: _ctx);
+      } catch (e) {
+        // Deletion failure is logged (not silently discarded — S-6 fix item
+        // 4) but remains non-fatal: the file may have already been removed
+        // by another device or a previous partial commit.
+        // ignore: avoid_print — structured logging deferred (Q8 decision).
+        print(
+          'WARN [ConsolidationCoordinator.commit] Failed to delete '
+          '"$path": $e',
+        );
       }
     }
 
     // Release the lease.
     try {
       await cloudAdapter.delete(_leasePath, ctx: _ctx);
-    } catch (_) {
-      // Non-fatal: lease will expire naturally.
+    } catch (e) {
+      // ignore: avoid_print — structured logging deferred (Q8 decision).
+      print(
+        'WARN [ConsolidationCoordinator.commit] Failed to delete lease file '
+        '(non-fatal — it will expire naturally): $e',
+      );
     }
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
+
+  /// Validates and resolves [filename] to a safe path under [_sstablesDir].
+  ///
+  /// Lease `inputFiles` entries are attacker-writable (S-6): a crafted lease
+  /// naming `../highwater/victim-device.hwm` or similar would otherwise let
+  /// this device delete or download arbitrary sync-folder paths using its
+  /// own credentials — a confused-deputy attack. A filename is safe only if
+  /// it (a) contains no path separator or `..` component, so it cannot
+  /// escape [_sstablesDir] when joined, and (b) parses as a well-formed
+  /// [SstableInfo] name. Returns `null` if either check fails; callers must
+  /// treat that as "reject this lease entirely," not "skip this one entry."
+  String? _safeSstablePath(String filename) {
+    if (filename.contains('/') ||
+        filename.contains('\\') ||
+        filename.contains('..')) {
+      return null;
+    }
+    try {
+      SstableInfo.parse(filename);
+    } on FormatException {
+      return null;
+    }
+    return '$_sstablesDir/$filename';
+  }
 
   /// Builds a candidate lease for this device.
   ///

@@ -88,12 +88,20 @@ final class ExportCommand extends CliCommand {
 
     const enc = JsonEncoder();
     await for (final entry in ctx.store.scan(collection)) {
+      // A single poisoned/oversized value (S-2) must not abort the whole
+      // export — report it and keep going.
+      final Map<String, dynamic> doc;
+      try {
+        doc = await ValueCodec.decode(entry.value);
+      } catch (e) {
+        ctx.writeError('Skipping ${entry.key}: $e');
+        continue;
+      }
       // Inject _id from the entry key — documents are stored without _id in
       // the value bytes (the key is the canonical identity). The exported NDJSON
       // must include _id so that import can restore documents to their original
       // keys rather than generating new ones.
-      final doc = await ValueCodec.decode(entry.value)
-        ..['_id'] = entry.key;
+      doc['_id'] = entry.key;
       ctx.out.writeln(enc.convert(doc));
     }
     return true;
@@ -138,10 +146,18 @@ final class ExportCommand extends CliCommand {
     const enc = JsonEncoder();
 
     await for (final entry in ctx.store.scan(collection)) {
+      // A single poisoned/oversized value (S-2) must not abort the whole
+      // export — see the note in the non-vault export path above.
+      final Map<String, dynamic> doc;
+      try {
+        doc = await ValueCodec.decode(entry.value);
+      } catch (e) {
+        ctx.writeError('Skipping ${entry.key}: $e');
+        continue;
+      }
       // Inject _id from the entry key — documents are stored without _id in
       // the value bytes (the key is the canonical identity).
-      final doc = await ValueCodec.decode(entry.value)
-        ..['_id'] = entry.key;
+      doc['_id'] = entry.key;
       final docId = entry.key;
 
       // Find vault URIs in this document.

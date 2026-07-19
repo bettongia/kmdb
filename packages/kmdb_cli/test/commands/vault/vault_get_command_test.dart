@@ -166,7 +166,7 @@ void main() {
 
     test('returns false for a stub object', () async {
       // Create a stub: manifest present but no blob file.
-      final sha256 = VaultStore.computeSha256ForTest(_kBytes);
+      final sha256 = VaultStore.computeSha256(_kBytes);
       final crc32c = VaultStore.computeCrc32cForTest(_kBytes);
       final dir = vault.hashDir(sha256);
       await vault.adapter.createDirectory(dir);
@@ -194,7 +194,7 @@ void main() {
 
     test('writes blob to --output file and returns JSON summary', () async {
       final uri = await _ingest(vault, _kBytes);
-      final sha256 = VaultStore.computeSha256ForTest(_kBytes);
+      final sha256 = VaultStore.computeSha256(_kBytes);
 
       final tmpPath =
           '${io.Directory.systemTemp.path}/kmdb_vault_get_${DateTime.now().microsecondsSinceEpoch}.bin';

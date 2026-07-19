@@ -220,7 +220,7 @@ void main() {
 
     test('--vault skips stub vault objects', () async {
       // Create a stub: manifest present, no blob.
-      final sha256 = VaultStore.computeSha256ForTest(_kFileBytes);
+      final sha256 = VaultStore.computeSha256(_kFileBytes);
       final crc32c = VaultStore.computeCrc32cForTest(_kFileBytes);
       final dir = vault.hashDir(sha256);
       await vault.adapter.createDirectory(dir);
@@ -251,7 +251,7 @@ void main() {
     test('fully hydrated vault object can be read back', () async {
       // Ingest a file and verify it is hydrated.
       final vaultUri = await _ingest(vault, _kFileBytes, name: 'attach.bin');
-      final sha256 = VaultStore.computeSha256ForTest(_kFileBytes);
+      final sha256 = VaultStore.computeSha256(_kFileBytes);
 
       expect(await vault.exists(sha256), isTrue);
       expect(await vault.isHydrated(sha256), isTrue);
