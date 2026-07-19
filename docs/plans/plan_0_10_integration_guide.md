@@ -233,6 +233,25 @@ code — no third-party state-management dependency, use the collections' own
 6. Sync/Settings — "Sync now" against a second local instance (Q4), device-id
    display.
 
+**Accessibility (added 2026-07-18, at the user's request).** This is a demo
+app but not exempt from Bettongia's accessibility baseline — a `kmdb`
+integration guide that ships an inaccessible reference app is a bad example
+to set. Minimum, achievable within the minimal-screen-count discipline above
+(this does not reopen scope, it's a quality bar on the six screens already
+defined):
+- Semantic labels (`Semantics`/`tooltip`) on icon-only controls (attach
+  file, sync-now, search-mode toggle) — none of the six screens should have
+  an icon button with no accessible name.
+- Full keyboard navigation and visible focus indicators — this matters more
+  than usual since the app is desktop-only (macOS/Linux/Windows, per Q3),
+  where keyboard-driven use is common, not just an assistive-tech fallback.
+- Sufficient colour contrast for status/priority chips (these are exactly
+  the kind of small, colour-coded UI element that's easy to make
+  inaccessible) — check against the Bettongia palette via the `bettongia:design`
+  skill if that skill is used for styling, rather than picking colours ad hoc.
+- Screen-reader-reachable error states (`badCredentials`, schema-rejection
+  messages) — errors must be announced, not just shown visually.
+
 **Package file layout** (`packages/kmdb_example_todo/`, non-workspace,
 mirrors `packages/kmdb_icloud/example/`'s pattern of `publish_to: none` +
 path dep on `kmdb` + a `dependency_overrides` block mirrored from root —
@@ -326,7 +345,18 @@ temp dirs where native file behaviour matters, i.e. vault and sync):
       Project list, Task list, Task detail/edit, Search, Sync/Settings),
       using `KmdbCollection.watch()`/`watchKey` for reactivity — no
       third-party state-management dependency. Mark `lib/src/ui/**` and
-      `main.dart` with `// coverage:ignore-file`.
+      `main.dart` with `// coverage:ignore-file`. Apply the accessibility
+      requirements above (semantic labels, keyboard nav/focus, colour
+      contrast, screen-reader-reachable errors) as each screen is built,
+      rather than retrofitting at the end.
+- [ ] Review the six screens with the **`bettongia:inclusivity` skill**
+      before handing off to `kmdb-qa` — it exists specifically to check
+      Flutter UIs against Bettongia's accessibility/i18n standards. Scope
+      this pass to accessibility (per the user's request); flag but don't
+      block on i18n findings, since the guide/app content is deliberately
+      English-only for v1 (matching `kmdb`'s own English-only text search,
+      §20) — note any such findings as a "going further" callout in the
+      guide rather than fixing them in this plan.
 - [ ] Write the enumerated data-layer tests (CRUD, schema admission, index,
       vault round-trip, sync convergence via two `LocalDirectoryAdapter`
       instances, encryption bootstrap incl. wrong-passphrase and recovery-code
@@ -362,8 +392,10 @@ temp dirs where native file behaviour matters, i.e. vault and sync):
       `repositories/`, `codecs/`, and `db/schemas.dart` meet the project's
       coverage bar (UI is excluded via `coverage:ignore-file`, not measured).
 - [ ] Hand off to the **`kmdb-qa` agent** for sign-off (spec alignment, doc
-      comments, test coverage/adequacy, code health). Resolve every blocking
-      item before proceeding. Do not open a PR until sign-off is received.
+      comments, test coverage/adequacy, code health, and that the
+      `bettongia:inclusivity` accessibility pass above was actually done, not
+      just planned). Resolve every blocking item before proceeding. Do not
+      open a PR until sign-off is received.
 - [ ] Run `make pre_commit` — format, analyze, license_check, tests all green
       (note: this package is non-workspace, so confirm its own analyze/format
       run separately, per CLAUDE.md's note that `make pre_commit`'s test step
