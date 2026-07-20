@@ -22,8 +22,9 @@ should block a `0.1.0` tag.
 
 ## 0. Executive summary
 
-**Recommendation: do not tag `0.1.0` yet.** Six critical findings, five of them
-sharing a single root cause.
+**Recommendation: do not tag `0.1.0` yet.** Seven critical findings — five
+sharing a single root cause (the sync trust boundary), one independent
+correctness defect found by the spec audit (**SC-10**).
 
 KMDB is a well-built system. The analyzer is clean across all nine packages,
 2,373 core tests pass, the CLI works correctly end-to-end with accurate exit
@@ -43,7 +44,7 @@ documents — a provider who **reads** your data — and it is indefensible unde
 the model specified for this release, in which the provider and peer devices can
 also **write**.
 
-That single assumption produces five of the six criticals:
+That single assumption produces five of the seven criticals:
 
 - **S-1** — crafted SSTable fields crash `pull()` permanently (confirmed,
   reproduced end-to-end)
@@ -57,6 +58,13 @@ That single assumption produces five of the six criticals:
 
 and **E-1** is the assumption itself: the spec's threat model is passive-only
 and never claims the synced data is authentic.
+
+The seventh, **SC-10**, is unrelated and was found by the spec audit rather than
+the security pass: secondary-index state replicates through `$meta` because the
+sync exclusion §16 relies on was never implemented, causing a second device to
+return **zero rows** for indexed queries whose documents are present. Reproduced
+end-to-end. It is a code fix, not a spec fix, and it changes a `$meta` key
+layout — so it should be sequenced *before* the `0.1.0` format freeze, not after.
 
 The reason the test suite could not catch any of this is structural, and it is
 the same reason the 2026-05-22 review gave: **every parser test feeds the parser
@@ -89,11 +97,12 @@ of what KMDB currently builds against.
 
 > **Coverage caveat:** the security workstreams (W2, W3), concurrency/durability
 > (W4), and the CLI smoke test are complete. **Spec conformance (W1) is
-> partially executed** (2026-07-20): tiers 1–3 audited to depth, tiers 4–6
-> surveyed only — roughly 40% of the spec surface. See §9 and §11.
+> substantially complete** after two passes (2026-07-20) — roughly 65% of the
+> spec surface. **§13, the public query API, is the material gap.** See §9 and
+> §11.1.
 
-> **W1 addendum (2026-07-20).** Eight conformance findings (SC-1…SC-8), three
-> of them 🟠 High. The one that matters most is **SC-1**: §31 documents a
+> **W1 addendum, pass 1 (2026-07-20).** Eight conformance findings (SC-1…SC-8),
+> three of them 🟠 High. The one that matters most is **SC-1**: §31 documents a
 > verification of the cached DEK against `enc:blob` that **does not exist**, so
 > a wrong passphrase opens an encrypted database whenever a `DekCache` is warm
 > — reproduced. The other two Highs are documentation defects with real
@@ -103,6 +112,34 @@ of what KMDB currently builds against.
 > is not implemented anywhere). Encouragingly, **PR #61's own spec edits are
 > accurate** (SC-9) — the drift is concentrated in sections nobody has had
 > reason to re-read.
+
+> **W1 addendum, pass 2 — WI-1 (2026-07-20).** Five further findings
+> (SC-10…SC-14), and the assumption behind the first addendum turned out to be
+> wrong in an important way. Pass 1 concluded the drift was confined to
+> documentation. **SC-10 is a reproduced correctness defect.**
+>
+> §16 states that secondary-index state never leaves the device, justified by a
+> sync filter excluding all `$`-prefixed namespaces. That filter has **never
+> existed** at any commit; only `$$`-prefixed namespaces are local-only, and §12
+> correctly documents `$meta` — which holds index state — as uploaded. The
+> consequence, reproduced end-to-end: a second device that pulls a peer's
+> `$meta` inherits `status: current` for an index it has never built, runs an
+> index scan against its own empty index namespaces, and **returns zero rows for
+> documents that are present and match**. Silently, with `QueryPlan` reporting
+> `indexScan`. A second device is exactly the read-mostly profile worst affected.
+>
+> The history explains how it survived and is the transferable lesson: WI-0 built
+> the real `$$`/`.local.sst` mechanism and rewrote the *adjacent* bullet in that
+> paragraph while leaving this one standing on the rationale it had just
+> invalidated. The section reads as freshly maintained because, in part, it is.
+> **When an implementation changes a mechanism, every claim citing the old
+> mechanism is in the blast radius — not just the claims about what changed.**
+>
+> The remaining four are documentation defects: **SC-11** (§32's `searchVault`
+> API reference documents an API that was never built — the section predates its
+> implementation), **SC-12** (§25 under-documents the schema validator by 13
+> *enforced* keywords), **SC-13** (§11 repeats SC-3's unimplemented `$cache` and
+> config fields as fact) and **SC-14** (minor drift across four sections).
 
 ---
 
@@ -640,6 +677,11 @@ position rather than being justified by it.
 | SC-7 | 🟢 Low | W1 | §05 presents vault blobs as size-bounded by `VaultSearchConfig.maxBlobBytes`; that bound is search-extraction-only and is applied *after* the blob is fully in memory | No |
 | SC-8 | 🟢 Low | W1 | Minor spec/code drift: the encrypted branch of `kMaxDecodedValueBytes` is untested; §31 and `kmdb_database.dart` both say "4-state matrix" over a 5-state table | No |
 | SC-9 | 🟢 Pass | W1 | PR #61's §05/§08/§12/§18/§24 spec edits were traced claim-by-claim to code and tests — **accurate**, including the S-1/S-6/S-7/D-1 hardening and the quarantine semantics; see notes | — |
+| SC-10 | 🔴 Critical | W1 | §16 claims index state "never leaves the device", justified by a `$`-prefix sync filter **that does not exist**. Index state lives in `$meta`, which §12 correctly documents as *uploaded*. A device that pulls a peer's `$meta` inherits `status: current` for an index it has never built and runs an index scan against its own empty `$$index:*` namespaces — **returning zero rows for present, matching documents** (**confirmed, reproduced end-to-end**) | **Yes** |
+| SC-11 | 🟠 High | W1 | §32's API-reference section documents a `searchVault` API that was never built: wrong return type, wrong default `SearchMode`, a `VaultChunk` whose four field names are **all** wrong, a `VaultChunkContext` shape that does not match, and a `StateError` the code does not throw. Written pre-implementation and never re-derived | **Yes** |
+| SC-12 | 🟡 Medium | W1 | §25's *Supported Keywords* table under-documents the validator by **13 keywords that are enforced** (`multipleOf`, `uniqueItems`, `const`, `exclusive*`, `min/maxProperties`, `prefixItems`, …). §25's "unknown keywords are silently ignored" is false for all of them, and §25 never names `betto_schema` as the owner of the list | No |
+| SC-13 | 🟡 Medium | W1 | §11's *System Namespaces* table states §16's explicitly-unimplemented compound-key index layout as fact, and lists `$cache:` plus `KvStoreConfig.sessionCacheMaxObjects`/`cacheTier` as real — **additional sites of SC-3**, which WI-2 must fix in §11 as well as §15 | No |
+| SC-14 | 🟢 Low | W1 | Minor drift across §16/§26/§11/§30: §16 says `$index` (single-`$`) in its opening paragraph; §26 says `extends ReclamationPolicy` where the code `implements` it; §11's `KvStoreConfig` block omits two real fields and overstates `tableCacheSize` platform variance; §30 says the adapter surfaces a `KmdbException`, a type that exists nowhere in the workspace | No |
 
 ---
 
@@ -2074,6 +2116,297 @@ reference tables.
 
 ---
 
+### SC-10 — §16's index-sync exclusion does not exist, and the consequence is silent wrong query results 🔴 (CONFIRMED, REPRODUCED)
+
+This is the most consequential W1 finding. It began as a spec contradiction and
+ended as a reproduced correctness defect.
+
+**The spec claim.** §16 *Indexes and Sync* opens:
+
+> Index state and index entries are **device-local** and are **never synced**:
+>
+> - `$meta` (where index status is stored as `index:{namespace}:{path}`) is a
+>   system namespace prefixed with `$`. The sync engine filters out all
+>   `$`-prefixed namespaces during SSTable upload, so index state never leaves
+>   the device.
+
+**No such filter exists.** The only namespace-derived sync exclusion is the
+`$$` (double-dollar) local-only rule, applied at file granularity via
+`.local.sst`. `isLocalOnly`
+([namespace_codec.dart:148](packages/kmdb/lib/src/engine/util/namespace_codec.dart#L148))
+is `namespace.startsWith(r'$$')`, and its own doc comment states the case
+outright:
+
+```dart
+/// isLocalOnly(r'$$fts:articles:body:68656c6c6f'); // true
+/// isLocalOnly(r'$meta');                            // false
+```
+
+**§12 says the opposite of §16**, and §12 is the correct one
+([12_sync.md:455](docs/spec/12_sync.md)):
+
+> Syncable system namespaces that **are** uploaded: `$meta`, `$ver:*`
+> (document versions), and `$vault` (vault references).
+
+So §16's second bullet (index *entries* in `$$index:*` are local-only) is true,
+and its first bullet (index *state* in `$meta` never leaves the device) is
+false. The rationale given for both is a rule that was never implemented.
+
+**Why this is not merely a documentation defect.** `$meta` symbolic names are
+hashed to physical keys by `MetaStore._nameToKey`
+([meta_store.dart:597](packages/kmdb/lib/src/engine/kvstore/meta_store.dart#L597)),
+a pure XXH64 of the name — **device-independent**. `index:contacts:city` and
+`gen:contacts` therefore occupy the same physical key on every device and
+LWW-resolve against each other across a sync. Meanwhile `getOrActivate`
+([index_manager.dart:378–388](packages/kmdb/lib/src/query/index/index_manager.dart#L378))
+validates a `current` index solely by comparing `state.builtThrough` against
+`gen:{namespace}` — both of which are synced values that travel together in the
+same SSTable, written at the same HLC, and so win or lose LWW together.
+
+The result is that a device can inherit a *foreign* proof-of-freshness for an
+index whose entries it does not have.
+
+**Reproduction.** Two throwaway probes, run against `main`:
+
+1. **Mechanism.** Device A writes `index:contacts:city` = `{status: current,
+   builtThrough: 1}` via `MetaStore.putRawByName` and bumps `gen:contacts`;
+   flush; `push()`. Device B (`KvStoreImpl`, fresh) `pull()`s. Result:
+
+   ```
+   PROBE B before pull: null
+   PROBE B after pull: {"namespace":"contacts","path":"city","status":"current","builtThrough":1}
+   PROBE B gen:contacts after pull = 1
+   ```
+
+   B now holds a `current` index state with a matching generation, for an index
+   it has never built.
+
+2. **End-to-end, through the query layer.** Device A opens with
+   `indexes: [IndexDefinition('people','city')]`, inserts three `city: 'Perth'`
+   documents, drives the index to `current`, and pushes. Device B opens with the
+   **same index declared** (the ordinary case — same app, two devices), pulls,
+   and runs the same equality query:
+
+   ```
+   PROBE A final: ScanStrategy.indexScan, 3 rows
+   PROBE B:       ScanStrategy.indexScan, 0 rows   (expected 3)
+   PROBE B unfiltered scan: 3 docs
+   ```
+
+   The documents are demonstrably on B. The unfiltered scan finds all three. The
+   indexed query finds none, and reports `indexScan` — it consulted B's
+   `$$index:people:city:*` namespaces, which are empty because local-only
+   namespaces are (correctly) never synced.
+
+**Failure characteristics.** Silent — no exception, no warning, no
+`stale` transition; `QueryPlan` affirmatively reports `indexScan`. Wrong in the
+direction that hides data rather than inventing it, which is the harder
+direction to notice. It affects the primary read API on any collection with a
+declared secondary index in any multi-device configuration, and it persists
+until something else advances `gen:{namespace}` on B (a local write to that
+namespace), at which point the index correctly flips to `stale` and rebuilds.
+That self-healing property is why this can go unnoticed on a device that writes
+often, and why a read-mostly device — the exact profile of a second device — is
+worst affected.
+
+**Severity note.** Recorded 🔴 Critical. The taxonomy in §5 reserves Critical for
+"data loss, data corruption, or a break in a stated security guarantee", and no
+bytes are lost or corrupted here. I am promoting it on the grounds that a
+silently wrong query result on the primary read path, with no workaround short
+of not declaring indexes, is at least as damaging to a user as corruption they
+can detect. If the maintainer disagrees, 🟠 High is defensible — but it should
+block `0.1.0` either way, because the fix may be a format or API decision and
+`0.1.0` freezes both.
+
+**Fix — code, not spec.** §16's *intent* is right and the code is wrong. Options,
+in rough order of preference:
+
+1. **Device-scope the index state key** — store index status under
+   `index:{deviceId}:{namespace}:{path}`, so a peer's state is invisible rather
+   than authoritative. Smallest change, no format break for user data, but it
+   does change a `$meta` key layout.
+2. **Move index state to a `$$`-prefixed namespace** so it rides `.local.sst`
+   with the entries it describes. Conceptually the cleanest — state and entries
+   should share a sync fate — and it makes §16's claim true as written.
+3. **Validate at use** — on `current`, cheaply confirm the index namespace is
+   non-empty before trusting it. A band-aid; it fixes the observed symptom and
+   not the class.
+
+Option 2 is the one that makes the spec and the code agree on a single rule
+(`$$` means local-only, and everything local-only lives together), which is why
+I would default to it.
+
+**Also needed:** the reproduction above should become a real regression test.
+There is currently no test asserting anything about `$meta` cross-device
+behaviour, which is why this survived. Note the connection to **D-3** — "no sync
+test uses fault injection"; this is the same blind spot in a different guise,
+and to SC-5, which is another instance of `$meta` holding something that should
+not cross devices (device identity).
+
+**How it survived — the history is the interesting part.** §16's *Indexes and
+Sync* section was written in `5f37dce` with two bullets resting on one shared
+rationale:
+
+> - `$meta` … The sync engine filters out all `$`-prefixed namespaces during
+>   SSTable upload, so index state never leaves the device.
+> - `$index:*` namespaces … are also `$`-prefixed and are therefore excluded
+>   from sync by the same rule.
+
+`git log -S` finds **no `$`-prefix filter in `sync_engine.dart` at any commit**.
+The rule was never implemented; both bullets were false from the day they were
+written.
+
+WI-0 (`aa6fb44`) then built the real mechanism — `$$` prefix, `.local.sst`,
+file-level exclusion — and **rewrote only the second bullet**, leaving the first
+one and its obsolete `$`-prefix rationale in place. The section now reads as
+freshly maintained: it cites `.local.sst`, references §8/§6/§12, and uses
+current terminology. One bullet above that, it asserts a mechanism that has
+never existed.
+
+This is a third drift pattern, distinct from the two §11.1 already names, and
+worse than either because it defeats the usual heuristics. It is not stale
+prose (the section was recently edited), not a duplicated definition (there is
+only one), and not design-intent-in-present-tense (the intent was real; the
+implementation diverged). It is a **partial update**: an implementation pass
+corrected the claim it was touching and left the adjacent claim standing on the
+rationale it had just invalidated.
+
+The detection rule that would have caught it: **when an implementation changes a
+mechanism, re-read every claim that cited the old mechanism, not just the claims
+about the thing you changed.** WI-0 changed what "local-only" means; every
+sentence containing "`$`-prefixed" was in its blast radius, and only some were
+updated. A grep for the superseded term across `docs/spec/` at the end of WI-0
+would have found this in seconds — and is worth running now for the other terms
+WI-0 and PR #61 superseded.
+
+---
+
+### SC-11 — §32's `searchVault` API reference documents an API that was never built 🟠
+
+§32's *API reference* section describes a `searchVault` surface that does not
+match the shipped one on any of five axes. This is SC-3's failure mode — design
+intent recorded in the present tense — but caught in a section whose git history
+makes the cause unusually legible: §32 was created by `ed7ff71` *"Vault search
+planning"*, **before** WI-3 (`6a37b5d`) implemented it. The prose was a plan; it
+was never re-derived from the result.
+
+| §32 claim | Actual |
+| :--- | :--- |
+| `Future<List<VaultSearchResult<T>>> searchVault(…)` | `Future<VaultSearchResult<T>>` — singular ([kmdb_collection.dart:707](packages/kmdb/lib/src/query/kmdb_collection.dart#L707)) |
+| `SearchMode mode = SearchMode.lexical` | `SearchMode.auto` |
+| Result carries `document` + `hits` | `VaultSearchResult` carries `metadata` + `hits` |
+| Hit carries `sha256`, `fieldPath`, `chunkIndex`, `context` | `VaultSearchHit` carries `rank`, `score`, `fieldScores`, `id`, `document`, `chunkContext` |
+| `VaultChunkContext` has `snippet`, `wordOffset`, `charOffset`, `score` | has `ref`, `chunkIndex`, `totalChunks`, `snippet`, `fieldPath` — no offsets, no score |
+| `VaultChunk` carries `text`, `wordOffset`, `charOffset`, `tokenIds` | carries `index`, `byteStart`, `byteEnd`, `wordCount` — **zero of four names match** |
+| Missing embedding model → `SearchMode.semantic`/`hybrid` "raise a `StateError`" | Degrades to lexical, recording `vault:semantic` in `SearchMetadata.skipped` ([vault_searcher.dart:201](packages/kmdb/lib/src/vault/search/vault_searcher.dart#L201)) |
+
+The last row is the one with teeth: it is a **behavioural** claim, not a naming
+one. A caller who follows §32 and writes `on StateError` to detect an
+unconfigured model will catch nothing and silently receive lexical results while
+believing they are semantic. The `wordOffset`/`charOffset` rows are also the two
+symbols the mechanical sweep flagged as having no match anywhere — the sweep was
+pointing at a section-wide problem, not two stray identifiers.
+
+Worth noting that §32's *non*-API prose is in good shape: chunking parameters,
+the WI-6 tokenizer routing narrative, the extractor table, and
+`VaultIndexingStatus` (all seven counters plus `isComplete`/`isSearchComplete`)
+all match the code exactly. The rot is confined to the block that was written
+speculatively.
+
+**Fix:** regenerate the API-reference block from the actual types. Given the
+cause, it is worth checking whether any other spec section was authored as
+planning material ahead of its implementation — that is a git-history question
+(`git log --diff-filter=A`) and a cheap one.
+
+---
+
+### SC-12 — §25's keyword table under-documents the validator by 13 enforced keywords 🟡
+
+§25 lists 14 supported JSON Schema keywords and closes with:
+
+> Unknown keywords are silently ignored. This allows schemas written by a newer
+> KMDB version to be partially interpreted by an older one.
+
+Validation is delegated to `betto_schema`, which parses **27** keywords
+([schema_parser.dart](/Users/gonk/development/bettongia/schema/lib/src/schema_parser.dart)).
+The 13 that §25 omits are all *enforced*, not ignored:
+
+`const`, `contains`, `dependentRequired`, `exclusiveMaximum`,
+`exclusiveMinimum`, `maxContains`, `maxProperties`, `minContains`,
+`minProperties`, `multipleOf`, `patternProperties`, `prefixItems`,
+`uniqueItems`
+
+So the closing sentence is false for exactly the keywords a reader is most
+likely to reach for. The concrete failure: an author adds `multipleOf` believing
+§25's statement that it is inert, and writes start being rejected with
+`SchemaValidationException`. The same applies to `format` — §25 lists six values,
+`betto_schema` registers roughly twenty (`urn`, `duration`, `hostname`,
+`idn-hostname`, `json-pointer`, `doi`, `isbn`, …).
+
+The structural cause is the SC-2 pattern crossing a package boundary: §25
+reproduces a capability list owned by `betto_schema`, never names
+`betto_schema` as its owner, and `betto_schema` is pinned by caret
+(`^0.1.0-dev.2`) so the list can drift further on a patch bump with no signal
+here. Unknown-format handling (`FormatRule` returns no violations when the name
+is unregistered) *is* conformant.
+
+**Fix:** replace §25's table with a pointer to `betto_schema`'s documentation
+plus a short statement of the KMDB-specific parts (the envelope, the registry
+key, the sync bypass, model versioning — all of which traced clean). If the
+table is kept, it must say which package owns it and at which version.
+
+---
+
+### SC-13 — §11's system-namespace and config tables repeat unimplemented designs 🟡
+
+§11 is short and mostly accurate, but its two reference tables carry three
+claims that do not hold. All three are *additional sites of defects already
+recorded*, which is the point worth making: SC-3 was written up against §15
+alone, and fixing §15 would have left these behind.
+
+- **The compound-key index layout, stated as fact.** §11:177 says `$$index:`
+  keys "encode the indexed value + document key". That is precisely the layout
+  §16 flags in a prominent note as "the target design … **not yet implemented**",
+  pending variable-length user keys. §16 has the caveat; §11 does not. Two
+  sections, one design, one of them stale — the SC-2 shape.
+- **`$cache:{ns}:{query}` listed as a live system namespace** (§11:178), with
+  prose about generation counters "at compute time". This is SC-3's
+  unimplemented materialised view cache, presented in §11 as though it exists.
+- **`KvStoreConfig.sessionCacheMaxObjects` and `cacheTier`** (§11:212–213).
+  Neither field exists; the real constructor
+  ([kv_store.dart:505–519](packages/kmdb/lib/src/engine/kvstore/kv_store.dart#L505))
+  has neither. SC-3 already recorded `sessionCacheMaxObjects` as absent — §11 is
+  the second place declaring it.
+
+**Fix:** fold into WI-2's SC-3 work rather than treating as separate. See the
+consolidated site list in §10, Group G.
+
+---
+
+### SC-14 — Minor drift 🟢
+
+Individually cosmetic; recorded so a corrections pass catches them in one sweep.
+
+- **§16:7** — "reserved `$index` system namespaces", single `$`. Everywhere else
+  in §16 (and WI-0) it is `$$index:`. Residual pre-WI-0 wording.
+- **§26** — "`VersionRetentionPolicy` extends `ReclamationPolicy`"; the code
+  `implements` it
+  ([version_retention_policy.dart:59](packages/kmdb/lib/src/versioning/version_retention_policy.dart#L59)).
+  The retention semantics §26 describes (`collapseVersions = false`,
+  `dropTombstone` false, the `filterGroup` rank/age rule) all traced clean.
+- **§11's `KvStoreConfig` block** omits two real fields
+  (`tombstoneGraceDuration`, `staleDeviceEvictionAfter`) and annotates
+  `tableCacheSize` as "256 desktop, 64 mobile/web" where the constructor default
+  is a flat `256` with no platform branch.
+- **§30:166** — "the Dart adapter surfaces it as a `KmdbException`". No such
+  type exists anywhere in the workspace; the only adapter-specific exception is
+  `ICloudRateLimitException`, and `quotaExceeded` has no Dart-side mapping at
+  all — an unmapped `PlatformException` passes through. A caller following §30
+  catches nothing. (This was the one symbol from the mechanical sweep that was
+  neither an external API nor a test-support class.)
+
+---
+
 ## 7. Scoping decisions and remaining questions
 
 ### 7.1 Resolved — 2026-07-18
@@ -2167,7 +2500,7 @@ and treating this document as complete coverage would be a mistake.
 | **W3** FFI safety | ✅ **Complete** | `betto_zstd` + `betto_icu` internals; PDFium boundary via S-8 |
 | **W5** CLI | 🟡 **Partial** | Core lifecycle exercised end-to-end; **not** swept: `sync`, `vault`, `search`, `index`, `schema`, `encryption`, `import`/`export`/`restore`, `promote`/`versions`, REPL, `--read` scripts |
 | **W6** code health | 🟡 **Partial** | Analyzer clean (all 9 packages); dependency gate analysed (O-1). **Not** done: coverage run, benchmark verification vs §18, public API surface, dead code, doc-comment audit, CHANGELOGs |
-| **W1** spec conformance | 🟡 **Partial** (2026-07-20) | Tiers 1–3 audited to depth on their highest-consequence claims; tiers 4–6 **surveyed, not audited**. Found SC-1…SC-8, and confirmed PR #61's spec edits (SC-9). See §11 for the conformance matrix and an explicit statement of what was *not* covered |
+| **W1** spec conformance | 🟡 **Substantially complete** (2026-07-20, two passes) | Pass 1: tiers 1–3 (SC-1…SC-9). Pass 2 (WI-1): §10, §11, §16, §25, §26, §30, §32 audited or targeted, mechanical symbol sweep triaged — found **SC-10** (🔴, reproduced), SC-11…SC-14. **§13 (584 lines) remains the largest unaudited section**, along with §20–23, §29, §33, §19 and the bulk of §12/§24. ~65% of spec surface scrutinised. See §11.1 for the per-section depth table |
 | **W4** concurrency + durability | ✅ **Complete** (2026-07-19) | 0.02.01 regression check (D-2), fault-injection coverage (D-3), and O-4 all done. Found **D-1** |
 
 ### Specific questions left open
@@ -2229,14 +2562,22 @@ and treating this document as complete coverage would be a mistake.
    table is itself a set of normative claims with no CI enforcement, so W1
    cannot verify it either — it is `untested` by construction until the
    benchmark is wired into a gate.
-6. ~~**W1 spec conformance remains entirely outstanding.**~~ **Partially
-   executed 2026-07-20** — tiers 1–3 to depth, tiers 4–6 surveyed only. §11
-   records the matrix and, explicitly, the ~60% of spec surface still
-   unaudited. The remaining question is now narrower but real: **§12 (2,000+
-   lines), §24 (900+), §22, §26, and §13 have had only spot checks**, and
-   three of the eight findings came from sections that had never been
-   re-read since they were written — which is weak evidence that the
-   unaudited remainder is clean.
+6. ~~**W1 spec conformance remains entirely outstanding.**~~ **Two passes
+   complete, 2026-07-20.** Pass 2 (WI-1) took §10, §11, §16, §25, §26, §30 and
+   §32 to depth and found five further findings including **SC-10**, the only
+   reproduced *correctness* defect W1 has produced — silent zero-row query
+   results on any second device with a declared secondary index.
+
+   The prediction recorded here after pass 1 — that the unaudited remainder
+   would hold drift at a similar rate — was **correct and understated**. Pass 1
+   found eight findings, none of which changed runtime behaviour. Pass 2 found
+   a 🔴 in the first section it audited to depth.
+
+   **What is still genuinely unaudited: §13 (584 lines)**, §20–23, §29, §33,
+   §19, and the bulk of §12 and §24. §13 is the public query API — the surface
+   most users read and the one `0.1.0` freezes hardest — and it is now the
+   single largest untraced section in the spec. It should not be left to a
+   post-release pass.
 7. **SC-1 needs a product decision, not just a fix.** Whether a `DekCache` hit
    is *intended* to bypass passphrase verification determines whether the fix
    is code or spec. Do not let this be resolved by editing §31.
@@ -2308,14 +2649,32 @@ independently shippable.
 ### Group F — Complete the review
 
 ~~**W1** spec conformance and~~ **W4** concurrency/durability (§9). W4 is
-complete; W1 is **partially** complete as of 2026-07-20 — see §11 for what
-remains.
+complete; W1 is **substantially** complete as of 2026-07-20 after two passes —
+see §11.1. The material remainder is **§13**, the public query API.
+
+### Group H — SC-10, the index-state sync defect *(new, blocks 0.1.0)*
+
+**SC-10 is a code fix and does not belong in Group G.** It is the only W1
+finding that changes runtime behaviour, and the only one reproduced end-to-end.
+
+- Decide the mechanism (§16 SC-10 lists three options; moving index state to a
+  `$$` namespace is the one that makes spec and code agree on a single rule).
+- Note this is a **`$meta` key-layout change** either way, so it interacts with
+  the `0.1.0` format freeze and should be sequenced before it — not after.
+- Add the two-device regression test the finding describes. There is currently
+  no test asserting anything about `$meta` cross-device behaviour.
+- **While in there:** audit what *else* lives in `$meta` and would misbehave if
+  a peer's copy won LWW. Device identity (SC-5) is the known second case; the
+  full list of symbolic names in `MetaStore` should be checked one by one. This
+  is the actual scope of the problem — SC-10 is one symptom of an unexamined
+  design question about which `$meta` entries are device-local facts and which
+  are replicated state.
 
 ### Group G — Spec corrections (W1)
 
-**SC-1 … SC-8.** Per the review's standing instruction, W1 did **not** edit
-`docs/spec/`; the corrections are proposed here and should be sequenced
-deliberately. Two of them are not documentation tasks:
+**SC-1 … SC-9, SC-11 … SC-14.** Per the review's standing instruction, W1 did
+**not** edit `docs/spec/`; the corrections are proposed here and should be
+sequenced deliberately. Two are not documentation tasks:
 
 - **SC-1** is a code-or-spec decision about whether a `DekCache` hit bypasses
   passphrase verification. **Sequence this first** — it is the only W1 finding
@@ -2324,10 +2683,36 @@ deliberately. Two of them are not documentation tasks:
 - **SC-3** is a scope decision about whether `$cache` ships in `0.1.0`. If it
   does not, §15 and `CLAUDE.md` both need rewriting, not patching.
 
-The rest (SC-2, SC-4, SC-5, SC-6, SC-7, SC-8) are spec edits with no code
-change, and can land as one pass. SC-2 should be fixed by making §24 the single
-authority for the vault blob layout and having §31 reference it — the
-duplication is what caused the drift.
+**SC-3's full site list** (WI-2 already owns SC-3; these are the sites, not a new
+finding). The materialised view cache and its config field are asserted in
+**three** places, and fixing §15 alone leaves two behind:
+
+| Site | Claim |
+| :--- | :--- |
+| §15 tier table | `$cache` materialised view cache, marked *Required* on mobile/web |
+| §15 | `KvStoreConfig.sessionCacheMaxObjects` configures session cache size |
+| **§11:178** | `$cache:{ns}:{query}` listed as a live system namespace |
+| **§11:212–213** | `sessionCacheMaxObjects` and `cacheTier` listed as `KvStoreConfig` fields |
+| `CLAUDE.md` | Cache Layer section describes the materialised view cache in the present tense |
+
+**SC-2's full site list** (WI-2 already owns SC-2): §31's *Vault Encryption* and
+§24. Fix by making §24 the single authority for the vault blob layout and having
+§31 reference it — the duplication is what caused the drift.
+
+The remaining spec-only edits (SC-4, SC-5, SC-6, SC-7, SC-8, SC-11, SC-12,
+SC-13, SC-14) can land as one pass. Two are larger than a patch:
+
+- **SC-11** needs §32's API-reference block regenerated from the actual types,
+  not edited. Seven distinct claims are wrong, including a behavioural one.
+- **SC-12** should replace §25's keyword table with a pointer to `betto_schema`
+  rather than re-synchronising a list that will drift again on the next caret
+  bump.
+
+**One cheap mechanical task worth adding to this group**, motivated by SC-10's
+history: grep `docs/spec/` for every term that WI-0 and PR #61 superseded
+(starting with `$`-prefixed used as a sync-exclusion rule) and check each
+surviving use. SC-10 existed because an implementation pass updated the claims
+it was touching and not the adjacent ones resting on the same rationale.
 
 ---
 
@@ -2340,36 +2725,68 @@ and to a test that would fail if it were violated.
 
 ### 11.1 Depth actually achieved — read this first
 
-This is a **partial audit reported as partial**. The spec is 10,728 lines; a
-complete claim-by-claim trace is a multi-pass effort and this was one pass.
+Two passes: tiers 1–3 on 2026-07-20, tiers 4–6 in a follow-up the same day
+(WI-1). The follow-up was informed by a mechanical symbol sweep — 489
+backtick-quoted identifiers extracted from the untraced sections, 315 filtered to
+plausible Dart symbols, grepped against `packages/*/lib` and `packages/*/bin`,
+24 unmatched — plus a claim-level trace of the sections listed below.
 
 | Tier | Sections | Depth |
 | :-- | :--- | :--- |
 | 1 | §31 encryption | 🔵 **Audited** — full read, all normative claims traced |
-| 1 | §24 vault, §12 sync | 🟡 **Targeted** — encryption/integrity/lease/namespace-exclusion claims traced; the bulk (sync state machine, consolidation recovery, GC) spot-checked only |
+| 1 | §24 vault, §12 sync | 🟡 **Targeted** — encryption/integrity/lease/namespace-exclusion claims traced (pass 1); §12's system-namespace upload rule re-traced in pass 2 and used to confirm SC-10. The bulk (sync state machine, consolidation recovery, GC) remains spot-checked only |
 | 2 | §05 value encoding, §08 SSTable, §07 WAL | 🔵 **Audited** |
-| 2 | §10 manifest | ⚪ **Surveyed** — not traced |
+| 2 | §10 manifest | 🟡 **Targeted** — record framing, checksum scope, and the 1 MB rotation threshold traced (all conformant); `VersionEdit` field-level claims not traced |
 | 3 | §18 concurrency, §17 crash recovery | 🟡 **Targeted** — D-1/PR #61 claims traced; §17 otherwise surveyed |
-| 3 | §11 KvStore | ⚪ **Surveyed** |
-| 4 | §13 query, §16 indexes, §25 schemas, §26 versioning | ⚪ **Surveyed** — §14/§15 spot-checked (§15 yielded SC-3) |
-| 5 | §20–23 text search, §32 vault search | ⚪ **Surveyed** — the `English-language only` drift that motivated W1 was already corrected in `CLAUDE.md` and the §20/§01 working tree |
-| 6 | §29/§30 adapters, §33 credential store, §19 platform | ⚪ **Not examined** |
+| 3 | §11 KvStore | 🔵 **Audited** — both reference tables traced field by field (yielded SC-13, part of SC-14) |
+| 4 | §16 indexes, §25 schemas | 🔵 **Audited** — every normative claim traced; yielded **SC-10** (reproduced), SC-12 |
+| 4 | §26 versioning | 🟡 **Targeted** — retention-policy semantics traced; CLI surface and `promote` not traced |
+| 4 | §13 query API | ⚪ **Surveyed** — 584 lines, largest untraced section remaining |
+| 4 | §14/§15 | 🟡 **Spot-checked** (§15 yielded SC-3) |
+| 5 | §32 vault search | 🔵 **Audited** — yielded SC-11 |
+| 5 | §20–23 text search | ⚪ **Surveyed** — §22's symbol set resolved against `betto_inferencing`; no claim-level trace |
+| 6 | §30 iCloud adapter | 🟡 **Targeted** — exception-mapping claims traced (part of SC-14); zone model and ETag/CAS semantics not traced |
+| 6 | §29 Drive adapter, §33 credential store, §19 platform | ⚪ **Surveyed** |
 
-**Roughly 40% of the spec surface received real scrutiny.** Do not read the
-absence of findings in §10, §11, §13, §16, §22, §25, §26, §29, §30, §32 or §33
-as evidence they are conformant — they were not audited. Given that three of
-eight findings (SC-3, SC-5, and half of SC-4) came from reference material
-nobody had re-read since it was written, the unaudited remainder should be
-assumed to hold drift at a similar rate.
+**Roughly 65% of the spec surface has now received real scrutiny**, up from
+~40%. What remains genuinely unaudited: **§13 (584 lines)**, §20–23, §29, §33,
+§19, and the bulk of §12 and §24. Do not read the absence of findings in those
+as evidence of conformance.
 
-**What would make a second pass cheaper.** The findings cluster by *cause*, not
-by section: duplicated byte-layout prose across two specs (SC-2), reference
-tables listing API symbols with no test binding them to reality (SC-4, SC-3's
-`sessionCacheMaxObjects`), and design intent recorded as present-tense fact
-(SC-3, SC-5). A targeted sweep for those three patterns — every API symbol named
-in the spec grepped against the codebase, every byte layout appearing in two
-places — would likely find most of what remains at a fraction of the cost of a
-linear read.
+**On the mechanical sweep.** It was necessary and badly insufficient, which is
+worth recording because it was cheap enough to look sufficient. Of the 24
+unmatched symbols, 21 were false positives (correctly-cited CloudKit and
+native-assets APIs, JSON Schema keywords that are not Dart at all, and
+test-support classes the grep's `lib`/`bin` scope could not see). Two —
+`charOffset`/`wordOffset` — turned out to be the visible edge of SC-11, a
+section-wide problem the sweep could only see two characters of. One,
+`KmdbException`, was a genuine standalone hit (SC-14).
+
+**Every finding of real consequence in this pass was invisible to the sweep.**
+SC-10 is the extreme case: every symbol §16 names exists, spelled correctly. The
+defect is that a *sentence of prose* asserts a filtering rule that was never
+built, and the consequence only appears when you ask what depends on that
+sentence being true. A symbol grep cannot see a missing mechanism; only reading
+the claim and asking "what breaks if this is false" can.
+
+**What actually worked**, in descending order of yield:
+
+1. **Ask what a false claim would cause.** SC-10 came from noticing that §16 and
+   §12 disagreed, then following the disagreement into `getOrActivate` rather
+   than stopping at "two specs contradict". The contradiction was worth 🟡; the
+   consequence was worth 🔴.
+2. **`git log --diff-filter=A` on each spec file.** Sections created *before*
+   their implementation commit are the highest-yield targets, because they are
+   plans that were never re-derived. §32 was created by a commit literally named
+   "Vault search planning" (SC-11); §25 has had exactly one commit ever
+   (SC-12). This is a two-minute check that ranks the whole spec by risk.
+3. **Follow delegated capability across package boundaries.** §25's keyword
+   table describes `betto_schema`, pinned by caret, and had drifted by 13
+   keywords (SC-12). Any spec table describing an external package's behaviour
+   is a standing drift candidate.
+
+**Still cheap and still unexploited:** the byte-layout-in-two-places sweep that
+found SC-2 was not repeated across §10/§08/§24 in this pass.
 
 ### 11.2 Matrix
 
@@ -2433,6 +2850,46 @@ matches, nothing catches a regression) · **D** divergent · **X** unimplemented
 | §15 | Generation counters `gen:{namespace}` incremented per WriteBatch | `meta_store.dart`, `kv_store_impl.dart` | `cache_layer_test.dart` | **C** |
 | §09 | Bloom filter 10 bits/key, ~0.8% FPR | `bloom_filter.dart:26,54` | `bloom_filter_test.dart` | **C** |
 
+Rows below added by the WI-1 pass (2026-07-20).
+
+| Spec | Claim | Code site | Test site | Verdict |
+| :--- | :--- | :--- | :--- | :-- |
+| §16 | Index **state** never leaves the device; sync filters all `$`-prefixed namespaces | no such filter — `isLocalOnly` is `$$`-only; `$meta` syncs | **none** | **D** (SC-10) |
+| §16 | Index **entries** (`$$index:*`) local-only via `.local.sst` | `namespace_codec.dart:148`, `lsm_engine.dart:777` | `local_only_namespace_test.dart` | **C** |
+| §16 | `current` requires `builtThrough == gen:{namespace}` | `index_manager.dart:378–388` | `index_query_test.dart` | **C** (but see SC-10 — both operands sync) |
+| §16 | Compound key `[encodedValue][0x00][documentKey]` — flagged *not implemented* | namespace-per-value `$$index:{ns}:{path}:{token}` | `index_test.dart` | **X** (correctly disclosed in §16; **not** in §11 — SC-13) |
+| §16 | Four lifecycle states in `$meta` as `index:{namespace}:{path}` | `index_manager.dart:297,535,549` | `index_test.dart` | **C** |
+| §16 | Write interception folds index entries + doc + `gen` bump into one `WriteBatch` | `index_manager.dart` `interceptWrite` | `writebatch_atomicity_test.dart` | **C** |
+| §16 | Only AND-root equality predicates are index-eligible | `kmdb_query.dart` `_executeWithPlan` | `index_query_test.dart` | **C** |
+| §16 | Build scans in batches of 200 | `index_manager.dart` `_buildIndex` | `index_test.dart` | **C** |
+| §25 | 14 supported JSON Schema keywords; unknown ones silently ignored | `betto_schema` parses **27**, all enforced | — | **D** (SC-12) |
+| §25 | `format` supports 6 values | `betto_schema` registers ~20 | — | **D** (SC-12) |
+| §25 | Unknown `format` names produce no violations | `schema_rule.dart:353–367` (`FormatRule`) | `betto_schema` tests | **C** |
+| §25 | Persisted at `schema:{collection}`, envelope `{schemaModelVersion, schema}` | `schema_manager.dart:132,149,153` | `schema_manager_test.dart` | **C** |
+| §25 | Registry at `schema:__registry__` | `schema_manager.dart:74` | `schema_manager_test.dart` | **C** |
+| §25 | `kSchemaModelVersion` = 1; higher → `onSchemaVersionMismatch`, validation disabled | `schema_manager.dart:72,220–222` | `schema_manager_test.dart` | **C** |
+| §25 | Sync ingest bypasses validation (`writeBatchInternal`) | `kv_store_impl.dart` | `schema_enforcement_test.dart` | **C** |
+| §11 | `$$index:` keys encode indexed value + document key | unimplemented (see §16) | — | **X** (SC-13) |
+| §11 | `$cache:{ns}:{query}` is a live system namespace | no read or write of `$cache` anywhere | — | **X** (SC-13 / SC-3) |
+| §11 | `KvStoreConfig.sessionCacheMaxObjects`, `.cacheTier` | neither field exists | — | **X** (SC-13 / SC-3) |
+| §11 | `KvStoreConfig` defaults (memtable 64 KB, L0 2, L1 2 MB, L2 20 MB, block 4 KB, bloom 10, maxValue 1 MiB) | `kv_store.dart:505–519` | `kv_store_config_test.dart` | **C** |
+| §11 | `tableCacheSize` "256 desktop, 64 mobile/web" | flat `256`, no platform branch | — | **D** (SC-14) |
+| §32 | `searchVault` returns `Future<List<VaultSearchResult<T>>>`, default mode `lexical` | returns singular; default `SearchMode.auto` | `vault_search_test.dart` | **D** (SC-11) |
+| §32 | `VaultChunk` carries `text`, `wordOffset`, `charOffset`, `tokenIds` | `index`, `byteStart`, `byteEnd`, `wordCount` | `vault_chunker_test.dart` | **D** (SC-11) |
+| §32 | `VaultChunkContext` has `snippet`, `wordOffset`, `charOffset`, `score` | `ref`, `chunkIndex`, `totalChunks`, `snippet`, `fieldPath` | — | **D** (SC-11) |
+| §32 | Missing embedding model → `StateError` on semantic/hybrid | degrades to lexical, `skipped: ['vault:semantic']` | `vault_searcher_test.dart` | **D** (SC-11) |
+| §32 | `VaultIndexingStatus` — 7 counters, `isComplete`, `isSearchComplete` | `vault_indexing_status.dart:47–108` | `vault_indexing_status_test.dart` | **C** |
+| §32 | Chunking defaults `chunkSize` 300, `chunkOverlap` 50 words | `vault_search_config.dart` | `vault_chunker_test.dart` | **C** |
+| §32 | `VaultChunker` uses an injectable `OffsetTokenizer`, `IcuTokenizer` by default (WI-6) | `vault_chunker.dart:98` | `vault_chunker_test.dart` | **C** |
+| §26 | `collapseVersions = false`; `dropTombstone` returns `false` | `version_retention_policy.dart:69,72` | `version_retention_policy_test.dart` | **C** |
+| §26 | `filterGroup` rank/age rule; newest entry always rank 1 | `version_retention_policy.dart:82–110` | `version_retention_policy_test.dart` | **C** |
+| §26 | `VersionRetentionPolicy` **extends** `ReclamationPolicy` | `implements` | — | **D** (SC-14) |
+| §10 | Record `[XXH64 8B][length 4B][CBOR]`; checksum over `[length][CBOR]` | `manifest_writer.dart:94–97` | `manifest_test.dart` | **C** |
+| §10 | Rotation threshold 1 MB | `manifest_writer.dart:26` | `manifest_test.dart` | **C** |
+| §10 | Manifest never written to or read from the sync folder | `sync_engine.dart` push list | `sync_engine_test.dart` | **C** |
+| §30 | `CKError.quotaExceeded` surfaces as a `KmdbException` | no such type; unmapped `PlatformException` | — | **D** (SC-14) |
+| §30 | `CKError.requestRateLimited` → `ICloudRateLimitException` | `icloud_sync_channel_interface.dart:110` | `fake_icloud_sync_channel.dart` | **C** |
+
 ### 11.3 Observations on the `0.09` reconciliation
 
 §4 asked specifically whether the `0.09` pass resolved drift by weakening the
@@ -2449,6 +2906,33 @@ tables were not re-derived from code when the surrounding prose was. A
 reconciliation pass that reads for *narrative* coherence will not catch a wrong
 `info` string or a config field that does not exist — those need mechanical
 checking, which is the SC-4/SC-3 pattern noted in §11.1.
+
+**WI-1 re-check (2026-07-20).** The second pass looked for the same
+weakened-to-match-wrong-code pattern in §10, §11, §13, §16, §22, §25, §26,
+§29, §30, §32 and §33, using `git log -L` on the specific paragraphs behind each
+finding. **Again, no instance of it.** The `0.09` reconciliation's honesty holds
+across the whole spec surface examined so far.
+
+But the pass found something the original framing did not anticipate, and it is
+worth separating clearly, because it produces a *more* trustworthy-looking
+document than either pattern already catalogued:
+
+- **SC-10's paragraph was half-updated by an implementation commit.** WI-0
+  rewrote the bullet describing the thing it changed and left the adjacent
+  bullet asserting the mechanism it had just replaced. The section reads as
+  current because it *is* current — in part. See SC-10's history subsection.
+- **SC-11's section was written before its implementation.** §32 was authored by
+  a commit named "Vault search planning"; the API reference is a design sketch
+  that the implementing commit touched without re-deriving.
+- **SC-12's table describes another package.** §25 reproduces `betto_schema`'s
+  keyword list, names neither the package nor a version, and the dependency is
+  caret-pinned.
+
+None of these are reconciliation failures. All three are *maintenance* failures
+of a kind a narrative read cannot catch, and all three would have been caught by
+mechanical checks that cost minutes: grep the superseded term after a mechanism
+change; diff spec creation date against implementation date; flag every spec
+table that describes an external package.
 
 One structural note. §31 is now 951 lines, much of it a changelog of resolved
 gaps written in the past tense ("previously… **Resolved** by…"). That form is
