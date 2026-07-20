@@ -682,6 +682,12 @@ position rather than being justified by it.
 | SC-12 | 🟡 Medium | W1 | §25's *Supported Keywords* table under-documents the validator by **13 keywords that are enforced** (`multipleOf`, `uniqueItems`, `const`, `exclusive*`, `min/maxProperties`, `prefixItems`, …). §25's "unknown keywords are silently ignored" is false for all of them, and §25 never names `betto_schema` as the owner of the list | No |
 | SC-13 | 🟡 Medium | W1 | §11's *System Namespaces* table states §16's explicitly-unimplemented compound-key index layout as fact, and lists `$cache:` plus `KvStoreConfig.sessionCacheMaxObjects`/`cacheTier` as real — **additional sites of SC-3**, which WI-2 must fix in §11 as well as §15 | No |
 | SC-14 | 🟢 Low | W1 | Minor drift across §16/§26/§11/§30: §16 says `$index` (single-`$`) in its opening paragraph; §26 says `extends ReclamationPolicy` where the code `implements` it; §11's `KvStoreConfig` block omits two real fields and overstates `tableCacheSize` platform variance; §30 says the adapter surfaces a `KmdbException`, a type that exists nowhere in the workspace | No |
+| SC-15 | 🔴 Critical | W1 | §13 states an index lookup merely "narrows the candidate set". It does not: a **case-insensitive** equality predicate is treated as index-eligible and dispatched to an exact-token index lookup, so declaring an index on a field silently changes `equals(x, caseSensitive: false)` from *matching* to **returning zero rows**. `QueryPlan` reports `indexScan` with `documentsScanned: 0` (**confirmed, reproduced**) | **Yes** |
+| SC-16 | 🟠 High | W1 | §13's *Write Methods* block misdescribes `insert()`: declared `Future<void>`, actually `Future<T>`; and `insert` **always** mints a fresh UUIDv7, ignoring `keyOf(value)`, making the documented `DocumentAlreadyExistsException` unreachable. §13's claim that `rawCollection` runs "all write pipeline layers identically" is false for `_id`, which `RawDocumentCodec.encode` strips before the validator sees it — so `rawCollection.insert(previouslyReadDoc)` **silently duplicates** where a typed collection throws (**reproduced**) | **Yes** |
+| SC-17 | 🟡 Medium | W1 | An unbalanced code fence at `13_query_api.md:438` swallows ~70 lines of the section. **"Field Path Syntax" and "Filter DSL" do not exist as headings in the published `site/spec.html`** — the JSONPath subset table, field-path null semantics, deferred-features list and the `stream()`/`orderBy` notes all render as syntax-highlighted Dart. One-character fix; largest documentation-loss finding in the register | No |
+| SC-18 | 🟡 Medium | W1 | §13 claims `orderBy('_id')` "maps directly to `KvStore.scan(descending:)` and avoids an in-memory sort — the only `orderBy` with this optimisation". `KvStore.scan` has **no `descending` parameter**; the executor sorts in memory for every `orderBy`, `_id` included (`plan.sorted == true`, reproduced). The same false claim is repeated in the code's own doc comment. Untested — no test references `orderBy('_id')` | No |
+| SC-19 | 🟡 Medium | W1 | §13's terminal-method annotations misstate execution: `stream()` is annotated "lazy; holds LSM snapshot" and contradicted 40 lines later by its own prose (code is eager); `count()` is annotated "avoids decoding documents" but decodes everything whenever any filter, `orderBy`, `limit` or `offset` is set. `any()`/`first()` fully materialise the namespace before taking one row (**reproduced**) | No |
+| SC-20 | 🟢 Low | W1 | Minor §13 drift: `requireFreshIndex()`/`StaleIndexException` are undocumented despite being the mitigation surface for SC-10; the `caseSensitive` parameter is undocumented on four filter operators; `equals()` against a `List`/`Map` never matches (reference equality); §13 cites `KvStore.writeEvents` where `watch()` subscribes to `CacheLayer.writeEvents`; the `open()` example omits `vaultSearch`, `versionConfigs`, `wasmUrl` | No |
 
 ---
 
@@ -2407,6 +2413,360 @@ Individually cosmetic; recorded so a corrections pass catches them in one sweep.
 
 ---
 
+### SC-15 — A case-insensitive equality filter returns zero rows once an index exists 🔴 (CONFIRMED, REPRODUCED)
+
+**§13 line 507 is the load-bearing claim:**
+
+> All filters are evaluated in memory after the LSM scan (**or after an index
+> lookup narrows the candidate set** — see §16).
+
+"Narrows" is the word that is false. For a case-insensitive equality predicate
+the index lookup does not narrow the candidate set — it **excludes documents
+that match the filter**, and the in-memory pass that §13 promises will catch
+everything never sees them.
+
+**The mechanism, in three hops.**
+
+1. [`field_filter.dart:175`](packages/kmdb/lib/src/query/filter/field_filter.dart#L175)
+   exposes a predicate to the planner without consulting `caseSensitive`:
+
+   ```dart
+   @override
+   (String, Object?)? get equalityPredicate =>
+       _op == _Op.eq ? (_path, _operand) : null;
+   ```
+
+   `Field('city').equals('london', caseSensitive: false)` therefore looks
+   identical to an exact-match predicate from the outside.
+
+2. [`kmdb_query.dart:313`](packages/kmdb/lib/src/query/kmdb_query.dart#L313)
+   accepts it as index-eligible and, at
+   [`:384`](packages/kmdb/lib/src/query/kmdb_query.dart#L384), calls
+   `lookupByValue(def, 'london')`.
+
+3. [`index_reader.dart:47`](packages/kmdb/lib/src/query/index/index_reader.dart#L47)
+   resolves that to the single namespace `$$index:{ns}:city:{token('london')}`
+   and scans it. `'London'` was indexed under a *different* token. The lookup
+   returns `[]`, the candidate set is empty, and the in-memory filter pass at
+   [`:452`](packages/kmdb/lib/src/query/kmdb_query.dart#L452) — which would have
+   matched correctly — is handed nothing to filter.
+
+**Reproduction.** One document, `{'city': 'London'}`; one query,
+`Field('city').equals('london', caseSensitive: false)`. The only difference
+between the two runs is whether `IndexDefinition('people', 'city')` was passed
+to `open()`:
+
+```
+PROBE A / no index declared  -> rows = 1
+PROBE A / index declared     -> rows = 0 strategy=ScanStrategy.indexScan scanned=0 matched=0
+PROBE A / control exact case -> rows = 1 strategy=ScanStrategy.indexScan
+```
+
+The control line matters: the index is healthy, `current`, and returns the right
+answer for an exact-case query. Nothing is broken except the case-insensitive
+path.
+
+**Why this is 🔴 and not 🟠.** It is the SC-10 failure shape exactly — *present,
+matching documents silently return zero rows, and the diagnostic surface agrees
+with the wrong answer*. `QueryPlan` reports `strategy: indexScan` and
+`documentsScanned: 0`, which reads as "the index looked and there was nothing
+there" rather than "the index was asked the wrong question". A developer who
+adds `caseSensitive: false` to a working query, or who adds an index to a
+working collection, gets a silent behaviour change in the opposite direction
+from the one they intended. There is no error, no log, and no test failure.
+
+**It is also the second instance of one root cause**, which is the part worth
+carrying into remediation. SC-10 and SC-15 are both *"the planner trusted a
+predicate it had not established the index could answer."* SC-10's version was
+trusting `status: current` across a device boundary; SC-15's is trusting
+`_Op.eq` across a case-folding boundary. Any future non-exact equality — locale
+folding, numeric coercion widening, accent-insensitive match — walks into the
+same hole unless `equalityPredicate` is changed to mean *"this predicate is
+answerable by an exact-token index"* rather than *"this predicate is an
+equality"*.
+
+**Why no test caught it.** `filter_test.dart:173–196` covers `caseSensitive`
+thoroughly — but only at the `Filter.evaluate()` level, against a literal map.
+`index_query_test.dart` covers index selection thoroughly — but only with
+case-sensitive predicates. **Each half is well tested; the interaction between
+them is untested**, and the defect lives exactly there. This is worth recording
+as a pattern: both files would score as good coverage on any line-based measure.
+
+**Proposed correction — code, not spec.** Make `equalityPredicate` return `null`
+when `caseSensitive == false`, forcing the full-scan path (correct, slower).
+§13's "narrows the candidate set" sentence then becomes true, and §13 should
+additionally document the `caseSensitive` parameter (see SC-20) with an explicit
+note that it forecloses index use. **Do not resolve this by editing §13** — the
+spec's description of intended behaviour is the correct one here; the code is
+wrong.
+
+---
+
+### SC-16 — §13's `insert()` contract is wrong in three ways, one of which silently duplicates documents 🟠
+
+§13's *Write Methods* block (lines 322–343) is the most-copied code in the
+section. Three of its claims about `insert` do not hold.
+
+**1. Wrong return type.** §13 declares:
+
+```dart
+// insert: throws DocumentAlreadyExistsException if key exists.
+Future<void> insert(T value);
+```
+
+The implementation is `Future<T>`
+([kmdb_collection.dart:176](packages/kmdb/lib/src/query/kmdb_collection.dart#L176)),
+returning the document with its assigned key. The project's own tests depend on
+this (`kmdb_collection_test.dart:144`, `:163`). §13 even *describes* the real
+behaviour 165 lines earlier — line 158 says `withKey()` exists "so that
+`insert()` can return the document with its assigned `_id`" — so the section
+contradicts itself, and the signature block is the wrong half. This is SC-11's
+pathology: prose re-derived, reference block not.
+
+**2. The documented exception is unreachable.** §13 says `insert` "throws
+`DocumentAlreadyExistsException` if key exists", which reads as *insert respects
+the key your codec supplies*. It does not — it mints a fresh UUIDv7 first and
+checks *that* for collision:
+
+```dart
+Future<T> insert(T value) async {
+  final key = keyGenerator.next();          // ← always a new key
+  final existing = await _db.cache.get(namespace, key);
+  if (existing != null) {
+    throw DocumentAlreadyExistsException(key, namespace);
+  }
+```
+
+`keyOf(value)` is never consulted. The exception fires only on a UUIDv7
+collision, which the code's own comment calls "rare". The code's doc comment is
+accurate here; §13 is not.
+
+**3. `rawCollection` does *not* run the pipeline "identically".** §13:269–271
+states plainly that for `rawCollection`, "All write pipeline layers run
+identically to a typed collection". §13 also states the `_` rule as a hard MUST
+three separate times (lines 102, 152–155, 207), the strongest being:
+
+> `encode()` **must not** return any top-level key starting with `_`. The
+> framework validates this before every write and throws `ReservedFieldException`
+> if violated. **This includes `_id` — the framework owns it entirely.**
+
+Reproduced against `rawCollection`:
+
+```
+PROBE I / insert with _id ACCEPTED (spec says it must throw)
+PROBE I / insert with _custom threw: ReservedFieldException
+```
+
+`ReservedKeyValidator` is not at fault — it rejects every `_`-prefixed key
+without exception
+([reserved_key_validator.dart:43](packages/kmdb/lib/src/query/reserved_key_validator.dart#L43)).
+The validator never sees `_id` because
+[`RawDocumentCodec.encode`](packages/kmdb/lib/src/query/raw_document_codec.dart#L71)
+strips it first:
+
+```dart
+@override
+Map<String, dynamic> encode(Map<String, dynamic> value) {
+  final m = Map<String, dynamic>.of(value)..remove('_id');
+  return m;
+}
+```
+
+**The consequence is the reason this is 🟠 rather than 🟢.** Combine (2) and (3)
+and the natural read-modify-write idiom over `rawCollection` silently duplicates
+data:
+
+```dart
+final doc = await col.get(key);   // {'name': 'Alice', '_id': '019f…'}
+doc['name'] = 'Alicia';
+await col.insert(doc);            // ← new key minted, _id stripped,
+                                  //   original untouched: TWO documents
+```
+
+No exception, no warning. §13 gives a reader two independent reasons to expect
+this to be caught — the `DocumentAlreadyExistsException` contract and the `_id`
+MUST — and neither fires. `rawCollection` is the path CLAUDE.md recommends for
+CLI tools, which is where this idiom is most likely to be written.
+
+**Proposed correction.** Spec: fix the return type, restate `insert` as
+*always assigning a new key* (and say so where `DocumentAlreadyExistsException`
+is mentioned), and qualify the "identically" claim in §13:269. Code: consider
+whether `RawDocumentCodec.encode` should throw on a non-null `_id` that does not
+match, rather than stripping silently — that is a product decision, not a spec
+edit. **A human should decide which side changes for (2) and (3);** only (1) is
+unambiguously a spec bug.
+
+---
+
+### SC-17 — An unbalanced code fence deletes two sections from the published spec 🟡
+
+`docs/spec/13_query_api.md` contains 31 code-fence markers — an odd number. The
+fence opened at
+[line 438](docs/spec/13_query_api.md#L438) (the `explainedGet` convenience-wrapper
+example) is never closed, and the next fence 72 lines later closes it instead.
+
+**Verified against the built site, not inferred.** In `site/spec.html`:
+
+```
+Filter DSL heading found: False
+Field Path Syntax heading found: False
+```
+
+Both are `##` headings in the source. Neither exists in the rendered document.
+The content between them renders as syntax-highlighted Dart inside block
+`cb58` — including, verbatim, `<span id="cb58-17">## Field Path Syntax</span>`.
+
+What is lost from the published specification:
+
+| Source lines | Content | Rendered as |
+| :--- | :--- | :--- |
+| 443–449 | `stream()` implementation note | Dart code |
+| 451–453 | `orderBy('_id')` optimisation note | Dart code |
+| 455–470 | **Field Path Syntax** heading + the entire RFC 9535 subset table | Dart code |
+| 471–502 | Notes, field-path missing/null semantics, deferred features | Dart code |
+| 504–508 | **Filter DSL** heading + the "narrows the candidate set" claim | Dart code |
+
+The two headings that vanish are the ones defining *how field paths resolve* and
+*what the filter operators mean* — the section's actual semantic contract, and
+the part an integrator building against `0.1.0` most needs. The §13 table of
+contents in the rendered spec jumps from `13.6.1` straight to `13.6.2 Missing vs
+Null Semantics` with no Field Path Syntax and no Filter DSL between them.
+
+**I considered promoting this to 🟠** on the grounds that "divergence users would
+rely on" describes total loss of the filter-semantics documentation fairly well.
+I have left it at 🟡 because nothing about the running system is wrong and the
+source markdown is correct — but it should be sequenced **first** in WI-2
+regardless of severity, because it is a one-character fix with the largest
+documentation payoff in the register.
+
+**Proposed correction.** Close the fence after line 441. Then add
+`pandoc --fail-if-warnings` or a fence-balance check to the `doc_site` target —
+this class of defect is mechanically detectable and shipped unnoticed.
+
+---
+
+### SC-18 — §13's `orderBy('_id')` optimisation does not exist 🟡
+
+§13:451–453 states:
+
+> **`orderBy('_id')`** maps directly to `KvStore.scan(descending:)` and avoids
+> an in-memory sort — the only `orderBy` with this optimisation.
+
+Every clause of this is false.
+
+- **`KvStore.scan` has no `descending` parameter.** The interface is
+  `Stream<KvEntry> scan(String namespace, {String? startKey, String? endKey})`
+  ([kv_store.dart:71](packages/kmdb/lib/src/engine/kvstore/kv_store.dart#L71)).
+  The string `descending` does not appear anywhere in the kvstore or cache
+  layers.
+- **No `_id` special case exists in the executor.**
+  [`kmdb_query.dart:461–469`](packages/kmdb/lib/src/query/kmdb_query.dart#L461)
+  sorts in memory whenever `_orderByField != null`, with no branch on the field
+  name.
+- **Reproduced:** `plan.sorted == true` for both `orderBy('_id')` and
+  `orderBy('_id', descending: true)`.
+
+**The claim is repeated in the code's own doc comment**
+([kmdb_query.dart:96–99](packages/kmdb/lib/src/query/kmdb_query.dart#L96)):
+"When [field] is `'_id'`, the ordering uses the natural LSM scan order …. For
+all other fields, documents are sorted in memory after the scan." Both sites
+need correcting; fixing only the spec leaves the lie in the API docs.
+
+**Verdict is X (unimplemented), not D.** Results are correct — sorting UUIDv7
+hex strings ascending yields the same order a scan would. The cost is
+performance and a false capability claim. That matters more than it looks:
+§9 records **Scan as the only benchmark near its budget (74%)**, and §13 offers
+`orderBy('_id')` as the documented way to order a large result set without
+paying for a sort. There is no such escape hatch. Also **untested** — no test in
+the repository references `orderBy('_id')`.
+
+---
+
+### SC-19 — §13's terminal-method annotations misstate execution, and contradict the section's own prose 🟡
+
+The `KmdbQuery<T>` terminal block (§13:402–410) annotates each method with its
+execution behaviour. Two annotations are wrong.
+
+**`stream()` — §13 contradicts itself 40 lines apart.**
+
+| Site | Claim |
+| :--- | :--- |
+| §13:404 | `Stream<T> stream(); // lazy; holds LSM snapshot for stream lifetime` |
+| §13:443–447 | "`stream()` is eagerly evaluated — identical to `get()` internally … **No LSM snapshot is held open.**" |
+
+The code is eager
+([kmdb_query.dart:214](packages/kmdb/lib/src/query/kmdb_query.dart#L214)):
+`Stream.fromFuture(get()).asyncExpand(...)`. The prose is right and the
+annotation is wrong — but a reader skimming the signature block, which is what
+signature blocks are for, takes away the opposite of the truth and may size a
+query expecting streaming memory behaviour it will not get. (Note this is *not*
+SC-2's cross-section duplication pathology; both statements are inside §13.)
+
+**`count()` — "avoids decoding documents" holds only in the trivial case.** The
+fast path is gated on *four* conditions
+([kmdb_query.dart:227](packages/kmdb/lib/src/query/kmdb_query.dart#L227)):
+no filters **and** no `orderBy` **and** no `limit` **and** no `offset`. Any one
+of those falls through to `await get()`, decoding every document in the
+namespace. Reproduced over 50 documents: `count()` unfiltered took the fast path;
+`where(...).count()` decoded all 50 to return 25.
+
+**`any()` and `first()` fully materialise.** §13 documents neither a
+short-circuit nor its absence, so this is a gap rather than a divergence — but
+it is the kind of gap that shapes how an integrator writes code. `any()` calls
+`first()`, which calls `limit(1).get()`, which runs the complete pipeline —
+scan, decode, filter, sort — before discarding all but one row:
+
+```
+PROBE B / any() underlying plan -> scanned=50 matched=25 returned=1
+```
+
+At §18's stated 100K-document target, `any()` decodes 100K documents to answer a
+boolean. Worth documenting explicitly in §13 rather than leaving to discovery.
+
+**Proposed correction.** Fix the `stream()` and `count()` annotations to match
+the code; add a sentence to §13 stating that `first()`/`any()` materialise the
+full result set and that `count()` only avoids decoding for unfiltered counts.
+
+---
+
+### SC-20 — Minor §13 drift 🟢
+
+Individually cosmetic; grouped so one corrections pass catches them.
+
+- **`requireFreshIndex()` is entirely undocumented in §13.** It exists
+  ([kmdb_query.dart:184](packages/kmdb/lib/src/query/kmdb_query.dart#L184)), as
+  does the `StaleIndexException` it throws
+  ([exceptions.dart:113](packages/kmdb/lib/src/query/exceptions.dart#L113)), but
+  §13's pipeline-method block lists only `where`/`orderBy`/`limit`/`offset`/
+  `keyPrefix`. **This is the caller-side mitigation for SC-10** — the one API
+  that turns a silent zero-row result into a thrown exception — and the section
+  documenting the query API does not mention it exists.
+- **`caseSensitive` is undocumented** on `equals`, `startsWith`, `endsWith` and
+  `contains`, all of which accept it. See SC-15 for why this one is not merely
+  cosmetic.
+- **`equals()` against a `List` or `Map` never matches.** `_coercedEquals`
+  ([field_filter.dart:290](packages/kmdb/lib/src/query/filter/field_filter.dart#L290))
+  special-cases `num` and otherwise falls through to Dart `==`, which is
+  reference equality for collections. Reproduced: `Field('tags').equals(['a','b'])`
+  returns 0 rows against a stored `['a','b']`. §13 does not document
+  collection-valued equality either way; the array operators (`contains`,
+  `containsAll`, `containsAny`) are the supported route and all work correctly.
+- **§13:256 names the wrong stream.** "`KvStore.writeEvents` fires … `watch()`
+  subscribers re-execute" — `watch()` subscribes to `CacheLayer.writeEvents`
+  ([kmdb_query.dart:279](packages/kmdb/lib/src/query/kmdb_query.dart#L279)).
+- **§13's `open()` example omits three real parameters**: `vaultSearch`,
+  `versionConfigs`, `wasmUrl`.
+- **`Filter.and([...])` is not index-eligible, and §13 teaches it.** Only
+  AND-root predicates supplied via chained `.where()` reach the planner;
+  a composite passed to a single `.where()` returns `null` from
+  `equalityPredicate` and forces a full scan. Reproduced: chained →
+  `indexScan`, `Filter.and([...])` → `fullScan` for semantically identical
+  queries. §16 documents the rule correctly, but §13's *Composition* example
+  (lines 547–553) presents the non-indexable form with no cross-reference. Not a
+  divergence — a documentation trap worth one sentence.
+
+---
+
 ## 7. Scoping decisions and remaining questions
 
 ### 7.1 Resolved — 2026-07-18
@@ -2500,7 +2860,7 @@ and treating this document as complete coverage would be a mistake.
 | **W3** FFI safety | ✅ **Complete** | `betto_zstd` + `betto_icu` internals; PDFium boundary via S-8 |
 | **W5** CLI | 🟡 **Partial** | Core lifecycle exercised end-to-end; **not** swept: `sync`, `vault`, `search`, `index`, `schema`, `encryption`, `import`/`export`/`restore`, `promote`/`versions`, REPL, `--read` scripts |
 | **W6** code health | 🟡 **Partial** | Analyzer clean (all 9 packages); dependency gate analysed (O-1). **Not** done: coverage run, benchmark verification vs §18, public API surface, dead code, doc-comment audit, CHANGELOGs |
-| **W1** spec conformance | 🟡 **Substantially complete** (2026-07-20, two passes) | Pass 1: tiers 1–3 (SC-1…SC-9). Pass 2 (WI-1): §10, §11, §16, §25, §26, §30, §32 audited or targeted, mechanical symbol sweep triaged — found **SC-10** (🔴, reproduced), SC-11…SC-14. **§13 (584 lines) remains the largest unaudited section**, along with §20–23, §29, §33, §19 and the bulk of §12/§24. ~65% of spec surface scrutinised. See §11.1 for the per-section depth table |
+| **W1** spec conformance | 🟡 **Substantially complete** (2026-07-21, three passes) | Pass 1: tiers 1–3 (SC-1…SC-9). Pass 2 (WI-1): §10, §11, §16, §25, §26, §30, §32 — found **SC-10** (🔴, reproduced), SC-11…SC-14. Pass 3 (WI-1 completion): **§13 audited in full** — found **SC-15** (🔴, reproduced), SC-16…SC-20. Still unaudited: §20–23, §29, §33, §19 and the bulk of §12/§24. ~75% of spec surface scrutinised. See §11.1 for the per-section depth table |
 | **W4** concurrency + durability | ✅ **Complete** (2026-07-19) | 0.02.01 regression check (D-2), fault-injection coverage (D-3), and O-4 all done. Found **D-1** |
 
 ### Specific questions left open
@@ -2573,11 +2933,16 @@ and treating this document as complete coverage would be a mistake.
    found eight findings, none of which changed runtime behaviour. Pass 2 found
    a 🔴 in the first section it audited to depth.
 
-   **What is still genuinely unaudited: §13 (584 lines)**, §20–23, §29, §33,
-   §19, and the bulk of §12 and §24. §13 is the public query API — the surface
-   most users read and the one `0.1.0` freezes hardest — and it is now the
-   single largest untraced section in the spec. It should not be left to a
-   post-release pass.
+   **Pass 3 closed §13 (2026-07-21).** The prediction held a second time. §13 —
+   the public query API, the surface `0.1.0` freezes hardest — yielded
+   **SC-15**, a second reproduced silent-wrong-results defect of the same family
+   as SC-10: a case-insensitive equality filter returns **zero rows** once an
+   index is declared on the field, with `QueryPlan` reporting `indexScan`. Two
+   of the three sections taken to depth for the first time have produced a 🔴.
+
+   **What is still genuinely unaudited: §20–23, §29, §33, §19**, and the bulk of
+   §12 and §24. Given the base rate now established, these should be treated as
+   presumed-drifted rather than presumed-clean.
 7. **SC-1 needs a product decision, not just a fix.** Whether a `DekCache` hit
    is *intended* to bypass passphrase verification determines whether the fix
    is code or spec. Do not let this be resolved by editing §31.
@@ -2670,11 +3035,38 @@ finding that changes runtime behaviour, and the only one reproduced end-to-end.
   design question about which `$meta` entries are device-local facts and which
   are replicated state.
 
+**SC-15 joins this group (added 2026-07-21), and it is the same bug twice.**
+It is also a code fix, also reproduced, and also a case of *the planner trusting
+a predicate it had not established the index could answer*:
+
+| | Trusted | Across which boundary |
+| :--- | :--- | :--- |
+| SC-10 | `status: current` in `$meta` | device |
+| SC-15 | `_Op.eq` regardless of `caseSensitive` | case folding |
+
+Both produce zero rows for present, matching documents with `QueryPlan`
+reporting `indexScan`. Fixing them together is cheaper than fixing them apart,
+and the shared lesson belongs in one place:
+
+- **The narrow fix** is one line — `equalityPredicate` returns `null` when
+  `caseSensitive == false`
+  ([field_filter.dart:175](packages/kmdb/lib/src/query/filter/field_filter.dart#L175)).
+- **The real fix** is to change what `equalityPredicate` *means*, from "this is
+  an equality predicate" to "this predicate is answerable by an exact-token
+  index lookup". Any future non-exact matcher — locale folding,
+  accent-insensitivity, widened numeric coercion — reintroduces SC-15 verbatim
+  under the current contract. Renaming it (`indexableExactPredicate`) would make
+  the obligation visible at every future call site.
+- **Add the seam test both defects needed.** There is no test anywhere that runs
+  a filter through the *index* path and the *full-scan* path and asserts the two
+  agree. That single property test would have caught SC-15, and would catch the
+  whole class. Given SC-10, it should assert agreement across devices too.
+
 ### Group G — Spec corrections (W1)
 
-**SC-1 … SC-9, SC-11 … SC-14.** Per the review's standing instruction, W1 did
-**not** edit `docs/spec/`; the corrections are proposed here and should be
-sequenced deliberately. Two are not documentation tasks:
+**SC-1 … SC-9, SC-11 … SC-14, SC-16 … SC-20.** Per the review's standing
+instruction, W1 did **not** edit `docs/spec/`; the corrections are proposed here
+and should be sequenced deliberately. Four are not pure documentation tasks:
 
 - **SC-1** is a code-or-spec decision about whether a `DekCache` hit bypasses
   passphrase verification. **Sequence this first** — it is the only W1 finding
@@ -2682,6 +3074,20 @@ sequenced deliberately. Two are not documentation tasks:
   fix or an admission.
 - **SC-3** is a scope decision about whether `$cache` ships in `0.1.0`. If it
   does not, §15 and `CLAUDE.md` both need rewriting, not patching.
+- **SC-16** is partly a product decision. The `insert` return type is
+  unambiguously a spec bug, but whether `rawCollection` should *silently strip*
+  a supplied `_id` or *reject* it is a behaviour choice — and the current
+  silence is what turns a read-modify-write into a duplicate. Do not settle it
+  by editing §13 to describe the stripping.
+- **SC-18** must be fixed in **two** places — §13 and the doc comment at
+  `kmdb_query.dart:96`, which repeats the same false `orderBy('_id')` claim.
+  Correcting only the spec leaves it live in the generated API docs.
+
+**Sequence SC-17 first regardless of severity.** It is a one-character fence fix
+that restores two missing `##` sections — *Field Path Syntax* and *Filter DSL* —
+to the published spec. Every other §13 correction edits text that currently does
+not render at all, so fixing the fence first makes the rest reviewable. Pair it
+with a fence-balance or `--fail-if-warnings` check in the `doc_site` target.
 
 **SC-3's full site list** (WI-2 already owns SC-3; these are the sites, not a new
 finding). The materialised view cache and its config field are asserted in
@@ -2741,17 +3147,53 @@ plausible Dart symbols, grepped against `packages/*/lib` and `packages/*/bin`,
 | 3 | §11 KvStore | 🔵 **Audited** — both reference tables traced field by field (yielded SC-13, part of SC-14) |
 | 4 | §16 indexes, §25 schemas | 🔵 **Audited** — every normative claim traced; yielded **SC-10** (reproduced), SC-12 |
 | 4 | §26 versioning | 🟡 **Targeted** — retention-policy semantics traced; CLI surface and `promote` not traced |
-| 4 | §13 query API | ⚪ **Surveyed** — 584 lines, largest untraced section remaining |
+| 4 | §13 query API | 🔵 **Audited** (WI-1 pass 3, 2026-07-21) — every normative claim traced; filter semantics, write pipeline and terminal behaviour reproduced. Yielded **SC-15** (🔴, reproduced), SC-16…SC-20 |
 | 4 | §14/§15 | 🟡 **Spot-checked** (§15 yielded SC-3) |
 | 5 | §32 vault search | 🔵 **Audited** — yielded SC-11 |
 | 5 | §20–23 text search | ⚪ **Surveyed** — §22's symbol set resolved against `betto_inferencing`; no claim-level trace |
 | 6 | §30 iCloud adapter | 🟡 **Targeted** — exception-mapping claims traced (part of SC-14); zone model and ETag/CAS semantics not traced |
 | 6 | §29 Drive adapter, §33 credential store, §19 platform | ⚪ **Surveyed** |
 
-**Roughly 65% of the spec surface has now received real scrutiny**, up from
-~40%. What remains genuinely unaudited: **§13 (584 lines)**, §20–23, §29, §33,
-§19, and the bulk of §12 and §24. Do not read the absence of findings in those
-as evidence of conformance.
+**Roughly 75% of the spec surface has now received real scrutiny** (~65% after
+pass 2; §13 closed in pass 3). What remains genuinely unaudited: §20–23, §29,
+§33, §19, and the bulk of §12 and §24. Do not read the absence of findings in
+those as evidence of conformance.
+
+**Pass 3 (WI-1 continued, 2026-07-21) — §13, and what it says about the prior.** §13 was
+the last untraced section of consequence and the one `0.1.0` freezes hardest.
+Pass 1 predicted the unaudited remainder would hold drift at a similar rate;
+pass 2 confirmed it and found a 🔴. **Pass 3 confirmed it again and found a
+second 🔴** (SC-15), in the section that had been surveyed twice without
+anything surfacing. Three passes, three sections audited to depth for the first
+time, two 🔴s. The base rate for "section never traced to code" is now high
+enough that the remaining unaudited sections should be treated as *presumed
+drifted*, not presumed clean.
+
+**What worked in pass 3**, adding to the list below:
+
+1. **"What would a false claim cause?" again outperformed everything else.**
+   SC-15 came from reading one sentence — "or after an index lookup **narrows**
+   the candidate set" — and asking whether every operator the DSL exposes can
+   actually be answered by an exact-token index. The mechanical sweep was clean:
+   **every symbol §13 names exists and is spelled correctly**, including
+   `caseSensitive`, `equalityPredicate` and `lookupByValue`. As with SC-10, the
+   defect is a *relationship between two correct symbols*.
+2. **Cross-checking a section against itself.** §13 contradicts itself in three
+   places (SC-16's `insert` return type vs. line 158; SC-19's `stream()`
+   annotation vs. its own prose 40 lines later). Internal contradiction is
+   cheap to look for — read the signature blocks against the surrounding prose —
+   and it reliably marks the half that was never re-derived.
+3. **Rendering the spec and reading *that*.** SC-17 is invisible in the
+   markdown source, which is well-formed prose throughout. It only appears when
+   you grep the built `site/spec.html` for the headings you just read. **No
+   prior pass had checked that the spec renders what it says.** Two `##`
+   sections of the public API are absent from the published document.
+4. **Testing the interaction between two well-tested halves.** SC-15 lives
+   exactly where `filter_test.dart` (filter semantics, thorough) meets
+   `index_query_test.dart` (index selection, thorough). Neither file crosses
+   into the other. Both would score well on any line-coverage measure. **Seams
+   between well-covered units are where the untested behaviour concentrates** —
+   worth a dedicated sweep in any future pass.
 
 **On the mechanical sweep.** It was necessary and badly insufficient, which is
 worth recording because it was cheap enough to look sufficient. Of the 24
@@ -2889,6 +3331,45 @@ Rows below added by the WI-1 pass (2026-07-20).
 | §10 | Manifest never written to or read from the sync folder | `sync_engine.dart` push list | `sync_engine_test.dart` | **C** |
 | §30 | `CKError.quotaExceeded` surfaces as a `KmdbException` | no such type; unmapped `PlatformException` | — | **D** (SC-14) |
 | §30 | `CKError.requestRateLimited` → `ICloudRateLimitException` | `icloud_sync_channel_interface.dart:110` | `fake_icloud_sync_channel.dart` | **C** |
+
+Rows below added by the WI-1 pass 3 (2026-07-21) — §13 query API.
+
+| Spec | Claim | Code site | Test site | Verdict |
+| :--- | :--- | :--- | :--- | :-- |
+| §13 | Index lookup "narrows the candidate set"; all filters re-evaluated in memory | `field_filter.dart:175` exposes case-insensitive `eq` as index-eligible; `index_reader.dart:47` exact-token lookup returns `[]` | **none** — `filter_test.dart` tests `evaluate()` only, `index_query_test.dart` uses exact case only | **D** (SC-15 🔴) |
+| §13 | `Future<void> insert(T value)` | `kmdb_collection.dart:176` — `Future<T>` | `kmdb_collection_test.dart:144` (asserts the real type) | **D** (SC-16) |
+| §13 | `insert` throws `DocumentAlreadyExistsException` if key exists | `kmdb_collection.dart:177` — always mints a fresh UUIDv7; `keyOf` never consulted | `kmdb_collection_test.dart:185` | **D** (SC-16) |
+| §13 | `rawCollection` runs "all write pipeline layers identically" | `raw_document_codec.dart:71` strips `_id` before `ReservedKeyValidator` runs | — | **D** (SC-16) |
+| §13 | `encode()` MUST NOT return `_`-prefixed keys; "this includes `_id`" → `ReservedFieldException` | `reserved_key_validator.dart:43` (typed path **C**); raw path silently strips | `kmdb_collection_test.dart:394` (typed only) | **D** (SC-16, raw path) |
+| §13 | `orderBy('_id')` maps to `KvStore.scan(descending:)`, avoids in-memory sort | `kv_store.dart:71` has no `descending`; `kmdb_query.dart:461` sorts unconditionally | **none** | **X** (SC-18) |
+| §13 | `stream()` "lazy; holds LSM snapshot for stream lifetime" | `kmdb_query.dart:214` — eager, no snapshot held | `kmdb_query_test.dart` | **D** (SC-19) |
+| §13 | `count()` "avoids decoding documents" | `kmdb_query.dart:227` — fast path only when no filter/orderBy/limit/offset | `kmdb_query_test.dart` | **D** (SC-19) |
+| §13 | `Filter DSL` / `Field Path Syntax` sections published | fence unbalanced at `13_query_api.md:438`; both headings absent from `site/spec.html` | — | **D** (SC-17) |
+| §13 | `requireFreshIndex()` / `StaleIndexException` | `kmdb_query.dart:184`, `exceptions.dart:113` — exist, undocumented in §13 | `index_query_test.dart` | **D** (SC-20, omission) |
+| §13 | `caseSensitive` on `equals`/`startsWith`/`endsWith`/`contains` | `field_filter.dart:50,105,111,121` — exist, undocumented in §13 | `filter_test.dart:173–228` | **D** (SC-20, omission) |
+| §13 | `isNull()` matches missing **or** null; `isNotNull()` requires present **and** non-null | `field_filter.dart:183–188` | `filter_test.dart` + reproduced | **C** |
+| §13 | Missing/null distinction preserved through `and`/`or`/`not` composition | `filter.dart:69–101`, `field_filter.dart:204,236` | `filter_test.dart` + reproduced | **C** |
+| §13 | `isBetween` inclusive on both ends | `field_filter.dart:223–227` | `filter_test.dart` | **C** |
+| §13 | `contains` dispatches String→substring, List→membership; `caseSensitive` ignored for lists | `field_filter.dart:253–261` | `filter_test.dart:224–228` | **C** |
+| §13 | `equals()` against a `List`/`Map` operand | `field_filter.dart:290` — reference equality, never matches | **none** | **U** (SC-20) |
+| §13 | Field path: `$` sigil optional, `[*]`≡`[]`, negative index, `$$` not normalised | `field_path.dart` | `field_path_test.dart` | **C** |
+| §13 | `FieldPath.resolve` returns `missing` sentinel, distinct from `null` | `field_path.dart` | `field_path_test.dart` | **C** |
+| §13 | Layer 1 validators run before any I/O; any throw aborts the write | `kmdb_collection.dart:898–908` | `schema_enforcement_test.dart` | **C** |
+| §13 | Layer 2 augmentors share the document's `WriteBatch` | `kmdb_collection.dart:910–922` | `writebatch_atomicity_test.dart` | **C** |
+| §13 | `delete()` skips validators; augmentors run with `newDoc: null` | `kmdb_collection.dart:933–950` | `index_test.dart` | **C** |
+| §13 | `putMany` atomic per-document, **not** across keys | `kmdb_collection.dart:228–232` | `kmdb_collection_test.dart` | **C** |
+| §13 | LWW applies to every write method without exception | §12 sync path; no per-method divergence found | `sync_engine_test.dart` | **C** |
+| §13 | Pipeline methods return a new `KmdbQuery`; no I/O until a terminal | `kmdb_query.dart:84–193` | `kmdb_query_test.dart` | **C** |
+| §13 | `watch()` re-runs on namespace writes, debounced 50 ms | `kmdb_query.dart:262–292` | `kmdb_query_test.dart` | **C** |
+| §13 | `offset` gives "stable pagination with orderBy" | `kmdb_query.dart:592` returns 0 for ties and cross-type; Dart `List.sort` is not stable | **none** | **U** — no skip/duplicate reproduced; see note |
+| §13 | Point lookups `get`/`getMany`/`exists`/`watchKey` signatures | `kmdb_collection.dart:109,123,132,142` | `kmdb_collection_test.dart` | **C** |
+| §13 | `replace`/`put`/`delete`/`update` signatures and semantics | `kmdb_collection.dart:197,215,238,258` | `kmdb_collection_test.dart` | **C** |
+| §13 | `explainedGet()` returns `(List<T>, QueryPlan)`; collection wrapper takes a query | `kmdb_query.dart:207`, `kmdb_collection.dart:406` | `index_query_test.dart` | **C** |
+| §13 | `QueryPlan` fields: strategy, documentsScanned/Matched/Returned, sorted, filters | `query_plan.dart`, `kmdb_query.dart:482–489` | `index_query_test.dart` | **C** (but reports `indexScan` on the SC-15 wrong answer) |
+| §13 | Only AND-root equality predicates index-eligible; `Filter.and([...])` full-scans | `kmdb_query.dart:311–313` | `index_query_test.dart` + reproduced | **C** (undocumented trap, SC-20) |
+| §13 | `open()` throws `EncryptionError` in four named scenarios | `encryption_error.dart:23–43` | `kmdb_database_encryption_test.dart` | **C** |
+| §13 | `ReservedIndexPathException` on `_`-prefixed index path at `open()` | `index_definition.dart` | `index_definition_test.dart` | **C** |
+| §13 | `keyPrefix` maps to `scan(startKey:, endKey:)` with UUIDv7 bit forcing | `kmdb_query.dart:550–571` | `kmdb_query_test.dart` | **C** |
 
 ### 11.3 Observations on the `0.09` reconciliation
 

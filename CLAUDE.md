@@ -104,10 +104,28 @@ inline.
   proposal review → **`kmdb-architect`** (authoritative on `docs/spec/`,
   `docs/plans/`, `docs/proposals/`, `docs/roadmap/`). Prefer it over
   re-deriving architecture from the code.
+- **"Is the spec actually true?"** → **`kmdb-spec-auditor`**. See the note
+  below — this is *not* the architect's job, and the difference matters.
 - A plan needs critical review before implementation → **`kmdb-plan-reviewer`**.
 - An `Investigated` plan needs building → **`kmdb-plan-implement`**.
 - Verify work before a commit/PR → **`kmdb-qa`** (correctness, completeness vs.
   the plan) then **`kmdb-pre-commit`** (mechanical gate).
+
+**Spec truth is a separate axis from spec consistency.** The pipeline above
+checks **artefact against artefact** — plan↔spec, implementation↔plan. It has no
+step that checks **artefact against reality**, so a false spec claim passes every
+downstream gate. The 2026-07-18 review found three defects through that gap,
+including a 🔴: §16 claimed a `$`-prefix sync filter that has never existed, and
+a second device consequently returned **zero rows for present, matching
+documents**. The claim was false the day it was written, so there was never a
+moment of "drift" for the pipeline to catch.
+
+`kmdb-architect` cannot cover this, and should not try — its instruction to
+*"ground every answer in the docs"* is correct for its job and structurally blind
+to a wrong document. **`kmdb-spec-auditor`** is its deliberate inverse: it
+grounds answers in the **code** and treats every spec claim as a hypothesis to
+disprove. Run it periodically — before a release, or after a large body of work —
+not per-change.
 
 The agents own the operational detail; the sections below are a quick reference
 for the main session.
