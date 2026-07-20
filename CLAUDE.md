@@ -437,8 +437,23 @@ Three modes: **lexical** (BM25 inverted index, `$$fts:` namespaces), **semantic*
 `$$index:*` namespaces are **local-only** — they are stored in `.local.sst` files
 and never uploaded to the sync folder. Each device rebuilds these derived indexes
 independently from the synced document data. Managed via `FtsManager` and
-`VecManager`; queried via `KmdbCollection.search()`. English-language only; web
-browser excluded. See §20 for shared types and CLI, §21–23 for each mode.
+`VecManager`; queried via `KmdbCollection.search()`.
+
+**Language and platform support** (corrected 2026-07-20 — this paragraph
+previously read "English-language only; web browser excluded", which is stale on
+both counts):
+
+- **Lexical is multilingual.** Stemming is language-aware and auto-selected per
+  field/query across the Snowball-supported languages, falling back to English
+  when detection is inconclusive. Tokenisation covers CJK, Thai, Arabic,
+  Cyrillic and Devanagari. **Stop-word lists are still English-only**, and off
+  by default.
+- **Semantic defaults to English** (`bge-small-en-v1.5`), with
+  `multilingual-e5-small` (~100 languages) available as a registered opt-in.
+- **Web: lexical is fully supported** (via `Intl.Segmenter`). Only **semantic**
+  is excluded on web, because ONNX inference there is deferred.
+
+See §20 for shared types and CLI, §21–23 for each mode.
 
 ### Sync Protocol (§12)
 

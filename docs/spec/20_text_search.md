@@ -33,20 +33,29 @@ never uploaded to the sync folder.
 ### Supported
 
 - Single `String`-valued document fields encoded as UTF-8 plain text.
-- English-language text (`en`). Tokenisation, stop-word lists, and the
-  stemmer are tuned for English.
+- **Word segmentation for all scripts.** UAX #29-conformant on every
+  platform — `IcuTokenizer` (ICU) native, `BrowserTokenizer`
+  (`Intl.Segmenter`) web — so CJK, Thai, Arabic, Cyrillic, Devanagari etc.
+  segment correctly (§21).
+- **English by default, multilingual where opted in.** Lexical stemming is
+  language-aware, auto-selected per field/query across Snowball-supported
+  languages, defaulting to English when detection is inconclusive (§21).
+  Semantic defaults to English-only `bge-small-en-v1.5`;
+  `multilingual-e5-small` (~100 languages) is a registered opt-in
+  alternative via `EmbeddingModelConfig` (§22).
 
-### Out of scope
+### Out of scope / current limitations
 
-- **Non-Latin scripts** — CJK, Thai, Arabic, and other scripts that require
-  language-specific segmentation are not supported in this version.
-- **Web browser** — semantic search (ONNX inference) on the web platform is
-  deferred. Lexical search is now supported on web: `FtsManager` uses
-  `BrowserTokenizer` (backed by the browser's native `Intl.Segmenter` API) as
-  the default tokenizer, giving UAX #29-quality segmentation at zero bundle cost.
-- **Plain text extraction** — content submitted for indexing must arrive as
-  plain text. Extracting text from PDF, HTML, or DOCX is the caller's
-  responsibility.
+- **Stop-word lists — English only.** Off by default; only Stopwords ISO
+  `en` ships (§21).
+- **No stemming for non-Snowball scripts.** CJK/Thai/Hebrew/Bengali etc. are
+  segmented and indexed but unstemmed — matched literally, not incorrectly
+  stemmed (§21).
+- **Semantic search on web** — ONNX inference on web is deferred. Lexical
+  search is fully supported on web.
+- **Plain text extraction** — direct-index content must be plain text;
+  extraction is the caller's job. (Vault search §32 handles blob
+  extraction.)
 - **Autocomplete / search-as-you-type** — full-term keyword search only.
 
 ## Opening with Search Indexes

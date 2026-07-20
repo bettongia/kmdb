@@ -1,8 +1,9 @@
 # KMDB Release-Readiness Review — 2026-07-18
 
 **Reviewer:** Claude (Opus 4.8), full-codebase review
-**Status:** 🔴 **Executed — `0.1.0` NO-GO.** Security workstreams complete;
-spec-conformance and durability workstreams **incomplete** (see §9 coverage)
+**Status:** 🔴 **Executed — `0.1.0` NO-GO.** Security and durability workstreams
+complete; spec conformance (W1) **partially executed 2026-07-20** — tiers 1–3
+audited, tiers 4–6 surveyed only (see §9 coverage and §11)
 **Target:** `0.1.0` — the first non-prerelease tag
 **Baseline:** `main` @ `a933dc4` ("Review and reconcile the spec, retire the
 primer, and prep the workspace for a real release")
@@ -86,9 +87,22 @@ not met — all 12 packages in the `betto_*` closure are still `-dev`, one of th
 (`betto_abnf`) is undocumented, and 11 of 12 have unpublished local work ahead
 of what KMDB currently builds against.
 
-> **Coverage caveat:** the security workstreams (W2, W3) and the CLI smoke test
-> are complete. **Spec conformance (W1) and concurrency/durability (W4) were not
-> meaningfully executed** and need a further pass before release. See §9.
+> **Coverage caveat:** the security workstreams (W2, W3), concurrency/durability
+> (W4), and the CLI smoke test are complete. **Spec conformance (W1) is
+> partially executed** (2026-07-20): tiers 1–3 audited to depth, tiers 4–6
+> surveyed only — roughly 40% of the spec surface. See §9 and §11.
+
+> **W1 addendum (2026-07-20).** Eight conformance findings (SC-1…SC-8), three
+> of them 🟠 High. The one that matters most is **SC-1**: §31 documents a
+> verification of the cached DEK against `enc:blob` that **does not exist**, so
+> a wrong passphrase opens an encrypted database whenever a `DekCache` is warm
+> — reproduced. The other two Highs are documentation defects with real
+> consequences: **SC-2** (§31 still specifies the vault blob format PR #61
+> replaced, and still describes the S-4-vulnerable read as current) and
+> **SC-3** (§15's materialised view cache, marked *Required* on mobile and web,
+> is not implemented anywhere). Encouragingly, **PR #61's own spec edits are
+> accurate** (SC-9) — the drift is concentrated in sections nobody has had
+> reason to re-read.
 
 ---
 
@@ -584,8 +598,8 @@ position rather than being justified by it.
 | `packages/kmdb` tests | **2373 pass, 12 skipped**, exit 0 |
 | `packages/kmdb_cli` tests | **1176 pass, 3 skipped**, exit 0 |
 | `make analyze` (all 9 packages) | **No issues found**, exit 0 |
-| Coverage | **not run** (see §9) |
-| §18 benchmarks | **not run** (see §9) |
+| Coverage | **94.8%** (11,181/11,800 lines, 205 files) — measured 2026-07-20 on merged `main`, post-PR #61 |
+| §18 benchmarks | **10/10 PASS** — run 2026-07-20 on merged `main`, post-PR #61 |
 
 > The analyzer and both test suites fail inside the review sandbox — Dart's
 > telemetry initialiser cannot create `~/.dart-tool/dart-flutter-telemetry.config`
@@ -617,6 +631,15 @@ position rather than being justified by it.
 | D-2 | 🟢 Pass | W4 | The v0.02.01 durability hardening (C1, C2, H1–H5, M1–M3) is **still in place** — regression-checked, no reversions | — |
 | D-3 | 🟡 Medium | W4 | `FaultyStorageAdapter` fault injection covers local durability paths but **no sync test uses it** — the trust boundary has no fault injection | No |
 | O-4 | 🟢 Pass | W4 | The vault indexing isolate does **not** violate §18's single-writer model — only pure data crosses the boundary; see notes | — |
+| SC-1 | 🟠 High | W1 | §31 claims a cached DEK is verified against `enc:blob`; **no verification exists** — a wrong passphrase opens an encrypted database on any cache hit (**confirmed, reproduced**) | **Yes** |
+| SC-2 | 🟠 High | W1 | §31's *Vault Encryption* documents the **pre-PR-#61** blob byte layout and the S-4-vulnerable manifest-flag read; §24 documents the current one. Two specs contradict on a format `0.1.0` freezes | **Yes** |
+| SC-3 | 🟠 High | W1 | §15's Materialised View Cache (`$cache`) is **unimplemented**, yet §15's tier table marks it *Required* on mobile/web. `KvStoreConfig.sessionCacheMaxObjects` does not exist either | **Yes** |
+| SC-4 | 🟡 Medium | W1 | §31's *Algorithms* table misstates the recovery-KEK derivation (salt and `info` both wrong) and names two API symbols that do not exist | No |
+| SC-5 | 🟡 Medium | W1 | §08 states the device ID lives in platform secure storage and "must not be stored inside the database"; it is stored in `$meta` — inside the database. Contradicts §31 gap 4 | No |
+| SC-6 | 🟡 Medium | W1 | §31's *Provisioning Guard* describes a `$meta` emptiness scan; the code checks only non-`$` namespaces, weakening §31's "born encrypted or never encrypted" claim | No |
+| SC-7 | 🟢 Low | W1 | §05 presents vault blobs as size-bounded by `VaultSearchConfig.maxBlobBytes`; that bound is search-extraction-only and is applied *after* the blob is fully in memory | No |
+| SC-8 | 🟢 Low | W1 | Minor spec/code drift: the encrypted branch of `kMaxDecodedValueBytes` is untested; §31 and `kmdb_database.dart` both say "4-state matrix" over a 5-state table | No |
+| SC-9 | 🟢 Pass | W1 | PR #61's §05/§08/§12/§18/§24 spec edits were traced claim-by-claim to code and tests — **accurate**, including the S-1/S-6/S-7/D-1 hardening and the quarantine semantics; see notes | — |
 
 ---
 
@@ -1629,6 +1652,428 @@ here (D-1) is about *lifecycle*, not concurrency.
 
 ---
 
+### SC-1 — §31 claims a DEK-cache verification step that does not exist 🟠 (CONFIRMED)
+
+§31's *DEK Cache* section makes an explicit, security-relevant promise:
+
+> If the DEK is found in the cache, Argon2id is skipped and the cached DEK is
+> used directly (**only AES-GCM decryption of `enc:blob` is still performed to
+> confirm the cached key is correct**).
+
+**No such confirmation is performed.** `_runEncryptionBootstrap`
+([kmdb_database.dart:732–735](packages/kmdb/lib/src/query/kmdb_database.dart#L732))
+is the whole of State 5's cache path:
+
+```dart
+final cachedDek = await encryptionConfig!.dekCache.read(dbId);
+if (cachedDek != null) {
+  return encryptionConfig.buildProvider(cachedDek);
+}
+```
+
+The cached bytes are wrapped in a provider and returned. `enc:blob` is never
+consulted, the passphrase the caller supplied is never used, and no AES-GCM
+operation runs.
+
+#### Consequence 1 — the passphrase is not a gate on a cache hit (reproduced)
+
+A throwaway probe, run 2026-07-20 against `MemoryStorageAdapter`: provision a
+database with passphrase `correct-horse-battery-staple` and an
+`InMemoryDekCache`, close, then reopen with the *same cache* and the passphrase
+`totally-the-wrong-passphrase`:
+
+```
+PROBE A RESULT: open() SUCCEEDED with a wrong passphrase
+```
+
+Any application that re-prompts for the passphrase as an authorisation gate —
+a lock screen, a re-authentication step before viewing sensitive records — gets
+**nothing** from that prompt whenever a `DekCache` is populated. This is the
+recommended production configuration on mobile: §31 tells Flutter hosts to
+inject `FlutterSecureDekCache` so "the user is only prompted once per device,"
+and `KeychainAccessibility.first_unlock_this_device` means the DEK is readable
+from the Keychain for the whole of an unlocked session. The passphrase check
+that §31 documents as the backstop is absent exactly where the cache is most
+likely to be warm.
+
+#### Consequence 2 — a stale DEK fails late and unattributably
+
+A second probe recreated a database at the same path with a new passphrase and
+DEK while a stale entry for that path remained in the cache — the
+`FlutterSecureDekCache` shape exactly, since it keys on
+`kmdb_dek_<base64url(utf8(path))>` and the Keychain outlives a deleted database
+directory. Opening with the correct new credentials but the stale cache fails:
+
+```
+EncryptionError(badCredentials): AES-GCM authentication failed
+  package:kmdb/src/encryption/encryption_provider.dart 197:7  decrypt
+  package:kmdb/src/engine/kvstore/meta_store.dart 238:23      MetaStore.getNamespaces
+  package:kmdb/src/query/kmdb_database.dart 539:31            KmdbDatabase.open
+```
+
+Two things are worth separating here. The **good** news is that Gap 3's `$meta`
+encryption incidentally catches the stale DEK, so this does not silently
+proceed to write user data under the wrong key — the blast radius is far
+smaller than the missing check alone would suggest. The **bad** news is that it
+surfaces as an unattributed authentication failure from inside
+`MetaStore.getNamespaces`, four frames below the bootstrap, rather than as the
+clean `EncryptionError.badCredentials` the bootstrap exists to raise. A host
+cannot distinguish "your passphrase is wrong" from "your DEK cache is stale,
+clear it" — and §31's error-code table offers no code for the latter.
+
+That incidental protection is also *conditional*: it holds only because `$meta`
+is encrypted and non-empty. It is not a designed check, nothing tests it as
+one, and any future change that reads a cached DEK before the first `$meta`
+access removes it silently.
+
+#### Recommended fix
+
+Either implement the verification §31 already documents — after a cache hit,
+unwrap `enc:blob` (or trial-decrypt a known `$meta` value) with the cached DEK
+and reject on failure — or, if the cache is meant to bypass credential checking
+by design, say so plainly in §31 and remove the sentence claiming otherwise.
+The first is a few lines and restores the documented behaviour; the second is a
+deliberate weakening of a security claim and should be an explicit decision, not
+a silent one. Whichever is chosen, a stale-cache open needs its own error code.
+
+**Do not resolve this by editing §31 to match the code without deciding the
+question first** — that is precisely the reconciliation failure mode §4 flagged.
+
+---
+
+### SC-2 — §31 documents a vault blob format PR #61 replaced 🟠
+
+PR #61 fixed S-4 by making the vault blob **self-describing**: the blob is
+wrapped through `EncryptionEnvelope` unconditionally, and `getBytes` decides
+whether to decrypt from the blob's own leading flag byte, never from the synced
+manifest. `VaultStore.ingest`
+([vault_store.dart:251–253](packages/kmdb/lib/src/vault/vault_store.dart#L251))
+and `getBytes` ([:368–375](packages/kmdb/lib/src/vault/vault_store.dart#L368))
+implement this, and §24 was updated correctly
+([24_vault.md:618–661](docs/spec/24_vault.md)).
+
+**§31 was not.** Its *Vault Encryption* section still specifies the superseded
+layout, with no flag byte:
+
+```
+stored = nonce(12B) || AES-GCM-256(key=dek, plaintext=blob) || tag(16B)
+```
+
+and still describes the **vulnerable** read path as current behaviour:
+
+> When reading a blob, `VaultStore.getBytes()` checks this flag. If
+> `encrypted: true` but no `EncryptionProvider` is available, a `StateError` is
+> thrown.
+
+Both statements are now false. The actual stored form is
+`[EncryptionFlag 1B] || …` in **both** the encrypted and unencrypted cases, and
+`getBytes` deliberately does *not* consult `manifest.encrypted` — that it once
+did was the S-4 vulnerability.
+
+Two distinct problems follow. First, §24 and §31 now give **contradictory byte
+layouts for the same file**, and §08's framing makes on-disk formats a `0.1.0`
+promise. Second, §31 is the document a security-conscious reader consults; it
+currently documents the pre-fix, attacker-controllable decryption gate as
+though it were the design. A reader auditing KMDB's vault integrity from §31
+alone would conclude the S-4 finding is still open.
+
+§31 also omits the new `VaultContentMismatchException` verification-on-every-read
+guarantee that §24 documents and `getBytes` implements — a real security
+property that the security spec does not currently claim.
+
+**Fix:** update §31's *Vault Encryption* to point at §24 as the normative
+description rather than restating the layout, and delete the manifest-flag
+sentence. Duplicated byte-layout prose in two specs is what produced this drift;
+one authority per format is the durable fix.
+
+---
+
+### SC-3 — §15's Materialised View Cache does not exist 🟠
+
+§15 opens by stating the Cache Layer "provides two distinct caches," the second
+being:
+
+> **Materialised view cache** — persisted scan results in the `$cache` system
+> namespace, surviving process restarts on mobile and web.
+
+Its platform-tier table marks this cache **Required** for both mobile and web,
+with the rationale "process silently killed frequently. Must rebuild from
+`$cache` on cold open." A full subsection then specifies its behaviour:
+generation-stamped CBOR key lists, stale-while-revalidate on mobile/web,
+background re-scan, caller notification.
+
+**None of it is implemented.** Every occurrence of `$cache` in
+`packages/kmdb/lib` is a doc comment or a system-namespace exclusion list —
+there is no write to, or read from, the `$cache` namespace anywhere.
+`CacheLayer.scan` explicitly defers it
+([cache_layer.dart:145–151](packages/kmdb/lib/src/cache/cache_layer.dart#L145)):
+
+> Materialised view caching (spec §15.3) … **is handled by the Query Layer
+> (Phase 7, `KmdbQuery`)**, which has knowledge of the query parameters needed
+> to form a stable cache key.
+
+`KmdbQuery` does not implement it either. The deferral points at a layer that
+never picked it up, and the hand-off was never reconciled — a
+responsibility-shaped gap that reads as "implemented elsewhere" from either end.
+
+§31 is the one document that gets this right, hedging with "when the
+materialised-view cache is implemented." §15 and `CLAUDE.md` both describe it in
+the present tense.
+
+**Second defect in the same section.** §15 states the session cache size "is
+configurable via `KvStoreConfig.sessionCacheMaxObjects`." That field does not
+exist anywhere in the workspace. The real seam is the `maxObjects` constructor
+parameter on `CacheLayer`
+([cache_layer.dart:84–89](packages/kmdb/lib/src/cache/cache_layer.dart#L84)),
+which defaults from `CacheTier`. A developer following §15 to tune cache size on
+a memory-constrained device will not find the knob it names.
+
+**Why this is High rather than Medium.** §15 does not describe a missing
+optimisation; it describes a component it marks *Required* for the two platforms
+where KMDB's local-first pitch matters most. A developer architecting a mobile
+app around §15 will expect scan results to survive a cold start and will
+discover otherwise only at runtime. There is no workaround short of building the
+cache themselves.
+
+**Fix:** decide whether `$cache` is in scope for `0.1.0`. If it is not — and
+nothing suggests it is — §15 must be rewritten to describe the session cache as
+the only implemented tier, with the materialised view cache moved to a clearly
+labelled *Planned* section and removed from the tier table's Required column.
+`CLAUDE.md`'s Cache Layer summary needs the same correction; it is the
+`English-language only` failure mode again, in a different file.
+
+---
+
+### SC-4 — §31's Algorithms table misstates the recovery-KEK derivation 🟡
+
+The recovery code is the last-resort access path to an encrypted database — the
+one mechanism a user reaches for when the passphrase is gone. §31's *Algorithms*
+table specifies its derivation as:
+
+| Purpose | Algorithm | Parameters |
+| :--- | :--- | :--- |
+| Recovery entropy → KEK | HKDF-SHA256 | Salt = SHA-256(recovery_entropy), info = `"kmdb-recovery-kek"` |
+
+`KeyDerivation.deriveKekFromRecoveryEntropy`
+([key_derivation.dart:106–116](packages/kmdb/lib/src/encryption/key_derivation.dart#L106))
+uses neither parameter as documented:
+
+- **Salt** is the empty byte string (`nonce: <int>[]`), not `SHA-256(recovery_entropy)`.
+- **Info** is `kmdb-recovery-kek-v1` (20 bytes, `kRecoveryKekInfo`), not
+  `kmdb-recovery-kek`.
+
+Neither is a cryptographic weakness — HKDF with an empty salt over a uniformly
+random 128-bit IKM is sound, and the info string only needs to be
+domain-separating, which it is. The defect is that **the spec's byte-level
+recipe does not reproduce the implementation's key.** Anyone writing an
+independent recovery tool from §31 — the most plausible reason to read this
+table at all — derives the wrong KEK and cannot unwrap the DEK.
+
+Two further symbols in the same area name things that do not exist:
+
+- §31's *Key Derivation* section calls `KeyDerivation.deriveKekFromRecovery(...)`;
+  the method is `deriveKekFromRecoveryEntropy`.
+- The *Algorithms* table gives DEK generation as "`SecureRandom` from
+  `package:cryptography`". There is no `SecureRandom` use in the codebase;
+  `generateRandom` extracts bytes from `AesGcm.with256bits().newSecretKey()`
+  ([key_derivation.dart:188–197](packages/kmdb/lib/src/encryption/key_derivation.dart#L188)).
+  The result is CSPRNG-backed, so the security claim holds — the named API does
+  not.
+
+**Fix:** correct the table to `Salt = <empty>, info = "kmdb-recovery-kek-v1"`,
+correct the two symbol names, and consider adding a round-trip test vector
+(entropy → mnemonic → KEK) to the spec so this table cannot drift again without
+a test failing.
+
+---
+
+### SC-5 — §08's device-identity paragraph describes an unimplemented mechanism 🟡
+
+§08's *SSTable Naming Convention* closes with:
+
+> The device ID is a stable per-installation UUID generated on first launch and
+> persisted in platform-specific secure storage (Keychain on iOS,
+> SharedPreferences on Android, localStorage on web). **It must not be stored
+> inside the database itself to avoid circular dependency during bootstrap.**
+
+The code does the thing the paragraph forbids. `DeviceId`
+([device_id.dart:21,37–38](packages/kmdb/lib/src/engine/kvstore/device_id.dart#L21))
+is explicit:
+
+> The device ID is persisted in `$meta` … Full platform-specific secure storage
+> (iOS Keychain, Android SharedPreferences, etc.) is **deferred to Phase 8**.
+
+So the mechanism §08 describes is *unimplemented*, and the prohibition §08
+states as an invariant is *violated by design*. §31 gap 4 confirms the real
+location, listing "device ID" among the `$meta` entries now encrypted — meaning
+§08 and §31 contradict each other on where device identity lives.
+
+The consequence worth stating is behavioural, not cosmetic: because identity
+lives in the database rather than beside it, **deleting and recreating a local
+database produces a new device ID**. A reader of §08 would reasonably expect
+identity to survive that, and would design sync recovery, `.hwm` bookkeeping,
+and peer-liveness logic on that assumption. (This is also the mechanism behind
+SC-1's stale-cache scenario: the DEK cache keys on the *path*, which is stable
+across a recreate, while the device ID is not.)
+
+Note that the Phase 8 deferral in `device_id.dart` predates the Implementation
+Status table's "Phase 8 ✅ Complete" entry, which does not mention device
+identity — worth checking whether the deferral was consciously carried past
+Phase 8 or simply lost.
+
+**Fix:** rewrite the paragraph to describe `$meta` storage as the implemented
+mechanism, state the recreate-changes-identity consequence explicitly, and move
+the secure-storage design to a *Planned* note cross-referenced to the roadmap
+`PlatformIdStore` item that §31 already cites.
+
+---
+
+### SC-6 — §31's Provisioning Guard describes a different check than the code performs 🟡
+
+§31:
+
+> State 4 (provisioning an empty database) rejects databases that already
+> contain any KV entries. **The check is performed by scanning the `$meta`
+> namespace for existing records and verifying the database is truly empty.**
+
+The code
+([kmdb_database.dart:678–683](packages/kmdb/lib/src/query/kmdb_database.dart#L678))
+inverts this — it lists namespaces and considers only those *not* beginning
+with `$`:
+
+```dart
+final userNamespaces = (await store.listNamespaces())
+    .where((ns) => !ns.startsWith(r'$'))
+    .toList();
+if (userNamespaces.isNotEmpty) {
+  throw EncryptionError.cannotProvisionNonEmptyDatabase();
+}
+```
+
+Scanning `$meta` as §31 describes could not work — `$meta` is never empty (it
+holds `device_id` and the format-version marker from the moment the database is
+created), so a literal implementation would reject every provisioning attempt.
+The code's check is the sensible one; the spec sentence is simply wrong about
+what it does.
+
+The reason this is worth more than a wording fix is the gap it leaves. The guard
+sees only user collections, so a database that has accumulated **only**
+system-namespace state — `$vault:` ref-counts and plaintext vault blobs from
+attachment ingestion, `$ver:` history, `$$fts:` indexes — passes the guard and
+can be retroactively provisioned. §31 gap 5 asserts the opposite as a
+load-bearing invariant:
+
+> a database is either born encrypted or never encrypted, so the two are always
+> set in lockstep; **there is no scenario where one is encrypted and the other
+> is not**.
+
+Per-blob `manifest.encrypted` and the SC-2 self-describing envelope mean such a
+database still *reads* correctly — this is not a data-loss path. But it
+produces exactly the mixed encrypted/plaintext state §31 says cannot arise, and
+pre-existing vault blobs stay plaintext on disk and in the cloud with no
+indication to the user that provisioning did not cover them.
+
+I have **not** built an end-to-end reproduction of vault-only ingestion
+preceding provisioning; whether `VaultStore.ingest` can be reached without
+registering a user namespace needs confirming before this is treated as more
+than a documentation defect. Recorded as reasoned-about, not confirmed.
+
+**Fix:** correct §31's description of the check. Separately, decide whether the
+guard should also reject on `$vault:`/`$ver:` state, and either tighten it or
+narrow gap 5's lockstep claim to match.
+
+---
+
+### SC-7 — §05 overstates the vault blob size bound 🟢
+
+§05's *Decompressed-Size Bound* section closes:
+
+> Vault blobs are **not** compressed by this codec at all and are bounded
+> separately and much more generously (`VaultSearchConfig.maxBlobBytes`, §24).
+
+`maxBlobBytes` (default 200 MiB) has exactly one enforcement site:
+`VaultSearchManager`
+([vault_search_manager.dart:584](packages/kmdb/lib/src/vault/search/vault_search_manager.dart#L584)),
+which skips *search extraction* for oversized blobs. It is not enforced by
+`VaultStore.ingest` or `VaultStore.getBytes`, so the vault read path itself is
+unbounded — and the check tests `bytes.length` on a blob **already fully read
+into memory**, so it does not prevent the allocation it appears to bound; it
+only prevents handing the result to an extractor.
+
+The sentence is defensible as written about *extraction*, but a reader tracing
+S-2's remediation will read "vault blobs are bounded" as a statement about the
+read path, which is the surface a hostile synced blob actually arrives on.
+
+**Fix:** say that the bound is on search extraction specifically, applied
+post-read, and that the vault read path has no size bound today.
+
+---
+
+### SC-8 — Minor drift 🟢
+
+Two small items, recorded so they are not rediscovered:
+
+- **The encrypted branch of the S-2 bound is untested.** §05 states
+  `kMaxDecodedValueBytes` is enforced "on both the encrypted and plaintext
+  branches," and it is
+  ([value_codec.dart:219](packages/kmdb/lib/src/encoding/value_codec.dart#L219)
+  and [:239](packages/kmdb/lib/src/encoding/value_codec.dart#L239)). Only the
+  plaintext branch has a test
+  (`test/encoding/value_codec_test.dart:375`); a regression that dropped the
+  `_checkDecodedSize` call from the encrypted branch would pass the suite.
+  Verdict `untested`, not `divergent`.
+- **"4-state matrix" over a 5-state table.** Both §31's *Bootstrap Sequence* and
+  the doc comment at
+  [kmdb_database.dart:343](packages/kmdb/lib/src/query/kmdb_database.dart#L343)
+  call it a 4-state matrix; the table beneath enumerates States 1–5. The states
+  themselves are correct and correctly implemented — only the count is wrong,
+  in both places.
+
+---
+
+### SC-9 — PR #61's spec edits are accurate ✅
+
+Because the §05/§08/§12/§17/§18/§24 edits landed days before this pass, they
+were traced claim-by-claim rather than assumed. They hold up, and the areas that
+generated this review's criticals are now the best-documented in the spec:
+
+- **§08's untrusted-input validation section** matches `SstableReader` field by
+  field — footer bounds, index `keyLen`, block `shared`/`unsharedLen`/`valueLen`,
+  varint sign rejection, and the uniform funnel to `CorruptedSstableException`.
+  The hostile corpus exists (`test/util/hostile_sstable.dart`,
+  `test/engine/sstable_hostile_parsing_test.dart`) and covers the classes the
+  section names.
+- **The quarantine claim is real.** §08's "a rejected peer file's high-water
+  mark still advances past it" is implemented — `SyncEngine.pull` catches
+  `CorruptedSstableException`, `FormatException`, `RangeError`,
+  `StorageException` *and* `OutOfMemoryError`, advancing the peer HWM on each
+  ([sync_engine.dart:578–624](packages/kmdb/lib/src/sync/sync_engine.dart#L578)).
+  This directly reverses S-1's re-poisoning behaviour. (§08 lists four of those
+  five types; the `OutOfMemoryError` catch is undocumented but present.)
+- **S-6 is fixed on both paths**, which was worth checking specifically since
+  the original finding named `commit()` and the obvious fix site is
+  `consolidate()`. `_safeSstablePath` is applied in both, plus a third defence
+  in `commit` — deleting only paths present in this device's *own* `sstables/`
+  listing rather than trusting the lease.
+- **§18's D-1 lifecycle bounds** (`kWorkTimeout` 30 s,
+  `kShutdownDrainTimeout` 5 s, flush strictly before isolate shutdown) match
+  `VaultIndexingIsolate` and `KmdbDatabase.close`, and are covered by
+  `test/query/kmdb_database_close_isolate_death_test.dart`.
+- **§07's WAL directory-entry durability** claim — that `append`/`appendBatch`
+  `syncDir` once per newly-active file — is implemented (`_syncDirOnce`,
+  [wal_writer.dart:185](packages/kmdb/lib/src/engine/wal/wal_writer.dart#L185))
+  and fault-injection tested against `FaultyStorageAdapter`, including the
+  revert-and-confirm-failure check. §07's honest note that retired-WAL
+  *deletion* has the mirror-image gap, with its argument for why that is benign,
+  also checks out.
+
+The contrast with the findings above is instructive: the specs that were
+rewritten under adversarial pressure are accurate, while the drift clusters in
+sections nobody has had reason to re-read — §15, §08's naming appendix, §31's
+reference tables.
+
+---
+
 ## 7. Scoping decisions and remaining questions
 
 ### 7.1 Resolved — 2026-07-18
@@ -1722,7 +2167,7 @@ and treating this document as complete coverage would be a mistake.
 | **W3** FFI safety | ✅ **Complete** | `betto_zstd` + `betto_icu` internals; PDFium boundary via S-8 |
 | **W5** CLI | 🟡 **Partial** | Core lifecycle exercised end-to-end; **not** swept: `sync`, `vault`, `search`, `index`, `schema`, `encryption`, `import`/`export`/`restore`, `promote`/`versions`, REPL, `--read` scripts |
 | **W6** code health | 🟡 **Partial** | Analyzer clean (all 9 packages); dependency gate analysed (O-1). **Not** done: coverage run, benchmark verification vs §18, public API surface, dead code, doc-comment audit, CHANGELOGs |
-| **W1** spec conformance | ❌ **Not executed** | The single largest gap. 34 spec files / 10,728 lines were **not** systematically traced to code and tests. Findings here are incidental (E-1 emerged from reading §31 for the threat model, not from a conformance pass) |
+| **W1** spec conformance | 🟡 **Partial** (2026-07-20) | Tiers 1–3 audited to depth on their highest-consequence claims; tiers 4–6 **surveyed, not audited**. Found SC-1…SC-8, and confirmed PR #61's spec edits (SC-9). See §11 for the conformance matrix and an explicit statement of what was *not* covered |
 | **W4** concurrency + durability | ✅ **Complete** (2026-07-19) | 0.02.01 regression check (D-2), fault-injection coverage (D-3), and O-4 all done. Found **D-1** |
 
 ### Specific questions left open
@@ -1738,12 +2183,63 @@ and treating this document as complete coverage would be a mistake.
    before the flush.
 3. ~~**Did the 0.02.01 hardening hold?**~~ **Resolved** — yes, verified item by
    item (**D-2**). No reversions.
-4. **Is coverage still ≥90%, and is it meaningful on the security paths?**
-   Still not measured. Given that every parser test uses well-formed input, high
-   line coverage on those files would be actively misleading.
-5. **Do the §18 benchmarks still meet their P99 targets?** Still not run.
-6. **W1 spec conformance remains entirely outstanding** — the largest gap in
-   this review.
+4. ~~**Is coverage still ≥90%?**~~ **Measured 2026-07-20 on merged `main`
+   (post-PR #61): 94.8% (11,181 of 11,800 lines), 205 source files, full suite
+   SUCCESS.** Above CLAUDE.md's 90% floor, ~0.2pp below the 95% post-remediation
+   baseline.
+
+   **But the more useful answer is the qualitative one**, and it came out of the
+   PR #61 QA pass rather than the number. `kmdb-qa` confirmed the hostile-SSTable
+   corpus exercises fourteen corruption classes — and found that the **two
+   classes it was missing (`blockOffset`/`blockSize`, and varint overflow reached
+   *through* SSTable parsing) were precisely the two whose exceptions escaped as
+   non-`CorruptedSstableException`**. The corpus gap and the code gap were the
+   same gap; a test would have caught the bug. Both have since been added.
+
+   That is the concrete vindication of this section's original warning: line
+   coverage on parser files tells you almost nothing, while *corpus* coverage
+   found a live defect. Judge future parser work the same way.
+5. ~~**Do the §18 benchmarks still meet their P99 targets?**~~ **Run 2026-07-20
+   on merged `main` (post-PR #61): 10/10 PASS.** The read-path validation added
+   by PR #61 did not regress anything.
+
+   | Operation | P99 | Target | Headroom |
+   | :--- | ---: | ---: | ---: |
+   | Put / Delete (no flush) | 0.54ms | 5.00ms | 89% |
+   | Put (flush + compact) | 8.10ms | 200.0ms | 96% |
+   | Get (in memtable) | 0.03ms | 1.00ms | 97% |
+   | Get (single-file mode) | 0.18ms | 2.00ms | 91% |
+   | Get (multi-level, present) | 0.11ms | 5.00ms | 98% |
+   | Get (warm cache, multi-file) | 0.10ms | 5.00ms | 98% |
+   | Get (absent key) | 0.17ms | 3.00ms | 94% |
+   | **Scan (namespace, 100 results)** | **7.43ms** | **10.0ms** | **26%** |
+   | Database open | 1.46ms | 100.0ms | 99% |
+   | Index build (2,000 docs) | 38.4ms | 500.0ms | 92% |
+
+   **One number to watch: `Scan` sits at 74% of its budget** while every other
+   benchmark is at a few percent of its own. Scan is the operation that decodes
+   many values per call, and PR #61's value-size check sits on that path. There
+   is no pre-PR baseline, so it is not possible to say whether this is new or
+   long-standing — but it is the only benchmark where a future change could
+   plausibly breach the target. **Re-run it after the AAD work lands**
+   ([plan_0_10_01_value_aad.md](../plans/plan_0_10_01_value_aad.md)), which adds
+   per-value AAD construction to exactly this path.
+
+   Note that the §18 P99
+   table is itself a set of normative claims with no CI enforcement, so W1
+   cannot verify it either — it is `untested` by construction until the
+   benchmark is wired into a gate.
+6. ~~**W1 spec conformance remains entirely outstanding.**~~ **Partially
+   executed 2026-07-20** — tiers 1–3 to depth, tiers 4–6 surveyed only. §11
+   records the matrix and, explicitly, the ~60% of spec surface still
+   unaudited. The remaining question is now narrower but real: **§12 (2,000+
+   lines), §24 (900+), §22, §26, and §13 have had only spot checks**, and
+   three of the eight findings came from sections that had never been
+   re-read since they were written — which is weak evidence that the
+   unaudited remainder is clean.
+7. **SC-1 needs a product decision, not just a fix.** Whether a `DekCache` hit
+   is *intended* to bypass passphrase verification determines whether the fix
+   is code or spec. Do not let this be resolved by editing §31.
 
 ### Suggested sequencing for the follow-up pass
 
@@ -1811,5 +2307,153 @@ independently shippable.
 
 ### Group F — Complete the review
 
-**W1** spec conformance and **W4** concurrency/durability (§9). Do W4 first for
-the S-2 detonation question.
+~~**W1** spec conformance and~~ **W4** concurrency/durability (§9). W4 is
+complete; W1 is **partially** complete as of 2026-07-20 — see §11 for what
+remains.
+
+### Group G — Spec corrections (W1)
+
+**SC-1 … SC-8.** Per the review's standing instruction, W1 did **not** edit
+`docs/spec/`; the corrections are proposed here and should be sequenced
+deliberately. Two of them are not documentation tasks:
+
+- **SC-1** is a code-or-spec decision about whether a `DekCache` hit bypasses
+  passphrase verification. **Sequence this first** — it is the only W1 finding
+  with a security consequence, and the answer determines whether §31 gains a
+  fix or an admission.
+- **SC-3** is a scope decision about whether `$cache` ships in `0.1.0`. If it
+  does not, §15 and `CLAUDE.md` both need rewriting, not patching.
+
+The rest (SC-2, SC-4, SC-5, SC-6, SC-7, SC-8) are spec edits with no code
+change, and can land as one pass. SC-2 should be fixed by making §24 the single
+authority for the vault blob layout and having §31 reference it — the
+duplication is what caused the drift.
+
+---
+
+## 11. W1 — Spec conformance matrix
+
+**Executed 2026-07-20** against `main` post-PR #61. Method per §4: extract
+normative claims — MUST/never/always statements, byte layouts, state machines,
+ordering guarantees, numeric thresholds — and trace each to implementing code
+and to a test that would fail if it were violated.
+
+### 11.1 Depth actually achieved — read this first
+
+This is a **partial audit reported as partial**. The spec is 10,728 lines; a
+complete claim-by-claim trace is a multi-pass effort and this was one pass.
+
+| Tier | Sections | Depth |
+| :-- | :--- | :--- |
+| 1 | §31 encryption | 🔵 **Audited** — full read, all normative claims traced |
+| 1 | §24 vault, §12 sync | 🟡 **Targeted** — encryption/integrity/lease/namespace-exclusion claims traced; the bulk (sync state machine, consolidation recovery, GC) spot-checked only |
+| 2 | §05 value encoding, §08 SSTable, §07 WAL | 🔵 **Audited** |
+| 2 | §10 manifest | ⚪ **Surveyed** — not traced |
+| 3 | §18 concurrency, §17 crash recovery | 🟡 **Targeted** — D-1/PR #61 claims traced; §17 otherwise surveyed |
+| 3 | §11 KvStore | ⚪ **Surveyed** |
+| 4 | §13 query, §16 indexes, §25 schemas, §26 versioning | ⚪ **Surveyed** — §14/§15 spot-checked (§15 yielded SC-3) |
+| 5 | §20–23 text search, §32 vault search | ⚪ **Surveyed** — the `English-language only` drift that motivated W1 was already corrected in `CLAUDE.md` and the §20/§01 working tree |
+| 6 | §29/§30 adapters, §33 credential store, §19 platform | ⚪ **Not examined** |
+
+**Roughly 40% of the spec surface received real scrutiny.** Do not read the
+absence of findings in §10, §11, §13, §16, §22, §25, §26, §29, §30, §32 or §33
+as evidence they are conformant — they were not audited. Given that three of
+eight findings (SC-3, SC-5, and half of SC-4) came from reference material
+nobody had re-read since it was written, the unaudited remainder should be
+assumed to hold drift at a similar rate.
+
+**What would make a second pass cheaper.** The findings cluster by *cause*, not
+by section: duplicated byte-layout prose across two specs (SC-2), reference
+tables listing API symbols with no test binding them to reality (SC-4, SC-3's
+`sessionCacheMaxObjects`), and design intent recorded as present-tense fact
+(SC-3, SC-5). A targeted sweep for those three patterns — every API symbol named
+in the spec grepped against the codebase, every byte layout appearing in two
+places — would likely find most of what remains at a fraction of the cost of a
+linear read.
+
+### 11.2 Matrix
+
+Verdicts: **C** conformant (code matches, test enforces) · **U** untested (code
+matches, nothing catches a regression) · **D** divergent · **X** unimplemented.
+
+| Spec | Claim | Code site | Test site | Verdict |
+| :--- | :--- | :--- | :--- | :-- |
+| §31 | AES-256-GCM, 96-bit random nonce, 128-bit tag | `encryption_provider.dart:135–170` | `encryption_provider_test.dart` | **C** |
+| §31 | Argon2id m=64 MiB, t=3, p=1, 32-byte output | `key_derivation.dart:51–57,86–91` | `key_derivation_test.dart` | **C** |
+| §31 | Recovery KEK: HKDF-SHA256, salt = SHA-256(entropy), info = `kmdb-recovery-kek` | `key_derivation.dart:106–116` — empty salt, info `…-v1` | — | **D** (SC-4) |
+| §31 | `KeyDerivation.deriveKekFromRecovery` | method is `deriveKekFromRecoveryEntropy` | — | **D** (SC-4) |
+| §31 | DEK generation via `SecureRandom` | `key_derivation.dart:188` — `AesGcm.newSecretKey()` | — | **D** (SC-4) |
+| §31 | Encrypted wire format `[0x01][nonce 12B][ct][tag 16B]`; CompressionFlag inside ciphertext | `value_codec.dart:199–220`, `encryption_flag.dart` | `value_codec_encryption_test.dart` | **C** |
+| §31 | Unknown `EncryptionFlag` byte → `ArgumentError` | `encryption_flag.dart:60–70` | `encryption_envelope_test.dart` | **C** |
+| §31 | `enc:blob` bypasses ValueCodec; structurally exempt from `$meta` encryption | `meta_store.dart` get/putEncryptionBlob | `meta_store_encryption_test.dart` | **C** |
+| §31 | Bootstrap state matrix (5 states) — called a "4-state matrix" | `kmdb_database.dart:661–756` | `kmdb_database_encryption_test.dart` | **C** (count wrong, SC-8) |
+| §31 | Provisioning guard scans `$meta` for emptiness | `kmdb_database.dart:678–683` — checks non-`$` namespaces only | `kmdb_database_encryption_test.dart` | **D** (SC-6) |
+| §31 | Cached DEK verified by AES-GCM decrypt of `enc:blob` | `kmdb_database.dart:732–735` — **no verification** | — | **D** (SC-1) |
+| §31 | Format-version gate: 3-way discrimination, `LegacyDatabaseFormatException` | `kv_store_impl.dart` open | `meta_store_encryption_test.dart` | **C** |
+| §31 | Recovery code: 16 words, 256-word list, 16 bytes, case-insensitive | `recovery_code.dart` | `recovery_code_test.dart` | **C** |
+| §31 | `indexToken` = HMAC-SHA256 under HKDF sub-key, info `kmdb-index-token` | `encryption_provider.dart:228–265` | `encryption_provider_test.dart` | **C** |
+| §31 | Vault blob stored as `nonce‖ct‖tag`; `getBytes` gates on `manifest.encrypted` | `vault_store.dart:251–252,368–375` — envelope-framed, manifest not consulted | `vault_encryption_test.dart` | **D** (SC-2) |
+| §31 | `$meta`/`$ver:`/`$vault:` sync; `$$`-prefixed are local-only | `sync_engine.dart`, `SstableInfo.localOnly` | `local_only_namespace_test.dart`, `vault_sync_exclusion_test.dart` | **C** |
+| §31 | `appendTombstoneFloorAdvance` has zero call sites | `meta_store.dart` | — | **C** |
+| §24 | Blob wrapped through `EncryptionEnvelope` unconditionally | `vault_store.dart:251–252` | `vault_encryption_test.dart` | **C** |
+| §24 | SHA-256/CRC32C over plaintext | `vault_store.dart:215–216` | `vault_store_test.dart` | **C** |
+| §24 | Content verified against address on **every** read | `vault_store.dart:371–374` | `vault_store_test.dart` | **C** |
+| §24 | `originalName` encrypted in place, base64, sole decrypt point `getManifest` | `vault_store.dart:297–306,399–421` | `vault_encryption_test.dart` | **C** |
+| §12 | Lease `inputFiles` validated before download **and** before delete | `consolidation_coordinator.dart:446–457,597–610,670–681` | `consolidation_coordinator_test.dart` | **C** |
+| §12 | `commit` deletes only files in this device's own listing | `consolidation_coordinator.dart:612–631` | `consolidation_coordinator_test.dart` | **C** |
+| §12 | Staging path is unique-per-run, not hardcoded `/tmp` (S-7) | `consolidation_coordinator.dart` `_stagingPathFor` | `consolidation_coordinator_test.dart` | **C** |
+| §12 | `.local.sst` excluded from push via `SstableInfo.parse(f).localOnly` | `sync_engine.dart:445` | `vault_sync_exclusion_test.dart` | **C** |
+| §05 | 2-byte prefix `[EncryptionFlag][CompressionFlag]` | `value_codec.dart:223–240` | `value_codec_test.dart` | **C** |
+| §05 | Compression only when `compressed.length < raw.length`; min 64 bytes | `value_codec.dart:34,144` | `value_codec_test.dart` | **C** |
+| §05 | `0x02` (Deflate) rejected with `ArgumentError` | `compression_flag.dart` | `value_codec_test.dart` | **C** |
+| §05 | `kMaxDecodedValueBytes` = 1 MiB, both branches, post-decompress pre-CBOR | `value_codec.dart:122,219,239` | plaintext branch only (`value_codec_test.dart:375`) | **U** (SC-8) |
+| §05 | `DecodedValueTooLargeException` distinct from `FormatException` | `value_codec.dart:317` | `value_codec_test.dart:391` | **C** |
+| §05 | Vault blobs bounded by `VaultSearchConfig.maxBlobBytes` | `vault_search_manager.dart:584` — extraction only, post-read | `vault_search_manager_test.dart` | **D** (SC-7) |
+| §08 | Footer 48 B; 4 KB data blocks | `sstable_writer.dart:24,166`, `sstable_reader.dart:171,371` | `sstable_test.dart` | **C** |
+| §08 | Footer fields non-negative and `offset+size <= fileSize` | `sstable_reader.dart:400–440` | `sstable_hostile_parsing_test.dart` | **C** |
+| §08 | Index `keyLen`, block `shared`/`unsharedLen`/`valueLen` bounds-checked pre-alloc | `sstable_reader.dart:474–540` | `sstable_hostile_parsing_test.dart` | **C** |
+| §08 | Varint with bit 63 set rejected as `FormatException` | `varint.dart` | `varint_test.dart`, hostile corpus | **C** |
+| §08 | All structural failures surface as `CorruptedSstableException` | `sstable_reader.dart` open/`_readBlock` | `sstable_hostile_parsing_test.dart` | **C** |
+| §08 | Rejected peer file's HWM still advances (quarantine, not re-poison) | `sync_engine.dart:570–624` | `sync_engine_native_adapter_test.dart` | **C** |
+| §08 | 3 filename formats; `.local` infix parsed before splitting on `-` | `sstable_info.dart` | `local_only_namespace_test.dart` | **C** |
+| §08 | Device ID in platform secure storage; **must not** be in the database | `device_id.dart:21,37` — stored in `$meta`; secure storage deferred | — | **D/X** (SC-5) |
+| §08 | TableCache LRU, default 256, evict-before-delete/rename | `table_cache.dart`, `kv_store.dart:519` | `table_cache_test.dart`, `table_cache_integration_test.dart` | **C** |
+| §07 | WAL never synced to cloud | `sync_engine.dart` push list | `sync_engine_test.dart` | **C** |
+| §07 | `append`/`appendBatch` `syncDir` once per newly-active file | `wal_writer.dart:96–97,147–148,185` | `wal_test.dart:174` (fault-injected) | **C** |
+| §07 | Batch = one WAL frame, one fsync; no partial batch observable | `wal_writer.dart` `appendBatch` | `writebatch_atomicity_test.dart` | **C** |
+| §07 | Rotation writes no boundary marker; replay not truncated at flush boundary | `wal_reader.dart`, `crash_recovery.dart` | `crash_recovery_test.dart` | **C** |
+| §18 | All operations on the calling isolate; vault isolate touches no KvStore | `vault_indexing_isolate.dart` | `vault_indexing_isolate_test.dart` | **C** |
+| §18 | `kWorkTimeout` 30 s, `kShutdownDrainTimeout` 5 s | `vault_indexing_isolate.dart:240,249` | `kmdb_database_close_isolate_death_test.dart` | **C** |
+| §18 | Memtable flush strictly **before** isolate shutdown in `close()` | `kmdb_database.dart:1028,1041` | `kmdb_database_close_isolate_death_test.dart` | **C** |
+| §18 | P99 latency targets (11 rows) | — | **no CI gate** | **U** |
+| §14 | `watch()` debounced at 50 ms | `kmdb_query.dart:282` | `kmdb_query_test.dart` | **C** |
+| §15 | Session cache 2,000 desktop / 256 mobile+web | `cache_tier.dart:63–64` | `session_cache_test.dart` | **C** |
+| §15 | Size configurable via `KvStoreConfig.sessionCacheMaxObjects` | **field does not exist** | — | **X** (SC-3) |
+| §15 | Materialised view cache persists scan results in `$cache`; *Required* on mobile/web | **no read or write of `$cache` anywhere** | — | **X** (SC-3) |
+| §15 | Generation counters `gen:{namespace}` incremented per WriteBatch | `meta_store.dart`, `kv_store_impl.dart` | `cache_layer_test.dart` | **C** |
+| §09 | Bloom filter 10 bits/key, ~0.8% FPR | `bloom_filter.dart:26,54` | `bloom_filter_test.dart` | **C** |
+
+### 11.3 Observations on the `0.09` reconciliation
+
+§4 asked specifically whether the `0.09` pass resolved drift by weakening the
+spec where the *code* was wrong. **I found no instance of that.** The two
+places where a claim looks carved out — §07's retired-WAL deletion note and
+§31's gaps 10 and 11 — both argue their case explicitly, name the QA pass that
+found them, and state why the code is acceptable as-is. That is the honest
+pattern, not the failure mode.
+
+The drift W1 did find has the opposite shape: it is in sections the `0.09` pass
+evidently did **not** reach. §15 has not been substantively touched since it was
+written, §08's naming appendix carries a Phase-8-era claim, and §31's reference
+tables were not re-derived from code when the surrounding prose was. A
+reconciliation pass that reads for *narrative* coherence will not catch a wrong
+`info` string or a config field that does not exist — those need mechanical
+checking, which is the SC-4/SC-3 pattern noted in §11.1.
+
+One structural note. §31 is now 951 lines, much of it a changelog of resolved
+gaps written in the past tense ("previously… **Resolved** by…"). That form is
+valuable as history and actively hostile as a specification: SC-2 exists
+precisely because a reader must hold both the superseded and current behaviour
+in mind to work out which is which, and the superseded one is stated first. Once
+`0.1.0` ships, the resolved-gap narratives belong in the roadmap's completed
+records, with §31 stating only what is true today.

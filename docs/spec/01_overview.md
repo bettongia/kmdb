@@ -118,9 +118,13 @@ a cross-device consolidation compaction.
 lexical (BM25 inverted index), semantic (BGE-family embeddings, SQ8-quantized,
 brute-force cosine similarity — the correct trade-off at KMDB's target scale),
 and `auto`/hybrid (Reciprocal Rank Fusion combining both when both indexes
-exist). Native-only, English-only. All `$$fts:`/`$$vec:` entries are
-local-only — excluded from SSTable sync — and each device rebuilds its
-indexes independently from synced document data.
+exist). English by default (default embedding model and stop-word list are
+both English-only), with opt-in multilingual embeddings and full non-Latin
+script tokenisation/stemming support — see §20's Scope section. Semantic
+search is native-only (web ONNX inference is deferred); lexical search runs
+on web too. All `$$fts:`/`$$vec:` entries are local-only — excluded from
+SSTable sync — and each device rebuilds its indexes independently from synced
+document data.
 
 **Vault (§24, §32).** A content-addressable binary object store for file
 attachments, keyed by SHA-256 hash; two documents referencing identical bytes
