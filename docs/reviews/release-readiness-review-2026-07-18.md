@@ -672,7 +672,7 @@ position rather than being justified by it.
 | SC-2 | 🟠 High | W1 | §31's *Vault Encryption* documents the **pre-PR-#61** blob byte layout and the S-4-vulnerable manifest-flag read; §24 documents the current one. Two specs contradict on a format `0.1.0` freezes | **Yes** |
 | SC-3 | 🟠 High | W1 | §15's Materialised View Cache (`$cache`) is **unimplemented**, yet §15's tier table marks it *Required* on mobile/web. `KvStoreConfig.sessionCacheMaxObjects` does not exist either | **Yes** |
 | SC-4 | 🟡 Medium | W1 | §31's *Algorithms* table misstates the recovery-KEK derivation (salt and `info` both wrong) and names two API symbols that do not exist | No |
-| SC-5 | 🟡 Medium | W1 | §08 states the device ID lives in platform secure storage and "must not be stored inside the database"; it is stored in `$meta` — inside the database. Contradicts §31 gap 4 | No |
+| SC-5 | 🟡→🟢 (rev. 2026-07-21) | W1 | §08 describes OS secure storage as current; actual authoritative store is a plaintext `DEVICE_ID` file in the db root (device-local, never synced) — §08's "not in the database" is substantially honoured. Residual: doc-accuracy (WI-2) + an inert synced `$meta` copy (WI-12 cleanup). Behavioural framing withdrawn. See finding note. | No |
 | SC-6 | 🟡 Medium | W1 | §31's *Provisioning Guard* describes a `$meta` emptiness scan; the code checks only non-`$` namespaces, weakening §31's "born encrypted or never encrypted" claim | No |
 | SC-7 | 🟢 Low | W1 | §05 presents vault blobs as size-bounded by `VaultSearchConfig.maxBlobBytes`; that bound is search-extraction-only and is applied *after* the blob is fully in memory | No |
 | SC-8 | 🟢 Low | W1 | Minor spec/code drift: the encrypted branch of `kMaxDecodedValueBytes` is untested; §31 and `kmdb_database.dart` both say "4-state matrix" over a 5-state table | No |
@@ -1935,7 +1935,33 @@ a test failing.
 
 ---
 
-### SC-5 — §08's device-identity paragraph describes an unimplemented mechanism 🟡
+### SC-5 — §08's device-identity paragraph describes an unimplemented mechanism 🟡 → 🟢 (revised 2026-07-21)
+
+> **Correction (2026-07-21) — severity revised down; the original consequence was
+> over-stated.** This finding missed the authoritative storage path. `ensureDeviceId`
+> ([kv_store_impl.dart:407](packages/kmdb/lib/src/engine/kvstore/kv_store_impl.dart#L407))
+> reads a plaintext **`DEVICE_ID` file in the db root first** — outside `sst/`, never
+> synced — and only falls back to `$meta` for backward compatibility (the file "is
+> always preferred over the `$meta` value when both are present"). Verified against
+> code and the real `demodb` instance (`DEVICE_ID` = `9c6bd81b`, with an inert `$meta`
+> copy in the syncable SSTable). Consequences of the correction:
+>
+> - **§08's "must not be stored inside the database" is *substantially already
+>   honoured*** by the `DEVICE_ID` file. What remains is a *doc-accuracy* issue: §08
+>   still describes OS secure storage (Keychain) as current when only a plaintext
+>   local file exists, and `device_id.dart:37-38` still says "`$meta` is the sole
+>   persistence mechanism" (stale). That doc correction is real and handled by **WI-2**.
+> - **The stated behavioural consequence is wrong.** Identity is *not* lost by
+>   recreating the LSM contents — it lives in the `DEVICE_ID` file beside the DB, not
+>   inside `sst/`. (This also detaches SC-5 from SC-1's stale-cache scenario.)
+> - **The residual real issue is minor:** the legacy `$meta` copy still syncs, which
+>   is dead weight and leaks each peer's `device_id` into the sync folder —
+>   hygiene/confidentiality, not correctness. **WI-12** is re-scoped to retire that
+>   copy (a cleanup), not to migrate device identity.
+>
+> Net: the spec-vs-code *documentation* divergence stands (🟡 → WI-2); the *behavioural
+> / data-loss* framing below is withdrawn, and the finding drops to 🟢. The original
+> text is retained unedited for the record.
 
 §08's *SSTable Naming Convention* closes with:
 

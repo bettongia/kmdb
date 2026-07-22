@@ -1,6 +1,12 @@
 # Spec attribute registry and a spec-authoring guide
 
-**Status**: Open
+**Status**: Investigated — reviewer's B1–B5 + Phase-3 questions resolved and confirmed
+2026-07-21. The rebuilt `device_id` entry and every changed anchor were re-verified
+against `main`; the load-bearing new claim (`reassignDeviceId` rewrites the `DEVICE_ID`
+file **and** `$meta`) was held to the same standard that caught B1 and passed
+(`KvStoreImpl.reassignDeviceId`, `kv_store_impl.dart:337-348`). Phases 3–4 are now
+mechanical. See [Maintainer resolution](#maintainer-resolution-2026-07-21) and the
+[confirmation note](#confirmation-pass-2026-07-21) in the review.
 
 **PR link**: _(none yet)_
 
@@ -131,22 +137,31 @@ keep the registry from becoming the very thing it exists to prevent:
 - **Each `$meta` WI updates its own attribute's registry row when it lands** — drop
   the ⚠, finalise the storage location. This becomes a checklist item in those WIs
   (roadmap note in Phase 6).
-- **The false "floor is not replicated" claim is WI-11's to fix, not this plan's.**
-  It appears in both `06_storage_engine.md:205-206` ("Per-device, not synced. The
-  floor lives in `$meta`, which is not replicated") and the `meta_store.dart:360`
-  doc comment — both false (`$meta` replicates; `isLocalOnly` matches `$$` only).
-  The registry entry for the floor **states the corrected fact and references
-  WI-11**; it does not duplicate the correction. (Bonus drift site found by the
-  architect pass — fold into WI-11's spec step.)
+- **The false "floor is not replicated" claim: this plan fixes the *spec*
+  sentences; WI-11 fixes the *code* comment** (B5, 2026-07-21). The false claim
+  appears in both `06_storage_engine.md:205-206` ("Per-device, not synced. The floor
+  lives in `$meta`, which is not replicated") and the `meta_store.dart:360` doc
+  comment — both false (`$meta` replicates; `isLocalOnly` matches `$$` only). Adding
+  a registry inbound link beside an uncorrected §06 sentence would ship a
+  self-contradicting section, so **this docs-only plan corrects the §06 spec sentence
+  (and audits §12/§31 for the same before linking)**; the `meta_store.dart:360` *code*
+  comment stays WI-11's (out of a docs-only plan's scope). See Phase 4/6.
 
 ### Edge cases the implementer must handle
 
 - **The registry's worth is checkability, not prose.** Every fact-block claim must
   carry a `file:symbol` anchor a reader (or the auditor) can verify. A row that
   asserts `Encrypted: Yes` without a verifiable anchor is SC-11 with better
-  formatting. Appendix A's `device_id` encryption field is the cautionary case: a
-  misleading comment at `meta_store.dart:504` nearly recorded it wrong — the truth
-  (`putDeviceId`/`getDeviceId` wrap via `EncryptionEnvelope`) came from the code.
+  formatting.
+- **The `device_id` entry is this plan's own worked cautionary tale.** Its first
+  draft said storage was "`$meta`, key `device_id`" — **wrong**: the authoritative
+  store is a `DEVICE_ID` file read first (`kv_store_impl.dart:407`). Both the initial
+  author *and* the `kmdb-architect` grounding pass got it wrong because both grounded
+  in the existing docs (which say `$meta`); the `kmdb-plan-reviewer`, told to hold the
+  plan to its own "code-anchored" standard, caught it against `main`. The plan
+  designed to fix doc-vs-code drift nearly shipped its flagship entry with exactly
+  that drift. **Lesson, recorded in the guide: verify every anchor by symbol against
+  the code, never by eyeballing a line or trusting adjacent prose.**
 - **`enc:blob` is the genuine encryption exception** — raw CBOR, *not*
   `EncryptionEnvelope`-wrapped, so bootstrap can read it before the DEK exists
   (`meta_store.dart:508-543`). The register must not blanket-claim "everything in
@@ -184,7 +199,11 @@ keep the registry from becoming the very thing it exists to prevent:
       sections, cross-ref conventions (§N by number, relative links/anchors), and
       table style.
 - [ ] Relocate the spec-numbering note from `docs/plans/README.md` (§44-48): the
-      guide owns it; `plans/README.md` keeps a one-line cross-reference (Q1).
+      guide owns it; `plans/README.md` keeps a one-line cross-reference (Q1). The
+      pointer must **preserve the plan-author-facing imperative** ("a plan must not
+      hard-code its spec number") — that audience differs from the guide's
+      spec-author-facing mechanics, so redirect *and* retain the imperative, don't
+      merely link away (reviewer non-blocking note).
 - [ ] Document the **registry entry template**: the fixed fact block (Kind, Format,
       Scope, Storage today/target, Encrypted, Mutability, CLI, Introduced→plan,
       Status), the **⚠ today/target** convention for mid-change attributes, the
@@ -198,8 +217,10 @@ keep the registry from becoming the very thing it exists to prevent:
       each section gains a requirements table linking into the registry) — described
       as the pattern, not applied spec-wide here.
 - [ ] Document the **code-anchoring discipline** and the **`kmdb-spec-auditor`'s**
-      standing job ("does each anchor still say what the row claims?"), and the hard
-      rule **never edit the spec to match wrong code**.
+      standing job ("does each anchor still say what the row claims?"), the hard rule
+      **never edit the spec to match wrong code**, and the standing rule **verify
+      every anchor by symbol against the code, never by eyeballing a line or trusting
+      adjacent prose** (B1/B3 — the `device_id` entry proved why).
 
 ### Phase 2 — the registry section (`03a_attribute_registry.md`, unnumbered)
 
@@ -222,24 +243,47 @@ keep the registry from becoming the very thing it exists to prevent:
       against code; correct if wrong (never move a false claim into the registry;
       never edit to match wrong code); *then* place. "If appropriate" — some detail
       is simply trimmed, not every entry needs a full registry entry.
-- [ ] **Migrate the overlaps now, defer the rest cleanly.** Reconcile the entries
-      that overlap the seeded `$meta` register (`enc:blob`, `Generation
-      counter`/`gen:{ns}`) so glossary and registry agree. For attribute families
-      the registry does not yet cover (vault namespaces, key material), either open
-      the corresponding registry family or leave a marked "registry candidate" note
-      — do **not** half-migrate.
+- [ ] **Migrate the overlaps now.** Reconcile the entries that overlap the seeded
+      `$meta` register — `enc:blob`, `Generation counter`/`gen:{ns}`, and **`Index
+      token`** (Q-Phase3a: its `hex`/`hmac` `tokenMode` detail belongs with the
+      seeded `index:`/`fts:`/`vec:` index-state rows, so it is a migrate-now overlap,
+      not a defer) — so glossary and registry agree. Trim each to a concept definition
+      + link; move the storage/scheme detail to the register.
+- [ ] **Defer uncovered families as marked "registry candidate" notes** (Q-Phase3b,
+      decided): for the vault namespaces and key-material entries (`DEK`, `KEK`,
+      `Wrapped DEK`, `DekCache`, `$vault:*`, `$$vault:*`), **do not open new registry
+      families in this plan** — leave a one-line "registry candidate" marker on the
+      glossary entry and stop there. This keeps Phase 3 bounded.
 - [ ] **Leave a glossary stub that links in.** Where content moves, the glossary
       keeps a one-line definition + "See the attribute registry: <entry>", so the
       term stays findable and the bidirectional-link rule holds.
 
-### Phase 4 — inbound links
+### Phase 4 — inbound links (and the §06 false-sentence fix)
 
-- [ ] From each of §03/§04/§08/§11/§12/§13/§31, replace inline `device_id`
-      description with a link into the registry entry (leave section-local context,
-      remove duplicated fact-of-record).
-- [ ] From §06/§12/§31, link the tombstone-floor mentions into the registry entry.
+- [ ] Apply this **per-section disposition** (B4) — *definitional* sections keep
+      their substance and gain a link; *consumer* sections replace the inline
+      fact-of-record with a link. Do not strip a definitional home into an unnumbered
+      reference section.
+
+      | Section | device_id / floor role | Disposition |
+      | :--- | :--- | :--- |
+      | §04 keys | **device_id definitional home** | **Keep** the definition; add a link. Do **not** demote into the registry. |
+      | §08 SSTable naming | uses `{deviceId}-…` in place | **Keep** the naming context; add a link. |
+      | §03, §11, §13, §31 | consumer mentions of device_id | **Replace** inline description with a link. |
+      | §12 sync | device_id + floor | Keep the sync-behaviour context; link the *storage/scope* fact. Audit for any "per-device/not-synced" floor sentence (see below). |
+      | §06 storage engine | tombstone floor | Keep compaction/ingest context; link the storage fact — **after** fixing the false sentence (below). |
+      | §31 encryption | floor | Link; audit for a "per-device/not-synced" claim. |
+
+- [ ] **Fix the false §06 sentence in this plan (B5).** `06_storage_engine.md:205-206`
+      asserts "Per-device, not synced. The floor lives in `$meta`, which is not
+      replicated" — false, and one low-risk sentence squarely in the registry's
+      domain. Correct it **here** so the inbound link does not sit beside a
+      contradiction. **Audit §12/§31 for the same "per-device/not-synced" floor claim
+      and fix any before linking.** (The `meta_store.dart:360` *code* comment stays
+      WI-11's — out of a docs-only plan's scope.)
 - [ ] Confirm no section is left asserting a fact the registry now owns (that is the
-      duplication the registry exists to remove).
+      duplication the registry exists to remove), and no inbound link lands beside an
+      uncorrected contradiction.
 
 ### Phase 5 — build and render verification (the SC-17 guard)
 
@@ -252,10 +296,14 @@ keep the registry from becoming the very thing it exists to prevent:
 ### Phase 6 — coordination
 
 - [ ] Add a checklist item to WI-11/WI-12/WI-13 (roadmap) that each updates its
-      attribute's registry row when it lands (drop ⚠, finalise storage).
-- [ ] Add the `06_storage_engine.md:205-206` false-claim correction to **WI-11**'s
-      spec step (with the `meta_store.dart:360` comment) — referenced, not
-      duplicated, by the registry entry.
+      attribute's registry row when it lands (drop ⚠, finalise storage). **WI-12 is
+      re-scoped** (2026-07-21): device_id's authoritative store is already the local
+      `DEVICE_ID` file, so WI-12 is a low-risk *cleanup* — stop writing the inert
+      `$meta` copy — not a device-identity migration. SC-5's severity is revised down
+      accordingly in the review.
+- [ ] The §06 **spec** false-sentence fix is owned by **this plan** (Phase 4, B5);
+      only the `meta_store.dart:360` **code** comment is left to **WI-11**. Update
+      WI-11's spec step to say so, so the two do not both claim the §06 sentence.
 
 **Final step — QA sign-off and pre-commit:**
 
@@ -271,6 +319,266 @@ keep the registry from becoming the very thing it exists to prevent:
 ## Summary
 
 _To be completed when the work is done._
+
+---
+
+## Plan review (2026-07-21, kmdb-plan-reviewer)
+
+**Verdict: not ready for `Investigated`. Status → `Questions`.** The infrastructure
+half of this plan is strong and well-motivated — the registry-vs-glossary division,
+the ⚠ today/target convention, the fact-block-as-agent-surface framing, the SC-17
+guard, and the unnumbered-section mechanics are all sound, and the `03a_` sort key
+was verified correct (see below). But the plan is held to its **own** standard —
+*"code-anchored and checkable, not asserted"* — and its **flagship seed entry
+(`device_id`) is materially wrong against `main` in exactly the SC-11 way the plan
+exists to prevent.** That, plus two under-specified phases, blocks the bar of
+"an implementer could execute this with no significant design decisions left."
+
+Everything below was verified against `main` at HEAD `83d54d8`.
+
+### Blocking — factual corrections to the seed (Appendix A)
+
+**B1. `device_id` storage today is wrong — it omits the authoritative `DEVICE_ID`
+file.** This is the load-bearing defect. The plan's `device_id` entry says storage
+today is "`$meta`, key `device_id`", scope "Device-local ⚠ stored as replicated
+today — it syncs via `$meta` (SC-5)", and frames WI-12 as a binary "`$meta` today →
+secure-storage-outside-DB *or* `$$`". The code tells a different story:
+
+- `KvStoreImpl.ensureDeviceId` (`kv_store_impl.dart:407-431`) reads a plaintext
+  **`DEVICE_ID` file in the db root** (`kDeviceIdFilename`, `kv_store_impl.dart:439`)
+  **first**, and only falls back to `$meta` for backward compatibility. Its own doc
+  comment (`kv_store_impl.dart:394-406`) states the device ID is stored in *two*
+  places and that **"The DEVICE_ID file is therefore always preferred over the
+  `$meta` value when both are present."**
+- The file lives outside `sst/`, so `SyncEngine` never uploads it — the
+  **authoritative** identity is already device-local. `$meta` is "retained for
+  backward compatibility only."
+- This is not new/in-flight behaviour: it landed in `2c6971c` ("Fix device ID
+  corruption when syncing copied databases"), predating the durability track.
+
+Consequences the entry must be reworked around:
+
+- **Storage — today** is `{dbDir}/DEVICE_ID` (authoritative, never synced) **plus** a
+  backward-compat `$meta` copy (which does replicate but is read *second*). SC-5's
+  bite is far smaller than "it syncs today" implies: a DB that has ever called
+  `ensureDeviceId` reads the local file and ignores the synced `$meta` value.
+- **The §08 "Tensions" narrative is undercut.** §08:153-155 ("secure storage… must
+  not be stored inside the database itself to avoid circular dependency") is
+  *substantially already honoured*: the `DEVICE_ID` file is outside the LSM, so
+  there's no bootstrap circularity and no encryption dependency. The plan presents a
+  binary that misses the existing third path. WI-12's framing needs to start from
+  "there is already a local file; what remains" — not "it lives in `$meta`."
+- **The encryption tension is largely moot on the primary path.** The `DEVICE_ID`
+  file is plaintext (`id.codeUnits`), read with no DEK. Only the `$meta` fallback is
+  `EncryptionEnvelope`-wrapped. "Reading it needs the DEK" is true only of the
+  fallback, not the path actually taken.
+
+This entry is the one the plan explicitly stakes its credibility on ("Appendix A's
+`device_id` encryption field is the cautionary case"). Shipping it with the primary
+storage mechanism missing would be the registry's first SC-11. Must be corrected and
+re-anchored before `Investigated`. (Note: `reassignDeviceId` should also be checked —
+does it rewrite the `DEVICE_ID` file, or only `$meta`? The `new-device-id` CLI note
+in the entry currently describes only the `$meta` + hwm story.)
+
+**B2. `ensureDeviceId` is mis-located, and the lifecycle prose conflates three
+things.** Appendix A's Code-coordinates row "Generate / ensure |
+`device_id.dart:63` (`ensureDeviceId`)" is wrong: `ensureDeviceId` is **not** in
+`device_id.dart`. It is `KvStoreImpl.ensureDeviceId` (`kv_store_impl.dart:407`),
+surfaced as `KmdbDatabase.ensureDeviceId` (`kmdb_database.dart:781`). `device_id.dart`
+has `DeviceId.load` (line 53; the UUIDv4 generation is line 64, not 63). The
+Lifecycle sentence — "Minted lazily on first launch by `ensureDeviceId` if absent
+(`device_id.dart:63`), defaulting to the sentinel `'00000000'` until then" —
+conflates: (a) `DeviceId.load` (generates a real ID); (b) `ensureDeviceId` (file-first
+resolution, different file); (c) the `'00000000'` **open-time param default**
+(`kv_store_impl.dart:120`, `kmdb_database.dart:303`), which is what an un-`ensure`d
+store reports, *not* what `DeviceId.load` returns. Untangle these.
+
+**B3. Minor line-drift (fix in passing, non-blocking on their own):**
+`reassignDeviceId` is cited at `lsm_engine.dart:1524`; actual is
+`lsm_engine.dart:1428` (doc at `:1408`). `new_device_id_command.dart:47` → class at
+`:46`. These are within the "line numbers drift, re-verify" caveat, but B1/B2 show the
+caveat needs teeth: **re-verify every anchor by symbol, not by eyeballing the line.**
+
+**Confirmed correct** (so the reviewer isn't only reporting misses):
+`putDeviceId`/`getDeviceId` are `EncryptionEnvelope`-wrapped at `meta_store.dart:217`/
+`:207`, `deviceIdKey` at `:204`; the misleading `:504-505` comment (mentions
+`deviceIdKey` in a "never wrapped" context) is indeed a trap — the values *are*
+wrapped. `enc:blob` is genuinely raw CBOR, not wrapped (`meta_store.dart:508-543`),
+so the "not everything in `$meta` is encrypted" caveat is right. `gc:tombstoneFloor`
+*is* wrapped (`setTombstoneFloor`/`getTombstoneFloor` `:405`/`:380`).
+`device_id.dart:37-38`'s "deferred to Phase 8" note, §08:153-155's "must not be stored
+inside the database", §06:205-206's false "not synced", and `meta_store.dart:360`'s
+false "excluded from sync" all check out exactly as described.
+
+### Blocking — under-specified phases (design decisions left to the implementer)
+
+**B4. Phase 4 (inbound links) is the least mechanical step and needs a per-section
+disposition.** "Leave section-local context, remove duplicated fact-of-record" asks a
+Sonnet implementer to decide, per section, what is *the fact of record* (strip → link)
+versus *local context a reader needs in place* (keep + link) across §03/04/08/11/12/13/
+31 (device_id) and §06/12/31 (floor). That is a design judgment on the fly, and two
+sections are clearly **not** "strip to a link":
+
+- **§04 is device_id's definitional home** (the keys/identity chapter). Demoting its
+  substance into an *unnumbered* early section would move a numbered spec's identity
+  definition into what reads as a reference appendix. §04 should keep its definition
+  and gain a link, not be stripped.
+- **§08's SSTable naming** needs `{deviceId}-…` in place; that is section-local, not
+  duplication.
+
+Add an explicit table to Phase 4: for each of the 10 sections, "definitional — keep
+substance + add link" vs "consumer — replace inline description with a link", and name
+what specifically gets removed. Without it, Phase 4 is not mechanical.
+
+**B5. Phase 4 + Phase 6 together ship a self-contradicting §06.** Phase 4 links §06's
+tombstone-floor mention *into* the registry (whose entry correctly says "syncs today,
+unsafe"), while Phase 6 defers correcting §06:205-206's **false** "Per-device, not
+synced… `$meta`, which is not replicated" to WI-11. Net effect of *this* plan: §06
+asserts "not synced" (false) immediately beside a link to a registry entry that says
+the opposite. That is worse than either fixing it or leaving it alone. Decide one:
+(a) fix that single false sentence in §06 now — it is one sentence, squarely in the
+registry's domain, and low-risk — or (b) do **not** add the §06 inbound link until
+WI-11 corrects the prose. Deferring the *code* comment (`meta_store.dart:360`) to WI-11
+is correct (out of a docs-only plan's scope); the *spec* sentence is this plan's to
+either fix or not-yet-link. (Same question applies wherever §12/§31 currently assert
+the floor is per-device/not-synced — audit those before linking.)
+
+### Questions for the maintainer (resolve, then this can move to `Investigated`)
+
+- [ ] **B1 — rework the `device_id` entry around the `DEVICE_ID` file.** Confirm the
+      corrected framing: storage today = local `DEVICE_ID` file (authoritative, never
+      synced) + backward-compat `$meta` copy; SC-5 scoped to the fallback; §08 rationale
+      already partly satisfied; WI-12 reframed accordingly. (Also: does
+      `reassignDeviceId` rewrite the file? verify and fix the CLI note.)
+- [ ] **B2 — correct `ensureDeviceId` location and untangle the lifecycle prose**
+      (`DeviceId.load` vs `ensureDeviceId` vs the `'00000000'` open-time default).
+- [ ] **B3 — re-anchor by symbol** (`reassignDeviceId` → `lsm_engine.dart:1428`, etc.)
+      and adopt "verify by symbol, not line" as the standing rule the guide records.
+- [ ] **B4 — add the per-section disposition table to Phase 4** (definitional-keep vs
+      consumer-strip; §04 and §08 are keep-with-link).
+- [ ] **B5 — decide the §06 false-sentence handling**: fix the one sentence in this
+      plan, or hold the §06 inbound link until WI-11. Audit §12/§31 for the same before
+      linking.
+- [ ] **Q-Phase3a — is `Index token` a "migrate now" overlap or a "defer" family?**
+      Its `tokenMode` (`hex`|`hmac`) discriminator lives in the index-state `$meta`
+      blobs the register already seeds as rows (`index:`/`fts:`/`vec:`), so it overlaps
+      the seed — yet the plan names only `enc:blob` and `Generation counter` as the
+      "migrate now" overlaps. Classify it explicitly so Phase 3 stays bounded. (The
+      `SQ8` = stays / `Index token` = migrates split is otherwise correct: `SQ8` is an
+      algorithm with no storage/sync/encryption axis, like `BM25`/`IDF`; `Index token`
+      carries stored-attribute detail.)
+- [ ] **Q-Phase3b — collapse the "either open the family OR leave a note" choice.**
+      For vault namespaces and key material, Phase 3 offers a design decision at
+      implementation time. Pick one now (recommend: leave a marked "registry candidate"
+      note; do not open new families in this plan) so Phase 3 is mechanical.
+
+### Non-blocking notes (address, but they don't gate `Investigated`)
+
+- **Q1 cross-reference nuance.** `docs/plans/README.md:44-48` is *plan-author*-facing
+  ("a plan must not hard-code its spec number"). The relocation is right, but the
+  one-line pointer must **preserve that plan-facing imperative**, not merely redirect to
+  `docs/spec/README.md`'s (spec-author-facing) mechanics. State this in the Phase 1
+  checklist item.
+- **`03a_` sort key: verified correct.** Empirically, `03a_attribute_registry.md`
+  sorts after `03_architecture_overview.md` and before `04_keys.md` under `LC_ALL=C`,
+  `C.UTF-8` (this repo's locale), and `en_US.UTF-8`. Q2 is settled; keep the
+  render-time confirmation in Phase 5 as belt-and-braces.
+- **Phase 5 SC-17 guard is adequate and concrete** (render, TOC-presence for the
+  unnumbered heading, grep for a heading *after* the registry to prove nothing was
+  swallowed, spot-check §13/§16 numbers). Good as written.
+- **Register completeness ("all twelve `$meta` families") is un-audited here** and is
+  correctly handed to `kmdb-spec-auditor` in the final step. Acceptable for a docs-only
+  plan, but note that `fts:`/`vec:`/`schema:`/`version:config:` keys are written by
+  other subsystems (not `meta_store.dart`), so the auditor's completeness pass is the
+  real check — don't treat the seed table as self-evidently exhaustive.
+- **Coordination division (WI-11/12/13) is otherwise clean.** Seeding a ⚠ today/target
+  row for a mid-change attribute does not create a maintenance trap *provided* the row
+  states the true current fact (it does, for the floor) — the WIs only drop the ⚠ and
+  finalise storage. This does **not** block completion of this plan.
+
+Once B1–B5 and the two Phase-3 questions are resolved in the plan text, this clears the
+bar and can go to `Investigated` — the underlying design is sound; the gaps are
+factual accuracy in the seed and mechanical specificity in Phases 3–4.
+
+### Maintainer resolution (2026-07-21)
+
+All seven items addressed in the plan text above; every code claim re-verified against
+`main` **and** against the real `demodb` instance the maintainer created.
+
+- **B1 — done.** The `device_id` entry (Appendix A) is rebuilt around the
+  authoritative `DEVICE_ID` file (`kv_store_impl.dart:407`, `:439`), with the `$meta`
+  copy demoted to legacy/inert-on-read. Storage, Scope, Encryption, the §08 Tensions,
+  and the WI-12 framing are all re-anchored. `reassignDeviceId` verified to rewrite
+  **both** the file and `$meta` (so the CLI note is correct). Confirmed empirically:
+  `demodb/DEVICE_ID` = `9c6bd81b`, with a `$meta` copy in the syncable SSTable body.
+- **B2 — done.** `ensureDeviceId` re-located to `kv_store_impl.dart:407`
+  (surfaced `kmdb_database.dart:781`); `DeviceId.load`/`ensureDeviceId`/`'00000000'`
+  open-time default untangled in the Lifecycle prose and Code-coordinates table.
+- **B3 — done.** Re-anchored by symbol (`reassignDeviceId` → `lsm_engine.dart:1428`,
+  CLI → `:46`, etc.); "verify by symbol, not line" added to the guide (Phase 1) and
+  to the edge-cases as this plan's own worked cautionary tale.
+- **B4 — done.** Phase 4 now carries the per-section disposition table (§04/§08 =
+  keep-substance + link; §03/11/13/31 = consumer-strip; §12/§06/§31 audited).
+- **B5 — decided: fix the §06 sentence in this plan.** Phase 4 corrects
+  `06_storage_engine.md:205-206` (and audits §12/§31) so no inbound link sits beside a
+  contradiction; the `meta_store.dart:360` code comment remains WI-11's. Phase 6 and
+  the Coordination note updated so the two don't both claim the §06 sentence.
+- **Q-Phase3a — decided: `Index token` migrates now** (its `tokenMode` detail folds
+  into the seeded index-state rows).
+- **Q-Phase3b — decided: registry-candidate notes, no new families** in this plan.
+
+Plus the two roadmap/review consequences (maintainer-approved 2026-07-21): **WI-12
+re-scoped** to "retire the inert `$meta` device_id copy" (cleanup, not migration), and
+**SC-5's severity revised down** in the review (hygiene/confidentiality, not
+wrong-identity). The Keychain/secure-storage move is logged as a separate optional
+enhancement.
+
+### Confirmation pass (2026-07-21, kmdb-plan-reviewer)
+
+**Confirmed — moving to `Investigated`.** All five blockers and both Phase-3 questions
+are genuinely resolved. Re-verified against `main` at HEAD `83d54d8`:
+
+- **B1 holds up under its own standard.** The rebuilt `device_id` entry now leads with
+  the authoritative `DEVICE_ID` file (`ensureDeviceId`, `kv_store_impl.dart:407`;
+  `kDeviceIdFilename`, `:439`) and demotes the `$meta` copy to legacy/inert-on-read —
+  matching the code (`kv_store_impl.dart:394-406`, "the DEVICE_ID file is therefore
+  always preferred"). The one new load-bearing claim — *reassign rewrites both the file
+  and `$meta`* — was held to the B1 bar and **passed**: `KvStoreImpl.reassignDeviceId`
+  (`kv_store_impl.dart:326`) delegates SSTable renames to `LsmEngine.reassignDeviceId`
+  (`lsm_engine.dart:1428`), then `putDeviceId` writes the `$meta` copy (`:337`), then
+  durably rewrites the `DEVICE_ID` file (`:342-348`). No new wrong anchor was
+  introduced.
+- **B2/B3 correct.** `ensureDeviceId` re-located to `kv_store_impl.dart:407`
+  (`kmdb_database.dart:781`); `DeviceId.load` (`device_id.dart:53`, UUIDv4 at `:64`)
+  and the `'00000000'` open-time default (`kv_store_impl.dart:120`) are untangled;
+  `reassignDeviceId` re-anchored to `lsm_engine.dart:1428`, CLI to `:46`. The
+  "verify by symbol, not line" rule is folded into the guide.
+- **B4/B5 make Phases 3–4 mechanical.** Phase 4's per-section disposition table
+  removes the on-the-fly keep-vs-strip judgment (§04/§08 keep+link is correct — they
+  are the definitional/naming homes), and the §06:205-206 false-sentence fix is pulled
+  into this plan with a §12/§31 audit, so no inbound link lands beside a contradiction.
+  Phase 6 cleanly splits the spec fix (this plan) from the `meta_store.dart:360` code
+  comment (WI-11).
+- **Phase 3 is bounded.** Migrate-now is exactly `enc:blob` + `Generation counter` +
+  `Index token`; all other candidates get a "registry candidate" note; no new families.
+  The `SQ8`-stays / `Index token`-migrates split is sound.
+
+**Two soft notes for the implementer (non-blocking, do not gate `Investigated`):**
+
+1. **Index-token detail placement.** The seeded `index:`/`fts:`/`vec:` rows are
+   *summary* rows; the `tokenMode` (`hex`|`hmac`) / HKDF-`kmdb-index-token` detail
+   being migrated from the glossary is richer than a single cell. Either add a compact
+   "tokenMode: hex→hmac" note to the rows or promote index-state to a full entry — the
+   granularity rule already sanctions both; pick whichever reads cleaner. The
+   underlying facts are already prose in the §99 `Index token` entry (validate them per
+   Phase 3's "validate before moving" step; the auditor is the final gate).
+2. **Register completeness** ("all twelve `$meta` families") remains the
+   `kmdb-spec-auditor`'s check — `fts:`/`vec:`/`schema:`/`version:config:` keys are
+   written outside `meta_store.dart`, so don't treat the seed table as self-evidently
+   exhaustive.
+
+The design is sound, the seed is now code-accurate, and an implementer can execute
+Phases 1–6 without significant design decisions. **Cleared for implementation.**
 
 ---
 
@@ -335,7 +643,7 @@ Phase-4 (WI-11) confirmation, not a settled fact.
 
 | Attribute | Kind | Scope | Storage: today → target | Encrypted | Detail |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `device_id` | Identifier | Device-local ⚠ syncs today (SC-5) | `$meta` → **WI-12** (secure store *or* `$$`) | Yes | **[full entry](#device_id)** |
+| `device_id` | Identifier | Device-local (authoritative) — inert `$meta` copy syncs (SC-5) | `DEVICE_ID` file (never synced) **+** legacy `$meta` copy → **WI-12** retires the copy | File: No · `$meta`: yes | **[full entry](#device_id)** |
 | `index:{ns}:{path}` | Index state | Device-local ⚠ syncs today (SC-10) | `$meta` → `$$indexstate` | Yes | WI-11 |
 | `fts:{ns}:{field}` | Index state | Device-local ⚠ syncs today (SC-10) | `$meta` → `$$ftsstate` | Yes | WI-11 |
 | `vec:{ns}:{field}` | Index state | Device-local ⚠ syncs today (SC-10) | `$meta` → `$$vecstate` | Yes | WI-11 |
@@ -361,69 +669,72 @@ Phase-4 (WI-11) confirmation, not a settled fact.
 | Field | Value |
 | :--- | :--- |
 | **Kind** | Identifier (opaque) |
-| **Format** | 8-char lowercase hex — truncated Universally Unique Identifier v4 (`v4().replaceAll('-','').substring(0,8)`) |
-| **Scope** | Device-local ⚠ **stored as replicated today** — it syncs via `$meta` (SC-5) |
-| **Storage — today** | `$meta`, key `device_id` (`_nameToKey('device_id')`) |
-| **Storage — target** | **Undecided (WI-12).** Platform secure storage *(outside the DB)* per §08 intent, **or** a `$$` local-only namespace. Not a settled "→ `$$`". |
-| **Encrypted at rest** | Yes, when the DB is encrypted — `EncryptionEnvelope`-wrapped in `putDeviceId`/`getDeviceId` |
-| **Mutability** | Set once at first launch; changed only by explicit `reassignDeviceId` (which renames every SSTable) |
+| **Format** | 8-char lowercase hex — truncated Universally Unique Identifier v4 (`DeviceId.load`, `device_id.dart:64`). Verified on a real instance: `demodb/DEVICE_ID` = `9c6bd81b`. |
+| **Scope** | Device-local. The **authoritative** store is a local file that is never synced; a legacy `$meta` copy *does* replicate but is read **second** and is inert on read (SC-5). |
+| **Storage — today** | **Authoritative:** a plaintext `DEVICE_ID` file in the db root (`{dbDir}/DEVICE_ID`), outside `sst/` → never uploaded. **Legacy:** a `$meta` `device_id` copy, written on first open via the fallback (and on every `reassignDeviceId`); it lands in a syncable `.sst` and replicates, but `ensureDeviceId` prefers the file. *(Confirmed on `demodb`: both the `DEVICE_ID` file and a `$meta` copy present; the copy is in the syncable SSTable body.)* |
+| **Storage — target** | **WI-12 (cleanup):** stop *writing* the inert `$meta` copy on new databases (keep reading it as the legacy fallback). Moving to OS secure storage (Keychain, per §08) is a *separate optional enhancement*, not required — the local file already resolves the bootstrap concern. |
+| **Encrypted at rest** | **File: No** — plaintext (`id.codeUnits`), read with no DEK. **`$meta` copy:** `EncryptionEnvelope`-wrapped (plaintext only when the DB is unencrypted, as in `demodb`). |
+| **Mutability** | Set once at first launch; changed only by `reassignDeviceId`, which rewrites the `DEVICE_ID` file **and** the `$meta` copy **and** renames every SSTable (the manifest then records the new filenames). |
 | **CLI** | `kmdb new-device-id` (see below) |
-| **Introduced** | [`plan_deviceid.md`](completed/plan_deviceid.md) (Phase 1, §04) |
-| **Status** | 🔧 Changing under **WI-12** (before the `0.1.0` format freeze) |
+| **Introduced** | [`plan_deviceid.md`](completed/plan_deviceid.md) (§04); the `DEVICE_ID` file landed later in `2c6971c` ("Fix device ID corruption when syncing copied databases"). |
+| **Status** | 🔧 WI-12 retires the legacy `$meta` copy (low-risk cleanup, before the `0.1.0` freeze) |
 
-**Role.** Two distinct jobs. (1) **Naming:** every SSTable this device flushes is
-`{deviceId}-{minHlc}-{maxHlc}.sst`, and consolidation output prepends the epoch —
-so `device_id` is load-bearing for the on-disk file layout (§08). (2) **Sync
-identity:** per-device high-water marks are keyed by it, consolidation fencing is
-per-`deviceId`, and `SyncEngine` uses it to *exclude self* when pulling peers.
+**Role.** Two jobs. (1) **Naming:** every SSTable is `{deviceId}-{minHlc}-{maxHlc}.sst`,
+and the manifest records those filenames — so `device_id` is load-bearing for the
+on-disk layout (§08). (2) **Sync identity:** per-device high-water marks are keyed by
+it, consolidation fencing is per-`deviceId`, and `SyncEngine` uses it to *exclude
+self* when pulling peers.
 
-**Lifecycle.** Minted lazily on first launch by `ensureDeviceId` if absent
-(`device_id.dart:63`), defaulting to the sentinel `'00000000'` until then.
-Persisted via `putDeviceId`. Reassignment is a heavyweight operation: it flushes,
-renames every SSTable file, and rewrites the stored value.
+**Lifecycle.** Resolved on open by `ensureDeviceId` (`kv_store_impl.dart:407`,
+surfaced as `KmdbDatabase.ensureDeviceId`, `kmdb_database.dart:781`): read the
+`DEVICE_ID` file **first**; if absent, fall back to `DeviceId.load`
+(`device_id.dart:53` — reads the `$meta` copy, or generates a fresh UUIDv4 and writes
+it to `$meta`); then write the file so subsequent opens skip `$meta`. An un-`ensure`d
+store reports the `'00000000'` **open-time param default** (`kv_store_impl.dart:120`)
+— distinct from a resolved identity, and not what `DeviceId.load` returns.
 
-**CLI.** `kmdb new-device-id` generates a fresh identity for a **copied**
-database. This is the answer to "I duplicated a KMDB instance onto another
-machine" — two copies sharing a `device_id` would write colliding SSTable
-filenames and clobber each other's high-water marks in a shared sync folder. The
-command mints a new ID, calls `reassignDeviceId`, and — if remotes are configured
-— warns on stderr that the old `highwater/{oldDeviceId}.hwm` must be deleted from
-each sync folder. Emits `{"oldDeviceId":…, "newDeviceId":…}` as machine-readable
-output. *(This is the value of an integrator being able to exercise an attribute
-from the CLI without touching Dart.)*
+**CLI.** `kmdb new-device-id` mints a fresh identity for a **copied** database — two
+copies sharing a `device_id` would write colliding SSTable filenames and clobber each
+other's high-water marks in a shared sync folder. It calls `reassignDeviceId`, which
+rewrites **both** the `DEVICE_ID` file and the `$meta` copy and renames the SSTables;
+if remotes are configured it warns on stderr to delete the stale
+`highwater/{oldDeviceId}.hwm`. Emits `{"oldDeviceId":…, "newDeviceId":…}`. *(The value
+of an integrator being able to exercise an attribute from the CLI without touching
+Dart.)*
 
-**Tensions (why WI-12 is more than a namespace move).**
+**Tensions (what WI-12 actually is, post-correction).**
 
-- **§08 describes an unbuilt design as current.** §08 says `device_id` lives in
-  "platform-specific secure storage (Keychain on iOS, SharedPreferences on
-  Android, localStorage on web)" and **"must not be stored inside the database
-  itself to avoid circular dependency during bootstrap."** The code contradicts
-  this and *says so*: `device_id.dart:37-38` records that secure storage was
-  **deferred to Phase 8** and "for now `$meta` is the store." → a spec-vs-code
-  divergence to log (WI-2).
-- **Moving to `$$` does not satisfy §08's own rationale.** A `$$` namespace still
-  lands in `.local.sst` — *inside* the database. Since `device_id` is needed to
-  *name* SSTable files, storing it in one is the bootstrap circular dependency §08
-  warns about. Only "outside the DB" (secure storage) resolves both SC-5 *and* the
-  bootstrap concern.
-- **Encryption compounds the bootstrap tension.** `device_id` is
-  `EncryptionEnvelope`-wrapped, so reading it needs the DEK — which is unlocked
-  during `open()`. Anything that needs `device_id` earlier than DEK unlock cannot
-  read it from encrypted `$meta`. Worth confirming WI-12 doesn't inherit this.
+- **SC-5's bite is smaller than "it syncs today" implies.** The authoritative
+  identity is the local file; the synced `$meta` copy is **inert on read** (every
+  device prefers its own file). SC-5's real exposure is **hygiene/confidentiality** —
+  the copy leaks each peer's `device_id` into the sync folder and is dead weight — not
+  a wrong-identity correctness bug. WI-12 = stop writing it.
+- **§08's rationale is substantially already honoured.** §08:153-155 ("must not be
+  stored inside the database itself to avoid circular dependency during bootstrap") —
+  the `DEVICE_ID` file is outside `sst/`, so there is no bootstrap circularity and no
+  DEK dependency. §08's "platform secure storage (Keychain…)" is a stronger,
+  still-unbuilt form; `device_id.dart:37-38`'s "for now `$meta` is the sole
+  persistence mechanism" is now **stale** (the file superseded it) — log for WI-2.
+- **The encryption tension is moot on the primary path.** The file is plaintext, read
+  with no DEK; only the `$meta` fallback is wrapped.
 
-**Code coordinates.**
+**Code coordinates.** *(Verify by symbol, not line — B1/B2 showed line-eyeballing is
+how the wrong story got written.)*
 
 | Concern | Location |
 | :--- | :--- |
-| Generate / ensure | `packages/kmdb/lib/src/engine/kvstore/device_id.dart:63` (`ensureDeviceId`) |
-| Read / write / key | `meta_store.dart:207` (`getDeviceId`), `:217` (`putDeviceId`), `:204` (`deviceIdKey`) |
-| "secure storage deferred" note | `device_id.dart:37-38` |
-| In-memory value + rename | `lsm_engine.dart:1727` (`get deviceId`), `:1524` / `kv_store_impl.dart:326` (`reassignDeviceId`) |
-| CLI | `packages/kmdb_cli/lib/src/commands/new_device_id_command.dart:47` |
-| Consumed — SSTable naming | §08 (`{deviceId}-…`) |
+| Resolve on open (file-first) | `kv_store_impl.dart:407` (`ensureDeviceId`), surfaced `kmdb_database.dart:781` |
+| The `DEVICE_ID` file | `kv_store_impl.dart:439` (`kDeviceIdFilename`) |
+| `$meta` fallback + generation | `device_id.dart:53` (`DeviceId.load`), `:64` (UUIDv4) |
+| `$meta` read / write / key | `meta_store.dart:207` (`getDeviceId`), `:217` (`putDeviceId`), `:204` (`deviceIdKey`) — both `EncryptionEnvelope`-wrapped |
+| Stale "secure storage deferred" note | `device_id.dart:37-38` |
+| Reassign (file + `$meta` + SSTable rename) | `lsm_engine.dart:1428` (`reassignDeviceId`), `kv_store_impl.dart:326` |
+| `'00000000'` open-time default | `kv_store_impl.dart:120`, `kmdb_database.dart:303` |
+| CLI | `new_device_id_command.dart:46` |
+| Consumed — SSTable naming / manifest | §08 (`{deviceId}-…`), manifest `add.filename` |
 | Consumed — sync | `sync_engine.dart:365` (exclude self), `highwater.dart:270` |
 
-**Spec cross-refs.** §04 (identity), §08 (SSTable naming), §12 (sync).
+**Spec cross-refs.** §04 (identity — definitional home), §08 (SSTable naming), §12 (sync).
 
 ### `gc:tombstoneFloor`
 
