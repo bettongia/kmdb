@@ -342,7 +342,23 @@ final class MetaStore {
     await _engine.delete(kNamespace, _genKey(userNamespace));
   }
 
-  // ── Tombstone GC floor (H4-FU3) ───────────────────────────────────────────
+  // ── Tombstone GC floor (H4-FU3; moved off `$meta` by 0.10.01 WI-11/Q-D) ────
+
+  /// The local-only namespace holding the persisted tombstone GC floor.
+  ///
+  /// Moved out of synced `$meta` by the 0.10.01 WI-11 fix (Q-D): the floor is
+  /// device-local *by design* (see [getTombstoneFloor]'s "Per-device by
+  /// design" section below), but until this fix it was stored in synced
+  /// `$meta` under the device-independent key `gc:tombstoneFloor`. `$meta`
+  /// uses plain last-write-wins, not a max-merge, so a peer's *older* floor
+  /// written with a *later* HLC could overwrite (and lower) this device's
+  /// higher floor — re-enabling the exact tombstone-resurrection scenario the
+  /// floor exists to prevent (see `IndexManager`'s sibling `$$indexstate`
+  /// namespace for the identical device-local-state-in-a-synced-namespace
+  /// defect shape). `$$gcstate` is local-only (see `isLocalOnly` in
+  /// `namespace_codec.dart`), so it is never uploaded and a peer's floor can
+  /// never affect this device's.
+  static const String kGcStateNamespace = r'$$gcstate';
 
   /// Returns the persisted tombstone GC floor HLC, or `Hlc(0, 0)` if no
   /// compaction has ever dropped tombstones on this device.
@@ -357,19 +373,20 @@ final class MetaStore {
   ///
   /// ## Per-device by design
   ///
-  /// The floor is stored in `$meta`, which is excluded from sync. Every device
-  /// maintains its own floor independently. This is correct: the floor tracks
-  /// the HLC range each device has GC'd locally, and that history is not
-  /// transferable — another device may not have GC'd the same range and must
-  /// not inherit a floor that overstates its own history.
+  /// The floor is stored in the local-only [kGcStateNamespace] namespace (see
+  /// that constant's doc comment for why it moved out of `$meta`). Every
+  /// device maintains its own floor independently. This is correct: the floor
+  /// tracks the HLC range each device has GC'd locally, and that history is
+  /// not transferable — another device may not have GC'd the same range and
+  /// must not inherit a floor that overstates its own history.
   ///
   /// ## Consistency with local state
   ///
   /// The floor is valid against any consistent local state, including after a
   /// filesystem snapshot rollback: a rollback restores both the dropped
   /// tombstones (from the pre-GC SSTables) *and* the pre-GC floor (from the
-  /// pre-GC `$meta`), leaving the engine in a coherent older state. The floor
-  /// is never ahead of actual GC history.
+  /// pre-GC [kGcStateNamespace] entry), leaving the engine in a coherent older
+  /// state. The floor is never ahead of actual GC history.
   ///
   /// ## Default on fresh DB
   ///
@@ -379,7 +396,7 @@ final class MetaStore {
   /// (no realistic SSTable has `maxHlc <= Hlc(0, 0)`).
   Future<Hlc> getTombstoneFloor() async {
     final bytes = await _engine.get(
-      kNamespace,
+      kGcStateNamespace,
       _nameToKey('gc:tombstoneFloor'),
     );
     if (bytes == null) return const Hlc(0, 0);
@@ -389,7 +406,8 @@ final class MetaStore {
     return Hlc.fromEncoded(encoded);
   }
 
-  /// Persists [floor] as the new tombstone GC floor in `$meta`.
+  /// Persists [floor] as the new tombstone GC floor in the local-only
+  /// [kGcStateNamespace] namespace.
   ///
   /// The floor is monotonic under correct operation: callers must only call
   /// this with a value greater than or equal to the current floor. A value
@@ -407,7 +425,11 @@ final class MetaStore {
       _encodeUint64(floor.encoded),
       encryption,
     );
-    await _engine.put(kNamespace, _nameToKey('gc:tombstoneFloor'), wrapped);
+    await _engine.put(
+      kGcStateNamespace,
+      _nameToKey('gc:tombstoneFloor'),
+      wrapped,
+    );
   }
 
   /// Appends a tombstone floor advance write for [floor] to [batch].
@@ -418,9 +440,9 @@ final class MetaStore {
   /// floor update into an existing batch for atomicity.
   ///
   /// Note that the Q6 atomicity decision for H4-FU3 chose option (b) — the
-  /// floor write is a *separate* `$meta` put after the compaction manifest
-  /// commits. This method is provided for completeness and future use; the
-  /// [LsmEngine._compactAll] path calls [setTombstoneFloor] directly.
+  /// floor write is a *separate* [kGcStateNamespace] put after the compaction
+  /// manifest commits. This method is provided for completeness and future
+  /// use; the [LsmEngine._compactAll] path calls [setTombstoneFloor] directly.
   ///
   /// **Left synchronous and unencrypted (Phase 2/B3 decision).** This method
   /// has no production call site today — `meta_store_test.dart` is its only
@@ -442,7 +464,7 @@ final class MetaStore {
   /// [setTombstoneFloor] does, not just have `encryption` added.
   void appendTombstoneFloorAdvance(Hlc floor, WriteBatch batch) {
     batch.put(
-      kNamespace,
+      kGcStateNamespace,
       _nameToKey('gc:tombstoneFloor'),
       _encodeUint64(floor.encoded),
     );
@@ -456,6 +478,22 @@ final class MetaStore {
   /// the full index-state helpers when that is sufficient.
   static String indexKey(String namespace, String path) =>
       _nameToKey('index:$namespace:$path');
+
+  /// Encodes an arbitrary symbolic name (e.g. `fts:tasks:title`,
+  /// `vec:tasks:body`) using the same deterministic key scheme as every
+  /// `$meta` entry.
+  ///
+  /// This exists so that state stores which used to live in `$meta` under a
+  /// symbolic name — but were moved to a device-local `$$…state` namespace by
+  /// the 0.10.01 WI-11 fix (secondary-index/FTS/Vec state; see
+  /// `docs/spec/16_secondary_indexes.md`) — can keep computing their key with
+  /// the exact same hash the rest of the codebase uses, without duplicating
+  /// the encoding scheme. It is deliberately generic (unlike [indexKey],
+  /// [genKey], [deviceIdKey]), because it is used for symbolic names this
+  /// class does not otherwise know about. It does **not** read or write
+  /// `$meta` itself — callers own the namespace, read/write, and encryption
+  /// wrapping for wherever they store the resulting key.
+  static String symbolicKey(String name) => _nameToKey(name);
 
   /// Reads the raw bytes stored under the symbolic [name] in `$meta`.
   ///

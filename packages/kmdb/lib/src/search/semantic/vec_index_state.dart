@@ -51,7 +51,15 @@ enum VecIndexStatus {
 }
 
 /// Persistent state for a single vector index field, stored as a CBOR map in
-/// the `$meta` system namespace under the key returned by [metaKey].
+/// the local-only `$$vecstate` system namespace under the key derived from
+/// [metaKey] (see `VecManager`'s `_loadState`/`_saveState`).
+///
+/// This moved out of synced `$meta` by the 0.10.01 WI-11 fix (SC-10): a
+/// device that pulled a peer's `$meta` would inherit `status: current` for a
+/// Vec index it never built locally, then scan its own empty `$$vec:*`
+/// namespaces and silently return zero `search()` results for present,
+/// matching documents. `$$vecstate` is local-only (never uploaded — see
+/// `isLocalOnly` in `namespace_codec.dart`), so this can no longer happen.
 final class VecIndexState {
   /// Creates a [VecIndexState].
   const VecIndexState({
@@ -213,12 +221,15 @@ final class VecIndexState {
   /// collides with a real document key.
   static const String corpusSentinelKey = '01900000000070009000000000000001';
 
-  /// Key for the persisted [VecIndexState] CBOR blob in `$meta`.
+  /// Symbolic name for the persisted [VecIndexState] CBOR blob, stored in the
+  /// local-only `$$vecstate` namespace (moved from `$meta` by WI-11/SC-10 —
+  /// see the class doc comment).
   ///
   /// Format: `vec:{ns}:{field}`
   ///
-  /// No `$` prefix — this is the symbolic name passed to
-  /// [MetaStore.getRawByName] / [MetaStore.putRawByName], which operate in
-  /// the `$meta` namespace.
+  /// Note: no `$` prefix here — this is a symbolic name, not a namespace. It
+  /// is passed to [MetaStore.symbolicKey] to derive the actual storage key
+  /// within `$$vecstate` (mirrors how [MetaStore.indexKey] does the same for
+  /// secondary-index state, reusing the identical key-encoding scheme).
   static String metaKey(String ns, String field) => 'vec:$ns:$field';
 }

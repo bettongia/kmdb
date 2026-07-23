@@ -16,6 +16,10 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:kmdb/kmdb.dart';
+import 'package:kmdb/src/encryption/encryption_envelope.dart';
+import 'package:kmdb/src/engine/kvstore/meta_store.dart';
+import 'package:kmdb/src/search/semantic/vec_manager.dart'
+    show kVecStateNamespace;
 import 'package:test/test.dart';
 
 // ── Fake embedding model ───────────────────────────────────────────────────────
@@ -813,6 +817,51 @@ void main() {
       await db.close();
     });
   });
+
+  // ── SC-10 regression: Vec state is device-local, not $meta ────────────────
+
+  group('SC-10 — Vec state is device-local (\$\$vecstate, not \$meta)', () {
+    test('a legacy `current` status left in \$meta (e.g. from a peer that '
+        'synced before the WI-11 fix) is dead: search() does not trust it and '
+        'still rebuilds from the local (empty) index', () async {
+      final db = await _openDb();
+      final col = db.collection(name: 'docs', codec: _codec);
+      await col.insert({'body': 'searchable content'});
+
+      // Simulate the pre-fix (or cross-device-inherited) shape: a
+      // `current` VecIndexState written under the OLD `$meta` symbolic
+      // name, with no corresponding $$vecstate entry and no local
+      // $$vec:* index entries for this document.
+      const legacyState = VecIndexState(
+        namespace: 'docs',
+        field: 'body',
+        status: VecIndexStatus.current,
+      );
+      await db.store.meta.putRawByName(
+        VecIndexState.metaKey('docs', 'body'),
+        legacyState.toBytes(),
+      );
+
+      // search() must not trust the legacy $meta status: it must actually
+      // build the index (lazily) rather than treat it as already current
+      // with an empty $$vec:* namespace (the SC-10 shape).
+      final result = await col.search(
+        'searchable',
+        fields: ['body'],
+        mode: SearchMode.semantic,
+      );
+      expect(
+        result.hits,
+        isNotEmpty,
+        reason:
+            'a legacy \$meta entry must not be trusted as this device\'s '
+            'index state (SC-10) — the index must actually build and find '
+            'the present, matching document',
+      );
+
+      await db.close();
+    });
+  });
 }
 
 // ── Configurable-id model for identity tests ──────────────────────────────────
@@ -841,23 +890,26 @@ final class _ConfigurableIdEmbeddingModel implements EmbeddingModel {
   void dispose() {}
 }
 
-// ── Helper: read VecIndexState from $meta ─────────────────────────────────────
+// ── Helper: read VecIndexState from $$vecstate ────────────────────────────────
 
 /// Loads the stored [VecIndexState] for [namespace]/[field] from [db]'s
-/// `$meta` namespace via the [MetaStore] API.
+/// local-only [kVecStateNamespace] namespace (moved from `$meta` by 0.10.01
+/// WI-11/SC-10 — see that constant's doc comment).
 ///
 /// Returns the `undefined` sentinel when no state has been persisted yet.
+/// None of the databases in this test file are encrypted, so no
+/// [EncryptionEnvelope] unwrap key is threaded through — passing `null`
+/// mirrors [VecManager]'s own `_loadState` for an unencrypted database.
 Future<VecIndexState> _loadVecState(
   KmdbDatabase db,
   String namespace,
   String field,
 ) async {
-  // VecManager stores state via MetaStore.getRawByName / putRawByName.
-  // Use the same API here to read without going through the UUID-keyed path.
-  final bytes = await db.store.meta.getRawByName(
-    VecIndexState.metaKey(namespace, field),
-  );
-  return VecIndexState.fromBytes(namespace, field, bytes);
+  final key = MetaStore.symbolicKey(VecIndexState.metaKey(namespace, field));
+  final bytes = await db.store.get(kVecStateNamespace, key);
+  if (bytes == null) return VecIndexState.fromBytes(namespace, field, null);
+  final unwrapped = await EncryptionEnvelope.unwrap(bytes, null);
+  return VecIndexState.fromBytes(namespace, field, unwrapped);
 }
 
 // ── Tracking model for dispose test ───────────────────────────────────────────

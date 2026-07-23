@@ -549,11 +549,26 @@ sync:
   confidentiality reconciliation, Gap 1 — see gap 1 below). These namespaces
   are local-only, so this protects against local disk theft, not a cloud
   provider.
-- **`$meta` operational metadata** — device ID, the namespace registry,
-  generation counters, the dirty flag, the tombstone-GC floor, and index/FTS/
-  Vec state are encrypted via `EncryptionEnvelope` (Gap 3), the one documented
-  exemption being `enc:blob` itself (see _enc:blob Structure_). Because `$meta`
-  rides synced SSTables, this is genuine cloud-provider protection.
+- **Secondary-index, FTS, and Vec index *state*** — `IndexState`,
+  `FtsIndexState`, and `VecIndexState` (the `status`/`builtThrough` records
+  tracking whether *this device* has built a derived index) are encrypted via
+  `EncryptionEnvelope` and stored in the local-only `$$indexstate`/
+  `$$ftsstate`/`$$vecstate` namespaces respectively (moved out of `$meta` by
+  0.10.01 WI-11, SC-10 — see `docs/spec/12_sync.md`'s "`$meta` vs `$$`
+  classification rule"). Like the sibling bullet above, this protects against
+  local disk theft, not a cloud provider, since these namespaces never
+  upload.
+- **Tombstone GC floor** — likewise moved out of `$meta` into the local-only
+  `$$gcstate` namespace (0.10.01 WI-11, Q-D), still `EncryptionEnvelope`-wrapped.
+  Local-disk-theft protection only, for the same reason.
+- **`$meta` operational metadata** — device ID, the namespace registry, and
+  generation counters are encrypted via `EncryptionEnvelope` (Gap 3), the one
+  documented exemption being `enc:blob` itself (see _enc:blob Structure_).
+  Because `$meta` rides synced SSTables, this is genuine cloud-provider
+  protection. (The dirty-open flag is also currently in `$meta`, encrypted the
+  same way — but 0.10.01 WI-11's audit found it is likely mis-placed there for
+  a different, non-confidentiality reason; see WI-14 on
+  `docs/roadmap/0_10_01.md`.)
 - **Vault blob bytes** — the `VaultStore` encrypts blob payloads with the DEK
   before writing them to disk and to the cloud (see _Vault Encryption_).
 - **Vault `extract/` filesystem artifacts (WI-10, gap 6 below)** — `text.txt`,
@@ -727,12 +742,23 @@ cannot itself be encrypted (see _enc:blob Structure_) — `getEncryptionBlob`/
 `$meta` accessors entirely, so this exemption is enforced structurally, not
 just by convention.
 
-For **all other** `$meta` entries — device ID, the namespace registry,
-generation counters, the dirty flag, the tombstone-GC floor, and
+For **all other** `$meta` entries at the time — device ID, the namespace
+registry, generation counters, the dirty flag, the tombstone-GC floor, and
 index/FTS/Vec state — the previous lack of encryption was a
 previously-undocumented gap: these values reveal **operational metadata**
 (which namespaces exist, write activity via generation counters, device
 identity, timing) but **not document content**.
+
+> **Update (0.10.01 WI-11).** The tombstone-GC floor and index/FTS/Vec state
+> have since moved out of `$meta` into local-only `$$gcstate`/`$$indexstate`/
+> `$$ftsstate`/`$$vecstate` namespaces (SC-10, Q-D — see
+> `docs/spec/12_sync.md`'s "`$meta` vs `$$` classification rule"). The
+> `EncryptionEnvelope` wrapping this section describes was **preserved**
+> across that move — these values are still encrypted when a provider is
+> configured, just no longer under `$meta`, and now for local-disk-theft
+> protection rather than cloud-provider protection (see the _Value-Level
+> Encryption Coverage_ list above). Device ID, the namespace registry, and
+> generation counters remain in `$meta` as described here.
 
 **Resolved** by the Encryption confidentiality reconciliation plan's Phase 2
 (`docs/roadmap/completed/0_08.md`, Gap 3): every general `$meta` accessor now routes

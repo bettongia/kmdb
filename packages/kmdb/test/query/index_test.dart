@@ -15,7 +15,9 @@
 import 'dart:typed_data';
 
 import 'package:cbor/cbor.dart';
+import 'package:kmdb/src/encryption/encryption_envelope.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
+import 'package:kmdb/src/engine/kvstore/meta_store.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
 import 'package:kmdb/src/engine/util/key_codec.dart';
 import 'package:kmdb/src/query/exceptions.dart';
@@ -717,8 +719,11 @@ void main() {
         expect(await db.indexManager.checkInterruptedBuilds(), isEmpty);
 
         // Directly write a `building` state for the index to simulate an
-        // interrupted build (as if the process crashed mid-build).
-        // The symbolic name matches IndexManager._persistState's format.
+        // interrupted build (as if the process crashed mid-build). Written to
+        // the local-only $$indexstate namespace (moved from `$meta` by
+        // 0.10.01 WI-11/SC-10), using the same key IndexManager._persistState
+        // computes (MetaStore.indexKey) and the same EncryptionEnvelope
+        // wrapping (unencrypted database here, so a plaintext-flagged wrap).
         final stateBytes = Uint8List.fromList(
           cbor.encode(
             CborMap({
@@ -730,13 +735,80 @@ void main() {
             }),
           ),
         );
-        await db.store.meta.putRawByName('index:contacts:city', stateBytes);
+        final key = MetaStore.indexKey('contacts', 'city');
+        final wrapped = await EncryptionEnvelope.wrap(stateBytes, null);
+        await db.store.putRaw(kIndexStateNamespace, key, wrapped);
 
         // Now checkInterruptedBuilds() must report the interrupted build.
         final events = await db.indexManager.checkInterruptedBuilds();
         expect(events, hasLength(1));
         expect(events.first.namespace, equals('contacts'));
         expect(events.first.path, equals('city'));
+      },
+    );
+  });
+
+  // ── SC-10 regression: index state is device-local, not $meta ──────────────
+
+  group('SC-10 — index state is device-local (\$\$indexstate, not \$meta)', () {
+    test(
+      'a legacy `current` state left in \$meta (e.g. from a peer that synced '
+      'before the WI-11 fix, or a pre-fix on-disk database) is dead: the new '
+      'read path never consults it, so the index still reports undefined and '
+      'rebuilds — it is not silently trusted',
+      () async {
+        final db = await KmdbDatabase.open(
+          path: '/sc10_legacy_meta_dead_test',
+          adapter: MemoryStorageAdapter(),
+          indexes: [IndexDefinition('contacts', 'city')],
+          config: KvStoreConfig.forTesting(),
+        );
+        addTearDown(db.close);
+        addTearDown(MemoryStorageAdapter.releaseAllLocks);
+
+        // Simulate the pre-fix (or cross-device-inherited) shape: a `current`
+        // IndexState written under the OLD `$meta` symbolic name, with NO
+        // corresponding entry in the new $$indexstate namespace — exactly
+        // what a device that pulled a peer's pre-fix `$meta` (or an old
+        // on-disk database not yet reopened by fixed code) would have.
+        final legacyBytes = Uint8List.fromList(
+          cbor.encode(
+            CborMap({
+              CborString('path'): CborString('city'),
+              CborString('namespace'): CborString('contacts'),
+              CborString('status'): CborString('current'),
+              CborString('builtThrough'): CborSmallInt(0),
+              CborString('builtAt'): CborString(''),
+            }),
+          ),
+        );
+        await db.store.meta.putRawByName('index:contacts:city', legacyBytes);
+
+        // The new read path must NOT see this as `current` — it only
+        // consults $$indexstate, which is empty for this index.
+        final state = await db.indexManager.getState('contacts', 'city');
+        expect(
+          state.status,
+          equals(IndexStatus.undefined),
+          reason:
+              'a legacy \$meta entry must be dead weight, never re-ingested '
+              'as though this device had built the index (SC-10)',
+        );
+
+        // getOrActivate must trigger a real build from this undefined state,
+        // not trust the stale $meta status.
+        await db
+            .collection(name: 'contacts', codec: _ContactCodec())
+            .insert(_Contact(id: '', city: 'London'));
+        final activated = await db.indexManager.getOrActivate(
+          'contacts',
+          'city',
+        );
+        expect(
+          activated.status,
+          anyOf(IndexStatus.building, IndexStatus.current),
+          reason: 'a fresh build must actually start, not be skipped',
+        );
       },
     );
   });

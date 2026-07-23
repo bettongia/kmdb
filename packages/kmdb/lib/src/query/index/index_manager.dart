@@ -18,12 +18,33 @@ import 'package:cbor/cbor.dart';
 
 import '../../engine/kvstore/kv_store.dart';
 import '../../engine/kvstore/kv_store_impl.dart';
+import '../../engine/kvstore/meta_store.dart';
 import '../../encoding/value_codec.dart';
+import '../../encryption/encryption_envelope.dart';
 import '../../encryption/encryption_provider.dart';
 import '../write_augmentor.dart';
 import 'index_definition.dart';
 import 'index_reader.dart';
 import 'index_writer.dart';
+
+/// The local-only namespace holding persisted [IndexState] for every declared
+/// secondary index.
+///
+/// Introduced by the 0.10.01 WI-11 fix (SC-10): index state — including
+/// `status: current` — used to live in synced `$meta`, so a device that
+/// pulled a peer's `$meta` inherited `current` for an index it never built
+/// locally, then scanned its own empty `$$index:*` namespaces and silently
+/// returned zero rows for present, matching documents. Moving the state
+/// itself into a `$$`-prefixed (local-only) namespace makes that
+/// structurally impossible: `$$indexstate` is never uploaded (see
+/// `isLocalOnly` in `namespace_codec.dart`), so every device's index state
+/// reflects only what *that device* has built.
+///
+/// The key within this namespace is unchanged — [MetaStore.indexKey] — and
+/// the value is the same CBOR-encoded [IndexState] as before, still wrapped
+/// with [EncryptionEnvelope] (see [IndexManager._loadState] /
+/// [IndexManager._persistState]). Only the target namespace moved.
+const String kIndexStateNamespace = r'$$indexstate';
 
 /// The four lifecycle states of a secondary index (spec §16).
 ///
@@ -67,7 +88,9 @@ enum IndexTokenMode {
   hmac,
 }
 
-/// Persistent state for a secondary index, stored as a CBOR map in `$meta`.
+/// Persistent state for a secondary index, stored as a CBOR map in the
+/// local-only [kIndexStateNamespace] (moved out of synced `$meta` by the
+/// 0.10.01 WI-11 fix — see that constant's doc comment for why).
 final class IndexState {
   const IndexState({
     required this.namespace,
@@ -109,8 +132,9 @@ final class IndexState {
 
 /// Manages the lifecycle and persistent state of secondary indexes.
 ///
-/// [IndexManager] reads and writes index state from the `$meta` system
-/// namespace and coordinates lazy index builds (spec §16).
+/// [IndexManager] reads and writes index state from the local-only
+/// [kIndexStateNamespace] system namespace and coordinates lazy index builds
+/// (spec §16).
 ///
 /// ## Usage
 ///
@@ -171,8 +195,9 @@ final class IndexManager implements WriteAugmentor {
   /// longer computes — those entries are effectively orphaned (unreachable by
   /// future reads/writes) and, if left in place, would defeat Gap 2 by
   /// leaving the very plaintext-derivable tokens it closes on disk
-  /// indefinitely. [removeIndex] purges every sub-namespace and the `$meta`
-  /// state entry, after which the index reads back as [IndexStatus.undefined]
+  /// indefinitely. [removeIndex] purges every sub-namespace and the
+  /// [kIndexStateNamespace] state entry, after which the index reads back as
+  /// [IndexStatus.undefined]
   /// and rebuilds lazily on the next write/query — the same path used for a
   /// brand-new index (mirrors [VecManager.checkAndTransitionOnOpen]'s
   /// model-identity check).
@@ -254,7 +279,7 @@ final class IndexManager implements WriteAugmentor {
   /// 1. Enumerates every `$$index:{namespace}:{path}:*` sub-namespace in
   ///    storage (one sub-namespace per distinct indexed value).
   /// 2. Deletes all entries in each sub-namespace in batches of 200.
-  /// 3. Deletes the `$meta` state entry for the index.
+  /// 3. Deletes the [kIndexStateNamespace] state entry for the index.
   ///
   /// It is a no-op if the index was never built (undefined state) — the method
   /// still deletes any sub-namespaces that might exist from a partial build.
@@ -293,9 +318,11 @@ final class IndexManager implements WriteAugmentor {
       }
     }
 
-    // Delete the $meta state entry for this index.
-    final symbolicName = 'index:$namespace:$path';
-    await _store.meta.deleteRawByName(symbolicName);
+    // Delete the persisted state entry for this index. Lives in the
+    // local-only $$indexstate namespace (WI-11/SC-10), not $meta — see
+    // kIndexStateNamespace's doc comment.
+    final key = MetaStore.indexKey(namespace, path);
+    await _store.deleteRaw(kIndexStateNamespace, key);
   }
 
   /// Adds index entry operations to [batch] for a document write.
@@ -528,12 +555,14 @@ final class IndexManager implements WriteAugmentor {
 
   // ── State persistence ──────────────────────────────────────────────────────
 
-  /// Reads the persisted [IndexState] for [definition] from `$meta`.
+  /// Reads the persisted [IndexState] for [definition] from the local-only
+  /// [kIndexStateNamespace] (moved from `$meta` by WI-11/SC-10 — see that
+  /// namespace's doc comment).
   ///
   /// Returns an `undefined` state if no state has been persisted yet.
   Future<IndexState> _loadState(IndexDefinition definition) async {
-    final symbolicName = 'index:${definition.namespace}:${definition.path}';
-    final bytes = await _store.meta.getRawByName(symbolicName);
+    final key = MetaStore.indexKey(definition.namespace, definition.path);
+    final bytes = await _store.get(kIndexStateNamespace, key);
     if (bytes == null || bytes.isEmpty) {
       return IndexState(
         namespace: definition.namespace,
@@ -541,14 +570,21 @@ final class IndexManager implements WriteAugmentor {
         status: IndexStatus.undefined,
       );
     }
-    return _decodeState(definition, bytes);
+    final unwrapped = await EncryptionEnvelope.unwrap(bytes, _encryption);
+    return _decodeState(definition, unwrapped);
   }
 
-  /// Persists [state] to `$meta`.
+  /// Persists [state] to the local-only [kIndexStateNamespace].
+  ///
+  /// Uses [KvStoreImpl.putRaw] (not [KvStoreImpl.writeBatchInternal]) so an
+  /// index status flip never marks the dirty-open flag — building or
+  /// rebuilding a derived index is not a document write (see [putRaw]'s doc
+  /// comment).
   Future<void> _persistState(IndexState state) async {
-    final symbolicName = 'index:${state.namespace}:${state.path}';
+    final key = MetaStore.indexKey(state.namespace, state.path);
     final bytes = _encodeState(state);
-    await _store.meta.putRawByName(symbolicName, bytes);
+    final wrapped = await EncryptionEnvelope.wrap(bytes, _encryption);
+    await _store.putRaw(kIndexStateNamespace, key, wrapped);
   }
 
   // ── CBOR serialisation ─────────────────────────────────────────────────────

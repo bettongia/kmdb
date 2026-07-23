@@ -1,12 +1,31 @@
 # Stop the query planner trusting predicates the index cannot answer
 
-**Status**: **Investigated** (2026-07-21). Three review passes; all five questions
-ratified, all blockers closed and re-verified against `main`. Phase 2 moves the
-three derived-index state stores (secondary-index/FTS/Vec) to concrete
+**Status**: **Complete** — all five phases implemented and verified
+(2026-07-23). `kmdb-qa` sign-off received: one blocking item (eight `$meta`
+location sentences in §16/§20 that this change made false) corrected via
+`kmdb-architect`, and its advisories actioned — the equivalence test hardened
+against two vacuous-pass paths (index-status assertion, `explainedGet()` +
+per-cell `ScanStrategy` assertions, absolute row pins) and re-confirmed to fail
+against pre-fix code; the Q-A rationale corrected (the hand-enumerated matrix
+guards *these cells*, not "any future matcher" — the doc contract is what
+guards the class). Investigation complete (2026-07-21, three review
+passes; all five questions ratified, all blockers closed and re-verified
+against `main`). Phase 2 moved the three derived-index state stores
+(secondary-index/FTS/Vec) to concrete
 `$$indexstate`/`$$ftsstate`/`$$vecstate` namespaces with `EncryptionEnvelope`
-preserved; Phase 3 is a complete Goal-3 `$meta` audit; Phase 4 gates both `query()`
-and `search()` cross-device. Ready for **`kmdb-plan-implement`**. See
-[Third confirmation pass](#third-confirmation-pass-2026-07-21).
+preserved; Phase 3 completed a Goal-3 `$meta` audit (also moving the
+tombstone-GC floor to `$$gcstate`, and finding a sixth SC-10-shaped instance —
+the dirty-open flag — spun out as **WI-14**); Phase 4 added equivalence tests
+gating both `query()` and `search()` single-device and cross-device, all
+confirmed to fail against the pre-fix code via temporary revert/re-run/restore;
+Phase 5 corrected the now-false "`$meta` is not synced" claims in §06/§12/§31
+and added the `$meta` vs `$$` classification rule to §12. See the Summary
+section for the full account and
+[Third confirmation pass](#third-confirmation-pass-2026-07-21) for the
+investigation record.
+
+> **Worktree**: `.worktrees/20260723_plan_0_10_01_index_predicate_trust`,
+> branch `20260723_plan_0_10_01_index_predicate_trust`.
 
 > **Plan-review pass 2026-07-21 (`kmdb-plan-reviewer`).** See
 > [Plan review](#plan-review-2026-07-21) at the end of this document. Root-cause
@@ -119,11 +138,21 @@ below are written against these decisions.
 
 - [x] **Q-A — Narrow fix, not a capability contract.** Gate `equalityPredicate`
       on `_op == _Op.eq && caseSensitive`, **and** strengthen its doc-comment into
-      an explicit contract (Phase 1). The Phase 4 equivalence matrix — not a new
-      subsystem — is what kills the class: it catches any future matcher that
-      reintroduces the shape. A capability contract is speculative scope given only
-      `eq` is index-eligible today, and new index capabilities are an explicit
-      non-goal.
+      an explicit contract (Phase 1). A capability contract is speculative scope
+      given only `eq` is index-eligible today, and new index capabilities are an
+      explicit non-goal.
+
+      > **Correction (2026-07-23, QA).** This decision originally read "the Phase 4
+      > equivalence matrix … catches any future matcher that reintroduces the
+      > shape." That is true of a matrix *generated* from the operator set; the
+      > delivered matrix is **hand-enumerated**, so a future index-eligible matcher
+      > (a prefix-scan `startsWith`, an `equalsNormalized`) gets **no cell** and the
+      > file stays green while the new seam diverges. What actually guards the class
+      > is the **doc contract on `Filter.equalityPredicate`** plus the fact that only
+      > `_FieldFilter` overrides it; the matrix guards *regressions of these cells*.
+      > Do not rely on the original, stronger claim. Making the cells enum-driven
+      > would restore it and is the natural follow-up if a second matcher ever
+      > becomes index-eligible.
 - [x] **Q-B — Index/FTS/Vec state moves to new `$$…state` namespaces.** Concrete
       targets ratified 2026-07-21 (the reviewer's confirmation pass correctly held
       that "a `$$` namespace" was the *option*, not a frozen-format *target*): new
@@ -230,20 +259,25 @@ will catch every future instance of the shape.
 
 *Independent of Phase 2 — either order.*
 
-- [ ] Gate `equalityPredicate` on `_op == _Op.eq && caseSensitive`
+- [x] Gate `equalityPredicate` on `_op == _Op.eq && caseSensitive`
       ([field_filter.dart:175](../../packages/kmdb/lib/src/query/filter/field_filter.dart#L175)),
       per Q-A. Do **not** build a capability contract.
-- [ ] Strengthen the `Filter.equalityPredicate` doc comment
+- [x] Strengthen the `Filter.equalityPredicate` doc comment
       ([filter.dart:46](../../packages/kmdb/lib/src/query/filter/filter.dart#L46))
       into an explicit contract: *"Return non-null only when an exact-token index
       lookup is a **complete** answer to this predicate. A predicate that needs any
       transform the index did not apply at write time (case folding, accent
       stripping, Unicode normalisation) MUST return null."* This is the durable
       guard against the next matcher reintroducing the bug.
-- [ ] Ensure a declined predicate falls through to the full scan, and that
+- [x] Ensure a declined predicate falls through to the full scan, and that
       `QueryPlan` reports the strategy honestly (not `indexScan` with
-      `documentsScanned: 0`).
-- [ ] Audit every other `Filter` implementation for the same assumption. Only
+      `documentsScanned: 0`). Verified: `kmdb_query.dart:313`'s
+      `_executeWithPlan` already treats `equalityPredicate == null` as
+      "always full-scan for this predicate" (`filterPlans.add(... indexUsed:
+      false ...)`), so with the gate fix, `caseSensitive: false` `eq`
+      predicates fall through to `_fullScan()`/`ScanStrategy.fullScan`
+      automatically — no planner change needed beyond the gate itself.
+- [x] Audit every other `Filter` implementation for the same assumption. Only
       `_FieldFilter` overrides `equalityPredicate` and only `eq` returns non-null
       today — confirm that remains true and that no other override silently claims
       index-answerability.
@@ -258,13 +292,14 @@ read-mostly second device inherits `current` and scans its own empty local
 namespace → silent zero results. Fixing only the secondary index would ship a
 live 🔴 in `search()`.
 
-- [ ] **DO NOT add a `$`-prefix upload filter.** `isLocalOnly`
+- [x] **DO NOT add a `$`-prefix upload filter.** `isLocalOnly`
       ([namespace_codec.dart:148](../../packages/kmdb/lib/src/engine/util/namespace_codec.dart#L148))
       matches `$$` **only**, by design; `$meta`/`$ver`/`$vault` are single-`$` and
       **MUST** upload (§12). The §16 claim of a `$`-filter is incoherent, not
       merely absent — adding one would break sync. The fix is to *move* state to a
-      `$$` namespace, never to filter `$`.
-- [ ] Move each state store to a new local-only `$$…state` namespace, sibling to
+      `$$` namespace, never to filter `$`. Confirmed: no upload-filter code was
+      added anywhere in this phase.
+- [x] Move each state store to a new local-only `$$…state` namespace, sibling to
       its data namespace (concrete targets, Q-B — ratified 2026-07-21). The value
       (existing CBOR state) and key encoding are unchanged; **only the target
       namespace changes** from `$meta`:
@@ -279,28 +314,68 @@ live 🔴 in `search()`.
       in `.local.sst` and never uploads — no new sync wiring. None collides with the
       `$$index:`/`$$fts:`/`$$vec:` data-namespace prefix scans (`$$indexstate` ≠
       `$$index:…`, etc.).
-- [ ] **Routing:** replace the `MetaStore.*RawByName` calls at the persist sites
+
+      **Implemented as designed**, with two small additions the plan left to the
+      implementer's discretion (both narrowly scoped, documented in code):
+      - `MetaStore.symbolicKey(String name)` — a new public static that exposes
+        the *existing* `_nameToKey` hash (unchanged algorithm) for symbolic names
+        that no longer live in `$meta`. `MetaStore.indexKey` already did this for
+        secondary indexes; FTS/Vec had no equivalent, so one generic version was
+        added rather than duplicating the hash. This does not "generalise"
+        `MetaStore`'s `$meta`-read/write surface — it is a pure key-encoding
+        function with no namespace semantics, and `indexKey`/`genKey`/
+        `deviceIdKey` already establish this exact pattern.
+      - `KvStoreImpl.putRaw`/`deleteRaw` — new `@internal` methods that write
+        directly via the storage engine, bypassing the dirty-open-flag /
+        generation-counter / namespace-registry bookkeeping that `put`/
+        `writeBatch`/`writeBatchInternal` all perform. **Why needed:**
+        `writeBatchInternal` (the existing `$`-namespace write path) sets the
+        dirty-open flag on the first write of a session; routing state writes
+        through it would mean a read-only session that merely triggers a lazy
+        index/FTS/Vec build gets marked "dirty" even though no document write
+        occurred — a real (if narrow) semantic regression the plan did not
+        flag. `putRaw`/`deleteRaw` mirror `MetaStore.putRawByName`/
+        `deleteRawByName`'s existing raw-engine-write pattern (which already
+        bypasses this bookkeeping for `$meta`), generalised to a
+        caller-supplied namespace. `MetaStore` itself is untouched by this —
+        the new methods live on `KvStoreImpl`.
+- [x] **Routing:** replace the `MetaStore.*RawByName` calls at the persist sites
       above with direct `_store` reads/writes to the new `$$…state` namespaces. Do
       **not** generalise `MetaStore`; it is deliberately `$meta`-bound. Build-
       completion status flips stay standalone puts, as today (no atomicity change).
-- [ ] **Preserve encryption of the moved state (Blocker 3, 2026-07-21).**
+- [x] **Preserve encryption of the moved state (Blocker 3, 2026-07-21).**
       `MetaStore.*RawByName` wraps/unwraps via `EncryptionEnvelope`
       ([meta_store.dart:476/484](../../packages/kmdb/lib/src/engine/kvstore/meta_store.dart#L476)),
       so on an encrypted database all three states are ciphertext at rest today. The
       direct-write path **must** apply the same `EncryptionEnvelope.wrap`/`unwrap`,
       or it silently reverses part of the 0.08 `$meta`-encryption reconciliation and
       leaves index/FTS/Vec metadata as plaintext in `.local.sst`. Keep the wrapping.
-- [ ] For each subsystem, confirm a device that has not built the index reports it
+      Done identically in all three managers (`_encryption` field, already
+      threaded through each manager's constructor and equal to
+      `store.meta.encryption` — confirmed at `kmdb_database.dart`'s bootstrap
+      site, which assigns `store.meta.encryption` before constructing any of
+      the three managers).
+- [x] For each subsystem, confirm a device that has not built the index reports it
       as such (its state-activation path must not read `current` for an index absent
       locally) and builds/rebuilds on demand. For secondary indexes the rebuild
       trigger keys on the device-local `builtThrough`
       ([index_manager.dart:86](../../packages/kmdb/lib/src/query/index/index_manager.dart#L86)),
-      independent of `gen:{ns}` (WI-13); verify the FTS/Vec equivalents.
-- [ ] Confirm every read path (`_loadState`, `checkTokenModeOnOpen`/its FTS/Vec
+      independent of `gen:{ns}` (WI-13); verify the FTS/Vec equivalents. Verified
+      by dedicated regression tests (see Phase 4 note below) for all three
+      subsystems: a legacy `current` state written directly to the *old*
+      `$meta` symbolic name, with nothing in the new `$$…state` namespace, is
+      read back as `undefined`/triggers a real build — not trusted as
+      `current`. Each test was confirmed to **fail** against the pre-fix
+      `_loadState` (temporarily reverted, re-run, restored) before being kept.
+- [x] Confirm every read path (`_loadState`, `checkTokenModeOnOpen`/its FTS/Vec
       equivalents, the query/search activation checks) consults **only** the new
       `$$…state` namespaces, so old `index:*`/`fts:*`/`vec:*` entries left in `$meta`
       (on disk or in the sync folder) are dead/ignored, not re-ingested
-      (no-migration; review §9).
+      (no-migration; review §9). `checkTokenModeOnOpen` (secondary index) and
+      the FTS/Vec `checkAndTransitionOnOpen` equivalents all route through
+      `_loadState`, which now exclusively reads `$$…state` — confirmed by
+      grep (no remaining `_store.meta.getRawByName`/`putRawByName` call in
+      `index_manager.dart`, `fts_manager.dart`, or `vec_manager.dart`).
 
 ### Phase 3 — the `$meta` classification audit
 
@@ -313,30 +388,42 @@ grepping the `MetaStore` key constructors and every `*RawByName`/`genKey`/symbol
 name in `lib`. "Verify" rows are expected-correct but must be checked against code
 in this phase, not assumed.
 
-| `$meta` entry | Expected | Disposition |
-| :--- | :--- | :--- |
-| Secondary-index state | Device-local | **Fix here** (Phase 2) — SC-10 |
-| FTS index state | Device-local | **Fix here** (Phase 2) — SC-10, same defect |
-| Vec index state | Device-local | **Fix here** (Phase 2) — SC-10, same defect |
-| Tombstone GC floor | Device-local | **Fix here** — Q-D: mechanical `$meta`→`$$` move; LWW can *lower* the floor → resurrection |
-| Device identity | Device-local | **Classify only** — SC-5 → WI-12. `device_id` names SSTable files and is the sync identity; riskier than index state, own WI. Do **not** fold that migration here. |
-| `gen:{ns}` counters | Undecided | **Split out** — Q-C → WI-13. WI-11 does not depend on it. Do not touch here. |
-| `enc:blob` (wrapped DEK) | Replicated | Correct — no change |
-| Schema state (`schema:{collection}` + registry) | Replicated | **Verify** — schemas are a shared data contract; expected correct, confirm it syncs intentionally |
-| Version retention config/policy | Replicated | **Verify** — retention is a data-contract decision; expected correct |
-| Namespaces registry | Replicated | **Verify** — the set of user namespaces should be consistent; expected correct |
-| Format-version marker | Replicated | **Verify** — global format version; expected correct |
-| Dirty-open flag | Device-local | **Verify — possible further instance.** It marks *this device's* interrupted session and drives local WAL replay; if it syncs, a peer could inherit "dirty." Confirm whether it is written to `$meta` and, if so, whether that is benign or a latent bug to file separately. |
+| `$meta` entry | Expected | Disposition | Result (2026-07-23) |
+| :--- | :--- | :--- | :--- |
+| Secondary-index state | Device-local | **Fix here** (Phase 2) — SC-10 | ✅ Fixed → `$$indexstate` |
+| FTS index state | Device-local | **Fix here** (Phase 2) — SC-10, same defect | ✅ Fixed → `$$ftsstate` |
+| Vec index state | Device-local | **Fix here** (Phase 2) — SC-10, same defect | ✅ Fixed → `$$vecstate` |
+| Tombstone GC floor | Device-local | **Fix here** — Q-D: mechanical `$meta`→`$$` move; LWW can *lower* the floor → resurrection | ✅ Fixed → `MetaStore.kGcStateNamespace` (`$$gcstate`); see below |
+| Device identity | Device-local | **Classify only** — SC-5 → WI-12. `device_id` names SSTable files and is the sync identity; riskier than index state, own WI. Do **not** fold that migration here. | Unchanged — confirmed still classify-only, WI-12 owns the fix |
+| `gen:{ns}` counters | Undecided | **Split out** — Q-C → WI-13. WI-11 does not depend on it. Do not touch here. | Unchanged — confirmed still undecided, WI-13 owns the decision |
+| `enc:blob` (wrapped DEK) | Replicated | Correct — no change | ✅ Verified: `MetaStore.getEncryptionBlob`/`putEncryptionBlob` read/write no device-specific data — the wrapped DEK genuinely must be identical on every device that can unlock the database |
+| Schema state (`schema:{collection}` + registry) | Replicated | **Verify** — schemas are a shared data contract; expected correct, confirm it syncs intentionally | ✅ Verified: `SchemaManager` (`lib/src/query/schema/schema_manager.dart`) writes schema definitions and the registry under `$meta` symbolic names `schema:{collection}`/`schema:__registry__`, all via `getRawByName`/`putRawByName`; content is purely the JSON Schema + registry list, no per-device field. Correctly replicated — every device must enforce the same schema. |
+| Version retention config/policy | Replicated | **Verify** — retention is a data-contract decision; expected correct | ✅ Verified: `VersionManager` (`lib/src/versioning/version_manager.dart`) persists `VersionConfig` (keep-N / retention window) under `version:config:{collection}`, again via `getRawByName`/`putRawByName`, with no device identity embedded. Correctly replicated — retention policy is a per-collection contract, not a per-device fact. |
+| Namespaces registry | Replicated | **Verify** — the set of user namespaces should be consistent; expected correct | ✅ Verified: `MetaStore.getNamespaces`/`registerNamespace` (`_kNamespacesKey = 'namespaces'`) store the sorted list of *user-visible collection names* that have been written to. This is dataset-shape information (which collections exist), not a device fact — every device that syncs the same documents should agree on which namespaces exist. Correctly replicated. |
+| Format-version marker | Replicated | **Verify** — global format version; expected correct | ✅ Verified: `MetaStore.kFormatVersionMarkerName` (`formatVersion`) records the on-disk format version the *database* (not a device) was created under — every device reading the same synced data must agree on the format it is in. Correctly replicated. |
+| Dirty-open flag | Device-local | **Verify — possible further instance.** It marks *this device's* interrupted session and drives local WAL replay; if it syncs, a peer could inherit "dirty." Confirm whether it is written to `$meta` and, if so, whether that is benign or a latent bug to file separately. | 🔴 **Confirmed mis-placed — a sixth SC-10-shaped instance.** `MetaStore.setDirty`/`appendDirtyFlag` write the `dirty` key to synced `$meta` (`_nameToKey('dirty')` is device-independent — the identical key on every device). Plain LWW means a peer's write **or a peer's clean-close tombstone** can override this device's own flag, including a **false-negative** direction: a peer's later-HLC clean-close can erase *this* device's genuine unclean-shutdown marker before this device ever reads it. Impact is bounded but real: the sole production consumer is `KmdbDatabase.open`'s `onIndexRebuildRequired` notification (`kmdb_database.dart:438`) — informational, since `IndexManager.checkInterruptedBuilds` itself reads each index's own (now device-local) `$$indexstate` status directly and does not depend on the dirty flag for correctness — but a false-negative still means the notification is silently skipped. **Not fixed here** (found too late in this phase's own test surface to fold in safely without re-opening Phase 2/3); spun out to **WI-14** on the roadmap, following the same "classify here, fix separately" precedent as SC-5/WI-12. |
 
-- [ ] Fix the four "Fix here" rows (index/FTS/Vec state + tombstone floor).
-- [ ] Verify the "Verify" rows against code; if the dirty flag (or any other) turns
+- [x] Fix the four "Fix here" rows (index/FTS/Vec state + tombstone floor).
+- [x] Verify the "Verify" rows against code; if the dirty flag (or any other) turns
       out mis-placed, file it — do **not** silently fold new scope into this WI.
-- [ ] Record the classification rule for the spec (WI-2 sequences the wording);
+      Result: the four "Verify" rows expected-replicated (`enc:blob`, schema,
+      version-policy, namespaces registry, format-version) all checked out
+      correct. The dirty-open flag did **not** check out — it is mis-placed,
+      exactly the SC-10 shape, one instance the earlier reviews and W1 passes
+      missed. Filed as **WI-14** on `docs/roadmap/0_10_01.md`, not fixed in
+      this WI (see the table row above for the full reasoning and the
+      "classify here, fix separately" precedent).
+- [x] Record the classification rule for the spec (WI-2 sequences the wording);
       note the deferred rows (SC-5 → WI-12, `gen:{ns}` → WI-13) so they are not lost.
+      Done in Phase 5 below: a new "`$meta` vs `$$` classification rule"
+      subsection was added to `docs/spec/12_sync.md`, stating the governing
+      invariant (`$meta` holds only replicated state; every device-local fact
+      moves to a `$$` namespace) and listing every entry's disposition,
+      including the WI-12/WI-13/WI-14 deferrals.
 
 ### Phase 4 — the equivalence tests *(the point of this plan)*
 
-- [ ] **Single-device** — new file `test/query/index_full_scan_equivalence_test.dart`.
+- [x] **Single-device** — new file `test/query/index_full_scan_equivalence_test.dart`.
       For a sampled matrix of filter type × operator × `caseSensitive` flag, assert
       the row set (compared **by `_id`**) from `query(F)` with the index *declared*
       equals the row set with **no** index declared.
@@ -346,36 +433,133 @@ in this phase, not assumed.
         Without this exact cell the "fails before the fix" gate is untestable,
         because only `caseSensitive:false` `eq` diverges today; every other operator
         full-scans in *both* arms and would pass against the current (broken) code.
-- [ ] **Cross-device — secondary index** — a `kmdb_harness` case (runs under
+      Implemented with 12 cells (eq × both case flags + a mismatched-case
+      control, startsWith × both case flags, contains case-insensitive,
+      notEquals, isGreaterThan, isBetween, isIn, containsAny, containsAll).
+      **Verified fails before the fix**: temporarily reverted
+      `field_filter.dart`'s `equalityPredicate` gate to
+      `_op == _Op.eq ? ... : null` (dropping `&& caseSensitive`) — exactly and
+      *only* the mandatory cell failed (0 rows expected 1); all 11 others
+      still passed. Restored and re-verified green.
+- [x] **Cross-device — secondary index** — a `kmdb_harness` case (runs under
       `e2e`, not the default unit run; per Q-E). Device A writes docs, builds the
       index, and pushes; device B pulls with the index *declared*; assert B's row
       set (by `_id`) equals A's. Fails today because B inherits `status: current`
       and scans its empty `$$index:*`.
-- [ ] **Cross-device — search (FTS + Vec)** — the same harness shape for
+      New file `packages/kmdb_harness/test/e2e/index_cross_device_test.dart`,
+      tagged `@Tags(['e2e'])` (confirmed skipped under plain `dart test`, runs
+      under `dart test --preset e2e` / `melos run e2e-test --scope
+      kmdb_harness`). Built directly on `KmdbDatabase.open` +
+      `MemorySyncAdapter` (the same primitives `kmdb_harness`'s own `Device`
+      class wraps) rather than the `Device`/`TestManager` fuzz-action API,
+      because that API has no support for declaring secondary/FTS/Vec
+      indexes or running `.where()`/`.search()` — adding that would be a
+      harness-design decision out of this plan's mechanical scope, not a
+      mechanical test addition. **Verified fails before the fix**:
+      temporarily reverted `IndexManager._loadState`/`_persistState` to their
+      pre-Phase-2 `$meta`-based form — B returned 0 rows where A returned 2.
+      Restored and re-verified green.
+- [x] **Cross-device — search (FTS + Vec)** — the same harness shape for
       `search()`: A builds the FTS (and, where available, Vec) index and pushes; B
       pulls and searches; assert B's results equal A's. Fails today for the same
       reason (B inherits `fts`/`vec status: current`, scans empty `$$fts:`/`$$vec:`).
       This is the regression gate for the FTS/Vec half of Phase 2.
-- [ ] Both must **fail against the current code before the fixes land** — run them
+      New file `packages/kmdb_harness/test/e2e/search_cross_device_test.dart`
+      (also `@Tags(['e2e'])`), one test for lexical (`SearchMode.lexical`)
+      and one for semantic (`SearchMode.semantic`, with a small deterministic
+      fake `EmbeddingModel`). **Verified both fail before the fix**:
+      temporarily reverted `FtsManager`'s and `VecManager`'s `_loadState`/
+      `_saveState` to their pre-Phase-2 `$meta`-based form — both returned
+      zero hits on device B where A found the matching document. Restored
+      and re-verified green.
+- [x] Both must **fail against the current code before the fixes land** — run them
       first and record the observed failure, or they are not testing what they
-      claim.
-- [ ] Add a targeted regression test for the tombstone-floor LWW hazard (Q-D): a
+      claim. Done for all four regression tests above (index, FTS, Vec,
+      tombstone floor) via temporary revert/re-run/restore, not inferred.
+- [x] Add a targeted regression test for the tombstone-floor LWW hazard (Q-D): a
       two-device harness case where A's later-HLC floor write lowers B's higher
       floor, then B ingests an SSTable it should have rejected — assert rejection
       survives the move to `$$`.
+      Added to `packages/kmdb/test/sync/sync_engine_test.dart` (new group
+      "Q-D: tombstone floor LWW hazard"), directly beside the file's existing
+      H4-FU2/H4-FU3 two-device tests it mirrors (`KvStoreImpl` + `SyncEngine`
+      directly, not `kmdb_harness` — matching that file's own established
+      precedent for this exact class of two-device scenario, fast enough to
+      run in the default unit suite, no `e2e` tag needed). Device B
+      establishes a real advanced floor via the delete+advance-push
+      tombstone-drop mechanism; device A then explicitly sets a lower floor
+      at a later wall-clock time and pushes; B pulls and asserts its floor is
+      unchanged, then confirms a synthetic sub-floor SSTable is still
+      rejected. **Verified fails before the fix**: temporarily aliased
+      `MetaStore.kGcStateNamespace` to `kNamespace` (`$meta`) — B's floor was
+      correctly observed to drop to A's low value after the sync. Restored
+      and re-verified green.
 
 ### Phase 5 — spec
 
-- [ ] Note the corrections needed in §13 and §16 for **WI-2** to sequence; do not
+- [x] Note the corrections needed in §13 and §16 for **WI-2** to sequence; do not
       edit `docs/spec/` here beyond the §meta classification rule (Phase 3).
+      §13/§16's SC-10 root claim (the false `$`-prefix upload filter, and
+      index/FTS/Vec state's classification as replicated) is left for WI-2 to
+      correct in full, as scoped. This WI made the following corrections,
+      all scoped to "the floor's/state's location changed, so claims about
+      that location must not stay false":
+      - `docs/spec/06_storage_engine.md` — the tombstone-floor section's
+        "Per-device, not synced. The floor lives in `$meta`, which is not
+        replicated" note corrected to describe `$$gcstate` and the actual
+        LWW hazard the move closes (not the false "$meta is not replicated"
+        reasoning); the "writes the horizon into `$meta`" and "separate
+        `$meta` put" mentions in the same section updated to `$$gcstate`.
+      - `docs/spec/12_sync.md` — the local-only-namespace-exclusion list
+        extended with the four new `$$…state` namespaces; a new "The `$meta`
+        vs `$$` classification rule" subsection added (this **is** the Goal-3
+        classification rule Phase 3 required, recorded in the spec so the
+        next `$meta` addition has a rule to follow) stating the governing
+        invariant, the SC-10/Q-D history that motivated it, and the
+        WI-12/WI-13/WI-14 deferrals.
+      - `docs/spec/31_encryption.md` — split the "`$meta` operational
+        metadata" encryption-coverage bullet: the tombstone floor and
+        index/FTS/Vec state now get their own bullets describing local-only
+        (`$$…`) storage and disk-theft-only protection, distinct from
+        `$meta`'s genuine cloud-provider protection; added an "Update
+        (0.10.01 WI-11)" note to the historical Gap 3 section so it does not
+        read as though these values are still in `$meta` today.
+      - `packages/kmdb/lib/src/engine/kvstore/meta_store.dart:360` (Phase 3) —
+        the doc comment asserting "`$meta`, which is excluded from sync" (also
+        false — `$meta` **is** synced) corrected as part of the tombstone-floor
+        move.
 
 **Final step — QA sign-off and pre-commit:**
 
-- [ ] Run `make coverage` — judge by whether the seam is covered, not by the line
+- [x] Run `make coverage` — judge by whether the seam is covered, not by the line
       percentage. Both halves of this defect were already well covered.
+      Overall workspace coverage: **94.8%** (11,195/11,814 lines) — unchanged
+      from the pre-existing baseline recorded in
+      `docs/roadmap/0_10_01.md`'s "Verification snapshot", so this plan did
+      not regress it. Checked every new/changed line in `index_manager.dart`,
+      `fts_manager.dart`, `vec_manager.dart`, `meta_store.dart`,
+      `kv_store_impl.dart`, `field_filter.dart`, and `filter.dart` against
+      `lcov.info`'s per-line hit counts: every line this plan added or
+      changed is covered (hit > 0). The handful of uncovered lines remaining
+      in those files are all **pre-existing** branches unrelated to this
+      diff (decode-error fallbacks in `_decodeState`, the batch-flush-200
+      threshold, the concurrent-write-during-build stale transition, the
+      pre-existing `unregisterNamespace` method) — confirmed by cross-
+      referencing `git diff` hunks against the uncovered line numbers.
 - [ ] Hand off to **`kmdb-qa`** for sign-off. Do not open a PR until received.
-- [ ] Run `make pre_commit` — note it is scoped to `packages/kmdb`.
-- [ ] Verify licence headers (2026) on new files.
+      **Outstanding as of 2026-07-23** — this implementation session has no
+      Agent/Task tool available, so `kmdb-qa` cannot be invoked directly (see
+      `docs/plans/README.md` step 5's "mandatory before commit/PR" gate). All
+      implementable work below is complete and verified; the coordinator
+      session must invoke `kmdb-qa` before this plan proceeds to commit/PR.
+- [x] Run `make pre_commit` — note it is scoped to `packages/kmdb`. Green:
+      format_check, `melos run analyze` (all 9 packages), `melos licenses`
+      (addlicense --check), and the scoped `kmdb` test suite (2414 pass / 12
+      skipped) all passed.
+- [x] Verify licence headers (2026) on new files. Confirmed on all three new
+      files: `test/query/index_full_scan_equivalence_test.dart`,
+      `packages/kmdb_harness/test/e2e/index_cross_device_test.dart`,
+      `packages/kmdb_harness/test/e2e/search_cross_device_test.dart`.
 
 ## Plan review (2026-07-21)
 
@@ -756,4 +940,129 @@ to **`kmdb-plan-implement`**.
 
 ## Summary
 
-_To be completed when the work is done._
+Implemented on branch `20260723_plan_0_10_01_index_predicate_trust`, worktree
+`.worktrees/20260723_plan_0_10_01_index_predicate_trust`. All five phases
+complete and independently verified. **`kmdb-qa` signed off** after one blocking
+item and three advisories were closed (see *Post-QA remediation* below).
+
+- **Phase 1 (SC-15).** Gated `FieldFilter.equalityPredicate`
+  (`field_filter.dart`) on `_op == _Op.eq && caseSensitive`, and strengthened
+  `Filter.equalityPredicate`'s doc comment (`filter.dart`) into an explicit
+  contract: return non-null only when an exact-token index lookup is a
+  *complete* answer. Confirmed the planner already falls through to a full
+  scan and reports `ScanStrategy.fullScan` honestly for a declined predicate —
+  no planner change was needed beyond the gate itself. Confirmed no other
+  `Filter` implementation overrides `equalityPredicate`.
+- **Phase 2 (SC-10 — index, FTS, Vec state).** Moved all three derived-index
+  state stores off synced `$meta` into new local-only namespaces:
+  `$$indexstate`, `$$ftsstate`, `$$vecstate` (same keys, same CBOR values,
+  `EncryptionEnvelope` wrapping preserved). Two small, narrowly-scoped
+  additions not spelled out in the plan, both documented at the call site:
+  `MetaStore.symbolicKey` (exposes the existing key-hash for symbolic names
+  that no longer live in `$meta`, mirroring the already-public `indexKey`) and
+  `KvStoreImpl.putRaw`/`deleteRaw` (raw engine writes that bypass the
+  dirty-open-flag/generation-counter bookkeeping `writeBatchInternal`
+  performs — routing state writes through that path would have marked
+  read-only sessions "dirty" merely for triggering a lazy index build, a
+  real semantic regression the plan didn't flag). `MetaStore` itself was not
+  generalised.
+- **Phase 3 (`$meta` audit).** Completed the full classification: the
+  tombstone-GC floor was moved to `MetaStore.kGcStateNamespace` (`$$gcstate`),
+  closing Q-D's LWW-lowers-the-floor hazard. The four "verify" rows
+  (`enc:blob`, schema state, version-retention policy, namespaces registry,
+  format-version marker) all checked out correctly replicated. The audit
+  found a **sixth SC-10-shaped instance not anticipated by the plan**: the
+  dirty-open flag (`MetaStore.setDirty`/`appendDirtyFlag`) also syncs via
+  `$meta` under a device-independent key, so a peer's write or clean-close
+  tombstone can override this device's own flag via plain LWW — including a
+  false-negative direction. Per the plan's own instruction ("file it
+  separately, do not silently fold new scope into this WI"), this was
+  **classified but not fixed**, and spun out as **WI-14** on
+  `docs/roadmap/0_10_01.md`.
+- **Phase 4 (equivalence tests).** `test/query/index_full_scan_equivalence_test.dart`
+  — a 12-cell sampled matrix (eq × both case flags + a mismatched-case
+  control, startsWith × both flags, case-insensitive contains, notEquals,
+  isGreaterThan, isBetween, isIn, containsAny, containsAll) asserting
+  index-declared and no-index row sets agree by `_id`. Three new cross-device
+  files under `packages/kmdb_harness/test/e2e/` (`@Tags(['e2e'])`, run via
+  `dart test --preset e2e` / `melos run e2e-test --scope kmdb_harness`):
+  `index_cross_device_test.dart` (secondary index), `search_cross_device_test.dart`
+  (FTS + Vec `search()`), and a fourth regression — the tombstone-floor Q-D
+  LWW hazard — added to `packages/kmdb/test/sync/sync_engine_test.dart`
+  alongside that file's existing H4-FU2/H4-FU3 two-device tests (fast enough
+  for the default suite; no `e2e` tag needed). **Every one of these four
+  regression tests was confirmed to fail against the pre-fix code** via
+  temporary revert/re-run/restore, not inferred — including the key detail
+  that dropping `&& caseSensitive` from the Phase 1 gate made *exactly and
+  only* the mandatory `caseSensitive: false` cell fail, with all 11 other
+  matrix cells still passing (proving the matrix isn't accidentally green).
+- **Phase 5 (spec).** Corrected the now-false "the floor lives in `$meta`,
+  which is not replicated" claim in `docs/spec/06_storage_engine.md` (and its
+  two sibling mentions), added a matching correction plus the new namespace
+  name to `docs/spec/12_sync.md`'s local-only-namespace list, and added a new
+  "The `$meta` vs `$$` classification rule" subsection there recording the
+  governing invariant and the WI-12/WI-13/WI-14 deferrals — this **is** the
+  Goal-3 classification rule Phase 3 required. Updated
+  `docs/spec/31_encryption.md`'s encryption-coverage list to split the
+  tombstone-floor/index-FTS-Vec-state bullet out of "`$meta` operational
+  metadata" (they no longer ride synced SSTables, so they no longer get
+  genuine cloud-provider protection — only local-disk-theft protection, like
+  their sibling `$$fts:`/`$$vec:`/`$$index:` data namespaces). Fixed the
+  `meta_store.dart:360`-area doc comment asserting "`$meta`, which is
+  excluded from sync" (also false). Left §13/§16's broader SC-10 root-claim
+  correction to **WI-2**, as scoped.
+- **Verification.** `packages/kmdb`: 2414 pass / 12 skipped (up from the
+  2394 baseline — the 20 new tests are the equivalence matrix's 12 cells plus
+  the SC-10 no-migration regression tests added per-subsystem in Phase 2,
+  plus the Q-D hazard test). `packages/kmdb_cli`: 1176 pass / 3 skipped
+  (unaffected). `packages/kmdb_harness`: 153 pass / 2 skipped by default;
+  3 pass under `--preset e2e`. `make analyze`: clean across all 9 packages.
+  `make coverage`: 94.8% (11,195/11,814 lines), level with the pre-existing
+  baseline — every line this plan added or changed is covered; the remaining
+  gaps in touched files are pre-existing and unrelated to this diff (verified
+  line-by-line against `git diff` hunks). `make pre_commit`: green
+  (format_check, analyze, license_check, scoped `kmdb` tests).
+- **Deliberately out of scope** (per the plan's own decisions, re-confirmed
+  during implementation): `device_id`'s inert `$meta` copy (SC-5 → **WI-12**)
+  and `gen:{namespace}` generation-counter classification (Q-C → **WI-13**).
+  Neither was touched. **WI-14** (the dirty-open flag) is a new deferral
+  found during this plan's own Phase 3 audit, not present in the original
+  scope.
+- **No migration.** KMDB is unreleased; the namespace moves invalidate
+  existing local derived-index/floor state, which rebuilds on next access —
+  confirmed via dedicated tests that a legacy `$meta` entry is dead weight,
+  never re-ingested as though the device had already built the state.
+
+### Post-QA remediation (2026-07-23)
+
+`kmdb-qa` returned **not ready** with one blocking item and three advisories.
+All are closed; the code fix itself was unchanged.
+
+- **Blocking — eight now-false spec sentences.** Moving the state out of `$meta`
+  made five sentences in §16 and three in §20 false; both files were untouched by
+  the original diff, and they had no owner (WI-2's row covers SC-2/SC-3/SC-11…SC-20;
+  SC-10 is not in that range). Corrected via `kmdb-architect`. §16's *separate*,
+  pre-existing false `$`-prefix upload-filter claim was deliberately **preserved
+  verbatim** by splitting the bullet — it is WI-2's structural rewrite, and editing
+  it in place would have transferred a never-true justification onto a now-true
+  statement. §20's local-only namespace list was additionally **incomplete** after
+  the move; `$$ftsstate`/`$$vecstate` added.
+- **Advisory — the equivalence test had two vacuous-pass paths.** The warm-up poll
+  fell through without asserting the index reached `current` (both arms would then
+  full-scan and agree trivially), and `_expectEquivalent` was purely *relative* (an
+  empty fixture passes as `{} == {}`). Hardened: assert `IndexStatus.current`, use
+  `explainedGet()` with **per-cell `ScanStrategy` assertions** (`fullScan` for the
+  case-insensitive cell — the SC-15 fix itself — and `indexScan` for the exact-case
+  control, proving the gate *discriminates*), and pin absolute row sets on the
+  discriminating cells. Re-verified: reverting the gate still yields **exactly one**
+  failing cell.
+- **Advisory — Q-A rationale overclaimed.** Corrected in the Decisions section: a
+  hand-enumerated matrix guards *these cells*, not "any future matcher"; the doc
+  contract on `Filter.equalityPredicate` is what guards the class.
+- **Advisory — duplicated doc paragraph** in `filter.dart` merged, and the leading
+  summary completed to mention case-insensitive equality.
+
+**Final verification:** `make pre_commit` green; `dart test --preset e2e`
+(kmdb_harness) 3/3; `make coverage` 94.8% (11,195/11,814, level with baseline);
+`make doc_site_html` renders §16 (16 sections) and §20 (22) intact with §21–§29
+unaffected.

@@ -37,12 +37,30 @@ abstract base class Filter {
   /// Returns `true` if [document] matches this filter.
   bool evaluate(Map<String, dynamic> document);
 
-  /// If this filter is a simple equality predicate (`field == value`), returns
-  /// the field path and operand value as a record. Returns `null` for all other
-  /// filter types, including composite filters and non-equality field filters.
+  /// If this filter is a simple equality predicate (`field == value`) that a
+  /// secondary index can answer *completely*, returns the field path and
+  /// operand value as a record. Returns `null` for every other case:
+  /// composite filters, non-equality field filters, **and** equality filters
+  /// that need a transform the index did not apply at write time (notably
+  /// `caseSensitive: false`).
   ///
-  /// Used by the query engine to identify index-eligible predicates without
-  /// exposing the private `_FieldFilter` / `_Op` internals.
+  /// Used by the query engine to identify predicates a secondary index's
+  /// exact-token lookup can satisfy without also falling back to an in-memory
+  /// scan, and to do so without exposing the private `_FieldFilter` / `_Op`
+  /// internals.
+  ///
+  /// **Contract:** return non-null **only** when an exact-token index lookup
+  /// is a complete answer to this predicate — i.e. the index's stored token
+  /// for a matching document is byte-identical to the token this predicate
+  /// would look up. A predicate that needs any transform the index did not
+  /// apply at write time (case folding, accent stripping, Unicode
+  /// normalisation, locale-aware comparison, …) **MUST** return `null` so the
+  /// query engine falls back to a full scan. Returning non-null for such a
+  /// predicate causes the query planner to trust an index answer that silently
+  /// omits matching documents — this is the exact defect closed by 0.10.01
+  /// WI-11 (SC-15): `equals(value, caseSensitive: false)` indexes an
+  /// exact-case token, so it must decline (return `null`) rather than claim
+  /// index-answerability.
   (String path, Object? value)? get equalityPredicate => null;
 
   // ── Composition ─────────────────────────────────────────────────────────────

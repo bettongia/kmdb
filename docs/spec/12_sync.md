@@ -199,8 +199,10 @@ before dropping a surviving tombstone.
 
 - **Ingest-side horizon floor (recipient guard).** As a defence-in-depth
   backstop, every device records the horizon used by each tombstone-
-  dropping `_compactAll` into `$meta` as a per-device **tombstone GC
-  floor**. `SyncEngine.pull` invokes `KvStore.ingestSstable` per file,
+  dropping `_compactAll` into the local-only `$$gcstate` namespace as a
+  per-device **tombstone GC floor** — device-local and never uploaded (see
+  §6's "Per-device, not synced" note for why this moved out of `$meta` in
+  0.10.01 WI-11/Q-D). `SyncEngine.pull` invokes `KvStore.ingestSstable` per file,
   and that path rejects any SSTable whose `maxHlc <= floor` with a typed
   `StaleSstableIngestException`. The catch block in `pull` logs at WARN
   and continues to the next file — the rejected file stays in the cloud
@@ -448,12 +450,54 @@ final ownLocalFiles = localFiles
 ```
 
 The `$$`-prefixed namespaces excluded from upload are:
-`$$fts:*` (lexical search), `$$vec:*` (semantic search), and
-`$$index:*` (secondary indexes). Each receiving device rebuilds these
-derived indexes independently from the synced document data.
+`$$fts:*` (lexical search data), `$$vec:*` (semantic search data),
+`$$index:*` (secondary index data), `$$indexstate` (secondary-index state),
+`$$ftsstate` (FTS index state), `$$vecstate` (Vec index state), and
+`$$gcstate` (the tombstone GC floor). Each receiving device rebuilds the
+derived *data* namespaces (`$$fts:*`/`$$vec:*`/`$$index:*`) independently
+from the synced document data, and maintains its own *state* entries
+(`$$indexstate`/`$$ftsstate`/`$$vecstate`/`$$gcstate`) independently — see
+"The `$meta` vs `$$` classification rule" below for why the state entries
+live here rather than in `$meta`.
 
 Syncable system namespaces that **are** uploaded: `$meta`, `$ver:*`
 (document versions), and `$vault` (vault references).
+
+### The `$meta` vs `$$` classification rule
+
+Added by the 0.10.01 WI-11 hardening pass, after **SC-10** — a case where this
+exact distinction was gotten wrong. Secondary-index, FTS, and Vec index
+state (the `status`/`builtThrough` fields tracking whether *this device* has
+built a derived index) originally lived in `$meta`. Because `$meta` is
+synced and its keys are content-hashed (device-independent), a device that
+pulled a peer's `$meta` inherited `status: current` for an index it had
+never built locally, then scanned its own empty `$$fts:*`/`$$vec:*`/
+`$$index:*` namespace and silently returned zero rows/search hits for
+present, matching documents. The tombstone GC floor had the identical defect
+via a different symptom: `$meta`'s plain last-write-wins let a peer's
+*older* floor, written with a *later* HLC, overwrite (and lower) this
+device's *higher* floor, re-enabling tombstone resurrection (Q-D).
+
+**The governing rule going forward:** `$meta` holds only *replicated* state
+— facts that must be identical across every device that syncs the same
+dataset (the wrapped DEK, schema definitions, version-retention policy, the
+namespace registry, the format-version marker). Any *device-local* fact —
+something that describes what **this device**, specifically, has done or
+built — belongs in a `$$`-prefixed namespace instead, even if it is a single
+scalar with no natural "data" sibling namespace (the tombstone floor's
+`$$gcstate` has no `$$gc:*` data counterpart; it is one state entry, moved
+for exactly this reason). Before adding a new `$meta` entry, ask: *would a
+different device correctly compute or want the same value?* If the answer is
+no, it is device-local and belongs behind `$$`, not in `$meta`.
+
+Known device-local entries not yet moved, tracked separately (not fixed by
+WI-11): the legacy `device_id` copy in `$meta` (superseded by the
+authoritative local `DEVICE_ID` file — WI-12) and the dirty-open flag, found
+mis-placed by this same audit and spun out as WI-14 (see
+`docs/roadmap/0_10_01.md`). `gen:{namespace}` generation counters are a
+separate, subtler case (WI-13) — they are read cross-device for cache
+invalidation today, so "device-local" alone is not obviously correct without
+also deciding a merge semantics `$meta`'s plain LWW does not provide.
 
 **Confidentiality.** Syncable system-namespace values in the cloud are
 protected by **value-level encryption** (§31), not by upload filtering.

@@ -566,6 +566,36 @@ final class KvStoreImpl implements KvStore {
   @internal
   Future<Set<String>> allStoredNamespaces() => _engine.allStoredNamespaces();
 
+  /// Writes [value] to [namespace]/[key] directly via the underlying storage
+  /// engine, bypassing the dirty-open flag, generation-counter, and
+  /// namespace-registry bookkeeping that [put] / [writeBatch] /
+  /// [writeBatchInternal] all perform.
+  ///
+  /// Used for device-local derived-index state — the `$$indexstate` /
+  /// `$$ftsstate` / `$$vecstate` namespaces introduced by the 0.10.01 WI-11
+  /// fix (see `docs/spec/16_secondary_indexes.md`) — which must **not** be
+  /// treated as a document write: a secondary-index/FTS/Vec build completing
+  /// is not something a crash-recovery caller should interpret as "the
+  /// previous session had an unclosed document write"
+  /// ([MetaStore.getDirtyFlag]'s contract). This mirrors
+  /// [MetaStore.putRawByName]'s existing raw-engine-write pattern for `$meta`,
+  /// generalised to a caller-supplied namespace. Callers are responsible for
+  /// their own encryption wrapping (an `EncryptionEnvelope`, typically),
+  /// exactly as [MetaStore.putRawByName]'s callers rely on it to wrap for
+  /// them — this method stores exactly the bytes it is given.
+  @internal
+  Future<void> putRaw(String namespace, String key, Uint8List value) =>
+      _engine.put(namespace, key, value);
+
+  /// Deletes [namespace]/[key] directly via the underlying storage engine,
+  /// bypassing the same bookkeeping as [putRaw].
+  ///
+  /// Mirrors [MetaStore.deleteRawByName], generalised to a caller-supplied
+  /// namespace. See [putRaw]'s doc comment for the full rationale.
+  @internal
+  Future<void> deleteRaw(String namespace, String key) =>
+      _engine.delete(namespace, key);
+
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   /// Appends the dirty-open flag, generation counter bumps, and namespace
