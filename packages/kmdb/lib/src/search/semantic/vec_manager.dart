@@ -20,6 +20,7 @@ import '../../encryption/encryption_envelope.dart';
 import '../../encryption/encryption_provider.dart';
 import '../../engine/kvstore/kv_store.dart';
 import '../../engine/kvstore/kv_store_impl.dart';
+import '../../engine/kvstore/meta_store.dart';
 import '../../query/write_augmentor.dart';
 import 'package:betto_inferencing/betto_inferencing.dart'
     show EmbeddingKind, EmbeddingModel;
@@ -27,6 +28,17 @@ import '../search_result.dart';
 import '../sync_delta.dart';
 import '../vec_index_definition.dart';
 import 'vec_index_state.dart';
+
+/// The local-only namespace holding persisted [VecIndexState] for every
+/// declared Vec index.
+///
+/// See [VecIndexState]'s class doc comment for why this moved out of synced
+/// `$meta` (0.10.01 WI-11, SC-10). The key within this namespace is derived
+/// from [VecIndexState.metaKey] via [MetaStore.symbolicKey]; the value is the
+/// same CBOR-encoded [VecIndexState] as before, still wrapped with
+/// [EncryptionEnvelope] (see [VecManager._loadState] / [VecManager._saveState]).
+/// Only the target namespace moved.
+const String kVecStateNamespace = r'$$vecstate';
 
 /// Manages all vector (semantic) search indexes for a [KmdbDatabase] instance.
 ///
@@ -796,23 +808,34 @@ final class VecManager implements WriteAugmentor {
 
   // ── State persistence ─────────────────────────────────────────────────────
 
+  /// Reads the persisted [VecIndexState] for [namespace]/[field] from the
+  /// local-only [kVecStateNamespace] (moved from `$meta` by WI-11/SC-10 — see
+  /// that constant's doc comment).
   Future<VecIndexState> _loadState(String namespace, String field) async {
-    final bytes = await _store.meta.getRawByName(
-      VecIndexState.metaKey(namespace, field),
-    );
-    return VecIndexState.fromBytes(namespace, field, bytes);
+    final key = MetaStore.symbolicKey(VecIndexState.metaKey(namespace, field));
+    final bytes = await _store.get(kVecStateNamespace, key);
+    if (bytes == null || bytes.isEmpty) {
+      return VecIndexState.fromBytes(namespace, field, null);
+    }
+    final unwrapped = await EncryptionEnvelope.unwrap(bytes, _encryption);
+    return VecIndexState.fromBytes(namespace, field, unwrapped);
   }
 
+  /// Persists [state] to the local-only [kVecStateNamespace].
+  ///
+  /// Uses [KvStoreImpl.putRaw] (not [KvStoreImpl.writeBatchInternal]) so a Vec
+  /// status flip never marks the dirty-open flag — building or rebuilding a
+  /// derived index is not a document write (see [KvStoreImpl.putRaw]'s doc
+  /// comment).
   Future<void> _saveState(
     VecIndexState state,
     String namespace,
     String field,
   ) async {
     _statusCache[_cacheKey(namespace, field)] = state.status;
-    await _store.meta.putRawByName(
-      VecIndexState.metaKey(namespace, field),
-      state.toBytes(),
-    );
+    final key = MetaStore.symbolicKey(VecIndexState.metaKey(namespace, field));
+    final wrapped = await EncryptionEnvelope.wrap(state.toBytes(), _encryption);
+    await _store.putRaw(kVecStateNamespace, key, wrapped);
   }
 
   // ── SQ8 quantisation ──────────────────────────────────────────────────────

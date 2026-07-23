@@ -64,8 +64,13 @@ When a dot-path ends with `[]`, one index entry is written per array element:
 
 ## Index Lifecycle States
 
-Each index transitions through four states stored in `$meta` under the key
-`index:{namespace}:{path}`:
+Each index transitions through the four states below. The state is
+**device-local**: it is stored in the local-only `$$indexstate` namespace,
+under a deterministic key
+derived from the symbolic name `index:{namespace}:{path}`. It moved there from
+the synced `$meta` namespace in 0.10.01 (WI-11/SC-10), because a device must
+never inherit a peer's belief that an index is built — see §12, *The
+`$meta` vs `$$` classification rule*.
 
 | State | Description | Write path behaviour |
 | :---- | :---------- | :------------------- |
@@ -76,7 +81,7 @@ Each index transitions through four states stored in `$meta` under the key
 
 ### Index Definition Storage
 
-Each index definition is stored in `$meta` as a CBOR map:
+Each index definition is stored in `$$indexstate` as a CBOR map:
 
 ```jsonc
 {
@@ -125,7 +130,7 @@ mutations — a concurrent reader sees the full batch or none of it (see §18).
 Index definitions are registered at `KmdbDatabase.open()` time but no entries
 are written until that index is first queried. On first query:
 
-1. Mark the index status as `building` in `$meta`.
+1. Mark the index status as `building` in `$$indexstate`.
 2. Record the current namespace generation as the build start generation.
 3. Begin writing new index entries for concurrent writes (write interception
    is active from this point).
@@ -141,7 +146,7 @@ slower). The `onIndexReady` callback fires when the index reaches `current`.
 
 ## Interrupted Build Recovery
 
-If the process is killed during an index build, the `$meta` entry shows
+If the process is killed during an index build, the `$$indexstate` entry shows
 `status = building` on next open. The Query Layer reports this via the
 `onIndexRebuildRequired` callback. The application decides whether to complete
 the build before the first query or defer it. Until rebuilt, queries on the
@@ -225,10 +230,14 @@ the full namespace size.
 
 Index state and index entries are **device-local** and are **never synced**:
 
-- `$meta` (where index status is stored as `index:{namespace}:{path}`) is a
-  system namespace prefixed with `$`. The sync engine filters out all
-  `$`-prefixed namespaces during SSTable upload, so index state never leaves the
-  device.
+- `$$indexstate` (where index status is stored, keyed by the symbolic name
+  `index:{namespace}:{path}`) uses the `$$` (double-dollar) local-only prefix,
+  so it is written to a `.local.sst` file that `SyncEngine.push` never uploads.
+  Index state moved here from the synced `$meta` namespace in 0.10.01
+  (WI-11/SC-10) — see §12, *The `$meta` vs `$$` classification rule*.
+- `$meta` is a system namespace prefixed with `$`. The sync engine filters out
+  all `$`-prefixed namespaces during SSTable upload, so index state never
+  leaves the device.
 - `$$index:*` namespaces (where index entries are stored) use the `$$`
   (double-dollar) local-only prefix. At flush time these entries are written to
   a `.local.sst` file that `SyncEngine.push` never uploads (see §8, §6, §12).

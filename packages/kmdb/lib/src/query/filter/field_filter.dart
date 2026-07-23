@@ -173,7 +173,7 @@ final class _FieldFilter extends Filter {
 
   @override
   (String, Object?)? get equalityPredicate =>
-      _op == _Op.eq ? (_path, _operand) : null;
+      _op == _Op.eq && caseSensitive ? (_path, _operand) : null;
 
   @override
   bool evaluate(Map<String, dynamic> document) {

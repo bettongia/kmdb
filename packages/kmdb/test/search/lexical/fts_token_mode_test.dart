@@ -28,10 +28,12 @@
 library;
 
 import 'package:kmdb/src/encoding/value_codec.dart';
+import 'package:kmdb/src/encryption/encryption_envelope.dart';
 import 'package:kmdb/src/encryption/encryption_provider.dart';
 import 'package:kmdb/src/encryption/key_derivation.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store_impl.dart';
+import 'package:kmdb/src/engine/kvstore/meta_store.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
 import 'package:kmdb/src/search/fts_index_definition.dart';
 import 'package:kmdb/src/search/lexical/fts_index_state.dart';
@@ -41,6 +43,22 @@ import 'package:test/test.dart';
 const _ns = 'docs';
 const _field = 'body';
 const _def = FtsIndexDefinition(collection: _ns, field: _field);
+
+/// Reads the persisted [FtsIndexState] directly from the local-only
+/// `$$ftsstate` namespace (moved from `$meta` by 0.10.01 WI-11/SC-10 — see
+/// [kFtsStateNamespace]'s doc comment), applying the same
+/// [EncryptionEnvelope] unwrap [FtsManager]'s private `_loadState` does. Test
+/// helper only — production code never reaches into the namespace directly.
+Future<FtsIndexState> _readFtsState(
+  KvStoreImpl store, [
+  EncryptionProvider? encryption,
+]) async {
+  final key = MetaStore.symbolicKey(FtsIndexState.metaKey(_ns, _field));
+  final bytes = await store.get(kFtsStateNamespace, key);
+  if (bytes == null) return FtsIndexState.fromBytes(_ns, _field, null);
+  final unwrapped = await EncryptionEnvelope.unwrap(bytes, encryption);
+  return FtsIndexState.fromBytes(_ns, _field, unwrapped);
+}
 
 Future<KvStoreImpl> _openStore() async {
   final (store, _) = await KvStoreImpl.open(
@@ -79,14 +97,7 @@ void main() {
       await ftsNoEnc.checkAndTransitionOnOpen();
       await ftsNoEnc.ensureBuilt(_ns, _field);
 
-      final stateAfterFirstBuild = await store.meta.getRawByName(
-        FtsIndexState.metaKey(_ns, _field),
-      );
-      final decodedState = FtsIndexState.fromBytes(
-        _ns,
-        _field,
-        stateAfterFirstBuild,
-      );
+      final decodedState = await _readFtsState(store);
       expect(decodedState.status, equals(FtsIndexStatus.current));
       expect(decodedState.tokenMode, equals(FtsTokenMode.hex));
 
@@ -137,11 +148,7 @@ void main() {
       expect(result.hits, hasLength(1));
       expect(result.hits.first.id, equals('01900000000070008000000000000001'));
 
-      final stateAfterRebuild = FtsIndexState.fromBytes(
-        _ns,
-        _field,
-        await store.meta.getRawByName(FtsIndexState.metaKey(_ns, _field)),
-      );
+      final stateAfterRebuild = await _readFtsState(store, provider);
       expect(stateAfterRebuild.status, equals(FtsIndexStatus.current));
       expect(stateAfterRebuild.tokenMode, equals(FtsTokenMode.hmac));
 
@@ -181,11 +188,7 @@ void main() {
       final fts2 = FtsManager(store, const [_def]);
       await fts2.checkAndTransitionOnOpen();
 
-      final stateAfterReopen = FtsIndexState.fromBytes(
-        _ns,
-        _field,
-        await store.meta.getRawByName(FtsIndexState.metaKey(_ns, _field)),
-      );
+      final stateAfterReopen = await _readFtsState(store);
       // Status must remain `current` — checkAndTransitionOnOpen must not
       // have reset it to `undefined`.
       expect(stateAfterReopen.status, equals(FtsIndexStatus.current));

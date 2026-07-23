@@ -74,7 +74,15 @@ enum FtsTokenMode {
 }
 
 /// Persistent state for a single FTS index field, stored as a CBOR map in
-/// the `$meta` system namespace under the key returned by [metaKey].
+/// the local-only `$$ftsstate` system namespace under the key derived from
+/// [metaKey] (see [FtsManager]'s `_loadState`/`_saveState`).
+///
+/// This moved out of synced `$meta` by the 0.10.01 WI-11 fix (SC-10): a
+/// device that pulled a peer's `$meta` would inherit `status: current` for an
+/// FTS index it never built locally, then scan its own empty `$$fts:*`
+/// namespaces and silently return zero `search()` results for present,
+/// matching documents. `$$ftsstate` is local-only (never uploaded — see
+/// `isLocalOnly` in `namespace_codec.dart`), so this can no longer happen.
 final class FtsIndexState {
   /// Creates an [FtsIndexState].
   const FtsIndexState({
@@ -242,13 +250,16 @@ final class FtsIndexState {
       r'$$fts:doc:'
       '$ns:$field:$docId';
 
-  /// Key for the persisted [FtsIndexState] CBOR blob in `$meta`.
+  /// Symbolic name for the persisted [FtsIndexState] CBOR blob, stored in the
+  /// local-only `$$ftsstate` namespace (moved from `$meta` by WI-11/SC-10 —
+  /// see the class doc comment).
   ///
   /// Format: `fts:{ns}:{field}`
   ///
-  /// Note: no `$` prefix here because this is used as the symbolic name
-  /// passed to [MetaStore.getRawByName] / [MetaStore.putRawByName], which
-  /// operate in the `$meta` namespace.
+  /// Note: no `$` prefix here — this is a symbolic name, not a namespace. It
+  /// is passed to [MetaStore.symbolicKey] to derive the actual storage key
+  /// within `$$ftsstate` (mirrors how [MetaStore.indexKey] does the same for
+  /// secondary-index state, reusing the identical key-encoding scheme).
   static String metaKey(String ns, String field) => 'fts:$ns:$field';
 }
 

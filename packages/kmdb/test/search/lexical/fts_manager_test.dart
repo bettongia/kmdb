@@ -999,4 +999,46 @@ void main() {
       },
     );
   });
+
+  // ── SC-10 regression: FTS state is device-local, not $meta ──────────────────
+
+  group('SC-10 — FTS state is device-local (\$\$ftsstate, not \$meta)', () {
+    test('a legacy `current` status left in \$meta (e.g. from a peer that '
+        'synced before the WI-11 fix) is dead: search() does not trust it and '
+        'still rebuilds from the local (empty) index', () async {
+      final db = await _openDb();
+      addTearDown(db.close);
+      final col = db.collection(name: 'docs', codec: _codec);
+      await col.insert({'body': 'searchable content'});
+
+      // Simulate the pre-fix (or cross-device-inherited) shape: a `current`
+      // FtsIndexState written under the OLD `$meta` symbolic name, with NO
+      // corresponding $$ftsstate entry and no local $$fts:* index entries
+      // for this document — exactly what a device that pulled a peer's
+      // pre-fix `$meta` would have.
+      const legacyState = FtsIndexState(
+        namespace: 'docs',
+        field: 'body',
+        status: FtsIndexStatus.current,
+      );
+      await db.store.meta.putRawByName(
+        FtsIndexState.metaKey('docs', 'body'),
+        legacyState.toBytes(),
+      );
+
+      // search() must not trust the legacy $meta status: it must actually
+      // build the index (lazily) rather than treat it as already current
+      // with an empty $$fts:* namespace (which would silently return zero
+      // results for a present, matching document — the SC-10 shape).
+      final result = await col.search('searchable', fields: ['body']);
+      expect(
+        result.hits,
+        isNotEmpty,
+        reason:
+            'a legacy \$meta entry must not be trusted as this device\'s '
+            'index state (SC-10) — the index must actually build and find '
+            'the present, matching document',
+      );
+    });
+  });
 }

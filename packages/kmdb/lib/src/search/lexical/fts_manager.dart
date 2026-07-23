@@ -30,6 +30,7 @@ import '../../encryption/encryption_envelope.dart';
 import '../../encryption/encryption_provider.dart';
 import '../../engine/kvstore/kv_store.dart';
 import '../../engine/kvstore/kv_store_impl.dart';
+import '../../engine/kvstore/meta_store.dart';
 import '../../query/write_augmentor.dart';
 import '../fts_index_definition.dart';
 import '../language_detection.dart';
@@ -39,6 +40,17 @@ import 'fts_index_state.dart';
 import 'pipeline.dart';
 
 final defaultStopwords = getStopWords(Locale.fromSubtags(languageCode: 'en'));
+
+/// The local-only namespace holding persisted [FtsIndexState] for every
+/// declared FTS index.
+///
+/// See [FtsIndexState]'s class doc comment for why this moved out of synced
+/// `$meta` (0.10.01 WI-11, SC-10). The key within this namespace is derived
+/// from [FtsIndexState.metaKey] via [MetaStore.symbolicKey]; the value is the
+/// same CBOR-encoded [FtsIndexState] as before, still wrapped with
+/// [EncryptionEnvelope] (see [FtsManager._loadState] / [FtsManager._saveState]).
+/// Only the target namespace moved.
+const String kFtsStateNamespace = r'$$ftsstate';
 
 /// Manages all full-text search (FTS) indexes for a [KmdbDatabase] instance.
 ///
@@ -1422,23 +1434,34 @@ final class FtsManager implements WriteAugmentor {
 
   // ── State persistence ─────────────────────────────────────────────────────
 
+  /// Reads the persisted [FtsIndexState] for [namespace]/[field] from the
+  /// local-only [kFtsStateNamespace] (moved from `$meta` by WI-11/SC-10 — see
+  /// that constant's doc comment).
   Future<FtsIndexState> _loadState(String namespace, String field) async {
-    final bytes = await _store.meta.getRawByName(
-      FtsIndexState.metaKey(namespace, field),
-    );
-    return FtsIndexState.fromBytes(namespace, field, bytes);
+    final key = MetaStore.symbolicKey(FtsIndexState.metaKey(namespace, field));
+    final bytes = await _store.get(kFtsStateNamespace, key);
+    if (bytes == null || bytes.isEmpty) {
+      return FtsIndexState.fromBytes(namespace, field, null);
+    }
+    final unwrapped = await EncryptionEnvelope.unwrap(bytes, _encryption);
+    return FtsIndexState.fromBytes(namespace, field, unwrapped);
   }
 
+  /// Persists [state] to the local-only [kFtsStateNamespace].
+  ///
+  /// Uses [KvStoreImpl.putRaw] (not [KvStoreImpl.writeBatchInternal]) so an
+  /// FTS status flip never marks the dirty-open flag — building or
+  /// rebuilding a derived index is not a document write (see
+  /// [KvStoreImpl.putRaw]'s doc comment).
   Future<void> _saveState(
     FtsIndexState state,
     String namespace,
     String field,
   ) async {
     _statusCache[_statusCacheKey(namespace, field)] = state.status;
-    await _store.meta.putRawByName(
-      FtsIndexState.metaKey(namespace, field),
-      state.toBytes(),
-    );
+    final key = MetaStore.symbolicKey(FtsIndexState.metaKey(namespace, field));
+    final wrapped = await EncryptionEnvelope.wrap(state.toBytes(), _encryption);
+    await _store.putRaw(kFtsStateNamespace, key, wrapped);
   }
 
   // ── CBOR helpers ──────────────────────────────────────────────────────────

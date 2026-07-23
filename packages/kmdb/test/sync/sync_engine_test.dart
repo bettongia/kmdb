@@ -1326,6 +1326,152 @@ void main() {
     });
   });
 
+  // ── Q-D: tombstone floor is device-local, not $meta (0.10.01 WI-11) ────────
+
+  group('Q-D: tombstone floor LWW hazard (0.10.01 WI-11)', () {
+    test("a peer's later-HLC floor write does not lower this device's floor "
+        'via sync, and this device still rejects a sub-floor SSTable '
+        'afterwards', () async {
+      MemoryStorageAdapter.releaseAllLocks();
+
+      // ── Device B: build up a real, high tombstone floor via the
+      // standard delete + advance-push tombstone-drop mechanism (mirrors
+      // the H4-FU3 test above). ──────────────────────────────────────────
+      final adapterB = MemoryStorageAdapter();
+      final (storeB, _) = await KvStoreImpl.open(
+        '/dbB',
+        adapterB,
+        config: KvStoreConfig.forTesting(),
+        deviceId: 'devbbbbb',
+      );
+      final engineB = SyncEngine(
+        store: storeB,
+        cloudAdapter: cloudAdapter,
+        localAdapter: adapterB,
+        deviceId: 'devbbbbb',
+        dbDir: '/dbB',
+        syncRoot: _syncRoot,
+        syncNamespaces: {'ns'},
+        config: KvStoreConfig(
+          memtableSizeBytes: 4096,
+          fsyncOnWrite: false,
+          tombstoneGraceDuration: Duration.zero,
+        ),
+      );
+
+      try {
+        const key = '00000000000070008dead000000000cd';
+        await storeB.put('ns', key, Uint8List.fromList([1]));
+        await storeB.flush();
+        await engineB.push();
+
+        await storeB.delete('ns', key);
+        await storeB.flush();
+        await engineB.push();
+
+        // Advance-push until B's own tombstone-GC pass actually drops the
+        // tombstone and bumps its floor (same polling technique as the
+        // H4-FU3 test — a fixed push count is flaky under real wall-clock
+        // HLC timing).
+        final floorBeforeAdvance = await storeB.meta.getTombstoneFloor();
+        var floorAdvanced = false;
+        for (var i = 0; i < 10 && !floorAdvanced; i++) {
+          final advanceKey =
+              '00000000000070008b00ccc0000000${i.toRadixString(16).padLeft(2, '0')}';
+          await storeB.put('ns', advanceKey, Uint8List.fromList([i]));
+          await storeB.flush();
+          await engineB.push();
+          final floor = await storeB.meta.getTombstoneFloor();
+          floorAdvanced = floor.compareTo(floorBeforeAdvance) > 0;
+        }
+        expect(
+          floorAdvanced,
+          isTrue,
+          reason:
+              "B's tombstone GC floor never advanced past its pre-delete "
+              'value after 10 advance-push attempts — the tombstone-drop '
+              'path may be broken (this is a precondition check, not the '
+              'assertion under test).',
+        );
+
+        final bFloorBeforeSync = await storeB.meta.getTombstoneFloor();
+        expect(bFloorBeforeSync.encoded, greaterThan(0));
+
+        // ── Device A: sets an explicit LOWER floor value strictly after
+        // B's floor was established (real wall-clock ordering guarantees
+        // A's write carries a later HLC), then pushes it. Under the
+        // pre-fix code (floor stored in synced `$meta` under the
+        // device-independent key `gc:tombstoneFloor`), this write would
+        // win the plain-LWW merge on B's next pull and *lower* B's floor —
+        // undoing B's own tombstone-GC history and re-enabling the exact
+        // resurrection the floor exists to prevent (Q-D). ───────────────
+        final adapterA = MemoryStorageAdapter();
+        final (storeA, _) = await KvStoreImpl.open(
+          '/dbA',
+          adapterA,
+          config: KvStoreConfig.forTesting(),
+          deviceId: 'devaaaaa',
+        );
+        final engineA = SyncEngine(
+          store: storeA,
+          cloudAdapter: cloudAdapter,
+          localAdapter: adapterA,
+          deviceId: 'devaaaaa',
+          dbDir: '/dbA',
+          syncRoot: _syncRoot,
+          syncNamespaces: {'ns'},
+        );
+
+        try {
+          // Deliberately a low floor — far below B's real, advanced floor.
+          await storeA.meta.setTombstoneFloor(const Hlc(1, 0));
+          await storeA.flush();
+          await engineA.push();
+
+          // Device B pulls A's data (including, pre-fix, A's low-floor
+          // $meta write).
+          await engineB.pull();
+
+          final bFloorAfterSync = await storeB.meta.getTombstoneFloor();
+          expect(
+            bFloorAfterSync,
+            equals(bFloorBeforeSync),
+            reason:
+                "B's floor must be unaffected by A's sync — the floor is "
+                'device-local (MetaStore.kGcStateNamespace / `\$\$gcstate`, '
+                'never uploaded), so a peer\'s write can never reach it. '
+                "Before the fix, this assertion failed: A's later-HLC "
+                'low-floor write in synced `\$meta` won the LWW merge and '
+                "lowered B's floor (Q-D).",
+          );
+
+          // Confirm the floor's protection actually still holds: a
+          // synthetic SSTable whose maxHlc is at B's real (high) floor
+          // must still be rejected — proving the sync above did not
+          // quietly undermine B's ingest-side guard even though the
+          // top-level floor value read back unchanged.
+          final staleFilename = SstableInfo.flushName(
+            'peeraaaa',
+            bFloorAfterSync,
+            bFloorAfterSync,
+          );
+          final staleBytes = _buildSst(
+            basePhysical: bFloorAfterSync.physicalMs,
+          );
+          await expectLater(
+            storeB.ingestSstable(staleFilename, staleBytes),
+            throwsA(isA<StaleSstableIngestException>()),
+          );
+        } finally {
+          await storeA.close();
+        }
+      } finally {
+        await storeB.close();
+        MemoryStorageAdapter.releaseAllLocks();
+      }
+    });
+  });
+
   // ── ingestSstable ─────────────────────────────────────────────────────────────
 
   group('KvStore.ingestSstable', () {

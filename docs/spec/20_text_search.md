@@ -102,10 +102,14 @@ final vecState = await db.vecManager.getState('books', 'description');
 await db.vecManager.deleteIndex('books', 'description');
 ```
 
-Index state is stored in `$meta` under `fts:{ns}:{field}` and `vec:{ns}:{field}`
-respectively, using the same four lifecycle states as secondary indexes: 
-`undefined` → `building` → `current` (or `stale`). See §16 for the lifecycle
-model.
+Index state is **device-local**: it is stored in the local-only `$$ftsstate`
+and `$$vecstate` namespaces, under deterministic keys derived from the symbolic
+names `fts:{ns}:{field}` and `vec:{ns}:{field}` respectively. Both use the same
+four lifecycle states as secondary indexes: `undefined` → `building` →
+`current` (or `stale`). See §16 for the lifecycle model, and §12 (*The `$meta`
+vs `$$` classification rule*) for why this state moved out of the synced
+`$meta` namespace in 0.10.01 (WI-11/SC-10) — a device must never inherit a
+peer's belief that a search index is built.
 
 ## Search API
 
@@ -300,7 +304,15 @@ $$fts:doc:      — lexical per-document forward index (tokenCount)
 $$vec:          — semantic vector entries (quantized embeddings)
 $$vec:corpus:   — semantic corpus statistics (n)
 $$vec:truncated: — semantic truncation markers
+$$ftsstate      — lexical index state (status, builtThrough, tokenMode)
+$$vecstate      — semantic index state (status, builtThrough, modelId)
 ```
+
+The two `…state` namespaces were moved here from `$meta` by 0.10.01 WI-11
+(SC-10): index *state* is a device-local fact, but `$meta` replicates, so a
+device that had never built the index inherited `status: current` from a peer
+and silently returned zero `search()` results. See §12's `$meta` classification
+rule.
 
 These namespaces use the `$$` (double-dollar) local-only prefix, which means
 their entries are **never uploaded to the sync folder**. At flush time the
@@ -353,7 +365,8 @@ or deleted by the incoming SSTables.
 `FtsManager` and `VecManager` subscribe to `SyncDelta` events. On receipt for a
 namespace with a `current` index:
 
-1. Transition the index state from `current` → `syncing` in `$meta`.
+1. Transition the index state from `current` → `syncing` in the index's state
+   namespace (`$$ftsstate` or `$$vecstate`).
 2. Process each entry in the delta using the same insert / update / delete logic
    as write interception (§21 and §22 respectively).
 3. Transition `syncing` → `current` on completion.
@@ -375,9 +388,9 @@ the UI remains responsive (see Isolate Recommendation below).
 
 ### Crash Recovery
 
-If the process is killed while an index is in `syncing` state, `$meta` retains
-the state. On the next `open()`, any index found in `syncing` is transitioned
-to `stale`. The next `search()` on that index triggers a full rebuild — the
+If the process is killed while an index is in `syncing` state, `$$ftsstate` /
+`$$vecstate` retains the state. On the next `open()`, any index found in
+`syncing` is transitioned to `stale`. The next `search()` on that index triggers a full rebuild — the
 same recovery path used by secondary indexes (§16).
 
 ### Isolate Recommendation (Flutter)

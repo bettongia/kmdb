@@ -16,7 +16,39 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:kmdb/kmdb.dart';
+import 'package:kmdb/src/encryption/encryption_envelope.dart';
+import 'package:kmdb/src/engine/kvstore/meta_store.dart';
+import 'package:kmdb/src/search/semantic/vec_manager.dart'
+    show kVecStateNamespace;
 import 'package:test/test.dart';
+
+/// Reads the persisted [VecIndexState] for [namespace]/[field] directly from
+/// [db]'s local-only [kVecStateNamespace] namespace (moved from `$meta` by
+/// 0.10.01 WI-11/SC-10). None of the databases in this test file are
+/// encrypted, so no unwrap key is threaded through. Test helper only.
+Future<VecIndexState> _readVecState(
+  KmdbDatabase db,
+  String namespace,
+  String field,
+) async {
+  final key = MetaStore.symbolicKey(VecIndexState.metaKey(namespace, field));
+  final bytes = await db.store.get(kVecStateNamespace, key);
+  if (bytes == null) return VecIndexState.fromBytes(namespace, field, null);
+  final unwrapped = await EncryptionEnvelope.unwrap(bytes, null);
+  return VecIndexState.fromBytes(namespace, field, unwrapped);
+}
+
+/// Writes [state] directly into [db]'s local-only [kVecStateNamespace]
+/// namespace, mirroring [VecManager]'s private `_saveState` for an
+/// unencrypted database. Test helper only — used to simulate a crash mid-sync
+/// by forcing a specific persisted state ahead of a real write.
+Future<void> _writeVecState(KmdbDatabase db, VecIndexState state) async {
+  final key = MetaStore.symbolicKey(
+    VecIndexState.metaKey(state.namespace, state.field),
+  );
+  final wrapped = await EncryptionEnvelope.wrap(state.toBytes(), null);
+  await db.store.putRaw(kVecStateNamespace, key, wrapped);
+}
 
 // ── Fake embedding model ────────────────────────────────────────────────────
 
@@ -509,13 +541,7 @@ void main() {
       await db.vecManager!.applyDelta('articles', delta);
 
       // Index should be current after applyDelta completes.
-      final state = VecIndexState.fromBytes(
-        'articles',
-        'body',
-        await db.store.meta.getRawByName(
-          VecIndexState.metaKey('articles', 'body'),
-        ),
-      );
+      final state = await _readVecState(db, 'articles', 'body');
       expect(state.status, equals(VecIndexStatus.current));
 
       await db.close();
@@ -538,22 +564,13 @@ void main() {
         field: 'body',
         status: VecIndexStatus.syncing,
       );
-      await db.store.meta.putRawByName(
-        VecIndexState.metaKey('articles', 'body'),
-        syncingState.toBytes(),
-      );
+      await _writeVecState(db, syncingState);
       await db.close(flush: false);
 
       // Re-open with the same adapter and path — checkAndTransitionOnOpen
       // should flip syncing → stale because a crash is simulated.
       final db2 = await _openDb(adapter: sharedAdapter, path: sharedPath);
-      final state = VecIndexState.fromBytes(
-        'articles',
-        'body',
-        await db2.store.meta.getRawByName(
-          VecIndexState.metaKey('articles', 'body'),
-        ),
-      );
+      final state = await _readVecState(db2, 'articles', 'body');
       // After re-open, index that was syncing is now stale.
       expect(state.status, equals(VecIndexStatus.stale));
 

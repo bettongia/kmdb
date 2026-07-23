@@ -182,8 +182,9 @@ self-evicted. A returning evicted device must perform a full re-sync via
 distributed safety argument.
 
 **Ingest-side horizon floor.** When `_compactAll` drops at least one
-tombstone, it writes the horizon used into `$meta` as the per-device
-**tombstone GC floor**. Subsequent calls to
+tombstone, it writes the horizon used into the local-only `$$gcstate`
+namespace (`MetaStore.kGcStateNamespace`) as the per-device **tombstone GC
+floor**. Subsequent calls to
 [`KvStore.ingestSstable`](../../packages/kmdb/lib/src/engine/kvstore/kv_store.dart)
 read the floor and reject any SSTable whose `maxHlc <= floor` with a
 typed `StaleSstableIngestException`. This is the recipient-side guard
@@ -202,11 +203,22 @@ than the GC decision the local device has already made.
 - **Default on a fresh database is `Hlc(0, 0)`.** No realistic SSTable
   has `maxHlc <= Hlc(0, 0)`, so a never-GC'd database accepts every
   incoming SSTable.
-- **Per-device, not synced.** The floor lives in `$meta`, which is not
-  replicated. Each device's floor reflects its own GC history.
+- **Per-device, not synced.** The floor lives in the local-only `$$gcstate`
+  namespace (`isLocalOnly` matches any `$$`-prefixed namespace — see §12's
+  system-namespace rule), so it is never uploaded to the sync folder. Each
+  device's floor reflects its own GC history.
+
+  This was **not always true**: before the 0.10.01 WI-11 hardening pass
+  (SC-10, Q-D), the floor lived in synced `$meta` under the
+  device-independent key `gc:tombstoneFloor`. `$meta` uses plain
+  last-write-wins, not a max-merge, so a peer's *older* floor written with a
+  *later* HLC could overwrite (and lower) this device's higher floor — silently
+  re-enabling the exact tombstone resurrection the floor exists to prevent.
+  Moving the floor into `$$gcstate` makes this structurally impossible: the
+  namespace is never uploaded, so no peer's value can ever reach it.
 - **Atomicity (Q6 option b).** `CompactionJob.run()` returns a
   `VersionEdit` to `ManifestWriter` *before* control returns to
-  `_compactAll`, so the floor write is a separate `$meta` put after the
+  `_compactAll`, so the floor write is a separate `$$gcstate` put after the
   manifest commits. A crash between the manifest commit and the floor
   write leaves the floor *behind* reality — pessimistic but safe: the
   engine accepts SSTables it could legitimately reject, never the
