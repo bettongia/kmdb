@@ -48,8 +48,12 @@ $(SITE_DIR)/favicon.ico: $(DOCS_DIR)/template/favicon.ico  | $(SITE_DIR)
 $(SITE_DIR)/index.html: $(_INDEX) $(DOCS_DIR)/.pandoc $(_HEADER) | $(SITE_DIR)
 	pandoc --defaults="$(DOCS_DIR)/.pandoc" $(_INDEX) README.md -o "$(SITE_DIR)/index.html";
 
-$(SITE_DIR)/spec.html: $(DOCS_DIR)/spec/*.md $(DOCS_DIR)/.pandoc $(_HEADER) | $(SITE_DIR)
-	pandoc --defaults="$(DOCS_DIR)/.pandoc" --mathml $(DOCS_DIR)/spec/*.md -o "$(SITE_DIR)/spec.html";
+# Only files with a numeric prefix are spec sections; docs/spec/README.md is the
+# spec-authoring guide and must not be concatenated into the published spec (it
+# would otherwise sort after 99_glossary.md and leak in). Mirrors the roadmap
+# build's numeric-prefix glob below.
+$(SITE_DIR)/spec.html: $(DOCS_DIR)/spec/[0-9]*.md $(DOCS_DIR)/.pandoc $(_HEADER) | $(SITE_DIR)
+	pandoc --defaults="$(DOCS_DIR)/.pandoc" --mathml $(DOCS_DIR)/spec/[0-9]*.md -o "$(SITE_DIR)/spec.html";
 
 $(SITE_DIR)/roadmap.html: $(DOCS_DIR)/roadmap/*.md $(DOCS_DIR)/.pandoc $(_HEADER) | $(SITE_DIR)
 	pandoc --defaults="$(DOCS_DIR)/.pandoc" $(DOCS_DIR)/roadmap/[0-9]_*.md -o "$(SITE_DIR)/roadmap.html";

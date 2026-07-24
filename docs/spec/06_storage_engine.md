@@ -206,7 +206,9 @@ than the GC decision the local device has already made.
 - **Per-device, not synced.** The floor lives in the local-only `$$gcstate`
   namespace (`isLocalOnly` matches any `$$`-prefixed namespace — see §12's
   system-namespace rule), so it is never uploaded to the sync folder. Each
-  device's floor reflects its own GC history.
+  device's floor reflects its own GC history. See the
+  [attribute registry](03a_attribute_registry.md) entry for `gc:tombstoneFloor`
+  (storage, encryption, and the history of its move out of `$meta`).
 
   This was **not always true**: before the 0.10.01 WI-11 hardening pass
   (SC-10, Q-D), the floor lived in synced `$meta` under the

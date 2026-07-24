@@ -124,9 +124,9 @@ occurs during compaction merge:
   (sequence number) is retained.
 
 - **Same-HLC tiebreaker:** If two entries have identical HLC timestamps (rare
-  but possible), the device ID with the higher lexicographic value wins. This
-  guarantees a total ordering so merge is deterministic regardless of which
-  device performs it.
+  but possible), the [device ID](03a_attribute_registry.md#device_id) with the
+  higher lexicographic value wins. This guarantees a total ordering so merge is
+  deterministic regardless of which device performs it.
 
 - **Tombstone vs Put:** A Delete tombstone wins over an older Put. A Put wins
   over an older Delete. At equal HLC, Put wins as a conservative choice.

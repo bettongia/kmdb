@@ -1,12 +1,11 @@
 # Spec attribute registry and a spec-authoring guide
 
-**Status**: Investigated — reviewer's B1–B5 + Phase-3 questions resolved and confirmed
-2026-07-21. The rebuilt `device_id` entry and every changed anchor were re-verified
-against `main`; the load-bearing new claim (`reassignDeviceId` rewrites the `DEVICE_ID`
-file **and** `$meta`) was held to the same standard that caught B1 and passed
-(`KvStoreImpl.reassignDeviceId`, `kv_store_impl.dart:337-348`). Phases 3–4 are now
-mechanical. See [Maintainer resolution](#maintainer-resolution-2026-07-21) and the
-[confirmation note](#confirmation-pass-2026-07-21) in the review.
+**Status**: **Complete** (2026-07-24) — implemented on `main` (docs-only, no PR).
+`kmdb-spec-auditor` verified every fact-block anchor against code; its three
+documentation findings were fixed. See [Summary](#summary). *(Reached
+`Investigated` 2026-07-21 after the reviewer's B1–B5 + Phase-3 questions were
+resolved — see [Maintainer resolution](#maintainer-resolution-2026-07-21) and the
+[confirmation note](#confirmation-pass-2026-07-21).)*
 
 **PR link**: _(none yet)_
 
@@ -318,7 +317,59 @@ keep the registry from becoming the very thing it exists to prevent:
 
 ## Summary
 
-_To be completed when the work is done._
+Implemented on `main` (docs-only; the maintainer authorised committing without a
+PR). Landed 2026-07-24, after WI-11 had merged — so the register reflects the
+post-WI-11 reality (index/FTS/Vec state and the tombstone floor are already
+device-local in `$$` namespaces; only `device_id`/`gen`/`dirty` remain `⚠`
+mid-change). Every code coordinate was re-verified against current `main`, not
+copied from the pre-WI-11 Appendix A seed.
+
+- **Phase 1 — `docs/spec/README.md`** (the spec-authoring guide): pandoc build,
+  positional-numbering + never-renumber rule, `{.unnumbered}` for reference
+  sections, the registry entry template, the `⚠ today → target` convention, the
+  glossary-vs-registry division, and the code-anchoring discipline (never edit the
+  spec to match wrong code; verify anchors by symbol). The numbering note in
+  `docs/plans/README.md` now cross-references the guide.
+  - **Necessary build fix:** the spec was built with `pandoc docs/spec/*.md`, which
+    would have swept the new `README.md` guide into the *published* spec. Changed
+    the glob to `docs/spec/[0-9]*.md` in `make_site.mk` (mirroring the roadmap
+    build's own numeric-prefix glob). Verified the guide no longer leaks and all 36
+    numeric-prefixed sections still render.
+- **Phase 2 — `docs/spec/03a_attribute_registry.md`** (unnumbered, sorts after §03):
+  the complete `$meta` register plus full `device_id` and `gc:tombstoneFloor`
+  entries. Renders as a real section, appears in the TOC, and does not renumber §04+.
+- **Phase 3 — glossary reconciliation:** `enc:blob`, `Generation counter`, and
+  `Index token` trimmed to concept + link; a division-of-labour intro and a
+  registry-candidate list added. The `Index token` entry's stale "`tokenMode` lives
+  in `$meta` state" claim was corrected (it moved to `$$indexstate`/`$$ftsstate`
+  under WI-11) — a validate-before-migrate catch.
+- **Phase 4 — inbound links + audit catches:** floor/device_id links from §06/§12;
+  corrected a **WI-11 miss** in §31 (it still listed index/FTS/Vec state as `$meta`
+  content). §04/§08 still carry the stale "Keychain" device-id-storage claim, which
+  is WI-2's holistic correction — per the B5 lesson those two inbound links are
+  deferred to WI-2 rather than placed beside an uncorrected contradiction.
+- **Phase 5 — build/render verified:** 36/36 sections render, registry unnumbered
+  and in the TOC, README excluded, no renumber, all code fences balanced.
+- **Phase 6 — coordination:** the roadmap's `$meta` end-state section now points to
+  the live registry and records the WI-12/13/14 "update your row on landing" rule
+  and the WI-2 handoffs.
+
+**`kmdb-spec-auditor` sign-off:** verified every register row, both code-coordinate
+tables symbol-by-symbol, all `device_id` narrative claims, and the glossary/§31
+edits. Three documentation findings, all fixed: (A) `formatVersion` is a *second*
+`$meta` encryption exemption, so "the one exemption is `enc:blob`" was false in the
+register, the glossary, and §31 (×2) — corrected everywhere; (B) the `Index token`
+glossary entry over-reached to `$$vecstate` — `VecIndexState` has no `tokenMode`
+(vec uses `modelId`) — narrowed to `$$indexstate`/`$$ftsstate`; (C) two stale *code*
+doc-comments (`device_id.dart` "UUIDv7", `vec_index_state.dart` "`$meta` storage")
+routed to WI-2 to keep this change docs-only. The register's four "(verify)" markers
+were resolved to confirmed answers (schema/version/namespaces = wrapped;
+`formatVersion` = raw).
+
+**The registry earned its keep on its first pass** — writing a single code-anchored
+home surfaced three pieces of drift (the §31 and glossary `$meta`/`tokenMode`
+staleness, and the three-places "one exemption" error) that had survived because no
+one place owned the fact.
 
 ---
 

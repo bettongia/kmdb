@@ -1,5 +1,15 @@
 # Glossary
 
+This glossary clarifies **terms** — "what does this mean" — with links to the
+sections that develop them. **Implementation facts** about stored attributes
+(where a value lives, whether it syncs, whether it is encrypted, its code
+coordinates) belong in the [attribute registry](03a_attribute_registry.md), not
+here; see the [spec-authoring guide](README.md) for the division. Several
+entries below still carry storage detail that is a **registry candidate** — it
+should migrate once the registry opens the relevant family (key material:
+`DEK`, `KEK`, `Wrapped DEK`, `DekCache`; namespaces: `$$`, `isLocalOnly`,
+`$vault:{sha256}`, `$$vault:fts:`, `$$vault:vec:idx:`).
+
 `$$` (double-dollar prefix)
 
 : The local-only namespace prefix. Any namespace whose name starts with `$$`
@@ -150,19 +160,21 @@ EncryptionEnvelope
 
 enc:blob
 
-: A CBOR-encoded record stored in the `$meta` namespace under the key `enc:blob`.
-  Contains the Argon2id salt, Argon2id parameters, and the DEK wrapped under
-  two KEKs (passphrase-derived and recovery-derived). Written at provisioning
-  time and read at every encrypted database open. Absent in plaintext databases.
-  See §31.
+: The `$meta` record holding an encrypted database's wrapped Data Encryption Key
+  (DEK) and its key-derivation parameters; absent in plaintext databases. See
+  §31 for the cryptographic format and the
+  [attribute registry](03a_attribute_registry.md) for its storage and encryption
+  classification (it is one of two `$meta` values not `EncryptionEnvelope`-wrapped
+  — the other is `formatVersion` — both raw so bootstrap can read them before the
+  DEK exists).
 
 Generation counter
 
-: A monotonically increasing integer stored in `$meta` under `gen:{namespace}`,
-  incremented on every `WriteBatch` that touches the namespace. The Cache
-  Layer uses it for coarse namespace-level invalidation: if the counter has
-  changed since an entry was cached, the whole namespace is considered stale
-  and re-fetched. See §15.
+: A per-namespace monotonically increasing integer (`gen:{namespace}`), bumped on
+  every `WriteBatch` touching the namespace; the Cache Layer (§15) uses it for
+  coarse namespace-level invalidation. See §15, and the
+  [attribute registry](03a_attribute_registry.md) (`gen:{ns}`) for its storage
+  classification.
 
 HLC (Hybrid Logical Clock)
 
@@ -189,25 +201,20 @@ IDF (Inverse Document Frequency)
 
 Index token
 
-: The `{token}` namespace-name suffix in KMDB's namespace-per-term/
-  namespace-per-value system indexes (`$$fts:{ns}:{field}:{token}`,
-  `$$index:{ns}:{path}:{token}`, `$$vault:fts:{sha256}:{token}`). On an
-  unencrypted database, `{token}` is a plaintext lowercase-hex encoding of
-  the underlying term/value (`FtsManager._termToHex`,
-  `IndexWriter._encodeValueHex`) — visible to anyone with local SSTable
-  access. On an encrypted database, `{token}` is instead an HMAC-SHA256
-  token from `EncryptionProvider.indexToken`, keyed by a sub-key derived
-  from (but distinct from) the DEK via HKDF-SHA256
-  (`info = "kmdb-index-token"`), and domain-separated per index type so the
-  same term/value never produces the same token in a different field or
-  collection. This closes the search-vocabulary/indexed-value enumeration
-  attack the plaintext-hex scheme allowed (Encryption confidentiality
-  reconciliation plan, Gap 2). Which scheme a given index's persisted
-  entries currently use is tracked by a `tokenMode` (`hex` | `hmac`)
-  discriminator in the index's `$meta` state, checked at `open()`/`recover()`
-  to detect a software-version upgrade of an already-encrypted database and
-  trigger a purge-and-rebuild. See §31 (_Known gaps and unprotected
-  surfaces_, gaps 2/3).
+: The `{token}` suffix in KMDB's namespace-per-term / namespace-per-value system
+  indexes (`$$fts:{ns}:{field}:{token}`, `$$index:{ns}:{path}:{token}`,
+  `$$vault:fts:{sha256}:{token}`). It is a plaintext lowercase-hex encoding of the
+  term/value on an unencrypted database, and an HMAC-SHA256 token (keyed by a
+  DEK-derived sub-key via HKDF-SHA256, domain-separated per index type) on an
+  encrypted one — which closes the indexed-value enumeration attack the hex scheme
+  allowed. Which scheme a built index uses is recorded by its `tokenMode`
+  (`hex` | `hmac`), checked at open to detect an encryption upgrade and trigger a
+  rebuild. See §31 (_Known gaps and unprotected surfaces_, gaps 2/3). The index
+  state that holds `tokenMode` is stored per the
+  [attribute registry](03a_attribute_registry.md) — in the local-only
+  `$$indexstate` / `$$ftsstate` namespaces (moved out of `$meta` by WI-11), **not**
+  in `$meta` as earlier drafts of this entry stated. (Vec index state has no
+  `tokenMode`; it detects an encryption/model change via `modelId` instead.)
 
 Inverted index
 

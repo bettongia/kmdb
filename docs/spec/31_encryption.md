@@ -330,9 +330,14 @@ local-disk one. See §12 _Namespace-Scoped Sync_ for the full mechanism. All ind
 encrypted so disk storage never sees plaintext document content: `FtsManager`
 and `VecManager` route their index values through `EncryptionEnvelope`/
 `ValueCodec` per value shape, and `MetaStore` (the `$meta` system namespace —
-device ID, namespace registry, generation counters, index/FTS/Vec state) is
-encrypted end to end except the one documented `enc:blob` exemption (see
-_enc:blob Structure_ above). The vault-search writers
+device ID, namespace registry, generation counters) is encrypted end to end
+except the two documented exemptions — `enc:blob` and the `formatVersion` marker
+(both raw so bootstrap can read them before the DEK exists; see _enc:blob
+Structure_ above).
+Index/FTS/Vec *state* was moved out of `$meta` into the local-only
+`$$indexstate`/`$$ftsstate`/`$$vecstate` namespaces by WI-11 (see the
+[attribute registry](03a_attribute_registry.md)); it remains
+`EncryptionEnvelope`-wrapped there. The vault-search writers
 (`VaultBm25Writer`/`VaultVecWriter`/`VaultExtractionState`) are likewise
 encrypted at the `VaultSearchManager` call site. **This closes what was
 previously documented here as a known gap** (`FtsManager`/`VecManager`
@@ -562,8 +567,10 @@ sync:
   `$$gcstate` namespace (0.10.01 WI-11, Q-D), still `EncryptionEnvelope`-wrapped.
   Local-disk-theft protection only, for the same reason.
 - **`$meta` operational metadata** — device ID, the namespace registry, and
-  generation counters are encrypted via `EncryptionEnvelope` (Gap 3), the one
-  documented exemption being `enc:blob` itself (see _enc:blob Structure_).
+  generation counters are encrypted via `EncryptionEnvelope` (Gap 3), the two
+  documented exemptions being `enc:blob` and the `formatVersion` marker (both
+  stored raw so bootstrap can read them before the DEK exists — see _enc:blob
+  Structure_).
   Because `$meta` rides synced SSTables, this is genuine cloud-provider
   protection. (The dirty-open flag is also currently in `$meta`, encrypted the
   same way — but 0.10.01 WI-11's audit found it is likely mis-placed there for

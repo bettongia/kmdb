@@ -41,11 +41,12 @@ Implementation work on a plan should follow the guidance provided in
 7. When you complete the implementation work, submit the changes as a pull
    request.
 
-**Spec section numbering:** Spec files in `docs/spec/` are numbered sequentially
-(`NN_topic.md`) and the spec is built serially as work is done. A plan that will
-add a spec section must **not** hard-code its number — refer to the spec by topic
-and take the next available `NN` when the file is actually created. This prevents
-number collisions between plans drafted in parallel.
+**Spec section numbering:** a plan that will add a spec section must **not**
+hard-code its number — refer to the spec by topic and take the next available
+`NN` when the file is actually created. This prevents number collisions between
+plans drafted in parallel. The mechanics of spec numbering, building, and the
+never-renumber rule are owned by the spec-authoring guide,
+[`docs/spec/README.md`](../spec/README.md).
 
 ## Plan template
 
