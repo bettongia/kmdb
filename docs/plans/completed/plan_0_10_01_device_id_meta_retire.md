@@ -1,6 +1,7 @@
 # Retire the `$meta` `device_id` copy (SC-5 / WI-12)
 
-**Status**: Investigated
+**Status**: **Complete** (2026-07-27) — `kmdb-qa` signed off; `make pre_commit`
+green. Implemented on `main`-based branch `20260727_plan_0_10_01_device_id_meta_retire`.
 
 **PR link**: _(none yet)_
 
@@ -142,25 +143,27 @@ regenerate cleanly. (Do not add a delete-on-open sweep; it is unnecessary code.)
 
 ### Phase 1 — remove the `$meta` `device_id` path
 
-- [ ] Delete `MetaStore.putDeviceId`, `getDeviceId`, `deviceIdKey`
+- [x] Delete `MetaStore.putDeviceId`, `getDeviceId`, `deviceIdKey`
       (`meta_store.dart:204/207/217`) after confirming no remaining callers.
-- [ ] Per Q1, replace `DeviceId.load(meta)` with a pure generator (recommend
+- [x] Per Q1, replace `DeviceId.load(meta)` with a pure generator (recommend
       `DeviceId.generate()`), and make `ensureDeviceId` file-only: read the
       `DEVICE_ID` file; if absent/invalid, generate a fresh id and write the file.
       No `$meta` interaction.
-- [ ] Remove the `_meta.putDeviceId(newDeviceId)` call in `reassignDeviceId`
+- [x] Remove the `_meta.putDeviceId(newDeviceId)` call in `reassignDeviceId`
       (`kv_store_impl.dart:337`). Reassign now rewrites **only** the `DEVICE_ID`
       file + renames SSTables + the manifest VersionEdit (the load-bearing chain —
       leave it untouched).
-- [ ] Per Q2, redirect `storeInfo()` (`kv_store_impl.dart:495`) to
+- [x] Per Q2, redirect `storeInfo()` (`kv_store_impl.dart:495`) to
       `_engine.deviceId`. **Do not** resolve from the `DEVICE_ID` file (see Q2 —
       that re-creates the mask). The honest `'00000000'` in the single-phase
       `open()+ensureDeviceId()` pattern is expected and correct.
-- [ ] Point `new_device_id_command.dart`'s duplicated generation
+- [x] Point `new_device_id_command.dart`'s duplicated generation
       (`:74-77`) at the shared `DeviceId.generate()` (Q1) so there is one
-      algorithm.
+      algorithm. (Required adding `export 'src/engine/kvstore/device_id.dart'
+      show DeviceId;` to `kmdb.dart`'s public surface — `DeviceId` was
+      previously package-private to `kmdb` and unreachable from `kmdb_cli`.)
 
-- [ ] **Doc-comment / prose cleanup (do not skip — dangling `[symbol]` links
+- [x] **Doc-comment / prose cleanup (do not skip — dangling `[symbol]` links
       are analyzer warnings, and stale "stored in `$meta`" prose directly
       contradicts this change; verified against `main`):**
   - `device_id.dart` class doc — rewrite `:19-39`: `:21` "persisted in `$meta`",
@@ -183,9 +186,14 @@ regenerate cleanly. (Do not add a delete-on-open sweep; it is unnecessary code.)
   - `kv_store_impl.dart` `reassignDeviceId` doc/comments `:332-341` — drop the
     "persist the new device ID to `$meta`" paragraph.
 
+  **Verification:** `dart analyze` in `packages/kmdb` after Phase 1 shows zero
+  errors/warnings in `lib/` — the only 22 remaining issues are the expected
+  `test/` failures Phase 2 rewrites (undefined `DeviceId.load`/
+  `MetaStore.putDeviceId`/`getDeviceId`/`deviceIdKey` references).
+
 ### Phase 2 — tests
 
-- [ ] **`device_id_test.dart` is a rewrite, not an edit.** The whole file
+- [x] **`device_id_test.dart` is a rewrite, not an edit.** The whole file
       exercises `DeviceId.load(meta)` and `$meta` persistence (persistence
       across reopen, "does not overwrite stored id", "survives flush/compaction"
       — all via `$meta`). Re-point it at `DeviceId.generate()` (format/shape)
@@ -193,15 +201,15 @@ regenerate cleanly. (Do not add a delete-on-open sweep; it is unnecessary code.)
       replace the deleted `$meta` ones — in particular a close/reopen round-trip
       that returns the same id **via the `DEVICE_ID` file** (the property the old
       `$meta` tests guaranteed must not be lost).
-- [ ] Update `meta_store_test.dart` (`:216-238`) and
+- [x] Update `meta_store_test.dart` (`:216-238`) and
       `meta_store_encryption_test.dart` (`:153-156`, `:233-242`, `:381`,
       `:426-437`) to drop the removed `getDeviceId`/`putDeviceId`/`deviceIdKey`
       surface.
-- [ ] Fix the stale comment at `reassign_device_id_test.dart:239` ("storeInfo
+- [x] Fix the stale comment at `reassign_device_id_test.dart:239` ("storeInfo
       reads from `$meta` …") — after this change it reads `_engine.deviceId`; the
       test still passes because the reopen is given the reassigned id, but the
       rationale comment must be corrected.
-- [ ] **New/updated coverage (exercise the real behaviour, not the golden path):**
+- [x] **New/updated coverage (exercise the real behaviour, not the golden path):**
   - **SC-5 regression (primary, deterministic):** a fresh DB writes the
     `DEVICE_ID` file and **`$meta` holds no `device_id` entry**. Assert by reading
     `store.get(MetaStore.kNamespace, MetaStore.symbolicKey('device_id'))` and
@@ -209,57 +217,87 @@ regenerate cleanly. (Do not add a delete-on-open sweep; it is unnecessary code.)
     deletion and computes the *exact* key the deleted `deviceIdKey` did — this is
     how the test locates the (now-absent) key. Prefer this over scanning raw
     SSTable bytes for the 8-char value, which is fragile (coincidental hex).
+    Done in `device_id_test.dart`, `meta_store_test.dart`,
+    `meta_store_encryption_test.dart` (incl. under encryption), and
+    `reassign_device_id_test.dart`.
   - **SC-5 regression (secondary, illustrative):** optionally flush and confirm a
     produced SSTable body does not contain a `device_id` entry — mirrors how the
     copy was found empirically in `demodb`, but keep the `$meta`-key-absence
-    assertion above as the load-bearing one.
+    assertion above as the load-bearing one. Done in `device_id_test.dart`.
   - `DEVICE_ID` file absent on open → a fresh id is generated and the file written;
-    it does **not** consult `$meta`.
+    it does **not** consult `$meta`. Done in `device_id_test.dart`.
   - `reassignDeviceId` rewrites the file and renames SSTables, and writes no
-    `device_id` to `$meta` (`symbolicKey('device_id')` → `null`).
+    `device_id` to `$meta` (`symbolicKey('device_id')` → `null`). Done in
+    `reassign_device_id_test.dart`.
   - `storeInfo().deviceId` returns the resolved id. **Scope this against a store
     that received its id via the open-time `deviceId:` param, the two-phase
     `DatabaseOpener` flow, or post-reassign — NOT the single-phase
     `KmdbDatabase.open()+ensureDeviceId()` pattern, where `'00000000'` is now the
     correct answer** (see Q2). Asserting "not `'00000000'`" against the
     single-phase pattern would enshrine the masking behaviour this change removes.
+    Done: new open-time-param test in `device_id_test.dart`; existing
+    post-reassign coverage in `reassign_device_id_test.dart` already exercises
+    this scope and needed no change.
   - Two-device sync: device B never observes device A's `device_id` in its `$meta`
     (the SC-5 leak is gone). A unit `$meta`-key-absence assertion covers the
     regression; the harness case is a stronger end-to-end confirmation but is
-    **optional** here, not required to close SC-5.
+    **optional** here, not required to close SC-5. **Deferred** — the unit
+    assertion above closes SC-5; no `kmdb_harness` case added.
 
 ### Phase 3 — registry + docs
 
-- [ ] Update the `device_id`
+- [x] Update the `device_id`
       [registry entry](../spec/03a_attribute_registry.md#device_id): drop the `⚠`
       and the "legacy `$meta` copy" from Storage/Scope/Encrypted; state the
       `DEVICE_ID` file is the sole store; record the durability trade-off and the
       §08 durable-storage enhancement as the churn-avoidance follow-up. Update the
       register table row and remove `device_id` from the `⚠` mid-change set.
-- [ ] Tick WI-12 on the roadmap **and reconcile its now-stale description.** The
+- [x] Tick WI-12 on the roadmap **and reconcile its now-stale description.** The
       roadmap (`docs/roadmap/0_10_01.md`) still describes WI-12 as the *old* scope
       — "stop writing the synced `$meta` copy, **keep the legacy read-fallback**"
       (`:51`, `:368`, `:680`). The maintainer's 2026-07-24 decision is a **full
       deletion (read *and* write)**; update those lines so the roadmap does not
       contradict the shipped change. Confirm the `$meta` end-state table/note
       (`:289-323`) reflect that `device_id` has left `$meta`.
-- [ ] **Claim the two `device_id.dart` doc items the roadmap parked under WI-2.**
+- [x] **Claim the two `device_id.dart` doc items the roadmap parked under WI-2.**
       Lines `:312` (`device_id.dart:23` UUIDv7 comment) and `:373-374`
       (`device_id.dart:37-38` "`$meta` is the sole persistence mechanism") are
       assigned to WI-2 in the roadmap, but this plan rewrites that file (Phase 1),
       so it fixes them here. Remove those two items from WI-2's list so WI-2 does
       not later re-touch now-correct comments.
-- [ ] Confirm no spec section still asserts `device_id` lives in `$meta` (§04/§08's
+- [x] Confirm no spec section still asserts `device_id` lives in `$meta` (§04/§08's
       *Keychain / platform secure storage* prose is a different, WI-2 claim — do
       **not** touch it here; the durable-storage enhancement remains a non-goal).
+      Found and fixed three additional sites beyond the plan's enumerated
+      coordinates: `04_keys.md` (reassign step 4 said "persists to `$meta`"),
+      `11_kv_store.md` (`$meta` namespace table listed "device ID"), and
+      `31_encryption.md` (two sites: the confidentiality-coverage bullet list,
+      and the Gap 3 "Update" callout that said "device ID … remain in `$meta`").
+      §04/§08's Keychain/SharedPreferences/localStorage prose (`04_keys.md`
+      "Device Identity" intro) was left untouched per the plan's non-goal.
 
 **Final step — QA sign-off and pre-commit:**
 
-- [ ] `make coverage` — judge the seam (the SC-5 "no device_id in synced `$meta`"
-      assertion is the point), not just the percentage.
-- [ ] Hand to **`kmdb-qa`** for sign-off; then **`kmdb-pre-commit`**. Note the
-      `pre_commit` test step is scoped to `packages/kmdb`; run `kmdb_cli` tests too
-      (the CLI's `new-device-id` path changed).
+- [x] `make coverage` — judge the seam (the SC-5 "no device_id in synced `$meta`"
+      assertion is the point), not just the percentage. Result: 94.8% overall
+      (11182/11801 lines); `meta_store.dart` 133/133 (100%), `device_id.dart`
+      2/2 (100%), `kv_store_impl.dart` 171/174 (98.3%) — the SC-5 seam
+      (`symbolicKey('device_id')` absence assertions) is exercised in
+      `device_id_test.dart`, `meta_store_test.dart`,
+      `meta_store_encryption_test.dart`, and `reassign_device_id_test.dart`.
+      `packages/kmdb_cli && dart test` also green (1176 tests, incl.
+      `new_device_id_command_test.dart`'s 6 tests).
+- [x] **`kmdb-qa` signed off (2026-07-27): ✅ ready.** All six judgement questions
+      passed (DeviceId export sound; SC-5 closed at the seam via deterministic
+      `symbolicKey('device_id')` absence across four test files; the
+      `device_id_test.dart` rewrite preserves the close/reopen persistence property,
+      re-homed onto the `DEVICE_ID` file; the Q2 `storeInfo` honesty change has no
+      masked-behaviour dependency; the §04/§11/§31 doc fixes are correct and the
+      WI-2 Keychain boundary held). QA found and fixed inline **four further stale
+      `$meta` doc-comments the plan's enumerated list missed** — `kv_store.dart:190`
+      (`storeInfo` doc), `:198` (`reassignDeviceId` doc), `:353` (`StoreInfo.deviceId`
+      field), and `lsm_engine.dart:1425` (internal crash-safety note) — three on the
+      public API surface. `make pre_commit` re-run green after those edits.
 
 ## Reviewer notes (2026-07-24)
 
@@ -299,4 +337,35 @@ remaining work is mechanical against the enumerated coordinates.
 
 ## Summary
 
-_To be completed when the work is done._
+Closed **SC-5** by removing the `$meta` `device_id` path entirely (greenfield → no
+read-fallback to keep). The local `DEVICE_ID` file is now the sole identity store,
+so `device_id` never reaches synced `$meta` and a device can no longer adopt a
+peer's identity via `$meta` LWW.
+
+- **Deletion:** removed `MetaStore.putDeviceId`/`getDeviceId`/`deviceIdKey`;
+  replaced `DeviceId.load(meta)` with a pure static `DeviceId.generate()`
+  (now exported from `kmdb.dart` so the CLI shares one algorithm); made
+  `ensureDeviceId` file-only; dropped the `$meta` write from `reassignDeviceId`;
+  redirected `storeInfo()` to `_engine.deviceId` (Q2). No `$meta` device_id
+  reference remains in code or dartdoc.
+- **Q2 (settled in review):** `storeInfo` reads the engine's id, not the file. In
+  the single-phase `open()+bare ensureDeviceId()` pattern (no production caller)
+  it now honestly reports `'00000000'`, matching the SSTables — the old `$meta`
+  read had *masked* that. Not a regression.
+- **Tests:** rewrote `device_id_test.dart` (persistence re-homed onto the file);
+  updated `meta_store_test.dart`, `meta_store_encryption_test.dart`,
+  `reassign_device_id_test.dart`. The SC-5 regression asserts the key's *absence*
+  deterministically via `MetaStore.symbolicKey('device_id')` across four files,
+  including under an encryption provider and post-reassign.
+- **Docs:** rewrote the `device_id` registry entry (`$$`-free sole-store, with the
+  durability trade-off + §08 durable-storage enhancement noted); fixed
+  now-falsified "device_id in `$meta`" claims in §04/§11/§12/§31; ticked WI-12 on
+  the roadmap. §04/§08's aspirational "Keychain" prose was deliberately left to
+  **WI-2**.
+- **QA** additionally fixed four stale `$meta` doc-comments the plan's enumerated
+  list missed (three on the public API surface).
+
+**Verification:** `make pre_commit` green (2419 kmdb tests, analyze clean across 7
+packages, license_check); `kmdb_cli` 1176 tests green; `make coverage` 94.8%
+(`meta_store.dart`/`device_id.dart` 100%, `kv_store_impl.dart` 98.3%). `kmdb-qa`
+signed off.

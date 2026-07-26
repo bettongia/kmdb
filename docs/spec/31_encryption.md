@@ -566,11 +566,15 @@ sync:
 - **Tombstone GC floor** — likewise moved out of `$meta` into the local-only
   `$$gcstate` namespace (0.10.01 WI-11, Q-D), still `EncryptionEnvelope`-wrapped.
   Local-disk-theft protection only, for the same reason.
-- **`$meta` operational metadata** — device ID, the namespace registry, and
-  generation counters are encrypted via `EncryptionEnvelope` (Gap 3), the two
-  documented exemptions being `enc:blob` and the `formatVersion` marker (both
-  stored raw so bootstrap can read them before the DEK exists — see _enc:blob
-  Structure_).
+- **`$meta` operational metadata** — the namespace registry and generation
+  counters are encrypted via `EncryptionEnvelope` (Gap 3), the two documented
+  exemptions being `enc:blob` and the `formatVersion` marker (both stored raw
+  so bootstrap can read them before the DEK exists — see _enc:blob
+  Structure_). (Device ID is **not** on this list — 0.10.01 WI-12 removed it
+  from `$meta` entirely; see the attribute registry's
+  [`device_id` entry](03a_attribute_registry.md#device_id). It is stored
+  unencrypted in the local, never-synced `DEVICE_ID` file instead, so this
+  paragraph's "genuine cloud-provider protection" claim does not apply to it.)
   Because `$meta` rides synced SSTables, this is genuine cloud-provider
   protection. (The dirty-open flag is also currently in `$meta`, encrypted the
   same way — but 0.10.01 WI-11's audit found it is likely mis-placed there for
@@ -764,8 +768,16 @@ identity, timing) but **not document content**.
 > across that move — these values are still encrypted when a provider is
 > configured, just no longer under `$meta`, and now for local-disk-theft
 > protection rather than cloud-provider protection (see the _Value-Level
-> Encryption Coverage_ list above). Device ID, the namespace registry, and
-> generation counters remain in `$meta` as described here.
+> Encryption Coverage_ list above). The namespace registry and generation
+> counters remain in `$meta` as described here.
+>
+> **Update (0.10.01 WI-12).** Device ID has since been removed from `$meta`
+> entirely (SC-5), not moved to a `$$` namespace — the local, never-synced
+> `DEVICE_ID` file was already its sole authoritative store, so there was no
+> cross-device value needing a device-local home behind `$$`. It is stored
+> unencrypted (plaintext), since the file itself never leaves the local
+> device. See the attribute registry's
+> [`device_id` entry](03a_attribute_registry.md#device_id).
 
 **Resolved** by the Encryption confidentiality reconciliation plan's Phase 2
 (`docs/roadmap/completed/0_08.md`, Gap 3): every general `$meta` accessor now routes

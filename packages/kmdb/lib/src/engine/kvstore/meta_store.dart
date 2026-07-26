@@ -35,8 +35,6 @@ import 'lsm_engine.dart';
 ///   open; cleared on clean close. If set on next open, it means the previous
 ///   session ended abruptly (crash or process kill), and secondary indexes may
 ///   need to be rebuilt.
-/// - **Device identity** (`device_id`) — the stable 8-character lowercase hex
-///   identifier used in SSTable filenames.
 ///
 /// All writes go directly to [LsmEngine], bypassing the `$` namespace guard in
 /// [KvStoreImpl] (which is intentional — these are internal writes). All
@@ -194,33 +192,6 @@ final class MetaStore {
 
   /// Deletes the dirty-open flag. Called by [KvStoreImpl.close].
   Future<void> clearDirty() => _engine.delete(kNamespace, _nameToKey('dirty'));
-
-  // ── Device ID ──────────────────────────────────────────────────────────────
-
-  /// Returns the `$meta` key under which [device_id] is stored.
-  ///
-  /// Exposed for tests that need to read the raw (possibly encrypted) bytes
-  /// directly — mirrors [genKey].
-  static String get deviceIdKey => _nameToKey('device_id');
-
-  /// Returns the stored 8-character device ID, or `null` if not yet set.
-  Future<String?> getDeviceId() async {
-    final bytes = await _engine.get(kNamespace, _nameToKey('device_id'));
-    if (bytes == null) return null;
-    final unwrapped = await EncryptionEnvelope.unwrap(bytes, encryption);
-    return String.fromCharCodes(unwrapped);
-  }
-
-  /// Stores [deviceId] persistently in `$meta`.
-  ///
-  /// [deviceId] must be an 8-character lowercase hex string.
-  Future<void> putDeviceId(String deviceId) async {
-    final wrapped = await EncryptionEnvelope.wrap(
-      Uint8List.fromList(deviceId.codeUnits),
-      encryption,
-    );
-    await _engine.put(kNamespace, _nameToKey('device_id'), wrapped);
-  }
 
   // ── Namespace registry ─────────────────────────────────────────────────────
 
@@ -489,7 +460,7 @@ final class MetaStore {
   /// `docs/spec/16_secondary_indexes.md`) — can keep computing their key with
   /// the exact same hash the rest of the codebase uses, without duplicating
   /// the encoding scheme. It is deliberately generic (unlike [indexKey],
-  /// [genKey], [deviceIdKey]), because it is used for symbolic names this
+  /// [genKey]), because it is used for symbolic names this
   /// class does not otherwise know about. It does **not** read or write
   /// `$meta` itself — callers own the namespace, read/write, and encryption
   /// wrapping for wherever they store the resulting key.
@@ -539,8 +510,7 @@ final class MetaStore {
   /// Returns the `$meta` key under which `enc:blob` is stored.
   ///
   /// Exposed for tests that need to read the raw bytes directly and confirm
-  /// they are never [EncryptionEnvelope]-wrapped (Q2) — mirrors [genKey]/
-  /// [deviceIdKey].
+  /// they are never [EncryptionEnvelope]-wrapped (Q2) — mirrors [genKey].
   static String get encryptionBlobKey => _nameToKey(kEncryptionBlobName);
 
   /// Reads the [EncryptionBlob] from `$meta`, or `null` if it has not been

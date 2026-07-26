@@ -145,26 +145,28 @@ void main() {
       await store.close();
     });
 
-    test('device ID round-trips with encryption active', () async {
-      final adapter = MemoryStorageAdapter();
-      final (store, _) = await _open(adapter);
-      store.meta.encryption = provider;
+    test(
+      'no device_id entry exists in \$meta even with encryption active (SC-5)',
+      () async {
+        // device_id was removed from $meta entirely (SC-5) — the DEVICE_ID
+        // file is the sole store, and encryption is orthogonal to that. This
+        // guards against a regression where the removed key silently comes
+        // back once a MetaStore.encryption provider is attached.
+        final adapter = MemoryStorageAdapter();
+        final (store, _) = await _open(adapter);
+        store.meta.encryption = provider;
 
-      await store.meta.putDeviceId('a1b2c3d4');
-      expect(await store.meta.getDeviceId(), equals('a1b2c3d4'));
+        await store.ensureDeviceId();
 
-      final raw = await store.get(MetaStore.kNamespace, MetaStore.deviceIdKey);
-      expect(raw![0], equals(EncryptionFlag.aesGcm.byte));
-      // Ciphertext must not contain the plaintext device ID. Compare against
-      // the full plaintext byte *sequence*, not a single byte value — random
-      // nonce/ciphertext bytes will contain any given single byte value with
-      // high probability (~13% for one byte over ~40 bytes), which made the
-      // previous single-byte `contains` assertion flaky. An 8-byte sequence
-      // colliding by chance is negligible.
-      expect(String.fromCharCodes(raw), isNot(contains('a1b2c3d4')));
+        final raw = await store.get(
+          MetaStore.kNamespace,
+          MetaStore.symbolicKey('device_id'),
+        );
+        expect(raw, isNull);
 
-      await store.close();
-    });
+        await store.close();
+      },
+    );
 
     test('namespace registry round-trips with encryption active', () async {
       final adapter = MemoryStorageAdapter();
@@ -230,7 +232,7 @@ void main() {
         final adapter = MemoryStorageAdapter();
         final (store, _) = await _open(adapter);
         store.meta.encryption = provider;
-        await store.meta.putDeviceId('deadbeef');
+        await store.meta.putRawByName('index:tasks:status', _bytes('opaque'));
         await store.close();
 
         final otherDek = await KeyDerivation.generateDek();
@@ -239,7 +241,7 @@ void main() {
         store2.meta.encryption = wrongProvider;
 
         await expectLater(
-          store2.meta.getDeviceId(),
+          store2.meta.getRawByName('index:tasks:status'),
           throwsA(isA<EncryptionError>()),
         );
         await store2.close();
@@ -376,9 +378,12 @@ void main() {
 
     test('a legacy database whose only content is a bare device_id fails '
         'cleanly too (not just the counter=0/1 collision case)', () async {
+      // MetaStore.deviceIdKey was removed (SC-5) — MetaStore.symbolicKey
+      // computes the identical key the deleted constant did, so this test
+      // still seeds the exact key a pre-plan build would have written.
       final adapter = MemoryStorageAdapter();
       await _seedLegacyDatabase(adapter, {
-        MetaStore.deviceIdKey: _bytes('a1b2c3d4'),
+        MetaStore.symbolicKey('device_id'): _bytes('a1b2c3d4'),
       });
 
       await expectLater(
@@ -391,8 +396,9 @@ void main() {
   // ── Bootstrap ordering (Q1) ────────────────────────────────────────────────
 
   group('Bootstrap ordering (Q1) — KmdbDatabase.open()', () {
-    test('every \$meta entry written during provisioning (incl. the first '
-        'device_id write) is encrypted from the very first write', () async {
+    test('every \$meta entry written during provisioning is encrypted from '
+        'the very first write, and device_id never appears in \$meta at all '
+        '(SC-5)', () async {
       final adapter = MemoryStorageAdapter();
       final result = await EncryptionConfig.createResult(
         passphrase: _kPassphrase,
@@ -406,7 +412,8 @@ void main() {
       );
 
       // Trigger the namespace registry + gen counter + dirty flag writes,
-      // and the device_id write, all after open() — all must be encrypted.
+      // and the device_id resolution (DEVICE_ID file only, post-SC-5), all
+      // after open() — the $meta writes must all be encrypted.
       final col = db.collection(name: 'notes', codec: _codec);
       await col.insert(const _Note(id: '', text: 'hello'));
       final deviceId = await db.ensureDeviceId();
@@ -421,23 +428,25 @@ void main() {
       );
       expect(rawGen![0], equals(EncryptionFlag.aesGcm.byte));
 
+      // SC-5 regression: even with encryption bootstrapped and
+      // ensureDeviceId() exercised, $meta must hold no device_id entry at
+      // all — encrypted or otherwise. MetaStore.symbolicKey computes the
+      // identical key the deleted deviceIdKey constant did.
       final rawDeviceId = await store.get(
         MetaStore.kNamespace,
-        MetaStore.deviceIdKey,
+        MetaStore.symbolicKey('device_id'),
       );
       expect(
-        rawDeviceId![0],
-        equals(EncryptionFlag.aesGcm.byte),
-        reason:
-            'the very first device_id write must be encrypted, not just '
-            'subsequent ones',
+        rawDeviceId,
+        isNull,
+        reason: 'device_id must never be written to \$meta, even encrypted',
       );
 
       // Functional round-trip for the namespace registry (no public raw
-      // key helper is exposed for it, unlike genKey/deviceIdKey — its
-      // decode path already exercises EncryptionEnvelope.unwrap, so a
-      // successful, correct result here is proof it round-trips through
-      // encryption rather than reading stale/garbage bytes).
+      // key helper is exposed for it, unlike genKey — its decode path
+      // already exercises EncryptionEnvelope.unwrap, so a successful,
+      // correct result here is proof it round-trips through encryption
+      // rather than reading stale/garbage bytes).
       expect(await store.listNamespaces(), contains('notes'));
 
       await db.close();

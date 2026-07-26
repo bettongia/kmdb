@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'package:uuid/uuid.dart';
-
+import 'package:kmdb/kmdb.dart';
 import 'package:kmdb/kmdb_config.dart';
 import 'command.dart';
 
@@ -29,7 +28,8 @@ import 'command.dart';
 /// 1. Reads the current device ID from the open store.
 /// 2. Generates a new random 8-character hex device ID.
 /// 3. Renames all local SSTables from `{oldId}-...` to `{newId}-...`.
-/// 4. Updates the device ID record in `$meta`.
+/// 4. Updates the `DEVICE_ID` file — the sole persistence mechanism for
+///    device identity.
 /// 5. Outputs `{ "oldDeviceId": "…", "newDeviceId": "…" }` as JSON.
 ///
 /// ## Remote warning
@@ -71,10 +71,11 @@ final class NewDeviceIdCommand extends CliCommand {
     final info = await ctx.store.storeInfo();
     final oldDeviceId = info.deviceId;
 
-    // Generate a new random device ID using the same algorithm as DeviceId.load:
-    // first 8 chars of a hyphen-stripped UUIDv4, which gives ~4 billion unique
-    // values with negligible same-millisecond collision probability.
-    final newDeviceId = const Uuid().v4().replaceAll('-', '').substring(0, 8);
+    // Generate a new random device ID via the shared DeviceId.generate() so
+    // there is a single algorithm (first 8 chars of a hyphen-stripped UUIDv4,
+    // giving ~4 billion unique values with negligible same-millisecond
+    // collision probability).
+    final newDeviceId = DeviceId.generate();
 
     // Warn if configured remotes exist — their highwater mark files will be
     // orphaned until manually removed from the remote sync folder.
@@ -97,8 +98,9 @@ final class NewDeviceIdCommand extends CliCommand {
       );
     }
 
-    // Perform the rename — flushes the memtable, renames SSTables, and updates
-    // $meta. Any crash before this point leaves the database unchanged.
+    // Perform the rename — flushes the memtable, renames SSTables, and
+    // updates the DEVICE_ID file. Any crash before this point leaves the
+    // database unchanged.
     try {
       await ctx.store.reassignDeviceId(newDeviceId);
     } on ArgumentError catch (e) {
