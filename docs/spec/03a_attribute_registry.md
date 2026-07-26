@@ -40,7 +40,7 @@ which must be readable before the DEK is available and so are stored raw.
 
 | Attribute | Kind | Scope | Storage | Encrypted | Detail |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `device_id` | Identifier | Device-local (authoritative); an inert `$meta` copy still syncs | `DEVICE_ID` file (db root, never synced) **+** legacy `$meta` copy — `⚠` WI-12 retires the copy | File: No · `$meta`: yes | **[full entry](#device_id)** |
+| `device_id` | Identifier | Device-local (sole store) | `DEVICE_ID` file (db root, never synced) | File: No | **[full entry](#device_id)** |
 | `index:{ns}:{path}` | Secondary-index state | Device-local | **`$$indexstate`** (local-only) | Yes | WI-11 |
 | `fts:{ns}:{field}` | FTS index state | Device-local | **`$$ftsstate`** (local-only) | Yes | WI-11 |
 | `vec:{ns}:{field}` | Vec index state | Device-local | **`$$vecstate`** (local-only) | Yes | WI-11 |
@@ -54,8 +54,9 @@ which must be readable before the DEK is available and so are stored raw.
 | `formatVersion` | Format-version marker | Replicated | `$meta` | **No — raw** (second bootstrap exemption, same non-circularity reason as `enc:blob`) | summary |
 
 > The four device-local index/floor rows were moved out of `$meta` by
-> [WI-11](../roadmap/0_10_01.md) (the SC-10/SC-15 fix); `gen:{ns}` (WI-13),
-> `device_id` (WI-12) and `dirty` (WI-14) are the remaining mid-change entries.
+> [WI-11](../roadmap/0_10_01.md) (the SC-10/SC-15 fix); `device_id` was fully
+> retired from `$meta` by WI-12 (this entry). `gen:{ns}` (WI-13) and `dirty`
+> (WI-14) are the remaining mid-change entries.
 > The registry generalises beyond `$meta` — the HLC, the DEK/`EncryptionBlob`,
 > and the SSTable filename fields are each families that would get their own
 > register in the same shape; this seed scopes to `$meta`, the family most
@@ -69,14 +70,14 @@ which must be readable before the DEK is available and so are stored raw.
 | Field | Value |
 | :--- | :--- |
 | **Kind** | Identifier (opaque) |
-| **Format** | 8-char lowercase hex — truncated UUIDv4 (`DeviceId.load`, `device_id.dart:64`) |
-| **Scope** | Device-local. The **authoritative** store is a local file that is never synced; a legacy `$meta` copy *does* replicate but is read **second** and is inert on read (SC-5). |
-| **Storage** | **Authoritative:** a plaintext `DEVICE_ID` file in the db root (`{dbDir}/DEVICE_ID`), outside `sst/` → never uploaded. **Legacy:** a `$meta` `device_id` copy, written on first open via the fallback (and on every `reassignDeviceId`); it lands in a syncable `.sst` and replicates, but `ensureDeviceId` prefers the file. `⚠` **WI-12** retires the inert copy. |
-| **Encrypted at rest** | **File: No** — plaintext (`id.codeUnits`), read with no DEK. **`$meta` copy:** `EncryptionEnvelope`-wrapped (plaintext only when the DB is unencrypted). |
-| **Mutability** | Set once at first launch; changed only by `reassignDeviceId`, which rewrites the `DEVICE_ID` file **and** the `$meta` copy **and** renames every SSTable (the manifest then records the new filenames). |
+| **Format** | 8-char lowercase hex — truncated UUIDv4 (`DeviceId.generate`, `device_id.dart`) |
+| **Scope** | Device-local. The `DEVICE_ID` file is the **sole** store — `device_id` never touches `$meta` (read or write). |
+| **Storage** | A plaintext `DEVICE_ID` file in the db root (`{dbDir}/DEVICE_ID`), outside `sst/` → never uploaded by `SyncEngine`. |
+| **Encrypted at rest** | **No** — plaintext (`id.codeUnits`), read with no DEK. |
+| **Mutability** | Set once at first launch; changed only by `reassignDeviceId`, which rewrites the `DEVICE_ID` file **and** renames every SSTable (the manifest then records the new filenames). |
 | **CLI** | `kmdb new-device-id` (see below) |
-| **Introduced** | [`plan_deviceid.md`](../plans/completed/plan_deviceid.md) (§04); the `DEVICE_ID` file landed later in `2c6971c` ("Fix device ID corruption when syncing copied databases"). |
-| **Status** | 🔧 WI-12 retires the legacy `$meta` copy (low-risk cleanup, before the `0.1.0` freeze) |
+| **Introduced** | [`plan_deviceid.md`](../plans/completed/plan_deviceid.md) (§04); the `DEVICE_ID` file landed later in `2c6971c` ("Fix device ID corruption when syncing copied databases"); the `$meta` copy was fully retired by [WI-12](../plans/completed/plan_0_10_01_device_id_meta_retire.md) (SC-5). |
+| **Status** | ✅ Complete — WI-12 retired the `$meta` copy entirely (read and write); no legacy fallback remains (greenfield project, no released databases to migrate). |
 
 **Role.** Two jobs. (1) **Naming:** every SSTable is
 `{deviceId}-{minHlc}-{maxHlc}.sst`, and the manifest records those filenames —
@@ -84,55 +85,68 @@ so `device_id` is load-bearing for the on-disk layout (§08). (2) **Sync
 identity:** per-device high-water marks are keyed by it, consolidation fencing is
 per-`deviceId`, and `SyncEngine` uses it to *exclude self* when pulling peers.
 
-**Lifecycle.** Resolved on open by `ensureDeviceId` (`kv_store_impl.dart:407`,
-surfaced as `KmdbDatabase.ensureDeviceId`, `kmdb_database.dart:781`): read the
-`DEVICE_ID` file **first**; if absent, fall back to `DeviceId.load`
-(`device_id.dart:53` — reads the `$meta` copy, or generates a fresh UUIDv4 and
-writes it to `$meta`); then write the file so subsequent opens skip `$meta`. An
-un-`ensure`d store reports the `'00000000'` **open-time param default**
-(`kv_store_impl.dart:120`) — distinct from a resolved identity, and not what
-`DeviceId.load` returns.
+**Lifecycle.** Resolved on open by `ensureDeviceId` (`kv_store_impl.dart`,
+surfaced as `KmdbDatabase.ensureDeviceId`, `kmdb_database.dart`): read the
+`DEVICE_ID` file; if absent or invalid, generate a fresh id via
+`DeviceId.generate()` (a pure generator with no persistence side effect) and
+write it to the file. `$meta` is never consulted — a lost or missing file
+always yields a new identity and a one-time SSTable re-upload (identity churn),
+which is safer than the removed `$meta` fallback (that fallback could silently
+adopt a peer's identity — the SC-5 defect this plan closes). An un-`ensure`d
+store reports the `'00000000'` **open-time param default** (`kv_store_impl.dart`)
+— distinct from a resolved identity, and not what `DeviceId.generate` returns.
+`KvStoreImpl.storeInfo()` reads the **running engine's** `deviceId` directly
+(not the file), because the engine's value is what SSTable filenames actually
+use in every production path.
 
 **CLI.** `kmdb new-device-id` mints a fresh identity for a **copied** database —
 two copies sharing a `device_id` would write colliding SSTable filenames and
 clobber each other's high-water marks in a shared sync folder. It calls
-`reassignDeviceId`, which rewrites **both** the `DEVICE_ID` file and the `$meta`
-copy and renames the SSTables; if remotes are configured it warns on stderr to
-delete the stale `highwater/{oldDeviceId}.hwm`. Emits
-`{"oldDeviceId":…, "newDeviceId":…}` — an integrator can exercise the attribute
-without touching Dart.
+`reassignDeviceId`, which rewrites the `DEVICE_ID` file and renames the
+SSTables; if remotes are configured it warns on stderr to delete the stale
+`highwater/{oldDeviceId}.hwm`. Emits `{"oldDeviceId":…, "newDeviceId":…}` — an
+integrator can exercise the attribute without touching Dart.
 
 **Tensions.**
 
-- **SC-5's bite is smaller than "it syncs" implies.** The authoritative identity
-  is the local file; the synced `$meta` copy is **inert on read** (every device
-  prefers its own file). SC-5's real exposure is **hygiene/confidentiality** — the
-  copy leaks each peer's `device_id` into the sync folder and is dead weight — not
-  a wrong-identity correctness bug. WI-12 = stop writing it.
+- **SC-5 is fully closed, not just mitigated.** Before WI-12, the authoritative
+  identity was the local file but a `$meta` copy also replicated (inert on read,
+  since every device preferred its own file) — a hygiene/confidentiality leak,
+  not a wrong-identity bug. WI-12 removed the `$meta` path entirely (read *and*
+  write), so a device can no longer even theoretically resolve a peer's identity
+  via `$meta` Last-Write-Wins.
 - **§08's rationale is substantially already honoured.** §08 says `device_id`
   "must not be stored inside the database itself to avoid circular dependency
   during bootstrap" — the `DEVICE_ID` file is outside `sst/`, so there is no
   bootstrap circularity and no DEK dependency. §08's "platform secure storage
-  (Keychain…)" is a stronger, still-unbuilt form; `device_id.dart:37-39`'s "for
-  now `$meta` is the sole persistence mechanism" is now **stale** (the file
-  superseded it) — a spec-vs-code correction tracked by WI-2.
-- **The encryption tension is moot on the primary path.** The file is plaintext,
-  read with no DEK; only the `$meta` fallback is wrapped.
+  (Keychain…)" is a stronger, still-unbuilt form — tracked separately as a
+  spec-vs-code correction by WI-2 (this entry does not speak to Keychain/OPFS
+  durability claims; that prose lives in §04/§08).
+- **Durability trade-off (documented, not fixed here).** Post-WI-12, the
+  identity's durability equals the `DEVICE_ID` file's: a plain file on native
+  (survives app updates/normal backup, not a data-clear or
+  uninstall-without-restore) or OPFS on web (per-origin, persistent, but cleared
+  with site data and evictable under storage pressure absent
+  `navigator.storage.persist()`). A lost file yields a fresh id and a one-time
+  SSTable re-upload — correct and *safer* than the removed `$meta` fallback, but
+  still churn. Durable platform-native storage (Keychain / persistent OPFS) is
+  the §08 enhancement that would close this gap; it is a separate, larger
+  design (crosses into `kmdb_flutter` and the platform layer) and remains
+  out of scope here.
 
 **Code coordinates.** *(Verify by symbol, not line.)*
 
 | Concern | Location |
 | :--- | :--- |
-| Resolve on open (file-first) | `kv_store_impl.dart:407` (`ensureDeviceId`), surfaced `kmdb_database.dart:781` |
-| The `DEVICE_ID` file | `kv_store_impl.dart:439` (`kDeviceIdFilename`) |
-| `$meta` fallback + generation | `device_id.dart:53` (`DeviceId.load`), `:64` (UUIDv4) |
-| `$meta` read / write / key | `meta_store.dart:207` (`getDeviceId`), `:217` (`putDeviceId`), `:204` (`deviceIdKey`) — both `EncryptionEnvelope`-wrapped |
-| Stale "sole persistence" note | `device_id.dart:37-39` |
-| Reassign (file + `$meta` + SSTable rename) | `lsm_engine.dart:1428` (`reassignDeviceId`), `kv_store_impl.dart:326` |
-| `'00000000'` open-time default | `kv_store_impl.dart:120`, `kmdb_database.dart:303` |
-| CLI | `new_device_id_command.dart:47` (`NewDeviceIdCommand`) |
+| Resolve on open (file-only) | `kv_store_impl.dart` (`ensureDeviceId`), surfaced `kmdb_database.dart` (`ensureDeviceId`) |
+| The `DEVICE_ID` file | `kv_store_impl.dart` (`kDeviceIdFilename`) |
+| Pure id generator | `device_id.dart` (`DeviceId.generate`) |
+| `storeInfo()` resolution (engine, not file) | `kv_store_impl.dart` (`storeInfo`) |
+| Reassign (file + SSTable rename) | `lsm_engine.dart` (`reassignDeviceId`), `kv_store_impl.dart` (`reassignDeviceId`) |
+| `'00000000'` open-time default | `kv_store_impl.dart` (`open`'s `deviceId` param), `kmdb_database.dart` |
+| CLI | `new_device_id_command.dart` (`NewDeviceIdCommand`) |
 | Consumed — SSTable naming / manifest | §08 (`{deviceId}-…`), manifest `add.filename` |
-| Consumed — sync | `sync_engine.dart:365` (exclude self), `highwater.dart:270` |
+| Consumed — sync | `sync_engine.dart` (exclude self), `highwater.dart` |
 
 **Spec cross-refs.** §04 (identity — definitional home), §08 (SSTable naming),
 §12 (sync).

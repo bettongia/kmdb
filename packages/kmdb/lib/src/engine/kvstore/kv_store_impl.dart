@@ -104,7 +104,7 @@ final class KvStoreImpl implements KvStore {
   ///
   /// [deviceId] must be an 8-character lowercase hex string used to name
   /// SSTable files. Defaults to `'00000000'` for tests; production code
-  /// should supply a stable per-device UUID prefix via [DeviceId.load].
+  /// should supply a stable per-device UUID prefix via [ensureDeviceId].
   ///
   /// Throws [LockException] if another process holds the database lock.
   ///
@@ -329,16 +329,9 @@ final class KvStoreImpl implements KvStore {
     // persisted to the Manifest.
     await _engine.reassignDeviceId(newDeviceId);
 
-    // Persist the new device ID to $meta. This is done after the engine write
-    // so that, on crash before this point, the next open sees the old ID and
-    // recovers into a consistent state (the renamed files will be orphans, which
-    // crash recovery will delete, and the old-named originals in the Manifest
-    // will be valid).
-    await _meta.putDeviceId(newDeviceId);
-
-    // Also update the DEVICE_ID file so that future opens prefer it over the
-    // $meta value (which is susceptible to peer-overwrite via sync ingestion).
-    // Make it durable — this is the identity-churn case decision D4 targets.
+    // Update the DEVICE_ID file — the sole persistence mechanism for device
+    // identity (see device_id.dart). Make it durable — this is the
+    // identity-churn case decision D4 targets.
     final deviceIdPath = '${_engine.dbDir}/$kDeviceIdFilename';
     await _engine.adapter.writeFile(
       deviceIdPath,
@@ -393,17 +386,14 @@ final class KvStoreImpl implements KvStore {
   ///
   /// ## Storage strategy
   ///
-  /// The device ID is stored in **two** places:
-  ///
-  /// 1. `{dbDir}/DEVICE_ID` — a plain-text file in the database root.  This
-  ///    file is never uploaded by [SyncEngine] (which only uploads `.sst` files
-  ///    from the `sst/` subdirectory), so peer devices can never overwrite it.
-  ///
-  /// 2. `$meta` inside the LSM — retained for backward compatibility only.
-  ///    Because SSTables (including their `$meta` entries) are exchanged during
-  ///    sync, a peer's device ID can land in the local LSM via Last-Write-Wins
-  ///    compaction.  The DEVICE_ID file is therefore always preferred over the
-  ///    `$meta` value when both are present.
+  /// `{dbDir}/DEVICE_ID` — a plain-text file in the database root — is the
+  /// **sole** persistence mechanism. This file is never uploaded by
+  /// [SyncEngine] (which only uploads `.sst` files from the `sst/`
+  /// subdirectory), so peer devices can never overwrite it. Device identity
+  /// is deliberately kept out of `$meta`: because SSTables (including their
+  /// `$meta` entries) are exchanged during sync, a value stored there could
+  /// resolve to a peer's identity via Last-Write-Wins compaction (the SC-5
+  /// defect — see the attribute registry's `device_id` entry).
   Future<String> ensureDeviceId() async {
     // 1. Try the dedicated DEVICE_ID file first.  It lives outside sst/ so
     //    sync never touches it.
@@ -416,13 +406,16 @@ final class KvStoreImpl implements KvStore {
       // File absent — fall through.
     }
 
-    // 2. Fall back to $meta (backward-compatible path for existing databases).
-    final id = await DeviceId.load(_meta);
+    // 2. No valid file found — generate a fresh id. There is no $meta
+    //    fallback: a lost/missing DEVICE_ID always yields a new identity and
+    //    a one-time SSTable re-upload, which is safer than resurrecting a
+    //    stale (and possibly peer-overwritten) $meta copy.
+    final id = DeviceId.generate();
 
-    // 3. Write to the DEVICE_ID file so future opens skip the $meta lookup.
-    //    Make it durable (content + directory entry): a lost DEVICE_ID falls back
-    //    to $meta but a changed identity forces a full SSTable re-upload, so the
-    //    fsync is cheap insurance against needless churn (decision D4).
+    // 3. Write to the DEVICE_ID file so future opens find it directly.
+    //    Make it durable (content + directory entry): a lost DEVICE_ID means
+    //    identity churn (see step 2), so the fsync is cheap insurance against
+    //    needless churn (decision D4).
     await _engine.adapter.writeFile(filePath, Uint8List.fromList(id.codeUnits));
     await _engine.adapter.syncFile(filePath);
     await _engine.adapter.syncDir(_engine.dbDir);
@@ -492,10 +485,15 @@ final class KvStoreImpl implements KvStore {
 
   @override
   Future<StoreInfo> storeInfo() async {
-    final deviceId = await _meta.getDeviceId() ?? _engine.deviceId;
+    // Read from the running engine, not $meta or the DEVICE_ID file: the
+    // engine's device ID is what SSTable filenames actually use in every
+    // production path (the CLI's two-phase DatabaseOpener reopens with the
+    // resolved id; reassignDeviceId updates the engine directly). See Q2 in
+    // the "retire the $meta device_id copy" plan for the single-phase
+    // open()+ensureDeviceId() edge case this intentionally does not mask.
     return StoreInfo(
       dbDir: _engine.dbDir,
-      deviceId: deviceId,
+      deviceId: _engine.deviceId,
       currentHlc: _engine.currentHlcString,
     );
   }

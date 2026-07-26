@@ -31,6 +31,7 @@ export 'src/engine/kvstore/kv_store.dart'
         StoreInfo,
         LegacyDatabaseFormatException;
 export 'src/engine/kvstore/kv_store_impl.dart' show KvStoreImpl;
+export 'src/engine/kvstore/device_id.dart' show DeviceId;
 export 'src/engine/platform/storage_adapter_interface.dart'
     show StorageAdapter, StorageException, LockException;
 export 'src/engine/wal/wal_exceptions.dart' show CorruptedWalException;

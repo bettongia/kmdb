@@ -136,8 +136,11 @@ Internally, `KvStore.reassignDeviceId(newId)`:
 3. Appends a single `VersionEdit` to the Manifest recording all renames
    atomically. The old entries are removed and the new entries are added in one
    record.
-4. Persists the new device ID to `$meta` so subsequent opens and `storeInfo()`
-   return the new value.
+4. Rewrites the local `DEVICE_ID` file so subsequent opens resolve the new
+   value. (`device_id` is never stored in `$meta` — see the attribute
+   registry's [`device_id` entry](03a_attribute_registry.md#device_id) — a
+   running session's `storeInfo()` reads the value directly from the engine,
+   which is updated in step 3.)
 
 **Remote highwater marks:** if the database has already synced under the old ID,
 the remote sync folder will have an orphaned `highwater/{oldId}.hwm` file. The

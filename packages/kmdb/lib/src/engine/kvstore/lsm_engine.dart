@@ -1422,9 +1422,9 @@ final class LsmEngine {
   /// open will replay the Manifest and find the old filenames still referenced.
   /// The renamed files will be treated as orphans and deleted during crash
   /// recovery, while the old-named files remain valid — i.e. the rename is
-  /// idempotent. The device ID in `$meta` is not written until after the
-  /// VersionEdit is persisted, so the caller ([KvStoreImpl]) updates `$meta`
-  /// after this method returns.
+  /// idempotent. The caller ([KvStoreImpl]) rewrites the local `DEVICE_ID`
+  /// file (the sole store for device identity — never `$meta`) after this
+  /// method returns, once the VersionEdit is persisted.
   Future<void> reassignDeviceId(String newDeviceId) async {
     // Validate format: must be exactly 8 lowercase hex characters.
     final hexPattern = RegExp(r'^[0-9a-f]{8}$');

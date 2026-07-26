@@ -210,34 +210,46 @@ void main() {
     });
   });
 
-  // ── Device ID ──────────────────────────────────────────────────────────────
+  // ── Device ID (SC-5 regression) ─────────────────────────────────────────────
 
   group('MetaStore — device ID', () {
-    test('getDeviceId returns null on fresh database', () async {
+    // MetaStore.putDeviceId/getDeviceId/deviceIdKey were removed by the
+    // "retire the $meta device_id copy" plan (SC-5): $meta replicates via
+    // synced SSTables, so a value stored there could resolve to a peer's
+    // identity via Last-Write-Wins, silently adopting the wrong device's ID.
+    // The DEVICE_ID file (see kv_store_impl.dart's ensureDeviceId) is now the
+    // sole store. These tests prove the $meta key stays absent — deterministic
+    // absence via MetaStore.symbolicKey, which survives the deletion and
+    // computes the identical key the deleted deviceIdKey did.
+    test('no device_id entry exists in \$meta on a fresh database', () async {
       final adapter = MemoryStorageAdapter();
       final (store, _) = await _open(adapter);
-      expect(await store.meta.getDeviceId(), isNull);
+      final raw = await store.get(
+        MetaStore.kNamespace,
+        MetaStore.symbolicKey('device_id'),
+      );
+      expect(raw, isNull);
       await store.close();
     });
 
-    test('putDeviceId and getDeviceId round-trip', () async {
-      final adapter = MemoryStorageAdapter();
-      final (store, _) = await _open(adapter);
-      await store.meta.putDeviceId('a1b2c3d4');
-      expect(await store.meta.getDeviceId(), equals('a1b2c3d4'));
-      await store.close();
-    });
+    test(
+      'no device_id entry appears in \$meta after writes and reopen',
+      () async {
+        final adapter = MemoryStorageAdapter();
+        final (store, _) = await _open(adapter);
+        await store.put('tasks', _key(1), _bytes('v'));
+        await store.ensureDeviceId(); // exercises the DEVICE_ID file path
+        await store.close();
 
-    test('device ID persists across close and reopen', () async {
-      final adapter = MemoryStorageAdapter();
-      final (store, _) = await _open(adapter);
-      await store.meta.putDeviceId('deadbeef');
-      await store.close();
-
-      final (store2, _) = await _open(adapter);
-      expect(await store2.meta.getDeviceId(), equals('deadbeef'));
-      await store2.close();
-    });
+        final (store2, _) = await _open(adapter);
+        final raw = await store2.get(
+          MetaStore.kNamespace,
+          MetaStore.symbolicKey('device_id'),
+        );
+        expect(raw, isNull);
+        await store2.close();
+      },
+    );
   });
 
   // ── unregisterNamespace ─────────────────────────────────────────────────────

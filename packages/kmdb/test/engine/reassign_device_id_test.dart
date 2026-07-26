@@ -16,6 +16,7 @@ import 'dart:typed_data';
 
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store_impl.dart';
+import 'package:kmdb/src/engine/kvstore/meta_store.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
 import 'package:test/test.dart';
 
@@ -236,7 +237,9 @@ void main() {
         final store2 = await _openStore(dir, adapter, deviceId: 'eeeeeeee');
         addTearDown(() => store2.close());
 
-        // storeInfo reads from $meta which was updated by reassignDeviceId.
+        // storeInfo reads from the running engine's deviceId, which is
+        // resolved at reopen from the `deviceId:` param above — itself
+        // sourced from the DEVICE_ID file that reassignDeviceId rewrote.
         final info = await store2.storeInfo();
         expect(info.deviceId, 'eeeeeeee');
       },
@@ -450,5 +453,37 @@ void main() {
 
       await store.close();
     });
+
+    // ── SC-5 regression ───────────────────────────────────────────────────────
+
+    test(
+      'reassignDeviceId writes no device_id entry to \$meta (SC-5)',
+      () async {
+        // Guards against a regression of SC-5: reassignDeviceId must rewrite
+        // only the DEVICE_ID file (never $meta), because $meta replicates via
+        // synced SSTables and a peer's Last-Write-Wins copy could otherwise
+        // silently adopt a peer's identity. MetaStore.symbolicKey computes the
+        // exact key the deleted MetaStore.deviceIdKey used to, so this proves
+        // absence deterministically rather than via a fragile raw-byte scan.
+        final adapter = MemoryStorageAdapter();
+        final dir = _uniqueDir();
+        final store = await _openStore(dir, adapter, deviceId: 'aaaaaaaa');
+        addTearDown(() => store.close());
+
+        await store.put('col', _key('key1'), Uint8List.fromList([1]));
+        await store.flush();
+        await store.reassignDeviceId('bbbbbbbb');
+
+        final rawBytes = await store.get(
+          MetaStore.kNamespace,
+          MetaStore.symbolicKey('device_id'),
+        );
+        expect(
+          rawBytes,
+          isNull,
+          reason: '\$meta must never hold a device_id entry after reassign',
+        );
+      },
+    );
   });
 }

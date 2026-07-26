@@ -491,13 +491,16 @@ different device correctly compute or want the same value?* If the answer is
 no, it is device-local and belongs behind `$$`, not in `$meta`.
 
 Known device-local entries not yet moved, tracked separately (not fixed by
-WI-11): the legacy `device_id` copy in `$meta` (superseded by the
-authoritative local `DEVICE_ID` file — WI-12) and the dirty-open flag, found
-mis-placed by this same audit and spun out as WI-14 (see
-`docs/roadmap/0_10_01.md`). `gen:{namespace}` generation counters are a
-separate, subtler case (WI-13) — they are read cross-device for cache
-invalidation today, so "device-local" alone is not obviously correct without
-also deciding a merge semantics `$meta`'s plain LWW does not provide.
+WI-11): the dirty-open flag, found mis-placed by this same audit and spun out
+as WI-14 (see `docs/roadmap/0_10_01.md`). `gen:{namespace}` generation
+counters are a separate, subtler case (WI-13) — they are read cross-device
+for cache invalidation today, so "device-local" alone is not obviously
+correct without also deciding a merge semantics `$meta`'s plain LWW does not
+provide. `device_id` is no longer in this list: WI-12 removed it from `$meta`
+entirely (read and write) rather than moving it to a `$$` namespace — the
+local `DEVICE_ID` file was already its sole authoritative store, so there was
+no cross-device value to preserve behind a `$$` prefix; see the attribute
+registry's [`device_id` entry](03a_attribute_registry.md#device_id).
 
 **Confidentiality.** Syncable system-namespace values in the cloud are
 protected by **value-level encryption** (§31), not by upload filtering.

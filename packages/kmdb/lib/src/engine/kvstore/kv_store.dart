@@ -187,17 +187,17 @@ abstract interface class KvStore {
 
   /// Returns identifying information about this database instance.
   ///
-  /// Includes the stable device ID persisted in `$meta` and the current HLC
-  /// clock value. Intended for the CLI `info` command.
+  /// Includes the stable device ID (resolved from the running engine) and the
+  /// current HLC clock value. Intended for the CLI `info` command.
   Future<StoreInfo> storeInfo();
 
   /// Assigns a new device identity to this store.
   ///
   /// All SSTable files whose filename begins with the current device ID are
   /// renamed to use [newDeviceId]. A single VersionEdit is appended to the
-  /// Manifest recording the renames. The `$meta` device_id entry is updated
-  /// last so that, on any crash before completion, the next open will still
-  /// see the old ID and recover cleanly.
+  /// Manifest recording the renames. The local `DEVICE_ID` file (the sole
+  /// store for device identity — never `$meta`) is then rewritten to the new
+  /// value so subsequent opens resolve it.
   ///
   /// [newDeviceId] must be an 8-character lowercase hex string. Throws
   /// [ArgumentError] if the format is invalid or if [newDeviceId] is the same
@@ -350,7 +350,7 @@ final class StoreInfo {
   /// Absolute path to the database directory.
   final String dbDir;
 
-  /// The stable 8-character device identifier persisted in `$meta`.
+  /// The stable 8-character device identifier used in SSTable filenames.
   final String deviceId;
 
   /// The current HLC timestamp as a hex string (`physicalMs:logical`).

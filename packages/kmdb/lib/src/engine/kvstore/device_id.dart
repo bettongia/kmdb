@@ -14,13 +14,16 @@
 
 import 'package:uuid/uuid.dart';
 
-import 'meta_store.dart';
-
-/// Manages the stable 8-character device identifier used in SSTable filenames.
+/// Generates the stable 8-character device identifier used in SSTable
+/// filenames.
 ///
-/// The device ID is persisted in `$meta` so every open of the same database
-/// directory returns the same value. On the first open of a fresh database,
-/// [load] generates a new ID from a UUIDv7 and stores it.
+/// The device ID is persisted solely in the local `DEVICE_ID` file (see
+/// `KvStoreImpl.ensureDeviceId`) — never in `$meta`, because `$meta`
+/// replicates via synced SSTables and a Last-Write-Wins read of a
+/// replicated key could resolve to a peer's identity rather than this
+/// device's own (the SC-5 defect; see the attribute registry's `device_id`
+/// entry). [generate] is a pure generator with no persistence side effect;
+/// callers are responsible for storing the result.
 ///
 /// ## Identity format
 ///
@@ -35,34 +38,32 @@ import 'meta_store.dart';
 /// ## Platform-specific storage
 ///
 /// Full platform-specific secure storage (iOS Keychain, Android
-/// SharedPreferences, etc.) is deferred to Phase 8. For now `$meta` is the
-/// sole persistence mechanism.
+/// SharedPreferences, etc.) is deferred to Phase 8. For now the `DEVICE_ID`
+/// file is the sole persistence mechanism.
 abstract final class DeviceId {
   DeviceId._();
 
-  /// Loads the device ID from [meta], or generates and stores a new one if no
-  /// ID has been set yet.
+  /// Generates a fresh 8-character lowercase hex device ID.
   ///
-  /// Returns an 8-character lowercase hex string.
+  /// Returns a new value on every call — it does not check or persist
+  /// anything. Callers that need a stable per-database identity (e.g.
+  /// `KvStoreImpl.ensureDeviceId`) must first check for an existing stored
+  /// value and only call this when none is found, then persist the result
+  /// themselves.
   ///
   /// Example:
   /// ```dart
-  /// final id = await DeviceId.load(metaStore);
-  /// // id == '01965a4b'  (or similar UUIDv7 prefix)
+  /// final id = DeviceId.generate();
+  /// // id == 'a3f2b1c9'  (or similar UUIDv4 prefix)
   /// ```
-  static Future<String> load(MetaStore meta) async {
-    final stored = await meta.getDeviceId();
-    if (stored != null) return stored;
-
-    // First open: generate a new 8-char ID from the random portion of a UUID.
-    // UUIDv4 is used rather than the timestamp prefix of a UUIDv7 because
-    // multiple databases opened within the same millisecond (common in tests
-    // and CLI demos) would otherwise receive identical IDs — the top 32 bits
-    // of a UUIDv7 timestamp change only every ~65 seconds.  A random UUID
-    // gives ~4 billion values in 4 bytes, making same-millisecond collisions
+  static String generate() {
+    // Generate a new 8-char ID from the random portion of a UUID. UUIDv4 is
+    // used rather than the timestamp prefix of a UUIDv7 because multiple
+    // databases opened within the same millisecond (common in tests and CLI
+    // demos) would otherwise receive identical IDs — the top 32 bits of a
+    // UUIDv7 timestamp change only every ~65 seconds. A random UUID gives
+    // ~4 billion values in 4 bytes, making same-millisecond collisions
     // negligibly unlikely.
-    final id = const Uuid().v4().replaceAll('-', '').substring(0, 8);
-    await meta.putDeviceId(id);
-    return id;
+    return const Uuid().v4().replaceAll('-', '').substring(0, 8);
   }
 }
