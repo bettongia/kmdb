@@ -86,6 +86,19 @@ added have no `localOnly` key; `SstableMeta.fromMap` treats an absent key as
 `add` and `remove` may both be non-empty in the same record (a compaction that
 produces new files and retires old ones is a single atomic edit).
 
+**The same `(level, filename)` pair may legitimately appear in both `add` and
+`remove` of the same record.** This happens when a compaction's output HLC
+range exactly reproduces one of its own inputs' range (same `deviceId` +
+`minHlc`/`maxHlc`). Because the output filename is derived **solely** from
+`deviceId` + the HLC range — never from content — it collides with that input
+whenever their surviving HLC extremes match, even though the merged content
+differs (a compaction routinely rewrites the file's contents). The runtime
+treats this as an in-place overwrite. On disk there
+is exactly one file at that path afterward, holding the new content, so
+replay must resolve the collision as **present** ("added wins"). Reconciling
+this is a `remove`-before-`add` ordering *within a single record* when
+folding `VersionEdit`s into level state — see "Level reconstruction" below.
+
 ## CURRENT File
 
 The active Manifest file is identified by a `CURRENT` file in the database
@@ -139,6 +152,16 @@ See §17 for the full recovery sequence. The Manifest's role:
   minKey, maxKey, entryCount, walSequence) as-recorded in the last `add` edit
   for that file. The diagnostic fields (minKey, maxKey, entryCount) are
   available directly from replay without any extra SSTable I/O.
+
+  **Within a single record, `remove` is folded before `add`.** State is keyed
+  by `(level, filename)`; cross-record accumulation order is unaffected (each
+  record is still folded in append order), but within one record this
+  ordering is what makes a same-`(level, filename)` collision (see above)
+  resolve to present with the `add` entry's metadata, matching the on-disk
+  reality of an in-place overwrite. Getting this backwards silently drops a
+  still-live SSTable from the reconstructed state, and the orphan-detection
+  step above then deletes it — a permanent, silent data-loss bug fixed by
+  `plan_manifest_replay_added_removed_ordering.md`.
 
   Pre-fix databases (written before `plan_sstable_meta_tracking` was
   implemented) may have rotation-snapshot edits with empty minKey/maxKey and

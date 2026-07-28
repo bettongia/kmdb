@@ -161,6 +161,32 @@ final class ManifestState {
     // deletes it. Using filename as the inner key means a later add
     // (e.g. from a compaction or reassignment) properly supersedes an earlier
     // add for the same file, preserving whatever metadata that edit carried.
+    //
+    // ## Within-edit ordering: removed before added (data-loss fix)
+    //
+    // `liveMeta` is keyed by the PAIR (level, filename), so ordering only
+    // matters within a single edit when that same pair appears in both
+    // `added` and `removed` — which happens when a compaction output reuses
+    // an input's filename via an in-place overwrite (identical deviceId +
+    // minHlc/maxHlc, e.g. a `_compactAll` merge whose surviving range exactly
+    // reproduces one of its own same-level inputs). On disk there is exactly
+    // one file at that path after the compaction, and it holds the *output*
+    // content — so `added` must win. Applying `removed` before `added` within
+    // each edit achieves this: whichever loop runs second determines the
+    // final state for a given (level, filename) pair, so putting `added`
+    // last means a reused pair always resolves to present with the added
+    // entry's (fresh) metadata. This matches the runtime: every compaction
+    // method in `LsmEngine` (`_compactL0ToL1`, `_compactL1ToL2`,
+    // `_compactAll`) evicts the stale cached reader for a reused filename but
+    // explicitly *skips deleting it from disk*, because the file was
+    // overwritten in place, not removed (see the `outputNames` guard around
+    // `lsm_engine.dart:960-991` and its siblings). Before this fix, the loops
+    // ran in the opposite order, so a same-level reused filename was
+    // incorrectly dropped from the reconstructed state — and crash
+    // recovery's orphan sweep then deleted the still-live SSTable from disk
+    // (plan_manifest_replay_added_removed_ordering.md). Cross-edit
+    // accumulation order (edits are folded in list order) is unaffected by
+    // this change — only the intra-edit order flips.
     final Map<int, Map<String, SstableMeta>> liveMeta = {0: {}, 1: {}, 2: {}};
     var maxLogNumber = 0;
     var maxNextSeq = 0;
@@ -169,13 +195,15 @@ final class ManifestState {
       if (edit.logNumber > maxLogNumber) maxLogNumber = edit.logNumber;
       if (edit.nextSeq > maxNextSeq) maxNextSeq = edit.nextSeq;
 
-      for (final added in edit.added) {
-        // putIfAbsent initialises the inner map for levels beyond 0-2 if they
-        // ever appear (forward-compatibility). The last add wins for a filename.
-        liveMeta.putIfAbsent(added.level, () => {})[added.filename] = added;
-      }
       for (final removed in edit.removed) {
         liveMeta[removed.level]?.remove(removed.filename);
+      }
+      for (final added in edit.added) {
+        // putIfAbsent initialises the inner map for levels beyond 0-2 if they
+        // ever appear (forward-compatibility). Applied after `removed` (see
+        // above), so the last add always wins for a filename, including one
+        // reused in place within the same edit.
+        liveMeta.putIfAbsent(added.level, () => {})[added.filename] = added;
       }
     }
 

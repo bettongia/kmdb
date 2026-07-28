@@ -1,6 +1,6 @@
 # Manifest replay applies `added` before `removed` — data loss on filename reuse
 
-**Status**: Investigated
+**Status**: Implementing
 
 **PR link**: {pending}
 
@@ -96,13 +96,22 @@ files that must both survive. It cannot:
 - **Consolidation is immune.** `SstableInfo.consolidationName` embeds a
   monotonic `epoch` fencing token, so consolidation outputs never share a name
   with their (flush-named) inputs — `added`/`removed` are always disjoint.
-- **All three compaction paths share the collision potential.** `_compactAll`
-  requires ≥2 inputs, so with monotonic, non-overlapping per-file HLC ranges
-  its combined output range equals no single input's range in normal operation
-  (a same-millisecond degenerate case aside). The clean, deterministic trigger
-  is a **single-input** compaction — `_compactL1ToL2` with exactly one L1 file
-  over the L1 byte cap, or `_compactL0ToL1` when `l0CompactionTrigger` is 1 —
-  where the sole input's range is trivially the output range.
+- **Only *same-level* filename reuse trips the bug** (corrected during
+  implementation — verified empirically, not by inspection; see the Tests
+  section and the new engine regression's doc comment). `_fromEdits`'s
+  `liveMeta` is keyed by the **pair `(level, filename)`**, so an intra-edit
+  collision only matters when the reused name appears in `added` and `removed`
+  at the **same level**. The single-input `_compactL1ToL2` / `_compactL0ToL1`
+  recipe originally proposed here does **not** reproduce the defect:
+  `_compactL0ToL1` outputs at L1 vs. its L0 inputs at L0, and `_compactL1ToL2`
+  outputs at L2 vs. its L1 inputs at L1 — the reused name lands in *different*
+  level buckets, so pre-fix code already handles it correctly (confirmed: a
+  test of exactly that shape passes on unmodified `main`). The genuine trigger
+  is **`_compactAll`'s single-file-collapse shortcut**, whose `outputLevel: 2`
+  can coincide with an existing L2 input's own level, reusing that file's exact
+  name at the same level. The engine regression drives precisely this (two keys
+  flushed into one L2 file, then a third key ingested with an HLC strictly
+  interior to that file's range, triggering the collapse and reusing the name).
 
 ## Open questions
 
@@ -130,17 +139,17 @@ files that must both survive. It cannot:
 
 ### Fix
 
-- [ ] In `ManifestReader._fromEdits`
+- [x] In `ManifestReader._fromEdits`
   (`packages/kmdb/lib/src/engine/manifest/manifest_reader.dart`), swap the two
   loops so `edit.removed` is applied **before** `edit.added` within each edit.
   Cross-edit iteration order is unchanged; only the intra-edit order flips.
-- [ ] Update the explanatory comment (currently lines 158-163) to state the
+- [x] Update the explanatory comment (currently lines 158-163) to state the
   invariant explicitly: *within a single edit, `removed` is applied before
   `added` so that a filename present in both lists (a compaction output that
   reused an input's name via an in-place overwrite) correctly resolves to
   present — matching the runtime, which overwrites the file on disk rather than
   deleting it.* Cross-reference the runtime guard in `LsmEngine`.
-- [ ] (Optional, encouraged) Add a one-line comment at the `VersionEdit`
+- [x] (Optional, encouraged) Add a one-line comment at the `VersionEdit`
   construction in `CompactionJob.run` noting that an output filename may
   legitimately equal an input filename and will appear in both `added` and
   `removed`, and that this is an in-place overwrite the manifest reader resolves
@@ -148,7 +157,7 @@ files that must both survive. It cannot:
 
 ### Tests
 
-- [ ] **Unit regression at `ManifestReader` level (mandatory).** Construct a
+- [x] **Unit regression at `ManifestReader` level (mandatory).** Construct a
   manifest (via `ManifestWriter` to a real/faulty adapter, or the existing test
   harness) whose records include an edit with the **same filename** in both
   `added` and `removed` (plus at least one unrelated live file, to prove the
@@ -156,46 +165,91 @@ files that must both survive. It cannot:
   `state.levels` / `state.allFiles`, with the `added` entry's metadata
   (level/minKey/maxKey/entryCount). Confirm this test **fails on pre-fix code**
   and passes after — record that verification in the PR.
-- [ ] **Engine-level integration regression on plain `main` (mandatory — must
+
+  **Correction found during implementation:** `liveMeta` is keyed by the
+  *pair* `(level, filename)`, not filename alone. A filename reused across
+  *different* levels (e.g. an L1 file recompacted unchanged to L2 — the
+  scenario this checklist item originally described) does **not** hit the
+  bug: `added` and `removed` land in different `liveMeta[level]` buckets, so
+  intra-edit ordering is immaterial and pre-fix code already handles it
+  correctly (verified empirically — a test built exactly this way passed on
+  unmodified `main`). The bug requires `level(added) == level(removed)` for
+  the reused filename. The implemented unit test at
+  `packages/kmdb/test/engine/manifest_test.dart` (group "ManifestReader —
+  filename reuse within a single edit") uses matching levels (both 2) and
+  was confirmed to fail on pre-fix code, then pass post-fix.
+- [x] **Engine-level integration regression on plain `main` (mandatory — must
   not lean on WI-14).** This is a durability defect; per CLAUDE.md it must be
   proven end-to-end through real compaction → manifest → close → reopen, not
-  just at the unit fold. It **is** triggerable on `main`:
-  1. Open an engine with a `KvStoreConfig` that forces a **single-input**
-     compaction — e.g. tiny `l1MaxBytes` so one L1 file exceeds the cap and
-     `_compactL1ToL2` runs with a single input, or `l0CompactionTrigger: 1` so
-     `_compactL0ToL1` runs on a single L0 file. Either yields an output whose
-     `flushName` range equals the sole input's range ⇒ reused filename ⇒ one
-     edit with that name in both `added` and `removed`.
-  2. Write a set of documents through that compaction and confirm they are
-     readable while the engine is open.
-  3. Close and **reopen** (fresh engine ⇒ manifest replay + orphan sweep).
-  4. Assert every previously-written key is still readable and the reused
-     `.sst` still exists on disk. This **fails on `main`** (keys gone, file
-     orphan-swept) and passes after the fix.
-  - Use a real/`FaultyStorageAdapter`-backed on-disk adapter, not the
-    in-memory adapter — the 2026-05-22 review established that in-memory
-    adapters hide exactly this class of data-loss bug (the orphan sweep +
-    delete must run against a real directory listing).
-- [ ] **Do not** make the end-to-end proof depend on WI-14's failing suite.
+  just at the unit fold.
+
+  **Correction found during implementation — the suggested trigger recipe
+  does not reproduce the bug.** Empirically verified (see
+  `packages/kmdb/test/engine/manifest_replay_filename_reuse_regression_test.dart`'s
+  doc comment for the full analysis): `_compactL0ToL1` always writes to
+  `outputLevel: 1` while a genuinely new L0 write always advances the HLC
+  maximum (this device's clock is monotonic), so a reused-range output can
+  never coincide with a pre-existing L1 input's own (older, narrower) range.
+  `_compactL1ToL2` always removes at `level: 1` and adds at `level: 2` —
+  different levels, so even when a single L1 input's name is reused verbatim
+  the pre-fix code already resolves it correctly (see the unit-test
+  correction above). Neither of the two config knobs originally suggested
+  (`l1MaxBytes` tiny / `l0CompactionTrigger: 1`) produces a same-level
+  collision; both were tried and produced no data loss on pre-fix code.
+
+  The only compaction path that can produce a genuine `level(added) ==
+  level(removed)` collision is `_compactAll` (`outputLevel: 2`, whose inputs
+  may include existing L2 files at `level: 2`), and only when the merge's
+  surviving HLC range exactly reproduces one L2 input's own range unchanged.
+  The implemented test constructs this deterministically without relying on
+  tombstone-GC or key-superseding timing: two keys (A, B) flushed together
+  produce a single L2 file F with range `[hlcA, hlcB]`; a third, unrelated
+  key C is ingested as a foreign SSTable with an HLC **strictly between**
+  `hlcA` and `hlcB` (via an injected, fully controlled `HlcClock`), which
+  immediately triggers `_compactAll`'s single-file-collapse shortcut. Because
+  C's HLC falls entirely inside F's existing range, the merged output's range
+  is unchanged from F's own — reusing F's exact filename at the same level
+  (2) F itself occupied as a `removed` input. The database then simulates a
+  crash (`FaultyStorageAdapter.crash()`, no clean `close()` — a clean
+  `close()` after any write sets the dirty flag and triggers a `clearDirty()`
+  write that cascades into a further compaction, which in this tiny-database
+  test happens to supersede/mask the collision edit before reopen) and
+  reopens. Confirmed to **fail on pre-fix code** (keys A/B/C become
+  unreadable; the `.sst` file is deleted by the orphan sweep) and pass after
+  the fix (verified via `git stash` of only the fix commit, then restored).
+- [x] **Do not** make the end-to-end proof depend on WI-14's failing suite.
   WI-14 may be reworked or abandoned; a guardrail that only lives on an
   unmerged branch leaves `main` with no regression coverage and lets a future
   replay refactor silently reintroduce the loss. The two tests above stand on
-  `main` independently. WI-14's suite going green once this lands beneath it is
-  a welcome corroboration, not the proof.
-- [ ] Confirm no existing manifest/compaction/crash-recovery tests regress.
+  `main` independently (this branch was created directly off `main`, not
+  off the WI-14 branch). WI-14's suite going green once this lands beneath it
+  is a welcome corroboration, not the proof.
+- [x] Confirm no existing manifest/compaction/crash-recovery tests regress.
+  Full `kmdb` test suite (`dart test` from `packages/kmdb`) passes: 2409 run,
+  12 skipped (E2E, skipped by default), 0 failures.
 
 ### Final step — QA sign-off and pre-commit
 
 - [ ] Run `make coverage` — confirm >95% on changed files (the fold and both
-      tests).
+      tests). *(Not run by kmdb-plan-implement in this session — deferred to
+      kmdb-qa per the coordinator's instruction.)*
 - [ ] Hand off to the **`kmdb-qa` agent** for sign-off (spec alignment, doc
       comments, test adequacy, code health). Resolve every blocking item before
       opening a PR.
 - [ ] Run `make pre_commit` — format, analyze, license_check, tests all green.
-- [ ] Verify licence headers on any new files (2026).
-- [ ] Consider whether `docs/spec/10_manifest.md` and/or
+      *(`dart analyze` and `dart format` were run manually and are clean; the
+      full `make pre_commit` gate itself is deferred to the kmdb-pre-commit
+      agent per the coordinator's instruction.)*
+- [x] Verify licence headers on any new files (2026). The one new file,
+      `manifest_replay_filename_reuse_regression_test.dart`, has the header.
+- [x] Consider whether `docs/spec/10_manifest.md` and/or
       `docs/spec/17_crash_recovery.md` should state the intra-edit
       removed-before-added invariant explicitly; add it if the spec is silent.
+      Both were silent; both now state the invariant (see `docs/spec/10_manifest.md`
+      "the same `(level, filename)` pair may legitimately appear in both `add`
+      and `remove`" note and the "Level reconstruction" bullet, and
+      `docs/spec/17_crash_recovery.md` step 4 and the compaction failure-scenario
+      row).
 
 ## Reviewer notes (kmdb-plan-reviewer, 2026-07-29)
 
@@ -221,4 +275,36 @@ files that must both survive. It cannot:
 
 ## Summary
 
-{to be completed on implementation}
+**Implementation in progress — awaiting kmdb-qa sign-off and kmdb-pre-commit
+before commit/PR.**
+
+- Fixed `ManifestReader._fromEdits` to fold `edit.removed` before `edit.added`
+  within each `VersionEdit`, so a filename reused in place by a compaction
+  (same `deviceId` + `minHlc`/`maxHlc`) resolves to present ("added wins"),
+  matching the runtime's in-place-overwrite semantics. Cross-edit order is
+  unchanged.
+- Added a doc comment cross-referencing the `LsmEngine` runtime guard, and an
+  optional note at `CompactionJob.run`'s `VersionEdit` construction.
+- Added a fail-first unit regression
+  (`packages/kmdb/test/engine/manifest_test.dart`, group "ManifestReader —
+  filename reuse within a single edit") and a fail-first engine-level
+  regression (new file
+  `packages/kmdb/test/engine/manifest_replay_filename_reuse_regression_test.dart`),
+  both verified to fail on pre-fix code and pass post-fix.
+- **Correction to the plan's suggested reproduction recipe**, discovered
+  during implementation: the bug requires a *same-level* filename collision
+  (`liveMeta` is keyed by `(level, filename)`, not filename alone). The
+  plan's suggested triggers (single-input `_compactL1ToL2` or
+  `_compactL0ToL1`) always produce *cross-level* reuse (output level always
+  one above the reused input's own level), which the pre-fix code already
+  handles correctly — verified empirically, not just reasoned. Only
+  `_compactAll` can produce a same-level collision (its inputs may include
+  existing L2 files at `level: 2`, matching its own `outputLevel: 2`), and
+  only when the merge's surviving range exactly reproduces one L2 input's
+  own range unchanged. Both regression tests were rebuilt around this
+  corrected understanding; see the "Tests" checklist above and the engine
+  test's doc comment for the full analysis.
+- Updated `docs/spec/10_manifest.md` and `docs/spec/17_crash_recovery.md`,
+  both previously silent on the intra-edit ordering invariant.
+- Full `kmdb` test suite passes (2409 run, 12 E2E skipped by default, 0
+  failures); `dart analyze` clean; `dart format` applied.

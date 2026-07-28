@@ -238,6 +238,101 @@ void main() {
     });
   });
 
+  group('ManifestReader — filename reuse within a single edit', () {
+    // Regression test for the manifest-replay data-loss bug
+    // (plan_manifest_replay_added_removed_ordering.md).
+    //
+    // `_fromEdits` folds `added`/`removed` into `liveMeta[level][filename]` —
+    // keyed by the PAIR (level, filename), not filename alone. A compaction
+    // output can legitimately reuse an input's filename in place (same
+    // deviceId + minHlc/maxHlc, e.g. `_compactAll` merging an existing L2
+    // file with a new entry whose HLC falls entirely inside that file's
+    // existing range, so the merged range — and therefore the filename — is
+    // unchanged). When that reused input was *already at the same level* as
+    // the compaction's output (both level 2 for `_compactAll`), the SAME
+    // (level, filename) pair appears in both `added` and `removed` of one
+    // edit. Before the fix, `_fromEdits` applied `added` before `removed`
+    // within an edit, so the `removed` loop deleted the entry the `added`
+    // loop had just inserted into the SAME map bucket — the file was
+    // incorrectly dropped from the reconstructed state, and crash recovery's
+    // orphan sweep would then delete the still-live SSTable from disk.
+    //
+    // Note: a filename reused across DIFFERENT levels (e.g. an L1 file
+    // recompacted to L2, unchanged) does NOT hit this bug — `added` and
+    // `removed` land in different `liveMeta[level]` buckets and the ordering
+    // is immaterial. Only a same-level collision (level(added) ==
+    // level(removed), reachable via `_compactAll`) exposes it; see the
+    // engine-level regression in
+    // `manifest_replay_filename_reuse_regression_test.dart` for the
+    // real-compaction reproduction and why the naive "single L1/L0 input"
+    // recipe does not trigger it.
+    test(
+      'a filename present in both added and removed of one edit at the '
+      'SAME level resolves to present, with the added entry\'s metadata',
+      () async {
+        final adapter = MemoryStorageAdapter();
+        final writer = ManifestWriter(path: _manifestPath, adapter: adapter);
+
+        // Seed state: an unrelated live file (level 0, untouched by the
+        // second edit — proves the fold is otherwise intact) plus the file
+        // that will be "reused" in place by a later same-level compaction.
+        await writer.append(
+          _edit(
+            log: 1,
+            seq: 100,
+            added: [
+              _meta('unrelated-000001-000002.sst'),
+              _meta('reused-000003-000004.sst', level: 2),
+            ],
+          ),
+        );
+
+        // The degenerate compaction edit: the output filename equals the
+        // sole surviving input's filename (identical deviceId/minHlc/maxHlc
+        // — an in-place overwrite), AND it is recorded at the SAME level (2)
+        // as the removed input it reuses. This is the exact (level,
+        // filename) collision `_compactAll` can produce.
+        final reusedMeta = SstableMeta(
+          level: 2,
+          filename: 'reused-000003-000004.sst',
+          minKey: '1' * 32,
+          maxKey: 'e' * 32,
+          entryCount: 42,
+        );
+        await writer.append(
+          _edit(
+            log: 2,
+            seq: 200,
+            added: [reusedMeta],
+            removed: [
+              const SstableRef(level: 2, filename: 'reused-000003-000004.sst'),
+            ],
+          ),
+        );
+
+        final state = await ManifestReader(
+          adapter: adapter,
+        ).replay(_manifestPath);
+
+        // The unrelated file must still be present, proving the fold is
+        // otherwise intact.
+        expect(_levelFiles(state, 0), contains('unrelated-000001-000002.sst'));
+
+        // The reused file must be present at level 2 — not dropped.
+        expect(_levelFiles(state, 2), contains('reused-000003-000004.sst'));
+
+        // The surviving metadata must be the *added* entry's, not stale data
+        // from the earlier edit.
+        final survivor = state.levels[2]!.firstWhere(
+          (m) => m.filename == 'reused-000003-000004.sst',
+        );
+        expect(survivor.minKey, equals('1' * 32));
+        expect(survivor.maxKey, equals('e' * 32));
+        expect(survivor.entryCount, equals(42));
+      },
+    );
+  });
+
   group('ManifestReader — truncation edge cases', () {
     test('truncated header (< 12 bytes) yields empty state', () async {
       final adapter = MemoryStorageAdapter();
