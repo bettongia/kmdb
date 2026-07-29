@@ -207,7 +207,15 @@ void main() {
       () async {
         // Find the SSTable file written by setUp.
         final sstDir = io.Directory('${tmpDir.path}/sst');
-        final files = sstDir.listSync().whereType<io.File>().toList();
+        final files = sstDir
+            .listSync()
+            .whereType<io.File>()
+            // Inspect the syncable SSTable holding the user documents, not the
+            // local-only `.local.sst` (which carries derived/system state such
+            // as the dirty-open flag). `listSync()` order is unspecified, so
+            // excluding it keeps these tests deterministic across platforms.
+            .where((f) => !f.path.endsWith('.local.sst'))
+            .toList();
         expect(files, isNotEmpty);
         final filename = files.first.uri.pathSegments.last;
 
@@ -238,7 +246,15 @@ void main() {
 
     test('--data without --full is ignored (no entries in output)', () async {
       final sstDir = io.Directory('${tmpDir.path}/sst');
-      final files = sstDir.listSync().whereType<io.File>().toList();
+      final files = sstDir
+          .listSync()
+          .whereType<io.File>()
+          // Inspect the syncable SSTable holding the user documents, not the
+          // local-only `.local.sst` (which carries derived/system state such
+          // as the dirty-open flag). `listSync()` order is unspecified, so
+          // excluding it keeps these tests deterministic across platforms.
+          .where((f) => !f.path.endsWith('.local.sst'))
+          .toList();
       expect(files, isNotEmpty);
       final filename = files.first.uri.pathSegments.last;
 
@@ -258,7 +274,15 @@ void main() {
 
     test('--full output includes index block refs and all entries', () async {
       final sstDir = io.Directory('${tmpDir.path}/sst');
-      final files = sstDir.listSync().whereType<io.File>().toList();
+      final files = sstDir
+          .listSync()
+          .whereType<io.File>()
+          // Inspect the syncable SSTable holding the user documents, not the
+          // local-only `.local.sst` (which carries derived/system state such
+          // as the dirty-open flag). `listSync()` order is unspecified, so
+          // excluding it keeps these tests deterministic across platforms.
+          .where((f) => !f.path.endsWith('.local.sst'))
+          .toList();
       expect(files, isNotEmpty);
       final filename = files.first.uri.pathSegments.last;
 
@@ -300,7 +324,15 @@ void main() {
     });
     test('--full --data includes decoded values for user entries', () async {
       final sstDir = io.Directory('${tmpDir.path}/sst');
-      final files = sstDir.listSync().whereType<io.File>().toList();
+      final files = sstDir
+          .listSync()
+          .whereType<io.File>()
+          // Inspect the syncable SSTable holding the user documents, not the
+          // local-only `.local.sst` (which carries derived/system state such
+          // as the dirty-open flag). `listSync()` order is unspecified, so
+          // excluding it keeps these tests deterministic across platforms.
+          .where((f) => !f.path.endsWith('.local.sst'))
+          .toList();
       expect(files, isNotEmpty);
       final filename = files.first.uri.pathSegments.last;
 
