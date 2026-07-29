@@ -7,7 +7,7 @@ prerequisite —
 **merged as PR #64**. This branch was rebased onto that fix; the full suite is
 green again. See "Resolution of the blocking finding" below.)
 
-**PR link**: _(pending)_
+**PR link**: https://github.com/bettongia/kmdb/pull/65
 
 > **Provenance.** WI-14 of the [0.10.01 hardening track](../roadmap/0_10_01.md).
 > Found during **WI-11 Phase 3** (2026-07-23) and classified — not fixed — there,
