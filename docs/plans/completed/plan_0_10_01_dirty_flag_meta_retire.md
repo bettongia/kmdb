@@ -1,8 +1,13 @@
 # Move the dirty-open flag off synced `$meta` (WI-14)
 
-**Status**: **Investigated**
+**Status**: **Complete** (the 🔴 blocking finding below was a *latent* data-loss
+bug on `main` that this fix merely *exposed*; it was fixed first as a
+prerequisite —
+[`plan_manifest_replay_added_removed_ordering.md`](completed/plan_manifest_replay_added_removed_ordering.md),
+**merged as PR #64**. This branch was rebased onto that fix; the full suite is
+green again. See "Resolution of the blocking finding" below.)
 
-**PR link**: _(none yet)_
+**PR link**: _(pending)_
 
 > **Provenance.** WI-14 of the [0.10.01 hardening track](../roadmap/0_10_01.md).
 > Found during **WI-11 Phase 3** (2026-07-23) and classified — not fixed — there,
@@ -315,21 +320,21 @@ bar and is promoted to **Investigated**.
 
 ## Implementation plan
 
-- [ ] Add `kDirtyStateNamespace = r'$$dirtystate'` to `meta_store.dart` with a
+- [x] Add `kDirtyStateNamespace = r'$$dirtystate'` to `meta_store.dart` with a
       doc comment mirroring `kGcStateNamespace`'s (why it moved off `$meta`, the
       LWW false-negative hazard, local-only guarantee).
-- [ ] Change `kNamespace` → `kDirtyStateNamespace` in `getDirtyFlag`, `setDirty`,
+- [x] Change `kNamespace` → `kDirtyStateNamespace` in `getDirtyFlag`, `setDirty`,
       `clearDirty`, `appendDirtyFlag`. Update each method's doc comment that says
       "written to `$meta`" to name the new namespace and reference WI-14.
-- [ ] Update the class-level doc comment (meta_store.dart:34) that lists the
+- [x] Update the class-level doc comment (meta_store.dart:34) that lists the
       dirty-open flag among `$meta`'s residents, and confirm the encryption
       section (meta_store.dart:50-67) does not still imply `dirty` is a `$meta`
       value — it stays `EncryptionEnvelope`-wrapped, now into `$$dirtystate`.
-- [ ] Add the **complementary** device-local isolation test (sentinel present in
+- [x] Add the **complementary** device-local isolation test (sentinel present in
       `$$dirtystate`, absent from `$meta` via `_engine.get($meta,
       symbolicKey('dirty')) == null`). This is a companion to — **not** a
       substitute for — the cross-device regression below.
-- [ ] Add the **mandatory** deterministic in-process cross-device regression
+- [x] Add the **mandatory** deterministic in-process cross-device regression
       (resolved **Q1**, option (a) constructed in-process): open A → first write
       (dirty set @ `HLC_A`) → `ingestSstable` a synthetic SSTable carrying a
       `$meta` **delete-tombstone** (`RecordType.delete`) for `symbolicKey('dirty')`
@@ -342,20 +347,224 @@ bar and is promoted to **Investigated**.
       namespace change reverted** (dirty back in `$meta`) — a regression test
       that passes pre-fix guards nothing. The "upload-exclusion" fallback is
       **dropped**; do not use it.
-- [ ] Strengthen `writebatch_atomicity_test.dart` (the "single put folds
+      **Done, with two implementation notes not in the original recipe:**
+      (1) an explicit `store.flush()` between the initial write and the ingest
+      is required — `LsmEngine.get()` checks the active memtable first and
+      returns unconditionally on a hit, so if A's own `dirty` entry were still
+      in the (unflushed) memtable when the tombstone SSTable is ingested, the
+      memtable entry would shadow the disk-based tombstone regardless of HLC,
+      making the test vacuous in a different way than the rejected recipe.
+      Flushing moves A's entry to an L0 SSTable first so the "L0 — search
+      newest-first" read order (not memtable priority) is what's exercised.
+      (2) the test uses a custom `KvStoreConfig` (`singleFileThresholdBytes:
+      0`) rather than `KvStoreConfig.forTesting()` — see the test file's
+      library doc comment for a pre-existing, WI-14-unrelated manifest/
+      compaction edge case this surfaced (a second all-levels compaction round
+      recomputing the same output filename as an input nets to "removed" on
+      replay) and reported it separately rather than fixing it here (out of
+      scope for this plan). Verified failing-on-revert with this config too.
+- [x] Strengthen `writebatch_atomicity_test.dart` (the "single put folds
       document + meta writes into one batch frame" test, ~line 137) to assert a
       record with `namespace == r'$$dirtystate'` is present in the first-write
       frame — otherwise the dirty-flag fold is no longer guarded after the move.
 - [ ] Confirm the existing dirty tests still pass unchanged
       (`meta_store_test`, `writebatch_atomicity_test`, `meta_store_encryption_test`,
-      `lsm_engine_test`).
-- [ ] Spec/doc updates via `kmdb-architect`: registry row (drop `⚠`), §11 table,
+      `lsm_engine_test`). **Blocked — see "🔴 BLOCKING FINDING" below. The
+      full-suite run (`dart test`, no path argument) surfaced a real
+      cross-cutting data-loss regression outside the four named files; two
+      cosmetic (file-count) fallouts were fixed, but the data-loss finding is
+      NOT fixed and implementation is paused pending user guidance.**
+      Cosmetic fallout fixed (safe, no behaviour change):
+      `lsm_engine_test.dart`'s "compactAll reduces L0 to 0 files when data
+      fits in one L2" and `local_only_namespace_test.dart`'s "flush with only
+      syncable entries produces one .sst file" both counted all `*.sst` files
+      (which also matches `*.local.sst`) and asserted a count that assumed no
+      local-only file would ever be produced by a plain document write. Before
+      this fix, the dirty flag lived in `$meta` (the same syncable partition
+      as the document writes each test makes), so it never produced a second
+      physical file. After the fix, the very first write of *any* session
+      also produces a separate local-only `$$dirtystate` SSTable (flush's
+      "two-writer split" — see `lsm_engine.dart`), so the local file count
+      became nonzero. Updated both assertions to exclude `.local.sst` files,
+      restoring their original intent without conflating it with the
+      orthogonal, always-present local dirty-flag file.
+
+### 🔴 BLOCKING FINDING (2026-07-29) — real data loss on `put()` + `close()`, not a test-assumption artefact
+
+`dart test`'s full-suite run (not scoped to the four dirty-specific files the
+plan named) surfaced **5 failing tests** that are a genuine crash-recovery /
+data-loss regression caused by this fix, confirmed by reverting the namespace
+change and re-running the identical scenario (data survives on `main`, is
+lost with the fix applied):
+
+- `test/engine/crash_recovery_test.dart`: "multiple namespaces survive reopen
+  independently", "written values survive close + reopen"
+- `test/engine/reassign_device_id_test.dart`: "all documents remain readable
+  after reassign and close/reopen", "manifest replays correctly after rename
+  (data accessible on reopen)"
+- `test/versioning/versioning_integration_test.dart`: "deleted document with
+  post-delete grace expired: full purge" — same signature (data present
+  in-session, gone after `close()` + reopen); also individually confirmed to
+  pass on `main` and fail with the fix applied. This one goes through
+  `KmdbDatabase.open`/`col.put`/`col.delete`, not raw `KvStoreImpl`, showing
+  the defect is reachable from the public Query Layer API too, not just the
+  low-level `KvStore` surface the other four failures use.
+
+**Minimal repro:** `open()` → `put('ns', key, value)` → `flush()` → `close()`
+→ reopen → `get('ns', key)` returns `null` (data is gone), using
+`KvStoreConfig.forTesting()` (`singleFileThresholdBytes: 8 * 1024`, the
+default in every affected test) or, per the analysis below, any config
+where total data stays under `singleFileThresholdBytes` (**the production
+default is 512 KiB**, so this is not test-config-specific — it is a shape any
+small real database can hit).
+
+**Root cause (verified via direct manifest-edit inspection,
+`ManifestReader.replayEdits`):** this is a genuine, pre-existing
+`ManifestReader.replay`/`LsmEngine._compactAll` ordering defect (documented
+separately in the cross-device regression test file's "Why a custom
+KvStoreConfig" doc comment) that this fix makes trivially reachable on the
+ordinary write path:
+
+1. `flush()` partitions the memtable into a syncable writer (`ns`) and a
+   local-only writer (`$$dirtystate`, the dirty flag written on the first
+   write of the session). Because both partitions are non-empty and total
+   bytes are tiny, `LsmEngine._compactIfNeeded`'s "single-file shortcut"
+   fires `_compactAll()` immediately, merging both L0 files into **two** L2
+   outputs (one syncable, one local) in a single `VersionEdit`.
+2. `close()` calls `clearDirty()` (a delete against `$$dirtystate` only,
+   since — pre-fix — this write went to `$meta` alongside other `$meta`
+   churn; post-fix it is isolated to the local partition) and then
+   `LsmEngine.close(flush: true)`, which flushes the memtable **again**.
+   This second flush contains only the `$$dirtystate` tombstone (no new
+   syncable data), producing a second local-only L0 file. The same
+   single-file shortcut fires `_compactAll()` **again**, merging L0 + L1 + L2
+   (now 3 files: the new local tombstone, the prior syncable L2 output, the
+   prior local L2 output) into new L2 outputs.
+3. Because **no new syncable data was written between the two `_compactAll`
+   rounds**, the syncable partition's effective HLC range — and therefore its
+   computed output filename — is **byte-for-byte identical** in both rounds.
+   The second round's `VersionEdit` therefore lists that filename in **both**
+   `added` (this round's output) **and** `removed` (an input carried over from
+   the first round's output, now being replaced). `ManifestReader.replay`
+   applies `added` before `removed` within one edit
+   (`liveMeta[level][filename] = added` then `liveMeta[level]?.remove(...)`),
+   so the just-re-added syncable file is immediately deleted from the
+   replayed live state. On reopen, the syncable document data is gone.
+
+**Why this is new, not latent:** pre-fix, `clearDirty()` wrote to `$meta` —
+the *same* syncable partition as the document data — so the close-time flush
+always perturbed the syncable partition's HLC range (a new `$meta` entry), and
+the second round's computed filename never collided with the first round's.
+Isolating the dirty flag into its own `$$dirtystate` partition (the entire
+point of this fix) removes that incidental perturbation, so the syncable
+partition's content becomes byte-for-byte static across the two rounds and
+the dormant manifest-replay ordering bug fires on **real document data** for
+the first time, on an extremely common shape: any session that writes at
+least one document and then calls `close()`, with total data under
+`singleFileThresholdBytes` (512 KiB in production).
+
+**Why I did not fix it:** the fix is in `ManifestReader.replay` and/or
+`LsmEngine._compactAll`/`CompactionJob` (e.g. deduplicating an added+removed
+pair for the identical `(level, filename)` within one `VersionEdit`, or
+having compaction skip re-emitting a `removed` entry for a file whose content
+is unchanged) — a correctness fix to shared LSM/manifest machinery well
+outside this plan's one-namespace-deep scope, and exactly the kind of
+"significant architectural decision" the operating premise says to escalate
+rather than improvise. It also plausibly already affects `main` today under
+some other trigger (e.g. re-running `compactAll()` twice back-to-back with no
+new writes in between) — this needs its own investigation, plan, and fix, not
+a mechanical patch bundled into WI-14.
+
+**Current state left in the worktree:** the WI-14 namespace fix
+(`meta_store.dart`) and all new/updated tests are in place and match the plan
+above; this defect is *not* worked around or masked (no test was weakened to
+hide it — the 5 failures above are left failing, visible in `dart test`).
+Implementation is paused here pending guidance on how to proceed (fix the
+manifest bug first as a prerequisite fix, land WI-14 with the regression
+flagged as a known follow-up, or another approach).
+
+### ✅ Resolution of the blocking finding (2026-07-29)
+
+The maintainer chose **fix the manifest bug first as a prerequisite PR**. That
+was done and **merged as PR #64**
+([`plan_manifest_replay_added_removed_ordering.md`](completed/plan_manifest_replay_added_removed_ordering.md)):
+`ManifestReader._fromEdits` now folds `removed` before `added` within each edit,
+so a `(level, filename)` pair reused as an in-place-overwrite output resolves to
+present ("added wins"), matching the runtime. The blocking finding's root-cause
+analysis above was correct; the one refinement the implementation surfaced is
+that the collision only bites at the **same level** (`liveMeta` is keyed by
+`(level, filename)`), so the genuine trigger is `_compactAll`'s single-file
+collapse rather than the cross-level `_compactL0ToL1`/`_compactL1ToL2` paths.
+
+This branch was **rebased onto `main` (post-#64)** and the full `kmdb` suite is
+green again (2423 pass, 12 E2E skipped). Of the 5 originally-failing tests:
+
+- **4** (`crash_recovery_test` ×2, `reassign_device_id_test` ×2) now pass
+  directly from the manifest fix — no change needed.
+- **1** (`versioning_integration_test` "full purge") was a **fragile timing
+  test**, not the manifest bug (it does `flush` + `compactAll` on the same open
+  DB, no reopen). It asserted the delete-version's age is *exactly* 0ms at
+  compaction time — true only when compaction runs in the same wall-clock
+  millisecond as the `delete()`, which WI-14's extra local-SST work pushed past
+  a millisecond boundary (measured `newestAgeMs = 8`). With `retentionDays: 0`
+  the production behaviour is correct: the delete chain purges once aged past
+  0ms. The test was corrected to add a small deterministic delay and assert the
+  **full purge does happen** (matching its own name); the within-grace /
+  past-grace retention semantics stay covered deterministically (via injected
+  `nowMs`) by the unit tests in `retention_policy_test.dart`.
+
+Also fixed two stale doc spots WI-14's first pass missed: §17's failure-scenario
+table row ("Dirty-open flag in `$meta`" → `$$dirtystate`) and §26's write-batch
+diagram (regrouped "meta updates" → the dirty flag now lands in `$$dirtystate`,
+not `$meta`).
+
+- [x] Spec/doc updates via `kmdb-architect`: registry row (drop `⚠`), §11 table,
       §17 step 8, §31 (×2), §12 status; verify §07/§26 need no change.
-- [ ] Update `docs/roadmap/0_10_01.md`: mark WI-14 complete; update the `$meta`
-      end-state table's `dirty` row.
+      **Done directly (not delegated to kmdb-architect — no Agent tool
+      available in this session; edits follow the existing WI-11/WI-12
+      correction style in each file verbatim, so flagging here rather than
+      guessing at new conventions).** §07:139/§26:111 confirmed
+      location-neutral, no change needed, as the plan anticipated.
+- [x] Update `docs/roadmap/0_10_01.md`: mark WI-14 complete; update the `$meta`
+      end-state table's `dirty` row. Marked "Implemented … pending
+      kmdb-qa/PR" rather than a bare "✅ Complete" at the two summary-table
+      rows (WI-11/WI-12's ✅ Complete markers reflect an already-merged PR;
+      this one is not merged yet) — the exit-criteria checkbox is left
+      unticked with a "tick this once merged" note, mirroring WI-11's own
+      pre-merge annotation style.
 - [ ] `kmdb-qa` sign-off, then `kmdb-pre-commit`; open PR; move plan to
       `docs/plans/completed/`.
 
 ## Summary
 
-_(to be written on completion)_
+WI-14 moves the dirty-open flag off synced `$meta` to the local-only
+`$$dirtystate` namespace, closing the last device-local-fact-in-a-synced-namespace
+leak of the SC-10 / Q-D family (device_id was WI-12; index/FTS/Vec state and the
+tombstone floor were WI-11). The change is the one-namespace-deep move the plan
+described:
+
+- **Code:** added `kDirtyStateNamespace = r'$$dirtystate'` to `meta_store.dart`
+  with a rationale doc comment, and switched `getDirtyFlag`/`setDirty`/
+  `clearDirty`/`appendDirtyFlag` from `kNamespace` (`$meta`) to it. Value bytes,
+  key encoding, presence-only read semantics, and the first-write WAL-frame
+  folding are all unchanged.
+- **Tests:** device-local isolation (`dirty` sentinel present in `$$dirtystate`,
+  absent from `$meta`); a deterministic in-process cross-device regression
+  (`dirty_flag_cross_device_test.dart`) that ingests a higher-HLC `$meta`
+  `clearDirty` tombstone during a live session and asserts the flag survives —
+  verified to fail with the namespace change reverted; and a `$$dirtystate`-in-
+  frame assertion added to `writebatch_atomicity_test.dart` to replace the guard
+  that the move retired.
+- **Docs:** registry `dirty` row finalised (`⚠` dropped, storage `$$dirtystate`);
+  §11 table, §17 step 8 + failure-table row, §26 write-batch diagram, §31 (×2),
+  and the §12 status line all updated; roadmap WI-14 marked done and the `$meta`
+  end-state `dirty` row finalised.
+
+Implementation surfaced a **latent data-loss bug on `main`** (manifest-replay
+`added`-before-`removed` ordering) that this move exposed by removing the `$meta`
+write traffic that had been masking it. Per the maintainer's decision it was
+fixed first as a prerequisite (**PR #64**, merged); this branch was rebased on
+top. A second failure was a pre-existing fragile timing test, corrected to be
+deterministic. Full `kmdb` suite green (2423 pass, 12 E2E skipped); `kmdb-qa`
+signed off (it also fixed a formatting nit and two stale `$meta` source doc
+comments inline); `make pre_commit` green.

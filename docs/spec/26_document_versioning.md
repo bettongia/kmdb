@@ -108,7 +108,7 @@ document write  ← main namespace put (or delete tombstone)
 $ver: entry     ← VersionEntry for this write
 $$index: entries ← secondary index augmentor
 vault refs      ← VaultRefInterceptor augmentor
-meta updates    ← dirty flag, gen counter, namespace registry
+bookkeeping     ← gen counter + namespace registry ($meta), dirty flag ($$dirtystate)
 ```
 
 Because H2 (`plan_writebatch_atomicity.md`) encodes the entire batch as one

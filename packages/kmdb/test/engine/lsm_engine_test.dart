@@ -324,9 +324,17 @@ void main() {
       await store.flush();
       await store.compactAll();
 
-      // After compactAll, L0 should be empty.
+      // After compactAll, L0 should be empty. Count only *syncable* SSTables
+      // (excluding `.local.sst`) — since the 0.10.01 WI-14 fix, the very
+      // first write of any session also produces a local-only
+      // `$$dirtystate` SSTable (see MetaStore.kDirtyStateNamespace), which
+      // flush()/compaction correctly partitions into its own file separate
+      // from the document data this assertion is actually about. Filtering
+      // it out here restores the test's original intent — "all document
+      // data consolidates to one L2 SSTable" — without conflating it with
+      // the also-real, but orthogonal, local-only dirty-flag file.
       final l0Files = adapter.files.keys
-          .where((k) => k.endsWith('.sst'))
+          .where((k) => k.endsWith('.sst') && !k.endsWith('.local.sst'))
           .toList();
       // All data should be in a single consolidated SSTable.
       expect(l0Files.length, lessThanOrEqualTo(1));

@@ -87,7 +87,8 @@ final class KvStoreImpl implements KvStore {
   /// never mark the database dirty.
   bool _sessionDirtyMarked = false;
 
-  /// Whether the dirty-open flag currently exists in `$meta`.
+  /// Whether the dirty-open flag currently exists in the local-only
+  /// `$$dirtystate` namespace (moved out of `$meta` by 0.10.01 WI-14).
   ///
   /// Set to true when:
   /// - [hadUnclosedSession] was true at open time (flag left by a crash), or

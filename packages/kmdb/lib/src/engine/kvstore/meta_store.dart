@@ -31,10 +31,10 @@ import 'lsm_engine.dart';
 /// - **Generation counters** (`gen:{namespace}`) — incremented on every write
 ///   to a user namespace. The Cache Layer reads these to detect stale cached
 ///   query results.
-/// - **Dirty-open flag** (`dirty`) — written on the first user write after
-///   open; cleared on clean close. If set on next open, it means the previous
-///   session ended abruptly (crash or process kill), and secondary indexes may
-///   need to be rebuilt.
+///
+/// The dirty-open flag (`dirty`) used to live here too, but was moved to the
+/// local-only [kDirtyStateNamespace] by the 0.10.01 WI-14 fix — see that
+/// constant's doc comment for why. It is documented there now, not here.
 ///
 /// All writes go directly to [LsmEngine], bypassing the `$` namespace guard in
 /// [KvStoreImpl] (which is intentional — these are internal writes). All
@@ -42,10 +42,14 @@ import 'lsm_engine.dart';
 ///
 /// ## Key encoding
 ///
-/// Meta keys are symbolic names (e.g. `gen:tasks`, `dirty`). They are encoded
-/// as deterministic 32-character hex strings via a two-seed XXH64 hash, which
-/// matches the 16-byte key format the LSM engine requires. Collision probability
-/// across the ~100 distinct names `$meta` will ever hold is negligible.
+/// Meta keys are symbolic names (e.g. `gen:tasks`, `index:tasks:title`). They
+/// are encoded as deterministic 32-character hex strings via a two-seed
+/// XXH64 hash ([_nameToKey]), which matches the 16-byte key format the LSM
+/// engine requires. Collision probability across the ~100 distinct names
+/// `$meta` will ever hold is negligible. The same hash is also used to key
+/// symbolic names in the local-only `$$…state` namespaces (e.g. `dirty` in
+/// [kDirtyStateNamespace], `gc:tombstoneFloor` in [kGcStateNamespace]) — see
+/// [symbolicKey].
 ///
 /// ## Encryption (Gap 3, Encryption confidentiality reconciliation plan)
 ///
@@ -152,9 +156,33 @@ final class MetaStore {
   static String _genKey(String userNamespace) =>
       _nameToKey('gen:$userNamespace');
 
-  // ── Dirty-open flag ────────────────────────────────────────────────────────
+  // ── Dirty-open flag (moved off `$meta` by 0.10.01 WI-14) ───────────────────
 
-  /// Returns `true` if the dirty-open flag is set in `$meta`.
+  /// The local-only namespace holding the persisted dirty-open flag.
+  ///
+  /// Moved out of synced `$meta` by the 0.10.01 WI-14 fix: the flag records
+  /// that *this device's* previous session did not [close] cleanly, which is
+  /// a device-local fact, but until this fix it was stored in synced `$meta`
+  /// under the device-independent key `dirty`. `$meta` resolves by plain
+  /// last-write-wins on HLC, not a per-device merge, so a peer's clean
+  /// `clearDirty` (a delete tombstone) could replicate in with a later HLC
+  /// than this device's own `setDirty` and erase this device's genuine crash
+  /// marker before it is ever read. Since [getDirtyFlag] is only consulted at
+  /// the *next* open — well after the flag was originally set — this is a
+  /// **false-negative** hazard (the dangerous direction): the device reopens,
+  /// sees no dirty flag, and `onIndexRebuildRequired` never fires, so it
+  /// silently serves queries against stale derived indexes (see
+  /// `IndexManager`'s sibling `$$indexstate` namespace and
+  /// [kGcStateNamespace]'s doc comment for the identical
+  /// device-local-state-in-a-synced-namespace defect shape). Symmetrically, a
+  /// peer's mid-session `setDirty` could mark this device dirty (a
+  /// false-positive), forcing an unnecessary rebuild. [kDirtyStateNamespace]
+  /// is local-only (see `isLocalOnly` in `namespace_codec.dart`), so it is
+  /// never uploaded and a peer's dirty/clean state can never affect this
+  /// device's.
+  static const String kDirtyStateNamespace = r'$$dirtystate';
+
+  /// Returns `true` if the dirty-open flag is set in [kDirtyStateNamespace].
   ///
   /// A set flag means the previous session did not call [close] cleanly —
   /// either the process was killed or the machine lost power after at least one
@@ -171,11 +199,11 @@ final class MetaStore {
   /// key outright (never zeroes it), presence — encrypted or not — is
   /// sufficient to answer the question; no decryption is needed.
   Future<bool> getDirtyFlag() async {
-    final bytes = await _engine.get(kNamespace, _nameToKey('dirty'));
+    final bytes = await _engine.get(kDirtyStateNamespace, _nameToKey('dirty'));
     return bytes != null && bytes.isNotEmpty;
   }
 
-  /// Writes the dirty-open flag to `$meta`.
+  /// Writes the dirty-open flag to [kDirtyStateNamespace].
   ///
   /// Called by [KvStoreImpl] on the first user write after open (§17, step 8).
   /// The flag is written lazily so read-only sessions never mark the database
@@ -187,11 +215,12 @@ final class MetaStore {
       Uint8List.fromList([1]),
       encryption,
     );
-    await _engine.put(kNamespace, _nameToKey('dirty'), wrapped);
+    await _engine.put(kDirtyStateNamespace, _nameToKey('dirty'), wrapped);
   }
 
   /// Deletes the dirty-open flag. Called by [KvStoreImpl.close].
-  Future<void> clearDirty() => _engine.delete(kNamespace, _nameToKey('dirty'));
+  Future<void> clearDirty() =>
+      _engine.delete(kDirtyStateNamespace, _nameToKey('dirty'));
 
   // ── Namespace registry ─────────────────────────────────────────────────────
 
@@ -285,7 +314,7 @@ final class MetaStore {
       Uint8List.fromList([1]),
       encryption,
     );
-    batch.put(kNamespace, _nameToKey('dirty'), wrapped);
+    batch.put(kDirtyStateNamespace, _nameToKey('dirty'), wrapped);
   }
 
   /// Removes [userNamespace] from the persisted set of known namespaces and

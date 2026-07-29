@@ -364,9 +364,15 @@ void main() {
       await store.put('users', k, Uint8List.fromList([1]));
       await store.flush();
 
-      // Exactly one SSTable produced; it must be a .sst file.
+      // Exactly one *syncable* SSTable produced. Since the 0.10.01 WI-14 fix,
+      // the first write of any session also produces a local-only
+      // `$$dirtystate` SSTable (the dirty-open flag) — orthogonal to this
+      // test's "only syncable entries" intent, so `.local.sst` files are
+      // excluded from this count.
       final files = await adapter.listFiles('$_dbDir/sst');
-      final sstFiles = files.where((f) => f.endsWith('.sst')).toList();
+      final sstFiles = files
+          .where((f) => f.endsWith('.sst') && !f.endsWith('.local.sst'))
+          .toList();
       expect(sstFiles.length, equals(1));
       expect(sstFiles.first, isNot(endsWith('.local.sst')));
 

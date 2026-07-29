@@ -407,17 +407,25 @@ void main() {
       await col.delete(key);
 
       await db.store.flush();
+
+      // The full-purge decision is `nowMs - deleteVersionPhysicalMs >
+      // retentionDays × 86_400_000`, with `nowMs` sampled (from wall-clock time)
+      // when `compactAll` runs. With `retentionDays: 0` the window is 0ms, so
+      // the chain purges as soon as the delete-version has aged *at all*. This
+      // small delay makes that deterministic: without it, whether compaction
+      // lands in the same wall-clock millisecond as the delete is a race
+      // (previously this test relied on same-ms execution and asserted
+      // non-purge — fragile, and it broke the moment surrounding work shifted
+      // the timing). The within-grace (retained) and past-grace (purged)
+      // semantics are covered deterministically via injected `nowMs` in
+      // `retention_policy_test.dart`.
+      await Future<void>.delayed(const Duration(milliseconds: 5));
       await db.store.compactAll();
 
-      // With retentionDays=0, the delete-version age (just written = ~0ms) is
-      // NOT greater than 0, so the full purge does NOT trigger for a just-written
-      // delete. This is expected: "elapsed > retentionDays" uses strict gt.
-      // A real 0-day grace would require the test to wait, which is impractical.
-      // Verify that the structure is correct regardless.
+      // retentionDays=0 + delete-version aged past 0ms ⇒ the entire $ver: chain
+      // (every put-version and the delete-version) is purged to zero residue.
       final versions = await col.getVersions(key);
-      // At least the delete-version should be present (it was just written).
-      // Full purge only triggers when the delete-version age > retentionDays.
-      expect(versions.isNotEmpty, isTrue);
+      expect(versions, isEmpty);
       await db.close();
     });
   });
