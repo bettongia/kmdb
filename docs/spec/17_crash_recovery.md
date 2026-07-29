@@ -15,6 +15,12 @@
    or compaction that crashed before its VersionEdit was appended). Orphans are
    deleted before WAL replay begins.
 
+   A compaction output can legitimately reuse an input's filename in place
+   (see §10, "the same `(level, filename)` pair may legitimately appear in
+   both `add` and `remove`"). Manifest replay must fold `remove` before `add`
+   *within a single record* so such a file resolves to present, not orphaned
+   — getting this backwards silently deletes a still-live SSTable here.
+
 5. Collect all `wal-*.log` files present and sort by sequence number. Delete any
    WAL file whose sequence number is **strictly less than** the highest
    `logNumber` recorded in the Manifest — those writes are already durable in an
@@ -66,7 +72,7 @@
 | After SSTable fsync, before VersionEdit appended | SSTable is an orphan and deleted; `logNumber` is unchanged, so the retired WAL is still ≥ `logNumber` and is replayed in full. | None. |
 | During VersionEdit append | Manifest replay stops at checksum failure. The previous VersionEdit is the current state; the new SSTable is an orphan and deleted; the WAL is replayed in full. | None. |
 | During compaction (output SSTable write) | Output SSTable not in Manifest — deleted as orphan. Input SSTables still valid and present. | None. |
-| After compaction VersionEdit, before input SSTable deletion | The compaction's `VersionEdit` is fsynced and the output's directory entry `syncDir`'d before any input is deleted, so the durable manifest already names the output. Old inputs in `remove` entries are deleted on open. | None. |
+| After compaction VersionEdit, before input SSTable deletion | The compaction's `VersionEdit` is fsynced and the output's directory entry `syncDir`'d before any input is deleted, so the durable manifest already names the output. Old inputs in `remove` entries are deleted on open — unless an input's filename was reused by the output (in-place overwrite, §10), in which case replay's `remove`-before-`add` folding correctly keeps it live and it is not deleted. | None. |
 | Process killed without clean close | Dirty-open flag in `$meta` set on next open. Reported in `OpenResult.hadUnclosedSession`. Writes since the last flush are replayed from the WAL. | None (WAL is durable). |
 | During sync upload | Local state intact. SSTable is re-uploaded on next sync cycle. | None locally. |
 | `close()` called while the vault-indexing isolate is hung or dead (D-1) | `KmdbDatabase.close()` flushes the memtable *before* shutting down the vault search isolate — see §18 "The Vault Indexing Isolate". The isolate shutdown step may itself fail or time out, but only *after* the flush has already completed. | None (flush already ran). |

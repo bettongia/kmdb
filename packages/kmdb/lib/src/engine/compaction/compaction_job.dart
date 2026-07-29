@@ -458,6 +458,14 @@ final class CompactionJob {
     // returns (review finding C2).
     await adapter.syncDir(sstDir);
 
+    // Note: `adds` may legitimately contain a filename that also appears in
+    // `inputs` (`removed`) — an output whose HLC range exactly reproduces a
+    // surviving input's own range (an in-place overwrite) reuses that
+    // input's name via `SstableInfo.flushName`. This is expected and safe:
+    // `ManifestReader._fromEdits` resolves a same-(level, filename) pair
+    // present in both lists of one edit as "added wins" (see its doc
+    // comment), matching the fact that only one physical file exists at that
+    // path after this method returns.
     final edit = VersionEdit(
       logNumber: logNumber,
       nextSeq: nextSeq,
