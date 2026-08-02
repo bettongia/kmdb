@@ -431,8 +431,10 @@ final class OpenResult {
   /// rebuild indexes for these namespaces.
   final List<String> affectedNamespaces;
 
-  /// True if the dirty-open flag in `$meta` was set, indicating an unclean
-  /// shutdown. Broader than WAL checksum failures — any crash sets this.
+  /// True if the dirty-open flag in the local-only `$$dirtystate` namespace
+  /// was set, indicating an unclean shutdown. Broader than WAL checksum
+  /// failures — any crash sets this. (Moved out of synced `$meta` by 0.10.01
+  /// WI-14 — see `MetaStore.kDirtyStateNamespace`.)
   final bool hadUnclosedSession;
 
   /// True if no `CURRENT` file was found at open time — i.e. this is a

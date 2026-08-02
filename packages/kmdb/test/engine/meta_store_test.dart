@@ -210,6 +210,38 @@ void main() {
     });
   });
 
+  // ── Dirty-open flag namespace isolation (WI-14 regression) ─────────────────
+
+  group('MetaStore — dirty flag lives in \$\$dirtystate, not \$meta', () {
+    // The 0.10.01 WI-14 fix moved the dirty-open flag off synced `$meta` into
+    // the local-only `$$dirtystate` namespace (see MetaStore.kDirtyStateNamespace's
+    // doc comment for the LWW false-negative hazard this closes). This is the
+    // direct analogue of WI-12's SC-5 device_id absence assertion: a
+    // **complementary** check that the leak is stopped, not a substitute for
+    // the cross-device regression below (which exercises the actual erasure
+    // mechanism).
+    test('dirty sentinel is present in \$\$dirtystate and absent from \$meta '
+        'after the first write', () async {
+      final adapter = MemoryStorageAdapter();
+      final (store, _) = await _open(adapter);
+      await store.put('tasks', _key(1), _bytes('v'));
+
+      final inDirtyState = await store.get(
+        MetaStore.kDirtyStateNamespace,
+        MetaStore.symbolicKey('dirty'),
+      );
+      expect(inDirtyState, isNotNull);
+
+      final inMeta = await store.get(
+        MetaStore.kNamespace,
+        MetaStore.symbolicKey('dirty'),
+      );
+      expect(inMeta, isNull);
+
+      await store.close();
+    });
+  });
+
   // ── Device ID (SC-5 regression) ─────────────────────────────────────────────
 
   group('MetaStore — device ID', () {

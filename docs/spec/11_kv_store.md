@@ -159,9 +159,10 @@ final class OpenResult {
   /// whether indexes for these namespaces are stale and trigger a rebuild.
   final List<String> affectedNamespaces;
 
-  /// True if the dirty-open flag in $meta was set, indicating the process
-  /// was killed without a clean close. Broader than WAL checksum failures —
-  /// any unclean shutdown sets this flag.
+  /// True if the dirty-open flag in the local-only `$$dirtystate` namespace
+  /// was set, indicating the process was killed without a clean close.
+  /// Broader than WAL checksum failures — any unclean shutdown sets this
+  /// flag.
   final bool hadUnclosedSession;
 }
 ```
@@ -173,7 +174,8 @@ User code cannot write to system namespaces directly.
 
 | Namespace              | Owner              | Purpose |
 | :--------------------- | :----------------- | :------ |
-| `$meta`                | KvStore / QueryLayer | Per-namespace generation counters (`gen:{ns}`), index definitions, last sync timestamps, dirty-open flag. Device ID is **not** stored here — see the attribute registry's [`device_id` entry](03a_attribute_registry.md#device_id). |
+| `$meta`                | KvStore / QueryLayer | Per-namespace generation counters (`gen:{ns}`), index definitions, last sync timestamps. Device ID is **not** stored here — see the attribute registry's [`device_id` entry](03a_attribute_registry.md#device_id). The dirty-open flag is **not** stored here either — see `$$dirtystate` below. |
+| `$$dirtystate`         | KvStore            | Dirty-open flag (`dirty`). Device-local — written on the first user write after open, cleared on clean close. Local-only — written to `.local.sst`, never uploaded (see the attribute registry's [`dirty` row](03a_attribute_registry.md) for why it moved out of `$meta`, WI-14). |
 | `$$index:{ns}:{path}`  | Query Layer        | Secondary index entries for namespace `{ns}` on dot-path `{path}`. Keys encode the indexed value + document key. Local-only — written to `.local.sst`, never uploaded. |
 | `$cache:{ns}:{query}`  | Cache Layer        | Materialised scan results. Entries include the generation counter at compute time for staleness detection. |
 | `$vault:{sha256}`      | Vault subsystem    | Reference count for the vault object identified by `{sha256}`. Incremented/decremented in the same `WriteBatch` as the document write. Zero-valued entries are GC candidates. See §24. |

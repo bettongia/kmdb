@@ -46,7 +46,9 @@
    immediately is a possible future optimisation; it is intentionally omitted so
    that read-only opens perform no writes.)
 
-8. Set the dirty-open flag in `$meta`. This is written as part of the first
+8. Set the dirty-open flag in the local-only `$$dirtystate` namespace (moved
+   out of synced `$meta` by WI-14 — see the attribute registry's [`dirty`
+   row](03a_attribute_registry.md)). This is written as part of the first
    `WriteBatch` on this session so that a crash before any write leaves the
    flag unset.
 
@@ -73,7 +75,7 @@
 | During VersionEdit append | Manifest replay stops at checksum failure. The previous VersionEdit is the current state; the new SSTable is an orphan and deleted; the WAL is replayed in full. | None. |
 | During compaction (output SSTable write) | Output SSTable not in Manifest — deleted as orphan. Input SSTables still valid and present. | None. |
 | After compaction VersionEdit, before input SSTable deletion | The compaction's `VersionEdit` is fsynced and the output's directory entry `syncDir`'d before any input is deleted, so the durable manifest already names the output. Old inputs in `remove` entries are deleted on open — unless an input's filename was reused by the output (in-place overwrite, §10), in which case replay's `remove`-before-`add` folding correctly keeps it live and it is not deleted. | None. |
-| Process killed without clean close | Dirty-open flag in `$meta` set on next open. Reported in `OpenResult.hadUnclosedSession`. Writes since the last flush are replayed from the WAL. | None (WAL is durable). |
+| Process killed without clean close | Dirty-open flag in the local-only `$$dirtystate` namespace set on next open. Reported in `OpenResult.hadUnclosedSession`. Writes since the last flush are replayed from the WAL. | None (WAL is durable). |
 | During sync upload | Local state intact. SSTable is re-uploaded on next sync cycle. | None locally. |
 | `close()` called while the vault-indexing isolate is hung or dead (D-1) | `KmdbDatabase.close()` flushes the memtable *before* shutting down the vault search isolate — see §18 "The Vault Indexing Isolate". The isolate shutdown step may itself fail or time out, but only *after* the flush has already completed. | None (flush already ran). |
 

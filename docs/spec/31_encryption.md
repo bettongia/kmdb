@@ -576,10 +576,12 @@ sync:
   unencrypted in the local, never-synced `DEVICE_ID` file instead, so this
   paragraph's "genuine cloud-provider protection" claim does not apply to it.)
   Because `$meta` rides synced SSTables, this is genuine cloud-provider
-  protection. (The dirty-open flag is also currently in `$meta`, encrypted the
-  same way — but 0.10.01 WI-11's audit found it is likely mis-placed there for
-  a different, non-confidentiality reason; see WI-14 on
-  `docs/roadmap/0_10_01.md`.)
+  protection. (The dirty-open flag is **not** on this list either — 0.10.01
+  WI-14 moved it to the local-only `$$dirtystate` namespace, still
+  `EncryptionEnvelope`-wrapped when a provider is configured, but now for
+  local-disk-theft protection rather than cloud-provider protection, the same
+  reclassification WI-11 applied to the tombstone-GC floor and index/FTS/Vec
+  state above.)
 - **Vault blob bytes** — the `VaultStore` encrypts blob payloads with the DEK
   before writing them to disk and to the cloud (see _Vault Encryption_).
 - **Vault `extract/` filesystem artifacts (WI-10, gap 6 below)** — `text.txt`,
@@ -778,6 +780,14 @@ identity, timing) but **not document content**.
 > unencrypted (plaintext), since the file itself never leaves the local
 > device. See the attribute registry's
 > [`device_id` entry](03a_attribute_registry.md#device_id).
+>
+> **Update (0.10.01 WI-14).** The dirty-open flag has since moved out of
+> `$meta` into the local-only `$$dirtystate` namespace, for the same
+> device-local-fact-in-a-synced-namespace reason as the WI-11 move above (a
+> peer's clean-close `clearDirty` tombstone could otherwise win LWW over this
+> device's own crash marker and erase it before it is ever read — see the
+> attribute registry's [`dirty` row](03a_attribute_registry.md)).
+> `EncryptionEnvelope` wrapping was preserved across the move.
 
 **Resolved** by the Encryption confidentiality reconciliation plan's Phase 2
 (`docs/roadmap/completed/0_08.md`, Gap 3): every general `$meta` accessor now routes

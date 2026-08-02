@@ -134,13 +134,31 @@ void main() {
         // The frame should carry the document write and at least one meta write
         // (dirty flag), and the gen-counter and namespace-registry puts.
         expect(decoded!.records.length, greaterThanOrEqualTo(2));
-        // At least one record must be in $meta — confirming the fold landed.
+        // At least one record must be in $meta (gen counter / namespace
+        // registry) — confirming the fold landed.
         final hasMeta = decoded.records.any((r) => r.namespace == r'$meta');
         expect(
           hasMeta,
           isTrue,
+          reason: 'meta writes (gen/namespace) must land in the same frame',
+        );
+        // The dirty-open flag itself now lives in the local-only
+        // `$$dirtystate` namespace (0.10.01 WI-14), not `$meta` — so `hasMeta`
+        // above no longer guards that [MetaStore.appendDirtyFlag] was folded
+        // into this frame (it would still be `true` if that write were
+        // dropped entirely, since gen/namespace writes also satisfy it).
+        // Assert the dirty-flag write specifically, by namespace, to keep
+        // guarding the "first-write crash leaves the dirty flag set"
+        // invariant after the move (reviewer finding (ii)).
+        final hasDirtyState = decoded.records.any(
+          (r) => r.namespace == r'$$dirtystate',
+        );
+        expect(
+          hasDirtyState,
+          isTrue,
           reason:
-              'meta writes (dirty/gen/namespace) must land in the same frame',
+              r'the dirty-open flag write ($$dirtystate) must land in the '
+              'same frame as the document write',
         );
 
         await store.close();

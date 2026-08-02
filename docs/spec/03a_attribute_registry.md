@@ -46,7 +46,7 @@ which must be readable before the DEK is available and so are stored raw.
 | `vec:{ns}:{field}` | Vec index state | Device-local | **`$$vecstate`** (local-only) | Yes | WI-11 |
 | `gc:tombstoneFloor` | Watermark (HLC) | Device-local | **`$$gcstate`** (local-only) | Yes | **[full entry](#gctombstonefloor)** |
 | `gen:{ns}` | Generation counter | **Undecided** `⚠` | `$meta` — `⚠` classification pending WI-13 | Yes | WI-13 |
-| `dirty` | Dirty-open flag | Device-local `⚠` (currently syncs) | `$meta` — `⚠` WI-14 moves it to `$$` | Yes | WI-14 |
+| `dirty` | Dirty-open flag | Device-local | **`$$dirtystate`** (local-only) | Yes | WI-14 |
 | `enc:blob` | Key material (wrapped DEK) | Replicated | `$meta` | **No — raw CBOR** (one of two bootstrap exemptions; must be read before the DEK exists) | summary |
 | `schema:{collection}` + `schema:__registry__` | Schema contract | Replicated | `$meta` | Yes | summary |
 | `version:config:{collection}` | Retention policy | Replicated | `$meta` | Yes | summary |
@@ -55,8 +55,9 @@ which must be readable before the DEK is available and so are stored raw.
 
 > The four device-local index/floor rows were moved out of `$meta` by
 > [WI-11](../roadmap/0_10_01.md) (the SC-10/SC-15 fix); `device_id` was fully
-> retired from `$meta` by WI-12 (this entry). `gen:{ns}` (WI-13) and `dirty`
-> (WI-14) are the remaining mid-change entries.
+> retired from `$meta` by WI-12 (this entry); the dirty-open flag was moved to
+> `$$dirtystate` by WI-14. `gen:{ns}` (WI-13) is the remaining mid-change
+> entry.
 > The registry generalises beyond `$meta` — the HLC, the DEK/`EncryptionBlob`,
 > and the SSTable filename fields are each families that would get their own
 > register in the same shape; this seed scopes to `$meta`, the family most
