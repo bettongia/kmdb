@@ -37,6 +37,12 @@ final db = await KmdbDatabase.open(
   },
   // ── Vault (§24) ──────────────────────────────────────────────────────────
   vaultStore: vaultStore,       // null → vault features disabled
+  vaultSearch: vaultSearch,     // VaultSearchConfig — vault text search (§32); null → off
+  // ── Versioning (§26) / platform ──────────────────────────────────────────
+  versionConfigs: {             // per-collection version retention (§26)
+    'notes': VersionConfig(maxVersions: 10),
+  },
+  wasmUrl: wasmUrl,             // web only — Zstd WASM module URL (defaults to the bundled asset)
   // ── Encryption (§31) ─────────────────────────────────────────────────────
   encryptionConfig: EncryptionConfig(passphrase: 'my-passphrase'), // null → plaintext
   // ── Collection schemas (§25) ─────────────────────────────────────────────
@@ -254,8 +260,10 @@ abstract interface class WriteAugmentor {
 ### Layer 3 — Post-write notifications
 
 `KvStore.writeEvents` fires automatically after `WriteBatch` is committed.
-`CacheLayer` subscribes to evict stale cache entries; `watch()` subscribers
-re-execute their queries. No additional application code is required.
+`CacheLayer` re-exposes it as `CacheLayer.writeEvents` (a pass-through) and
+subscribes to evict stale cache entries; `watch()` subscribes to
+`CacheLayer.writeEvents` (not `KvStore.writeEvents` directly) and re-executes
+its query. No additional application code is required.
 
 ### Delete path
 
@@ -401,11 +409,11 @@ KmdbQuery<T> keyPrefix(String prefix);       // narrows the underlying LSM scan
 
 ```dart
 Future<List<T>>              get();           // eager; LSM snapshot closed immediately
-Stream<T>                    stream();        // lazy; holds LSM snapshot for stream lifetime
+Stream<T>                    stream();        // eager; identical to get(), emitted as a Stream (no snapshot held)
 Stream<List<T>>              watch();         // reactive; re-runs on namespace writes (debounced 50ms)
-Future<T?>                   first();
-Future<int>                  count();         // avoids decoding documents
-Future<bool>                 any();
+Future<T?>                   first();         // materialises matches, returns the first (no early stop)
+Future<int>                  count();         // scans; decodes documents when any filter/orderBy/limit/offset is set
+Future<bool>                 any();           // materialises matches, returns whether any exist
 Future<(List<T>, QueryPlan)> explainedGet();  // get() plus execution metadata
 ```
 
@@ -449,9 +457,12 @@ ref-counted SSTable retention can be introduced if larger scale demands it.
 Prefer `watch()` for reactive UI lists — see §14 for the full debounce and
 invalidation semantics.
 
-**`orderBy('_id')`** maps directly to `KvStore.scan(descending:)` and avoids
-an in-memory sort — the only `orderBy` with this optimisation. All other fields
-require a full in-memory sort after scan.
+**`orderBy`** always sorts in memory after the scan — including `orderBy('_id')`
+(`plan.sorted == true` in every case). There is no scan-order optimisation:
+`KvStore.scan` takes only `startKey`/`endKey`, with **no `descending`
+parameter**, so results are consumed in ascending key order and any requested
+ordering (ascending or descending, `_id` or any other field) is applied by an
+in-memory sort.
 
 ## Field Path Syntax
 
@@ -505,8 +516,28 @@ The following RFC 9535 features are intentionally not yet implemented:
 ## Filter DSL
 
 Filters are composed via `and` / `or` / `not` and use dot-notation field paths.
-All filters are evaluated in memory after the LSM scan (or after an index
-lookup narrows the candidate set — see §16).
+All filters are evaluated in memory after the LSM scan. A predicate is dispatched
+to a secondary index **only** when the index is a *complete* answer for it — an
+**exact, case-sensitive** equality on an indexed field (an exact-token lookup);
+any remaining filters in the query are then applied in memory to those
+candidates (see §16). A case-insensitive equality (`equals(x,
+caseSensitive: false)`) or any non-equality predicate is **never** routed to an
+index — doing so would silently return zero rows, the SC-15 defect closed in
+0.10.01 (WI-11): the `equalityPredicate` contract now returns non-null only for
+the case-sensitive exact match an index can actually satisfy.
+
+**Filter operator notes:**
+
+- `equals`, `startsWith`, `endsWith`, and `contains` each take an optional
+  `caseSensitive` parameter (default `true`); pass `false` for case-insensitive
+  string matching.
+- `equals` against a `List` or `Map` operand uses Dart `==` (reference
+  equality), so it never matches a decoded collection value — compare scalar
+  fields, or use the array operators (`containsAll`/`containsAny`) for element
+  membership.
+- A query may assert its indexes are current with `requireFreshIndex()`, which
+  throws `StaleIndexException` if a relevant index is not yet built/current —
+  the mitigation surface for the SC-10 read-mostly-device index-staleness case.
 
 ```dart
 // Equality & comparison
