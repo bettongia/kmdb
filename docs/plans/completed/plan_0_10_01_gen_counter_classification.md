@@ -2,7 +2,7 @@
 
 **Status**: **Complete**
 
-**PR link**: _(pending)_
+**PR link**: https://github.com/bettongia/kmdb/pull/66
 
 > **Provenance.** WI-13 of the [0.10.01 hardening track](../roadmap/0_10_01.md) —
 > the **last** device-local-vs-replicated `$meta` entry (WI-11 moved index/FTS/Vec
