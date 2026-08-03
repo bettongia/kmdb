@@ -270,33 +270,35 @@ next open.
 
 ## Vault Encryption
 
-When encryption is active, the `VaultStore` encrypts blob bytes before writing
-them to disk. The SHA-256 content address and CRC32C checksum are always
-computed over the **plaintext** bytes, preserving the deduplication guarantee:
+`VaultStore` wraps every blob through `EncryptionEnvelope` before writing it to
+disk. The SHA-256 content address and CRC32C checksum are always computed over
+the **plaintext** bytes, preserving the deduplication guarantee. The stored blob
+is **self-describing** via a leading `EncryptionFlag` byte — the format is owned
+by §24 (see §24 _Encryption_), reproduced here for reference:
 
 ```
-sha256 = SHA-256(plaintext)   // used as the content address
-stored = nonce(12B) || AES-GCM-256(key=dek, plaintext=blob) || tag(16B)
+sha256 = SHA-256(plaintext)   // content address, always over plaintext
+stored = EncryptionFlag.aesGcm(0x01) || nonce(12B) || AES-256-GCM(dek, plaintext) || tag(16B)   [encrypted]
+stored = EncryptionFlag.none(0x00)  || plaintext                                                 [unencrypted]
 ```
 
-The `manifest.json` for each blob gains an `encrypted: boolean` field:
+The wrap is **unconditional** — a blob written on an unencrypted database still
+carries the one-byte `EncryptionFlag.none` prefix. Whether a blob is ciphertext
+is therefore determined by its own leading flag byte, not by any external
+record.
 
-```json
-{
-  "schemaVersion": "1",
-  "sha256": "...",
-  "size": 1024,
-  "crc32c": "a1b2c3d4",
-  "mediaType": "image/jpeg",
-  "originalName": "photo.jpg",
-  "createdAt": "...",
-  "encrypted": true
-}
-```
-
-When reading a blob, `VaultStore.getBytes()` checks this flag. If
-`encrypted: true` but no `EncryptionProvider` is available, a `StateError` is
-thrown.
+The `manifest.json` for each blob carries an `encrypted: true` field when
+encryption is active (absent otherwise), but it is **descriptive only**.
+`VaultStore.getBytes()` decides whether to decrypt by reading the
+`EncryptionFlag` byte **on the blob itself** via `EncryptionEnvelope.unwrap` — it
+never consults `manifest.json`'s `encrypted` field. This closes S-4 (2026-07-18
+release-readiness review): for a blob synced from a peer the manifest flag is
+attacker-controlled, so gating decryption on it let a substituted plaintext blob
+be served with GCM authentication silently disabled. After unwrapping,
+`getBytes()` verifies the plaintext against its claimed content address and
+throws `VaultContentMismatchException` on a mismatch. If the blob is
+`EncryptionFlag.aesGcm`-flagged but no `EncryptionProvider` is configured,
+`EncryptionEnvelope.unwrap` throws a `StateError`.
 
 KVLT archive export (`VaultStore.exportKvlt`) decrypts blobs to plaintext before
 packing them. KVLT import re-encrypts blobs if the destination database has

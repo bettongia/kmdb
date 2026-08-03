@@ -77,27 +77,43 @@ Schema validation applies to every document write path:
 
 ## Supported Keywords
 
-The following JSON Schema keywords are recognised:
+Schema parsing and validation are owned by the **`betto_schema`** package
+(`SchemaParser` → `SchemaRule.validate`); `SchemaManager` delegates to it. The
+following JSON Schema keywords are recognised and enforced:
 
-| Keyword                | Types        | Notes                                      |
-| :--------------------- | :----------- | :----------------------------------------- |
-| `type`                 | any          | `string`, `number`, `integer`, `boolean`, `object`, `array`, `null` |
-| `required`             | object       | List of required property names            |
-| `properties`           | object       | Per-property sub-schemas                   |
-| `additionalProperties` | object       | `false` rejects unknown keys; defaults to `true` |
-| `enum`                 | any          | Value must equal one of the listed items   |
-| `minimum`              | number/integer | Inclusive lower bound                    |
-| `maximum`              | number/integer | Inclusive upper bound                    |
-| `minLength`            | string       | Minimum character count (Unicode-aware)    |
-| `maxLength`            | string       | Maximum character count (Unicode-aware)    |
-| `pattern`              | string       | ECMAScript regular expression              |
-| `format`               | string       | `email`, `uri`, `date`, `date-time`, `time`, `uuid` (unknown formats silently ignored) |
-| `minItems`             | array        | Minimum element count                      |
-| `maxItems`             | array        | Maximum element count                      |
-| `items`                | array        | Sub-schema applied to every element        |
+| Keyword                | Types          | Notes                                      |
+| :--------------------- | :------------- | :----------------------------------------- |
+| `type`                 | any            | `string`, `number`, `integer`, `boolean`, `object`, `array`, `null`; also accepts an **array of types** (valid if any listed type matches) |
+| `required`             | object         | List of required property names            |
+| `properties`           | object         | Per-property sub-schemas                   |
+| `patternProperties`    | object         | Map of ECMAScript regex → sub-schema (unanchored match) |
+| `additionalProperties` | object         | `false` rejects unknown keys; a sub-schema validates extras; defaults to `true` |
+| `minProperties`        | object         | Minimum property count                     |
+| `maxProperties`        | object         | Maximum property count                     |
+| `dependentRequired`    | object         | Map of trigger property → required dependent property names |
+| `enum`                 | any            | Value must equal one of the listed items   |
+| `const`                | any            | Value must equal the given constant (including `null`) |
+| `minimum`              | number/integer | Inclusive lower bound                      |
+| `maximum`              | number/integer | Inclusive upper bound                      |
+| `exclusiveMinimum`     | number/integer | Exclusive lower bound                      |
+| `exclusiveMaximum`     | number/integer | Exclusive upper bound                      |
+| `multipleOf`           | number/integer | Value must be an integer multiple of the divisor |
+| `minLength`            | string         | Minimum character count (Unicode-aware)    |
+| `maxLength`            | string         | Maximum character count (Unicode-aware)    |
+| `pattern`              | string         | ECMAScript regular expression              |
+| `format`               | string         | `email`, `uri`, `date`, `date-time`, `time`, `uuid` (unknown formats silently ignored) |
+| `minItems`             | array          | Minimum element count                      |
+| `maxItems`             | array          | Maximum element count                      |
+| `items`                | array          | Sub-schema applied to every element (or those beyond `prefixItems`); `false` rejects such elements |
+| `prefixItems`          | array          | Positional sub-schemas (2020-12)           |
+| `uniqueItems`          | array          | When `true`, all elements must be distinct |
+| `contains`             | array          | At least one element must match the sub-schema |
+| `minContains`          | array          | Minimum number of `contains` matches       |
+| `maxContains`          | array          | Maximum number of `contains` matches       |
 
-Unknown keywords are silently ignored. This allows schemas written by a newer
-KMDB version to be partially interpreted by an older one.
+Keywords **not** in this recognised set are silently ignored by the parser. This
+allows schemas written by a newer KMDB version (with keywords this build does not
+yet understand) to be partially interpreted by an older one.
 
 ## Persistence and Sync
 

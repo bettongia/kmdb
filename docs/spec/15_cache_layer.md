@@ -19,14 +19,20 @@ to `KvStore` directly.
 The caching strategy differs by platform because mobile and web processes are
 killed silently — an in-memory cache cannot be assumed to be warm on next open.
 
+The **session cache** column is implemented today. The **persistent cache**
+column describes the *intended* strategy for the materialised-view (`$$cache`)
+tier, which is **not yet implemented** (see _Materialised View Cache_ below) —
+"Required (planned)" is the design target, not current behaviour.
+
 | Platform              | Session cache size | Persistent cache | Notes |
 | :-------------------- | :----------------- | :--------------- | :---- |
 | Desktop (macOS, Windows, Linux) | 2,000 objects | Optional — process is long-lived | Cache is built once on open and stays warm. |
-| Mobile (iOS, Android) | 256 objects | Required | Process silently killed frequently. Must rebuild from `$$cache` on cold open. |
-| Web (dart2js / WASM)  | 256 objects | Required | Every page reload is a cold start. No persistent process memory. |
+| Mobile (iOS, Android) | 256 objects | Required (planned) | Process silently killed frequently. Intended to rebuild from `$$cache` on cold open. |
+| Web (dart2js / WASM)  | 256 objects | Required (planned) | Every page reload is a cold start. No persistent process memory. |
 
-The `CacheTier` is auto-detected from the platform at `KvStore.open()` time and
-can be overridden in `KvStoreConfig`.
+The `CacheTier` (an enum in the cache layer, not a `KvStoreConfig` field) is
+auto-detected from the platform via `detectCacheTier()` at open time. The
+`CacheLayer` constructor accepts optional `tier` and `maxObjects` overrides.
 
 ## Session Object Cache
 
@@ -37,8 +43,9 @@ write produces a higher sequence number, and any cached entry with the old
 sequence is never served again (it simply ages out of the LRU).
 
 On desktop the cache holds 2,000 objects. On mobile and web it holds 256 —
-enough for the currently visible UI and recently viewed items. The size is
-configurable via `KvStoreConfig.sessionCacheMaxObjects`.
+enough for the currently visible UI and recently viewed items. These defaults
+come from `CacheTier.maxSessionObjects`; the size can be overridden via the
+`CacheLayer` constructor's `maxObjects` parameter.
 
 ## Namespace Generation Counters
 

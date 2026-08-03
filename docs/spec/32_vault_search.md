@@ -349,8 +349,10 @@ different models without correctness issues because:
 
 If a device has no embedding model configured, vault search operates in
 **lexical-only mode**: the `$$vault:vec:idx` entries are never written, and
-`searchVault()` accepts only `SearchMode.lexical`. The `modelVersion` field in
-the extraction state is stored as `""` (empty string) in lexical-only mode.
+`searchVault()` runs lexical regardless of the requested `mode` — `auto` and
+`semantic` both fall back to lexical (an explicit `semantic` request adds
+`vault:semantic` to `SearchMetadata.skipped`). The `modelVersion` field in the
+extraction state is stored as `""` (empty string) in lexical-only mode.
 
 ## GC Integration
 
@@ -405,26 +407,34 @@ Future<int> reindexVault();  // returns count of blobs queued
 ### `KmdbCollection<T>.searchVault`
 
 ```dart
-Future<List<VaultSearchResult<T>>> searchVault(
+Future<VaultSearchResult<T>> searchVault(
   String query, {
-  SearchMode mode = SearchMode.lexical,  // lexical | semantic | hybrid
+  SearchMode mode = SearchMode.auto,  // auto | lexical | semantic
   int limit = 10,
   int offset = 0,
 })
 ```
 
-Returns a ranked list of `VaultSearchResult<T>` objects. Each result carries:
+`SearchMode` has no separate `hybrid` value — hybrid (RRF) activates
+automatically under `auto` when an embedding model is available; otherwise
+`auto` runs lexical-only.
 
-- `document`: the matched document (of type `T`).
-- `hits`: a ranked list of `VaultSearchHit` — one per matching chunk.
-  - `sha256`: the blob's content address.
-  - `fieldPath`: the document field that holds the vault URI.
-  - `chunkIndex`: which chunk within the blob matched.
-  - `context`: a `VaultChunkContext` with `snippet`, `wordOffset`, `charOffset`,
-    and the computed `score`.
+Returns a single `VaultSearchResult<T>` carrying:
 
-When the embedding model is absent, `SearchMode.semantic` and
-`SearchMode.hybrid` raise a `StateError`.
+- `metadata`: a `SearchMetadata` (`query`, `searched`, `skipped`, `total`).
+- `hits`: a ranked `List<VaultSearchHit<T>>`, one per matching chunk. Each
+  `VaultSearchHit` carries:
+  - `rank`: 1-based position in the result list.
+  - `score`: overall relevance (BM25, cosine, or RRF per the active mode).
+  - `fieldScores`: per-component scores keyed `"vault:bm25"` / `"vault:cosine"`.
+  - `id`: the owning document key (UUIDv7 hex string).
+  - `document`: the fully decoded owning document (of type `T`).
+  - `chunkContext`: a `VaultChunkContext` with `ref`, `chunkIndex`,
+    `totalChunks`, `snippet`, and `fieldPath`.
+
+When no embedding model is configured, `SearchMode.semantic` does **not** throw —
+it falls back to lexical and reports `vault:semantic` in
+`SearchMetadata.skipped`.
 
 ### `VaultIndexingStatus`
 
