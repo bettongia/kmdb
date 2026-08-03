@@ -99,18 +99,27 @@ ArgumentError: Namespace exceeds 255 UTF-8 bytes (got 256): <name>
 
 ## Device Identity
 
-Each device installation generates a stable UUID on first launch. This ID is
-used in SSTable filenames, .hwm filenames, and as the HLC tiebreaker for
-conflict resolution. It must be persisted outside the database:
+Each device installation generates a stable 8-character hex identifier (a
+truncated UUIDv4, `DeviceId.generate`) on first launch. This ID is used in
+SSTable filenames, .hwm filenames, and as the HLC tiebreaker for conflict
+resolution.
 
-- iOS/macOS: Keychain (survives app reinstall).
+It is persisted in a plaintext `DEVICE_ID` file in the database directory root
+(`{dbDir}/DEVICE_ID`), written through the `StorageAdapter` — a `dart:io` file
+on native platforms and an OPFS file on web. Two properties follow from *where*
+it lives:
 
-- Android: SharedPreferences with backup rules (or Keystore for higher
-  security).
+- Because the file sits **outside** the synced `sst/` directory, `SyncEngine`
+  never uploads it — the identity stays device-local.
+- Because it sits **beside** the database rather than inside its key-value
+  space, it is readable during bootstrap before the engine (and any DEK) exist.
 
-- Web: localStorage (per-origin, survives page reload).
-
-- Desktop: Platform-specific app data directory.
+It is **not** held in platform secure storage (Keychain / SharedPreferences /
+localStorage), and it is deliberately **not** stored in `$meta`: `$meta`
+replicates, so a copied database could otherwise resolve its identity to a
+peer's (the SC-5 defect, closed in 0.10.01 WI-12). See the attribute registry's
+[`device_id` entry](03a_attribute_registry.md#device_id) for the authoritative
+description.
 
 ### Reassigning a Device Identity
 

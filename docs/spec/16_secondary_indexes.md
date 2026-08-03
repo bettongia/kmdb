@@ -234,10 +234,10 @@ Index state and index entries are **device-local** and are **never synced**:
   `index:{namespace}:{path}`) uses the `$$` (double-dollar) local-only prefix,
   so it is written to a `.local.sst` file that `SyncEngine.push` never uploads.
   Index state moved here from the synced `$meta` namespace in 0.10.01
-  (WI-11/SC-10) — see §12, *The `$meta` vs `$$` classification rule*.
-- `$meta` is a system namespace prefixed with `$`. The sync engine filters out
-  all `$`-prefixed namespaces during SSTable upload, so index state never
-  leaves the device.
+  (WI-11/SC-10) — see §12, *The `$meta` vs `$$` classification rule*. Only the
+  `$$` (double-dollar) prefix is local-only; the single-`$` `$meta` namespace
+  **does** sync (that is precisely why index state had to move out of it),
+  so "device-local" here comes from the `$$` prefix, never from `$meta`.
 - `$$index:*` namespaces (where index entries are stored) use the `$$`
   (double-dollar) local-only prefix. At flush time these entries are written to
   a `.local.sst` file that `SyncEngine.push` never uploads (see §8, §6, §12).

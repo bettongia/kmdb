@@ -439,6 +439,7 @@ the full index selection algorithm and the semantics of each `QueryPlan` field.
 final (results, plan) = await collection.explainedGet(
   collection.where(Field('city').equals('London')),
 );
+```
 
 **`stream()` implementation:** `stream()` is eagerly evaluated — identical to
 `get()` internally, but the result is emitted as a `Stream<T>` rather than

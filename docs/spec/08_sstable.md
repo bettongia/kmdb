@@ -149,10 +149,13 @@ f9e8d7c6-017F8B0C00000000-017F8B0C3FFF0000.sst         ← regular flush (syncab
 a3f2b1c9-7-017F8A090000-017F8A0AFFFF.sst               ← consolidation, epoch 7
 ```
 
-The device ID is a stable per-installation UUID generated on first launch and
-persisted in platform-specific secure storage (Keychain on iOS,
-SharedPreferences on Android, localStorage on web). It must not be stored inside
-the database itself to avoid circular dependency during bootstrap.
+The device ID is a stable per-installation identifier (an 8-character hex
+truncated UUIDv4) generated on first launch and persisted in a plaintext
+`DEVICE_ID` file in the database directory root (a `dart:io` file on native, an
+OPFS file on web) — **not** in platform secure storage. It is kept beside the
+database rather than inside its key-value space (and never in the synced
+`$meta`) to avoid a circular dependency during bootstrap. See §04 and the
+attribute registry's [`device_id` entry](03a_attribute_registry.md#device_id).
 
 ### Stale consolidation output detection
 
