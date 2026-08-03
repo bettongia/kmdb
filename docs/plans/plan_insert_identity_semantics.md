@@ -1,6 +1,7 @@
-# `insert()` identity semantics — always-mint vs honour-key (SC-16)
+# Key-presence-driven upsert + versioning (SC-16)
 
-**Status**: **Open**
+**Status**: **Open** (decision recorded — key-presence-driven upsert; Q1–Q4 in
+the Decision section remain for investigation before `Investigated`)
 
 **PR link**: _(none yet)_
 
@@ -54,62 +55,72 @@ There is also a **pure documentation drift** riding along (SC-16's doc half):
 `Future<T>` (returns the stored document with its assigned key). That correction
 belongs with whichever behaviour this plan settles on, so §13 is edited once.
 
-## The decision this plan must make
+## Decision (maintainer, 2026-08-03)
 
-Is `insert`'s contract **(A) "always create new"** or **(B) "create at the
-value's identity, reject a duplicate"**?
+**The desired behaviour is upsert, driven by key presence: if the write's value
+carries a key it is an *update*; if it carries no key it is an *insert* (mint a
+fresh UUIDv7).** And **versioning must be respected** — every write, insert or
+update, extends the *logical* document's `$ver:` history correctly; a keyed value
+must never start a fresh version chain under a new key (which is exactly the
+damage the SC-16 silent-duplicate does today).
 
-- **(A) Always-mint (document the current behaviour, remove the dead exception).**
-  `insert` is defined as "add a brand-new document, assigning a fresh key";
-  calling it twice with the same value legitimately yields two documents. If this
-  is the intent, then `DocumentAlreadyExistsException` and its unreachable check
-  are **dead code** to remove (CLAUDE.md: no unreachable code), and §13 must state
-  plainly that `insert` ignores any `_id`/`keyOf` on the input and never dedupes.
-  `replace()`/`put()` remain the identity-carrying writes. The "silent duplicate"
-  is then not a bug but a documentation failure.
+This reframes SC-16 from "fix `insert`" to "make the write API key-presence-
+driven." The current surface (`kmdb_collection.dart`) already has most of the
+pieces — the work is to unify them cleanly:
 
-- **(B) Honour the key when present (make the exception reachable, kill the
-  silent duplicate).** When `value` already carries a key (`keyOf` succeeds),
-  `insert` uses it, checks existence, and throws `DocumentAlreadyExistsException`
-  if present; only when no key is present does it mint one. This makes
-  `rawCollection.insert(previouslyReadDoc)` throw instead of duplicate, matching
-  the documented exception and the "identical pipeline layers" claim. Cost: a
-  behavioural change to `insert`, new tests, and a decision on the typed-codec
-  path (a typed `KmdbCodec.keyOf` may always return a key — does typed `insert`
-  then also honour it, changing today's always-mint behaviour for typed
-  collections too?).
+| method | today | role under the decision |
+| :--- | :--- | :--- |
+| `put(value)` (215) | upsert, but **requires** `keyOf(value)` to yield a key; passes the existing doc as `oldDoc` so versioning appends | the natural home for the unified upsert — extend it to **mint a fresh key when the value carries none**, so key-present → update, key-absent → insert |
+| `insert(value)` (176) | always mints, ignores `keyOf` → silent duplicate on a keyed value; `DocumentAlreadyExistsException` unreachable | resolve: either remove it (subsumed by the keyless `put` path), or keep it strictly as "always create new" but make it **reject a value that already carries a key** so it can never silently duplicate |
+| `replace(value)` (197) | update-only, throws `DocumentNotFoundException` if absent | keep as the strict "update, error if missing" write |
 
-**Investigation must establish the intended contract** before choosing — check:
-`insert`'s original design intent (§13, `plan`s), how `replace`/`put`/`upsert`
-divide responsibility, whether any caller relies on always-mint, what the typed
-vs raw `keyOf` contract is (does typed `keyOf` throw when `_id` absent, like
-`RawDocumentCodec.keyOf` does?), and whether `DocumentAlreadyExistsException` has
-any other (reachable) caller. The recommendation is not pre-judged here — that is
-the reviewer/investigation's job.
+### The genuine design questions (for the reviewer / investigation)
+
+- **Q1 — which method carries the unified upsert, and what happens to `insert`?**
+  Recommended shape: `put` becomes the canonical key-presence-driven upsert
+  (mint when keyless); `insert` is either removed or narrowed to strict-create
+  that rejects a keyed value; `replace` unchanged. Confirm against how callers
+  and the CLI use these today.
+- **Q2 — `keyOf` on a keyless value.** `RawDocumentCodec.keyOf` *throws* when
+  `_id` is absent ([raw_document_codec.dart:44-53](../../packages/kmdb/lib/src/query/raw_document_codec.dart#L44-L53));
+  a typed `KmdbCodec.keyOf` may always return a key. The upsert must reliably
+  distinguish "has a key" from "no key" for **both** codec kinds — decide the
+  detection contract (e.g. a nullable `tryKeyOf`, or catch the `StateError`).
+- **Q3 — `DocumentAlreadyExistsException`'s fate.** Under upsert semantics a
+  key-present write is an update, not a conflict, so the exception has no caller.
+  Remove it (CLAUDE.md: no dead code) unless a strict-`insert` (Q1) keeps it
+  reachable.
+- **Q4 — versioning correctness across the branches.** Verify the version-chain
+  behaviour on each path: keyless insert starts a chain; keyed update appends to
+  the existing chain (via `oldDoc`); and confirm no path can fork a new chain for
+  an existing logical document. Fault-injection/versioning tests per §26.
 
 ## Scope
 
-- `insert()` behaviour + `DocumentAlreadyExistsException` reachability
-  (`kmdb_collection.dart`).
-- The raw vs typed `_id`/`keyOf` pipeline asymmetry
-  (`raw_document_codec.dart`, the codec contract).
-- §13 *Write Methods* doc block: `insert` return type (`Future<T>`), the
-  identity semantics chosen, and the "all pipeline layers identically" claim.
-- Tests: reproduce the current silent-duplicate (fail-first if fixing per B), and
-  lock in whichever contract is chosen; exercise both typed and `rawCollection`.
+- The write API's key-presence-driven upsert (`put`/`insert`/`replace` in
+  `kmdb_collection.dart`) and `DocumentAlreadyExistsException`'s fate.
+- The raw vs typed `_id`/`keyOf` pipeline asymmetry and the keyless-detection
+  contract (`raw_document_codec.dart`, the `KmdbCodec` contract).
+- **Versioning correctness** (§26): every branch extends the correct `$ver:`
+  chain; no path forks a new chain for an existing logical document.
+- §13 *Write Methods* doc block: `insert` return type (`Future<T>`), the unified
+  upsert semantics, and the false "all pipeline layers identically" claim.
+- Tests: reproduce the current silent-duplicate + orphaned-version-chain
+  (fail-first), lock in the upsert contract, exercise both typed and
+  `rawCollection`, and cover the versioning behaviour on each branch.
 
 ## Out of scope
 
-The rest of WI-2 (done). Any broader write-API redesign (`upsert`, batch inserts)
-beyond settling `insert`'s identity contract.
+The rest of WI-2 (done). Broader write-API redesign beyond settling the upsert
+contract (e.g. bulk/transactional insert semantics), `putMany` atomicity.
 
 ## Open questions
 
-- [ ] **Q1 — contract A (always-mint) or B (honour-key)?** The core decision
-      above; the reviewer/investigation resolves it against the intended design.
-- [ ] **Q2 — if B, does the typed path change too?** Does typed `insert` start
-      honouring `keyOf`, and is that a breaking behavioural change for existing
-      typed callers, or is honour-key scoped to when a key is genuinely present?
+See **Q1–Q4** in the Decision section — which method carries the upsert and
+`insert`'s fate (Q1); keyless-value detection across codec kinds (Q2);
+`DocumentAlreadyExistsException` removal (Q3); versioning correctness on every
+branch (Q4). All to be resolved by the reviewer/investigation before
+`Investigated`.
 
 ## Implementation plan
 
