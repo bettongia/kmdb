@@ -216,8 +216,8 @@ default — neither trims `$ver:` history. Only `VersionRetentionPolicy` overrid
 
 ### `VersionRetentionPolicy`
 
-`VersionRetentionPolicy` extends `ReclamationPolicy` and applies the trim rules
-for `$ver:` namespaces:
+`VersionRetentionPolicy` implements `ReclamationPolicy` (which is an
+`abstract interface class`) and applies the trim rules for `$ver:` namespaces:
 
 - `collapseVersions = false` — versions are never collapsed.
 - `dropTombstone` returns `false` — version tombstones are not subject to H4

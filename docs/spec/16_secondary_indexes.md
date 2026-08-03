@@ -4,8 +4,9 @@
 
 Secondary indexes allow the Query Layer to answer equality and range queries on
 document fields without scanning the entire namespace. Indexes are maintained by
-the Query Layer, stored as ordinary KV entries in reserved `$index` system
-namespaces, and built lazily on first query. The storage engine knows nothing
+the Query Layer, stored as ordinary KV entries in reserved `$$index` system
+namespaces (the `$$` double-dollar prefix makes them local-only — see
+*Indexes and Sync* below), and built lazily on first query. The storage engine knows nothing
 about indexes — they are a pure application-level concern using the same
 `put`/`delete` API as user data.
 

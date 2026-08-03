@@ -205,15 +205,15 @@ final class KvStoreConfig {
   final int bloomBitsPerKey;          // default: 10     (~0.8% FPR)
 
   // Table cache — see §8 (M1)
-  final int tableCacheSize;           // default: 256 desktop, 64 mobile/web
+  final int tableCacheSize;           // default: 256 (all platforms)
                                       // Maximum open SstableReader instances
                                       // held in the LRU table cache. Each
                                       // entry ≈ 2–5 KiB (footer + index +
                                       // Bloom filter).
-
-  // Cache — see §15
-  final int sessionCacheMaxObjects;   // default: 2000 desktop, 256 mobile/web
-  final CacheTier cacheTier;          // default: auto-detected from platform
+  // NB: the session object cache and its capacity live in the Cache Layer
+  // (see §15: CacheTier / detectCacheTier / CacheLayer's maxObjects override),
+  // NOT in KvStoreConfig — there is no sessionCacheMaxObjects or cacheTier
+  // field here.
 
   // WAL
   final bool fsyncOnWrite;            // default: true   (false in tests only)
@@ -231,6 +231,10 @@ final class KvStoreConfig {
                                       // before any I/O. Large payloads should
                                       // use the vault facility instead.
   static const int maxValueBytesUnlimited = -1;
+
+  // Tombstone GC / sync horizon
+  final Duration tombstoneGraceDuration;   // default: 7 days
+  final Duration staleDeviceEvictionAfter; // default: 90 days
 
   /// Tiny thresholds, no fsync — forces all code paths with a handful of writes.
   factory KvStoreConfig.forTesting();
