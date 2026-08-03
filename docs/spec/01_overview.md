@@ -74,11 +74,14 @@ that just changed, which the cache layer and reactive queries subscribe to.
 
 **Cache layer (§15).** Sits above KvStore with two caches: a session object
 cache (decoded `Map<String, dynamic>` objects, LRU, platform-sized) and a
-persisted materialised-view cache (`$cache` namespace, needed on mobile/web
-where the OS may kill the process at any time). Invalidation uses namespace
-generation counters in `$meta` rather than per-key tracking — a single write
-to a namespace invalidates the whole namespace's cached entries, trading some
-cache efficiency for implementation simplicity.
+persisted materialised-view cache (`$$cache` namespace, local-only, needed on
+mobile/web where the OS may kill the process at any time). Invalidation uses
+namespace generation counters in the local-only `$$genstate` namespace rather
+than per-key tracking — a single write to a namespace invalidates the whole
+namespace's cached entries, trading some cache efficiency for implementation
+simplicity. The counter is bumped on local writes and, since 0.10.01 WI-13, on
+ingest of a peer SSTable touching that namespace (a precise per-namespace
+scan, not a device-independent replicated value).
 
 **Value encoding (§5, §31).** User documents pass through a pipeline —
 `codec.encode()` → CBOR → optional Zstd compression → a prefix byte — before
@@ -179,7 +182,7 @@ storage growth; older entries are trimmed at compaction time.
 | Conflict resolution | Last-Write-Wins via HLC timestamps | Hybrid Logical Clocks (48-bit physical + 16-bit logical) preserve causality across devices without a central coordinator. LWW is sufficient for the personal-app document model targeted by KMDB. See §4. |
 | Document keys | UUIDv7, not random UUIDv4 | UUIDv7 is time-ordered at millisecond precision. This gives documents implicit insertion order, improves SSTable key locality during compaction, and makes key-order scans meaningful without a secondary index. |
 | Index build strategy | Lazy on first query, not eager at open() | Indexes are declared at open time but entries are not written until the index is first queried. This keeps `open()` fast and avoids unnecessary work for indexes that are never used. See §16. |
-| Cache invalidation | Namespace generation counters in `$meta` | A single integer per namespace that increments on every `WriteBatch` provides a universal staleness signal for both the in-memory session cache and the persisted `$cache` materialised views, without tracking individual key versions. See §15. |
+| Cache invalidation | Namespace generation counters in local-only `$$genstate` | A single integer per namespace that increments on every `WriteBatch` (local or ingested) provides a universal staleness signal for both the in-memory session cache and the persisted `$$cache` materialised views, without tracking individual key versions. Local-only rather than synced `$meta`, so a peer's write can never move the counter backwards and resurrect a stale cache entry. See §15. |
 | Index consistency | All index writes in the same `WriteBatch` as the document | Atomic writes ensure there is never a window where a document exists without its index entries (or vice versa), even if the process is killed mid-write. See §16. |
 | Encryption | Value-level AES-256-GCM at the encoding seam, opt-in | Applying encryption at the Query Layer's value-encoding boundary (rather than whole-file or whole-database) means the storage engine, compaction, and sync are all encryption-agnostic — they only ever see ciphertext once enabled. See §31. |
 | Conflict silence | Opt-in document versioning alongside LWW | LWW is deterministic but silently discards the losing write in a conflict. Versioning retains every write as a numbered, promotable entry for callers who need an audit trail. See §26. |

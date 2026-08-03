@@ -100,7 +100,7 @@ abstract interface class ReclamationPolicy {
 /// highest-HLC entry, and drop a surviving delete tombstone iff the
 /// compaction covers all levels and the tombstone's HLC is below the sync
 /// horizon. Applied to all user namespaces and to KMDB system namespaces
-/// that hold current-state only (`$meta`, `$cache`, `$$index:`, `$$fts:`,
+/// that hold current-state only (`$meta`, `$$cache`, `$$index:`, `$$fts:`,
 /// `$$vec:`, `$sync`, …).
 final class CollapseToNewestPolicy implements ReclamationPolicy {
   /// Creates the default collapse-to-newest policy.

@@ -43,7 +43,7 @@ import 'session_cache.dart';
 /// [CacheLayer] subscribes to [KvStore.writeEvents]. On each emission:
 ///
 /// 1. The current generation counter for the affected namespace is read from
-///    `$meta`.
+///    the local-only `$$genstate` namespace.
 /// 2. All session cache entries for that namespace whose generation does not
 ///    match the new counter are evicted proactively.
 ///
@@ -76,7 +76,7 @@ final class CacheLayer implements KvStore {
   /// [tier] defaults to [detectCacheTier]. [maxObjects] overrides the
   /// tier-derived session cache capacity. [encryption] is the database's
   /// [EncryptionProvider], or `null` for a plaintext database — needed so
-  /// [_readGeneration] can correctly unwrap the `$meta` generation-counter
+  /// [_readGeneration] can correctly unwrap the `$$genstate` generation-counter
   /// bytes it reads directly (see that method's doc comment).
   CacheLayer({
     required this._store,
@@ -146,7 +146,7 @@ final class CacheLayer implements KvStore {
   ///
   /// Scan results are not materialised in the session cache at this layer.
   /// Materialised view caching (spec §15.3) — persisting frequent scan results
-  /// as CBOR-encoded key lists in the `$cache` system namespace — is handled by
+  /// as CBOR-encoded key lists in the `$$cache` system namespace — is handled by
   /// the Query Layer (Phase 7, `KmdbQuery`), which has knowledge of the query
   /// parameters needed to form a stable cache key.
   @override
@@ -270,12 +270,13 @@ final class CacheLayer implements KvStore {
     });
   }
 
-  /// Reads the generation counter for [namespace] from `$meta`.
+  /// Reads the generation counter for [namespace] from the local-only
+  /// [MetaStore.kGenStateNamespace] (`$$genstate`).
   ///
   /// Returns 0 if no counter has been written yet (namespace is empty).
   ///
-  /// Reads the raw `$meta` bytes directly via [_store] (a [KvStore], not a
-  /// `MetaStore` — [CacheLayer] deliberately depends only on the generic
+  /// Reads the raw `$$genstate` bytes directly via [_store] (a [KvStore], not
+  /// a `MetaStore` — [CacheLayer] deliberately depends only on the generic
   /// [KvStore] interface so it stays testable against plain [KvStore]
   /// doubles) rather than going through `MetaStore.getGenerationCounter`.
   /// Because [MetaStore.appendGenerationCounterBump] now wraps this value
@@ -284,10 +285,14 @@ final class CacheLayer implements KvStore {
   /// the big-endian uint64 — reading the raw bytes directly (as before this
   /// plan) would misinterpret the leading flag byte as part of the encoded
   /// integer.
+  ///
+  /// The counter moved from synced `$meta` to local-only `$$genstate` by the
+  /// 0.10.01 WI-13 fix (see [MetaStore.kGenStateNamespace]'s doc comment) —
+  /// this method reads the same symbolic key, just under the new namespace.
   Future<int> _readGeneration(String namespace) async {
     _trackedNamespaces.add(namespace);
     final bytes = await _store.get(
-      MetaStore.kNamespace,
+      MetaStore.kGenStateNamespace,
       MetaStore.genKey(namespace),
     );
     if (bytes == null) return 0;

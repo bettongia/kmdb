@@ -32,7 +32,7 @@ void main() {
       final registry = ReclamationPolicyRegistry();
       for (final ns in [
         r'$meta',
-        r'$cache',
+        r'$$cache',
         r'$index:users:email',
         r'$fts:users:body',
         r'$vec:users:embedding',

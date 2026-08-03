@@ -335,7 +335,7 @@ Application
     ↓
 Query Layer       — typed KmdbCollection<T> API, filter DSL, reactive watch() streams
     ↓
-Cache Layer       — session object cache + persistent materialised views ($cache)
+Cache Layer       — session object cache + persistent materialised views ($$cache)
     ↓
 KvStore           — public LSM API boundary (untyped Uint8List, String keys)
     ↓
@@ -417,12 +417,18 @@ Sits between KvStore and the Query Layer. Two caches:
 1. **Session object cache** — decoded `Map<String, dynamic>` objects, keyed by
    `(namespace, key, sequenceNumber)`. 2,000 objects on desktop; 256 on
    mobile/web.
-2. **Materialised view cache** (`$cache` namespace) — persisted scan results
-   required on mobile/web where processes are killed silently.
+2. **Materialised view cache** (`$$cache` namespace, local-only) — persisted
+   scan results required on mobile/web where processes are killed silently.
 
-Invalidation uses **namespace generation counters** in `$meta`
-(`gen:{namespace}`), incremented atomically on every `WriteBatch`. The Cache
-Layer subscribes to `KvStore.writeEvents` to evict stale entries.
+Invalidation uses **namespace generation counters** in the local-only
+`$$genstate` namespace (`gen:{namespace}`), incremented atomically on every
+local `WriteBatch` — and, since 0.10.01 WI-13, on every ingest of a peer
+SSTable touching that namespace (`LsmEngine.ingestAt0` scans the ingested
+file once for its distinct namespaces and bumps/emits for exactly that set).
+The counter used to live in synced `$meta`, which let a peer's plain
+last-write-wins move it *backwards* and resurrect a stale cache entry — see
+`MetaStore.kGenStateNamespace`'s doc comment. The Cache Layer subscribes to
+`KvStore.writeEvents` to evict stale entries.
 
 ### Query API (§13)
 

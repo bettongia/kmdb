@@ -171,10 +171,11 @@ enc:blob
 Generation counter
 
 : A per-namespace monotonically increasing integer (`gen:{namespace}`), bumped on
-  every `WriteBatch` touching the namespace; the Cache Layer (§15) uses it for
-  coarse namespace-level invalidation. See §15, and the
-  [attribute registry](03a_attribute_registry.md) (`gen:{ns}`) for its storage
-  classification.
+  every `WriteBatch` touching the namespace — local writes and, since 0.10.01
+  WI-13, ingests of peer SSTables touching the namespace — the Cache Layer
+  (§15) uses it for coarse namespace-level invalidation. See §15, and the
+  [attribute registry](03a_attribute_registry.md#genns) (`gen:{ns}`) for its
+  storage classification (device-local, `$$genstate`).
 
 HLC (Hybrid Logical Clock)
 

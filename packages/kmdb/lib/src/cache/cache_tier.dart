@@ -24,7 +24,7 @@ export '_cache_tier_detect_stub.dart'
 /// - **[maxSessionObjects]** — capacity of the in-memory session object cache.
 ///   Desktop has more RAM and longer process lifetimes so the cap is higher.
 /// - **[requiresPersistentCache]** — whether the materialised view cache
-///   (`$cache` namespace) is required. Mobile and web processes are killed
+///   (`$$cache` namespace) is required. Mobile and web processes are killed
 ///   silently so the persistent cache is needed for a warm cold-start.
 ///
 /// ## Auto-detection
@@ -64,7 +64,7 @@ enum CacheTier {
     CacheTier.mobile || CacheTier.web => 256,
   };
 
-  /// Whether the persistent materialised view cache (`$cache`) is required.
+  /// Whether the persistent materialised view cache (`$$cache`) is required.
   ///
   /// `true` on mobile and web; `false` on desktop.
   bool get requiresPersistentCache => this != CacheTier.desktop;

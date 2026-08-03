@@ -100,7 +100,14 @@ When a device comes online or returns to foreground:
    than the recorded high-water mark for that device.
 
 1. Download and ingest each new SSTable at L0. Verify the footer XXH64 checksum
-   before use.
+   before use. Since 0.10.01 WI-13, ingest also reads every data block once (to
+   collect the file's distinct namespaces for the generation-counter bump, §15),
+   so **block-level** corruption — a bad per-block checksum or malformed block,
+   with an otherwise valid footer — is now detected at ingest and rejects the
+   whole file with `CorruptedSstableException` rather than being admitted and
+   failing on a later query. `SyncEngine.pull` catches this and quarantines the
+   file (consistent with the S-1 sync-trust-boundary posture), so a corrupt peer
+   file is skipped, not fatal.
 
 1. If L0 count exceeds the trigger threshold after ingestion, run compaction.
 
@@ -452,13 +459,16 @@ final ownLocalFiles = localFiles
 The `$$`-prefixed namespaces excluded from upload are:
 `$$fts:*` (lexical search data), `$$vec:*` (semantic search data),
 `$$index:*` (secondary index data), `$$indexstate` (secondary-index state),
-`$$ftsstate` (FTS index state), `$$vecstate` (Vec index state), and
-`$$gcstate` (the tombstone GC floor). Each receiving device rebuilds the
-derived *data* namespaces (`$$fts:*`/`$$vec:*`/`$$index:*`) independently
-from the synced document data, and maintains its own *state* entries
-(`$$indexstate`/`$$ftsstate`/`$$vecstate`/`$$gcstate`) independently — see
-"The `$meta` vs `$$` classification rule" below for why the state entries
-live here rather than in `$meta`.
+`$$ftsstate` (FTS index state), `$$vecstate` (Vec index state),
+`$$gcstate` (the tombstone GC floor), `$$dirtystate` (the dirty-open flag),
+`$$genstate` (namespace generation counters — see §15), and `$$cache`
+(the materialised view cache — currently unimplemented spec). Each
+receiving device rebuilds the derived *data* namespaces
+(`$$fts:*`/`$$vec:*`/`$$index:*`) independently from the synced document
+data, and maintains its own *state* entries
+(`$$indexstate`/`$$ftsstate`/`$$vecstate`/`$$gcstate`/`$$dirtystate`/
+`$$genstate`) independently — see "The `$meta` vs `$$` classification rule"
+below for why the state entries live here rather than in `$meta`.
 
 Syncable system namespaces that **are** uploaded: `$meta`, `$ver:*`
 (document versions), and `$vault` (vault references).
@@ -498,15 +508,25 @@ clean-close `clearDirty` tombstone, replicated in with a later HLC, erase
 this device's own crash marker before it was ever read, silently suppressing
 the index rebuild that marker exists to trigger.
 
-`gen:{namespace}` generation counters remain a separate, subtler case not yet
-moved (WI-13) — they are read cross-device for cache invalidation today, so
-"device-local" alone is not obviously correct without also deciding a merge
-semantics `$meta`'s plain LWW does not provide. `device_id` is no longer in
-this list: WI-12 removed it from `$meta` entirely (read and write) rather
-than moving it to a `$$` namespace — the local `DEVICE_ID` file was already
-its sole authoritative store, so there was no cross-device value to preserve
-behind a `$$` prefix; see the attribute registry's
-[`device_id` entry](03a_attribute_registry.md#device_id).
+`gen:{namespace}` generation counters were the last, subtlest case: unlike the
+other entries above, they were read *cross-device* for cache invalidation, so
+"device-local" alone was not obviously correct without also deciding a
+compensating mechanism for the cross-device behaviour that depended on
+replication. WI-13 resolved this: the counter moved to the local-only
+`$$genstate` namespace (device-local, like every other entry in this section),
+and `LsmEngine.ingestAt0` was given a matching ingest-side fix — it scans each
+ingested SSTable once for its distinct namespaces and, for exactly that set,
+bumps the local `$$genstate` counter and emits a per-namespace `writeEvent`.
+This also closed a `watch()`/`stream()` reactivity gap (§14): before WI-13,
+ingest emitted only a generic `$sync` event that no query terminal consumed,
+so a peer's data landing via ingest never woke a live `watch()` on the
+affected namespace. See §15 for the full mechanism and
+[`03a_attribute_registry.md`](03a_attribute_registry.md) for the `gen`
+attribute row. `device_id` is no longer in this list: WI-12 removed it from
+`$meta` entirely (read and write) rather than moving it to a `$$` namespace —
+the local `DEVICE_ID` file was already its sole authoritative store, so there
+was no cross-device value to preserve behind a `$$` prefix; see the attribute
+registry's [`device_id` entry](03a_attribute_registry.md#device_id).
 
 **Confidentiality.** Syncable system-namespace values in the cloud are
 protected by **value-level encryption** (§31), not by upload filtering.

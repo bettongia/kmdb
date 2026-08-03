@@ -14,6 +14,16 @@ writes occur. The implementation uses debounced re-execution:
 - **Namespace scoping:** A write to the "tasks" namespace does not trigger
   re-query on a "notes" watcher.
 
+- **Cross-device reactivity.** A peer's data arriving via sync (ingested as an
+  SSTable, not written locally) also re-fires `watch()`/`stream()` for any
+  namespace present in the ingested data. `LsmEngine.ingestAt0` scans each
+  ingested SSTable once for its distinct namespaces and emits a `writeEvent`
+  for exactly that set (0.10.01 WI-13) — the same precise, per-namespace
+  semantics as a local `writeBatch`. Before this fix, ingest emitted only a
+  generic `$sync` event that no query terminal consumed, so a `watch('tasks')`
+  never re-fired when a peer's `tasks` data arrived until this device made its
+  own subsequent local write to `tasks`.
+
 ## Scaling Watch at 100K+ Documents
 
 At the revised scale, re-running a filtered query over 100K documents on every
