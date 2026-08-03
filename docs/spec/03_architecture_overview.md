@@ -10,7 +10,7 @@
 │                 Index definitions · Write interception             │
 │                 search() · VaultRef interception                   │
 ├────────────────────────────────────────────────────────────────────┤
-│  Cache Layer    Session object cache · $cache materialised views   │
+│  Cache Layer    Session object cache · $$cache materialised views  │
 │                 Platform-aware sizing · Generation counter reads   │
 ├────────────────────────────────────────────────────────────────────┤
 │  KvStore        put · get · delete · scan · writeBatch · open      │

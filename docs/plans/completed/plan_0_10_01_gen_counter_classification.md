@@ -1,8 +1,8 @@
 # Move `gen:{ns}` generation counters off synced `$meta`; fix cross-device cache invalidation & reactivity (WI-13)
 
-**Status**: **Investigated**
+**Status**: **Complete**
 
-**PR link**: _(none yet)_
+**PR link**: _(pending)_
 
 > **Provenance.** WI-13 of the [0.10.01 hardening track](../roadmap/0_10_01.md) —
 > the **last** device-local-vs-replicated `$meta` entry (WI-11 moved index/FTS/Vec
@@ -214,7 +214,7 @@ Two adjacent issues this WI also resolves (maintainer-approved scope):
 
 ## Implementation plan
 
-- [ ] Add `MetaStore.kGenStateNamespace = r'$$genstate'` with a rationale doc
+- [x] Add `MetaStore.kGenStateNamespace = r'$$genstate'` with a rationale doc
       comment; switch `getGenerationCounter`, `incrementGenerationCounter`,
       `appendGenerationCounterBump`, `_genKey`, and the `unregisterNamespace` delete
       to it. Update the class-level doc comment listing `$meta` residents.
@@ -226,9 +226,9 @@ Two adjacent issues this WI also resolves (maintainer-approved scope):
       with no `$`-guard (the guard is write-only). `isLocalOnly` is prefix-based
       (`ns.startsWith(r'$$')`, namespace_codec.dart:148), so `$$genstate` is
       automatically sync-excluded with no new wiring.
-- [ ] Repoint `CacheLayer._readGeneration` (cache_layer.dart:287) to
+- [x] Repoint `CacheLayer._readGeneration` (cache_layer.dart:287) to
       `kGenStateNamespace`.
-- [ ] **Ingest bump + emit — engine-side, per Q1/§A.** Inside `LsmEngine.ingestAt0`,
+- [x] **Ingest bump + emit — engine-side, per Q1/§A.** Inside `LsmEngine.ingestAt0`,
       **after** the GC-floor check (lsm_engine.dart:1273) and **before** the manifest
       append (:1327):
       1. Scan the already-open `reader` (`reader.scan()`), decode each entry's
@@ -243,15 +243,38 @@ Two adjacent issues this WI also resolves (maintainer-approved scope):
       3. After the manifest append + `_levels` update, emit one writeEvent per `ns`
          in `affected` (`_writeEventsController.add(ns)`), then keep the existing
          `$sync` emit (Q2: additive, harmless).
-- [ ] Tests (see Test surface).
-- [ ] Docs: §15 (correct the false "sync bumps gen" claim + describe device-local
+- [x] `$cache` → `$$cache` doc-comment reclassification: cache_layer.dart:149,
+      cache_tier.dart:27/67, kmdb_database.dart:213, kmdb_collection.dart:86,
+      reclamation_policy.dart:103, kv_store_impl.dart:537, plus two test-file
+      example strings (`local_only_namespace_test.dart`,
+      `reclamation_policy_test.dart`) updated to match for consistency.
+- [x] Tests (see Test surface) — all 6 written and fail-first verified:
+      1. device-local isolation (`meta_store_test.dart`)
+      2. LWW-backwards resurrection (`sync/gen_counter_lww_resurrection_test.dart`)
+      3. cross-device cache invalidation (`cache/cache_layer_test.dart`)
+      4. cross-device `watch()` reactivity (`query/kmdb_query_test.dart`)
+      5. ingest bump durability/ordering fault injection
+         (`sync/gen_counter_ingest_crash_test.dart`)
+      6. `onResume` with the relocated counter (`cache/cache_layer_test.dart`)
+- [x] Docs: §15 (correct the false "sync bumps gen" claim + describe device-local
       `$$genstate` + bump-on-ingest; reclassify `$cache` → `$$cache` local-only);
-      registry row 48 (finalise `gen:{ns}` → `$$genstate`, drop the `⚠`); §12
-      (:501-509 sync-exclusion list); §14 (cross-device reactivity now works via
-      per-namespace ingest events); `docs/roadmap/0_10_01.md` (`$meta` end-state
-      table row + mark WI-13 done + tick exit criterion); **CLAUDE.md:423-424**
-      (generation counters now `$$genstate` local-only, not `$meta`). Route spec
-      wording through `kmdb-architect`.
+      registry row 48 (finalise `gen:{ns}` → `$$genstate`, drop the `⚠`, added a
+      full entry mirroring `gc:tombstoneFloor`); §12 (:452-461 sync-exclusion
+      list, :501-509 classification-rule narrative); §14 (cross-device
+      reactivity now works via per-namespace ingest events); `docs/roadmap/0_10_01.md`
+      (`$meta` end-state table row + mark WI-13 implemented + tick exit
+      criterion note, pending merge); **CLAUDE.md:338,420-427** (generation
+      counters now `$$genstate` local-only, not `$meta`; `$cache`→`$$cache`).
+      Also swept and fixed additional fallout beyond the plan's explicit list
+      (per the "verify checklist claims" discipline from prior WIs): §01, §03
+      (ASCII diagram), §05, §06, §11 (System Namespaces table — added a
+      `$$genstate` row, corrected the `$meta` row), §31 (three sites: coverage
+      list, historical Gap-3 narrative + a new WI-13 update callout), §99
+      glossary. Not touched: `docs/proposals/encryption.md` (pre-planning
+      document, not a living spec) and historical `docs/reviews/*.md` snapshots.
+      Note: WI-14's roadmap exit-criterion checkbox appears stale (unchecked
+      despite PR #65 being merged per git log) — pre-existing, out of this
+      plan's scope, left for a future pass to notice/fix.
 - [ ] `kmdb-qa` sign-off; `kmdb-pre-commit`; **also run `cd packages/kmdb_cli &&
       dart test`** and grep other packages for `gen`/`$meta`/`listSync` assumptions
       (the kmdb-only gates missed a `kmdb_cli` regression in WI-14 — commit `e7ea7cb`).
@@ -380,4 +403,83 @@ section states gen counters live in `$meta`. Route spec wording through
 
 ## Summary
 
-_(to be written on completion)_
+Implemented on branch/worktree `20260803_plan_0_10_01_gen_counter_classification`.
+All checklist items complete; `kmdb` (2429 tests) and `kmdb_cli` (1176 tests)
+both green, plus `kmdb_harness`'s non-E2E suite. `make coverage` 94.7% overall;
+the touched files (`meta_store.dart`, `cache_layer.dart`) are at 100% line
+coverage and `lsm_engine.dart`'s new code block has no missing lines.
+`kmdb-qa` signed off (evaluated the two flagged concerns — the ingest full-scan
+perf cost and the corruption-abort behaviour change — as acceptable/safe; see
+below); `make pre_commit` green.
+
+**Post-QA follow-ups folded in (this branch):** ticked the merged WI-14
+exit-criterion checkbox in the roadmap; added a roadmap follow-up note recording
+QA's quantified ingest-scan cost (~1.5 ms/64 KB … ~110 ms/20 MB; bulk-resync
+escape hatch = over-broad `getNamespaces()`); and documented the ingest
+block-corruption rejection in §12 (`SyncEngine.pull` quarantines it, consistent
+with the S-1 posture).
+
+**What changed:**
+
+- `MetaStore.kGenStateNamespace = r'$$genstate'` added; all gen methods
+  (`getGenerationCounter`, `incrementGenerationCounter`,
+  `appendGenerationCounterBump`, `_genKey`, and the `unregisterNamespace`
+  delete) switched to it, preserving the `EncryptionEnvelope` wrap.
+- `CacheLayer._readGeneration` repointed to `kGenStateNamespace`.
+- `LsmEngine.ingestAt0` now scans the ingested SSTable once (`reader.scan()` +
+  `KeyCodec.decodeNamespace`) for its distinct namespaces, bumps `$$genstate`
+  for exactly that set via a single `WriteBatch`, and emits a per-namespace
+  `writeEvent` for each — closing both the cache-invalidation defect and a
+  `watch()`/`stream()` cross-device reactivity gap.
+- `$cache` reclassified to `$$cache` in the 7 code doc-comments the reviewer
+  identified, plus two test-file example strings for consistency (no
+  functional code — zero writers exist).
+- Docs updated: §01, §03 (ASCII diagram), §05, §06, §11 (System Namespaces
+  table — added a `$$genstate` row), §12 (sync-exclusion list +
+  classification-rule narrative), §14 (reactivity), §15 (corrected the false
+  "sync bumps gen" claim), §31 (three sites — coverage list, historical
+  narrative, new WI-13 update callout), §99 glossary, the attribute registry
+  (row 48 finalised + a new full `gen:{ns}` entry mirroring
+  `gc:tombstoneFloor`), `docs/roadmap/0_10_01.md`, and `CLAUDE.md`.
+
+**Deviation from the plan, found during implementation (not a design
+change):** the plan's checklist placed the gen-bump/scan block immediately
+after the GC-floor check and *before* `advanceClock`. Implementing it there
+broke an existing test (`lsm_engine_test.dart`'s `ClockSkewException thrown
+when ingested maxHlc exceeds skew limit`) — `advanceClock` is a *synchronous*
+check that must fire (and reject a clock-skewed SSTable) before any of the
+new *asynchronous* gen-bump work runs, for the same "a rejected file must not
+bump" principle the plan already established for the GC-floor check. Moved
+`advanceClock(info.maxHlc)` to run immediately after the floor check and
+before the gen-bump/scan block; the ordering relative to the floor check and
+the manifest append is unchanged. This also surfaced (and required updating)
+three tests whose fault-injection assumptions predated the mandatory
+whole-file scan:
+
+- `meta_store_encryption_test.dart` — two tests read the gen counter's raw
+  bytes directly from `MetaStore.kNamespace`; repointed to
+  `MetaStore.kGenStateNamespace`.
+- `sstable_meta_tracking_test.dart` — a test asserting the old D4 "corrupt
+  first block degrades minKey to '' but the ingest still succeeds" fallback
+  is now genuinely superseded: the mandatory gen-bump scan reads every data
+  block *before* that diagnostic-only derivation ever runs, so an unreadable
+  first block is now caught by the scan instead and aborts the whole ingest
+  with `CorruptedSstableException`. This is a deliberate strengthening (the
+  trust boundary now rejects a file with any unreadable block outright,
+  rather than silently admitting it with a degraded diagnostic field), not a
+  regression — the test was rewritten to assert the new behaviour, and the
+  code's own doc comments (both the `_CountingReadAdapter` test double and
+  `ingestAt0`'s minKey-derivation comment) were updated to explain why the
+  old fallback's practical trigger surface has shrunk to near-zero.
+
+**Fail-first verification:** all 6 test-surface items were verified to fail
+for the stated reason with the corresponding fix reverted (temporary,
+in-session `if (false)` toggles / namespace-constant swaps — never
+committed), then verified green again after restoring the fix. Test 2 (LWW
+resurrection) and test 5 (ingest crash ordering) additionally use
+`FaultyStorageAdapter`, never the durability-blind in-memory adapter, per
+CLAUDE.md.
+
+**No open questions remain** — both of the plan's open questions (Q1: precise
+vs over-broad; Q2: does anything consume `$sync`) were already resolved by
+the `kmdb-plan-reviewer` before implementation began.

@@ -26,15 +26,14 @@ import 'lsm_engine.dart';
 
 /// Access to the `$meta` system namespace.
 ///
-/// Provides named helpers for the pieces of engine state stored in `$meta`:
+/// Provides named helpers for the pieces of engine state stored in `$meta`.
 ///
-/// - **Generation counters** (`gen:{namespace}`) — incremented on every write
-///   to a user namespace. The Cache Layer reads these to detect stale cached
-///   query results.
-///
-/// The dirty-open flag (`dirty`) used to live here too, but was moved to the
-/// local-only [kDirtyStateNamespace] by the 0.10.01 WI-14 fix — see that
-/// constant's doc comment for why. It is documented there now, not here.
+/// The generation counters (`gen:{namespace}`) used to live here too, but were
+/// moved to the local-only [kGenStateNamespace] by the 0.10.01 WI-13 fix — see
+/// that constant's doc comment for why. The dirty-open flag (`dirty`) was
+/// similarly moved to the local-only [kDirtyStateNamespace] by the 0.10.01
+/// WI-14 fix — see that constant's doc comment for why. Both are documented
+/// there now, not here.
 ///
 /// All writes go directly to [LsmEngine], bypassing the `$` namespace guard in
 /// [KvStoreImpl] (which is intentional — these are internal writes). All
@@ -82,7 +81,30 @@ final class MetaStore {
   /// The system namespace for all meta values.
   static const String kNamespace = r'$meta';
 
-  // ── Generation counters ──────────────────────────────────────────────────
+  // ── Generation counters (moved off `$meta` by 0.10.01 WI-13) ────────────────
+
+  /// The local-only namespace holding the persisted namespace generation
+  /// counters (`gen:{namespace}`).
+  ///
+  /// Moved out of synced `$meta` by the 0.10.01 WI-13 fix: the Cache Layer
+  /// uses `gen:{namespace}` to invalidate its session object cache, but until
+  /// this fix the counter was stored in synced `$meta`, which resolves by
+  /// plain last-write-wins on HLC. A peer's later-HLC-but-**lower** `gen`
+  /// value could move the counter *backwards* — and unlike a spurious
+  /// forward change (a harmless cache miss), a backwards move could land on a
+  /// value that matches a still-cached stale entry, **resurrecting** it: the
+  /// cache would serve data from before the newer writes (the underlying LSM
+  /// data was always intact — this was a session-cache-only defect). Cross-
+  /// device cache invalidation had, in effect, been resting entirely on this
+  /// replicated value by accident, since [LsmEngine.ingestAt0] itself bumped
+  /// no counter and emitted no per-namespace `writeEvents` — see
+  /// `docs/spec/15_cache_layer.md` for the corrected mechanism (device-local
+  /// counter + an ingest-side bump/emit, computed once per ingested SSTable's
+  /// distinct namespaces). `$$genstate` is local-only (see `isLocalOnly` in
+  /// `namespace_codec.dart`), so a peer's counter value can never affect this
+  /// device's — each device now tracks invalidation purely from its own
+  /// local writes and its own ingest-time bumps.
+  static const String kGenStateNamespace = r'$$genstate';
 
   /// Returns the current generation counter for [userNamespace], or 0 if not
   /// yet set.
@@ -90,7 +112,7 @@ final class MetaStore {
   /// The Cache Layer compares this value against a cached snapshot to decide
   /// whether to evict stale entries.
   Future<int> getGenerationCounter(String userNamespace) async {
-    final bytes = await _engine.get(kNamespace, _genKey(userNamespace));
+    final bytes = await _engine.get(kGenStateNamespace, _genKey(userNamespace));
     if (bytes == null) return 0;
     final unwrapped = await EncryptionEnvelope.unwrap(bytes, encryption);
     if (unwrapped.length < 8) return 0;
@@ -114,7 +136,7 @@ final class MetaStore {
       _encodeUint64(next),
       encryption,
     );
-    await _engine.put(kNamespace, _genKey(userNamespace), wrapped);
+    await _engine.put(kGenStateNamespace, _genKey(userNamespace), wrapped);
     return next;
   }
 
@@ -144,11 +166,12 @@ final class MetaStore {
       _encodeUint64(next),
       encryption,
     );
-    batch.put(kNamespace, _genKey(userNamespace), wrapped);
+    batch.put(kGenStateNamespace, _genKey(userNamespace), wrapped);
     return next;
   }
 
-  /// Returns the `$meta` key for the generation counter of [userNamespace].
+  /// Returns the `$$genstate` key for the generation counter of
+  /// [userNamespace].
   ///
   /// Exposed for tests that need to verify the key exists directly.
   static String genKey(String userNamespace) => _genKey(userNamespace);
@@ -318,7 +341,7 @@ final class MetaStore {
   }
 
   /// Removes [userNamespace] from the persisted set of known namespaces and
-  /// deletes its generation counter from `$meta`.
+  /// deletes its generation counter from [kGenStateNamespace].
   ///
   /// Called when a collection is deleted so it no longer appears in
   /// [getNamespaces]. This is a no-op if the namespace is not currently
@@ -338,8 +361,10 @@ final class MetaStore {
     );
     await _engine.put(kNamespace, _nameToKey(_kNamespacesKey), wrapped);
 
-    // Remove the generation counter for this namespace.
-    await _engine.delete(kNamespace, _genKey(userNamespace));
+    // Remove the generation counter for this namespace. Lives in the
+    // local-only kGenStateNamespace, not $meta — see that constant's doc
+    // comment for why the counter moved (0.10.01 WI-13).
+    await _engine.delete(kGenStateNamespace, _genKey(userNamespace));
   }
 
   // ── Tombstone GC floor (H4-FU3; moved off `$meta` by 0.10.01 WI-11/Q-D) ────

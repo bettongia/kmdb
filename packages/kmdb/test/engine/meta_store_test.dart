@@ -129,6 +129,38 @@ void main() {
       expect(genB, equals(1));
       await store.close();
     });
+
+    // ── Device-local isolation (0.10.01 WI-13) ───────────────────────────────
+    //
+    // Analogue of the WI-12 (device_id)/WI-14 (dirty flag) absence assertions:
+    // the gen:{ns} entry must live in the local-only $$genstate namespace and
+    // must NOT be present under the synced $meta namespace — a peer's gen
+    // value (were it ever to arrive via a synced $meta entry) must never be
+    // able to overwrite this device's counter via plain last-write-wins.
+    test(
+      'gen counter key lives in \$\$genstate and is absent from \$meta',
+      () async {
+        final adapter = MemoryStorageAdapter();
+        final (store, _) = await _open(adapter);
+        await store.put('tasks', _key(1), _bytes('v'));
+
+        final genKey = MetaStore.genKey('tasks');
+        expect(
+          await store.get(MetaStore.kGenStateNamespace, genKey),
+          isNotNull,
+          reason: 'the gen counter must be persisted under \$\$genstate',
+        );
+        expect(
+          await store.get(MetaStore.kNamespace, genKey),
+          isNull,
+          reason:
+              'the gen counter must NOT be persisted under synced \$meta — '
+              'see MetaStore.kGenStateNamespace for the LWW-backwards-'
+              'resurrection hazard this avoids',
+        );
+        await store.close();
+      },
+    );
   });
 
   // ── Dirty-open flag ──────────────────────────────────────────────────────

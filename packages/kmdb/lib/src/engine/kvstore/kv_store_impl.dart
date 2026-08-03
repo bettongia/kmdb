@@ -534,7 +534,7 @@ final class KvStoreImpl implements KvStore {
     // the storage engine see a canonical form.
     final extended = WriteBatch();
     for (final e in batch.entries) {
-      // System namespaces ($meta, $cache, $$index:…, $$fts:…, $$vec:…, etc.)
+      // System namespaces ($meta, $$cache, $$index:…, $$fts:…, $$vec:…, etc.)
       // are ASCII by construction and do not need normalisation.
       // User namespaces are normalised.
       final ns = e.namespace.startsWith(r'$')

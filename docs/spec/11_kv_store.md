@@ -174,10 +174,11 @@ User code cannot write to system namespaces directly.
 
 | Namespace              | Owner              | Purpose |
 | :--------------------- | :----------------- | :------ |
-| `$meta`                | KvStore / QueryLayer | Per-namespace generation counters (`gen:{ns}`), index definitions, last sync timestamps. Device ID is **not** stored here — see the attribute registry's [`device_id` entry](03a_attribute_registry.md#device_id). The dirty-open flag is **not** stored here either — see `$$dirtystate` below. |
+| `$meta`                | KvStore / QueryLayer | Index definitions, schema/version-retention policy, the namespace registry, the format-version marker. Device ID is **not** stored here — see the attribute registry's [`device_id` entry](03a_attribute_registry.md#device_id). The dirty-open flag and the per-namespace generation counters are **not** stored here either — see `$$dirtystate` and `$$genstate` below. |
 | `$$dirtystate`         | KvStore            | Dirty-open flag (`dirty`). Device-local — written on the first user write after open, cleared on clean close. Local-only — written to `.local.sst`, never uploaded (see the attribute registry's [`dirty` row](03a_attribute_registry.md) for why it moved out of `$meta`, WI-14). |
+| `$$genstate`           | KvStore / Cache Layer | Per-namespace generation counters (`gen:{ns}`). Device-local — bumped on every local `WriteBatch` and on every ingest of a peer SSTable touching that namespace. Local-only — written to `.local.sst`, never uploaded (see the attribute registry's [`gen:{ns}` entry](03a_attribute_registry.md#genns) for why it moved out of `$meta`, WI-13). |
 | `$$index:{ns}:{path}`  | Query Layer        | Secondary index entries for namespace `{ns}` on dot-path `{path}`. Keys encode the indexed value + document key. Local-only — written to `.local.sst`, never uploaded. |
-| `$cache:{ns}:{query}`  | Cache Layer        | Materialised scan results. Entries include the generation counter at compute time for staleness detection. |
+| `$$cache:{ns}:{query}` | Cache Layer        | Materialised scan results (currently unimplemented spec — no code writers yet). Entries include the generation counter at compute time for staleness detection. Local-only — a per-device materialised view must never sync. |
 | `$vault:{sha256}`      | Vault subsystem    | Reference count for the vault object identified by `{sha256}`. Incremented/decremented in the same `WriteBatch` as the document write. Zero-valued entries are GC candidates. See §24. |
 
 ## KvStoreConfig

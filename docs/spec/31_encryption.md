@@ -542,7 +542,7 @@ sync:
 - **Document values** — encrypted via `ValueCodec.encode(encryption:)` before
   they enter the storage engine (see _Encoding Pipeline with Encryption_).
 - **System namespace values that pass through `ValueCodec`** — the _values_
-  stored under `$$index:`, `$ver:`, `$vault:` ref-count entries, and `$cache:`
+  stored under `$$index:`, `$ver:`, `$vault:` ref-count entries, and `$$cache:`
   materialised views (when the materialised-view cache is implemented) are
   encrypted, because their write paths thread the `EncryptionProvider` through
   `ValueCodec.encode` (see _Provider Threading_).
@@ -566,22 +566,26 @@ sync:
 - **Tombstone GC floor** — likewise moved out of `$meta` into the local-only
   `$$gcstate` namespace (0.10.01 WI-11, Q-D), still `EncryptionEnvelope`-wrapped.
   Local-disk-theft protection only, for the same reason.
-- **`$meta` operational metadata** — the namespace registry and generation
-  counters are encrypted via `EncryptionEnvelope` (Gap 3), the two documented
-  exemptions being `enc:blob` and the `formatVersion` marker (both stored raw
-  so bootstrap can read them before the DEK exists — see _enc:blob
-  Structure_). (Device ID is **not** on this list — 0.10.01 WI-12 removed it
-  from `$meta` entirely; see the attribute registry's
-  [`device_id` entry](03a_attribute_registry.md#device_id). It is stored
-  unencrypted in the local, never-synced `DEVICE_ID` file instead, so this
-  paragraph's "genuine cloud-provider protection" claim does not apply to it.)
-  Because `$meta` rides synced SSTables, this is genuine cloud-provider
-  protection. (The dirty-open flag is **not** on this list either — 0.10.01
-  WI-14 moved it to the local-only `$$dirtystate` namespace, still
-  `EncryptionEnvelope`-wrapped when a provider is configured, but now for
-  local-disk-theft protection rather than cloud-provider protection, the same
-  reclassification WI-11 applied to the tombstone-GC floor and index/FTS/Vec
-  state above.)
+- **`$meta` operational metadata** — the namespace registry, schema/
+  version-retention policy, and the format-version marker are encrypted via
+  `EncryptionEnvelope` (Gap 3), the two documented exemptions being `enc:blob`
+  and the `formatVersion` marker (both stored raw so bootstrap can read them
+  before the DEK exists — see _enc:blob Structure_). (Device ID is **not** on
+  this list — 0.10.01 WI-12 removed it from `$meta` entirely; see the
+  attribute registry's [`device_id` entry](03a_attribute_registry.md#device_id).
+  It is stored unencrypted in the local, never-synced `DEVICE_ID` file
+  instead, so this paragraph's "genuine cloud-provider protection" claim does
+  not apply to it.) Because `$meta` rides synced SSTables, this is genuine
+  cloud-provider protection. (The dirty-open flag is **not** on this list
+  either — 0.10.01 WI-14 moved it to the local-only `$$dirtystate` namespace,
+  still `EncryptionEnvelope`-wrapped when a provider is configured, but now
+  for local-disk-theft protection rather than cloud-provider protection, the
+  same reclassification WI-11 applied to the tombstone-GC floor and
+  index/FTS/Vec state above. Generation counters are **not** on this list
+  either — 0.10.01 WI-13 moved `gen:{ns}` to the local-only `$$genstate`
+  namespace for the identical reason: still `EncryptionEnvelope`-wrapped, but
+  now local-disk-theft protection only, since `$$genstate` never uploads —
+  see the attribute registry's [`gen:{ns}` entry](03a_attribute_registry.md#genns).)
 - **Vault blob bytes** — the `VaultStore` encrypts blob payloads with the DEK
   before writing them to disk and to the cloud (see _Vault Encryption_).
 - **Vault `extract/` filesystem artifacts (WI-10, gap 6 below)** — `text.txt`,
@@ -770,8 +774,9 @@ identity, timing) but **not document content**.
 > across that move — these values are still encrypted when a provider is
 > configured, just no longer under `$meta`, and now for local-disk-theft
 > protection rather than cloud-provider protection (see the _Value-Level
-> Encryption Coverage_ list above). The namespace registry and generation
-> counters remain in `$meta` as described here.
+> Encryption Coverage_ list above). The namespace registry remains in `$meta`
+> as described here; generation counters have since moved too — see the
+> WI-13 update below.
 >
 > **Update (0.10.01 WI-12).** Device ID has since been removed from `$meta`
 > entirely (SC-5), not moved to a `$$` namespace — the local, never-synced
@@ -788,6 +793,18 @@ identity, timing) but **not document content**.
 > device's own crash marker and erase it before it is ever read — see the
 > attribute registry's [`dirty` row](03a_attribute_registry.md)).
 > `EncryptionEnvelope` wrapping was preserved across the move.
+>
+> **Update (0.10.01 WI-13).** Generation counters (`gen:{ns}`) have since
+> moved out of `$meta` into the local-only `$$genstate` namespace — the last
+> of the six device-local facts this section originally listed as living in
+> `$meta`. Unlike the moves above, this one was not purely mechanical: the
+> counter was read *cross-device* for cache invalidation, so a compensating
+> ingest-side bump/emit was needed (`LsmEngine.ingestAt0` scans each ingested
+> SSTable for its distinct namespaces and bumps/emits for exactly that set —
+> see the attribute registry's [`gen:{ns}` entry](03a_attribute_registry.md#genns)).
+> `EncryptionEnvelope` wrapping was preserved across the move. No `$meta`
+> entry originally listed in this paragraph as an undocumented-encryption gap
+> remains in `$meta` today.
 
 **Resolved** by the Encryption confidentiality reconciliation plan's Phase 2
 (`docs/roadmap/completed/0_08.md`, Gap 3): every general `$meta` accessor now routes

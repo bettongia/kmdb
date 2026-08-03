@@ -45,7 +45,7 @@ which must be readable before the DEK is available and so are stored raw.
 | `fts:{ns}:{field}` | FTS index state | Device-local | **`$$ftsstate`** (local-only) | Yes | WI-11 |
 | `vec:{ns}:{field}` | Vec index state | Device-local | **`$$vecstate`** (local-only) | Yes | WI-11 |
 | `gc:tombstoneFloor` | Watermark (HLC) | Device-local | **`$$gcstate`** (local-only) | Yes | **[full entry](#gctombstonefloor)** |
-| `gen:{ns}` | Generation counter | **Undecided** `⚠` | `$meta` — `⚠` classification pending WI-13 | Yes | WI-13 |
+| `gen:{ns}` | Generation counter | Device-local | **`$$genstate`** (local-only) | Yes | **[full entry](#genns)** |
 | `dirty` | Dirty-open flag | Device-local | **`$$dirtystate`** (local-only) | Yes | WI-14 |
 | `enc:blob` | Key material (wrapped DEK) | Replicated | `$meta` | **No — raw CBOR** (one of two bootstrap exemptions; must be read before the DEK exists) | summary |
 | `schema:{collection}` + `schema:__registry__` | Schema contract | Replicated | `$meta` | Yes | summary |
@@ -56,8 +56,8 @@ which must be readable before the DEK is available and so are stored raw.
 > The four device-local index/floor rows were moved out of `$meta` by
 > [WI-11](../roadmap/0_10_01.md) (the SC-10/SC-15 fix); `device_id` was fully
 > retired from `$meta` by WI-12 (this entry); the dirty-open flag was moved to
-> `$$dirtystate` by WI-14. `gen:{ns}` (WI-13) is the remaining mid-change
-> entry.
+> `$$dirtystate` by WI-14; `gen:{ns}` was moved to `$$genstate` by WI-13 (this
+> entry). All `$meta` mid-change entries are now resolved.
 > The registry generalises beyond `$meta` — the HLC, the DEK/`EncryptionBlob`,
 > and the SSTable filename fields are each families that would get their own
 > register in the same shape; this seed scopes to `$meta`, the family most
@@ -199,3 +199,71 @@ leaves the device, so no peer can overwrite it).
 | Reset | `kv_store_impl.dart:371` (`resetTombstoneFloor`) |
 
 **Spec cross-refs.** §06 (compaction & the floor), §12 (sync horizon).
+
+## `gen:{ns}`
+
+> Per-namespace generation counter. The Cache Layer's universal cache
+> invalidation signal — a session cache entry is valid only while its
+> captured generation matches the namespace's current counter.
+
+| Field | Value |
+| :--- | :--- |
+| **Kind** | Monotonic counter (per user namespace) |
+| **Format** | 64-bit big-endian uint64 |
+| **Scope** | Device-local |
+| **Storage** | `$$genstate` (`MetaStore.kGenStateNamespace`) — local-only, lands in `.local.sst`, never uploaded. |
+| **Encrypted at rest** | Yes, when the DB is encrypted — `EncryptionEnvelope`-wrapped in `incrementGenerationCounter`/`appendGenerationCounterBump`/`getGenerationCounter`. |
+| **Mutability** | Monotonic increment-by-1, on every local `WriteBatch` touching the namespace and on every ingest of a peer SSTable touching it (see "On sync" below). |
+| **CLI** | None — managed automatically by the Cache Layer / `KvStoreImpl` (no integrator-facing surface). |
+| **Introduced** | Phase 6 (Cache Layer); moved to `$$genstate` and given an ingest-side bump by [WI-13](../plans/completed/plan_0_10_01_gen_counter_classification.md). |
+| **Status** | Stable |
+
+**Role.** `CacheLayer` keys session cache entries by `(namespace, key)` with
+the generation stored as a match *field* on the entry. A write bumps the
+namespace's counter; the Cache Layer's `writeEvents` listener re-reads the
+new counter and proactively evicts entries whose captured generation no
+longer matches. Lazy `get()` performs the same check as a belt-and-suspenders
+path for any proactive-eviction race.
+
+**On sync (ingest).** Because the counter is device-local, a peer's write
+never replicates a value in for this device to read. Instead,
+`LsmEngine.ingestAt0` scans each ingested SSTable once for its distinct
+namespaces (reusing the already-open reader — `SstableReader.scan()` +
+`KeyCodec.decodeNamespace`) and, for exactly that set, bumps `$$genstate` and
+emits a per-namespace `writeEvent` — a *precise* scan matching the precision
+of the local `writeBatch` path (lsm_engine.dart:401/419-420), not an
+over-broad bump across every registered namespace. This also closes a
+`watch()`/`stream()` reactivity gap (§14): ingest previously emitted only a
+generic `$sync` event that no query terminal consumed.
+
+**Crash ordering.** The bump is written via a single `WriteBatch` — one
+WAL-fsynced frame — **before** the manifest edit that admits the ingested
+file. A crash between the two leaves the counter bumped but the file
+un-admitted (a harmless spurious cache miss on next open); the reverse
+ordering would leave new data visible under a stale counter, which is why the
+bump is placed first.
+
+**History.** The counter previously lived in synced `$meta`. `$meta` resolves
+by plain last-write-wins on HLC, so a peer's later-HLC-but-lower `gen` value
+could move the counter *backwards*. Because the session cache's key is
+`(namespace, key)` with `gen` as a match field (not part of the key), a gen
+mismatch produces a miss **without removing the stale entry** — it survives
+in the LRU until overwritten or proactively evicted. A backwards move could
+then match the surviving stale entry's discriminator and resurrect it: the
+cache would serve data from before newer writes, even though the underlying
+LSM data was always correct. This was reachable specifically via **ingest**
+(which, pre-fix, emitted only `$sync` and so never proactively evicted) —
+never via a local write, which always proactively evicts on its own
+`writeEvents` emission. WI-13 closed this by making the counter device-local
+and adding the ingest-side bump/emit described above.
+
+**Code coordinates.**
+
+| Concern | Location |
+| :--- | :--- |
+| Namespace | `meta_store.dart:107` (`kGenStateNamespace` = `$$genstate`) |
+| Read / write | `meta_store.dart` — `getGenerationCounter`, `incrementGenerationCounter`, `appendGenerationCounterBump` |
+| Cache read | `cache_layer.dart` — `CacheLayer._readGeneration` |
+| Ingest bump + emit | `LsmEngine.ingestAt0` (after the GC-floor check, before the manifest append) |
+
+**Spec cross-refs.** §14 (reactivity), §15 (Cache Layer — full mechanism).

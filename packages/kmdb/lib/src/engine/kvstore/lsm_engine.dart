@@ -1273,8 +1273,44 @@ final class LsmEngine {
     }
 
     // Advance the local clock to ensure subsequent local writes are causally
-    // after the ingested data.
+    // after the ingested data. Synchronous — throws ClockSkewException
+    // immediately (before any of the async work below) if the ingested
+    // maxHlc is too far ahead of this device's wall clock, so a
+    // clock-skew-rejected SSTable never reaches the gen bump below either
+    // (same "a rejected file must not bump" principle as the GC-floor check
+    // above).
     advanceClock(info.maxHlc);
+
+    // Bump the local `$$genstate` generation counter for every namespace
+    // present in the ingested SSTable, and remember the set for the
+    // per-namespace writeEvents emitted after the manifest append below
+    // (0.10.01 WI-13, Q1 — uniform precise: computed once, from a scan of
+    // this ingest's own data, and reused for both the gen bump and the
+    // reactivity emit; see MetaStore.kGenStateNamespace's doc comment).
+    //
+    // Placement matters: this runs *after* both the GC-floor check and the
+    // clock-skew check above (a rejected SSTable must not bump any counter
+    // or wake any watcher for data that never becomes visible) and *before*
+    // the manifest append below, so the WAL-durable bump is always ordered
+    // ahead of the manifest edit that admits the file — a crash between the
+    // two leaves the counter bumped but the file un-admitted (a harmless
+    // spurious cache miss), never the reverse (which would leave new data
+    // visible under a stale counter).
+    //
+    // The reader is already open (via _tableCache above), so this scan reads
+    // no extra file — the tradeoff is reading every data block up front on
+    // the ingest path (accepted; see the plan's Q1 rationale).
+    final affectedNamespaces = <String>{};
+    await for (final entry in reader.scan()) {
+      affectedNamespaces.add(KeyCodec.decodeNamespace(entry.key));
+    }
+    if (metaStore != null && affectedNamespaces.isNotEmpty) {
+      final genBumpBatch = WriteBatch();
+      for (final ns in affectedNamespaces) {
+        await metaStore.appendGenerationCounterBump(ns, genBumpBatch);
+      }
+      await writeBatch(genBumpBatch);
+    }
 
     final hlc = _clock.now();
 
@@ -1287,6 +1323,15 @@ final class LsmEngine {
     // this is one readFileRange of ≤4 KiB. Wrapped in try/catch because minKey
     // is a diagnostic-only field — a failure must never abort an ingest that has
     // already passed its correctness checks (D4 rationale).
+    //
+    // Note (0.10.01 WI-13): the gen-bump scan above already reads every data
+    // block unconditionally (when a MetaStore is configured, which is always
+    // true via KvStoreImpl), so an unreadable/corrupt block is now normally
+    // caught there first and aborts the whole ingest — this try/catch's
+    // practical trigger surface has shrunk to callers with no MetaStore
+    // configured (bypassing the scan) and to the narrower RangeError/
+    // OutOfMemoryError belt-and-suspenders cases below, which are specific
+    // to firstKey()'s own implementation.
     String maxKey = '';
     String minKey = '';
     if (reader.index.isNotEmpty) {
@@ -1334,8 +1379,22 @@ final class LsmEngine {
 
     (_levels[0] ??= []).add(meta);
 
+    // Notify listeners for each namespace actually present in the ingested
+    // data (0.10.01 WI-13, Q1/Q2) — this closes two gaps at once: it fixes
+    // cross-device reactivity (watch()/stream() on that namespace re-fire
+    // when a peer's data is ingested) and, as a bonus, drives CacheLayer's
+    // existing proactive-eviction path (_onWriteEvent already acts on any
+    // bare user-namespace event; it only ever ignored `$sync` because that
+    // event never named a user namespace). Reusing the same affected-namespace
+    // set as the gen bump above keeps the two mechanisms in lockstep.
+    for (final ns in affectedNamespaces) {
+      _writeEventsController.add(ns);
+    }
+
     // Notify listeners that new data is available (use '$sync' namespace to
     // signal sync-sourced data without targeting a specific user namespace).
+    // Kept alongside the per-namespace emits above — nothing in the codebase
+    // consumes '$sync' today (Q2), so this is purely additive.
     _writeEventsController.add(r'$sync');
 
     await _rotateManifestIfNeeded();

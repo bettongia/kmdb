@@ -64,7 +64,7 @@ At flush time the frozen memtable is **partitioned into two writers** by the
 `isLocalOnly(namespace)` predicate (`namespace.startsWith(r'$$')`):
 
 - **Syncable writer** — receives entries from user namespaces and non-`$$`
-  system namespaces (`$meta`, `$cache`, `$ver:`, etc.). Produces
+  system namespaces (`$meta`, `$ver:`, etc.). Produces
   `{deviceId}-{minHlc}-{maxHlc}.sst` if non-empty.
 - **Local-only writer** — receives entries from `$$`-prefixed derived-data
   namespaces (`$$fts:*`, `$$vec:*`, `$$index:*`). Produces
@@ -107,7 +107,8 @@ entry. The same argument extends across devices via HLC LWW.
 The transform consults a **per-namespace-class reclamation policy** for each
 group. The default policy collapses to the newest version (applied to every
 user namespace and to KMDB current-state system namespaces — `$meta`,
-`$cache`, `$ver:`, `$sync`, and the local-only `$$` class). A namespace whose
+`$ver:`, `$sync`, and the local-only `$$` class, which includes `$$cache`). A
+namespace whose
 policy returns `collapseVersions = false` is exempt and passes every version
 through unchanged. The default registry exempts `$ver:` (document-versioning
 history); future history-bearing namespace classes can be registered the

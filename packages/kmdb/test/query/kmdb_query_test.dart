@@ -12,8 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'package:kmdb/src/encoding/value_codec.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
+import 'package:kmdb/src/engine/sstable/sstable_info.dart';
+import 'package:kmdb/src/engine/sstable/sstable_writer.dart';
+import 'package:kmdb/src/engine/util/hlc.dart';
 import 'package:kmdb/src/engine/util/key_codec.dart';
 import 'package:kmdb/src/query/exceptions.dart';
 import 'package:kmdb/src/query/filter/field_filter.dart';
@@ -375,6 +379,68 @@ void main() {
 
       await sub.cancel();
       expect(emitted.length, equals(countBefore)); // no re-emit
+      await db.close();
+    });
+
+    // ── Cross-device reactivity (0.10.01 WI-13, defect #4) ──────────────────
+    //
+    // Before this fix, LsmEngine.ingestAt0 emitted only the generic '$sync'
+    // writeEvent — never a per-namespace event — so a watch() on device B
+    // never re-fired when device A's data for that namespace arrived via
+    // ingest (a peer sync landed silently; only a subsequent *local* write
+    // to the same namespace would surface it). The per-namespace emit added
+    // to ingestAt0 (computed once from the ingested SSTable's own distinct
+    // namespaces — the same "uniform precise" scan that drives the gen
+    // bump) closes this gap.
+    test("watch() re-fires when a peer's data is ingested, without any local "
+        'write (WI-13 defect #4)', () async {
+      final (db, col) = await _open();
+      final emitted = <List<_Item>>[];
+      final sub = col.all().watch().listen(emitted.add);
+
+      await Future.delayed(Duration.zero); // initial emit (empty)
+      expect(emitted.single, isEmpty);
+
+      // Build a synthetic SSTable simulating a peer device's flush of one
+      // new document into this same collection's namespace. Encode the
+      // document exactly as KmdbCollection.put would (ValueCodec, no
+      // encryption — this database is plaintext) so the re-executed
+      // query can decode it via the real read path.
+      final docBytes = await ValueCodec.encode({
+        'name': 'FromDeviceA',
+        'score': 5,
+      }, encryption: null);
+      final docKey = KeyCodec.generate();
+      final peerHlc = Hlc(DateTime.now().millisecondsSinceEpoch + 10000, 0);
+      final sstable =
+          (SstableWriter()..add(
+                KeyCodec.encodeInternalKey(
+                  col.namespace,
+                  KeyCodec.keyToBytes(docKey),
+                  peerHlc,
+                  RecordType.put,
+                ),
+                docBytes,
+              ))
+              .finish();
+      final filename = SstableInfo.flushName('devicea1', peerHlc, peerHlc);
+
+      await db.store.ingestSstable(filename, sstable);
+
+      // Wait for the debounced re-execution (50ms) + margin.
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      await sub.cancel();
+      expect(
+        emitted.length,
+        greaterThanOrEqualTo(2),
+        reason:
+            'watch() must re-fire on an ingest of peer data for its own '
+            'namespace, even though no local write occurred',
+      );
+      expect(emitted.last.length, equals(1));
+      expect(emitted.last.single.name, equals('FromDeviceA'));
+
       await db.close();
     });
   });

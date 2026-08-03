@@ -131,13 +131,14 @@ void main() {
       expect(isLocalOnly(r'$$fts:articles:body:abc'), isTrue);
       expect(isLocalOnly(r'$$vec:docs:embedding'), isTrue);
       expect(isLocalOnly(r'$$index:users:email'), isTrue);
+      expect(isLocalOnly(r'$$genstate'), isTrue);
+      expect(isLocalOnly(r'$$cache'), isTrue);
       expect(isLocalOnly(r'$$'), isTrue);
       expect(isLocalOnly(r'$$custom:namespace'), isTrue);
     });
 
     test(r'returns false for single-$ system namespaces', () {
       expect(isLocalOnly(r'$meta'), isFalse);
-      expect(isLocalOnly(r'$cache'), isFalse);
       expect(isLocalOnly(r'$ver:users'), isFalse);
       expect(isLocalOnly(r'$sync'), isFalse);
     });

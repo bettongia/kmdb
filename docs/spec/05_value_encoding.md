@@ -160,8 +160,8 @@ CBOR encoding occurs **only at the Query Layer**:
 See §31 for the full encryption bootstrap sequence and key management details.
 
 The Cache Layer stores decoded `Map<String, dynamic>` objects in the session
-cache — it does not re-encode to CBOR for caching. The `$cache` materialised
-view namespace stores CBOR-encoded key lists (not full documents).
+cache — it does not re-encode to CBOR for caching. The local-only `$$cache`
+materialised view namespace stores CBOR-encoded key lists (not full documents).
 
 ## Zstd Dictionary Compression (Future)
 

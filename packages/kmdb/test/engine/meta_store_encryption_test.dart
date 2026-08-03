@@ -136,8 +136,10 @@ void main() {
       expect(await store.meta.getGenerationCounter('tasks'), equals(2));
 
       // Confirm the raw bytes are genuinely AES-GCM framed, not plaintext.
+      // Read from the local-only $$genstate namespace (0.10.01 WI-13) — the
+      // counter no longer lives in $meta.
       final raw = await store.get(
-        MetaStore.kNamespace,
+        MetaStore.kGenStateNamespace,
         MetaStore.genKey('tasks'),
       );
       expect(raw![0], equals(EncryptionFlag.aesGcm.byte));
@@ -420,10 +422,12 @@ void main() {
       expect(deviceId, isNotEmpty);
 
       // Read every relevant $meta entry's RAW bytes directly and confirm
-      // each carries the EncryptionFlag.aesGcm prefix.
+      // each carries the EncryptionFlag.aesGcm prefix. The gen counter lives
+      // in the local-only $$genstate namespace (0.10.01 WI-13), not $meta —
+      // it is still wrapped the same way.
       final store = db.store;
       final rawGen = await store.get(
-        MetaStore.kNamespace,
+        MetaStore.kGenStateNamespace,
         MetaStore.genKey('notes'),
       );
       expect(rawGen![0], equals(EncryptionFlag.aesGcm.byte));

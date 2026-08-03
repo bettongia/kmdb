@@ -210,7 +210,7 @@ final class KmdbDatabase {
   /// The active encryption provider, or `null` for plaintext databases.
   ///
   /// Threaded into every [ValueCodec] call site so that all stored values
-  /// (documents, `$$index:`, `$ver:`, `$vault`, `$cache`) are encrypted
+  /// (documents, `$$index:`, `$ver:`, `$vault`, `$$cache`) are encrypted
   /// uniformly. Exposed to [KmdbCollection] via the [encryption] getter.
   final EncryptionProvider? _encryption;
   final List<FtsIndexDefinition> _ftsIndexes;

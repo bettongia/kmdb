@@ -494,93 +494,94 @@ void main() {
       },
     );
 
-    test(
-      'ingest minKey derivation failure is non-fatal: corrupt first block '
-      'still yields entryCount and maxKey, but minKey == "" (D4 fallback)',
-      () async {
-        // Ingest a peer SSTable whose first data block has a corrupt checksum
-        // so firstKey() throws CorruptedSstableException. The ingest must
-        // complete successfully with minKey == '' and the other fields real.
-        //
-        // The SSTable has a valid footer + index (so reader.open succeeds and
-        // entryCount/maxKey are available), but a zeroed-out first data block
-        // (so _readBlock(index.first) fails its checksum).
-        //
-        // Note: the whole-file checksum in the footer covers bytes 0..fileSize-8.
-        // Corrupting the data block changes the whole-file checksum. The reader's
-        // open() validates the whole-file checksum FIRST. So we need to also
-        // update the footer checksum — but the footer checksum is the LAST 8
-        // bytes and covers bytes 0..fileSize-8 (i.e. everything except those
-        // 8 bytes). We cannot update it without re-writing the file.
-        //
-        // Alternative: instead of corrupting a block, we corrupt the per-block
-        // checksum (last 8 bytes of the block) while keeping the rest intact.
-        // That leaves the whole-file checksum valid (we need to recalculate it)
-        // but makes _decodeBlock throw on checksum mismatch. But again the
-        // whole-file hash includes the block, so changing the block changes
-        // the whole-file hash too.
-        //
-        // Conclusion: we cannot corrupt one data block without also invalidating
-        // the whole-file checksum. The approach won't work at the byte level.
-        //
-        // Correct approach: use a StorageAdapter that throws StorageException
-        // on readFileRange calls for a specific file after the reader is open.
-        // We inject the failure by using a custom adapter that counts
-        // readFileRange calls for the target path and fails on the one that
-        // firstKey() makes (after open() has already read footer+filter+index).
-        //
-        // reader.open reads:
-        //   1. fileSize(path)          — fileSize call, not readFileRange
-        //   2. readFileRange footer    — 48 bytes from end
-        //   3. readFileRange wholefile — for whole-file checksum
-        //   4. readFileRange filter    — filter block
-        //   5. readFileRange index     — index block
-        // firstKey() reads:
-        //   6. readFileRange block     — first data block
-        //
-        // We fail on call #6 (5th readFileRange for the peer file).
-        final inner = MemoryStorageAdapter();
-        // failAfterCount: 4 allows 4 calls (footer, whole-file hash, filter,
-        // index), then fails on call 5, which is the firstKey() block read.
-        final adapter = _CountingReadAdapter(inner, failAfterCount: 4);
-        final (store, _) = await KvStoreImpl.open(
-          _dbDir,
-          adapter,
-          config: _config(),
-          deviceId: _deviceId,
-        );
-        addTearDown(() => store.close(flush: false));
+    test('ingest with an unreadable first data block now aborts entirely '
+        '(0.10.01 WI-13 superseded the old D4 minKey-only fallback for this '
+        'fault) — the file is never admitted to the manifest', () async {
+      // Historical note (pre-WI-13 behaviour, kept for context): before
+      // WI-13, LsmEngine.ingestAt0 only read data blocks for the
+      // best-effort, diagnostic-only minKey derivation (firstKey()) — a
+      // failure there was caught and degraded gracefully to minKey == ''
+      // (the D4 rationale), because nothing else in ingestAt0 touched
+      // block data at all.
+      //
+      // WI-13 added a mandatory precise scan (reader.scan()) *before* that
+      // minKey/maxKey derivation, to compute the ingested SSTable's
+      // distinct namespaces for the gen-counter bump + per-namespace
+      // writeEvent (see LsmEngine.ingestAt0's doc comment). That scan reads
+      // every data block unconditionally, so it now encounters this exact
+      // fault (an unreadable first data block) *before* firstKey() ever
+      // runs — and, unlike firstKey()'s narrow diagnostic-only fallback,
+      // the scan's failure is not caught: it propagates out of ingestAt0
+      // entirely, and the SSTable is never admitted.
+      //
+      // This is a deliberate strengthening, not a regression: a data block
+      // that cannot be read at all is exactly the kind of corruption the
+      // ingest trust boundary should reject outright, rather than silently
+      // admitting a file with a degraded diagnostic field.
+      //
+      // The SSTable has a valid footer + index (so reader.open succeeds and
+      // entryCount/maxKey would have been available), but the underlying
+      // storage adapter is armed to fail the very first data-block read.
+      //
+      // Note: the whole-file checksum in the footer covers bytes
+      // 0..fileSize-8, so corrupting a data block byte-for-byte would also
+      // invalidate that checksum (see the original D4 test's investigation
+      // for why byte-level corruption doesn't isolate to one block).
+      // Injecting the failure at the StorageAdapter level (rather than
+      // corrupting bytes) keeps the footer/index genuinely valid so
+      // `reader.open()` and the index-derived fields still succeed, and
+      // only the data-block *read* itself fails.
+      //
+      // reader.open reads:
+      //   1. fileSize(path)          — fileSize call, not readFileRange
+      //   2. readFileRange footer    — 48 bytes from end
+      //   3. readFileRange wholefile — for whole-file checksum
+      //   4. readFileRange filter    — filter block
+      //   5. readFileRange index     — index block
+      // reader.scan() (WI-13's gen-bump scan) reads:
+      //   6. readFileRange block     — first data block
+      //
+      // We fail on call #6 (5th readFileRange for the peer file).
+      final inner = MemoryStorageAdapter();
+      // failAfterCount: 4 allows 4 calls (footer, whole-file hash, filter,
+      // index), then fails on call 5 — the first data-block read, now made
+      // by the gen-bump scan rather than firstKey().
+      final adapter = _CountingReadAdapter(inner, failAfterCount: 4);
+      final (store, _) = await KvStoreImpl.open(
+        _dbDir,
+        adapter,
+        config: _config(),
+        deviceId: _deviceId,
+      );
+      addTearDown(() => store.close(flush: false));
 
-        final sstBytes = _buildSst(count: 2, basePhysical: 200);
-        const peerFilename = 'peerdev1-0000000000c8-0000000000c9.sst';
+      final sstBytes = _buildSst(count: 2, basePhysical: 200);
+      const peerFilename = 'peerdev1-0000000000c8-0000000000c9.sst';
 
-        // Enable the failure counter for the peer file BEFORE ingest.
-        adapter.startCounting('$_sstDir/$peerFilename');
+      // Enable the failure counter for the peer file BEFORE ingest.
+      adapter.startCounting('$_sstDir/$peerFilename');
 
-        // ingestSstable writes the file then calls ingestAt0. ingestAt0 calls
-        // _tableCache.open (5 reads above) then firstKey() (read #6, fails).
-        await expectLater(
-          store.ingestSstable(peerFilename, sstBytes),
-          completes,
-          reason: 'ingest must not throw when firstKey() read fails',
-        );
+      // ingestSstable writes the file then calls ingestAt0. ingestAt0's
+      // mandatory gen-bump scan (5 reads to open + read #6 for the first
+      // data block) now fails and propagates before the file is ever
+      // admitted.
+      await expectLater(
+        store.ingestSstable(peerFilename, sstBytes),
+        throwsA(isA<CorruptedSstableException>()),
+        reason:
+            'an unreadable data block must abort the ingest entirely — '
+            'never admit a file whose content could not be fully read',
+      );
 
-        // Verify the manifest entry.
-        final manifestName = await _currentManifest(inner);
-        final edits = await ManifestReader(
-          adapter: inner,
-        ).replayEdits('$_dbDir/$manifestName');
+      // The file must never appear in the manifest — it was rejected
+      // before the VersionEdit that would have admitted it was appended.
+      final manifestName = await _currentManifest(inner);
+      final edits = await ManifestReader(
+        adapter: inner,
+      ).replayEdits('$_dbDir/$manifestName');
 
-        final ingestMeta = _findIngestMeta(edits, peerFilename);
-        expect(ingestMeta, isNotNull);
-        // minKey derivation failed → fallback to ''.
-        expect(ingestMeta!.minKey, equals(''));
-        // maxKey from the index (loaded at open, not affected by the failure).
-        expect(ingestMeta.maxKey.isNotEmpty, isTrue);
-        // entryCount from footer (loaded at open).
-        expect(ingestMeta.entryCount, equals(2));
-      },
-    );
+      expect(_findIngestMeta(edits, peerFilename), isNull);
+    });
   });
 
   // ── reassignDeviceId carries metadata ─────────────────────────────────────────
@@ -724,8 +725,13 @@ void main() {
 /// armed to throw [StorageException] after [failAfterCount] [readFileRange]
 /// calls for a specific target path.
 ///
-/// Used to test the D4 fallback: if [SstableReader.firstKey]'s block-read
-/// fails, [LsmEngine.ingestAt0] must still succeed with `minKey == ''`.
+/// Originally built to test the D4 fallback (a [SstableReader.firstKey]
+/// block-read failure degrading gracefully to `minKey == ''`). Since
+/// 0.10.01 WI-13 added a mandatory precise scan inside [LsmEngine.ingestAt0]
+/// that reads every data block *before* that diagnostic-only derivation, an
+/// unreadable first data block is now caught by the scan instead and aborts
+/// the whole ingest — see the "unreadable first data block" test below for
+/// the current behaviour this adapter exercises.
 final class _CountingReadAdapter implements StorageAdapter {
   _CountingReadAdapter(this._inner, {required this.failAfterCount});
 

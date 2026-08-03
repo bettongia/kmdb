@@ -128,6 +128,28 @@ Uint8List _buildSst({int count = 2, int basePhysical = 5000}) {
   return writer.finish();
 }
 
+/// Builds a single-entry SSTable containing a document put for
+/// `ns/keyHex = value` at [hlc] — used by the WI-13 cross-device tests to
+/// construct a synthetic peer SSTable for a specific key.
+Uint8List _buildSingleEntrySst({
+  required String ns,
+  required String keyHex,
+  required Uint8List value,
+  required Hlc hlc,
+}) {
+  final writer = SstableWriter()
+    ..add(
+      KeyCodec.encodeInternalKey(
+        ns,
+        KeyCodec.keyToBytes(keyHex),
+        hlc,
+        RecordType.put,
+      ),
+      value,
+    );
+  return writer.finish();
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 void main() {
@@ -321,6 +343,47 @@ void main() {
       await mobileCache.close();
     });
 
+    // ── onResume with the relocated gen counter (0.10.01 WI-13, test #6) ────
+    //
+    // Confirms the resume path (onResume -> _readGeneration) still works
+    // after the gen counter's namespace moved from synced $meta to the
+    // local-only $$genstate (MetaStore.kGenStateNamespace) — cheap insurance
+    // that the repoint didn't silently break the mobile/web resume path,
+    // which depends on the counter being *persisted* (A1, not an in-memory
+    // counter) for its poll-on-resume semantics to work across process
+    // death. The counter is advanced directly via MetaStore, out-of-band —
+    // not via a normal document write — modelling any process that bumps
+    // the persisted counter without going through CacheLayer's own
+    // writeEvents (e.g. a background sync task in a separate isolate).
+    test('onResume evicts stale entries when \$\$genstate is advanced '
+        'out-of-band', () async {
+      final (ownStore, _) = await _openStore();
+      final mobileCache = CacheLayer(store: ownStore, tier: CacheTier.mobile);
+
+      final key = '00000000000070008000000000000fe1';
+      await ownStore.put('ns', key, _b(1));
+      await mobileCache.get('ns', key); // prime cache at gen=1
+      expect(mobileCache.cachedObjectCount, greaterThan(0));
+
+      // Advance the persisted $$genstate counter directly via MetaStore —
+      // out-of-band, not via a document write, so no writeEvent fires and
+      // CacheLayer's proactive eviction path never runs. Only onResume's
+      // poll-based re-check can catch this.
+      await ownStore.meta.incrementGenerationCounter('ns');
+
+      await mobileCache.onResume();
+      expect(
+        mobileCache.cachedObjectCount,
+        0,
+        reason:
+            'onResume must re-read the counter from the local-only '
+            '\$\$genstate namespace (MetaStore.kGenStateNamespace) and '
+            'evict stale entries, even when nothing wrote a document',
+      );
+
+      await mobileCache.close();
+    });
+
     // ── scan pass-through ─────────────────────────────────────────────────────
 
     test('scan delegates to underlying KvStore', () async {
@@ -492,6 +555,66 @@ void main() {
       final stream = cache.scanVersionHistory('history-ns', key);
       // Should emit at least one entry or complete without error.
       await expectLater(stream.toList(), completes);
+    });
+
+    // ── Cross-device cache invalidation after ingest (0.10.01 WI-13, #3) ────
+    //
+    // Defect #2 in the WI-13 plan: cross-device invalidation used to rest
+    // entirely on the (now-removed) replicated `$meta` gen value, because
+    // LsmEngine.ingestAt0 bumped no counter and emitted only '$sync' (which
+    // CacheLayer._onWriteEvent ignores). This proves the ingest-side
+    // bump+emit added in ingestAt0 makes B's cache see A's fresher ingested
+    // data, not a stale cache hit.
+    test("device B's cached get() reflects a peer's ingested data, not a stale "
+        'cache hit (WI-13 defect #2)', () async {
+      final (storeB, _) = await _openStore();
+      final cacheB = CacheLayer(store: storeB, tier: CacheTier.desktop);
+
+      const ns = 'notes';
+      const keyHex = '00000000000070008000000000000ab1';
+      final v1 = _b(1);
+      final v2 = _b(2);
+
+      // B's own old value, cached.
+      await storeB.put(ns, keyHex, v1);
+      expect(await cacheB.get(ns, keyHex), equals(v1));
+
+      // Flush to L0 before ingesting — LsmEngine.get() checks the active
+      // memtable unconditionally first, so an un-flushed entry would
+      // shadow the ingested (newer) data regardless of HLC (see the
+      // WI-14 dirty-flag cross-device test for the identical reasoning).
+      await storeB.flush();
+
+      // Device A's fresher value for the same key, at a later HLC,
+      // ingested as a synthetic peer SSTable.
+      final peerHlc = Hlc(DateTime.now().millisecondsSinceEpoch + 10000, 0);
+      final peerSst = _buildSingleEntrySst(
+        ns: ns,
+        keyHex: keyHex,
+        value: v2,
+        hlc: peerHlc,
+      );
+      final peerFilename = SstableInfo.flushName('devicea1', peerHlc, peerHlc);
+      await cacheB.ingestSstable(peerFilename, peerSst);
+
+      // No explicit delay needed: the gen bump + per-namespace writeEvent
+      // are emitted synchronously inside ingestAt0's already-awaited call,
+      // and CacheLayer._onWriteEvent's eviction is fire-and-forget but the
+      // generation-check in get() (belt-and-suspenders) covers the race
+      // regardless. Still allow one microtask turn for parity with the
+      // rest of this file's pattern.
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        await cacheB.get(ns, keyHex),
+        equals(v2),
+        reason:
+            "B's cache must reflect A's freshly ingested data, not a "
+            'stale cache hit that only ever worked by accident via a '
+            'replicated \$meta gen value',
+      );
+
+      await cacheB.close();
     });
   });
 }
