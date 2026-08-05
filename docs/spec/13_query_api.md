@@ -92,12 +92,14 @@ encode/decode to generated code (`freezed` / `json_serializable`):
 
 ```dart
 abstract interface class KmdbCodec<T> {
-  /// The document's stable, immutable key.
+  /// The document's stable, immutable key, or null (or empty) if [value]
+  /// does not yet carry one. A null/empty result is "keyless" — put() and
+  /// insert() mint a fresh key in that case.
   /// Must not change after a document is written.
-  String keyOf(T value);
+  String? keyOf(T value);
 
   /// Returns a new instance of [value] with [key] assigned to its identifier
-  /// field. Called by insert() after generating a new system key.
+  /// field. Called after minting a new system key for a keyless value.
   T withKey(T value, String key);
 
   /// Encode to a JSON-compatible map. CBOR encoding is applied by the
@@ -161,8 +163,8 @@ Rules:
    owns it entirely.
 2. `decode()` receives the map with `_id` pre-injected. Read `json['_id']` to
    reconstruct the key field in your typed model.
-3. `withKey()` stamps the key onto the typed model so that `insert()` can
-   return the document with its assigned `_id`.
+3. `withKey()` stamps the key onto the typed model so that `put()`/`insert()`
+   can return the document with its assigned `_id`.
 4. Secondary index paths must not start with `_`. Defining an index on a
    reserved path throws `ReservedIndexPathException` at `KmdbDatabase.open()`
    time.
@@ -172,7 +174,7 @@ Rules:
 ```dart
 class TaskCodec implements KmdbCodec<Task> {
   @override
-  String keyOf(Task value) => value.id;
+  String? keyOf(Task value) => value.id;
 
   @override
   Task withKey(Task value, String key) => Task(
@@ -275,8 +277,14 @@ to clean up side-effect entries (index postings, vector embeddings, ref counts).
 
 `KmdbDatabase.rawCollection(String name)` returns a
 `KmdbCollection<Map<String, dynamic>>` backed by the built-in
-`RawDocumentCodec`. All write pipeline layers run identically to a typed
-collection:
+`RawDocumentCodec`. Layers 1–3 of the write pipeline (validators, augmentors,
+post-write notifications) run identically to a typed collection. One field is
+the exception: `RawDocumentCodec.encode()` strips `_id` from the map before it
+reaches validators, so — unlike every other field — `_id` never flows through
+the pipeline as ordinary document content; it is the framework-owned key, not
+a document field. `RawDocumentCodec.keyOf()` reads `_id` from the map (or
+returns `null` if absent or not a `String`), so a map with no `_id` is
+keyless and `insert()`/`put()` mint a fresh key for it:
 
 ```dart
 final col = db.rawCollection('contacts');
@@ -328,16 +336,24 @@ against the schema before committing. Violations throw
 ### Write Methods
 
 ```dart
-// insert: throws DocumentAlreadyExistsException if key exists.
-Future<void> insert(T value);
+// insert: strict create. A keyless value (KmdbCodec.keyOf returns null or
+// empty) mints a fresh key and inserts, same as put()'s keyless path. A
+// keyed value throws ArgumentError — insert() must never silently duplicate
+// a document that already has an identity. Returns the stored document.
+Future<T> insert(T value);
 
-// replace: throws DocumentNotFoundException if key does not exist.
+// replace: throws ArgumentError if value is keyless; throws
+// DocumentNotFoundException if key does not exist.
 Future<void> replace(T value);
 
-// put: upsert — inserts if absent, replaces if present.
-Future<void> put(T value);
+// put: key-presence-driven upsert. A keyless value mints a fresh key and
+// inserts; a keyed value updates the existing document at that key (or
+// creates it at that key if absent). Returns the stored document with its
+// key populated — the only way to recover a key minted for a keyless value.
+Future<T> put(T value);
 
 // putMany: batch upsert. Atomic per-document; NOT atomic across all keys.
+// Discards each put()'s return value.
 Future<void> putMany(Iterable<T> values);
 
 // delete: no-op if the key does not exist.

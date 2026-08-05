@@ -98,10 +98,10 @@ is `true`.
 
 ## Write path
 
-Every `KmdbCollection.put()` or `delete()` call produces a companion `$ver:`
-entry in the **same `WriteBatch`** as the document write. This is guaranteed by
-the `VersionManager` augmentor registered in `KmdbDatabase`. The single batch
-contains:
+Every `KmdbCollection.put()`, `insert()`, `replace()`, or `delete()` call
+produces a companion `$ver:` entry in the **same `WriteBatch`** as the
+document write. This is guaranteed by the `VersionManager` augmentor
+registered in `KmdbDatabase`. The single batch contains:
 
 ```
 document write  ← main namespace put (or delete tombstone)
@@ -118,6 +118,28 @@ prevents one write prevents all — no partial state is possible after recovery.
 If versioning is **disabled** for a collection (`maxVersions: 0` and no
 `retentionDays`), the `VersionManager` augmentor emits no `$ver:` entries and
 the behaviour is identical to unversioned KMDB.
+
+### No-fork invariant
+
+Every `$ver:` write is keyed by the **same `docKey`** the write method passes
+to `_writeDocument` — the chain a write extends is entirely determined by
+which key the write method uses, never by a separate decision:
+
+- `put()`/`insert()` on a **keyless** value mint a fresh key `K` and write with
+  `oldDoc: null` — this **starts a new chain** at `K` (correct: it is a new
+  logical document).
+- `put()` on a **keyed** value with an existing document reads that document as
+  `oldDoc` before writing — this **appends** to the existing chain at that key.
+- `put()` on a **keyed** value with no existing document writes with
+  `oldDoc: null` at the caller-supplied key — this **starts a chain at that
+  key** (create-at-supplied-key).
+- `insert()` **rejects** a keyed value with `ArgumentError` rather than
+  minting a different key for it. This closes the one path that could
+  previously fork a chain: minting a fresh key `K'` for a value that already
+  carried key `K` left `K`'s chain un-extended while starting an orphaned
+  second chain under `K'` (see the SC-16 finding in
+  `docs/roadmap/0_10_01.md`). Because `K'` and `K` never coincide, no write
+  method can leave a document's history split across two keys.
 
 ## Delete semantics (soft delete)
 

@@ -73,7 +73,9 @@ void main() {
       final (db, out, err) = await _openDb();
       final col = db.rawCollection('notes');
       final key = UuidV7KeyGenerator().next();
-      await col.insert({'body': 'v1', '_id': key});
+      // Use put (not insert) so the explicit _id field is preserved as the
+      // key — insert() now throws on a value that already carries a key.
+      await col.put({'body': 'v1', '_id': key});
       await col.put({'body': 'v2', '_id': key});
 
       final ctx = _ctx(db, out: out, err: err);
@@ -116,7 +118,9 @@ void main() {
       final (db, out, err) = await _openDb();
       final col = db.rawCollection('notes');
       final key = UuidV7KeyGenerator().next();
-      await col.insert({'body': 'v1', '_id': key});
+      // Use put (not insert) so the explicit _id field is preserved as the
+      // key — insert() now throws on a value that already carries a key.
+      await col.put({'body': 'v1', '_id': key});
 
       final ctx = _ctx(db, out: out, err: err);
       // Use a valid-format HLC that doesn't exist in version history.

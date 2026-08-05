@@ -39,21 +39,19 @@ final class RawDocumentCodec implements KmdbCodec<Map<String, dynamic>> {
   /// Creates a [RawDocumentCodec].
   const RawDocumentCodec();
 
-  /// Returns the `_id` field value from [value] as the document key.
+  /// Returns the `_id` field value from [value] as the document key, or
+  /// `null` if `_id` is absent or not a [String].
   ///
-  /// Throws [StateError] if the `_id` field is absent or not a [String].
-  /// The `_id` field is always present when [withKey] has been called (i.e.
-  /// on documents returned from a [KmdbCollection] read operation).
+  /// A `null` result signals "keyless" to [KmdbCollection.put] and
+  /// [KmdbCollection.insert], which mint a fresh key in that case. The `_id`
+  /// field is present (and thus a key is returned) when [withKey] has been
+  /// called (i.e. on documents returned from a [KmdbCollection] read
+  /// operation) — a freshly-constructed map passed straight to `insert()`
+  /// typically has no `_id` and is correctly treated as keyless.
   @override
-  String keyOf(Map<String, dynamic> value) {
+  String? keyOf(Map<String, dynamic> value) {
     final id = value['_id'];
-    if (id is! String) {
-      throw StateError(
-        'RawDocumentCodec.keyOf: document missing _id field or _id is not a String. '
-        'Only call keyOf on documents returned from a KmdbCollection read.',
-      );
-    }
-    return id;
+    return id is String ? id : null;
   }
 
   /// Returns a copy of [value] with the `_id` field set to [key].

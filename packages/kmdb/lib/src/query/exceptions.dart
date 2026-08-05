@@ -55,23 +55,6 @@ final class SchemaValidationException implements Exception {
       '${violations.map((v) => v.toString()).join('; ')}';
 }
 
-/// Thrown by [KmdbCollection.insert] when a document with the same key already
-/// exists in the collection.
-final class DocumentAlreadyExistsException implements Exception {
-  const DocumentAlreadyExistsException(this.key, this.namespace);
-
-  /// The document key that caused the conflict.
-  final String key;
-
-  /// The collection namespace.
-  final String namespace;
-
-  @override
-  String toString() =>
-      'DocumentAlreadyExistsException: document "$key" already exists in '
-      'namespace "$namespace"';
-}
-
 /// Thrown by [KmdbCollection.replace] when no document with the given key
 /// exists in the collection.
 final class DocumentNotFoundException implements Exception {

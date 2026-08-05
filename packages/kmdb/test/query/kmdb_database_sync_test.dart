@@ -110,7 +110,7 @@ void main() {
       // Write a document and flush so it becomes an SSTable on disk.
       final col = db.rawCollection('things');
       final key = const UuidV7KeyGenerator().next();
-      await col.insert({'_id': key, 'name': 'widget'});
+      await col.put({'_id': key, 'name': 'widget'});
       await db.store.flush();
 
       await db.sync(syncAdapter: syncAdapter, localAdapter: localAdapter);
@@ -182,7 +182,7 @@ void main() {
 
       // Produce a flushed SSTable.
       final key = const UuidV7KeyGenerator().next();
-      await db.rawCollection('col').insert({'_id': key, 'v': 42});
+      await db.rawCollection('col').put({'_id': key, 'v': 42});
       await db.store.flush();
 
       await db.push(syncAdapter: syncAdapter, localAdapter: localAdapter);
@@ -202,8 +202,8 @@ void main() {
 
         final k1 = const UuidV7KeyGenerator().next();
         final k2 = const UuidV7KeyGenerator().next();
-        await db.rawCollection('wanted').insert({'_id': k1, 'a': 1});
-        await db.rawCollection('unwanted').insert({'_id': k2, 'b': 2});
+        await db.rawCollection('wanted').put({'_id': k1, 'a': 1});
+        await db.rawCollection('unwanted').put({'_id': k2, 'b': 2});
         await db.store.flush();
 
         // Only sync the 'wanted' namespace.
@@ -229,7 +229,7 @@ void main() {
       const root = 'mydb';
 
       final key = const UuidV7KeyGenerator().next();
-      await db.rawCollection('ns').insert({'_id': key, 'v': 1});
+      await db.rawCollection('ns').put({'_id': key, 'v': 1});
       await db.store.flush();
 
       await db.push(
@@ -312,8 +312,8 @@ void main() {
         // Register two user collections and one system-like collection.
         final k1 = const UuidV7KeyGenerator().next();
         final k2 = const UuidV7KeyGenerator().next();
-        await db.rawCollection('alpha').insert({'_id': k1, 'v': 1});
-        await db.rawCollection('beta').insert({'_id': k2, 'v': 2});
+        await db.rawCollection('alpha').put({'_id': k1, 'v': 1});
+        await db.rawCollection('beta').put({'_id': k2, 'v': 2});
         await db.store.flush();
 
         // sync with null syncNamespaces should not throw.
@@ -358,7 +358,7 @@ void main() {
 
         // Push from device A.
         final k = const UuidV7KeyGenerator().next();
-        await dbA.rawCollection('x').insert({'_id': k, 'n': 1});
+        await dbA.rawCollection('x').put({'_id': k, 'n': 1});
         await dbA.store.flush();
         await dbA.push(syncAdapter: syncAdapter, localAdapter: adapterA);
 

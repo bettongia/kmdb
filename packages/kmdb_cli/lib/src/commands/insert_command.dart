@@ -138,11 +138,13 @@ final class InsertCommand extends CliCommand {
     final col = ctx.rawCollection(collection);
     final inserted = <Map<String, dynamic>>[];
     for (final doc in docs) {
-      // col.insert() assigns a new UUIDv7 key and calls _writeDocument(),
-      // which runs all validators and augmentors before committing.
-      // The '_id' in the user's doc is stripped by RawDocumentCodec.encode()
-      // and the assigned key is re-injected via RawDocumentCodec.withKey().
-      final result = await col.insert(doc);
+      // col.insert() is a strict create: it throws ArgumentError if the
+      // value already carries a key (RawDocumentCodec.keyOf reads '_id').
+      // Strip any caller-supplied '_id' first so this command keeps its
+      // documented behaviour — a stray '_id' is silently discarded and a
+      // fresh system-generated key is assigned — rather than throwing.
+      final withoutId = Map<String, dynamic>.of(doc)..remove('_id');
+      final result = await col.insert(withoutId);
       inserted.add(result);
     }
 

@@ -64,14 +64,14 @@ void main() {
       expect(codec.keyOf(doc), equals('abc123'));
     });
 
-    test('keyOf throws StateError when _id is absent', () {
+    test('keyOf returns null when _id is absent', () {
       final doc = {'name': 'Alice'};
-      expect(() => codec.keyOf(doc), throwsA(isA<StateError>()));
+      expect(codec.keyOf(doc), isNull);
     });
 
-    test('keyOf throws StateError when _id is not a String', () {
+    test('keyOf returns null when _id is not a String', () {
       final doc = {'_id': 42, 'name': 'Alice'};
-      expect(() => codec.keyOf(doc), throwsA(isA<StateError>()));
+      expect(codec.keyOf(doc), isNull);
     });
 
     test('withKey returns copy with _id set', () {

@@ -100,6 +100,35 @@ void main() {
       expect(errSink.toString(), contains('"_ver"'));
     });
 
+    test('a --value document containing an _id still writes a new document '
+        '(key stripped, does not throw)', () async {
+      // Regression for SC-16 caller impact: KmdbCollection.insert() now
+      // throws ArgumentError on a value that already carries a key.
+      // InsertCommand must strip any caller-supplied '_id' first so a
+      // stray '_id' in user input mints a fresh key instead of throwing.
+      final outSink = _Sink();
+      final (db, ctx) = await _openCtx(out: outSink);
+      addTearDown(db.close);
+
+      final result = await const InsertCommand().execute(
+        ctx,
+        ['docs'],
+        {'value': '{"_id": "caller-supplied-key", "name": "Alice"}'},
+      );
+      expect(result, isTrue);
+
+      // The stored document's _id is a minted UUIDv7, not the caller's
+      // string — proving the key was stripped rather than honoured or
+      // rejected.
+      final col = ctx.rawCollection('docs');
+      var storedKey = '';
+      await for (final entry in db.store.scan('docs')) {
+        storedKey = entry.key;
+      }
+      expect(storedKey, isNot(equals('caller-supplied-key')));
+      expect(await col.exists(storedKey), isTrue);
+    });
+
     test('invalid JSON from --value returns false with error', () async {
       final errSink = _Sink();
       final (db, ctx) = await _openCtx(err: errSink);

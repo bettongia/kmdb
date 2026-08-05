@@ -41,10 +41,20 @@ import 'query_plan.dart';
 ///
 /// ## Keys
 ///
-/// KMDB uses UUIDv7 identifiers for all records. New documents are
-/// automatically assigned a system-generated key when created via [insert].
-/// Existing documents already carry a system-assigned key that is preserved
-/// during [put] or [replace].
+/// KMDB uses UUIDv7 identifiers for all records. Whether a write is treated as
+/// a create or an update is driven entirely by whether [KmdbCodec.keyOf]
+/// returns a key for the value being written (`null` or empty ⇒ keyless):
+///
+/// - [put] is a **key-presence upsert**: a keyless value mints a fresh
+///   system-generated key and inserts it; a keyed value updates the existing
+///   document at that key. It returns the stored document with its key
+///   populated — the only way to recover a minted key.
+/// - [insert] is a **strict create**: a keyless value mints and inserts (same
+///   as [put]'s keyless path); a keyed value throws [ArgumentError], since
+///   `insert` must never silently duplicate a document that already has an
+///   identity.
+/// - [replace] is a **strict update**: requires a keyed value and throws
+///   [DocumentNotFoundException] if no document exists at that key.
 ///
 /// All keys must be valid UUIDv7 hex strings. Format validation is enforced
 /// at the storage boundary.
@@ -162,23 +172,41 @@ final class KmdbCollection<T> {
 
   // ── Write methods ──────────────────────────────────────────────────────────
 
-  /// Inserts [value] as a new document.
+  /// Returns [value]'s key, or `null` if it carries none.
   ///
-  /// Assigns a new system-generated UUIDv7 key to the document via
-  /// [KmdbCodec.withKey].
+  /// Centralises the "keyless" detection shared by [put], [insert], and
+  /// [replace]: [KmdbCodec.keyOf] may return `null` for a not-yet-persisted
+  /// value, and by convention an empty string is also treated as keyless (the
+  /// established sentinel used by typed codecs, e.g. `_Task(id: '')`, that
+  /// cannot express `null` for a non-nullable id field). An empty string is
+  /// never a valid 32-character UUIDv7 hex key, so this can never mask a real
+  /// key.
+  String? _keyOrNull(T value) {
+    final k = codec.keyOf(value);
+    return (k == null || k.isEmpty) ? null : k;
+  }
+
+  /// Inserts [value] as a **new** document — strict create semantics.
   ///
-  /// Returns the updated document with its assigned key.
+  /// If [value] is keyless (per [KmdbCodec.keyOf]), assigns a new
+  /// system-generated UUIDv7 key via [KmdbCodec.withKey] and writes it.
   ///
-  /// Throws [DocumentAlreadyExistsException] if a document with the same key
-  /// already exists (rare for UUIDv7).
+  /// If [value] already carries a key, throws [ArgumentError] — `insert` must
+  /// never silently duplicate a document that already has an identity. Use
+  /// [put] to upsert an existing document.
+  ///
+  /// Returns the stored document with its assigned key.
+  ///
   /// Throws [SchemaValidationException] if a [CollectionSchema] is registered
   /// for this collection and the document violates it.
   Future<T> insert(T value) async {
-    final key = keyGenerator.next();
-    final existing = await _db.cache.get(namespace, key);
-    if (existing != null) {
-      throw DocumentAlreadyExistsException(key, namespace);
+    if (_keyOrNull(value) != null) {
+      throw ArgumentError(
+        'insert() requires a value with no key; use put() to upsert an '
+        'existing document.',
+      );
     }
+    final key = keyGenerator.next();
     final newValue = codec.withKey(value, key);
     await _writeDocument(
       key: key,
@@ -191,11 +219,18 @@ final class KmdbCollection<T> {
   /// Replaces the document with the same key as [value].
   ///
   /// The key returned by [KmdbCodec.keyOf] must be a valid UUIDv7 hex string.
+  /// Throws [ArgumentError] if [value] is keyless (no document to replace).
   /// Throws [DocumentNotFoundException] if no document with that key exists.
   /// Throws [SchemaValidationException] if a [CollectionSchema] is registered
   /// for this collection and the replacement document violates it.
   Future<void> replace(T value) async {
-    final key = codec.keyOf(value);
+    final key = _keyOrNull(value);
+    if (key == null) {
+      throw ArgumentError(
+        'replace() requires a value with a key identifying the document to '
+        'replace; use insert() to create a new document.',
+      );
+    }
     final existingBytes = await _db.cache.get(namespace, key);
     if (existingBytes == null) {
       throw DocumentNotFoundException(key, namespace);
@@ -207,24 +242,48 @@ final class KmdbCollection<T> {
     await _writeDocument(key: key, newDoc: codec.encode(value), oldDoc: oldDoc);
   }
 
-  /// Upserts [value] — inserts if absent, replaces if present.
+  /// Upserts [value] — key-presence-driven: a keyless [value] mints a fresh
+  /// UUIDv7 and inserts; a keyed [value] updates the existing document at
+  /// that key (creating it if the key is not yet present).
   ///
-  /// The key returned by [KmdbCodec.keyOf] must be a valid UUIDv7 hex string.
+  /// Returns the stored document with its key populated — this is the only
+  /// way to recover a key minted for a keyless [value].
+  ///
   /// Throws [SchemaValidationException] if a [CollectionSchema] is registered
   /// for this collection and the document violates it.
-  Future<void> put(T value) async {
-    final key = codec.keyOf(value);
+  Future<T> put(T value) async {
+    final key = _keyOrNull(value);
+    if (key == null) {
+      // Keyless: mint a fresh key and insert, mirroring insert()'s keyless
+      // path. This is a brand-new logical document, so oldDoc is null and a
+      // fresh $ver: chain starts under the minted key.
+      final newKey = keyGenerator.next();
+      final newValue = codec.withKey(value, newKey);
+      await _writeDocument(
+        key: newKey,
+        newDoc: codec.encode(newValue),
+        oldDoc: null,
+      );
+      return newValue;
+    }
+    // Keyed: read the existing document (if any) so the version augmentor
+    // appends to its $ver: chain rather than starting a new one. If no
+    // document exists at this key yet, this creates one at the caller-
+    // supplied key (oldDoc: null starts a chain at that key).
     final existingBytes = await _db.cache.get(namespace, key);
     final oldDoc = existingBytes != null
         ? await ValueCodec.decode(existingBytes, encryption: _db.encryption)
         : null;
     await _writeDocument(key: key, newDoc: codec.encode(value), oldDoc: oldDoc);
+    return value;
   }
 
   /// Upserts each value in [values] as individual atomic writes.
   ///
   /// Each document is written atomically, but the batch as a whole is NOT
-  /// guaranteed to be atomic across all keys.
+  /// guaranteed to be atomic across all keys. [put]'s return value (the
+  /// stored document, with any minted key) is discarded for each value; call
+  /// [put] directly if you need to recover minted keys.
   Future<void> putMany(Iterable<T> values) async {
     for (final value in values) {
       await put(value);

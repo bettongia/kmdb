@@ -153,7 +153,10 @@ void main() {
 
     test('insert creates a version entry', () async {
       final (db, col) = await _open();
-      final note = await col.insert(_Note(id: _key(), body: 'inserted'));
+      // insert() is now a strict-create guard (SC-16): it mints a key only
+      // for a keyless value, so pass the blank-id sentinel here rather than
+      // a caller-supplied key.
+      final note = await col.insert(_Note(id: '', body: 'inserted'));
       final versions = await col.getVersions(note.id);
       expect(versions.length, equals(1));
       expect(versions.first.value?['body'], equals('inserted'));

@@ -188,8 +188,11 @@ void main() {
     test('valid document succeeds', () async {
       final (db, col) = await _openWithSchema();
       addTearDown(db.close);
+      // insert() is a strict-create guard (SC-16): it mints a key only for
+      // a keyless value, so pass the blank-id sentinel rather than a
+      // caller-supplied key.
       await expectLater(
-        col.insert(_Contact(id: _key(), name: 'Bob', email: 'b@c.com')),
+        col.insert(_Contact(id: '', name: 'Bob', email: 'b@c.com')),
         completes,
       );
     });
@@ -199,7 +202,7 @@ void main() {
       addTearDown(db.close);
       // Empty name violates minLength: 1.
       await expectLater(
-        col.insert(_Contact(id: _key(), name: '', email: 'b@c.com')),
+        col.insert(_Contact(id: '', name: '', email: 'b@c.com')),
         throwsA(isA<SchemaValidationException>()),
       );
     });
