@@ -217,8 +217,9 @@ void main() {
       final sub = col.all().watch().listen(events.add);
       addTearDown(sub.cancel);
 
-      // Insert a document — should trigger the watch() stream.
-      await col.insert(_Doc(id: _key(), name: 'First'));
+      // Insert a document — should trigger the watch() stream. insert() is
+      // a strict-create guard (SC-16): pass a keyless value so it mints.
+      await col.insert(_Doc(id: '', name: 'First'));
 
       // Allow the debounced stream to fire.
       await Future<void>.delayed(const Duration(milliseconds: 100));
@@ -323,8 +324,9 @@ void main() {
       final (db, col) = await _open();
       addTearDown(db.close);
 
-      final k1 = _key();
-      await col.insert(_Doc(id: k1, name: 'Explained'));
+      // insert() is a strict-create guard (SC-16): pass a keyless value so
+      // it mints rather than a caller-supplied key.
+      await col.insert(_Doc(id: '', name: 'Explained'));
 
       // explainedGet is a delegation helper on KmdbCollection.
       final query = col.all();
@@ -353,7 +355,9 @@ void main() {
       final (db, col) = await _open();
       addTearDown(db.close);
 
-      await col.insert(_Doc(id: _key(), name: 'X'));
+      // insert() is a strict-create guard (SC-16): pass a keyless value so
+      // it mints rather than a caller-supplied key.
+      await col.insert(_Doc(id: '', name: 'X'));
       expect(await col.all().any(), isTrue);
     });
 

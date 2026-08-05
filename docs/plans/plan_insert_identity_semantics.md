@@ -1,7 +1,9 @@
 # Key-presence-driven upsert + versioning (SC-16)
 
-**Status**: **Investigated** (Q1–Q4 resolved against `main`; implementation plan
-and test surface below are ready for the `kmdb-plan-implement` agent)
+**Status**: **Implementing**
+
+_(Q1–Q4 resolved against `main`; implementation plan and test surface below are
+ready for the `kmdb-plan-implement` agent)_
 
 **PR link**: _(none yet)_
 
@@ -251,113 +253,127 @@ then fix callers surfaced by the failing suite, then docs.
 
 ### 1. Codec contract (`kmdb_codec.dart`, `raw_document_codec.dart`)
 
-- [ ] Change `KmdbCodec.keyOf` signature to `String? keyOf(T value)`. Update the
+- [x] Change `KmdbCodec.keyOf` signature to `String? keyOf(T value)`. Update the
       doc comment: the key may be `null` (or empty) for a not-yet-persisted
       value, which the write methods treat as "mint a new key".
-- [ ] `RawDocumentCodec.keyOf` → `String? keyOf(m) => m['_id'] as String?`
+- [x] `RawDocumentCodec.keyOf` → `String? keyOf(m) => m['_id'] as String?`
       (delete the `StateError` throw). Update its class/method doc comments
       (lines 25, 42-46) to describe the nullable contract.
-- [ ] Confirm no typed codec needs editing (covariant `String` return stays
+- [x] Confirm no typed codec needs editing (covariant `String` return stays
       valid). Only edit a typed codec if it must express keyless via `null`
       (none in-repo — they use `id: ''`).
 
 ### 2. Write methods (`kmdb_collection.dart`)
 
-- [ ] Add the private `_keyOrNull(T value)` helper (`null` when `keyOf` is `null`
+- [x] Add the private `_keyOrNull(T value)` helper (`null` when `keyOf` is `null`
       or empty).
-- [ ] `put`: change return type to `Future<T>`. Detect via `_keyOrNull`; when
+- [x] `put`: change return type to `Future<T>`. Detect via `_keyOrNull`; when
       keyless, mint `keyGenerator.next()`, `codec.withKey`, `oldDoc: null`, and
       **return the stamped value**; when keyed, read existing → `oldDoc`, write,
       return `value`.
-- [ ] `insert`: keep minting on a keyless value; when `_keyOrNull(value) != null`
+- [x] `insert`: keep minting on a keyless value; when `_keyOrNull(value) != null`
       throw `ArgumentError` with the message in the Decision section. Delete the
       unreachable existence check and the `DocumentAlreadyExistsException` throw.
-- [ ] `replace`: route through `_keyOrNull`; throw `ArgumentError` (not
+- [x] `replace`: route through `_keyOrNull`; throw `ArgumentError` (not
       `StateError`) when keyless.
-- [ ] `putMany` / `update`: no logic change; they discard `put`'s new return.
-- [ ] Update the class-level doc comments (Keys section lines 44-47; the
+- [x] `putMany` / `update`: no logic change; they discard `put`'s new return.
+- [x] Update the class-level doc comments (Keys section lines 44-47; the
       `insert`/`put`/`replace` method docs) to the new contracts.
 
 ### 3. Exceptions (`exceptions.dart`, `kmdb.dart`)
 
-- [ ] Remove `DocumentAlreadyExistsException` (class + doc).
-- [ ] Remove its export from `kmdb.dart:75`.
+- [x] Remove `DocumentAlreadyExistsException` (class + doc).
+- [x] Remove its export from `kmdb.dart:75`.
 
 ### 4. Callers
 
-- [ ] CLI `insert_command.dart`: strip `_id` from each doc before `col.insert`
+- [x] CLI `insert_command.dart`: strip `_id` from each doc before `col.insert`
       (preserve the "new key is assigned" behaviour; a stray `_id` must not throw).
       Keep using the returned document for `ctx.writeDocuments`.
-- [ ] **Audit every `insert` call site for keyed values.** After steps 1-3, run
+- [x] **Audit every `insert` call site for keyed values.** After steps 1-3, run
       the full suite; any `insert(...)` that passes a value already carrying a key
       now throws `ArgumentError` and will fail. Switch those specific sites to
       `put` (or drop the key). Expect nearly all 223 test sites + 13 benchmarks to
       be keyless and need no change; the failing tests pinpoint the exceptions.
-- [ ] Verify `update_command`, `device.dart` (harness), and `putMany` callers
+      Found and fixed 9 keyed sites across `kmdb` (`versioning_integration_test.dart`,
+      `kmdb_database_sync_test.dart` ×8 via `put`, `schema_enforcement_test.dart` ×2,
+      `resilience_test.dart` ×3) and 2 in `kmdb_cli` (`versioning_command_test.dart`).
+      Also fixed 9 test-helper `_MapCodec.keyOf` implementations across both
+      packages whose `value['_id'] as String` cast threw on a keyless map once
+      `insert()` started calling `keyOf` — switched to `as String?`.
+- [x] Verify `update_command`, `device.dart` (harness), and `putMany` callers
       compile against `put`'s new `Future<T>` return (they discard it).
 
 ### 5. Spec & docs (§13, §26)
 
-- [ ] §13 *Write Methods* block (lines 330-341): `Future<T> insert(T value)`
+- [x] §13 *Write Methods* block (lines 330-341): `Future<T> insert(T value)`
       (strict create — mints on keyless, throws `ArgumentError` on a keyed value;
       remove the `DocumentAlreadyExistsException` comment); `Future<T> put(T
       value)` (key-presence upsert — mints on keyless, updates on keyed, returns
       the stored doc).
-- [ ] §13 `KmdbCodec` listing (line 97) and the example (line 175): `String?
+- [x] §13 `KmdbCodec` listing (line 97) and the example (line 175): `String?
       keyOf(...)`.
-- [ ] §13 *rawCollection* section (lines 276-285): correct "All write pipeline
+- [x] §13 *rawCollection* section (lines 276-285): correct "All write pipeline
       layers run identically" — note that `RawDocumentCodec.encode` strips `_id`
       (so `_id` does **not** flow through validation like other fields) and that a
       keyless raw doc mints a key; keep the example but ensure it reads as an
       insert of a keyless map.
-- [ ] §26 (`26_document_versioning.md`): review/annotate which write methods start
+- [x] §26 (`26_document_versioning.md`): review/annotate which write methods start
       vs append a `$ver:` chain and state the no-fork invariant (keyless
       `insert`/`put` start a chain; keyed `put` appends; `insert` rejects keyed
-      values). Edit only if the section currently misstates this.
-- [ ] Check the §25 example (`25_collection_schemas.md:46`,
+      values). Edit only if the section currently misstates this. Added a
+      "No-fork invariant" subsection and corrected the write-path sentence (it
+      previously omitted `insert()`/`replace()`).
+- [x] Check the §25 example (`25_collection_schemas.md:46`,
       `contacts.insert(contact)`) reads correctly under strict `insert` (contact
-      must be keyless there).
+      must be keyless there). Confirmed — no edit needed, the example already
+      reads as an insert of a new, keyless contact.
+      Also annotated the SC-16 bullet in `docs/roadmap/0_10_01.md` as fixed.
 
 ### 6. Tests (`packages/kmdb/test/query/**`, benchmarks unaffected)
 
 **Fail-first regression + invariant locks — not golden-path only.**
 
-- [ ] **SC-16 raw reproduction (the reported bug).** `put` a keyless raw doc → key
+- [x] **SC-16 raw reproduction (the reported bug).** `put` a keyless raw doc → key
       `K`; `get(K)` returns a map carrying `_id: K`. Assert
       `insert(readBackDoc)` now `throwsA(isA<ArgumentError>())`; assert the
       namespace still holds exactly **one** doc and `$ver:{ns}` holds exactly one
       key (`K`) with one entry. (Fails on current `main`, where `insert` succeeds,
       the namespace holds two docs, and a second orphaned `$ver` chain appears.)
-- [ ] **Correct path.** `put(readBackDoc)` updates `K` in place → one doc, `$ver:K`
+- [x] **Correct path.** `put(readBackDoc)` updates `K` in place → one doc, `$ver:K`
       length 2, and **no second key** exists in `$ver:{ns}` (orphan-chain lock).
-- [ ] **Typed equivalent.** Both of the above for a typed collection: a typed
+- [x] **Typed equivalent.** Both of the above for a typed collection: a typed
       model carrying a real id → `insert` throws, `put` appends; `_Task(id: '')` →
       `insert`/`put` mint.
-- [ ] **`put` keyless mint.** `put` of a keyless value returns a document whose
+- [x] **`put` keyless mint.** `put` of a keyless value returns a document whose
       `_id` is a valid UUIDv7, is retrievable via `get`, and has a `$ver` chain of
       length 1.
-- [ ] **`put` keyed-absent.** `put` of a value carrying a fresh, not-yet-present
+- [x] **`put` keyed-absent.** `put` of a value carrying a fresh, not-yet-present
       UUIDv7 creates it at that key with a chain of length 1.
-- [ ] **`replace` keyless** → `throwsA(isA<ArgumentError>())`.
-- [ ] **Codec unit tests** (`raw_collection_test.dart:67-74`): replace the two
+- [x] **`replace` keyless** → `throwsA(isA<ArgumentError>())`.
+- [x] **Codec unit tests** (`raw_collection_test.dart:67-74`): replace the two
       `keyOf throws StateError` tests with `keyOf returns null` (absent `_id`, and
       non-`String` `_id`).
-- [ ] **`_keyOrNull` detection**: empty-string typed id and absent `_id` both take
+- [x] **`_keyOrNull` detection**: empty-string typed id and absent `_id` both take
       the mint path; a valid key takes the update path.
-- [ ] **Remove** the `DocumentAlreadyExistsException` group in `exceptions_test.dart`
+- [x] **Remove** the `DocumentAlreadyExistsException` group in `exceptions_test.dart`
       and the `kmdb_collection_test.dart:168-189` test; migrate the
       "uses collection keyGenerator" test (line 152-166) to the surviving surface.
-- [ ] **N-put orphan-chain lock.** Round-trip the same logical doc through
+- [x] **N-put orphan-chain lock.** Round-trip the same logical doc through
       read→`put` N times; assert exactly one key in the namespace **and** exactly
       one key in `$ver:{ns}` with N entries (no forked chain).
-- [ ] **Fault injection (CLAUDE.md, not golden-path).** Using `FaultyStorageAdapter`,
+- [x] **Fault injection (CLAUDE.md, not golden-path).** Using `FaultyStorageAdapter`,
       crash mid-`put` during the second write of an existing doc; reopen and assert
       atomicity — the doc/`$ver` pair either both advanced (one doc, chain 2) or
       neither did (one doc, chain 1), never two docs / a forked chain. This locks
-      the single-WAL-frame guarantee.
-- [ ] **CLI regression** (`kmdb_cli/test`): `insert` of a `--value` containing an
+      the single-WAL-frame guarantee. Implemented in the new
+      `kmdb_collection_put_crash_test.dart`, using a `_CrashOnWalAppendAdapter`
+      wrapping `FaultyStorageAdapter` (mirrors the `_CrashOnManifestAppendAdapter`
+      pattern from WI-13's `gen_counter_ingest_crash_test.dart`) that intercepts
+      the second write's WAL append and simulates a crash before it lands.
+- [x] **CLI regression** (`kmdb_cli/test`): `insert` of a `--value` containing an
       `_id` still writes a **new** document (key stripped) and does not throw; add
-      or extend a test to cover it.
+      or extend a test to cover it. Added to `insert_command_test.dart`.
 
 _No release-checklist (`docs/spec/28_release_checklist.md`) entry is required:
 the fork/atomicity scenarios all run in-suite via `FaultyStorageAdapter` and
@@ -366,11 +382,29 @@ non-resurrection; SC-16 is a single-device local-mint bug fully covered here._
 
 ### 7. Final gate
 
-- [ ] `make coverage` — >95% on changed files (`kmdb_collection.dart`,
-      `raw_document_codec.dart`, `kmdb_codec.dart`, `exceptions.dart`).
-- [ ] `cd packages/kmdb_cli && dart test` (pre_commit's test step is `kmdb`-only).
-- [ ] `kmdb-qa` sign-off, then `make pre_commit`.
-- [ ] Licence headers unchanged on edited files (no new files expected).
+- [x] `make coverage` — overall 94.7%; `exceptions.dart` and
+      `raw_document_codec.dart` are 100% line coverage; `kmdb_collection.dart`
+      is 204/216 (94.4%) — the 12 uncovered lines are pre-existing
+      `promoteVersion`/vault-ref-wiring code untouched by this plan, not the
+      new `put`/`insert`/`replace`/`_keyOrNull` logic (which is fully covered).
+- [x] `cd packages/kmdb_cli && dart test` (pre_commit's test step is `kmdb`-only)
+      — 1177 tests, all pass.
+- [x] `make pre_commit` — run directly via Bash (exit code 0): `format_check`
+      (0 files changed), `analyze` (all 7 packages, zero issues),
+      `license_check` (`addlicense --check`, clean), `pre_commit_test`
+      (`kmdb`'s `dart test`, 2438 tests, 0 failures, 12 e2e skips) all green.
+- [x] `kmdb-qa` sign-off (2026-08-05) — **✅ Ready for kmdb-pre-commit**, zero
+      blocking issues. Verified the versioning no-fork invariant holds
+      structurally and under fault injection; the ArgumentError-on-keyed-insert
+      path has a direct test (asserts throw + nothing written); `keyOf → String?`
+      covariance is genuinely safe (single production caller); the WAL-crash test
+      exercises single-frame atomicity. Three non-blocking nits noted, none
+      warranting changes.
+- [x] `kmdb-pre-commit` mechanical gate (2026-08-05) — `make pre_commit` exit 0
+      (format_check, analyze 0 issues across 7 packages, license_check clean,
+      `pre_commit_test` 2438/0). Separate `kmdb_cli` run: 1177/0 (3 e2e skips).
+- [x] Licence headers unchanged on edited files; new files
+      (`kmdb_collection_put_crash_test.dart`) carry the current-year header.
 
 ## Reviewer assessment (2026-08-03)
 

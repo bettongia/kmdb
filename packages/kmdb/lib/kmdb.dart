@@ -72,7 +72,6 @@ export 'src/query/write_augmentor.dart' show WriteAugmentor;
 export 'src/query/write_validator.dart' show WriteValidator;
 export 'src/query/exceptions.dart'
     show
-        DocumentAlreadyExistsException,
         DocumentNotFoundException,
         IndexRebuildEvent,
         ReservedFieldException,

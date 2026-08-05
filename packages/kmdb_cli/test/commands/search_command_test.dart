@@ -58,7 +58,7 @@ final class _MapCodec implements KmdbCodec<Map<String, dynamic>> {
       Map.of(value)..remove('_id');
 
   @override
-  String keyOf(Map<String, dynamic> value) => value['_id'] as String;
+  String? keyOf(Map<String, dynamic> value) => value['_id'] as String?;
 
   @override
   Map<String, dynamic> withKey(Map<String, dynamic> value, String key) => {

@@ -133,6 +133,35 @@ void main() {
       expect(result!.title, equals('Updated'));
       await db.close();
     });
+
+    test('put of a keyless value mints a fresh key and returns it', () async {
+      final (db, col) = await _open();
+      final result = await col.put(_Task(id: '', title: 'Mint me'));
+
+      // The returned document carries the minted key — the only way to
+      // recover it for a keyless put().
+      expect(result.id, isNotEmpty);
+      expect(await col.get(result.id), isNotNull);
+
+      // A brand-new logical document starts a fresh $ver: chain of length 1.
+      final versions = await col.getVersions(result.id);
+      expect(versions, hasLength(1));
+      await db.close();
+    });
+
+    test('put of a keyed value with an absent key creates it at that key '
+        'with a chain of length 1', () async {
+      final (db, col) = await _open();
+      final id = _key();
+      final result = await col.put(_Task(id: id, title: 'Created at key'));
+
+      expect(result.id, equals(id));
+      expect((await col.get(id))!.title, equals('Created at key'));
+
+      final versions = await col.getVersions(id);
+      expect(versions, hasLength(1));
+      await db.close();
+    });
   });
 
   // ── insert / replace ──────────────────────────────────────────────────────
@@ -165,26 +194,154 @@ void main() {
       await db.close();
     });
 
-    test('throws DocumentAlreadyExistsException if key exists', () async {
+    test('throws ArgumentError if value already carries a key', () async {
       final (db, col) = await _open();
-      // Force same key by resetting generator or just using two inserts
-      // if it was random, but here we can just use put then insert with same key.
+      // insert() is a strict-create guard: a value that already carries a
+      // key must never be silently duplicated under a fresh key (the SC-16
+      // bug). It throws instead of minting a second copy.
       final id = '00000000000070008000000000000001';
       final task = _Task(id: id, title: 'Existing');
+
+      expect(() => col.insert(task), throwsA(isA<ArgumentError>()));
+      // Nothing was written — the guard fires before any I/O.
+      expect(await col.get(id), isNull);
+      await db.close();
+    });
+
+    test(
+      'the SC-16 raw-doc silent-duplicate reproduction (read-back doc)',
+      () async {
+        // Reproduces the reported bug: a keyless raw doc is put (mints key
+        // K), read back (carrying _id: K), then passed to insert(). On
+        // unfixed main this silently mints a NEW key and writes a second
+        // copy under it, orphaning K's $ver: chain. Fixed: insert() must
+        // throw and the namespace must still hold exactly one document.
+        final adapter = MemoryStorageAdapter();
+        final db = await KmdbDatabase.open(
+          path: '/db',
+          adapter: adapter,
+          config: KvStoreConfig.forTesting(),
+        );
+        final raw = db.rawCollection('contacts');
+
+        final inserted = await raw.insert({'name': 'Alice'});
+        final key = inserted['_id'] as String;
+        final readBack = await raw.get(key);
+        expect(readBack, isNotNull);
+        expect(readBack!['_id'], equals(key));
+
+        await expectLater(raw.insert(readBack), throwsA(isA<ArgumentError>()));
+
+        // Exactly one document exists in the namespace.
+        var count = 0;
+        await for (final _ in db.store.scan('contacts')) {
+          count++;
+        }
+        expect(count, equals(1));
+
+        // Exactly one key exists in the $ver: chain, with a single entry.
+        final versions = await raw.getVersions(key);
+        expect(versions, hasLength(1));
+
+        await db.close();
+      },
+    );
+
+    test('put(readBackDoc) updates in place — no orphaned chain', () async {
+      // The correct path for the SC-16 scenario: put() (not insert()) on a
+      // read-back doc updates K in place rather than forking a new chain.
+      final adapter = MemoryStorageAdapter();
+      final db = await KmdbDatabase.open(
+        path: '/db',
+        adapter: adapter,
+        config: KvStoreConfig.forTesting(),
+      );
+      final raw = db.rawCollection('contacts');
+
+      final inserted = await raw.insert({'name': 'Alice'});
+      final key = inserted['_id'] as String;
+      final readBack = await raw.get(key);
+      final updated = Map<String, dynamic>.of(readBack!)..['name'] = 'Alicia';
+      await raw.put(updated);
+
+      var count = 0;
+      await for (final _ in db.store.scan('contacts')) {
+        count++;
+      }
+      expect(count, equals(1));
+
+      final versions = await raw.getVersions(key);
+      expect(versions, hasLength(2));
+
+      final doc = await raw.get(key);
+      expect(doc!['name'], equals('Alicia'));
+
+      await db.close();
+    });
+
+    test('typed equivalent: insert throws for a real id, put appends; '
+        'a blank id mints on both', () async {
+      final (db, col) = await _open();
+
+      // A typed model carrying a real (caller-supplied) id: insert()
+      // rejects it, put() appends to its chain.
+      final id = _key();
+      final task = _Task(id: id, title: 'Has id');
+      expect(() => col.insert(task), throwsA(isA<ArgumentError>()));
+      expect(await col.get(id), isNull); // insert() wrote nothing
+
       await col.put(task);
+      await col.put(_Task(id: id, title: 'Has id v2'));
+      final versions = await col.getVersions(id);
+      expect(versions, hasLength(2));
 
-      // We need to control the generator to trigger the collision in insert()
-      final col2 = KmdbCollection(
-        namespace: 'tasks',
-        codec: _codec,
-        database: db,
-        keyGenerator: SequentialKeyGenerator(start: 1),
-      );
+      // The typed keyless sentinel (`id: ''`) mints on both insert() and
+      // put(), same as the raw-doc keyless case above.
+      final insertedBlank = await col.insert(_Task(id: '', title: 'Blank'));
+      expect(insertedBlank.id, isNotEmpty);
+      expect(await col.getVersions(insertedBlank.id), hasLength(1));
 
-      expect(
-        () => col2.insert(_Task(id: '', title: 'Collision')),
-        throwsA(isA<DocumentAlreadyExistsException>()),
+      final putBlank = await col.put(_Task(id: '', title: 'Blank2'));
+      expect(putBlank.id, isNotEmpty);
+      expect(putBlank.id, isNot(equals(insertedBlank.id)));
+      expect(await col.getVersions(putBlank.id), hasLength(1));
+
+      await db.close();
+    });
+
+    test('N-put orphan-chain lock: repeated read-modify-put round trips never '
+        'fork a second key or chain', () async {
+      final adapter = MemoryStorageAdapter();
+      final db = await KmdbDatabase.open(
+        path: '/db',
+        adapter: adapter,
+        config: KvStoreConfig.forTesting(),
       );
+      final raw = db.rawCollection('contacts');
+
+      final inserted = await raw.insert({'name': 'v0'});
+      final key = inserted['_id'] as String;
+
+      const roundTrips = 5;
+      for (var i = 1; i <= roundTrips; i++) {
+        final current = await raw.get(key);
+        final updated = Map<String, dynamic>.of(current!)..['name'] = 'v$i';
+        await raw.put(updated);
+      }
+
+      // Exactly one document in the namespace — no forked key.
+      var count = 0;
+      await for (final _ in db.store.scan('contacts')) {
+        count++;
+      }
+      expect(count, equals(1));
+
+      // Exactly one $ver: chain, with one entry per write (initial insert
+      // + each round trip).
+      final versions = await raw.getVersions(key);
+      expect(versions, hasLength(roundTrips + 1));
+
+      expect((await raw.get(key))!['name'], equals('v$roundTrips'));
       await db.close();
     });
   });
@@ -205,6 +362,50 @@ void main() {
         () => col.replace(_Task(id: _key(), title: 'Ghost')),
         throwsA(isA<DocumentNotFoundException>()),
       );
+      await db.close();
+    });
+
+    test('throws ArgumentError for a keyless value', () async {
+      final (db, col) = await _open();
+      expect(
+        () => col.replace(_Task(id: '', title: 'No key')),
+        throwsA(isA<ArgumentError>()),
+      );
+      await db.close();
+    });
+  });
+
+  // ── keyless detection (_keyOrNull) ────────────────────────────────────────
+
+  group('keyless detection', () {
+    test('empty-string typed id takes the mint path on put', () async {
+      final (db, col) = await _open();
+      final result = await col.put(_Task(id: '', title: 'Blank id'));
+      expect(result.id, isNotEmpty);
+      await db.close();
+    });
+
+    test('absent _id on a raw doc takes the mint path on put', () async {
+      final adapter = MemoryStorageAdapter();
+      final db = await KmdbDatabase.open(
+        path: '/db',
+        adapter: adapter,
+        config: KvStoreConfig.forTesting(),
+      );
+      final raw = db.rawCollection('contacts');
+      final result = await raw.put({'name': 'No id'});
+      expect(result['_id'], isA<String>());
+      expect((result['_id'] as String), isNotEmpty);
+      await db.close();
+    });
+
+    test('a valid key takes the update path on put', () async {
+      final (db, col) = await _open();
+      final id = _key();
+      await col.put(_Task(id: id, title: 'First'));
+      final result = await col.put(_Task(id: id, title: 'Second'));
+      expect(result.id, equals(id));
+      expect(await col.getVersions(id), hasLength(2));
       await db.close();
     });
   });

@@ -67,15 +67,23 @@
 /// [Map<String, dynamic>] produced by [encode] — the codec itself deals only
 /// with JSON-compatible maps.
 abstract interface class KmdbCodec<T> {
-  /// Returns the document's stable, immutable key.
+  /// Returns the document's stable, immutable key, or `null` (or an empty
+  /// string) if [value] does not yet carry one.
   ///
   /// Must not change after a document is written. KMDB uses this key to
   /// identify the document in the LSM store and in secondary indexes.
   ///
-  /// The key must be a 32-character lowercase hex string (a UUIDv7 binary
-  /// key encoded as hex). KMDB enforces UUIDv7 format validation (version 7,
-  /// variant 2) at the storage boundary.
-  String keyOf(T value);
+  /// When non-null and non-empty, the key must be a 32-character lowercase
+  /// hex string (a UUIDv7 binary key encoded as hex). KMDB enforces UUIDv7
+  /// format validation (version 7, variant 2) at the storage boundary.
+  ///
+  /// A `null` or empty-string result signals "keyless" — [KmdbCollection.put]
+  /// and [KmdbCollection.insert] treat this as "mint a new key" rather than
+  /// attempting to read or update an existing document. Existing typed
+  /// codecs that return a non-nullable `String` remain valid overrides of
+  /// this method (covariant return); they only need to change if they must
+  /// express "keyless" themselves (e.g. via a sentinel empty string).
+  String? keyOf(T value);
 
   /// Returns a new instance of [value] with [key] assigned to its identifier
   /// field.

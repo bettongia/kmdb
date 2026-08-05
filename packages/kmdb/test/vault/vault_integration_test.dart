@@ -89,7 +89,7 @@ final class _RawCodec implements KmdbCodec<Map<String, dynamic>> {
   const _RawCodec();
 
   @override
-  String keyOf(Map<String, dynamic> v) => v['_id'] as String;
+  String? keyOf(Map<String, dynamic> v) => v['_id'] as String?;
 
   @override
   Map<String, dynamic> withKey(Map<String, dynamic> v, String key) => {

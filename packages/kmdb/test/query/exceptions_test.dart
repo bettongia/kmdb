@@ -15,7 +15,6 @@
 import 'package:betto_schema/betto_schema.dart' show SchemaViolation;
 import 'package:kmdb/kmdb.dart'
     show
-        DocumentAlreadyExistsException,
         DocumentNotFoundException,
         StaleIndexException,
         ReservedFieldException,
@@ -25,19 +24,6 @@ import 'package:kmdb/kmdb.dart'
 import 'package:test/test.dart';
 
 void main() {
-  group('DocumentAlreadyExistsException', () {
-    test('toString includes key and namespace', () {
-      const e = DocumentAlreadyExistsException('key-abc', 'contacts');
-      final s = e.toString();
-      expect(s, contains('key-abc'));
-      expect(s, contains('contacts'));
-    });
-
-    test('is an Exception', () {
-      expect(const DocumentAlreadyExistsException('k', 'ns'), isA<Exception>());
-    });
-  });
-
   group('DocumentNotFoundException', () {
     test('toString includes key and namespace', () {
       const e = DocumentNotFoundException('key-xyz', 'tasks');
