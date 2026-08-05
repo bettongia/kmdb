@@ -5,7 +5,7 @@
 _(Q1–Q4 resolved against `main`; implementation plan and test surface below are
 ready for the `kmdb-plan-implement` agent)_
 
-**PR link**: _(none yet)_
+**PR link**: https://github.com/bettongia/kmdb/pull/67
 
 > **Provenance.** Spun out of **WI-2** (0.10.01 spec corrections) as a code-fix
 > work item, per the maintainer's call: unlike the rest of WI-2, SC-16 is not a
