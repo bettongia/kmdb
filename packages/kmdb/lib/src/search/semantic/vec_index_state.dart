@@ -116,7 +116,9 @@ final class VecIndexState {
 
   // ── CBOR serialisation ─────────────────────────────────────────────────────
 
-  /// Serialises this state to a CBOR-encoded [Uint8List] for `$meta` storage.
+  /// Serialises this state to a CBOR-encoded [Uint8List] for local-only
+  /// `$$vecstate` storage (moved there from `$meta` by WI-11 — Vec index
+  /// state is device-local and must never sync).
   Uint8List toBytes() {
     final map = CborMap({
       CborString('namespace'): CborString(namespace),
