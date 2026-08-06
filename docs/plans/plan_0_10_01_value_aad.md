@@ -1,6 +1,6 @@
 # Bind encrypted values to their context with AES-GCM associated data (E-2)
 
-**Status**: Investigated
+**Status**: Implementing
 
 **PR link**: _(none yet)_
 
