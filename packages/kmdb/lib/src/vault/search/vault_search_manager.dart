@@ -48,6 +48,7 @@ import 'package:betto_inferencing/betto_inferencing.dart'
 import '../../encryption/encryption_envelope.dart';
 import '../../encryption/encryption_flag.dart';
 import '../../encryption/encryption_provider.dart';
+import '../../encryption/value_context.dart';
 import '../../engine/kvstore/kv_store.dart';
 import '../../engine/kvstore/kv_store_impl.dart';
 import '../../search/language_detection.dart';
@@ -186,8 +187,14 @@ final class VaultSearchManager {
   /// private [_encryption] field itself — Dart privacy is per-file, not
   /// per-directory, even though both classes live under
   /// `lib/src/vault/search/` (mirrors the [readExtractArtifact] seam above).
-  Future<Uint8List> unwrapIndexValue(Uint8List bytes) =>
-      EncryptionEnvelope.unwrap(bytes, _encryption);
+  ///
+  /// [context] must be the real `(namespace, key)` this entry was read from —
+  /// [VaultSearcher] always has its scan-cursor `(ns, key)` in scope at the
+  /// call site (0.10.01 WI-3 / finding E-2).
+  Future<Uint8List> unwrapIndexValue(
+    Uint8List bytes, {
+    required ValueContext context,
+  }) => EncryptionEnvelope.unwrap(bytes, _encryption, context: context);
 
   /// Writes [plaintext] to [path] as an `extract/` filesystem artifact,
   /// encrypting it first when the database has an [EncryptionProvider]
@@ -221,7 +228,11 @@ final class VaultSearchManager {
   /// callers must not attempt to layer [readFileRange]-style partial reads on
   /// top of this format.
   Future<void> writeExtractArtifact(String path, Uint8List plaintext) async {
-    final payload = await EncryptionEnvelope.wrap(plaintext, _encryption);
+    final payload = await EncryptionEnvelope.wrap(
+      plaintext,
+      _encryption,
+      context: ValueContext.vaultExtract(path),
+    );
     await _vaultStore.adapter.writeFile(path, payload);
   }
 
@@ -254,7 +265,11 @@ final class VaultSearchManager {
     if (raw.isEmpty) {
       throw FormatException('Extract artifact at "$path" is empty');
     }
-    return EncryptionEnvelope.unwrap(raw, _encryption);
+    return EncryptionEnvelope.unwrap(
+      raw,
+      _encryption,
+      context: ValueContext.vaultExtract(path),
+    );
   }
 
   /// Registers [VaultStore.onAfterIngest] so newly ingested blobs are
@@ -1114,7 +1129,11 @@ final class VaultSearchManager {
         target.delete(entry.namespace, entry.key);
         continue;
       }
-      final wrapped = await EncryptionEnvelope.wrap(entry.value!, _encryption);
+      final wrapped = await EncryptionEnvelope.wrap(
+        entry.value!,
+        _encryption,
+        context: ValueContext(entry.namespace, entry.key),
+      );
       target.put(entry.namespace, entry.key, wrapped);
     }
   }

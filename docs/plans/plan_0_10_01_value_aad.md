@@ -289,7 +289,7 @@ to be corrected.
 
 ### Phase 1 — Define the context type
 
-- [ ] `ValueContext` carrying the **real storage namespace + key** (the only two
+- [x] `ValueContext` carrying the **real storage namespace + key** (the only two
       bound fields). For KvStore-backed values a single `ValueContext(namespace,
       key)` suffices. Provide **named constructors** for the values whose
       namespace literal is *not* a live KvStore namespace, so each literal is
@@ -301,62 +301,87 @@ to be corrected.
       - `ValueContext.vaultManifestName(sha256)` — one fixed manifest-name literal
         + SHA-256, **distinct** from the `vaultBlob` literal (Q-R5) so the
         manifest-`originalName` AAD cannot collide with the blob-bytes AAD.
-- [ ] A canonical, unambiguous byte encoding — `domainByte(0x01) ‖
+      Implemented in `lib/src/encryption/value_context.dart`. `vaultCorpus` ended
+      up a literal redirecting constructor (`this(namespace, key)`) rather than
+      taking a sha256 — see the deviation note below.
+- [x] A canonical, unambiguous byte encoding — `domainByte(0x01) ‖
       lenPrefixed(namespace) ‖ lenPrefixed(key)`; length-prefixed, not
       concatenated, so `("ab", "c")` and `("a", "bc")` cannot collide.
-- [ ] The leading `0x01` domain/version byte.
-- [ ] Doc comments explaining *why* ns+key are bound and why freshness is not
+      Implemented with 4-byte big-endian length prefixes (not the 1-byte
+      namespace-length-prefix style used in the WAL/key-codec format) — chosen
+      because AAD keys are not all subject to that 255-byte cap (e.g. extract
+      artifact paths), so a wider prefix avoids introducing a new limit.
+- [x] The leading `0x01` domain/version byte.
+- [x] Doc comments explaining *why* ns+key are bound and why freshness is not
       (see the scope decision above).
 
 ### Phase 2 — Thread it through
 
-- [ ] Add an `aad` parameter to `EncryptionProvider.encrypt`/`decrypt`
+- [x] Add an `aad` parameter to `EncryptionProvider.encrypt`/`decrypt`
       (`encryption_provider.dart:39/47`) and implement it in
       `AesGcmEncryptionProvider` (`:143/:170`) by passing `aad` to
       `package:cryptography`'s `AesGcm.encrypt`/`decrypt`. **This interface is
       the fourth work surface and must land before the callers can thread AAD.**
-- [ ] Add a **required** `ValueContext` parameter to `ValueCodec.encode`/`decode`,
+- [x] Add a **required** `ValueContext` parameter to `ValueCodec.encode`/`decode`,
       which composes the AAD (`domainByte ‖ lenPrefixed(ns) ‖ lenPrefixed(key)`)
       and forwards it to the provider.
-- [ ] Fix every resulting compile error — the point of making it required.
-      (This also corrects the latent `vault_searcher.dart:632` omission.)
-- [ ] Same for **`EncryptionEnvelope`** call sites (~45 in `lib/`). Note several
+- [x] Fix every resulting compile error — the point of making it required.
+      (This also corrects the latent `vault_searcher.dart:632` omission — it was
+      missing `encryption:` entirely, not just `context:`.) The compiler
+      enumerated 79 sites (not ~40 + ~45 — many plan line-number hints had
+      drifted, confirming the reviewer's warning to treat them as hints only).
+- [x] Same for **`EncryptionEnvelope`** call sites (~45 in `lib/`). Note several
       `$$…state` reads bypass `MetaStore` and need context supplied at the call
-      site directly — `$$genstate` in `cache_layer.dart:299`, `$$indexstate` in
-      `index_manager.dart:573/586`.
-- [ ] **`version:config` is double-encrypted** — thread a `ValueContext` through
+      site directly — `$$genstate` in `cache_layer.dart`, `$$indexstate` in
+      `index_manager.dart` — confirmed exactly as the reviewer described.
+- [x] **`version:config` is double-encrypted** — thread a `ValueContext` through
       *both* the `ValueCodec.encode` and the `EncryptionEnvelope.wrap` in
-      `VersionConfigStore.put`/get.
-- [ ] **Vault blobs** — thread `ValueContext.vaultBlob(sha256)` through the
-      `EncryptionEnvelope.wrap`/`unwrap` at the write (`vault_store.dart:252`) and
+      `VersionConfigStore.put`/get. Note: `MetaStore.getRawByName`/`putRawByName`
+      themselves needed **no signature change** — they already have `name` in
+      scope and build `ValueContext.meta(name)` internally, so only the
+      *caller's* inner `ValueCodec` layer needed an explicit context.
+- [x] **Vault blobs** — thread `ValueContext.vaultBlob(sha256)` through the
+      `EncryptionEnvelope.wrap`/`unwrap` at the write (`vault_store.dart`) and
       **both** reads (`VaultStore.getBytes`,
       `LocalDirectoryVaultAdapter.hydrateVaultBlob`).
-- [ ] **`extract/` artifacts** — thread `ValueContext.vaultExtract(path)` through
-      `writeExtractArtifact`/`readExtractArtifact` (`vault_search_manager.dart:224/257`).
-- [ ] **Vault-manifest `originalName`** — thread
+- [x] **`extract/` artifacts** — thread `ValueContext.vaultExtract(path)` through
+      `writeExtractArtifact`/`readExtractArtifact` (`vault_search_manager.dart`).
+- [x] **Vault-manifest `originalName`** — thread
       `ValueContext.vaultManifestName(sha256)` through the `EncryptionEnvelope.wrap`
-      at `vault_store.dart:299` (write) and `unwrap` in `VaultStore.getManifest`
-      (`:409`). Distinct literal from `vaultBlob` (Q-R5).
-- [ ] **Vault search index reads** — grow `unwrapIndexValue(bytes)`
-      (`vault_search_manager.dart:189`) a `ValueContext` param; callers
-      (`vault_searcher.dart:333/364/490`) pass the scan-cursor `(ns, key)`. Bind
-      the corpus-sentinel via `ValueContext.vaultCorpus(...)` matching the writer
-      (`:1117`).
-- [ ] **Out of scope (state, don't change):** the direct-`AesGcm` DEK wrap in
-      `key_derivation.dart:135/177` (Q-R4).
+      at `vault_store.dart` (write) and `unwrap` in `VaultStore.getManifest`.
+      Distinct literal from `vaultBlob` (Q-R5).
+- [x] **Vault search index reads** — grow `unwrapIndexValue(bytes)`
+      (`vault_search_manager.dart`) a `ValueContext` param; callers
+      (`vault_searcher.dart`) pass the scan-cursor `(ns, key)`. Bind
+      the corpus-sentinel via `ValueContext.vaultCorpus(...)` matching the writer.
+- [x] **Out of scope (state, don't change):** the direct-`AesGcm` DEK wrap in
+      `key_derivation.dart` (Q-R4). Confirmed untouched.
+- [x] **Deviation (not in the plan's census) — compaction `$ver:`-drop callback.**
+      `KvStore.setVersionDropCallback`'s callback previously received only raw
+      `List<Uint8List>` value bytes with no namespace/docKey — compaction-time
+      drops had no other way to recover the `(namespace, docKey)` a required
+      `ValueContext` now demands for `VersionEntry.decode`/
+      `VaultRefInterceptor.decrementVersionRefs`. Widened to a new
+      `DroppedVersionEntry` typedef (`{namespace, docKey, value}`), decoded from
+      the dropped entry's internal key via `KeyCodec.decodeNamespace`/
+      `decodeUserKey`/`bytesToKey` in `CompactionJob.flushGroupBuffer`, threaded
+      through `LsmEngine`/`KvStoreImpl`/`CacheLayer`/`KmdbDatabase`. This is the
+      "sixth encrypted site" class of surprise the task explicitly asked to be
+      reported — it is a signature change, not a value-context ambiguity.
 
 ### Phase 3 — Format version
 
-- [ ] Bump **`MetaStore.kCurrentFormatVersion`** (`meta_store.dart:611-618`) from
-      `1` to `2` — this is the correct lever, **not** the per-value 1-byte
-      `EncryptionFlag` prefix (which is self-describing per value and must not be
-      repurposed).
-- [ ] Make `KvStoreImpl.open()` **reject** a database whose stored
+- [x] Bump **`MetaStore.kCurrentFormatVersion`** from `1` to `2` — this is the
+      correct lever, **not** the per-value 1-byte `EncryptionFlag` prefix (which
+      is self-describing per value and must not be repurposed).
+- [x] Make `KvStoreImpl.open()` **reject** a database whose stored
       `formatVersion` marker is `< kCurrentFormatVersion` with an explicit
-      diagnostic (e.g. "database written by an older KMDB format; AAD binding is
-      incompatible; re-create the database"). Without this, a pre-AAD ciphertext
-      decrypted with a non-empty AAD fails GCM auth and is indistinguishable from
-      tampering. No migration is written (greenfield; no released databases).
+      diagnostic. Confirmed the reviewer's sharp edge: the existing code only
+      branched on `formatVersion == null`; added a new `else if (formatVersion <
+      MetaStore.kCurrentFormatVersion)` branch throwing `LegacyDatabaseFormatException`
+      (extended with optional `foundVersion`/`currentVersion` fields to produce a
+      distinct, specific message for this case vs. the marker-absent case). No
+      migration is written (greenfield; no released databases).
 
 ### Phase 4 — Tests
 

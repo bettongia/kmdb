@@ -31,20 +31,39 @@ import 'encryption_error.dart';
 abstract interface class EncryptionProvider {
   /// Encrypts [plaintext] and returns the ciphertext.
   ///
+  /// [aad] is the AES-GCM associated data — bytes that are authenticated by
+  /// the GCM tag but never encrypted or stored. Callers pass
+  /// `ValueContext.toAad()` (0.10.01 WI-3 / finding E-2) so that the resulting
+  /// ciphertext is bound to *where* it belongs (its real KvStore namespace and
+  /// key, or the fixed non-KvStore identifier for the handful of values that
+  /// are not KvStore entries — see `ValueContext`'s doc comment). [aad] is
+  /// **required**, not optional: an omitted AAD would silently produce
+  /// unbound ciphertext, which is exactly the vulnerability this parameter
+  /// exists to close. Pass an empty list only where genuinely no context
+  /// exists to bind (there is currently no such production call site — every
+  /// [ValueCodec]/`EncryptionEnvelope` caller has a `ValueContext`).
+  ///
   /// The returned bytes include any nonce / IV and authentication tag needed
   /// for decryption (the format is implementation-defined but
-  /// [AesGcmEncryptionProvider] uses `[96-bit nonce][ciphertext][16-byte tag]`).
+  /// [AesGcmEncryptionProvider] uses `[96-bit nonce][ciphertext][16-byte tag]`
+  /// — [aad] itself is not stored, only its effect on the tag).
   ///
   /// Throws [EncryptionError] if encryption fails.
-  Future<Uint8List> encrypt(Uint8List plaintext);
+  Future<Uint8List> encrypt(Uint8List plaintext, {required Uint8List aad});
 
   /// Decrypts [ciphertext] previously produced by [encrypt].
   ///
+  /// [aad] must be byte-for-byte identical to the [aad] passed to the
+  /// [encrypt] call that produced [ciphertext], or authentication fails —
+  /// this is what makes a relocated or transplanted ciphertext unable to
+  /// decrypt cleanly at the wrong `(namespace, key)`.
+  ///
   /// Throws [EncryptionError.badCredentials] if authentication verification
-  /// fails (wrong key, tampered ciphertext, or truncated data).
+  /// fails (wrong key, wrong/mismatched AAD, tampered ciphertext, or
+  /// truncated data).
   ///
   /// Throws [EncryptionError] for other failure modes.
-  Future<Uint8List> decrypt(Uint8List ciphertext);
+  Future<Uint8List> decrypt(Uint8List ciphertext, {required Uint8List aad});
 
   /// Derives a deterministic, keyed namespace token for [message] (Gap 2 of
   /// the Encryption confidentiality reconciliation plan, Q4).
@@ -112,11 +131,16 @@ abstract interface class EncryptionProvider {
 /// plaintext; callers receive this object after the DEK has been derived or
 /// unwrapped from its encrypted envelope.
 ///
-/// ## Associated data
+/// ## Associated data (0.10.01 WI-3 / finding E-2)
 ///
-/// No additional authenticated data (AAD) is used for document values.
-/// The GCM tag covers both the ciphertext and the implicit empty AAD, so any
-/// modification or truncation of the stored bytes is detected on decrypt.
+/// [encrypt]/[decrypt] pass their `aad` parameter straight through to
+/// `package:cryptography`'s `AesGcm.encrypt`/`.decrypt`. The AAD is never
+/// stored on disk — it must be recomputed identically at decrypt time (the
+/// caller's [ValueContext] does this deterministically from the real
+/// `(namespace, key)` the value is stored under) — but it is covered by the
+/// GCM tag, so any mismatch (including a relocated ciphertext whose AAD no
+/// longer matches its new location) is detected as an authentication failure
+/// indistinguishable from a wrong key or tampered ciphertext.
 final class AesGcmEncryptionProvider implements EncryptionProvider {
   /// Creates a provider wrapping the given [_dek].
   ///
@@ -140,7 +164,7 @@ final class AesGcmEncryptionProvider implements EncryptionProvider {
   static final _algorithm = AesGcm.with256bits(nonceLength: 12);
 
   @override
-  Future<Uint8List> encrypt(Uint8List plaintext) async {
+  Future<Uint8List> encrypt(Uint8List plaintext, {required Uint8List aad}) async {
     final secretKey = SecretKey(_dek);
     // Generate a fresh random 96-bit nonce for each call.
     // cryptography.AesGcm.newNonce() uses a cryptographically secure RNG.
@@ -149,6 +173,7 @@ final class AesGcmEncryptionProvider implements EncryptionProvider {
       plaintext,
       secretKey: secretKey,
       nonce: nonce,
+      aad: aad,
     );
 
     // Concatenate: [nonce (12B)] [ciphertext] [mac (16B)]
@@ -167,7 +192,10 @@ final class AesGcmEncryptionProvider implements EncryptionProvider {
   }
 
   @override
-  Future<Uint8List> decrypt(Uint8List ciphertext) async {
+  Future<Uint8List> decrypt(
+    Uint8List ciphertext, {
+    required Uint8List aad,
+  }) async {
     // Minimum size: 12 (nonce) + 0 (empty plaintext) + 16 (tag) = 28 bytes.
     const int kNonceLength = 12;
     const int kTagLength = 16;
@@ -190,7 +218,11 @@ final class AesGcmEncryptionProvider implements EncryptionProvider {
     final box = SecretBox(encrypted, nonce: nonce, mac: Mac(tag));
 
     try {
-      final plaintext = await _algorithm.decrypt(box, secretKey: secretKey);
+      final plaintext = await _algorithm.decrypt(
+        box,
+        secretKey: secretKey,
+        aad: aad,
+      );
       return Uint8List.fromList(plaintext);
     } on SecretBoxAuthenticationError {
       // GCM authentication tag mismatch — wrong key or tampered ciphertext.

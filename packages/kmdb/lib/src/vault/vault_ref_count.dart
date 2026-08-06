@@ -14,6 +14,7 @@
 
 import '../encoding/value_codec.dart';
 import '../encryption/encryption_provider.dart';
+import '../encryption/value_context.dart';
 import '../engine/kvstore/kv_store.dart';
 import 'vault_recovery.dart' show kVaultNamespace, kVaultRefCountSentinelKey;
 
@@ -125,15 +126,17 @@ final class VaultRefCount {
     String sha256, {
     EncryptionProvider? encryption,
   }) async {
-    final bytes = await kvStore.get(
-      '$kVaultNamespace:$sha256',
-      kVaultRefCountSentinelKey,
-    );
+    final refNs = '$kVaultNamespace:$sha256';
+    final bytes = await kvStore.get(refNs, kVaultRefCountSentinelKey);
     if (bytes == null) return const RefCountAbsent();
 
     final Map<String, dynamic> decoded;
     try {
-      decoded = await ValueCodec.decode(bytes, encryption: encryption);
+      decoded = await ValueCodec.decode(
+        bytes,
+        context: ValueContext(refNs, kVaultRefCountSentinelKey),
+        encryption: encryption,
+      );
     } catch (_) {
       // Corrupt, truncated, or an encoding this build cannot read. We cannot
       // prove the object is unreferenced, so report undecodable and let the

@@ -17,6 +17,7 @@ import 'dart:typed_data';
 
 import '../encryption/encryption_envelope.dart';
 import '../encryption/encryption_provider.dart';
+import '../encryption/value_context.dart';
 import '../engine/compaction/reclamation_policy.dart'
     show ReclamationPolicyRegistry;
 import '../engine/kvstore/kv_store.dart';
@@ -167,7 +168,7 @@ final class CacheLayer implements KvStore {
 
   @override
   void setVersionDropCallback(
-    Future<void> Function(List<Uint8List> droppedValues)? callback,
+    Future<void> Function(List<DroppedVersionEntry> droppedValues)? callback,
   ) => _store.setVersionDropCallback(callback);
 
   @override
@@ -291,12 +292,14 @@ final class CacheLayer implements KvStore {
   /// this method reads the same symbolic key, just under the new namespace.
   Future<int> _readGeneration(String namespace) async {
     _trackedNamespaces.add(namespace);
-    final bytes = await _store.get(
-      MetaStore.kGenStateNamespace,
-      MetaStore.genKey(namespace),
-    );
+    final key = MetaStore.genKey(namespace);
+    final bytes = await _store.get(MetaStore.kGenStateNamespace, key);
     if (bytes == null) return 0;
-    final unwrapped = await EncryptionEnvelope.unwrap(bytes, encryption);
+    final unwrapped = await EncryptionEnvelope.unwrap(
+      bytes,
+      encryption,
+      context: ValueContext(MetaStore.kGenStateNamespace, key),
+    );
     if (unwrapped.length < 8) return 0;
     return ByteData.sublistView(unwrapped).getUint64(0, Endian.big);
   }

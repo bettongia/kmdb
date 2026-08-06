@@ -22,6 +22,7 @@ import 'package:cbor/cbor.dart';
 
 import '../encryption/encryption_flag.dart';
 import '../encryption/encryption_provider.dart';
+import '../encryption/value_context.dart';
 import 'compression.dart';
 import 'compression_flag.dart';
 
@@ -132,8 +133,20 @@ final class ValueCodec {
   ///
   /// When [encryption] is non-null, the post-compression bytes are encrypted
   /// with AES-256-GCM and the encryption flag byte is `0x01` ([EncryptionFlag.aesGcm]).
+  ///
+  /// [context] is **required** (0.10.01 WI-3 / finding E-2), even when
+  /// [encryption] is `null`: it identifies the real KvStore `(namespace,
+  /// key)` — or fixed non-KvStore identifier — this value is stored under,
+  /// and is composed into the AES-GCM associated data via
+  /// `context.toAad()` whenever encryption is active. Making it required
+  /// (rather than optional, as `encryption` is) means the compiler enumerates
+  /// every call site — an omitted context would otherwise silently produce
+  /// unbound ciphertext, exactly the vulnerability this parameter exists to
+  /// close. See [ValueContext]'s doc comment for what to pass for each value
+  /// class.
   static Future<Uint8List> encode(
     Map<String, dynamic> value, {
+    required ValueContext context,
     EncryptionProvider? encryption,
   }) async {
     // Step 1: Serialize to CBOR.
@@ -155,8 +168,10 @@ final class ValueCodec {
     }
 
     // Encryption enabled: encrypt the [compression_flag][payload] bytes so
-    // the compression algorithm is hidden inside the ciphertext.
-    final ciphertext = await encryption.encrypt(compressed);
+    // the compression algorithm is hidden inside the ciphertext. The AAD
+    // binds this ciphertext to [context]'s real (namespace, key) so it cannot
+    // be relocated to a different document/namespace and still authenticate.
+    final ciphertext = await encryption.encrypt(compressed, aad: context.toAad());
     return _prependEncryption(EncryptionFlag.aesGcm, ciphertext);
   }
 
@@ -170,7 +185,13 @@ final class ValueCodec {
   ///
   /// When [encryption] is non-null, decrypts AES-GCM ciphertext before
   /// decompressing. If the stored value was encrypted with a different key,
-  /// or the ciphertext is tampered, throws [EncryptionError.badCredentials].
+  /// [context] does not match the [context] passed to [encode], or the
+  /// ciphertext is tampered, throws [EncryptionError.badCredentials] — AAD
+  /// mismatch is indistinguishable from a wrong key or corruption by design
+  /// (0.10.01 WI-3 / finding E-2).
+  ///
+  /// [context] is **required** for the same reason it is required on
+  /// [encode] — see that method's doc comment.
   ///
   /// Throws [FormatException] if the byte sequence is malformed or the CBOR
   /// payload cannot be decoded as a [Map].
@@ -182,6 +203,7 @@ final class ValueCodec {
   /// not available on the current platform (e.g. Zstd on web).
   static Future<Map<String, dynamic>> decode(
     Uint8List bytes, {
+    required ValueContext context,
     EncryptionProvider? encryption,
   }) async {
     if (bytes.isEmpty) {
@@ -208,7 +230,10 @@ final class ValueCodec {
         );
       }
       final ciphertext = bytes.sublist(1);
-      final plaintext = await encryption.decrypt(ciphertext);
+      final plaintext = await encryption.decrypt(
+        ciphertext,
+        aad: context.toAad(),
+      );
       // plaintext = [compression_flag][compressed-or-raw payload]
       if (plaintext.isEmpty) {
         throw const FormatException('Decrypted payload is empty');

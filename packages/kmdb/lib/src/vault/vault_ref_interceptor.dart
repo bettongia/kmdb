@@ -16,6 +16,7 @@ import 'dart:typed_data';
 
 import '../encoding/value_codec.dart';
 import '../encryption/encryption_provider.dart';
+import '../encryption/value_context.dart';
 import '../engine/kvstore/kv_store.dart';
 import '../query/write_augmentor.dart';
 import 'vault_gc.dart';
@@ -158,10 +159,15 @@ final class VaultRefInterceptor implements WriteAugmentor {
     // encrypted uniformly with other $vault entries.
     for (final sha256 in newSha256s.difference(oldSha256s)) {
       final fieldPath = newPaths[sha256]!;
+      final docRefNs = '$kVaultDocRefPrefix$sha256';
       batch.put(
-        '$kVaultDocRefPrefix$sha256',
+        docRefNs,
         docKey,
-        await ValueCodec.encode({'p': fieldPath}, encryption: encryption),
+        await ValueCodec.encode(
+          {'p': fieldPath},
+          context: ValueContext(docRefNs, docKey),
+          encryption: encryption,
+        ),
       );
     }
 
@@ -184,6 +190,13 @@ final class VaultRefInterceptor implements WriteAugmentor {
   /// [batch]. Used by the compaction version-drop callback (RQ5) to release
   /// vault ref counts for `$ver:` entries trimmed at compaction time.
   ///
+  /// [context] must match the [ValueContext] the entry's nested `encodedValue`
+  /// was originally encoded with — the **live** document namespace and docKey
+  /// (0.10.01 WI-3 / finding E-2), not the `$ver:` namespace the outer
+  /// `VersionEntry` container is bound to. See
+  /// `VersionWriteAugmentor.interceptWrite`'s doc comment for why the nested
+  /// value uses the live namespace.
+  ///
   /// ## Crash posture
   ///
   /// The caller ([KmdbDatabase]) issues [batch] as a post-compaction write.
@@ -191,11 +204,16 @@ final class VaultRefInterceptor implements WriteAugmentor {
   /// over-counted (blob retained). This is the fail-safe posture from H3.
   Future<void> decrementVersionRefs(
     Uint8List encodedValue,
-    WriteBatch batch,
-  ) async {
+    WriteBatch batch, {
+    required ValueContext context,
+  }) async {
     final Map<String, dynamic> doc;
     try {
-      doc = await ValueCodec.decode(encodedValue, encryption: encryption);
+      doc = await ValueCodec.decode(
+        encodedValue,
+        context: context,
+        encryption: encryption,
+      );
     } catch (_) {
       // Cannot decode — skip. The fail-safe posture means undecodable entries
       // leave the ref count over-counted (blob retained), never under-counted.
@@ -320,10 +338,15 @@ final class VaultRefInterceptor implements WriteAugmentor {
     // (namespace: '$vault:{sha256}', key: kVaultRefCountSentinelKey), not
     // (namespace: '$vault', key: sha256) — a 64-char sha256 cannot pass
     // KeyCodec.keyToBytes as a KV key.
+    final refNs = '$kVaultNamespace:$sha256';
     batch.put(
-      '$kVaultNamespace:$sha256',
+      refNs,
       kVaultRefCountSentinelKey,
-      await ValueCodec.encode({'refCount': next}, encryption: encryption),
+      await ValueCodec.encode(
+        {'refCount': next},
+        context: ValueContext(refNs, kVaultRefCountSentinelKey),
+        encryption: encryption,
+      ),
     );
 
     // If transitioning from 0 → 1, a tombstone may have been left by a prior
@@ -349,10 +372,15 @@ final class VaultRefInterceptor implements WriteAugmentor {
       batch.delete('$kVaultNamespace:$sha256', kVaultRefCountSentinelKey);
       await gc.onZeroRefs(sha256);
     } else {
+      final refNs = '$kVaultNamespace:$sha256';
       batch.put(
-        '$kVaultNamespace:$sha256',
+        refNs,
         kVaultRefCountSentinelKey,
-        await ValueCodec.encode({'refCount': next}, encryption: encryption),
+        await ValueCodec.encode(
+          {'refCount': next},
+          context: ValueContext(refNs, kVaultRefCountSentinelKey),
+          encryption: encryption,
+        ),
       );
     }
   }

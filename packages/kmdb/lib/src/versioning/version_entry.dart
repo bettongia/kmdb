@@ -21,6 +21,7 @@ import '../encoding/compression.dart';
 import '../encoding/compression_flag.dart';
 import '../encryption/encryption_flag.dart';
 import '../encryption/encryption_provider.dart';
+import '../encryption/value_context.dart';
 import '../engine/util/hlc.dart';
 
 /// A single version entry stored in the `$ver:{namespace}` system namespace.
@@ -106,13 +107,26 @@ final class VersionEntry {
 
   /// Encodes this entry via [ValueCodec] for storage in the LSM engine.
   ///
+  /// [context] is required (0.10.01 WI-3 / finding E-2) — pass
+  /// `ValueContext(versionNamespace(namespace), docKey)`, i.e. the real
+  /// `$ver:{namespace}` namespace and the document key this entry is stored
+  /// under. Binding it means a `$ver:` ciphertext transplanted into the live
+  /// document slot at the same key fails GCM authentication (the namespace
+  /// differs), and a version entry moved to a different document key also
+  /// fails.
+  ///
   /// [encryption] is optional. When non-null the encoded bytes are encrypted
   /// with AES-256-GCM (spec §31). Pass the same provider used for document
   /// values so all `$ver:` bytes are uniformly encrypted.
-  Future<Uint8List> encode({EncryptionProvider? encryption}) =>
-      ValueCodec.encode(toMap(), encryption: encryption);
+  Future<Uint8List> encode({
+    required ValueContext context,
+    EncryptionProvider? encryption,
+  }) => ValueCodec.encode(toMap(), context: context, encryption: encryption);
 
   /// Decodes a [VersionEntry] from a [ValueCodec]-encoded byte sequence.
+  ///
+  /// [context] must match the [context] passed to the [encode] call that
+  /// produced [bytes] — see [encode]'s doc comment.
   ///
   /// [encryption] must match the provider used when [encode] was called, or
   /// `null` for plaintext values.
@@ -121,9 +135,14 @@ final class VersionEntry {
   /// required fields.
   static Future<VersionEntry> decode(
     Uint8List bytes, {
+    required ValueContext context,
     EncryptionProvider? encryption,
   }) async {
-    final map = await ValueCodec.decode(bytes, encryption: encryption);
+    final map = await ValueCodec.decode(
+      bytes,
+      context: context,
+      encryption: encryption,
+    );
     return fromMap(map);
   }
 

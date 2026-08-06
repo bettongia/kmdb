@@ -15,6 +15,7 @@
 import 'dart:async';
 
 import '../encoding/value_codec.dart';
+import '../encryption/value_context.dart';
 import '../engine/kvstore/kv_store.dart';
 import '../engine/util/hlc.dart';
 import '../engine/util/key_codec.dart';
@@ -122,7 +123,11 @@ final class KmdbCollection<T> {
     // Inject the document key as '_id' before handing the map to the codec.
     // This gives codec.decode() a consistent fromJson-style map that includes
     // the system key without it being persisted in the value bytes.
-    final doc = await ValueCodec.decode(bytes, encryption: _db.encryption);
+    final doc = await ValueCodec.decode(
+      bytes,
+      context: ValueContext(namespace, key),
+      encryption: _db.encryption,
+    );
     doc['_id'] = key;
     return decodeDoc(doc);
   }
@@ -237,6 +242,7 @@ final class KmdbCollection<T> {
     }
     final oldDoc = await ValueCodec.decode(
       existingBytes,
+      context: ValueContext(namespace, key),
       encryption: _db.encryption,
     );
     await _writeDocument(key: key, newDoc: codec.encode(value), oldDoc: oldDoc);
@@ -272,7 +278,11 @@ final class KmdbCollection<T> {
     // supplied key (oldDoc: null starts a chain at that key).
     final existingBytes = await _db.cache.get(namespace, key);
     final oldDoc = existingBytes != null
-        ? await ValueCodec.decode(existingBytes, encryption: _db.encryption)
+        ? await ValueCodec.decode(
+            existingBytes,
+            context: ValueContext(namespace, key),
+            encryption: _db.encryption,
+          )
         : null;
     await _writeDocument(key: key, newDoc: codec.encode(value), oldDoc: oldDoc);
     return value;
@@ -300,6 +310,7 @@ final class KmdbCollection<T> {
 
     final oldDoc = await ValueCodec.decode(
       existingBytes,
+      context: ValueContext(namespace, key),
       encryption: _db.encryption,
     );
     await _deleteDocument(key: key, oldDoc: oldDoc);
@@ -405,7 +416,11 @@ final class KmdbCollection<T> {
       // Read the current document (if any) to pass to augmentors as oldDoc.
       final existingBytes = await _db.cache.get(namespace, docKey);
       final oldDoc = existingBytes != null
-          ? await ValueCodec.decode(existingBytes, encryption: _db.encryption)
+          ? await ValueCodec.decode(
+              existingBytes,
+              context: ValueContext(namespace, docKey),
+              encryption: _db.encryption,
+            )
           : null;
       if (oldDoc == null) return; // already deleted — no-op
       await _writePromotedDelete(
@@ -425,15 +440,23 @@ final class KmdbCollection<T> {
         requestedHlc: fromVersion,
       );
     }
+    // encodedValue's AAD binds the *live* namespace + docKey — see
+    // VersionWriteAugmentor.interceptWrite's doc comment for why the nested
+    // encodedValue uses the live namespace rather than the $ver: namespace.
     final newDoc = await ValueCodec.decode(
       encodedValue,
+      context: ValueContext(namespace, docKey),
       encryption: _db.encryption,
     );
 
     // Read the current document to pass to augmentors as oldDoc.
     final existingBytes = await _db.cache.get(namespace, docKey);
     final oldDoc = existingBytes != null
-        ? await ValueCodec.decode(existingBytes, encryption: _db.encryption)
+        ? await ValueCodec.decode(
+            existingBytes,
+            context: ValueContext(namespace, docKey),
+            encryption: _db.encryption,
+          )
         : null;
 
     // Write the promoted document as a new put, bypassing the version
@@ -577,6 +600,7 @@ final class KmdbCollection<T> {
         try {
           doc = await ValueCodec.decode(
             entry.value,
+            context: ValueContext(namespace, entry.key),
             encryption: _db.encryption,
           );
         } catch (_) {
@@ -869,6 +893,7 @@ final class KmdbCollection<T> {
 
     final encodedValue = await ValueCodec.encode(
       newDoc,
+      context: ValueContext(namespace, key),
       encryption: _db.encryption,
     );
     final batch = WriteBatch()..put(namespace, key, encodedValue);
@@ -897,7 +922,10 @@ final class KmdbCollection<T> {
     batch.put(
       versionNamespace(namespace),
       key,
-      await verEntry.encode(encryption: _db.encryption),
+      await verEntry.encode(
+        context: ValueContext(versionNamespace(namespace), key),
+        encryption: _db.encryption,
+      ),
     );
 
     await _db.store.writeBatchInternal(batch);
@@ -937,7 +965,10 @@ final class KmdbCollection<T> {
     batch.put(
       versionNamespace(namespace),
       key,
-      await verEntry.encode(encryption: _db.encryption),
+      await verEntry.encode(
+        context: ValueContext(versionNamespace(namespace), key),
+        encryption: _db.encryption,
+      ),
     );
 
     await _db.store.writeBatchInternal(batch);
@@ -962,6 +993,7 @@ final class KmdbCollection<T> {
 
     final encodedValue = await ValueCodec.encode(
       newDoc,
+      context: ValueContext(namespace, key),
       encryption: _db.encryption,
     );
     final batch = WriteBatch()..put(namespace, key, encodedValue);

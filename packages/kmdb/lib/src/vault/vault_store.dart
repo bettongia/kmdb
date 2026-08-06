@@ -21,6 +21,7 @@ import 'dart:typed_data';
 
 import '../encryption/encryption_envelope.dart';
 import '../encryption/encryption_provider.dart';
+import '../encryption/value_context.dart';
 import '../engine/kvstore/kv_store.dart';
 import '../engine/platform/storage_adapter_interface.dart';
 import 'media_type_detector.dart';
@@ -249,7 +250,11 @@ class VaultStore {
     // ciphertext, so [getBytes] never needs to consult the manifest to decide.
     // The on-disk cost is one byte per blob when encryption is inactive.
     final enc = encryption;
-    final storedBytes = await EncryptionEnvelope.wrap(bytes, enc);
+    final storedBytes = await EncryptionEnvelope.wrap(
+      bytes,
+      enc,
+      context: ValueContext.vaultBlob(sha256),
+    );
     final isEncrypted = enc != null;
 
     // Step 4: write (encrypted or plaintext) bytes to staging.
@@ -299,6 +304,7 @@ class VaultStore {
       final wrapped = await EncryptionEnvelope.wrap(
         Uint8List.fromList(utf8.encode(originalName)),
         enc,
+        context: ValueContext.vaultManifestName(sha256),
       );
       storedOriginalName = base64.encode(wrapped);
     } else {
@@ -366,7 +372,11 @@ class VaultStore {
       await adapter.hydrateVaultBlob(sha256);
     }
     final raw = await _adapter.readFile(blobPath(sha256));
-    final plaintext = await EncryptionEnvelope.unwrap(raw, encryption);
+    final plaintext = await EncryptionEnvelope.unwrap(
+      raw,
+      encryption,
+      context: ValueContext.vaultBlob(sha256),
+    );
 
     final actual = computeSha256(plaintext);
     if (actual != sha256) {
@@ -409,6 +419,7 @@ class VaultStore {
     final decrypted = await EncryptionEnvelope.unwrap(
       base64.decode(raw.originalName),
       enc,
+      context: ValueContext.vaultManifestName(sha256),
     );
     return VaultManifest(
       schemaVersion: raw.schemaVersion,

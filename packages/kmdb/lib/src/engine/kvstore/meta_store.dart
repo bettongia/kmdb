@@ -19,6 +19,7 @@ import 'package:cbor/cbor.dart';
 import '../../encryption/encryption_blob.dart';
 import '../../encryption/encryption_envelope.dart';
 import '../../encryption/encryption_provider.dart';
+import '../../encryption/value_context.dart';
 import '../util/hlc.dart';
 import '../util/xxhash.dart';
 import 'kv_store.dart';
@@ -112,9 +113,14 @@ final class MetaStore {
   /// The Cache Layer compares this value against a cached snapshot to decide
   /// whether to evict stale entries.
   Future<int> getGenerationCounter(String userNamespace) async {
-    final bytes = await _engine.get(kGenStateNamespace, _genKey(userNamespace));
+    final key = _genKey(userNamespace);
+    final bytes = await _engine.get(kGenStateNamespace, key);
     if (bytes == null) return 0;
-    final unwrapped = await EncryptionEnvelope.unwrap(bytes, encryption);
+    final unwrapped = await EncryptionEnvelope.unwrap(
+      bytes,
+      encryption,
+      context: ValueContext(kGenStateNamespace, key),
+    );
     if (unwrapped.length < 8) return 0;
     return ByteData.sublistView(unwrapped).getUint64(0, Endian.big);
   }
@@ -132,11 +138,13 @@ final class MetaStore {
   Future<int> incrementGenerationCounter(String userNamespace) async {
     final current = await getGenerationCounter(userNamespace);
     final next = current + 1;
+    final key = _genKey(userNamespace);
     final wrapped = await EncryptionEnvelope.wrap(
       _encodeUint64(next),
       encryption,
+      context: ValueContext(kGenStateNamespace, key),
     );
-    await _engine.put(kGenStateNamespace, _genKey(userNamespace), wrapped);
+    await _engine.put(kGenStateNamespace, key, wrapped);
     return next;
   }
 
@@ -162,11 +170,13 @@ final class MetaStore {
   ) async {
     final current = await getGenerationCounter(userNamespace);
     final next = current + 1;
+    final key = _genKey(userNamespace);
     final wrapped = await EncryptionEnvelope.wrap(
       _encodeUint64(next),
       encryption,
+      context: ValueContext(kGenStateNamespace, key),
     );
-    batch.put(kGenStateNamespace, _genKey(userNamespace), wrapped);
+    batch.put(kGenStateNamespace, key, wrapped);
     return next;
   }
 
@@ -234,11 +244,13 @@ final class MetaStore {
   /// has already returned and [encryption] is assigned, so this write is
   /// always encrypted when a provider is configured.
   Future<void> setDirty() async {
+    final key = _nameToKey('dirty');
     final wrapped = await EncryptionEnvelope.wrap(
       Uint8List.fromList([1]),
       encryption,
+      context: ValueContext(kDirtyStateNamespace, key),
     );
-    await _engine.put(kDirtyStateNamespace, _nameToKey('dirty'), wrapped);
+    await _engine.put(kDirtyStateNamespace, key, wrapped);
   }
 
   /// Deletes the dirty-open flag. Called by [KvStoreImpl.close].
@@ -256,9 +268,14 @@ final class MetaStore {
   /// The stored value is a CBOR **list** of strings, not a map, so it is
   /// wrapped with [EncryptionEnvelope] rather than `ValueCodec` (Phase 0/B7).
   Future<List<String>> getNamespaces() async {
-    final bytes = await _engine.get(kNamespace, _nameToKey(_kNamespacesKey));
+    final key = _nameToKey(_kNamespacesKey);
+    final bytes = await _engine.get(kNamespace, key);
     if (bytes == null) return [];
-    final unwrapped = await EncryptionEnvelope.unwrap(bytes, encryption);
+    final unwrapped = await EncryptionEnvelope.unwrap(
+      bytes,
+      encryption,
+      context: ValueContext.meta(_kNamespacesKey),
+    );
     if (unwrapped.isEmpty) return [];
     final decoded = cbor.decode(unwrapped);
     if (decoded is! CborList) return [];
@@ -285,6 +302,7 @@ final class MetaStore {
     final wrapped = await EncryptionEnvelope.wrap(
       Uint8List.fromList(encoded),
       encryption,
+      context: ValueContext.meta(_kNamespacesKey),
     );
     await _engine.put(kNamespace, _nameToKey(_kNamespacesKey), wrapped);
   }
@@ -314,6 +332,7 @@ final class MetaStore {
     final wrapped = await EncryptionEnvelope.wrap(
       Uint8List.fromList(encoded),
       encryption,
+      context: ValueContext.meta(_kNamespacesKey),
     );
     batch.put(kNamespace, _nameToKey(_kNamespacesKey), wrapped);
     return true;
@@ -333,11 +352,13 @@ final class MetaStore {
   /// sibling meta calls, so adding one more `await` is a contained,
   /// mechanical change with no `WriteBatch`-API ripple.
   Future<void> appendDirtyFlag(WriteBatch batch) async {
+    final key = _nameToKey('dirty');
     final wrapped = await EncryptionEnvelope.wrap(
       Uint8List.fromList([1]),
       encryption,
+      context: ValueContext(kDirtyStateNamespace, key),
     );
-    batch.put(kDirtyStateNamespace, _nameToKey('dirty'), wrapped);
+    batch.put(kDirtyStateNamespace, key, wrapped);
   }
 
   /// Removes [userNamespace] from the persisted set of known namespaces and
@@ -358,6 +379,7 @@ final class MetaStore {
     final wrapped = await EncryptionEnvelope.wrap(
       Uint8List.fromList(encoded),
       encryption,
+      context: ValueContext.meta(_kNamespacesKey),
     );
     await _engine.put(kNamespace, _nameToKey(_kNamespacesKey), wrapped);
 
@@ -420,12 +442,14 @@ final class MetaStore {
   /// case, which causes [LsmEngine.ingestAt0] to accept every incoming SSTable
   /// (no realistic SSTable has `maxHlc <= Hlc(0, 0)`).
   Future<Hlc> getTombstoneFloor() async {
-    final bytes = await _engine.get(
-      kGcStateNamespace,
-      _nameToKey('gc:tombstoneFloor'),
-    );
+    final key = _nameToKey('gc:tombstoneFloor');
+    final bytes = await _engine.get(kGcStateNamespace, key);
     if (bytes == null) return const Hlc(0, 0);
-    final unwrapped = await EncryptionEnvelope.unwrap(bytes, encryption);
+    final unwrapped = await EncryptionEnvelope.unwrap(
+      bytes,
+      encryption,
+      context: ValueContext(kGcStateNamespace, key),
+    );
     if (unwrapped.length < 8) return const Hlc(0, 0);
     final encoded = ByteData.sublistView(unwrapped).getUint64(0, Endian.big);
     return Hlc.fromEncoded(encoded);
@@ -446,15 +470,13 @@ final class MetaStore {
   /// call it directly) — see [appendTombstoneFloorAdvance]'s doc comment for
   /// why the batch-aware variant is intentionally left unencrypted (B3).
   Future<void> setTombstoneFloor(Hlc floor) async {
+    final key = _nameToKey('gc:tombstoneFloor');
     final wrapped = await EncryptionEnvelope.wrap(
       _encodeUint64(floor.encoded),
       encryption,
+      context: ValueContext(kGcStateNamespace, key),
     );
-    await _engine.put(
-      kGcStateNamespace,
-      _nameToKey('gc:tombstoneFloor'),
-      wrapped,
-    );
+    await _engine.put(kGcStateNamespace, key, wrapped);
   }
 
   /// Appends a tombstone floor advance write for [floor] to [batch].
@@ -536,7 +558,11 @@ final class MetaStore {
   Future<Uint8List?> getRawByName(String name) async {
     final bytes = await _engine.get(kNamespace, _nameToKey(name));
     if (bytes == null) return null;
-    return EncryptionEnvelope.unwrap(bytes, encryption);
+    return EncryptionEnvelope.unwrap(
+      bytes,
+      encryption,
+      context: ValueContext.meta(name),
+    );
   }
 
   /// Writes [bytes] under the symbolic [name] in `$meta`.
@@ -544,7 +570,11 @@ final class MetaStore {
   /// Used by the Query Layer to persist index state atomically. See
   /// [getRawByName]'s doc comment for the encryption/`enc:blob` details.
   Future<void> putRawByName(String name, Uint8List bytes) async {
-    final wrapped = await EncryptionEnvelope.wrap(bytes, encryption);
+    final wrapped = await EncryptionEnvelope.wrap(
+      bytes,
+      encryption,
+      context: ValueContext.meta(name),
+    );
     await _engine.put(kNamespace, _nameToKey(name), wrapped);
   }
 
@@ -615,7 +645,17 @@ final class MetaStore {
   /// way that is not safely self-describing per value (mirroring the
   /// reasoning that motivated this marker in the first place — see the class
   /// doc comment and `docs/spec/31_encryption.md`).
-  static const int kCurrentFormatVersion = 1;
+  ///
+  /// Bumped 1 → 2 by the 0.10.01 WI-3 / finding E-2 AAD-binding change: every
+  /// encrypted value's AES-GCM associated data now includes the real
+  /// `(namespace, key)` it is stored under (see `ValueContext`), which is a
+  /// breaking change to the ciphertext produced for the *same* plaintext —
+  /// a v1 ciphertext (encrypted with no AAD) fails GCM authentication under
+  /// v2's non-empty AAD. `KvStoreImpl.open()` rejects a v1 database outright
+  /// (see [LegacyDatabaseFormatException]) rather than let every encrypted
+  /// value fail confusingly one at a time. No migration path — greenfield,
+  /// no released database holds a compatibility expectation.
+  static const int kCurrentFormatVersion = 2;
 
   /// Reads the raw format-version marker byte, or `null` if absent.
   ///

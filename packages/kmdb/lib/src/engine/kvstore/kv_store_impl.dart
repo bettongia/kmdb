@@ -203,8 +203,23 @@ final class KvStoreImpl implements KvStore {
         // doc comment).
         throw LegacyDatabaseFormatException(dbDir);
       }
+    } else if (formatVersion < MetaStore.kCurrentFormatVersion) {
+      // Case (d) — 0.10.01 WI-3 / finding E-2: the marker IS present, but it
+      // is older than the format this build requires (e.g. a v1 database
+      // predating the AES-GCM AAD binding). Prior to this branch,
+      // `KvStoreImpl.open()` only ever branched on `formatVersion == null`,
+      // so a non-null-but-stale marker silently fell through as "accepted" —
+      // this is the fix for that sharp edge. Without this check, every
+      // encrypted value in such a database would fail GCM authentication the
+      // moment it was read with a non-empty AAD, indistinguishable from
+      // tampering, instead of failing loudly and explicitly here at open().
+      throw LegacyDatabaseFormatException(
+        dbDir,
+        foundVersion: formatVersion,
+        currentVersion: MetaStore.kCurrentFormatVersion,
+      );
     }
-    // Case (a): marker present, nothing to do — fall through.
+    // Case (a): marker present and current, nothing to do — fall through.
 
     // Check for the dirty-open flag written by the previous session. Safe to
     // call before any EncryptionProvider is available — see getDirtyFlag's
@@ -349,7 +364,7 @@ final class KvStoreImpl implements KvStore {
 
   @override
   void setVersionDropCallback(
-    Future<void> Function(List<Uint8List> droppedValues)? callback,
+    Future<void> Function(List<DroppedVersionEntry> droppedValues)? callback,
   ) {
     _engine.setVersionDropCallback(callback);
   }
