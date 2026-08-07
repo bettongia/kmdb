@@ -73,12 +73,16 @@ void main() {
       await db.store.put(
         'notes',
         id1,
-        await ValueCodec.encode({'title': 'Hello'}),
+        await ValueCodec.encode({
+          'title': 'Hello',
+        }, context: ValueContext('notes', id1)),
       );
       await db.store.put(
         'notes',
         id2,
-        await ValueCodec.encode({'title': 'World'}),
+        await ValueCodec.encode({
+          'title': 'World',
+        }, context: ValueContext('notes', id2)),
       );
 
       final out = StringBuffer();
@@ -104,15 +108,21 @@ void main() {
     test('writes headers and documents for multiple collections', () async {
       final db = await _openStore();
       addTearDown(() => db.close());
+      final n1Key = _key('n1');
       await db.store.put(
         'notes',
-        _key('n1'),
-        await ValueCodec.encode({'n': 1}),
+        n1Key,
+        await ValueCodec.encode({
+          'n': 1,
+        }, context: ValueContext('notes', n1Key)),
       );
+      final t1Key = _key('t1');
       await db.store.put(
         'tasks',
-        _key('t1'),
-        await ValueCodec.encode({'t': 1}),
+        t1Key,
+        await ValueCodec.encode({
+          't': 1,
+        }, context: ValueContext('tasks', t1Key)),
       );
 
       final out = StringBuffer();

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import 'package:kmdb/src/encoding/value_codec.dart';
+import 'package:kmdb/src/encryption/value_context.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
 import 'package:kmdb/src/engine/sstable/sstable_info.dart';
@@ -406,11 +407,12 @@ void main() {
       // document exactly as KmdbCollection.put would (ValueCodec, no
       // encryption — this database is plaintext) so the re-executed
       // query can decode it via the real read path.
-      final docBytes = await ValueCodec.encode({
-        'name': 'FromDeviceA',
-        'score': 5,
-      }, encryption: null);
       final docKey = KeyCodec.generate();
+      final docBytes = await ValueCodec.encode(
+        {'name': 'FromDeviceA', 'score': 5},
+        context: ValueContext(col.namespace, docKey),
+        encryption: null,
+      );
       final peerHlc = Hlc(DateTime.now().millisecondsSinceEpoch + 10000, 0);
       final sstable =
           (SstableWriter()..add(

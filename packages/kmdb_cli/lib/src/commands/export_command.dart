@@ -92,7 +92,10 @@ final class ExportCommand extends CliCommand {
       // export — report it and keep going.
       final Map<String, dynamic> doc;
       try {
-        doc = await ValueCodec.decode(entry.value);
+        doc = await ValueCodec.decode(
+          entry.value,
+          context: ValueContext(collection, entry.key),
+        );
       } catch (e) {
         ctx.writeError('Skipping ${entry.key}: $e');
         continue;
@@ -150,7 +153,10 @@ final class ExportCommand extends CliCommand {
       // export — see the note in the non-vault export path above.
       final Map<String, dynamic> doc;
       try {
-        doc = await ValueCodec.decode(entry.value);
+        doc = await ValueCodec.decode(
+          entry.value,
+          context: ValueContext(collection, entry.key),
+        );
       } catch (e) {
         ctx.writeError('Skipping ${entry.key}: $e');
         continue;

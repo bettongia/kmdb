@@ -171,7 +171,10 @@ final class ValueCodec {
     // the compression algorithm is hidden inside the ciphertext. The AAD
     // binds this ciphertext to [context]'s real (namespace, key) so it cannot
     // be relocated to a different document/namespace and still authenticate.
-    final ciphertext = await encryption.encrypt(compressed, aad: context.toAad());
+    final ciphertext = await encryption.encrypt(
+      compressed,
+      aad: context.toAad(),
+    );
     return _prependEncryption(EncryptionFlag.aesGcm, ciphertext);
   }
 

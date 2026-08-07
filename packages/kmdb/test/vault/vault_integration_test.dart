@@ -15,6 +15,7 @@
 import 'dart:typed_data';
 
 import 'package:kmdb/src/encoding/value_codec.dart';
+import 'package:kmdb/src/encryption/value_context.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
 import 'package:kmdb/src/query/kmdb_codec.dart';
@@ -555,7 +556,7 @@ void main() {
       final docBytes = await ValueCodec.encode({
         'name': 'attachment',
         'file': vaultUri,
-      });
+      }, context: ValueContext('attachments', docId));
       await vaultDb.store.put('attachments', docId, docBytes);
 
       // Read back via collection — _wireVaultRefsInMap must replace the URI
@@ -587,7 +588,7 @@ void main() {
           '_id': docId,
           'name': 'list-doc',
           'files': [vaultUri, 'plain-string', vaultUri],
-        });
+        }, context: ValueContext('items', docId));
         await vaultDb.store.put('items', docId, docBytes);
 
         // Use a raw codec so we can inspect the raw decoded map.
@@ -620,7 +621,7 @@ void main() {
         final docBytes = await ValueCodec.encode({
           'name': 'nested-doc',
           'meta': {'attachment': vaultUri, 'other': 'plain'},
-        });
+        }, context: ValueContext('items', docId));
         await vaultDb.store.put('items', docId, docBytes);
 
         final col = vaultDb.collection(name: 'items', codec: _RawCodec());

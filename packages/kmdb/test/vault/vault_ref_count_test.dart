@@ -15,6 +15,7 @@
 import 'dart:typed_data';
 
 import 'package:kmdb/src/encoding/value_codec.dart';
+import 'package:kmdb/src/encryption/value_context.dart';
 import 'package:kmdb/src/engine/compaction/reclamation_policy.dart'
     show ReclamationPolicyRegistry;
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
@@ -66,7 +67,7 @@ class _FakeKvStore implements KvStore {
 
   @override
   void setVersionDropCallback(
-    Future<void> Function(List<Uint8List>)? callback,
+    Future<void> Function(List<DroppedVersionEntry>)? callback,
   ) {}
 
   @override
@@ -126,6 +127,10 @@ class _FakeKvStore implements KvStore {
 
 final _sha = 'aa' * 32;
 
+/// Matches the real `ValueContext(refNs, kVaultRefCountSentinelKey)`
+/// [VaultRefCount.read] uses to decode entries at `$vault:{sha256}`.
+final _ctx = ValueContext('$kVaultNamespace:$_sha', kVaultRefCountSentinelKey);
+
 void main() {
   late _FakeKvStore kvStore;
 
@@ -143,7 +148,10 @@ void main() {
       // and uint16 integer widths.
       for (final n in [0, 1, 5, 23, 24, 100, 255, 256, 1000, 65535]) {
         test('refCount == $n decodes to RefCountValue($n)', () async {
-          kvStore.setRaw(_sha, await ValueCodec.encode({'refCount': n}));
+          kvStore.setRaw(
+            _sha,
+            await ValueCodec.encode({'refCount': n}, context: _ctx),
+          );
           final result = await VaultRefCount.read(kvStore, _sha);
           expect(result, isA<RefCountValue>());
           expect((result as RefCountValue).count, equals(n));
@@ -152,7 +160,10 @@ void main() {
     });
 
     test('negative stored count is clamped to RefCountValue(0)', () async {
-      kvStore.setRaw(_sha, await ValueCodec.encode({'refCount': -3}));
+      kvStore.setRaw(
+        _sha,
+        await ValueCodec.encode({'refCount': -3}, context: _ctx),
+      );
       final result = await VaultRefCount.read(kvStore, _sha);
       expect(result, isA<RefCountValue>());
       expect((result as RefCountValue).count, equals(0));
@@ -165,7 +176,7 @@ void main() {
     });
 
     test('truncated value bytes → RefCountUndecodable', () async {
-      final full = await ValueCodec.encode({'refCount': 65535});
+      final full = await ValueCodec.encode({'refCount': 65535}, context: _ctx);
       // Drop the trailing bytes so the CBOR payload is incomplete.
       kvStore.setRaw(_sha, Uint8List.sublistView(full, 0, full.length - 1));
       final result = await VaultRefCount.read(kvStore, _sha);
@@ -188,7 +199,10 @@ void main() {
     });
 
     test('valid map missing the refCount key → RefCountUndecodable', () async {
-      kvStore.setRaw(_sha, await ValueCodec.encode({'other': 5}));
+      kvStore.setRaw(
+        _sha,
+        await ValueCodec.encode({'other': 5}, context: _ctx),
+      );
       final result = await VaultRefCount.read(kvStore, _sha);
       expect(result, isA<RefCountUndecodable>());
     });
@@ -196,7 +210,7 @@ void main() {
     test('refCount present but non-integer → RefCountUndecodable', () async {
       kvStore.setRaw(
         _sha,
-        await ValueCodec.encode({'refCount': 'not-a-number'}),
+        await ValueCodec.encode({'refCount': 'not-a-number'}, context: _ctx),
       );
       final result = await VaultRefCount.read(kvStore, _sha);
       expect(result, isA<RefCountUndecodable>());

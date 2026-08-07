@@ -21,6 +21,7 @@ library;
 import 'dart:typed_data';
 
 import 'package:kmdb/src/encoding/value_codec.dart';
+import 'package:kmdb/src/encryption/value_context.dart';
 import 'package:kmdb/src/engine/compaction/reclamation_policy.dart'
     show ReclamationPolicyRegistry;
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
@@ -100,7 +101,7 @@ final class _MemKvStore implements KvStore {
 
   @override
   void setVersionDropCallback(
-    Future<void> Function(List<Uint8List>)? callback,
+    Future<void> Function(List<DroppedVersionEntry>)? callback,
   ) {}
 
   @override
@@ -161,9 +162,13 @@ final class _MemKvStore implements KvStore {
   ///
   /// The field path is stored as `{"p": fieldPath}` via [ValueCodec].
   Future<String?> readDocRef(String sha256, String docId) async {
-    final bytes = _data['$kVaultDocRefPrefix$sha256']?[docId];
+    final docRefNs = '$kVaultDocRefPrefix$sha256';
+    final bytes = _data[docRefNs]?[docId];
     if (bytes == null) return null;
-    final decoded = await ValueCodec.decode(bytes);
+    final decoded = await ValueCodec.decode(
+      bytes,
+      context: ValueContext(docRefNs, docId),
+    );
     return decoded['p'] as String?;
   }
 
@@ -173,9 +178,13 @@ final class _MemKvStore implements KvStore {
 
   /// Reads the ref count from `$vault:{sha256}`.
   Future<int> readRefCount(String sha256) async {
-    final bytes = _data['$kVaultNamespace:$sha256']?[kVaultRefCountSentinelKey];
+    final refNs = '$kVaultNamespace:$sha256';
+    final bytes = _data[refNs]?[kVaultRefCountSentinelKey];
     if (bytes == null) return 0;
-    final decoded = await ValueCodec.decode(bytes);
+    final decoded = await ValueCodec.decode(
+      bytes,
+      context: ValueContext(refNs, kVaultRefCountSentinelKey),
+    );
     final v = decoded['refCount'];
     return v is int ? v : 0;
   }

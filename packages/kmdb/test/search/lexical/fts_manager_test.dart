@@ -309,7 +309,11 @@ void main() {
       final newId = const UuidV7KeyGenerator().next();
       final newDoc = {'body': 'delta added document'};
       final batch = WriteBatch()
-        ..put('docs', newId, await ValueCodec.encode(newDoc));
+        ..put(
+          'docs',
+          newId,
+          await ValueCodec.encode(newDoc, context: ValueContext('docs', newId)),
+        );
       await db.store.writeBatchInternal(batch);
 
       await db.ftsManager!.applyDelta(
@@ -507,7 +511,14 @@ void main() {
         final newId = const UuidV7KeyGenerator().next();
         final newDoc = {'body': 'delta applied document'};
         final batch = WriteBatch()
-          ..put('docs', newId, await ValueCodec.encode(newDoc));
+          ..put(
+            'docs',
+            newId,
+            await ValueCodec.encode(
+              newDoc,
+              context: ValueContext('docs', newId),
+            ),
+          );
         await db.store.writeBatchInternal(batch);
 
         await db.ftsManager!.applyDelta(
@@ -734,7 +745,10 @@ void main() {
 
       // Update document in the store to have new body text.
       final updatedDoc = {...doc, 'body': 'updated replacement body'};
-      final bytes = await ValueCodec.encode(updatedDoc..remove('_id'));
+      final bytes = await ValueCodec.encode(
+        updatedDoc..remove('_id'),
+        context: ValueContext('docs', id),
+      );
       await db.store.writeBatchInternal(WriteBatch()..put('docs', id, bytes));
 
       // Apply delta signalling the document was updated.

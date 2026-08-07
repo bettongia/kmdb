@@ -200,7 +200,11 @@ void main() {
         // KV key (rejected by LSM engine key validation).
         const docId = '01900000000070809000000000000050';
         final doc = {'title': 'doc-with-stub', 'file': vaultUri};
-        await db.store.put('docs', docId, await ValueCodec.encode(doc));
+        await db.store.put(
+          'docs',
+          docId,
+          await ValueCodec.encode(doc, context: ValueContext('docs', docId)),
+        );
 
         final vaultDir = '${tmpDir.path}/vault_stub_out';
         final ok = await const DumpCommand().execute(ctx, [], {
@@ -258,7 +262,10 @@ void main() {
       await db.store.put(
         'docs',
         docId,
-        await ValueCodec.encode({'title': 'hydrated-doc', 'file': vaultUri}),
+        await ValueCodec.encode({
+          'title': 'hydrated-doc',
+          'file': vaultUri,
+        }, context: ValueContext('docs', docId)),
       );
 
       final vaultDir = '${tmpDir.path}/vault_hydrated_out';

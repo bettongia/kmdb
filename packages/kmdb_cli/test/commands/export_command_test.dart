@@ -273,7 +273,10 @@ void main() {
         await db.store.put(
           'docs',
           docId,
-          await ValueCodec.encode({'title': 'stub-doc', 'file': vaultUri}),
+          await ValueCodec.encode({
+            'title': 'stub-doc',
+            'file': vaultUri,
+          }, context: ValueContext('docs', docId)),
         );
 
         final outputDir = '${tmpDir.path}/export_stub';

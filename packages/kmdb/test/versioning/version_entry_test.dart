@@ -15,9 +15,17 @@
 import 'dart:typed_data';
 
 import 'package:kmdb/src/encoding/value_codec.dart';
+import 'package:kmdb/src/encryption/value_context.dart';
 import 'package:kmdb/src/engine/util/hlc.dart';
 import 'package:kmdb/src/versioning/version_entry.dart';
 import 'package:test/test.dart';
+
+/// A fixed context used throughout this file. None of these tests exercise
+/// encryption, so the actual context value is unused at runtime — it exists
+/// only because `context` is a required parameter (0.10.01 WI-3 / finding
+/// E-2), matching the real `$ver:{ns}` / docKey shape these entries are
+/// stored under in production.
+const _ctx = ValueContext(r'$ver:tasks', 'doc-key');
 
 void main() {
   group('VersionEntry', () {
@@ -28,11 +36,11 @@ void main() {
       final encoded = await ValueCodec.encode({
         'title': 'Hello',
         'done': false,
-      });
+      }, context: _ctx);
       final entry = VersionEntry(hlc: hlc, encodedValue: encoded);
 
-      final bytes = await entry.encode();
-      final decoded = await VersionEntry.decode(bytes);
+      final bytes = await entry.encode(context: _ctx);
+      final decoded = await VersionEntry.decode(bytes, context: _ctx);
 
       expect(decoded.hlc, equals(hlc));
       expect(decoded.encodedValue, equals(entry.encodedValue));
@@ -44,8 +52,8 @@ void main() {
       final hlc = const Hlc(2000, 5);
       final entry = VersionEntry(hlc: hlc, encodedValue: null, isDelete: true);
 
-      final bytes = await entry.encode();
-      final decoded = await VersionEntry.decode(bytes);
+      final bytes = await entry.encode(context: _ctx);
+      final decoded = await VersionEntry.decode(bytes, context: _ctx);
 
       expect(decoded.hlc, equals(hlc));
       expect(decoded.encodedValue, isNull);
@@ -56,15 +64,17 @@ void main() {
     test('promoted entry round-trips with promotedFrom set', () async {
       final hlc = const Hlc(3000, 0);
       final promotedFrom = const Hlc(1000, 0);
-      final encoded = await ValueCodec.encode({'title': 'Restored'});
+      final encoded = await ValueCodec.encode({
+        'title': 'Restored',
+      }, context: _ctx);
       final entry = VersionEntry(
         hlc: hlc,
         encodedValue: encoded,
         promotedFrom: promotedFrom,
       );
 
-      final bytes = await entry.encode();
-      final decoded = await VersionEntry.decode(bytes);
+      final bytes = await entry.encode(context: _ctx);
+      final decoded = await VersionEntry.decode(bytes, context: _ctx);
 
       expect(decoded.promotedFrom, equals(promotedFrom));
       expect(decoded.isDelete, isFalse);
@@ -100,7 +110,10 @@ void main() {
       // These bytes do not represent a valid ValueCodec-encoded map.
       // EncryptionFlag=0x00, CompressionFlag=0xFF (unknown) → ArgumentError.
       await expectLater(
-        VersionEntry.decode(Uint8List.fromList([0x00, 0xFF, 0xAB])),
+        VersionEntry.decode(
+          Uint8List.fromList([0x00, 0xFF, 0xAB]),
+          context: _ctx,
+        ),
         throwsA(isA<ArgumentError>()),
       );
     });
@@ -174,7 +187,9 @@ void main() {
           encodedValue: null,
           isDelete: true,
         );
-        final bytes = await entry.encode(); // EncryptionFlag.none prefix
+        final bytes = await entry.encode(
+          context: _ctx,
+        ); // EncryptionFlag.none prefix
         expect(VersionEntry.decodeIsDeleteSync(bytes), isTrue);
       },
     );
@@ -182,9 +197,11 @@ void main() {
     test(
       'decodeIsDeleteSync returns false for plaintext put-version entry',
       () async {
-        final encoded = await ValueCodec.encode({'title': 'Hello'});
+        final encoded = await ValueCodec.encode({
+          'title': 'Hello',
+        }, context: _ctx);
         final entry = VersionEntry(hlc: const Hlc(1, 0), encodedValue: encoded);
-        final bytes = await entry.encode();
+        final bytes = await entry.encode(context: _ctx);
         expect(VersionEntry.decodeIsDeleteSync(bytes), isFalse);
       },
     );

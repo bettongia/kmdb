@@ -39,6 +39,7 @@ library;
 import 'dart:typed_data';
 
 import 'package:kmdb/src/encoding/value_codec.dart';
+import 'package:kmdb/src/encryption/value_context.dart';
 import 'package:kmdb/src/engine/sstable/sstable_writer.dart';
 import 'package:kmdb/src/engine/util/hlc.dart';
 import 'package:kmdb/src/engine/util/key_codec.dart';
@@ -398,5 +399,10 @@ Future<Uint8List> buildDecompressionBombValue({
   // to build; the CBOR map wrapper overhead is negligible against a
   // multi-megabyte payload.
   final map = {'bomb': 'A' * decodedSizeBytes};
-  return ValueCodec.encode(map);
+  // No encryption is used here, so the context's exact value has no effect
+  // on the produced bytes (it is only folded into the AAD when an
+  // EncryptionProvider is supplied) — a fixed placeholder matching the
+  // 'test' namespace used by buildValidSstable's entries is used purely for
+  // call-site consistency (0.10.01 WI-3 / finding E-2 made context required).
+  return ValueCodec.encode(map, context: const ValueContext('test', 'bomb'));
 }

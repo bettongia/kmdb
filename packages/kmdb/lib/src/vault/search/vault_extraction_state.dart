@@ -31,7 +31,8 @@ import '../../encoding/value_codec.dart';
 import '../../encryption/encryption_provider.dart';
 import '../../encryption/value_context.dart';
 import '../../search/lexical/fts_index_state.dart' show FtsTokenMode;
-import 'vault_namespaces.dart' show kVaultExtractPrefix, kVaultCorpusSentinelKey;
+import 'vault_namespaces.dart'
+    show kVaultExtractPrefix, kVaultCorpusSentinelKey;
 
 /// The lifecycle status of a single vault blob's text extraction and indexing.
 enum VaultExtractionStatus {
@@ -309,14 +310,15 @@ final class VaultExtractionState {
   /// Phase 0/B7) rather than a bare CBOR encode — this is the fix for Gap 1's
   /// leak of `charset`/`script`/`language`/`modelVersion`/`chunkCount`/
   /// `error` (which may contain content fragments).
-  Future<Uint8List> encode({EncryptionProvider? encryption}) => ValueCodec.encode(
-    toMap(),
-    context: ValueContext(
-      '$kVaultExtractPrefix$sha256',
-      kVaultCorpusSentinelKey,
-    ),
-    encryption: encryption,
-  );
+  Future<Uint8List> encode({EncryptionProvider? encryption}) =>
+      ValueCodec.encode(
+        toMap(),
+        context: ValueContext(
+          '$kVaultExtractPrefix$sha256',
+          kVaultCorpusSentinelKey,
+        ),
+        encryption: encryption,
+      );
 
   /// Decodes a [VaultExtractionState] from [ValueCodec]-encoded bytes and
   /// [sha256].

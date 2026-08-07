@@ -34,7 +34,11 @@ Future<VecIndexState> _readVecState(
   final key = MetaStore.symbolicKey(VecIndexState.metaKey(namespace, field));
   final bytes = await db.store.get(kVecStateNamespace, key);
   if (bytes == null) return VecIndexState.fromBytes(namespace, field, null);
-  final unwrapped = await EncryptionEnvelope.unwrap(bytes, null);
+  final unwrapped = await EncryptionEnvelope.unwrap(
+    bytes,
+    null,
+    context: ValueContext(kVecStateNamespace, key),
+  );
   return VecIndexState.fromBytes(namespace, field, unwrapped);
 }
 
@@ -46,7 +50,11 @@ Future<void> _writeVecState(KmdbDatabase db, VecIndexState state) async {
   final key = MetaStore.symbolicKey(
     VecIndexState.metaKey(state.namespace, state.field),
   );
-  final wrapped = await EncryptionEnvelope.wrap(state.toBytes(), null);
+  final wrapped = await EncryptionEnvelope.wrap(
+    state.toBytes(),
+    null,
+    context: ValueContext(kVecStateNamespace, key),
+  );
   await db.store.putRaw(kVecStateNamespace, key, wrapped);
 }
 
@@ -472,7 +480,9 @@ void main() {
           WriteBatch()..put(
             'articles',
             newDocId,
-            await ValueCodec.encode({'body': 'relational database management'}),
+            await ValueCodec.encode({
+              'body': 'relational database management',
+            }, context: ValueContext('articles', newDocId)),
           ),
         );
 

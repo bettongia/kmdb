@@ -37,6 +37,7 @@ import 'dart:typed_data';
 import 'package:test/test.dart';
 
 import 'package:kmdb/src/encoding/value_codec.dart';
+import 'package:kmdb/src/encryption/value_context.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store_impl.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
@@ -164,7 +165,7 @@ final class _RefCountKvStore implements KvStore {
 
   @override
   void setVersionDropCallback(
-    Future<void> Function(List<Uint8List>)? callback,
+    Future<void> Function(List<DroppedVersionEntry>)? callback,
   ) {}
 
   @override
@@ -279,9 +280,11 @@ Future<void> _seedVaultSearchEntries(
   // ── Document reference ($vault:docref:{sha256} / docKey) ──────────────────
   // ValueCodec.encode mirrors what VaultRefInterceptor writes.
   // docKey is a 32-char UUIDv7 hex string — compatible with the LSM key codec.
-  final fieldBytes = await ValueCodec.encode({'p': 'attachment'});
-  final docRefBatch = WriteBatch()
-    ..put('$kVaultDocRefPrefix$sha256', docKey, fieldBytes);
+  final docRefNs = '$kVaultDocRefPrefix$sha256';
+  final fieldBytes = await ValueCodec.encode({
+    'p': 'attachment',
+  }, context: ValueContext(docRefNs, docKey));
+  final docRefBatch = WriteBatch()..put(docRefNs, docKey, fieldBytes);
   await store.writeBatchInternal(docRefBatch);
 }
 

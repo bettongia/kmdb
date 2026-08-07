@@ -43,9 +43,11 @@ import 'dart:async';
 import 'dart:convert' show json, utf8;
 import 'dart:typed_data';
 
+import 'package:kmdb/src/encryption/encryption_error.dart';
 import 'package:kmdb/src/encryption/encryption_flag.dart';
 import 'package:kmdb/src/encryption/encryption_provider.dart';
 import 'package:kmdb/src/encryption/key_derivation.dart';
+import 'package:kmdb/src/encryption/value_context.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store_impl.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_interface.dart';
@@ -635,7 +637,10 @@ void main() {
       // raw CBOR payload (`manager` has no encryption configured here, so
       // this is a no-op plaintext unwrap, but it still peels the leading
       // EncryptionFlag byte the raw decodeCorpus() helper does not expect).
-      final unwrapped = await manager.unwrapIndexValue(corpusBytes!);
+      final unwrapped = await manager.unwrapIndexValue(
+        corpusBytes!,
+        context: ValueContext(corpusNs, kVaultCorpusSentinelKey),
+      );
       final corpus = VaultBm25Writer.decodeCorpus(unwrapped);
       expect(corpus?.n, equals(state!.chunkCount));
     });
@@ -1595,6 +1600,80 @@ void main() {
         encryption: provider,
       );
       expect(finalState.status, equals(VaultExtractionStatus.indexed));
+    });
+  });
+
+  // ── Relocation — extract/ artifacts (0.10.01 WI-3 / finding E-2, Q-R2) ─────
+
+  group('Relocation — extract/ artifacts', () {
+    test('an extract/ artifact ciphertext rewritten under a DIFFERENT path '
+        'fails GCM authentication', () async {
+      final dek = await KeyDerivation.generateDek();
+      final provider = AesGcmEncryptionProvider(dek);
+
+      final shaA = await _ingest(
+        vaultStore,
+        Uint8List.fromList(utf8.encode('artifact A content')),
+      );
+      final shaB = await _ingest(
+        vaultStore,
+        Uint8List.fromList(utf8.encode('artifact B content — different')),
+      );
+
+      final writerManager = VaultSearchManager(
+        config: VaultSearchConfig(
+          chunkSize: 50,
+          chunkOverlap: 5,
+          extractors: [_FixedTextExtractor()],
+        ),
+        kvStore: kvStore,
+        vaultStore: vaultStore,
+        encryption: provider,
+      );
+
+      final extractDirA = '${vaultStore.hashDir(shaA)}/extract';
+      final extractDirB = '${vaultStore.hashDir(shaB)}/extract';
+      await adapter.createDirectory(extractDirA);
+      await adapter.createDirectory(extractDirB);
+      final pathA = '$extractDirA/text.txt';
+      final pathB = '$extractDirB/text.txt';
+
+      await writerManager.writeExtractArtifact(
+        pathA,
+        Uint8List.fromList(utf8.encode('artifact A content')),
+      );
+      await writerManager.writeExtractArtifact(
+        pathB,
+        Uint8List.fromList(utf8.encode('artifact B content — different')),
+      );
+      await writerManager.close();
+
+      // "Attacker" relocates A's valid ciphertext onto B's path.
+      final aCiphertext = await adapter.readFile(pathA);
+      await adapter.writeFile(pathB, aCiphertext);
+
+      final readerManager = VaultSearchManager(
+        config: VaultSearchConfig(
+          chunkSize: 50,
+          chunkOverlap: 5,
+          extractors: [_FixedTextExtractor()],
+        ),
+        kvStore: kvStore,
+        vaultStore: vaultStore,
+        encryption: provider,
+      );
+      addTearDown(readerManager.close);
+
+      await expectLater(
+        readerManager.readExtractArtifact(pathB),
+        throwsA(
+          isA<EncryptionError>().having(
+            (e) => e.code,
+            'code',
+            EncryptionErrorCode.badCredentials,
+          ),
+        ),
+      );
     });
   });
 

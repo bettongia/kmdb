@@ -50,7 +50,10 @@ final class VerifyCommand extends CliCommand {
       await for (final entry in ctx.store.scan(coll)) {
         checked++;
         try {
-          await ValueCodec.decode(entry.value);
+          await ValueCodec.decode(
+            entry.value,
+            context: ValueContext(coll, entry.key),
+          );
         } catch (e) {
           errors.add({'collection': coll, 'key': entry.key, 'error': '$e'});
         }

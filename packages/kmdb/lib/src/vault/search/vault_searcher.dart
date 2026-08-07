@@ -333,7 +333,10 @@ final class VaultSearcher<T> {
         try {
           unwrappedCorpusBytes = await _manager.unwrapIndexValue(
             corpusBytes,
-            context: ValueContext.vaultCorpus(corpusNs, kVaultCorpusSentinelKey),
+            context: ValueContext.vaultCorpus(
+              corpusNs,
+              kVaultCorpusSentinelKey,
+            ),
           );
         } catch (_) {
           unwrappedCorpusBytes = null;

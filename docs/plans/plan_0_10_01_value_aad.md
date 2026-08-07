@@ -385,56 +385,127 @@ to be corrected.
 
 ### Phase 4 — Tests
 
-- [ ] **Relocation:** encrypt at key A, place the ciphertext at key B, assert
+- [x] **Relocation:** encrypt at key A, place the ciphertext at key B, assert
       authentication failure. This is the test that proves the fix. **Use the real
       `AesGcmEncryptionProvider`** — a toy XOR/no-op provider ignores AAD and makes
       the assertion vacuous.
-- [ ] **Cross-namespace transplant:** same, across namespaces.
-- [ ] **Vault-blob relocation:** place a valid blob ciphertext at a different
+      Implemented in `test/encryption/value_aad_test.dart` ("Relocation and
+      cross-namespace transplant" group), plus the `EncryptionEnvelope`-layer
+      variant in the same group.
+- [x] **Cross-namespace transplant:** same, across namespaces.
+      Implemented alongside the relocation test above (same group).
+- [x] **Vault-blob relocation:** place a valid blob ciphertext at a different
       SHA-256 address, assert **GCM auth** failure — distinct from (and prior to)
       S-4's post-decrypt content→address check.
-- [ ] **`extract/` artifact relocation:** rewrite an artifact under a different
+      Implemented in `test/encryption/vault_encryption_test.dart`
+      ("Relocation — blob bytes and manifest originalName" group), asserting
+      `EncryptionErrorCode.badCredentials` specifically (not
+      `VaultContentMismatchException`).
+- [x] **`extract/` artifact relocation:** rewrite an artifact under a different
       path, assert auth failure.
-- [ ] **Manifest-`originalName` relocation:** serve a valid `originalName`
+      Implemented in `test/vault/search/vault_search_manager_test.dart`
+      ("Relocation — extract/ artifacts" group).
+- [x] **Manifest-`originalName` relocation:** serve a valid `originalName`
       ciphertext under a different `sha256`'s manifest, assert **GCM auth**
       failure (Q-R5). Also assert it does *not* collide with the blob-bytes AAD
       for the same `sha256` (distinct literals).
-- [ ] **Encrypted docref fieldPath round-trip:** on an *encrypted* DB, assert the
+      Implemented in `test/encryption/vault_encryption_test.dart` (same
+      "Relocation" group as vault-blob, above) — includes both the
+      cross-sha256 relocation test and a same-sha256 blob↔manifest-name
+      AAD-collision test.
+- [x] **Encrypted docref fieldPath round-trip:** on an *encrypted* DB, assert the
       `vault_searcher` fieldPath decode succeeds — the `catch(_)` there
       (`:634`-ish) would otherwise make a wrong-context regression silent.
-- [ ] **Rollback (negative / boundary test):** replace a value with an older
+      Implemented in `test/vault/search/vault_searcher_test.dart`
+      ("encrypted extract/ artifacts" group) — asserts the fieldPath comes
+      back **non-empty and correct**, not merely "no throw".
+- [x] **Rollback (negative / boundary test):** replace a value with an older
       ciphertext for the **same** key and assert it **still authenticates** —
       documenting honestly that E-2's AAD does *not* detect rollback (freshness
       is not bound; deferred to WI-4). This test pins the scope boundary so a
       later reader does not mistake it for a gap.
-- [ ] **`$ver:` isolation:** a `$ver:{ns}` ciphertext transplanted into the live
+      Implemented in `test/encryption/value_aad_test.dart` ("Scope boundary —
+      AAD binds location, not freshness" group).
+- [x] **`$ver:` isolation:** a `$ver:{ns}` ciphertext transplanted into the live
       `{ns}` slot at the same key fails authentication (namespace differs).
-- [ ] **`version:config` double-encryption:** round-trips correctly with a
+      Implemented in `test/encryption/value_aad_test.dart` (`$ver: isolation`
+      group), including the reverse direction and a real `VersionEntry`
+      round-trip.
+- [x] **`version:config` double-encryption:** round-trips correctly with a
       `ValueContext` threaded through both layers.
-- [ ] Round-trip tests for every `ValueContext` constructor / value class.
-- [ ] Old-format database (`formatVersion` = 1) fails to open with the expected
+      Implemented in `test/encryption/value_aad_test.dart`
+      ("version:config double-encryption round-trip" group) — also asserts the
+      outer `EncryptionEnvelope` layer is genuinely active (raw bytes start
+      with `EncryptionFlag.aesGcm`) and that a wrong provider falls back to
+      `VersionConfig.defaults` (the documented defensive posture, not a thrown
+      exception).
+- [x] Round-trip tests for every `ValueContext` constructor / value class.
+      Implemented in `test/encryption/value_aad_test.dart` ("Round-trip per
+      ValueContext constructor" group) plus unit-level composition/collision
+      tests for `ValueContext` itself in the new
+      `test/encryption/value_context_test.dart`.
+- [x] Old-format database (`formatVersion` = 1) fails to open with the expected
       diagnostic. **Assert the new `< kCurrentFormatVersion` branch** — the
       current open logic gates only on a *null* marker and would otherwise accept
       a v1 DB.
-- [ ] **Fault injection (CLAUDE.md-required):** using `FaultyStorageAdapter`,
+      Implemented in `test/encryption/value_aad_test.dart` ("Old-format
+      database rejection" group) — seeds a raw `formatVersion=1` marker
+      (bypassing `KvStoreImpl.open`'s gate) and asserts
+      `LegacyDatabaseFormatException` with `foundVersion=1`/
+      `currentVersion=2`, plus a companion test that a brand-new database is
+      stamped `2`.
+- [x] **Fault injection (CLAUDE.md-required):** using `FaultyStorageAdapter`,
       exercise a crash on the open/recovery and `$ver:` write paths under AAD —
       the in-memory adapter is durability-blind. At minimum: crash mid-`$ver:`
       write and reopen; crash during the format-marker write and reopen.
+      Implemented in `test/encryption/value_aad_test.dart` ("Fault injection
+      (FaultyStorageAdapter)" group): (1) an AAD-bound live document + its
+      companion `$ver:` entry survive a crash-and-WAL-replay and both
+      authenticate on reopen; (2) a crash between the format-marker/`enc:blob`
+      write and the first encrypted user value leaves the database safely
+      reopenable under both possible crash outcomes.
+- [x] **Deviation (surfaced during implementation, not in the original
+      census):** the compaction `$ver:`-drop callback (`DroppedVersionEntry`)
+      is exercised directly in `test/encryption/value_aad_test.dart`
+      ("Compaction \$ver:-drop deviation" group) — registers a real
+      `setVersionDropCallback`, forces a real all-levels compaction that trims
+      `$ver:` history, and asserts the dropped entries' `(namespace, docKey)`
+      are correct and decode successfully under real AES-GCM encryption via
+      the reconstructed `ValueContext`, plus a wrong-context regression guard.
 
 ### Phase 5 — Spec
 
-- [ ] Update §31 (encryption) with the AAD composition
+- [x] Update §31 (encryption) with the AAD composition
       (`domainByte ‖ lenPrefixed(ns) ‖ lenPrefixed(key)`) and its rationale.
-- [ ] Update §05 (value encoding) for the format version bump.
-- [ ] **State the scope boundary explicitly in §31:** AAD binds *location*
+      Added a new "Associated Data (AAD Binding)" section (with "Non-KvStore
+      values" and scope-boundary subsections), updated the "Encoding Pipeline
+      with Encryption" diagram, "Provider Threading", "API Reference", the
+      "Database Format-Version Gate" (four-way discrimination, v1→v2), and the
+      "Protected (encrypted)" list (confidentiality-vs-authenticity note).
+- [x] Update §05 (value encoding) for the format version bump.
+      Added a "Database Format Version" section and an AAD note in the "With
+      encryption" pipeline diagram.
+- [x] **State the scope boundary explicitly in §31:** AAD binds *location*
       (ns+key), not *freshness* (HLC/version). E-2 fixes relocation/transplant;
       rollback/replay and intra-key version reordering are out of scope and
       deferred to WI-4 (sync authentication). Also note AAD does not protect
       against a peer that legitimately holds the DEK.
+      Covered in §31's new "Scope: location, not freshness" and "Out of
+      scope: the DEK-wrap envelope" subsections.
 
 **Final step — QA sign-off and pre-commit:**
 
-- [ ] Run `make coverage` — confirm >95% on all new files.
+- [x] Run `make coverage` — confirm >95% on all new files.
+      `packages/kmdb` overall 95.1% (7381/7765), `packages/kmdb_cli` overall
+      95.2% (2919/3065) — both well above the 90% CLAUDE.md floor. The new
+      `value_context.dart` is 100% covered (30/30); `encryption_provider.dart`
+      95.6%. (Deviation: fixing this plan's `ValueCodec`/`EncryptionEnvelope`
+      required-parameter break also required threading `context:` through
+      `packages/kmdb_cli` — 81 call sites across lib/ and test/, not scoped
+      by the original plan/reviewer census since it only covered
+      `packages/kmdb`. Also removed one genuinely dead, pre-existing
+      `kmdb_cli` function, `readVaultRefCount`, which used a stale/incorrect
+      key scheme and was unreachable from any call site.)
 - [ ] Hand off to the **`kmdb-qa` agent** for sign-off. Do not open a PR until
       sign-off is received.
 - [ ] Run `make pre_commit` — format, analyze, license_check, tests all green.

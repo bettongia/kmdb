@@ -90,7 +90,13 @@ void main() {
 
       final raw1 = await db.store.get('notes', id1);
       expect(raw1, isNotNull);
-      expect((await ValueCodec.decode(raw1!))['title'], 'Hello');
+      expect(
+        (await ValueCodec.decode(
+          raw1!,
+          context: ValueContext('notes', id1),
+        ))['title'],
+        'Hello',
+      );
     });
 
     test('restores multiple collections', () async {
@@ -269,7 +275,11 @@ void main() {
       final db = await _openStore();
       addTearDown(() => db.close());
       final id1 = _key('v1');
-      await db.store.put('notes', id1, await ValueCodec.encode({'x': 1}));
+      await db.store.put(
+        'notes',
+        id1,
+        await ValueCodec.encode({'x': 1}, context: ValueContext('notes', id1)),
+      );
 
       final out = StringBuffer();
       final ok = await VerifyCommand().execute(_ctx(db, out: out), [], {});
@@ -296,15 +306,21 @@ void main() {
     test('verifies documents in multiple collections', () async {
       final db = await _openStore();
       addTearDown(() => db.close());
+      final v2Key = _key('v2');
       await db.store.put(
         'notes',
-        _key('v2'),
-        await ValueCodec.encode({'a': 1}),
+        v2Key,
+        await ValueCodec.encode({
+          'a': 1,
+        }, context: ValueContext('notes', v2Key)),
       );
+      final v3Key = _key('v3');
       await db.store.put(
         'tasks',
-        _key('v3'),
-        await ValueCodec.encode({'b': 2}),
+        v3Key,
+        await ValueCodec.encode({
+          'b': 2,
+        }, context: ValueContext('tasks', v3Key)),
       );
 
       final out = StringBuffer();
@@ -336,10 +352,13 @@ void main() {
     test('returns false for a filter that is not a JSON object', () async {
       final db = await _openStore();
       addTearDown(() => db.close());
+      final c1Key = _key('c1');
       await db.store.put(
         'notes',
-        _key('c1'),
-        await ValueCodec.encode({'x': 1}),
+        c1Key,
+        await ValueCodec.encode({
+          'x': 1,
+        }, context: ValueContext('notes', c1Key)),
       );
 
       final err = StringBuffer();

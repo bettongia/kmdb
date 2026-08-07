@@ -546,7 +546,11 @@ void main() {
       final newId = const UuidV7KeyGenerator().next();
       final newDoc = {'body': 'delta synced content'};
       final batch = WriteBatch()
-        ..put('docs', newId, await ValueCodec.encode(newDoc));
+        ..put(
+          'docs',
+          newId,
+          await ValueCodec.encode(newDoc, context: ValueContext('docs', newId)),
+        );
       await db.store.writeBatchInternal(batch);
 
       await db.ftsManager!.applyDelta(

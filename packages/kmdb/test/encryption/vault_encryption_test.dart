@@ -12,16 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'dart:convert' show json;
+import 'dart:convert' show base64, json, utf8;
 import 'dart:typed_data';
 
 import 'package:kmdb/src/encoding/value_codec.dart';
 import 'package:kmdb/src/encryption/encryption_error.dart';
 import 'package:kmdb/src/encryption/encryption_provider.dart';
 import 'package:kmdb/src/encryption/key_derivation.dart';
+import 'package:kmdb/src/encryption/value_context.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
 import 'package:kmdb/src/vault/media_type_detector.dart';
 import 'package:kmdb/src/vault/vault_gc.dart';
+import 'package:kmdb/src/vault/vault_manifest.dart';
+import 'package:kmdb/src/vault/vault_recovery.dart'
+    show kVaultNamespace, kVaultRefCountSentinelKey;
 import 'package:kmdb/src/vault/vault_store.dart';
 import 'package:test/test.dart';
 
@@ -444,9 +448,14 @@ void main() {
         // Step 2: Seed an encrypted ref count entry (simulates what
         // VaultRefInterceptor writes when a document referencing this blob is
         // created). The entry is a ValueCodec-encoded map with the provider.
-        final encryptedRefCountBytes = await ValueCodec.encode({
-          'refCount': 1,
-        }, encryption: provider);
+        final encryptedRefCountBytes = await ValueCodec.encode(
+          {'refCount': 1},
+          context: ValueContext(
+            '$kVaultNamespace:$sha256',
+            kVaultRefCountSentinelKey,
+          ),
+          encryption: provider,
+        );
         kvStore.setRawRefCount(sha256, encryptedRefCountBytes);
 
         // Blob should be present and the ref count readable when the correct
@@ -498,9 +507,14 @@ void main() {
 
         // Store an encrypted ref count entry (non-zero) — GC without provider
         // cannot decode it.
-        final encryptedRefCountBytes = await ValueCodec.encode({
-          'refCount': 1,
-        }, encryption: provider);
+        final encryptedRefCountBytes = await ValueCodec.encode(
+          {'refCount': 1},
+          context: ValueContext(
+            '$kVaultNamespace:$sha256',
+            kVaultRefCountSentinelKey,
+          ),
+          encryption: provider,
+        );
         kvStore.setRawRefCount(sha256, encryptedRefCountBytes);
 
         // Tombstone the object.
@@ -518,5 +532,147 @@ void main() {
         );
       },
     );
+  });
+
+  // ── Relocation (0.10.01 WI-3 / finding E-2, Q-R1/Q-R5) ───────────────────────
+
+  group('Relocation — blob bytes and manifest originalName', () {
+    late Uint8List dek;
+    late AesGcmEncryptionProvider provider;
+
+    setUpAll(() async {
+      dek = await KeyDerivation.generateDek();
+    });
+
+    setUp(() {
+      provider = AesGcmEncryptionProvider(dek);
+    });
+
+    test('a blob ciphertext relocated to a DIFFERENT sha256 address fails GCM '
+        'authentication — distinct from (and prior to) the S-4 post-decrypt '
+        'content-hash check', () async {
+      final store = _TestVaultStore(adapter, encryption: provider);
+
+      final refA = await store.ingest(
+        bytes: _bytes('blob A content'),
+        hlcTimestamp: _hlc,
+      );
+      final refB = await store.ingest(
+        bytes: _bytes('blob B content — totally different'),
+        hlcTimestamp: _hlc,
+      );
+
+      // "Attacker" relocates A's valid ciphertext to B's blob address.
+      final aCiphertext = adapter.files[store.blobPath(refA.sha256)]!;
+      adapter.files[store.blobPath(refB.sha256)] = Uint8List.fromList(
+        aCiphertext,
+      );
+
+      // getBytes(refB.sha256) must fail at GCM authentication (AAD bound
+      // to refA.sha256, not refB.sha256) — this is a DIFFERENT failure
+      // from VaultContentMismatchException (S-4), which only runs AFTER a
+      // successful decrypt and never gets the chance to run here.
+      await expectLater(
+        store.getBytes(refB.sha256),
+        throwsA(
+          isA<EncryptionError>().having(
+            (e) => e.code,
+            'code',
+            EncryptionErrorCode.badCredentials,
+          ),
+        ),
+      );
+    });
+
+    test('a manifest originalName ciphertext relocated under a DIFFERENT '
+        "sha256's manifest fails GCM authentication (Q5)", () async {
+      final store = _TestVaultStore(adapter, encryption: provider);
+
+      final refA = await store.ingest(
+        bytes: _bytes('content A'),
+        hlcTimestamp: _hlc,
+        originalName: 'secretA.txt',
+      );
+      final refB = await store.ingest(
+        bytes: _bytes('content B'),
+        hlcTimestamp: _hlc,
+        originalName: 'secretB.txt',
+      );
+
+      final rawA = VaultManifest.fromJsonString(
+        String.fromCharCodes(adapter.files[store.manifestPath(refA.sha256)]!),
+      );
+      final rawB = VaultManifest.fromJsonString(
+        String.fromCharCodes(adapter.files[store.manifestPath(refB.sha256)]!),
+      );
+
+      // Splice A's encrypted originalName ciphertext into B's manifest,
+      // leaving every other field (sha256, mediaType, etc.) as B's own.
+      final spliced = VaultManifest(
+        schemaVersion: rawB.schemaVersion,
+        sha256: rawB.sha256,
+        size: rawB.size,
+        crc32c: rawB.crc32c,
+        mediaType: rawB.mediaType,
+        originalName: rawA.originalName, // relocated ciphertext
+        createdAt: rawB.createdAt,
+        encrypted: rawB.encrypted,
+      );
+      adapter.files[store.manifestPath(refB.sha256)] = Uint8List.fromList(
+        utf8.encode(spliced.toJsonString()),
+      );
+
+      await expectLater(
+        store.getManifest(refB.sha256),
+        throwsA(
+          isA<EncryptionError>().having(
+            (e) => e.code,
+            'code',
+            EncryptionErrorCode.badCredentials,
+          ),
+        ),
+      );
+    });
+
+    test('the manifest-name AAD does not collide with the blob-bytes AAD for '
+        'the SAME sha256 — splicing the blob ciphertext into the originalName '
+        'field of its own manifest still fails GCM authentication (distinct '
+        'namespace literals, Q5)', () async {
+      final store = _TestVaultStore(adapter, encryption: provider);
+
+      final ref = await store.ingest(
+        bytes: _bytes('same-sha-swap-test'),
+        hlcTimestamp: _hlc,
+        originalName: 'name.txt',
+      );
+
+      final blobCiphertext = adapter.files[store.blobPath(ref.sha256)]!;
+      final rawManifest = VaultManifest.fromJsonString(
+        String.fromCharCodes(adapter.files[store.manifestPath(ref.sha256)]!),
+      );
+
+      // Both fields share the same wire shape
+      // ([EncryptionFlag][nonce+ciphertext+tag]) — base64-encode the blob
+      // ciphertext as if it were the manifest's originalName field, for
+      // the SAME sha256 both AADs would otherwise share.
+      final spliced = VaultManifest(
+        schemaVersion: rawManifest.schemaVersion,
+        sha256: rawManifest.sha256,
+        size: rawManifest.size,
+        crc32c: rawManifest.crc32c,
+        mediaType: rawManifest.mediaType,
+        originalName: base64.encode(blobCiphertext),
+        createdAt: rawManifest.createdAt,
+        encrypted: rawManifest.encrypted,
+      );
+      adapter.files[store.manifestPath(ref.sha256)] = Uint8List.fromList(
+        utf8.encode(spliced.toJsonString()),
+      );
+
+      await expectLater(
+        store.getManifest(ref.sha256),
+        throwsA(isA<EncryptionError>()),
+      );
+    });
   });
 }

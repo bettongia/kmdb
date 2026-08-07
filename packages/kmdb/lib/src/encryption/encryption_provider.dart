@@ -164,7 +164,10 @@ final class AesGcmEncryptionProvider implements EncryptionProvider {
   static final _algorithm = AesGcm.with256bits(nonceLength: 12);
 
   @override
-  Future<Uint8List> encrypt(Uint8List plaintext, {required Uint8List aad}) async {
+  Future<Uint8List> encrypt(
+    Uint8List plaintext, {
+    required Uint8List aad,
+  }) async {
     final secretKey = SecretKey(_dek);
     // Generate a fresh random 96-bit nonce for each call.
     // cryptography.AesGcm.newNonce() uses a cryptographically secure RNG.

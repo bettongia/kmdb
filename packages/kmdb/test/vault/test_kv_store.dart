@@ -108,7 +108,7 @@ class TestKvStore implements KvStore {
 
   @override
   void setVersionDropCallback(
-    Future<void> Function(List<Uint8List>)? callback,
+    Future<void> Function(List<DroppedVersionEntry>)? callback,
   ) {}
 
   @override

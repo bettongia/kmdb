@@ -87,7 +87,11 @@ Future<void> _putDoc(
   Map<String, dynamic> doc,
 ) async {
   final id = doc['_id'] as String;
-  await db.store.put(coll, id, await ValueCodec.encode(doc));
+  await db.store.put(
+    coll,
+    id,
+    await ValueCodec.encode(doc, context: ValueContext(coll, id)),
+  );
 }
 
 /// Simple temporary file wrapper.
@@ -993,7 +997,13 @@ void main() {
             // Build a valid 32-hex UUIDv7 key: version nibble at position 12,
             // variant nibble at position 16.
             final key = 'aaaaaaaaaaaa7aaaa8aaaaaaaa$suffix';
-            await db.store.put('large', key, await ValueCodec.encode({'n': i}));
+            await db.store.put(
+              'large',
+              key,
+              await ValueCodec.encode({
+                'n': i,
+              }, context: ValueContext('large', key)),
+            );
           }
           // 202 total: 1 from _putDoc + 201 from direct put.
           expect(await db.store.scan('large').toList(), hasLength(202));
@@ -1268,11 +1278,17 @@ void main() {
       expect(result['skipped'], equals(0));
 
       expect(
-        (await ValueCodec.decode((await db.store.get('people', p1))!))['name'],
+        (await ValueCodec.decode(
+          (await db.store.get('people', p1))!,
+          context: ValueContext('people', p1),
+        ))['name'],
         equals('Alice'),
       );
       expect(
-        (await ValueCodec.decode((await db.store.get('people', p2))!))['name'],
+        (await ValueCodec.decode(
+          (await db.store.get('people', p2))!,
+          context: ValueContext('people', p2),
+        ))['name'],
         equals('Bob'),
       );
 
@@ -1297,7 +1313,10 @@ void main() {
       expect(result['skipped'], equals(1));
       // Original value must be unchanged.
       expect(
-        (await ValueCodec.decode((await db.store.get('people', p1))!))['name'],
+        (await ValueCodec.decode(
+          (await db.store.get('people', p1))!,
+          context: ValueContext('people', p1),
+        ))['name'],
         equals('OldAlice'),
       );
 
@@ -1458,7 +1477,10 @@ void main() {
           isNotNull,
           reason: 'Missing document after re-import: ${orig['_id']}',
         );
-        final restored = await ValueCodec.decode(bytes!);
+        final restored = await ValueCodec.decode(
+          bytes!,
+          context: ValueContext('people', orig['_id'] as String),
+        );
         expect(restored['name'], equals(orig['name']));
         expect(restored['score'], equals(orig['score']));
       }
@@ -1515,7 +1537,13 @@ void main() {
 
       final stored = await db.store.get('notes', generatedId);
       expect(stored, isNotNull);
-      expect((await ValueCodec.decode(stored!))['name'], equals('Alice'));
+      expect(
+        (await ValueCodec.decode(
+          stored!,
+          context: ValueContext('notes', generatedId),
+        ))['name'],
+        equals('Alice'),
+      );
     });
 
     test('ignores user-provided _id and generates a new one', () async {
@@ -1591,7 +1619,10 @@ void main() {
       expect(decoded, hasLength(1));
       final id = decoded[0]['_id'] as String;
       expect(
-        (await ValueCodec.decode((await db.store.get('notes', id))!))['name'],
+        (await ValueCodec.decode(
+          (await db.store.get('notes', id))!,
+          context: ValueContext('notes', id),
+        ))['name'],
         equals('Carol'),
       );
     });
@@ -1739,7 +1770,10 @@ void main() {
       );
       expect(ok, isTrue);
 
-      final doc = await ValueCodec.decode((await db.store.get('col', idA))!);
+      final doc = await ValueCodec.decode(
+        (await db.store.get('col', idA))!,
+        context: ValueContext('col', idA),
+      );
       expect(doc['score'], equals(99));
       expect(doc['name'], equals('Alice')); // still present
     });
@@ -1796,8 +1830,14 @@ void main() {
       );
       expect(ok, isTrue);
 
-      final docA = await ValueCodec.decode((await db.store.get('col', idA))!);
-      final docB = await ValueCodec.decode((await db.store.get('col', idB))!);
+      final docA = await ValueCodec.decode(
+        (await db.store.get('col', idA))!,
+        context: ValueContext('col', idA),
+      );
+      final docB = await ValueCodec.decode(
+        (await db.store.get('col', idB))!,
+        context: ValueContext('col', idB),
+      );
       expect(docA['status'], equals('reviewed'));
       expect(docB['status'], equals('reviewed'));
     });
@@ -1837,7 +1877,10 @@ void main() {
       expect(ok, isTrue);
       final result = json.decode(out.toString()) as Map;
       expect(result['updated'], equals(1));
-      final doc = await ValueCodec.decode((await db.store.get('col', idA))!);
+      final doc = await ValueCodec.decode(
+        (await db.store.get('col', idA))!,
+        context: ValueContext('col', idA),
+      );
       expect(doc['status'], equals('solo'));
     });
 
@@ -1853,9 +1896,18 @@ void main() {
       );
       expect(ok, isTrue);
 
-      final docA = await ValueCodec.decode((await db.store.get('col', idA))!);
-      final docB = await ValueCodec.decode((await db.store.get('col', idB))!);
-      final docC = await ValueCodec.decode((await db.store.get('col', idC))!);
+      final docA = await ValueCodec.decode(
+        (await db.store.get('col', idA))!,
+        context: ValueContext('col', idA),
+      );
+      final docB = await ValueCodec.decode(
+        (await db.store.get('col', idB))!,
+        context: ValueContext('col', idB),
+      );
+      final docC = await ValueCodec.decode(
+        (await db.store.get('col', idC))!,
+        context: ValueContext('col', idC),
+      );
       expect(docA['flagged'], isTrue); // active -> updated
       expect(docB['flagged'], isTrue); // active -> updated
       expect(docC['flagged'], isNull); // inactive -> not touched
@@ -1907,7 +1959,10 @@ void main() {
       expect(ok, isTrue);
 
       for (final id in [idA, idB, idC]) {
-        final doc = await ValueCodec.decode((await db.store.get('col', id))!);
+        final doc = await ValueCodec.decode(
+          (await db.store.get('col', id))!,
+          context: ValueContext('col', id),
+        );
         expect(doc['archived'], isTrue);
       }
 
@@ -2044,7 +2099,10 @@ void main() {
         );
         expect(ok, isTrue);
 
-        final doc = await ValueCodec.decode((await db.store.get('col', id))!);
+        final doc = await ValueCodec.decode(
+          (await db.store.get('col', id))!,
+          context: ValueContext('col', id),
+        );
         // Shallow merge: entire profile replaced.
         expect(doc['profile'], equals({'city': 'Melbourne'}));
         expect(doc['name'], equals('Dana')); // sibling field unchanged

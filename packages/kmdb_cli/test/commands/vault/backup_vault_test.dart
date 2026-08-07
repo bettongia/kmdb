@@ -118,7 +118,13 @@ void main() {
       () async {
         // Insert a small document using the raw KV store.
         const id = '01900000000070809000000000000010';
-        await db.store.put('notes', id, await ValueCodec.encode({'i': id}));
+        await db.store.put(
+          'notes',
+          id,
+          await ValueCodec.encode({
+            'i': id,
+          }, context: ValueContext('notes', id)),
+        );
 
         final ctx = _ctx(db, out: out, err: err);
         final ok = await DumpCommand().execute(ctx, [], {});
@@ -185,7 +191,11 @@ void main() {
 
     test('--vault skips documents without vault URIs', () async {
       const id = '01900000000070809000000000000011';
-      await db.store.put('docs', id, await ValueCodec.encode({'i': id}));
+      await db.store.put(
+        'docs',
+        id,
+        await ValueCodec.encode({'i': id}, context: ValueContext('docs', id)),
+      );
 
       final vaultDirPath = '${tmpDir.path}/output2';
       final ctx = _ctx(db, out: out, err: err);

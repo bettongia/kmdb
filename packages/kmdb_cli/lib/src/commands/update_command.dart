@@ -351,7 +351,11 @@ final class UpdateCommand extends CliCommand {
 
     // Build a WriteBatch: document replace + vault ref count adjustments.
     final batch = WriteBatch();
-    batch.put(collection, targetId, await ValueCodec.encode(doc));
+    batch.put(
+      collection,
+      targetId,
+      await ValueCodec.encode(doc, context: ValueContext(collection, targetId)),
+    );
     await applyVaultRefCounts(
       doc: doc,
       oldDoc: oldDoc,

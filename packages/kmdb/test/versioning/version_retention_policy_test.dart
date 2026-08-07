@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'package:kmdb/src/encryption/value_context.dart';
 import 'package:kmdb/src/engine/compaction/merge_iterator.dart';
 import 'package:kmdb/src/engine/util/hlc.dart';
 import 'package:kmdb/src/engine/util/key_codec.dart';
@@ -23,6 +24,10 @@ import 'package:test/test.dart';
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const _kMsPerDay = 24 * 60 * 60 * 1000;
+
+/// Matches the `$ver:tasks` / `hex` namespace+key every [MergeEntry] built
+/// below uses — the real coordinates a [VersionEntry] is stored under.
+const _ctx = ValueContext(r'$ver:tasks', '01930000000070008000000000000001');
 
 /// Builds a [MergeEntry] for a put-version at [hlcMs].
 ///
@@ -42,7 +47,7 @@ Future<MergeEntry> _putEntry(int hlcMs, {int logical = 0}) async {
     hlc: const Hlc(0, 0),
     encodedValue: null, // minimally valid put-version
     isDelete: false,
-  ).encode();
+  ).encode(context: _ctx);
   return MergeEntry(key, value, source: 0);
 }
 
@@ -66,7 +71,7 @@ Future<MergeEntry> _deleteEntry(int hlcMs, {int logical = 0}) async {
     hlc: const Hlc(0, 0),
     encodedValue: null,
     isDelete: true,
-  ).encode();
+  ).encode(context: _ctx);
   return MergeEntry(key, value, source: 0);
 }
 

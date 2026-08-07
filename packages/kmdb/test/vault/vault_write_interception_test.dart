@@ -15,6 +15,7 @@
 import 'dart:typed_data';
 
 import 'package:kmdb/src/encoding/value_codec.dart';
+import 'package:kmdb/src/encryption/value_context.dart';
 import 'package:kmdb/src/engine/compaction/reclamation_policy.dart'
     show ReclamationPolicyRegistry;
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
@@ -107,7 +108,7 @@ class _TrackingKvStore implements KvStore {
 
   @override
   void setVersionDropCallback(
-    Future<void> Function(List<Uint8List>)? callback,
+    Future<void> Function(List<DroppedVersionEntry>)? callback,
   ) {}
 
   @override
@@ -164,9 +165,13 @@ class _TrackingKvStore implements KvStore {
 
   /// Reads the ref count for [sha256] from the `$vault:{sha256}` namespace.
   Future<int> readRefCount(String sha256) async {
-    final bytes = _data['$kVaultNamespace:$sha256']?[kVaultRefCountSentinelKey];
+    final refNs = '$kVaultNamespace:$sha256';
+    final bytes = _data[refNs]?[kVaultRefCountSentinelKey];
     if (bytes == null) return 0;
-    final decoded = await ValueCodec.decode(bytes);
+    final decoded = await ValueCodec.decode(
+      bytes,
+      context: ValueContext(refNs, kVaultRefCountSentinelKey),
+    );
     final v = decoded['refCount'];
     return v is int ? v : 0;
   }
@@ -595,20 +600,32 @@ void main() {
         expect(await kvStore.readRefCount(ref.sha256), equals(1));
 
         // Decrement via decrementVersionRefs (the $ver: trim path).
-        final encodedValue = await ValueCodec.encode({'file': ref.uri});
+        const verCtx = ValueContext(r'$ver:test', 'k1');
+        final encodedValue = await ValueCodec.encode({
+          'file': ref.uri,
+        }, context: verCtx);
         final decBatch = WriteBatch();
-        await interceptor.decrementVersionRefs(encodedValue, decBatch);
+        await interceptor.decrementVersionRefs(
+          encodedValue,
+          decBatch,
+          context: verCtx,
+        );
         await kvStore.writeBatch(decBatch);
 
         expect(await kvStore.readRefCount(ref.sha256), equals(0));
       });
 
       test('does nothing when encodedValue contains no vault URIs', () async {
+        const verCtx = ValueContext(r'$ver:test', 'k1');
         final encodedValue = await ValueCodec.encode({
           'title': 'no vault ref here',
-        });
+        }, context: verCtx);
         final batch = WriteBatch();
-        await interceptor.decrementVersionRefs(encodedValue, batch);
+        await interceptor.decrementVersionRefs(
+          encodedValue,
+          batch,
+          context: verCtx,
+        );
         expect(batch.isEmpty, isTrue);
       });
 
@@ -621,6 +638,7 @@ void main() {
             interceptor.decrementVersionRefs(
               Uint8List.fromList([0xFF, 0x00, 0xAB]),
               batch,
+              context: const ValueContext(r'$ver:test', 'k1'),
             ),
             completes,
           );
@@ -652,12 +670,17 @@ void main() {
           await kvStore.writeBatch(incBatch);
 
           // Decrement both in one call.
+          const verCtx = ValueContext(r'$ver:test', 'k1');
           final encodedValue = await ValueCodec.encode({
             'a': ref1.uri,
             'b': ref2.uri,
-          });
+          }, context: verCtx);
           final decBatch = WriteBatch();
-          await interceptor.decrementVersionRefs(encodedValue, decBatch);
+          await interceptor.decrementVersionRefs(
+            encodedValue,
+            decBatch,
+            context: verCtx,
+          );
           await kvStore.writeBatch(decBatch);
 
           expect(await kvStore.readRefCount(ref1.sha256), equals(0));
