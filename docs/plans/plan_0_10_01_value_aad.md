@@ -506,10 +506,17 @@ to be corrected.
       `packages/kmdb`. Also removed one genuinely dead, pre-existing
       `kmdb_cli` function, `readVaultRefCount`, which used a stale/incorrect
       key scheme and was unreachable from any call site.)
-- [ ] Hand off to the **`kmdb-qa` agent** for sign-off. Do not open a PR until
-      sign-off is received.
-- [ ] Run `make pre_commit` — format, analyze, license_check, tests all green.
-- [ ] Verify licence headers on all new files (2026).
+- [x] Hand off to the **`kmdb-qa` agent** for sign-off (2026-08-08) — **PASS**,
+      no code changes required. Verified all seven high-risk seams: the 81
+      kmdb_cli context assignments bind the same `(namespace, key)` the library
+      reads under; the compaction `DroppedVersionEntry` context matches the
+      `$ver:` write path; `readVaultRefCount` genuinely dead; every relocation
+      test uses the real `AesGcmEncryptionProvider` and asserts `badCredentials`;
+      fault-injection and the `< kCurrentFormatVersion` gate exercised.
+- [x] Run `make pre_commit` — **green** (format_check, analyze 0 issues across 7
+      packages, license_check, kmdb 2489 tests). Full `kmdb_cli` suite run
+      separately (kmdb-only gate doesn't cover it): **1177 passed**.
+- [x] Verify licence headers on all new files (2026) — confirmed present.
 
 ## Reviewer assessment (kmdb-plan-reviewer, 2026-08-05)
 
