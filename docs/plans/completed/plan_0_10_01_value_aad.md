@@ -1,8 +1,8 @@
 # Bind encrypted values to their context with AES-GCM associated data (E-2)
 
-**Status**: Implementing
+**Status**: Complete
 
-**PR link**: https://github.com/bettongia/kmdb/pull/68
+**PR link**: https://github.com/bettongia/kmdb/pull/68 (merged 2026-08-09)
 
 > **Provenance.** Finding **E-2** of the
 > [2026-07-18 release-readiness review](../reviews/release-readiness-review-2026-07-18.md),
@@ -719,4 +719,30 @@ execute it with no significant design decisions left. Handing off to
 
 ## Summary
 
-_To be completed when the work is done._
+Delivered in [PR #68](https://github.com/bettongia/kmdb/pull/68) (merged
+2026-08-09). AES-GCM associated data now binds every encrypted value to its
+storage `(namespace, key)` via a required `ValueContext`
+(`domainByte(0x01) ‖ lenPrefixed(namespace) ‖ lenPrefixed(key)`), closing the
+relocation/transplant vector (E-2). Binds **location, not freshness** — rollback/
+replay is out of scope, deferred to WI-4 (documented in §31 with a boundary
+test). Breaking format change: `MetaStore.kCurrentFormatVersion` 1→2 with an
+open-time `< kCurrentFormatVersion` rejection; no migration (greenfield).
+
+Four surfaces threaded: the `EncryptionProvider.encrypt/decrypt` `aad` parameter,
+`ValueCodec.encode/decode`, ~45 `EncryptionEnvelope` sites, and the call-site
+fixups; plus `version:config`'s double-encryption. Five `ValueContext` named
+constructors single-source each non-KvStore literal (`.meta`, `.vaultBlob`,
+`.vaultExtract`, `.vaultCorpus`, `.vaultManifestName`).
+
+Two deviations surfaced during implementation, both handled and tested: (1) a
+**sixth** encrypted site the reviewer census missed — a compaction `$ver:`-drop
+`DroppedVersionEntry` callback; (2) the required-`context` change reached **81
+`kmdb_cli` sites** (13 lib/, 68 test/) outside the plan's `kmdb`-scoped census,
+caught only by `make coverage`; all threaded with correct coordinates and one
+genuinely dead function (`readVaultRefCount`) removed. A latent bug
+(`vault_searcher.dart` fieldPath decode omitting `encryption:`) was also fixed.
+
+`kmdb-qa` PASS (all seven high-risk seams verified); `make pre_commit` green +
+full `kmdb_cli` 1177 pass; coverage kmdb 95.1% / kmdb_cli 95.2%
+(`value_context.dart` 100%). §31 gained an "Associated Data (AAD Binding)"
+section; §05 the format-version + AAD notes.
