@@ -14,6 +14,7 @@
 
 import 'dart:typed_data';
 
+import '../kvstore/kv_store.dart' show DroppedVersionEntry;
 import '../manifest/manifest_writer.dart';
 import '../manifest/version_edit.dart';
 import '../platform/storage_adapter_interface.dart';
@@ -155,17 +156,22 @@ final class CompactionJob {
   /// in tests, though production code constructs a fresh job per compaction.
   int tombstonesDropped = 0;
 
-  /// Raw value bytes of every `$ver:` version entry trimmed by
-  /// [ReclamationPolicy.filterGroup] during [run].
+  /// Namespace, docKey, and raw value bytes of every `$ver:` version entry
+  /// trimmed by [ReclamationPolicy.filterGroup] during [run].
   ///
   /// Populated by the retain-all path when `collapseVersions=false` and
   /// `filterGroup` returns a subset of the group's entries. [LsmEngine] reads
   /// this field after [run] returns and, if non-empty, invokes the registered
   /// version-drop callback to release vault ref counts (RQ5).
   ///
+  /// [namespace]/[docKey] are decoded from the dropped entry's internal key
+  /// (0.10.01 WI-3 / finding E-2) so the callback can reconstruct the
+  /// `ValueContext` the entry was originally encrypted with — see
+  /// [DroppedVersionEntry]'s doc comment.
+  ///
   /// Reset to `[]` at the start of each [run] call so the object is safe to
   /// reuse in tests (parallel to [tombstonesDropped]).
-  List<Uint8List> droppedVersionValues = [];
+  List<DroppedVersionEntry> droppedVersionValues = [];
 
   // ── Run ───────────────────────────────────────────────────────────────────
 
@@ -332,15 +338,23 @@ final class CompactionJob {
       for (final s in survivors) {
         emit(s.key, s.value, groupIsLocal);
       }
-      // Record dropped entries' values for the post-compaction vault
-      // ref-decrement callback (RQ5). $$-namespaced entries never hold vault
-      // URIs, so droppedVersionValues is populated only for syncable entries
-      // (which can only reach here via history-bearing $ver: namespaces).
+      // Record dropped entries' namespace/docKey/value for the post-compaction
+      // vault ref-decrement callback (RQ5). $$-namespaced entries never hold
+      // vault URIs, so droppedVersionValues is populated only for syncable
+      // entries (which can only reach here via history-bearing $ver:
+      // namespaces). namespace/docKey are decoded from the internal key here
+      // (0.10.01 WI-3 / finding E-2) so the callback can reconstruct the
+      // ValueContext the entry was encrypted with — see
+      // [DroppedVersionEntry]'s doc comment.
       if (survivors.length < buf.length) {
         final survivorKeys = survivors.map((s) => s.key).toSet();
         for (final dropped in buf) {
           if (!survivorKeys.contains(dropped.key)) {
-            droppedVersionValues.add(dropped.value);
+            droppedVersionValues.add((
+              namespace: KeyCodec.decodeNamespace(dropped.key),
+              docKey: KeyCodec.bytesToKey(KeyCodec.decodeUserKey(dropped.key)),
+              value: dropped.value,
+            ));
           }
         }
       }

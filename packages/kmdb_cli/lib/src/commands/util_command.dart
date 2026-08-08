@@ -191,11 +191,16 @@ final class UtilCommand extends CliCommand {
           // Only attempt ValueCodec decoding for user collections. System
           // collections (those starting with '$') use internal raw encodings
           // that are incompatible with ValueCodec.
-          final coll = KeyCodec.decodeNamespace(Uint8List.fromList(entry.key));
+          final internalKey = Uint8List.fromList(entry.key);
+          final coll = KeyCodec.decodeNamespace(internalKey);
           if (!coll.startsWith(r'$')) {
+            final docKey = KeyCodec.bytesToKey(
+              KeyCodec.decodeUserKey(internalKey),
+            );
             try {
               valueMap['decoded'] = await ValueCodec.decode(
                 Uint8List.fromList(entry.value),
+                context: ValueContext(coll, docKey),
               );
             } catch (e) {
               valueMap['decodeError'] = e.toString();
@@ -290,6 +295,10 @@ final class UtilCommand extends CliCommand {
           try {
             valueMap['decoded'] = await ValueCodec.decode(
               Uint8List.fromList(r.value),
+              context: ValueContext(
+                r.namespace,
+                KeyCodec.bytesToKey(Uint8List.fromList(r.key)),
+              ),
             );
           } catch (e) {
             valueMap['decodeError'] = e.toString();

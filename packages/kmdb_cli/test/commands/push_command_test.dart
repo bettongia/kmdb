@@ -130,10 +130,13 @@ void main() {
 
   test('push via --sync-dir uploads SSTables when data exists', () async {
     // Write a document so there is something to push.
+    final pushKey1 = _key();
     await db.store.put(
       'notes',
-      _key(),
-      await ValueCodec.encode({'title': 'Hello'}),
+      pushKey1,
+      await ValueCodec.encode({
+        'title': 'Hello',
+      }, context: ValueContext('notes', pushKey1)),
     );
 
     final ctx = _ctx(db, out: out, err: err);
@@ -162,10 +165,13 @@ void main() {
     );
 
     // Write a document.
+    final pushKey2 = _key();
     await db.store.put(
       'notes',
-      _key(),
-      await ValueCodec.encode({'title': 'World'}),
+      pushKey2,
+      await ValueCodec.encode({
+        'title': 'World',
+      }, context: ValueContext('notes', pushKey2)),
     );
 
     final ctx = _ctx(db, out: out, err: err);
@@ -183,10 +189,13 @@ void main() {
       {'path': syncDir.path},
     );
 
+    final pushKey3 = _key();
     await db.store.put(
       'notes',
-      _key(),
-      await ValueCodec.encode({'body': 'test'}),
+      pushKey3,
+      await ValueCodec.encode({
+        'body': 'test',
+      }, context: ValueContext('notes', pushKey3)),
     );
 
     final ctx = _ctx(db, out: out, err: err);
@@ -198,8 +207,22 @@ void main() {
   // ── Namespace filtering ───────────────────────────────────────────────────
 
   test('--namespace restricts sync to named namespace', () async {
-    await db.store.put('notes', _key(), await ValueCodec.encode({'n': 1}));
-    await db.store.put('tasks', _key(), await ValueCodec.encode({'t': 1}));
+    final pushKey6 = _key();
+    await db.store.put(
+      'notes',
+      pushKey6,
+      await ValueCodec.encode({
+        'n': 1,
+      }, context: ValueContext('notes', pushKey6)),
+    );
+    final pushKey7 = _key();
+    await db.store.put(
+      'tasks',
+      pushKey7,
+      await ValueCodec.encode({
+        't': 1,
+      }, context: ValueContext('tasks', pushKey7)),
+    );
 
     final ctx = _ctx(db, out: out, err: err);
     final ok = await pushCmd.execute(ctx, [], {
@@ -233,10 +256,13 @@ void main() {
       // push short-circuits to "nothing to push" before ever reaching
       // adapterFor when there are no user collections, so write a document
       // first to ensure the credential-resolution path is actually reached.
+      final pushKey4 = _key();
       await db.store.put(
         'notes',
-        _key(),
-        await ValueCodec.encode({'title': 'Hello'}),
+        pushKey4,
+        await ValueCodec.encode({
+          'title': 'Hello',
+        }, context: ValueContext('notes', pushKey4)),
       );
 
       final config = await KmdbConfig.forDatabase(dbDir.path);
@@ -274,10 +300,13 @@ void main() {
 
   test('missing Google Drive credentials render a clean one-line error, not '
       'a stack trace', () async {
+    final pushKey5 = _key();
     await db.store.put(
       'notes',
-      _key(),
-      await ValueCodec.encode({'title': 'Hello'}),
+      pushKey5,
+      await ValueCodec.encode({
+        'title': 'Hello',
+      }, context: ValueContext('notes', pushKey5)),
     );
 
     final config = await KmdbConfig.forDatabase(dbDir.path);

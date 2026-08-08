@@ -18,6 +18,7 @@ import 'dart:typed_data';
 import '../../encoding/value_codec.dart';
 import '../../encryption/encryption_envelope.dart';
 import '../../encryption/encryption_provider.dart';
+import '../../encryption/value_context.dart';
 import '../../engine/kvstore/kv_store.dart';
 import '../../engine/kvstore/kv_store_impl.dart';
 import '../../engine/kvstore/meta_store.dart';
@@ -266,9 +267,14 @@ final class VecManager implements WriteAugmentor {
       kind: EmbeddingKind.document,
     );
     final quantised = _quantise(embedding);
-    final wrapped = await EncryptionEnvelope.wrap(quantised, _encryption);
+    final vecNs = VecIndexState.vecNamespace(namespace, def.field);
+    final wrapped = await EncryptionEnvelope.wrap(
+      quantised,
+      _encryption,
+      context: ValueContext(vecNs, docId),
+    );
 
-    batch.put(VecIndexState.vecNamespace(namespace, def.field), docId, wrapped);
+    batch.put(vecNs, docId, wrapped);
 
     if (truncated) {
       batch.put(
@@ -323,10 +329,15 @@ final class VecManager implements WriteAugmentor {
       kind: EmbeddingKind.document,
     );
     final quantised = _quantise(embedding);
-    final wrapped = await EncryptionEnvelope.wrap(quantised, _encryption);
+    final vecNs = VecIndexState.vecNamespace(namespace, def.field);
+    final wrapped = await EncryptionEnvelope.wrap(
+      quantised,
+      _encryption,
+      context: ValueContext(vecNs, docId),
+    );
 
     // Overwrite the vector atomically — no read-before-write needed.
-    batch.put(VecIndexState.vecNamespace(namespace, def.field), docId, wrapped);
+    batch.put(vecNs, docId, wrapped);
 
     // Adjust truncation marker: remove stale marker and add new one if needed.
     batch.delete(VecIndexState.truncatedNamespace(namespace, def.field), docId);
@@ -381,7 +392,11 @@ final class VecManager implements WriteAugmentor {
       final docId = entry.key;
       Map<String, dynamic> doc;
       try {
-        doc = await ValueCodec.decode(entry.value, encryption: _encryption);
+        doc = await ValueCodec.decode(
+          entry.value,
+          context: ValueContext(namespace, docId),
+          encryption: _encryption,
+        );
       } catch (_) {
         continue; // skip corrupt entries
       }
@@ -394,10 +409,15 @@ final class VecManager implements WriteAugmentor {
         kind: EmbeddingKind.document,
       );
       final quantised = _quantise(embedding);
-      final wrapped = await EncryptionEnvelope.wrap(quantised, _encryption);
+      final vecNs = VecIndexState.vecNamespace(namespace, field);
+      final wrapped = await EncryptionEnvelope.wrap(
+        quantised,
+        _encryption,
+        context: ValueContext(vecNs, docId),
+      );
 
       final batch = WriteBatch();
-      batch.put(VecIndexState.vecNamespace(namespace, field), docId, wrapped);
+      batch.put(vecNs, docId, wrapped);
       if (truncated) {
         batch.put(
           VecIndexState.truncatedNamespace(namespace, field),
@@ -523,7 +543,11 @@ final class VecManager implements WriteAugmentor {
         if (bytes == null) return; // deleted again before delta was applied
         Map<String, dynamic> doc;
         try {
-          doc = await ValueCodec.decode(bytes, encryption: _encryption);
+          doc = await ValueCodec.decode(
+            bytes,
+            context: ValueContext(namespace, docId),
+            encryption: _encryption,
+          );
         } catch (_) {
           return;
         }
@@ -534,7 +558,11 @@ final class VecManager implements WriteAugmentor {
         if (bytes == null) return;
         Map<String, dynamic> doc;
         try {
-          doc = await ValueCodec.decode(bytes, encryption: _encryption);
+          doc = await ValueCodec.decode(
+            bytes,
+            context: ValueContext(namespace, docId),
+            encryption: _encryption,
+          );
         } catch (_) {
           return;
         }
@@ -696,17 +724,19 @@ final class VecManager implements WriteAugmentor {
     // every entry in an encrypted database.
     final expectedByteLen = _model.dimensions;
 
+    final vecNs = VecIndexState.vecNamespace(namespace, field);
     if (candidateIds != null) {
       // Pre-filter path: targeted key lookups instead of a full prefix scan.
       for (final docId in candidateIds) {
-        final bytes = await _store.get(
-          VecIndexState.vecNamespace(namespace, field),
-          docId,
-        );
+        final bytes = await _store.get(vecNs, docId);
         if (bytes == null) continue;
         final Uint8List unwrapped;
         try {
-          unwrapped = await EncryptionEnvelope.unwrap(bytes, _encryption);
+          unwrapped = await EncryptionEnvelope.unwrap(
+            bytes,
+            _encryption,
+            context: ValueContext(vecNs, docId),
+          );
         } catch (_) {
           continue; // corrupt or undecryptable entry — skip
         }
@@ -716,12 +746,14 @@ final class VecManager implements WriteAugmentor {
       }
     } else {
       // Full scan path: iterate every entry in the vector namespace.
-      await for (final entry in _store.scan(
-        VecIndexState.vecNamespace(namespace, field),
-      )) {
+      await for (final entry in _store.scan(vecNs)) {
         final Uint8List unwrapped;
         try {
-          unwrapped = await EncryptionEnvelope.unwrap(entry.value, _encryption);
+          unwrapped = await EncryptionEnvelope.unwrap(
+            entry.value,
+            _encryption,
+            context: ValueContext(vecNs, entry.key),
+          );
         } catch (_) {
           continue; // corrupt or undecryptable entry — skip
         }
@@ -745,13 +777,15 @@ final class VecManager implements WriteAugmentor {
   /// `Map`-shaped (`{n}`), so it is routed through [ValueCodec] directly
   /// (Encryption confidentiality reconciliation plan, Phase 0/B7).
   Future<int> _readCorpusN(String namespace, String field) async {
-    final bytes = await _store.get(
-      VecIndexState.corpusNamespace(namespace, field),
-      VecIndexState.corpusSentinelKey,
-    );
+    final corpusNs = VecIndexState.corpusNamespace(namespace, field);
+    final bytes = await _store.get(corpusNs, VecIndexState.corpusSentinelKey);
     if (bytes == null || bytes.isEmpty) return 0;
     try {
-      final map = await ValueCodec.decode(bytes, encryption: _encryption);
+      final map = await ValueCodec.decode(
+        bytes,
+        context: ValueContext(corpusNs, VecIndexState.corpusSentinelKey),
+        encryption: _encryption,
+      );
       return (map['n'] as num?)?.toInt() ?? 0;
     } catch (_) {}
     return 0;
@@ -765,12 +799,13 @@ final class VecManager implements WriteAugmentor {
     int n,
     WriteBatch batch,
   ) async {
-    final encoded = await ValueCodec.encode({'n': n}, encryption: _encryption);
-    batch.put(
-      VecIndexState.corpusNamespace(namespace, field),
-      VecIndexState.corpusSentinelKey,
-      encoded,
+    final corpusNs = VecIndexState.corpusNamespace(namespace, field);
+    final encoded = await ValueCodec.encode(
+      {'n': n},
+      context: ValueContext(corpusNs, VecIndexState.corpusSentinelKey),
+      encryption: _encryption,
     );
+    batch.put(corpusNs, VecIndexState.corpusSentinelKey, encoded);
   }
 
   // ── Clear helpers ─────────────────────────────────────────────────────────
@@ -817,7 +852,11 @@ final class VecManager implements WriteAugmentor {
     if (bytes == null || bytes.isEmpty) {
       return VecIndexState.fromBytes(namespace, field, null);
     }
-    final unwrapped = await EncryptionEnvelope.unwrap(bytes, _encryption);
+    final unwrapped = await EncryptionEnvelope.unwrap(
+      bytes,
+      _encryption,
+      context: ValueContext(kVecStateNamespace, key),
+    );
     return VecIndexState.fromBytes(namespace, field, unwrapped);
   }
 
@@ -834,7 +873,11 @@ final class VecManager implements WriteAugmentor {
   ) async {
     _statusCache[_cacheKey(namespace, field)] = state.status;
     final key = MetaStore.symbolicKey(VecIndexState.metaKey(namespace, field));
-    final wrapped = await EncryptionEnvelope.wrap(state.toBytes(), _encryption);
+    final wrapped = await EncryptionEnvelope.wrap(
+      state.toBytes(),
+      _encryption,
+      context: ValueContext(kVecStateNamespace, key),
+    );
     await _store.putRaw(kVecStateNamespace, key, wrapped);
   }
 

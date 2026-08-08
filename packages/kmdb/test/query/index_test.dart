@@ -16,6 +16,7 @@ import 'dart:typed_data';
 
 import 'package:cbor/cbor.dart';
 import 'package:kmdb/src/encryption/encryption_envelope.dart';
+import 'package:kmdb/src/encryption/value_context.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/kvstore/meta_store.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
@@ -736,7 +737,11 @@ void main() {
           ),
         );
         final key = MetaStore.indexKey('contacts', 'city');
-        final wrapped = await EncryptionEnvelope.wrap(stateBytes, null);
+        final wrapped = await EncryptionEnvelope.wrap(
+          stateBytes,
+          null,
+          context: ValueContext(kIndexStateNamespace, key),
+        );
         await db.store.putRaw(kIndexStateNamespace, key, wrapped);
 
         // Now checkInterruptedBuilds() must report the interrupted build.

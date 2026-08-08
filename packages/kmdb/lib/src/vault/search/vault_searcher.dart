@@ -28,6 +28,7 @@ import 'package:betto_lexical/betto_lexical.dart' show createDefaultTokenizer;
 
 import '../../encoding/value_codec.dart';
 import '../../encryption/encryption_error.dart';
+import '../../encryption/value_context.dart';
 import '../../search/language_detection.dart';
 import '../../search/lexical/fts_manager.dart' show defaultStopwords;
 import '../../search/lexical/pipeline.dart' show preprocess;
@@ -330,7 +331,13 @@ final class VaultSearcher<T> {
       Uint8List? unwrappedCorpusBytes;
       if (corpusBytes != null) {
         try {
-          unwrappedCorpusBytes = await _manager.unwrapIndexValue(corpusBytes);
+          unwrappedCorpusBytes = await _manager.unwrapIndexValue(
+            corpusBytes,
+            context: ValueContext.vaultCorpus(
+              corpusNs,
+              kVaultCorpusSentinelKey,
+            ),
+          );
         } catch (_) {
           unwrappedCorpusBytes = null;
         }
@@ -361,7 +368,10 @@ final class VaultSearcher<T> {
         await for (final entry in _kvStore.scan(termNs)) {
           Uint8List? unwrapped;
           try {
-            unwrapped = await _manager.unwrapIndexValue(entry.value);
+            unwrapped = await _manager.unwrapIndexValue(
+              entry.value,
+              context: ValueContext(termNs, entry.key),
+            );
           } catch (_) {
             continue; // corrupt or undecryptable entry — skip
           }
@@ -487,7 +497,10 @@ final class VaultSearcher<T> {
         // treatment as a dimension mismatch below.
         final Uint8List unwrapped;
         try {
-          unwrapped = await _manager.unwrapIndexValue(entry.value);
+          unwrapped = await _manager.unwrapIndexValue(
+            entry.value,
+            context: ValueContext(ns, entry.key),
+          );
         } catch (_) {
           continue;
         }
@@ -624,12 +637,24 @@ final class VaultSearcher<T> {
       // Value is stored as ValueCodec-encoded map {'p': fieldPath} (see
       // VaultRefInterceptor.interceptWrite). Decode via ValueCodec to handle
       // encryption and CBOR decoding uniformly.
+      //
+      // Latent bug fixed by 0.10.01 WI-3: this call previously omitted
+      // `encryption:` entirely, so on an encrypted database the decode always
+      // threw (caught below) and fieldPath silently came back empty. Making
+      // `context` required on ValueCodec.decode forced this call site to be
+      // corrected — it now also passes the writer's encryption provider
+      // (`_manager.encryption`) and the real (docRefNs, docId) context that
+      // `VaultRefInterceptor.interceptWrite` used to encode it.
       final docRefNs = '$kVaultDocRefPrefix$sha256';
       final fieldPathBytes = await _kvStore.get(docRefNs, docId);
       String fieldPath = '';
       if (fieldPathBytes != null) {
         try {
-          final decoded = await ValueCodec.decode(fieldPathBytes);
+          final decoded = await ValueCodec.decode(
+            fieldPathBytes,
+            context: ValueContext(docRefNs, docId),
+            encryption: _manager.encryption,
+          );
           fieldPath = (decoded['p'] as String?) ?? '';
         } catch (_) {
           // Undecodable — use empty path.

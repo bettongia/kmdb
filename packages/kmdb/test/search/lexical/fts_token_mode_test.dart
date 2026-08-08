@@ -31,6 +31,7 @@ import 'package:kmdb/src/encoding/value_codec.dart';
 import 'package:kmdb/src/encryption/encryption_envelope.dart';
 import 'package:kmdb/src/encryption/encryption_provider.dart';
 import 'package:kmdb/src/encryption/key_derivation.dart';
+import 'package:kmdb/src/encryption/value_context.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store_impl.dart';
 import 'package:kmdb/src/engine/kvstore/meta_store.dart';
@@ -56,7 +57,11 @@ Future<FtsIndexState> _readFtsState(
   final key = MetaStore.symbolicKey(FtsIndexState.metaKey(_ns, _field));
   final bytes = await store.get(kFtsStateNamespace, key);
   if (bytes == null) return FtsIndexState.fromBytes(_ns, _field, null);
-  final unwrapped = await EncryptionEnvelope.unwrap(bytes, encryption);
+  final unwrapped = await EncryptionEnvelope.unwrap(
+    bytes,
+    encryption,
+    context: ValueContext(kFtsStateNamespace, key),
+  );
   return FtsIndexState.fromBytes(_ns, _field, unwrapped);
 }
 
@@ -76,7 +81,12 @@ Future<void> _putDoc(
   String docKey,
   Map<String, dynamic> doc,
 ) async {
-  final batch = WriteBatch()..put(_ns, docKey, await ValueCodec.encode(doc));
+  final batch = WriteBatch()
+    ..put(
+      _ns,
+      docKey,
+      await ValueCodec.encode(doc, context: ValueContext(_ns, docKey)),
+    );
   await store.writeBatchInternal(batch);
 }
 
@@ -142,7 +152,11 @@ void main() {
         fetchDoc: (id) async {
           final bytes = await store.get(_ns, id);
           if (bytes == null) return null;
-          return ValueCodec.decode(bytes, encryption: provider);
+          return ValueCodec.decode(
+            bytes,
+            context: ValueContext(_ns, id),
+            encryption: provider,
+          );
         },
       );
       expect(result.hits, hasLength(1));
@@ -230,7 +244,11 @@ void main() {
         fetchDoc: (id) async {
           final bytes = await store.get(_ns, id);
           if (bytes == null) return null;
-          return ValueCodec.decode(bytes, encryption: provider);
+          return ValueCodec.decode(
+            bytes,
+            context: ValueContext(_ns, id),
+            encryption: provider,
+          );
         },
       );
       expect(result.hits, hasLength(1));

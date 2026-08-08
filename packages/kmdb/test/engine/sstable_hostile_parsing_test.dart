@@ -28,6 +28,7 @@ library;
 import 'dart:io';
 
 import 'package:kmdb/src/encoding/value_codec.dart';
+import 'package:kmdb/src/encryption/value_context.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_native.dart';
 import 'package:kmdb/src/engine/sstable/sstable_reader.dart';
 import 'package:test/test.dart';
@@ -232,8 +233,14 @@ void main() {
         expect(rawValue, isNotNull);
 
         // The bomb only detonates when something actually decodes the value.
+        // No encryption is used, so the context passed here need not match
+        // any real write-site value (see `hostile_sstable.dart`'s
+        // buildDecompressionBombValue doc comment).
         await expectLater(
-          ValueCodec.decode(rawValue!),
+          ValueCodec.decode(
+            rawValue!,
+            context: const ValueContext('test', 'bomb'),
+          ),
           throwsA(isA<DecodedValueTooLargeException>()),
         );
       },

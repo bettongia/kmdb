@@ -29,7 +29,10 @@ import 'dart:typed_data';
 
 import '../../encoding/value_codec.dart';
 import '../../encryption/encryption_provider.dart';
+import '../../encryption/value_context.dart';
 import '../../search/lexical/fts_index_state.dart' show FtsTokenMode;
+import 'vault_namespaces.dart'
+    show kVaultExtractPrefix, kVaultCorpusSentinelKey;
 
 /// The lifecycle status of a single vault blob's text extraction and indexing.
 enum VaultExtractionStatus {
@@ -308,7 +311,14 @@ final class VaultExtractionState {
   /// leak of `charset`/`script`/`language`/`modelVersion`/`chunkCount`/
   /// `error` (which may contain content fragments).
   Future<Uint8List> encode({EncryptionProvider? encryption}) =>
-      ValueCodec.encode(toMap(), encryption: encryption);
+      ValueCodec.encode(
+        toMap(),
+        context: ValueContext(
+          '$kVaultExtractPrefix$sha256',
+          kVaultCorpusSentinelKey,
+        ),
+        encryption: encryption,
+      );
 
   /// Decodes a [VaultExtractionState] from [ValueCodec]-encoded bytes and
   /// [sha256].
@@ -321,7 +331,14 @@ final class VaultExtractionState {
     String sha256, {
     EncryptionProvider? encryption,
   }) async {
-    final map = await ValueCodec.decode(bytes, encryption: encryption);
+    final map = await ValueCodec.decode(
+      bytes,
+      context: ValueContext(
+        '$kVaultExtractPrefix$sha256',
+        kVaultCorpusSentinelKey,
+      ),
+      encryption: encryption,
+    );
     return VaultExtractionState.fromMap(map, sha256);
   }
 

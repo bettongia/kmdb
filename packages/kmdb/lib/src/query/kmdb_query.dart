@@ -17,6 +17,7 @@ import 'dart:async';
 import 'dart:developer' as developer;
 
 import '../encoding/value_codec.dart';
+import '../encryption/value_context.dart';
 import 'exceptions.dart';
 import 'filter/field_path.dart';
 import 'filter/filter.dart';
@@ -414,6 +415,7 @@ final class KmdbQuery<T> {
           try {
             doc = await ValueCodec.decode(
               bytes,
+              context: ValueContext(ns, key),
               encryption: _collection.database.encryption,
             );
           } catch (_) {
@@ -510,6 +512,7 @@ final class KmdbQuery<T> {
       try {
         doc = await ValueCodec.decode(
           entry.value,
+          context: ValueContext(_collection.namespace, entry.key),
           encryption: _collection.database.encryption,
         );
       } catch (_) {

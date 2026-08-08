@@ -19,6 +19,14 @@ import 'package:kmdb/src/encryption/encryption_provider.dart';
 import 'package:kmdb/src/encryption/key_derivation.dart';
 import 'package:test/test.dart';
 
+/// A fixed, arbitrary AAD used by tests in this file that exercise
+/// encrypt/decrypt behaviour unrelated to the AAD binding itself (nonce
+/// uniqueness, key mismatch, tamper detection, truncation, etc.) — those
+/// tests only need *a* consistent AAD passed to both `encrypt` and `decrypt`,
+/// not any particular one. Dedicated AAD-mismatch/binding tests live in
+/// `test/encryption/value_aad_test.dart`.
+final _testAad = Uint8List.fromList('test-aad'.codeUnits);
+
 void main() {
   // ── AesGcmEncryptionProvider ────────────────────────────────────────────────
 
@@ -32,15 +40,15 @@ void main() {
     test('encrypt/decrypt round-trips plaintext correctly', () async {
       final provider = AesGcmEncryptionProvider(dek);
       final plaintext = Uint8List.fromList(List.generate(32, (i) => i));
-      final ciphertext = await provider.encrypt(plaintext);
-      final recovered = await provider.decrypt(ciphertext);
+      final ciphertext = await provider.encrypt(plaintext, aad: _testAad);
+      final recovered = await provider.decrypt(ciphertext, aad: _testAad);
       expect(recovered, equals(plaintext));
     });
 
     test('round-trips empty plaintext', () async {
       final provider = AesGcmEncryptionProvider(dek);
-      final ciphertext = await provider.encrypt(Uint8List(0));
-      final recovered = await provider.decrypt(ciphertext);
+      final ciphertext = await provider.encrypt(Uint8List(0), aad: _testAad);
+      final recovered = await provider.decrypt(ciphertext, aad: _testAad);
       expect(recovered, isEmpty);
     });
 
@@ -49,16 +57,16 @@ void main() {
       final plaintext = Uint8List.fromList(
         List.generate(100000, (i) => i % 256),
       );
-      final ciphertext = await provider.encrypt(plaintext);
-      final recovered = await provider.decrypt(ciphertext);
+      final ciphertext = await provider.encrypt(plaintext, aad: _testAad);
+      final recovered = await provider.decrypt(ciphertext, aad: _testAad);
       expect(recovered, equals(plaintext));
     });
 
     test('nonce is unique across calls (ciphertext differs)', () async {
       final provider = AesGcmEncryptionProvider(dek);
       final plaintext = Uint8List.fromList([1, 2, 3, 4]);
-      final ct1 = await provider.encrypt(plaintext);
-      final ct2 = await provider.encrypt(plaintext);
+      final ct1 = await provider.encrypt(plaintext, aad: _testAad);
+      final ct2 = await provider.encrypt(plaintext, aad: _testAad);
       // Different nonces → different ciphertext bytes (even for identical
       // plaintext). The probability of collision is negligible (2^{-96}).
       expect(ct1, isNot(equals(ct2)));
@@ -69,7 +77,7 @@ void main() {
       () async {
         final provider = AesGcmEncryptionProvider(dek);
         final plaintext = Uint8List.fromList(List.generate(50, (i) => i));
-        final ciphertext = await provider.encrypt(plaintext);
+        final ciphertext = await provider.encrypt(plaintext, aad: _testAad);
         expect(ciphertext.length, equals(plaintext.length + 28));
       },
     );
@@ -83,10 +91,11 @@ void main() {
 
         final ciphertext = await provider.encrypt(
           Uint8List.fromList([1, 2, 3, 4]),
+          aad: _testAad,
         );
 
         expect(
-          () async => wrongProvider.decrypt(ciphertext),
+          () async => wrongProvider.decrypt(ciphertext, aad: _testAad),
           throwsA(
             isA<EncryptionError>().having(
               (e) => e.code,
@@ -103,14 +112,14 @@ void main() {
       () async {
         final provider = AesGcmEncryptionProvider(dek);
         final plaintext = Uint8List.fromList([1, 2, 3, 4, 5, 6, 7, 8]);
-        final ciphertext = await provider.encrypt(plaintext);
+        final ciphertext = await provider.encrypt(plaintext, aad: _testAad);
 
         // Flip one bit in the ciphertext body (not the tag or nonce).
         final tampered = Uint8List.fromList(ciphertext);
         tampered[13] ^= 0xFF; // flip bits in the ciphertext body
 
         expect(
-          () async => provider.decrypt(tampered),
+          () async => provider.decrypt(tampered, aad: _testAad),
           throwsA(
             isA<EncryptionError>().having(
               (e) => e.code,
@@ -129,7 +138,7 @@ void main() {
         // Input shorter than minimum valid AES-GCM output (12+16=28 bytes).
         final tooShort = Uint8List.fromList([1, 2, 3]);
         expect(
-          () async => provider.decrypt(tooShort),
+          () async => provider.decrypt(tooShort, aad: _testAad),
           throwsA(
             isA<EncryptionError>().having(
               (e) => e.code,
@@ -162,9 +171,57 @@ void main() {
       got[0] ^= 0xFF; // mutate the returned copy
       // The provider must still encrypt correctly — its internal DEK is unchanged.
       final plaintext = Uint8List.fromList([42, 43, 44]);
-      final ciphertext = await provider.encrypt(plaintext);
-      final recovered = await provider.decrypt(ciphertext);
+      final ciphertext = await provider.encrypt(plaintext, aad: _testAad);
+      final recovered = await provider.decrypt(ciphertext, aad: _testAad);
       expect(recovered, equals(plaintext));
+    });
+
+    // ── Associated data (0.10.01 WI-3 / finding E-2) ──────────────────────────
+
+    group('associated data', () {
+      test('decrypt succeeds when the AAD matches encrypt', () async {
+        final provider = AesGcmEncryptionProvider(dek);
+        final plaintext = Uint8List.fromList([9, 8, 7]);
+        final aad = Uint8List.fromList([1, 2, 3]);
+        final ciphertext = await provider.encrypt(plaintext, aad: aad);
+        final recovered = await provider.decrypt(ciphertext, aad: aad);
+        expect(recovered, equals(plaintext));
+      });
+
+      test(
+        'decrypt throws EncryptionError.badCredentials when the AAD does '
+        'not match the AAD used at encrypt time — this is the core GCM '
+        'authentication property WI-3 relies on to detect relocation',
+        () async {
+          final provider = AesGcmEncryptionProvider(dek);
+          final plaintext = Uint8List.fromList([9, 8, 7]);
+          final ciphertext = await provider.encrypt(
+            plaintext,
+            aad: Uint8List.fromList([1, 2, 3]),
+          );
+          expect(
+            () async => provider.decrypt(
+              ciphertext,
+              aad: Uint8List.fromList([4, 5, 6]),
+            ),
+            throwsA(
+              isA<EncryptionError>().having(
+                (e) => e.code,
+                'code',
+                EncryptionErrorCode.badCredentials,
+              ),
+            ),
+          );
+        },
+      );
+
+      test('an empty AAD is valid and round-trips', () async {
+        final provider = AesGcmEncryptionProvider(dek);
+        final plaintext = Uint8List.fromList([1, 2, 3]);
+        final ciphertext = await provider.encrypt(plaintext, aad: Uint8List(0));
+        final recovered = await provider.decrypt(ciphertext, aad: Uint8List(0));
+        expect(recovered, equals(plaintext));
+      });
     });
   });
 

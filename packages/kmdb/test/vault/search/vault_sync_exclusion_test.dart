@@ -36,6 +36,7 @@ import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
 import 'package:kmdb/src/engine/sstable/sstable_reader.dart';
 import 'package:kmdb/src/engine/util/namespace_codec.dart';
 import 'package:kmdb/src/encoding/value_codec.dart';
+import 'package:kmdb/src/encryption/value_context.dart';
 import 'package:kmdb/src/vault/search/vault_bm25_writer.dart';
 import 'package:kmdb/src/vault/search/vault_namespaces.dart';
 
@@ -132,9 +133,11 @@ void main() {
 
       // Document reference: $vault:docref:{sha256} / {docId} → field path.
       // ValueCodec.encode is used to mirror VaultRefInterceptor.
-      final fieldPathBytes = await ValueCodec.encode({'p': 'attachment'});
-      final docRefBatch = WriteBatch()
-        ..put('$kVaultDocRefPrefix$sha256', docId, fieldPathBytes);
+      final docRefNs = '$kVaultDocRefPrefix$sha256';
+      final fieldPathBytes = await ValueCodec.encode({
+        'p': 'attachment',
+      }, context: ValueContext(docRefNs, docId));
+      final docRefBatch = WriteBatch()..put(docRefNs, docId, fieldPathBytes);
       await store.writeBatchInternal(docRefBatch);
 
       // Flush to produce SSTable files.
@@ -241,7 +244,10 @@ void main() {
       );
 
       // Confirm the value decodes to the expected field path.
-      final decoded = await ValueCodec.decode(fieldPathBytes!);
+      final decoded = await ValueCodec.decode(
+        fieldPathBytes!,
+        context: ValueContext('$kVaultDocRefPrefix$sha256', docId),
+      );
       expect(decoded['p'], equals('attachment'));
 
       await store.close();

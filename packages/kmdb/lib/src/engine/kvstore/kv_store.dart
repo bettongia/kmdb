@@ -257,8 +257,11 @@ abstract interface class KvStore {
   /// Registers a callback invoked after an all-levels compaction trims one or
   /// more `$ver:` version entries via `ReclamationPolicy.filterGroup`.
   ///
-  /// The callback receives the raw value bytes (`List<Uint8List>`) of every
-  /// trimmed [VersionEntry]. Each entry may contain vault URIs; the callback is
+  /// The callback receives one [DroppedVersionEntry] per trimmed
+  /// [VersionEntry], carrying the real `(namespace, docKey)` the entry was
+  /// stored under alongside its raw value bytes (0.10.01 WI-3 / finding E-2:
+  /// needed to reconstruct the `ValueContext` a required [ValueCodec.decode]
+  /// call now demands). Each entry may contain vault URIs; the callback is
   /// responsible for decrementing the vault ref counts for those URIs.
   ///
   /// ## Crash posture (RQ5)
@@ -273,7 +276,7 @@ abstract interface class KvStore {
   /// Pass `null` to unregister the callback (e.g. when vault is disabled).
   /// Mirrors the pattern of [setTombstoneHorizonProvider].
   void setVersionDropCallback(
-    Future<void> Function(List<Uint8List> droppedValues)? callback,
+    Future<void> Function(List<DroppedVersionEntry> droppedValues)? callback,
   );
 
   /// Resets the tombstone GC floor to `Hlc(0, 0)` in `$meta`.
@@ -362,38 +365,76 @@ final class StoreInfo {
 // ── Public types ──────────────────────────────────────────────────────────────
 
 /// Thrown by [KvStoreImpl.open] when a database directory contains persisted
-/// state (`CURRENT`/manifest/SSTables) but is missing the `$meta`
-/// format-version marker introduced by the Encryption confidentiality
-/// reconciliation plan (Phase 2/B8-B9).
+/// state (`CURRENT`/manifest/SSTables) whose `$meta` format-version marker is
+/// either absent entirely or older than the format this build requires.
 ///
-/// This indicates the database was created by pre-plan code, whose `$meta`,
-/// index/FTS/Vec state, and vault-search index values were bare CBOR with no
-/// leading [EncryptionFlag]/[CompressionFlag] framing byte. The current code
-/// unconditionally expects that framing (via `EncryptionEnvelope`/
-/// `ValueCodec`) on every value it reads through those paths — attempting to
-/// read a pre-plan value would either throw an unrelated, confusing error or,
-/// worse, silently misparse a legacy CBOR byte that happens to collide with a
-/// valid flag byte (small integers 0/1 are indistinguishable from
-/// `EncryptionFlag.none`/`EncryptionFlag.aesGcm` at the single-byte level —
-/// this is exactly why the gate is enforced once at the database level here,
-/// not per-value).
+/// Two distinct scenarios both throw this exception, distinguished by
+/// [foundVersion]:
+///
+/// - **[foundVersion] is `null`** (marker absent): the database was created by
+///   pre-Phase-2/B8-B9 code, whose `$meta`, index/FTS/Vec state, and
+///   vault-search index values were bare CBOR with no leading
+///   [EncryptionFlag]/[CompressionFlag] framing byte. The current code
+///   unconditionally expects that framing (via `EncryptionEnvelope`/
+///   `ValueCodec`) on every value it reads through those paths — attempting
+///   to read a pre-plan value would either throw an unrelated, confusing
+///   error or, worse, silently misparse a legacy CBOR byte that happens to
+///   collide with a valid flag byte (small integers 0/1 are indistinguishable
+///   from `EncryptionFlag.none`/`EncryptionFlag.aesGcm` at the single-byte
+///   level — this is exactly why the gate is enforced once at the database
+///   level here, not per-value).
+/// - **[foundVersion] is non-null and `< currentVersion`** (0.10.01 WI-3 /
+///   finding E-2): the marker is present but stamped with an older format
+///   version — e.g. a v1 database predating the AES-GCM associated-data (AAD)
+///   binding this build requires on every encrypted value. Reading such a
+///   database's encrypted values with a non-empty AAD would fail GCM
+///   authentication on every single one (the ciphertext was never bound to
+///   an AAD), indistinguishable from tampering. `KvStoreImpl.open()` must
+///   therefore reject it explicitly rather than let each value fail
+///   confusingly one at a time.
 ///
 /// This is a pre-v1-beta breaking format change with **no migration path**,
 /// consistent with the original Phase 12 encryption precedent: the database
 /// must be recreated. There is no way to open it with older or newer code.
 final class LegacyDatabaseFormatException implements Exception {
-  const LegacyDatabaseFormatException(this.dbDir);
+  /// Creates a [LegacyDatabaseFormatException] for the database at [dbDir].
+  ///
+  /// [foundVersion] is the format-version marker actually found, or `null` if
+  /// no marker exists at all. [currentVersion] is the format version this
+  /// build requires (`MetaStore.kCurrentFormatVersion`) — passed in rather
+  /// than referenced directly to avoid an import cycle (`MetaStore` already
+  /// depends on this file).
+  const LegacyDatabaseFormatException(
+    this.dbDir, {
+    this.foundVersion,
+    this.currentVersion,
+  });
 
   /// The database directory that failed to open.
   final String dbDir;
 
+  /// The format-version marker actually found in the database, or `null` if
+  /// no marker was present at all (pre-Phase-2/B8-B9 database).
+  final int? foundVersion;
+
+  /// The format version this build requires, or `null` if [foundVersion] is
+  /// also `null` (the marker-absent case does not need this for its message).
+  final int? currentVersion;
+
   @override
-  String toString() =>
-      'LegacyDatabaseFormatException: the database at "$dbDir" was created '
-      'before the Encryption confidentiality reconciliation plan landed and '
-      'cannot be opened by this version of KMDB. There is no migration path '
-      '— recreate the database (see docs/spec/31_encryption.md and '
-      'docs/spec/28_release_checklist.md).';
+  String toString() {
+    final detail = foundVersion == null
+        ? 'was created before the Encryption confidentiality reconciliation '
+              'plan landed and is missing its `\$meta` format-version marker '
+              'entirely'
+        : 'was written by an older KMDB format (format version $foundVersion, '
+              'current is $currentVersion) — the AES-GCM associated-data '
+              'binding introduced by 0.10.01 WI-3 is incompatible with it';
+    return 'LegacyDatabaseFormatException: the database at "$dbDir" $detail '
+        'and cannot be opened by this version of KMDB. There is no migration '
+        'path — recreate the database (see docs/spec/31_encryption.md and '
+        'docs/spec/28_release_checklist.md).';
+  }
 }
 
 /// A raw key-value entry returned by [KvStore.scan].
@@ -404,6 +445,24 @@ typedef KvEntry = ({String key, Uint8List value});
 /// Carries the raw [value] bytes, the authoritative [hlc] extracted from the
 /// internal key, and a flag indicating whether the entry is a tombstone.
 typedef VersionHistoryEntry = ({Uint8List value, Hlc hlc, bool isDelete});
+
+/// A single `$ver:` version entry trimmed during all-levels compaction,
+/// passed to the callback registered via [KvStore.setVersionDropCallback]
+/// (0.10.01 WI-3 / finding E-2).
+///
+/// Carries [namespace] (the real `$ver:{userNamespace}` storage namespace) and
+/// [docKey] alongside the raw [value] bytes — both decoded from the dropped
+/// entry's internal key by [CompactionJob] — so the callback can construct the
+/// same `ValueContext(namespace, docKey)` the entry was originally encoded
+/// with and successfully decrypt it. Before this field existed, the callback
+/// received only raw bytes with no way to reconstruct the AAD a required
+/// [ValueContext] needs, which would have made every encrypted `$ver:` drop
+/// undecodable the moment [ValueCodec.decode] started requiring a context.
+typedef DroppedVersionEntry = ({
+  String namespace,
+  String docKey,
+  Uint8List value,
+});
 
 /// Describes what happened during KvStoreImpl.open crash recovery.
 ///

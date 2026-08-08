@@ -24,6 +24,7 @@ library;
 import 'package:kmdb/src/encoding/value_codec.dart';
 import 'package:kmdb/src/encryption/encryption_provider.dart';
 import 'package:kmdb/src/encryption/key_derivation.dart';
+import 'package:kmdb/src/encryption/value_context.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store_impl.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
@@ -49,7 +50,12 @@ Future<void> _putDoc(
   String docKey,
   Map<String, dynamic> doc,
 ) async {
-  final batch = WriteBatch()..put(_ns, docKey, await ValueCodec.encode(doc));
+  final batch = WriteBatch()
+    ..put(
+      _ns,
+      docKey,
+      await ValueCodec.encode(doc, context: ValueContext(_ns, docKey)),
+    );
   await store.writeBatchInternal(batch);
 }
 

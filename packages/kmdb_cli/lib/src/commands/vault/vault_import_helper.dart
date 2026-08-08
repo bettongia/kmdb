@@ -139,14 +139,3 @@ void _scan(dynamic value, Set<String> result) {
     }
   }
 }
-
-/// Reads the current vault ref count for [sha256] from [store].
-///
-/// Returns 0 if no entry exists.
-Future<int> readVaultRefCount(KvStoreImpl store, String sha256) async {
-  final bytes = await store.get(kVaultNamespace, sha256);
-  if (bytes == null) return 0;
-  final decoded = await ValueCodec.decode(bytes);
-  final count = decoded['refCount'];
-  return count is int ? count : 0;
-}

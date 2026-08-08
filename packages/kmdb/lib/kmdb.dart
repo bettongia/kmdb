@@ -153,3 +153,4 @@ export 'src/encryption/encryption_error.dart'
     show EncryptionError, EncryptionErrorCode;
 export 'src/encryption/encryption_provider.dart'
     show EncryptionProvider, AesGcmEncryptionProvider;
+export 'src/encryption/value_context.dart' show ValueContext;

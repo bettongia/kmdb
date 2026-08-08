@@ -136,8 +136,9 @@ final class LsmEngine {
 
   /// Optional callback invoked after an all-levels compaction trims `$ver:`
   /// version entries via [ReclamationPolicy.filterGroup]. The callback receives
-  /// the raw value bytes of every trimmed entry and is responsible for
-  /// decrementing vault ref counts for any vault URIs in those entries.
+  /// one [DroppedVersionEntry] (namespace + docKey + raw value bytes) per
+  /// trimmed entry and is responsible for decrementing vault ref counts for
+  /// any vault URIs in those entries.
   ///
   /// Injected by [KvStoreImpl.setVersionDropCallback], wired by [KmdbDatabase]
   /// to the vault ref decrement path (RQ5). `null` when vault is disabled.
@@ -146,7 +147,7 @@ final class LsmEngine {
   /// before this callback completes, vault refs are over-counted (blobs
   /// retained). This is the fail-safe: blobs are never deleted while possibly
   /// referenced (H3 posture, RQ5).
-  Future<void> Function(List<Uint8List>)? _versionDropCallback;
+  Future<void> Function(List<DroppedVersionEntry>)? _versionDropCallback;
 
   /// Optional callback that provides a [ReclamationPolicyRegistry] with
   /// per-collection [VersionRetentionPolicy] instances for `_compactAll`.
@@ -238,7 +239,7 @@ final class LsmEngine {
   /// Called by [KvStoreImpl.setVersionDropCallback], wired by [KmdbDatabase]
   /// to the vault ref decrement path. Mirrors the pattern of [setMetaStore].
   void setVersionDropCallback(
-    Future<void> Function(List<Uint8List>)? callback,
+    Future<void> Function(List<DroppedVersionEntry>)? callback,
   ) {
     _versionDropCallback = callback;
   }

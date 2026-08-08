@@ -311,7 +311,10 @@ final class ScanCommand extends CliCommand {
         // own full-scan path (kmdb_query.dart's `_fullScan`).
         final Map<String, dynamic> doc;
         try {
-          doc = await ValueCodec.decode(entry.value);
+          doc = await ValueCodec.decode(
+            entry.value,
+            context: ValueContext(collection, entry.key),
+          );
         } catch (_) {
           continue;
         }

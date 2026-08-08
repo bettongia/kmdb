@@ -90,7 +90,10 @@ final class DumpCommand extends CliCommand {
         // that would otherwise have been dumped after it.
         final Map<String, dynamic> doc;
         try {
-          doc = await ValueCodec.decode(entry.value);
+          doc = await ValueCodec.decode(
+            entry.value,
+            context: ValueContext(coll, entry.key),
+          );
         } catch (e) {
           ctx.writeError('Skipping ${entry.key} in "$coll": $e');
           continue;
@@ -146,7 +149,10 @@ final class DumpCommand extends CliCommand {
         // dump — see the note in the non-vault dump path above.
         final Map<String, dynamic> doc;
         try {
-          doc = await ValueCodec.decode(entry.value);
+          doc = await ValueCodec.decode(
+            entry.value,
+            context: ValueContext(coll, entry.key),
+          );
         } catch (e) {
           ctx.writeError('Skipping ${entry.key} in "$coll": $e');
           continue;

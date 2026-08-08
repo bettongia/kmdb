@@ -20,6 +20,7 @@ import '../encryption/encryption_config.dart';
 import '../encryption/encryption_error.dart';
 import '../encryption/encryption_provider.dart';
 import '../encryption/key_derivation.dart';
+import '../encryption/value_context.dart';
 import '../engine/kvstore/kv_store.dart';
 import '../engine/kvstore/kv_store_impl.dart';
 import '../engine/platform/storage_adapter_interface.dart';
@@ -582,18 +583,33 @@ final class KmdbDatabase {
                 // any vault URIs contained in the stored encodedValue.
                 // This mirrors the H4-FU3 tombstonesDropped callback pattern.
                 final batch = WriteBatch();
-                for (final bytes in droppedValues) {
+                for (final dropped in droppedValues) {
                   try {
                     // VersionEntry.decode is async when encryption is active
-                    // because the inner ValueCodec.decode is async.
+                    // because the inner ValueCodec.decode is async. The
+                    // context binds the real ($ver:{ns}, docKey) this entry
+                    // was stored under (0.10.01 WI-3 / finding E-2) — carried
+                    // by DroppedVersionEntry since compaction-time drops have
+                    // no other way to recover it.
                     final entry = await VersionEntry.decode(
-                      bytes,
+                      dropped.value,
+                      context: ValueContext(dropped.namespace, dropped.docKey),
                       encryption: encryption,
                     );
                     if (entry.encodedValue != null) {
+                      // The nested encodedValue was encrypted under the LIVE
+                      // document namespace, not the $ver: namespace (see
+                      // VersionWriteAugmentor.interceptWrite's doc comment) —
+                      // droppedValues is only ever populated for $ver:
+                      // namespaces (compaction_job.dart), so stripping the
+                      // fixed prefix recovers it.
+                      final liveNamespace = dropped.namespace.substring(
+                        kVersionNamespacePrefix.length,
+                      );
                       await vaultRefInterceptor.decrementVersionRefs(
                         entry.encodedValue!,
                         batch,
+                        context: ValueContext(liveNamespace, dropped.docKey),
                       );
                     }
                   } catch (_) {

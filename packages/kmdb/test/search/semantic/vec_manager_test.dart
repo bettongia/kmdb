@@ -908,7 +908,11 @@ Future<VecIndexState> _loadVecState(
   final key = MetaStore.symbolicKey(VecIndexState.metaKey(namespace, field));
   final bytes = await db.store.get(kVecStateNamespace, key);
   if (bytes == null) return VecIndexState.fromBytes(namespace, field, null);
-  final unwrapped = await EncryptionEnvelope.unwrap(bytes, null);
+  final unwrapped = await EncryptionEnvelope.unwrap(
+    bytes,
+    null,
+    context: ValueContext(kVecStateNamespace, key),
+  );
   return VecIndexState.fromBytes(namespace, field, unwrapped);
 }
 

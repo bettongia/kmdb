@@ -61,7 +61,7 @@ final class _CountingStore implements KvStore {
       _inner.setTombstoneHorizonProvider(provider);
   @override
   void setVersionDropCallback(
-    Future<void> Function(List<Uint8List>)? callback,
+    Future<void> Function(List<DroppedVersionEntry>)? callback,
   ) => _inner.setVersionDropCallback(callback);
   @override
   void setVersionRegistryProvider(

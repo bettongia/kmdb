@@ -16,6 +16,7 @@ import 'dart:typed_data';
 
 import 'encryption_flag.dart';
 import 'encryption_provider.dart';
+import 'value_context.dart';
 
 /// Encrypts/decrypts opaque byte payloads that are not `Map<String, dynamic>`
 /// shaped and therefore cannot go through [ValueCodec].
@@ -58,19 +59,27 @@ final class EncryptionEnvelope {
   /// Wraps [bytes] with a leading [EncryptionFlag] byte, encrypting with
   /// [encryption] when non-null.
   ///
+  /// [context] is **required** (0.10.01 WI-3 / finding E-2), even when
+  /// [encryption] is `null`: it identifies the real KvStore `(namespace,
+  /// key)` — or fixed non-KvStore identifier — this value is stored under,
+  /// and is composed into the AES-GCM associated data via `context.toAad()`
+  /// whenever encryption is active. See [ValueContext]'s doc comment for what
+  /// to pass for each value class.
+  ///
   /// See the class doc for the exact wire format, including the `null`
   /// (plaintext) and zero-length-payload edge cases.
   static Future<Uint8List> wrap(
     Uint8List bytes,
-    EncryptionProvider? encryption,
-  ) async {
+    EncryptionProvider? encryption, {
+    required ValueContext context,
+  }) async {
     if (encryption == null) {
       final out = Uint8List(1 + bytes.length)
         ..[0] = EncryptionFlag.none.byte
         ..setAll(1, bytes);
       return out;
     }
-    final ciphertext = await encryption.encrypt(bytes);
+    final ciphertext = await encryption.encrypt(bytes, aad: context.toAad());
     final out = Uint8List(1 + ciphertext.length)
       ..[0] = EncryptionFlag.aesGcm.byte
       ..setAll(1, ciphertext);
@@ -79,18 +88,24 @@ final class EncryptionEnvelope {
 
   /// Reverses [wrap], returning the original plaintext bytes.
   ///
+  /// [context] must be byte-for-byte equivalent to the [context] passed to
+  /// the [wrap] call that produced [bytes] (0.10.01 WI-3 / finding E-2), or
+  /// authentication fails — this is what makes a relocated or transplanted
+  /// ciphertext unable to decrypt cleanly at the wrong `(namespace, key)`.
+  ///
   /// Throws:
   /// - [ArgumentError] if [bytes] is empty (there is no flag byte to parse)
   ///   or the leading byte is not a recognised [EncryptionFlag] (data from a
   ///   future KMDB version, or corruption — see [EncryptionFlag.fromByte]).
   /// - [StateError] if the payload is [EncryptionFlag.aesGcm]-flagged but
   ///   [encryption] is `null` — the database was opened without a key.
-  /// - [EncryptionError] if decryption fails (wrong key or tampered/corrupted
-  ///   ciphertext).
+  /// - [EncryptionError] if decryption fails (wrong key, wrong/mismatched
+  ///   [context], or tampered/corrupted ciphertext).
   static Future<Uint8List> unwrap(
     Uint8List bytes,
-    EncryptionProvider? encryption,
-  ) async {
+    EncryptionProvider? encryption, {
+    required ValueContext context,
+  }) async {
     if (bytes.isEmpty) {
       throw ArgumentError.value(bytes, 'bytes', 'Cannot unwrap empty bytes');
     }
@@ -106,7 +121,7 @@ final class EncryptionEnvelope {
             'configured. Open the database with an EncryptionConfig.',
           );
         }
-        return encryption.decrypt(body);
+        return encryption.decrypt(body, aad: context.toAad());
     }
   }
 }

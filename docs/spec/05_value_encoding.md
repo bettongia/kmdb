@@ -49,7 +49,8 @@ Map<String, dynamic>
 Uint8List (CBOR bytes)
     ↓  Zstd (optional)
 [CompressionFlag][CBOR or compressed payload]
-    ↓  AES-256-GCM encrypt (12-byte nonce, 16-byte tag)
+    ↓  AES-256-GCM encrypt (12-byte nonce, 16-byte tag,
+    ↓    associated data = ValueContext.toAad() — see §31)
     ↓  EncryptionFlag prefix: [0x01]
 [0x01][nonce 12B][ciphertext][tag 16B]
 SSTable slot value
@@ -57,6 +58,18 @@ SSTable slot value
 
 When encryption is active, the `CompressionFlag` moves **inside** the
 ciphertext, hiding algorithm information from observers without the key.
+
+**Associated data (0.10.01 WI-3 / finding E-2).** Every AES-GCM encrypt/decrypt
+call is bound to a `ValueContext` — the real KvStore `(namespace, key)` this
+value is stored under, or a fixed non-KvStore identifier for the handful of
+encrypted-at-rest values that are not KvStore entries (vault blobs, `extract/`
+artifacts, the vault manifest's `originalName` field). The context is
+**required**, not optional, on `ValueCodec.encode`/`decode` and
+`EncryptionEnvelope.wrap`/`unwrap` — an omitted context would silently produce
+unbound ciphertext, which is exactly what this parameter exists to prevent.
+See §31's "Associated data (AAD binding)" section for the byte composition,
+the full value-class table, and the scope boundary (this binds *where* a
+value belongs, not *when* it was written).
 
 Both native and web platforms compress values with Zstd. On native, `betto_zstd`
 uses FFI bindings compiled from source via `native_toolchain_c`. On web,
@@ -75,6 +88,26 @@ that depends on whether encryption is active:
 | `aesGcm`       | `0x01` | AES-256-GCM encrypted | `[nonce 12B][ciphertext][tag 16B]` |
 
 Any other `EncryptionFlag` byte is rejected with `ArgumentError`.
+
+## Database Format Version
+
+`MetaStore.kCurrentFormatVersion` is a separate, database-level marker (stored
+raw in `$meta`, checked once at `KvStoreImpl.open()`) from the per-value
+`EncryptionFlag` above — it is **not** a per-value wire-format byte and must
+not be confused with one. It exists because a change to *how* AES-GCM
+ciphertext is produced (not merely a new flag value) can make every existing
+encrypted value in a database permanently unreadable, and that class of
+breakage needs a single, explicit, whole-database gate rather than a
+confusing per-value authentication failure the first time each value is read.
+
+Bumped `1 → 2` by 0.10.01 WI-3 / finding E-2: introducing the AAD binding
+above changes the ciphertext AES-GCM produces for the same plaintext (the
+associated data is now non-empty), so a v1 database's values fail GCM
+authentication under a v2 build. `KvStoreImpl.open()` rejects a database whose
+stored marker is `< kCurrentFormatVersion` with `LegacyDatabaseFormatException`
+— there is no migration path (greenfield; no released database held a
+compatibility expectation at the time of this change). See §31 for the full
+open-time gate logic.
 
 ## Compression Flag
 

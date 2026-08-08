@@ -14,6 +14,7 @@
 
 import '../encoding/value_codec.dart';
 import '../encryption/encryption_provider.dart';
+import '../encryption/value_context.dart';
 import '../engine/kvstore/kv_store.dart';
 import '../engine/kvstore/meta_store.dart';
 import '../engine/util/hlc.dart';
@@ -66,6 +67,17 @@ final class VersionConfigStore {
   /// [VersionConfig.defaults] if no config has been written.
   ///
   /// [encryption] must match the provider used when [put] was called.
+  ///
+  /// ## Double encryption (0.10.01 WI-3 / finding E-2)
+  ///
+  /// `version:config` is the one value that passes through both encryption
+  /// primitives: [MetaStore.getRawByName] wraps/unwraps the outer
+  /// [EncryptionEnvelope] layer using its own internally-computed
+  /// `ValueContext.meta` for [_configKey], and this method's [ValueCodec.decode]
+  /// call binds the **same** `ValueContext.meta(_configKey(collection))` for
+  /// the inner layer — both layers bind the identical logical identity, since
+  /// they are two encryption layers around the same entry, not two different
+  /// entries.
   Future<VersionConfig> get(
     String collection, {
     EncryptionProvider? encryption,
@@ -73,7 +85,11 @@ final class VersionConfigStore {
     final bytes = await _meta.getRawByName(_configKey(collection));
     if (bytes == null) return VersionConfig.defaults;
     try {
-      final map = await ValueCodec.decode(bytes, encryption: encryption);
+      final map = await ValueCodec.decode(
+        bytes,
+        context: ValueContext.meta(_configKey(collection)),
+        encryption: encryption,
+      );
       return VersionConfig.fromMap(map);
     } catch (_) {
       // Defensive: corrupt or unrecognised bytes → defaults rather than crash.
@@ -82,6 +98,8 @@ final class VersionConfigStore {
   }
 
   /// Persists [config] for [collection] in `$meta`.
+  ///
+  /// See [get]'s doc comment for the double-encryption context binding.
   Future<void> put(
     String collection,
     VersionConfig config, {
@@ -89,6 +107,7 @@ final class VersionConfigStore {
   }) async {
     final bytes = await ValueCodec.encode(
       config.toMap(),
+      context: ValueContext.meta(_configKey(collection)),
       encryption: encryption,
     );
     await _meta.putRawByName(_configKey(collection), bytes);
@@ -168,12 +187,26 @@ final class VersionWriteAugmentor implements WriteAugmentor {
     final config = configs[namespace] ?? VersionConfig.defaults;
     if (config.isDisabled) return;
 
+    final verNs = versionNamespace(namespace);
+    // The $ver: entry's AAD binds (verNs, docKey) — the real namespace and key
+    // this entry is stored under. Because verNs differs from the live
+    // {namespace}, a $ver: ciphertext transplanted into the live document slot
+    // at the same docKey fails GCM authentication (0.10.01 WI-3).
+    final context = ValueContext(verNs, docKey);
+
     final isDelete = newDoc == null;
     // Store the encoded value for puts; null for deletes. The encoding is
     // identical to what the main namespace stores — decoding is symmetric.
+    // The encoded value's own AAD binds the *live* namespace + docKey (it is
+    // the same bytes that would be stored there), not the $ver: namespace —
+    // see the call site in _writeDocument/_deleteDocument for that context.
     final encodedValue = isDelete
         ? null
-        : await ValueCodec.encode(newDoc, encryption: encryption);
+        : await ValueCodec.encode(
+            newDoc,
+            context: ValueContext(namespace, docKey),
+            encryption: encryption,
+          );
 
     // Store Hlc(0,0) as the placeholder — the real HLC is the internal key's HLC,
     // surfaced via scanVersionHistory(). See class doc for the rationale.
@@ -183,9 +216,9 @@ final class VersionWriteAugmentor implements WriteAugmentor {
       isDelete: isDelete,
     );
     batch.put(
-      versionNamespace(namespace),
+      verNs,
       docKey,
-      await entry.encode(encryption: encryption),
+      await entry.encode(context: context, encryption: encryption),
     );
   }
 }
@@ -232,6 +265,7 @@ Future<List<DocumentVersion>> readVersions(
         try {
           ve = await VersionEntry.decode(
             histEntry.value,
+            context: ValueContext(verNs, docKey),
             encryption: encryption,
           );
         } catch (_) {
@@ -244,8 +278,12 @@ Future<List<DocumentVersion>> readVersions(
 
       Map<String, dynamic>? decodedValue;
       if (!isDelete && ve?.encodedValue != null) {
+        // The nested encodedValue's own AAD binds the *live* namespace + key
+        // (matching how VersionWriteAugmentor.interceptWrite encoded it) —
+        // not the $ver: namespace, which is the outer VersionEntry's binding.
         decodedValue = await ValueCodec.decode(
           ve!.encodedValue!,
+          context: ValueContext(namespace, docKey),
           encryption: encryption,
         );
       }
@@ -298,6 +336,7 @@ Future<VersionEntry?> readVersionAt(
       try {
         return await VersionEntry.decode(
           histEntry.value,
+          context: ValueContext(verNs, docKey),
           encryption: encryption,
         );
       } catch (_) {

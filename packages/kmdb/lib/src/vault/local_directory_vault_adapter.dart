@@ -20,6 +20,7 @@ import 'dart:io';
 
 import '../encryption/encryption_envelope.dart';
 import '../encryption/encryption_provider.dart';
+import '../encryption/value_context.dart';
 import '../engine/kvstore/kv_store.dart';
 import 'vault_manifest.dart';
 import 'vault_storage_adapter.dart';
@@ -236,7 +237,11 @@ final class LocalDirectoryVaultAdapter implements VaultStorageAdapter {
     // in name only. `encryption` must match the provider active on this
     // database (see the class doc), so unwrapping here mirrors
     // `VaultStore.getBytes`.
-    final plaintext = await EncryptionEnvelope.unwrap(blobBytes, encryption);
+    final plaintext = await EncryptionEnvelope.unwrap(
+      blobBytes,
+      encryption,
+      context: ValueContext.vaultBlob(sha256),
+    );
     final actual = VaultStore.computeSha256(plaintext);
     if (actual != sha256) {
       throw VaultContentMismatchException(expected: sha256, actual: actual);

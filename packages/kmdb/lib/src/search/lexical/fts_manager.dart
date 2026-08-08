@@ -28,6 +28,7 @@ import 'package:meta/meta.dart' show visibleForTesting;
 import '../../encoding/value_codec.dart';
 import '../../encryption/encryption_envelope.dart';
 import '../../encryption/encryption_provider.dart';
+import '../../encryption/value_context.dart';
 import '../../engine/kvstore/kv_store.dart';
 import '../../engine/kvstore/kv_store_impl.dart';
 import '../../engine/kvstore/meta_store.dart';
@@ -536,7 +537,11 @@ final class FtsManager implements WriteAugmentor {
     await for (final entry in _store.scan(ns)) {
       Map<String, dynamic> doc;
       try {
-        doc = await ValueCodec.decode(entry.value, encryption: _encryption);
+        doc = await ValueCodec.decode(
+          entry.value,
+          context: ValueContext(ns, entry.key),
+          encryption: _encryption,
+        );
       } catch (_) {
         continue;
       }
@@ -544,12 +549,13 @@ final class FtsManager implements WriteAugmentor {
       final docId = entry.key;
 
       // Check for a pending overlay for this document.
-      final overlayBytes = await _store.get(
-        _overlayNamespace(ns, field),
-        docId,
-      );
+      final overlayNs = _overlayNamespace(ns, field);
+      final overlayBytes = await _store.get(overlayNs, docId);
       final overlay = overlayBytes != null
-          ? await _decodeOverlayBytes(overlayBytes)
+          ? await _decodeOverlayBytes(
+              overlayBytes,
+              context: ValueContext(overlayNs, docId),
+            )
           : null;
 
       if (overlay is String && overlay == kFtsTombstone) {
@@ -632,7 +638,10 @@ final class FtsManager implements WriteAugmentor {
     await for (final docEntry in _store.scan(_docNamespace(ns, field))) {
       finalDocCount++;
       // Doc namespace values are now CBOR maps {n, t}; extract the count.
-      final info = await _readDocInfoFromBytes(docEntry.value);
+      final info = await _readDocInfoFromBytes(
+        docEntry.value,
+        context: ValueContext(_docNamespace(ns, field), docEntry.key),
+      );
       finalTotalTokens += info.count;
     }
 
@@ -857,9 +866,8 @@ final class FtsManager implements WriteAugmentor {
       // Scan the per-term namespace: `$$fts:{ns}:{field}:{token}`.
       // All entries in this namespace have docId as the key (32-char UUID),
       // so no startKey/endKey constraints are needed.
-      await for (final entry in _store.scan(
-        await _termNamespace(namespace, field, term),
-      )) {
+      final termNs = await _termNamespace(namespace, field, term);
+      await for (final entry in _store.scan(termNs)) {
         final docId = entry.key;
 
         if (candidateIds != null && !candidateIds.contains(docId)) continue;
@@ -871,7 +879,10 @@ final class FtsManager implements WriteAugmentor {
 
         if (overlay == null) {
           // No overlay — document not updated since last base write.
-          effectiveTf = await _decodeCborInt(entry.value);
+          effectiveTf = await _decodeCborInt(
+            entry.value,
+            context: ValueContext(termNs, docId),
+          );
         } else if (overlay is String && overlay == kFtsTombstone) {
           // Tombstone — document deleted; skip.
           continue;
@@ -943,7 +954,10 @@ final class FtsManager implements WriteAugmentor {
 
     for (final overlayEntry in overlayEntries) {
       final docId = overlayEntry.docId;
-      final decoded = await _decodeOverlayBytes(overlayEntry.value);
+      final decoded = await _decodeOverlayBytes(
+        overlayEntry.value,
+        context: ValueContext(overlayNs, docId),
+      );
       final batch = WriteBatch();
 
       if (decoded is String && decoded == kFtsTombstone) {
@@ -976,15 +990,13 @@ final class FtsManager implements WriteAugmentor {
 
         // Write current base entries from the overlay, replacing stale ones.
         for (final t in currentTerms.entries) {
+          final termNs = await _termNamespace(namespace, field, t.key);
           final wrapped = await EncryptionEnvelope.wrap(
             _encodeCborInt(t.value),
             _encryption,
+            context: ValueContext(termNs, docId),
           );
-          batch.put(
-            await _termNamespace(namespace, field, t.key),
-            docId,
-            wrapped,
-          );
+          batch.put(termNs, docId, wrapped);
         }
 
         // Update doc info to reflect the current terms (post-compaction).
@@ -1070,7 +1082,11 @@ final class FtsManager implements WriteAugmentor {
         if (bytes == null) return; // deleted again before delta was applied
         Map<String, dynamic> doc;
         try {
-          doc = await ValueCodec.decode(bytes, encryption: _encryption);
+          doc = await ValueCodec.decode(
+            bytes,
+            context: ValueContext(namespace, docId),
+            encryption: _encryption,
+          );
         } catch (_) {
           return;
         }
@@ -1081,7 +1097,11 @@ final class FtsManager implements WriteAugmentor {
         if (bytes == null) return;
         Map<String, dynamic> doc;
         try {
-          doc = await ValueCodec.decode(bytes, encryption: _encryption);
+          doc = await ValueCodec.decode(
+            bytes,
+            context: ValueContext(namespace, docId),
+            encryption: _encryption,
+          );
         } catch (_) {
           return;
         }
@@ -1220,15 +1240,13 @@ final class FtsManager implements WriteAugmentor {
     WriteBatch batch,
   ) async {
     for (final entry in tf.entries) {
+      final termNs = await _termNamespace(namespace, def.field, entry.key);
       final wrapped = await EncryptionEnvelope.wrap(
         _encodeCborInt(entry.value),
         _encryption,
+        context: ValueContext(termNs, docId),
       );
-      batch.put(
-        await _termNamespace(namespace, def.field, entry.key),
-        docId,
-        wrapped,
-      );
+      batch.put(termNs, docId, wrapped);
     }
   }
 
@@ -1247,11 +1265,13 @@ final class FtsManager implements WriteAugmentor {
     List<String> terms,
     WriteBatch batch,
   ) async {
-    final encoded = await ValueCodec.encode({
-      'n': count,
-      't': terms,
-    }, encryption: _encryption);
-    batch.put(_docNamespace(namespace, field), docId, encoded);
+    final docNs = _docNamespace(namespace, field);
+    final encoded = await ValueCodec.encode(
+      {'n': count, 't': terms},
+      context: ValueContext(docNs, docId),
+      encryption: _encryption,
+    );
+    batch.put(docNs, docId, encoded);
   }
 
   /// The value is `Map`-shaped (`{n, totalTokens}`), so it is routed through
@@ -1263,11 +1283,13 @@ final class FtsManager implements WriteAugmentor {
     required int totalTokens,
     required WriteBatch batch,
   }) async {
-    final encoded = await ValueCodec.encode({
-      'n': n,
-      'totalTokens': totalTokens,
-    }, encryption: _encryption);
-    batch.put(_corpusNamespace(namespace, field), _corpusKey, encoded);
+    final corpusNs = _corpusNamespace(namespace, field);
+    final encoded = await ValueCodec.encode(
+      {'n': n, 'totalTokens': totalTokens},
+      context: ValueContext(corpusNs, _corpusKey),
+      encryption: _encryption,
+    );
+    batch.put(corpusNs, _corpusKey, encoded);
   }
 
   /// Writes an overlay entry recording the current term→tf map for [docId].
@@ -1301,8 +1323,13 @@ final class FtsManager implements WriteAugmentor {
         CborMap(tf.map((k, v) => MapEntry(CborString(k), CborSmallInt(v)))),
       ),
     );
-    final wrapped = await EncryptionEnvelope.wrap(cborBytes, _encryption);
-    batch.put(_overlayNamespace(namespace, field), docId, wrapped);
+    final overlayNs = _overlayNamespace(namespace, field);
+    final wrapped = await EncryptionEnvelope.wrap(
+      cborBytes,
+      _encryption,
+      context: ValueContext(overlayNs, docId),
+    );
+    batch.put(overlayNs, docId, wrapped);
   }
 
   /// Writes the [kFtsTombstone] sentinel into the overlay namespace for
@@ -1318,8 +1345,13 @@ final class FtsManager implements WriteAugmentor {
     final cborBytes = Uint8List.fromList(
       cbor.encode(CborString(kFtsTombstone)),
     );
-    final wrapped = await EncryptionEnvelope.wrap(cborBytes, _encryption);
-    batch.put(_overlayNamespace(namespace, field), docId, wrapped);
+    final overlayNs = _overlayNamespace(namespace, field);
+    final wrapped = await EncryptionEnvelope.wrap(
+      cborBytes,
+      _encryption,
+      context: ValueContext(overlayNs, docId),
+    );
+    batch.put(overlayNs, docId, wrapped);
   }
 
   // ── Read helpers ──────────────────────────────────────────────────────────
@@ -1328,13 +1360,15 @@ final class FtsManager implements WriteAugmentor {
     String namespace,
     String field,
   ) async {
-    final bytes = await _store.get(
-      _corpusNamespace(namespace, field),
-      _corpusKey,
-    );
+    final corpusNs = _corpusNamespace(namespace, field);
+    final bytes = await _store.get(corpusNs, _corpusKey);
     if (bytes == null || bytes.isEmpty) return (n: 0, totalTokens: 0);
     try {
-      final map = await ValueCodec.decode(bytes, encryption: _encryption);
+      final map = await ValueCodec.decode(
+        bytes,
+        context: ValueContext(corpusNs, _corpusKey),
+        encryption: _encryption,
+      );
       return (
         n: (map['n'] as num?)?.toInt() ?? 0,
         totalTokens: (map['totalTokens'] as num?)?.toInt() ?? 0,
@@ -1364,11 +1398,12 @@ final class FtsManager implements WriteAugmentor {
     String field,
     String docId,
   ) async {
-    final bytes = await _store.get(_docNamespace(namespace, field), docId);
+    final docNs = _docNamespace(namespace, field);
+    final bytes = await _store.get(docNs, docId);
     if (bytes == null || bytes.isEmpty) {
       return (count: 0, terms: const <String>[]);
     }
-    return _readDocInfoFromBytes(bytes);
+    return _readDocInfoFromBytes(bytes, context: ValueContext(docNs, docId));
   }
 
   /// Decodes doc info from raw [bytes].
@@ -1386,11 +1421,16 @@ final class FtsManager implements WriteAugmentor {
   /// so the fallback was dead code under the new "no migration, recreate the
   /// database" stance and is not reintroduced here.
   Future<({int count, List<String> terms})> _readDocInfoFromBytes(
-    Uint8List bytes,
-  ) async {
+    Uint8List bytes, {
+    required ValueContext context,
+  }) async {
     if (bytes.isEmpty) return (count: 0, terms: const <String>[]);
     try {
-      final map = await ValueCodec.decode(bytes, encryption: _encryption);
+      final map = await ValueCodec.decode(
+        bytes,
+        context: context,
+        encryption: _encryption,
+      );
       final count = (map['n'] as num?)?.toInt() ?? 0;
       final rawTerms = map['t'];
       final terms = rawTerms is List
@@ -1411,18 +1451,26 @@ final class FtsManager implements WriteAugmentor {
     String field,
     String docId,
   ) async {
-    final bytes = await _store.get(_overlayNamespace(namespace, field), docId);
+    final overlayNs = _overlayNamespace(namespace, field);
+    final bytes = await _store.get(overlayNs, docId);
     if (bytes == null || bytes.isEmpty) return null;
-    return _decodeOverlayBytes(bytes);
+    return _decodeOverlayBytes(bytes, context: ValueContext(overlayNs, docId));
   }
 
   /// Decodes an overlay entry. See [_writeOverlayEntry]'s doc comment for why
   /// this peels the outer [EncryptionEnvelope] layer and then applies the
   /// original raw-CBOR type discrimination (`CborString` vs `CborMap`)
   /// rather than routing through [ValueCodec].
-  Future<Object?> _decodeOverlayBytes(Uint8List bytes) async {
+  Future<Object?> _decodeOverlayBytes(
+    Uint8List bytes, {
+    required ValueContext context,
+  }) async {
     try {
-      final inner = await EncryptionEnvelope.unwrap(bytes, _encryption);
+      final inner = await EncryptionEnvelope.unwrap(
+        bytes,
+        _encryption,
+        context: context,
+      );
       final decoded = cbor.decode(inner);
       if (decoded is CborString) return decoded.toString();
       if (decoded is CborMap) return decoded.toObject();
@@ -1443,7 +1491,11 @@ final class FtsManager implements WriteAugmentor {
     if (bytes == null || bytes.isEmpty) {
       return FtsIndexState.fromBytes(namespace, field, null);
     }
-    final unwrapped = await EncryptionEnvelope.unwrap(bytes, _encryption);
+    final unwrapped = await EncryptionEnvelope.unwrap(
+      bytes,
+      _encryption,
+      context: ValueContext(kFtsStateNamespace, key),
+    );
     return FtsIndexState.fromBytes(namespace, field, unwrapped);
   }
 
@@ -1460,7 +1512,11 @@ final class FtsManager implements WriteAugmentor {
   ) async {
     _statusCache[_statusCacheKey(namespace, field)] = state.status;
     final key = MetaStore.symbolicKey(FtsIndexState.metaKey(namespace, field));
-    final wrapped = await EncryptionEnvelope.wrap(state.toBytes(), _encryption);
+    final wrapped = await EncryptionEnvelope.wrap(
+      state.toBytes(),
+      _encryption,
+      context: ValueContext(kFtsStateNamespace, key),
+    );
     await _store.putRaw(kFtsStateNamespace, key, wrapped);
   }
 
@@ -1476,9 +1532,16 @@ final class FtsManager implements WriteAugmentor {
   /// Decodes a base-entry term-frequency value written by
   /// [_writeBaseEntries]: peels the [EncryptionEnvelope] layer, then decodes
   /// the inner raw CBOR int.
-  Future<int> _decodeCborInt(Uint8List bytes) async {
+  Future<int> _decodeCborInt(
+    Uint8List bytes, {
+    required ValueContext context,
+  }) async {
     try {
-      final inner = await EncryptionEnvelope.unwrap(bytes, _encryption);
+      final inner = await EncryptionEnvelope.unwrap(
+        bytes,
+        _encryption,
+        context: context,
+      );
       final decoded = cbor.decode(inner);
       if (decoded is CborSmallInt) return decoded.toInt();
       if (decoded is CborInt) return decoded.toBigInt().toInt();

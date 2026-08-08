@@ -28,6 +28,7 @@ import 'dart:convert' show utf8;
 import 'dart:typed_data';
 
 import 'package:kmdb/src/encoding/value_codec.dart';
+import 'package:kmdb/src/encryption/value_context.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store_impl.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
@@ -133,8 +134,11 @@ Future<VaultExtractionState> _awaitTerminal(
 /// `VaultRefInterceptor` would for a real document write — required for
 /// [VaultSearcher] to map a matched blob back to a document.
 Future<void> _seedDocref(KvStoreImpl kvStore, String sha256) async {
-  final value = await ValueCodec.encode({'p': 'attachment'});
-  final batch = WriteBatch()..put('$kVaultDocRefPrefix$sha256', _docId, value);
+  final docRefNs = '$kVaultDocRefPrefix$sha256';
+  final value = await ValueCodec.encode({
+    'p': 'attachment',
+  }, context: ValueContext(docRefNs, _docId));
+  final batch = WriteBatch()..put(docRefNs, _docId, value);
   await kvStore.writeBatchInternal(batch);
 }
 

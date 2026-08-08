@@ -21,7 +21,17 @@ import 'package:test/test.dart';
 import 'package:kmdb/src/encoding/compression_flag.dart';
 import 'package:kmdb/src/encoding/value_codec.dart';
 import 'package:kmdb/src/encryption/encryption_flag.dart';
+import 'package:kmdb/src/encryption/value_context.dart';
 import 'package:kmdb/src/query/filter/field_path.dart';
+
+/// A fixed context used throughout this file. None of these tests exercise
+/// encryption (encryption is always `null`), so the actual context value is
+/// unused at runtime — it exists only because `context` is a required
+/// parameter (0.10.01 WI-3 / finding E-2), even for plaintext values, so the
+/// compiler enumerates every call site rather than silently permitting an
+/// omitted context the moment encryption is enabled. AAD-specific behaviour
+/// is covered in `test/encryption/value_aad_test.dart`.
+const _ctx = ValueContext('test-ns', 'test-key');
 
 void main() {
   // On web the Zstd WASM module must be initialised before any codec call.
@@ -78,7 +88,10 @@ void main() {
   group('ValueCodec round-trips', () {
     // Round-trip: encode then decode. Both are async in Phase 12.
     Future<Map<String, dynamic>> roundTrip(Map<String, dynamic> doc) async =>
-        ValueCodec.decode(await ValueCodec.encode(doc));
+        ValueCodec.decode(
+          await ValueCodec.encode(doc, context: _ctx),
+          context: _ctx,
+        );
 
     test('empty map', () async {
       expect(await roundTrip({}), equals({}));
@@ -190,7 +203,7 @@ void main() {
     test(
       'unencrypted value has EncryptionFlag.none (0x00) at byte 0',
       () async {
-        final bytes = await ValueCodec.encode({'x': 1});
+        final bytes = await ValueCodec.encode({'x': 1}, context: _ctx);
         // Byte 0 is EncryptionFlag — must be 0x00 for plaintext.
         expect(bytes[0], equals(EncryptionFlag.none.byte));
       },
@@ -199,7 +212,7 @@ void main() {
     test(
       'small doc (< 64 bytes) has CompressionFlag.none (0x00) at byte 1 when plaintext',
       () async {
-        final bytes = await ValueCodec.encode({'x': 1});
+        final bytes = await ValueCodec.encode({'x': 1}, context: _ctx);
         // Byte 0 = EncryptionFlag.none; byte 1 = CompressionFlag.
         expect(bytes[0], equals(EncryptionFlag.none.byte));
         expect(bytes[1], equals(CompressionFlag.none.byte));
@@ -215,7 +228,7 @@ void main() {
         final doc = {
           for (var i = 0; i < 20; i++) 'key_$i': 'value_repeated_$i' * 5,
         };
-        final bytes = await ValueCodec.encode(doc);
+        final bytes = await ValueCodec.encode(doc, context: _ctx);
         // Byte 0 = EncryptionFlag.none (unencrypted).
         expect(bytes[0], equals(EncryptionFlag.none.byte));
         // Byte 1 = CompressionFlag.zstd (compressed).
@@ -229,12 +242,12 @@ void main() {
         final doc = {
           for (var i = 0; i < 20; i++) 'field_$i': 'hello_world_$i' * 10,
         };
-        final encoded = await ValueCodec.encode(doc);
+        final encoded = await ValueCodec.encode(doc, context: _ctx);
         // Byte 0 = EncryptionFlag.none; byte 1 = CompressionFlag.zstd.
         expect(encoded[0], equals(EncryptionFlag.none.byte));
         expect(encoded[1], equals(CompressionFlag.zstd.byte));
         // Decode must recover the original document exactly.
-        expect(await ValueCodec.decode(encoded), equals(doc));
+        expect(await ValueCodec.decode(encoded, context: _ctx), equals(doc));
       },
     );
 
@@ -244,7 +257,7 @@ void main() {
         // Pre-compressed random-looking bytes do not compress further.
         final noise = List.generate(200, (i) => (i * 37 + 13) % 256);
         final doc = {'data': noise};
-        final bytes = await ValueCodec.encode(doc);
+        final bytes = await ValueCodec.encode(doc, context: _ctx);
         // Byte 0 = EncryptionFlag.none.
         expect(bytes[0], equals(EncryptionFlag.none.byte));
         // Byte 1 must be a known CompressionFlag value.
@@ -271,7 +284,7 @@ void main() {
         stored.setAll(2, cborBytes);
 
         expect(
-          () async => ValueCodec.decode(stored),
+          () async => ValueCodec.decode(stored, context: _ctx),
           throwsA(isA<ArgumentError>()),
         );
       },
@@ -282,7 +295,7 @@ void main() {
 
   group('ValueCodec.encode output format', () {
     test('encode returns at least 2 bytes', () async {
-      final bytes = await ValueCodec.encode({});
+      final bytes = await ValueCodec.encode({}, context: _ctx);
       expect(bytes.length, greaterThanOrEqualTo(2));
     });
 
@@ -293,7 +306,7 @@ void main() {
         {for (var i = 0; i < 20; i++) 'k$i': 'value_$i' * 5},
       ];
       for (final doc in docs) {
-        final bytes = await ValueCodec.encode(doc);
+        final bytes = await ValueCodec.encode(doc, context: _ctx);
         expect(() => EncryptionFlag.fromByte(bytes[0]), returnsNormally);
       }
     });
@@ -307,7 +320,7 @@ void main() {
           {for (var i = 0; i < 20; i++) 'k$i': 'value_$i' * 5},
         ];
         for (final doc in docs) {
-          final bytes = await ValueCodec.encode(doc);
+          final bytes = await ValueCodec.encode(doc, context: _ctx);
           // Byte 0 = EncryptionFlag.none → byte 1 is the CompressionFlag.
           if (bytes[0] == EncryptionFlag.none.byte) {
             expect(() => CompressionFlag.fromByte(bytes[1]), returnsNormally);
@@ -322,14 +335,17 @@ void main() {
   group('ValueCodec.decode error paths', () {
     test('throws ArgumentError on empty input', () async {
       expect(
-        () async => ValueCodec.decode(Uint8List(0)),
+        () async => ValueCodec.decode(Uint8List(0), context: _ctx),
         throwsA(isA<ArgumentError>()),
       );
     });
 
     test('throws ArgumentError on unknown encryption flag byte', () async {
       final bad = Uint8List.fromList([0xFF, 0xA1, 0x60]); // 0xFF is unknown
-      expect(() async => ValueCodec.decode(bad), throwsA(isA<ArgumentError>()));
+      expect(
+        () async => ValueCodec.decode(bad, context: _ctx),
+        throwsA(isA<ArgumentError>()),
+      );
     });
 
     test(
@@ -338,7 +354,7 @@ void main() {
         // Two bytes: EncryptionFlag.none then an unknown CompressionFlag.
         final bad = Uint8List.fromList([0x00, 0x02, 0xDE, 0xAD]);
         expect(
-          () async => ValueCodec.decode(bad),
+          () async => ValueCodec.decode(bad, context: _ctx),
           throwsA(isA<ArgumentError>()),
         );
       },
@@ -350,7 +366,10 @@ void main() {
       // ZstdException (from betto_zstd WASM). The `anything` matcher accepts
       // both — no platform-specific guard needed.
       final bad = Uint8List.fromList([0x00, 0x01, 0xDE, 0xAD, 0xBE, 0xEF]);
-      expect(() async => ValueCodec.decode(bad), throwsA(anything));
+      expect(
+        () async => ValueCodec.decode(bad, context: _ctx),
+        throwsA(anything),
+      );
     });
 
     test(
@@ -363,7 +382,7 @@ void main() {
           ...List.filled(28, 0x42), // fake nonce+ciphertext
         ]);
         expect(
-          () async => ValueCodec.decode(fakeEncrypted),
+          () async => ValueCodec.decode(fakeEncrypted, context: _ctx),
           throwsA(isA<ArgumentError>()),
         );
       },
@@ -379,10 +398,10 @@ void main() {
         // Highly compressible so the encoded bytes stay tiny while the
         // decompressed CBOR comfortably exceeds the 1 MiB bound.
         final huge = {'bomb': 'A' * (ValueCodec.kMaxDecodedValueBytes + 1024)};
-        final encoded = await ValueCodec.encode(huge);
+        final encoded = await ValueCodec.encode(huge, context: _ctx);
 
         await expectLater(
-          ValueCodec.decode(encoded),
+          ValueCodec.decode(encoded, context: _ctx),
           throwsA(isA<DecodedValueTooLargeException>()),
         );
       },
@@ -401,8 +420,8 @@ void main() {
 
     test('a document safely under the bound round-trips normally', () async {
       final doc = {'text': 'well under the limit'};
-      final encoded = await ValueCodec.encode(doc);
-      final decoded = await ValueCodec.decode(encoded);
+      final encoded = await ValueCodec.encode(doc, context: _ctx);
+      final decoded = await ValueCodec.decode(encoded, context: _ctx);
       expect(decoded['text'], equals('well under the limit'));
     });
   });
@@ -412,15 +431,15 @@ void main() {
   group('ValueCodec idempotency', () {
     test('encoding the same document twice produces identical bytes', () async {
       final doc = {'a': 1, 'b': 'hello'};
-      final b1 = await ValueCodec.encode(doc);
-      final b2 = await ValueCodec.encode(doc);
+      final b1 = await ValueCodec.encode(doc, context: _ctx);
+      final b2 = await ValueCodec.encode(doc, context: _ctx);
       expect(b1, equals(b2));
     });
 
     test('encoding a large document twice produces identical bytes', () async {
       final doc = {for (var i = 0; i < 20; i++) 'k$i': 'value_$i' * 5};
-      final b1 = await ValueCodec.encode(doc);
-      final b2 = await ValueCodec.encode(doc);
+      final b1 = await ValueCodec.encode(doc, context: _ctx);
+      final b2 = await ValueCodec.encode(doc, context: _ctx);
       expect(b1, equals(b2));
     });
   });

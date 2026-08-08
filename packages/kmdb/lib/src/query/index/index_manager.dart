@@ -22,6 +22,7 @@ import '../../engine/kvstore/meta_store.dart';
 import '../../encoding/value_codec.dart';
 import '../../encryption/encryption_envelope.dart';
 import '../../encryption/encryption_provider.dart';
+import '../../encryption/value_context.dart';
 import '../write_augmentor.dart';
 import 'index_definition.dart';
 import 'index_reader.dart';
@@ -525,7 +526,11 @@ final class IndexManager implements WriteAugmentor {
     await for (final entry in _store.scan(definition.namespace)) {
       Map<String, dynamic> doc;
       try {
-        doc = await ValueCodec.decode(entry.value, encryption: _encryption);
+        doc = await ValueCodec.decode(
+          entry.value,
+          context: ValueContext(definition.namespace, entry.key),
+          encryption: _encryption,
+        );
       } catch (_) {
         continue; // skip corrupt values
       }
@@ -570,7 +575,11 @@ final class IndexManager implements WriteAugmentor {
         status: IndexStatus.undefined,
       );
     }
-    final unwrapped = await EncryptionEnvelope.unwrap(bytes, _encryption);
+    final unwrapped = await EncryptionEnvelope.unwrap(
+      bytes,
+      _encryption,
+      context: ValueContext(kIndexStateNamespace, key),
+    );
     return _decodeState(definition, unwrapped);
   }
 
@@ -583,7 +592,11 @@ final class IndexManager implements WriteAugmentor {
   Future<void> _persistState(IndexState state) async {
     final key = MetaStore.indexKey(state.namespace, state.path);
     final bytes = _encodeState(state);
-    final wrapped = await EncryptionEnvelope.wrap(bytes, _encryption);
+    final wrapped = await EncryptionEnvelope.wrap(
+      bytes,
+      _encryption,
+      context: ValueContext(kIndexStateNamespace, key),
+    );
     await _store.putRaw(kIndexStateNamespace, key, wrapped);
   }
 

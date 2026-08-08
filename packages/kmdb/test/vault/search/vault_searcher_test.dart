@@ -28,6 +28,7 @@ import 'package:kmdb/src/encryption/encryption_error.dart';
 import 'package:kmdb/src/encryption/encryption_flag.dart';
 import 'package:kmdb/src/encryption/encryption_provider.dart';
 import 'package:kmdb/src/encryption/key_derivation.dart';
+import 'package:kmdb/src/encryption/value_context.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store_impl.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_interface.dart';
@@ -254,7 +255,11 @@ Future<void> _seedBm25(
   );
   final batch = WriteBatch();
   for (final entry in raw.entries) {
-    final wrapped = await EncryptionEnvelope.wrap(entry.value!, encryption);
+    final wrapped = await EncryptionEnvelope.wrap(
+      entry.value!,
+      encryption,
+      context: ValueContext(entry.namespace, entry.key),
+    );
     batch.put(entry.namespace, entry.key, wrapped);
   }
   await kvStore.writeBatchInternal(batch);
@@ -263,15 +268,26 @@ Future<void> _seedBm25(
 /// Writes a docref entry linking [sha256] to [docId] via [fieldPath].
 ///
 /// This simulates the write that [VaultRefInterceptor] performs when a document
-/// is stored with a vault URI in [fieldPath].
+/// is stored with a vault URI in [fieldPath]. [encryption], when non-null,
+/// encrypts the entry exactly as `VaultRefInterceptor.interceptWrite` would
+/// on an encrypted database — needed to regress the `vault_searcher.dart`
+/// fieldPath decode (0.10.01 WI-3): before that fix, the read site omitted
+/// `encryption:` entirely, so an encrypted docref entry always failed to
+/// decode and silently came back as an empty path.
 Future<void> _seedDocref(
   KvStoreImpl kvStore,
   String sha256,
   String docId,
-  String fieldPath,
-) async {
-  final value = await ValueCodec.encode({'p': fieldPath});
-  final batch = WriteBatch()..put('$kVaultDocRefPrefix$sha256', docId, value);
+  String fieldPath, {
+  EncryptionProvider? encryption,
+}) async {
+  final docRefNs = '$kVaultDocRefPrefix$sha256';
+  final value = await ValueCodec.encode(
+    {'p': fieldPath},
+    context: ValueContext(docRefNs, docId),
+    encryption: encryption,
+  );
+  final batch = WriteBatch()..put(docRefNs, docId, value);
   await kvStore.writeBatchInternal(batch);
 }
 
@@ -339,7 +355,11 @@ Future<void> _seedVec(
   );
   final batch = WriteBatch();
   for (final entry in raw.entries) {
-    final wrapped = await EncryptionEnvelope.wrap(entry.value!, encryption);
+    final wrapped = await EncryptionEnvelope.wrap(
+      entry.value!,
+      encryption,
+      context: ValueContext(entry.namespace, entry.key),
+    );
     batch.put(entry.namespace, entry.key, wrapped);
   }
   await kvStore.writeBatchInternal(batch);
@@ -1398,6 +1418,44 @@ void main() {
       await expectLater(
         searcher.search('snippet', mode: SearchMode.lexical),
         throwsA(isA<EncryptionError>()),
+      );
+    });
+
+    test('the docref fieldPath decodes correctly on an ENCRYPTED database — '
+        'regression for the vault_searcher.dart latent bug (0.10.01 WI-3): the '
+        'read site previously omitted `encryption:` entirely, so an encrypted '
+        'docref entry always failed to decode and the catch(_) silently '
+        'produced an empty path. Asserting non-empty AND correct is essential '
+        '— a bare "does not throw" check would not catch a regression back '
+        'to that silent-empty-path behaviour.', () async {
+      final sha256 = _sha256('a');
+      await _seedVaultBlob(vaultStore, sha256);
+      await _seedBm25(kvStore, sha256, [
+        {'content': 1},
+      ], encryption: provider);
+      // The docref entry ITSELF is encrypted, exactly as
+      // VaultRefInterceptor.interceptWrite produces on an encrypted
+      // database.
+      await _seedDocref(
+        kvStore,
+        sha256,
+        _docId1,
+        'documents.attachment',
+        encryption: provider,
+      );
+
+      final searcher = _makeSearcher<Map<String, dynamic>>(
+        encManager,
+        fetchDoc: (_) async => {'doc': true},
+      );
+
+      final result = await searcher.search('content', mode: SearchMode.lexical);
+
+      expect(result.hits, hasLength(1));
+      expect(result.hits.first.chunkContext.fieldPath, isNotEmpty);
+      expect(
+        result.hits.first.chunkContext.fieldPath,
+        equals('documents.attachment'),
       );
     });
   });

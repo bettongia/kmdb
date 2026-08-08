@@ -70,7 +70,10 @@ Future<void> _putDoc(
   await db.store.put(
     coll,
     id,
-    await ValueCodec.encode({...doc}..remove('_id')),
+    await ValueCodec.encode(
+      {...doc}..remove('_id'),
+      context: ValueContext(coll, id),
+    ),
   );
 }
 
@@ -302,9 +305,21 @@ void main() {
       final keyB = _key('bbb'); // sorts second
       final keyC = _key('ccc'); // sorts third
 
-      await db.store.put('items', keyA, await ValueCodec.encode({'n': 1}));
-      await db.store.put('items', keyB, await ValueCodec.encode({'n': 2}));
-      await db.store.put('items', keyC, await ValueCodec.encode({'n': 3}));
+      await db.store.put(
+        'items',
+        keyA,
+        await ValueCodec.encode({'n': 1}, context: ValueContext('items', keyA)),
+      );
+      await db.store.put(
+        'items',
+        keyB,
+        await ValueCodec.encode({'n': 2}, context: ValueContext('items', keyB)),
+      );
+      await db.store.put(
+        'items',
+        keyC,
+        await ValueCodec.encode({'n': 3}, context: ValueContext('items', keyC)),
+      );
 
       // Scanning from keyB should return keyB and keyC.
       final ctx = _ctx(db, out: out, err: err);
@@ -327,7 +342,11 @@ void main() {
       // Insert a document with keyA (sorts before keyC).
       final keyA = _key('abc');
       final keyC = _key('zzz'); // sorts after keyA
-      await db.store.put('items', keyA, await ValueCodec.encode({'x': 1}));
+      await db.store.put(
+        'items',
+        keyA,
+        await ValueCodec.encode({'x': 1}, context: ValueContext('items', keyA)),
+      );
 
       // Scanning from keyC (which sorts after keyA) yields nothing.
       final ctx = _ctx(db, out: out, err: err);
@@ -345,8 +364,16 @@ void main() {
     test('applies filter within key-prefix scan', () async {
       final keyA = _key('aaa');
       final keyB = _key('bbb');
-      await db.store.put('items', keyA, await ValueCodec.encode({'n': 1}));
-      await db.store.put('items', keyB, await ValueCodec.encode({'n': 2}));
+      await db.store.put(
+        'items',
+        keyA,
+        await ValueCodec.encode({'n': 1}, context: ValueContext('items', keyA)),
+      );
+      await db.store.put(
+        'items',
+        keyB,
+        await ValueCodec.encode({'n': 2}, context: ValueContext('items', keyB)),
+      );
 
       final ctx = _ctx(db, out: out, err: err);
       final ok = await ScanCommand().execute(

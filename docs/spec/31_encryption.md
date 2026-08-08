@@ -86,12 +86,120 @@ Map<String, dynamic>
 Uint8List (CBOR bytes)
     ↓  Zstd (optional)
 [CompressionFlag][CBOR or compressed payload]
-    ↓  AesGcmEncryptionProvider.encrypt()  (if encryption is active)
+    ↓  AesGcmEncryptionProvider.encrypt(aad: context.toAad())  (if encryption is active)
 [0x01 nonce(12B) ciphertext tag(16B)]
     ↓  (or, without encryption)
 [0x00 CompressionFlag CBOR payload]
 SSTable slot value
 ```
+
+`context` is a required `ValueContext` — see "Associated Data (AAD Binding)"
+below.
+
+## Associated Data (AAD Binding)
+
+**Problem this closes (0.10.01 WI-3 / finding E-2).** Before this binding,
+`AesGcmEncryptionProvider` encrypted with no associated data: a ciphertext
+authenticated only *itself*, never *where it belonged*. An adversary who can
+write SSTables (S-1 confirmed this is practical for a peer with sync-folder
+access) could:
+
+- **Relocate** a valid encrypted value from document A to document B — it
+  decrypted cleanly and the GCM tag verified, because the tag never covered
+  the key.
+- **Transplant** values across namespaces or collections.
+
+**The fix.** Every AES-GCM encrypt/decrypt call now takes a required `aad`
+parameter (`EncryptionProvider.encrypt`/`decrypt`), computed by a `ValueContext`
+that every `ValueCodec.encode`/`decode` and `EncryptionEnvelope.wrap`/`unwrap`
+call site must supply:
+
+```
+AAD = domainByte(0x01) ‖ lenPrefixed(namespace) ‖ lenPrefixed(key)
+```
+
+Both `namespace` and `key` are UTF-8 encoded, each prefixed with its own
+big-endian 4-byte length (not the 1-byte length-prefix style used elsewhere in
+the engine — AAD keys are not all subject to that 255-byte cap, e.g. `extract/`
+artifact paths). Length-prefixing — not bare concatenation — is essential:
+without it, `("ab", "c")` and `("a", "bc")` would produce identical AAD bytes,
+letting a value bound to one `(namespace, key)` pair authenticate under a
+different, colliding pair. The leading `0x01` domain byte is cheap insurance so
+a future AAD-composition change cannot be silently confused with this one.
+
+For any value that is a real KvStore `(namespace, key)` entry — collection
+documents, `$ver:` history entries, `$$fts:`/`$$vec:`/`$$index:` entries, vault
+ref-count entries — the context is constructed directly:
+`ValueContext(namespace, key)`. Because the write site and the read site
+always address the same KvStore entry at the same coordinates, the AAD matches
+automatically: neither side has to reconstruct anything, and there is no way
+for the two to drift apart.
+
+### Non-KvStore values
+
+A handful of encrypted-at-rest values are **not** KvStore entries at all —
+whole files written by a `StorageAdapter`, or a field inside such a file. For
+these, `ValueContext` provides named constructors that single-source one
+fixed, AAD-only namespace literal each (never a real KvStore namespace):
+
+| Constructor | Key bound | Used for |
+| :---------- | :-------- | :------- |
+| `ValueContext.meta(name)` | symbolic name | `$meta` raw-by-name entries and `$$…state` store symbolic names (generation counters, dirty flag, tombstone GC floor, namespace registry, schema/index definitions) |
+| `ValueContext.vaultBlob(sha256)` | SHA-256 address | Vault blob bytes (adapter files, not KvStore entries) — blobs are content-addressed/deduplicated, so no single document key owns one |
+| `ValueContext.vaultExtract(path)` | file path | `extract/` artifact files (`text.txt`, `chunks_v1.json`, `vectors_{modelId}_sq8.bin`) — local-only and regenerable, bound anyway for uniformity |
+| `ValueContext.vaultManifestName(sha256)` | SHA-256 address | The vault manifest's `originalName` field — **a distinct namespace literal from `vaultBlob`**, so the two ciphertexts for the same SHA-256 cannot be swapped |
+| `ValueContext.vaultCorpus(ns, key)` | scan-cursor `(ns, key)` | The vault search corpus-sentinel entry — pure sugar over the base constructor, not a new literal (the corpus sentinel *is* a real KvStore entry) |
+
+**Vault blobs get defense-in-depth, not a replacement.** The AAD binding
+authenticates *before* decrypt (a relocated blob ciphertext fails GCM
+authentication outright); the pre-existing post-decrypt content→address check
+(`VaultStore.getBytes`, S-4) verifies content integrity independently, after
+decryption succeeds. Both checks run; neither supersedes the other.
+
+**Why the manifest name needs its own literal.** The vault manifest's
+`originalName` field and the blob's bytes are two different encrypted values
+that happen to share a SHA-256 address. If `vaultManifestName` reused
+`vaultBlob`'s namespace literal, the two AADs would be byte-identical for the
+same SHA-256, permitting an attacker to swap the two ciphertexts — an AAD
+collision that would defeat the whole point of binding. A distinct literal
+makes the two domains non-interchangeable no matter what SHA-256 they share.
+
+### Scope: location, not freshness
+
+The AAD binds **where** a value belongs (namespace + key), not **when** it was
+written (HLC / version). This is a deliberate, resolved scope decision, not an
+oversight:
+
+- The authoritative write-HLC is assigned by the LSM engine at commit time,
+  strictly *below* the query-layer encryption call — it is not available yet
+  when the AAD would need it. Binding it is a layering impossibility, not a
+  cost trade-off.
+- A `$ver:` history entry's real storage namespace (`$ver:{ns}`) already
+  differs from the live document's namespace (`{ns}`), so a version-history
+  ciphertext transplanted into the live slot at the same key still fails
+  authentication — no separate `recordType` field is needed.
+
+Consequently, this binding **fixes relocation and cross-namespace
+transplant** (a ciphertext moved to a different document key or a different
+namespace/collection now fails GCM authentication) but does **not** detect
+**rollback/replay** — re-placing an *older* ciphertext of the *same* document
+back at the *same* key with a newer HLC authenticates just fine, because
+namespace+key are unchanged. Rollback detection requires binding *freshness*,
+which is only reachable at a layer that authenticates the writer and carries
+monotonic device state — that is out of scope here and deferred to a future
+sync-authentication work item. It does **not** protect against a peer that
+legitimately holds the DEK (the threat model throughout this document is a
+peer with sync-folder write access but not the DEK — see "Threat Model &
+Confidentiality Boundaries" below); a legitimate DEK holder can always produce
+validly-authenticating ciphertext for any `(namespace, key)` it chooses.
+
+### Out of scope: the DEK-wrap envelope
+
+The DEK wrap in `key_derivation.dart` (`wrapDek`/`unwrapDek`) uses `AesGcm`
+directly and is **not** threaded through `ValueContext`/`aad`. The wrapped DEK
+is keyed by the passphrase- or recovery-derived KEK, and it is not relocatable
+in a way that makes a victim decrypt *authentic-looking* data — a wrong KEK
+simply fails to unwrap. This is a deliberate exclusion, not an oversight.
 
 ## enc:blob Structure
 
@@ -163,7 +271,7 @@ an `EncryptionFlag` would be actively dangerous, not just wrong.
 raw, non-circular path as `enc:blob` — see `MetaStore.
 getFormatVersionMarker`/`putFormatVersionMarker`) immediately after crash
 recovery, before any other `$meta`/index/FTS/Vec/vault value is read through
-`EncryptionEnvelope`/`ValueCodec`. Three-way discrimination (marker absence
+`EncryptionEnvelope`/`ValueCodec`. Four-way discrimination (marker absence
 alone is not sufficient — a brand-new database also has no marker until this
 gate writes one):
 
@@ -171,19 +279,36 @@ gate writes one):
    completely empty even if `CURRENT` exists — the widened check needed for
    `fsyncOnWrite: false` test configs where a crash can leave `CURRENT`
    durable but every `$meta` write lost) → write the marker
-   (`kCurrentFormatVersion = 1`) and proceed normally. This is the only path
-   a brand-new database takes.
+   (`kCurrentFormatVersion`, currently `2`) and proceed normally. This is the
+   only path a brand-new database takes.
 2. **Marker present and current** → proceed normally. This is the steady
    state for every database opened after this plan landed.
 3. **Marker absent and the database is not empty** → the database predates
-   this plan. Throw `LegacyDatabaseFormatException` — a clean, explicit
-   failure (not a silent misparse of a legacy value as encrypted garbage).
+   the Encryption confidentiality reconciliation plan's `$meta` framing
+   entirely (format version was never introduced). Throw
+   `LegacyDatabaseFormatException` — a clean, explicit failure (not a silent
+   misparse of a legacy value as encrypted garbage).
+4. **Marker present but `< kCurrentFormatVersion`** (0.10.01 WI-3 / finding
+   E-2) — the marker exists (e.g. `1`), but this build requires a newer
+   format (`2`, the AAD-binding change above). Throw
+   `LegacyDatabaseFormatException` with `foundVersion`/`currentVersion` set,
+   producing a message distinct from case 3's marker-absent message. Before
+   this branch existed, `KvStoreImpl.open()` only ever checked
+   `formatVersion == null`, so a non-null-but-stale marker would have
+   silently "fallen through" as accepted — every encrypted value in such a
+   database would then fail GCM authentication the moment it was read with a
+   non-empty AAD, indistinguishable from tampering, instead of failing
+   loudly and explicitly at `open()`.
 
-**There is no migration path, consistent with the original Phase 12
-encryption precedent (no in-place migration for encryption either): a
-database created before this plan landed must be recreated.** This applies
-to every pre-plan database, encrypted or not, since the format break is in
-the general `$meta` framing, not specifically in encryption. See
+**There is no migration path for either legacy case, consistent with the
+original Phase 12 encryption precedent (no in-place migration for encryption
+either): a database created before the relevant plan landed must be
+recreated.** Case 3 applies to every pre-Encryption-confidentiality-
+reconciliation database, encrypted or not, since that format break is in the
+general `$meta` framing, not specifically in encryption. Case 4 applies to
+every database written between that plan and 0.10.01 WI-3 (format version
+`1`), since the AAD-binding change is itself a breaking change to what
+AES-GCM ciphertext looks like for the same plaintext. See
 `docs/spec/28_release_checklist.md` RC-22 for anyone upgrading a
 pre-existing dev/test database.
 
@@ -307,15 +432,29 @@ encryption active.
 ## Provider Threading
 
 `EncryptionProvider?` is threaded as a named optional parameter through all
-`ValueCodec.encode` / `ValueCodec.decode` call sites:
+`ValueCodec.encode` / `ValueCodec.decode` call sites. A `ValueContext` — see
+"Associated Data (AAD Binding)" above — is threaded alongside it as a
+**required** parameter (required even when `encryption` is `null`, so the
+compiler enumerates every call site rather than silently permitting an
+omitted context the moment encryption is enabled):
 
 ```dart
-final bytes = await ValueCodec.encode(doc, encryption: _db.encryption);
-final doc   = await ValueCodec.decode(bytes, encryption: _db.encryption);
+final bytes = await ValueCodec.encode(
+  doc,
+  context: ValueContext(namespace, key),
+  encryption: _db.encryption,
+);
+final doc = await ValueCodec.decode(
+  bytes,
+  context: ValueContext(namespace, key),
+  encryption: _db.encryption,
+);
 ```
 
 All call sites in `KmdbCollection`, `IndexManager`, `VersionManager`, and
-`VaultRefInterceptor` receive the provider from `KmdbDatabase.encryption`.
+`VaultRefInterceptor` receive the provider from `KmdbDatabase.encryption`, and
+construct `ValueContext` from the real `(namespace, key)` (or a named
+constructor for the non-KvStore value classes) already in scope at each site.
 
 System namespace values vary in their sync behaviour. `$meta`, `$ver:`, and
 `$vault:` entries (all single-`$`) ride in syncable SSTables and reach the
@@ -405,9 +544,15 @@ The `encryptionConfig` parameter is `null` for plaintext databases.
 final dek = await KeyDerivation.generateDek(); // 32 random bytes
 final provider = AesGcmEncryptionProvider(dek);
 
-final ciphertext = await provider.encrypt(plaintext);
-final recovered  = await provider.decrypt(ciphertext);
+final aad = const ValueContext('tasks', docKey).toAad();
+final ciphertext = await provider.encrypt(plaintext, aad: aad);
+final recovered  = await provider.decrypt(ciphertext, aad: aad);
 ```
+
+`aad` is required on both `encrypt` and `decrypt` (0.10.01 WI-3) — see
+"Associated Data (AAD Binding)" above. `ValueCodec`/`EncryptionEnvelope`
+callers never call `encrypt`/`decrypt` directly; they pass a `ValueContext`
+and the codec computes `aad` internally via `context.toAad()`.
 
 ## Platform Notes
 
@@ -602,6 +747,15 @@ sync:
 > the namespace name is a part. Where a namespace name embeds content-derived
 > data (see gaps 2 and 3 below), that data is not protected even when the
 > corresponding value is.
+
+> **Note on confidentiality vs. authenticity.** Every bullet above is a
+> confidentiality claim (the value is unreadable without the DEK). Separately,
+> **every AES-GCM encrypted value above is also bound to *where* it is
+> stored** (its real `(namespace, key)`, or a fixed non-KvStore identifier —
+> see "Associated Data (AAD Binding)" above, 0.10.01 WI-3). This is an
+> authenticity property, not a confidentiality one: it does not hide content,
+> it prevents a valid ciphertext from being relocated or transplanted to a
+> different location and still decrypting successfully.
 
 ### Known gaps and unprotected surfaces
 

@@ -20,7 +20,15 @@ import 'package:kmdb/src/encoding/value_codec.dart';
 import 'package:kmdb/src/encryption/encryption_error.dart';
 import 'package:kmdb/src/encryption/encryption_provider.dart';
 import 'package:kmdb/src/encryption/key_derivation.dart';
+import 'package:kmdb/src/encryption/value_context.dart';
 import 'package:test/test.dart';
+
+/// A fixed context used throughout this file for calls that are not
+/// specifically testing AAD binding. AAD-mismatch/relocation behaviour is
+/// covered in `test/encryption/value_aad_test.dart` (using the real
+/// [AesGcmEncryptionProvider] — never [_XorProvider], which ignores its
+/// `aad` parameter entirely and would make such an assertion vacuous).
+const _ctx = ValueContext('test-ns', 'test-key');
 
 /// A test-only [EncryptionProvider] that XOR-encrypts with a fixed key byte.
 ///
@@ -29,18 +37,30 @@ import 'package:test/test.dart';
 ///
 /// Wire format: `[key_byte (1B)][plaintext XOR key_byte]`. The `decrypt` is
 /// its own inverse.
+///
+/// **Deliberately ignores `aad`** (0.10.01 WI-3 / finding E-2): this provider
+/// exists only to test `ValueCodec`'s compress-then-encrypt layering, not the
+/// AAD binding itself — using it in a relocation/transplant test would make
+/// the assertion vacuous, since XOR never authenticates anything. Those tests
+/// use the real [AesGcmEncryptionProvider] instead.
 final class _XorProvider implements EncryptionProvider {
   const _XorProvider(this._key);
 
   final int _key; // single-byte XOR key
 
   @override
-  Future<Uint8List> encrypt(Uint8List plaintext) async {
+  Future<Uint8List> encrypt(
+    Uint8List plaintext, {
+    required Uint8List aad,
+  }) async {
     return Uint8List.fromList([_key, ...plaintext.map((b) => b ^ _key)]);
   }
 
   @override
-  Future<Uint8List> decrypt(Uint8List ciphertext) async {
+  Future<Uint8List> decrypt(
+    Uint8List ciphertext, {
+    required Uint8List aad,
+  }) async {
     if (ciphertext.isEmpty) {
       throw EncryptionError(
         EncryptionErrorCode.badCredentials,
@@ -66,15 +86,20 @@ final class _BadKeyProvider implements EncryptionProvider {
   const _BadKeyProvider();
 
   @override
-  Future<Uint8List> encrypt(Uint8List plaintext) async =>
+  Future<Uint8List> encrypt(
+    Uint8List plaintext, {
+    required Uint8List aad,
+  }) async =>
       throw const EncryptionError(EncryptionErrorCode.encryptionFailed, 'test');
 
   @override
-  Future<Uint8List> decrypt(Uint8List ciphertext) async =>
-      throw const EncryptionError(
-        EncryptionErrorCode.badCredentials,
-        'Wrong key (test)',
-      );
+  Future<Uint8List> decrypt(
+    Uint8List ciphertext, {
+    required Uint8List aad,
+  }) async => throw const EncryptionError(
+    EncryptionErrorCode.badCredentials,
+    'Wrong key (test)',
+  );
 
   @override
   Future<String> indexToken(String message) async =>
@@ -96,8 +121,16 @@ void main() {
       final doc = {'name': 'Alice', 'age': 30};
       final provider = const _XorProvider(0x55);
 
-      final encoded = await ValueCodec.encode(doc, encryption: provider);
-      final decoded = await ValueCodec.decode(encoded, encryption: provider);
+      final encoded = await ValueCodec.encode(
+        doc,
+        context: _ctx,
+        encryption: provider,
+      );
+      final decoded = await ValueCodec.decode(
+        encoded,
+        context: _ctx,
+        encryption: provider,
+      );
       expect(decoded, equals(doc));
     });
 
@@ -110,16 +143,32 @@ void main() {
         };
         final provider = const _XorProvider(0xAB);
 
-        final encoded = await ValueCodec.encode(doc, encryption: provider);
-        final decoded = await ValueCodec.decode(encoded, encryption: provider);
+        final encoded = await ValueCodec.encode(
+          doc,
+          context: _ctx,
+          encryption: provider,
+        );
+        final decoded = await ValueCodec.decode(
+          encoded,
+          context: _ctx,
+          encryption: provider,
+        );
         expect(decoded, equals(doc));
       },
     );
 
     test('empty doc round-trips with encryption', () async {
       final provider = const _XorProvider(0x12);
-      final encoded = await ValueCodec.encode({}, encryption: provider);
-      final decoded = await ValueCodec.decode(encoded, encryption: provider);
+      final encoded = await ValueCodec.encode(
+        {},
+        context: _ctx,
+        encryption: provider,
+      );
+      final decoded = await ValueCodec.decode(
+        encoded,
+        context: _ctx,
+        encryption: provider,
+      );
       expect(decoded, equals({}));
     });
 
@@ -128,8 +177,16 @@ void main() {
       final provider = AesGcmEncryptionProvider(dek);
       final doc = {'secret': 'top-secret data', 'value': 42};
 
-      final encoded = await ValueCodec.encode(doc, encryption: provider);
-      final decoded = await ValueCodec.decode(encoded, encryption: provider);
+      final encoded = await ValueCodec.encode(
+        doc,
+        context: _ctx,
+        encryption: provider,
+      );
+      final decoded = await ValueCodec.decode(
+        encoded,
+        context: _ctx,
+        encryption: provider,
+      );
       expect(decoded, equals(doc));
     });
 
@@ -138,8 +195,16 @@ void main() {
       final provider = AesGcmEncryptionProvider(dek);
       final doc = {for (var i = 0; i < 50; i++) 'field_$i': 'data_$i' * 20};
 
-      final encoded = await ValueCodec.encode(doc, encryption: provider);
-      final decoded = await ValueCodec.decode(encoded, encryption: provider);
+      final encoded = await ValueCodec.encode(
+        doc,
+        context: _ctx,
+        encryption: provider,
+      );
+      final decoded = await ValueCodec.decode(
+        encoded,
+        context: _ctx,
+        encryption: provider,
+      );
       expect(decoded, equals(doc));
     });
   });
@@ -150,12 +215,16 @@ void main() {
     test('encrypted value starts with EncryptionFlag.aesGcm (0x01)', () async {
       final dek = await KeyDerivation.generateDek();
       final provider = AesGcmEncryptionProvider(dek);
-      final encoded = await ValueCodec.encode({'x': 1}, encryption: provider);
+      final encoded = await ValueCodec.encode(
+        {'x': 1},
+        context: _ctx,
+        encryption: provider,
+      );
       expect(encoded[0], equals(EncryptionFlag.aesGcm.byte));
     });
 
     test('plaintext value starts with EncryptionFlag.none (0x00)', () async {
-      final encoded = await ValueCodec.encode({'x': 1});
+      final encoded = await ValueCodec.encode({'x': 1}, context: _ctx);
       expect(encoded[0], equals(EncryptionFlag.none.byte));
     });
 
@@ -166,8 +235,12 @@ void main() {
         final provider = AesGcmEncryptionProvider(dek);
         final doc = {'key': 'value'};
 
-        final plain = await ValueCodec.encode(doc);
-        final encrypted = await ValueCodec.encode(doc, encryption: provider);
+        final plain = await ValueCodec.encode(doc, context: _ctx);
+        final encrypted = await ValueCodec.encode(
+          doc,
+          context: _ctx,
+          encryption: provider,
+        );
 
         // Encrypted = EncryptionFlag (1B) + nonce (12B) + ciphertext + tag (16B)
         // Plaintext = EncryptionFlag (1B) + CompressionFlag (1B) + CBOR payload
@@ -189,7 +262,11 @@ void main() {
           for (var i = 0; i < 30; i++) 'k_$i': 'v' * 50,
         }; // large enough to be compressed
 
-        final encoded = await ValueCodec.encode(doc, encryption: provider);
+        final encoded = await ValueCodec.encode(
+          doc,
+          context: _ctx,
+          encryption: provider,
+        );
         // Byte 0 = EncryptionFlag.aesGcm (0x01). Byte 1 onwards is the nonce
         // (random bytes) — NOT a CompressionFlag. Verify byte 1 is not 0x00 or
         // 0x01 (the only valid CompressionFlag values) at least sometimes, or
@@ -208,13 +285,27 @@ void main() {
         final provider = AesGcmEncryptionProvider(dek);
         final doc = {'x': 1};
 
-        final e1 = await ValueCodec.encode(doc, encryption: provider);
-        final e2 = await ValueCodec.encode(doc, encryption: provider);
+        final e1 = await ValueCodec.encode(
+          doc,
+          context: _ctx,
+          encryption: provider,
+        );
+        final e2 = await ValueCodec.encode(
+          doc,
+          context: _ctx,
+          encryption: provider,
+        );
         // Different nonces → different ciphertext.
         expect(e1, isNot(equals(e2)));
         // Both decrypt correctly.
-        expect(await ValueCodec.decode(e1, encryption: provider), equals(doc));
-        expect(await ValueCodec.decode(e2, encryption: provider), equals(doc));
+        expect(
+          await ValueCodec.decode(e1, context: _ctx, encryption: provider),
+          equals(doc),
+        );
+        expect(
+          await ValueCodec.decode(e2, context: _ctx, encryption: provider),
+          equals(doc),
+        );
       },
     );
   });
@@ -227,10 +318,14 @@ void main() {
       () async {
         final dek = await KeyDerivation.generateDek();
         final provider = AesGcmEncryptionProvider(dek);
-        final encoded = await ValueCodec.encode({'x': 1}, encryption: provider);
+        final encoded = await ValueCodec.encode(
+          {'x': 1},
+          context: _ctx,
+          encryption: provider,
+        );
 
         expect(
-          () async => ValueCodec.decode(encoded),
+          () async => ValueCodec.decode(encoded, context: _ctx),
           throwsA(isA<ArgumentError>()),
         );
       },
@@ -242,12 +337,18 @@ void main() {
       final wrongDek = await KeyDerivation.generateDek();
       final wrongProvider = AesGcmEncryptionProvider(wrongDek);
 
-      final encoded = await ValueCodec.encode({
-        'secret': 'value',
-      }, encryption: provider);
+      final encoded = await ValueCodec.encode(
+        {'secret': 'value'},
+        context: _ctx,
+        encryption: provider,
+      );
 
       expect(
-        () async => ValueCodec.decode(encoded, encryption: wrongProvider),
+        () async => ValueCodec.decode(
+          encoded,
+          context: _ctx,
+          encryption: wrongProvider,
+        ),
         throwsA(
           isA<EncryptionError>().having(
             (e) => e.code,
@@ -264,14 +365,19 @@ void main() {
         // Build a valid plaintext AES-GCM encrypted payload.
         final dek = await KeyDerivation.generateDek();
         final goodProvider = AesGcmEncryptionProvider(dek);
-        final encoded = await ValueCodec.encode({
-          'x': 1,
-        }, encryption: goodProvider);
+        final encoded = await ValueCodec.encode(
+          {'x': 1},
+          context: _ctx,
+          encryption: goodProvider,
+        );
 
         // Decode with a provider that always rejects.
         expect(
-          () async =>
-              ValueCodec.decode(encoded, encryption: const _BadKeyProvider()),
+          () async => ValueCodec.decode(
+            encoded,
+            context: _ctx,
+            encryption: const _BadKeyProvider(),
+          ),
           throwsA(isA<EncryptionError>()),
         );
       },
@@ -287,9 +393,13 @@ void main() {
         final provider = AesGcmEncryptionProvider(dek);
         final doc = {'greeting': 'hello'};
 
-        final plainEncoded = await ValueCodec.encode(doc); // no encryption
+        final plainEncoded = await ValueCodec.encode(
+          doc,
+          context: _ctx,
+        ); // no encryption
         final decoded = await ValueCodec.decode(
           plainEncoded,
+          context: _ctx,
           encryption: provider,
         );
         expect(decoded, equals(doc));

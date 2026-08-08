@@ -153,12 +153,18 @@ void main() {
       await db.store.put(
         'ns',
         k1,
-        await ValueCodec.encode({'id': 'a', 'x': 1}),
+        await ValueCodec.encode({
+          'id': 'a',
+          'x': 1,
+        }, context: ValueContext('ns', k1)),
       );
       await db.store.put(
         'ns',
         k2,
-        await ValueCodec.encode({'id': 'b', 'x': 2}),
+        await ValueCodec.encode({
+          'id': 'b',
+          'x': 2,
+        }, context: ValueContext('ns', k2)),
       );
       await db.store.flush();
     });
@@ -415,15 +421,21 @@ void main() {
       tmpDir = _mkTempDir();
       db = await _openStore(tmpDir);
       // Write data to generate WAL records.
+      final key421a = _keygen.next();
       await db.store.put(
         'ns',
-        _keygen.next(),
-        await ValueCodec.encode({'id': 'a'}),
+        key421a,
+        await ValueCodec.encode({
+          'id': 'a',
+        }, context: ValueContext('ns', key421a)),
       );
+      final key421b = _keygen.next();
       await db.store.put(
         'ns',
-        _keygen.next(),
-        await ValueCodec.encode({'id': 'b'}),
+        key421b,
+        await ValueCodec.encode({
+          'id': 'b',
+        }, context: ValueContext('ns', key421b)),
       );
     });
     tearDown(() => db.close());
@@ -765,10 +777,13 @@ void main() {
     test(
       'after flush summary lists SSTable metadata (with filename) in levels',
       () async {
+        final utilKey1 = _keygen.next();
         await db.store.put(
           'ns',
-          _keygen.next(),
-          await ValueCodec.encode({'id': 'a'}),
+          utilKey1,
+          await ValueCodec.encode({
+            'id': 'a',
+          }, context: ValueContext('ns', utilKey1)),
         );
         await db.store.flush();
 
@@ -809,10 +824,13 @@ void main() {
     test(
       'after flush --full lists VersionEdits with expected fields',
       () async {
+        final utilKey2 = _keygen.next();
         await db.store.put(
           'ns',
-          _keygen.next(),
-          await ValueCodec.encode({'id': 'a'}),
+          utilKey2,
+          await ValueCodec.encode({
+            'id': 'a',
+          }, context: ValueContext('ns', utilKey2)),
         );
         await db.store.flush();
 
