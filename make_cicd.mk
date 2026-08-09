@@ -129,13 +129,25 @@ cicd_flutter:
 
 # ── Web / Chrome ───────────────────────────────────────────────────────────────
 #
-# Runs the WASM compression codec tests in Chrome.  Requires Chrome to be
-# installed and CHROME_EXECUTABLE=chrome to be set in the environment (handled
-# by browser-actions/setup-chrome in the workflow).
+# Runs the WASM compression codec tests in Chrome, plus the vault SHA-256/
+# CRC32C known-answer-vector tests (S-5, 0.10.01) — the latter guards against
+# web (JS number) `int`-semantics divergence in the vault content-address
+# hash. Requires Chrome to be installed and CHROME_EXECUTABLE=chrome to be
+# set in the environment (handled by browser-actions/setup-chrome in the
+# workflow).
+#
+# The vault test is compiled with `--compiler dart2wasm`, not the `dart2js`
+# default: it transitively imports `xxhash.dart`, whose 64-bit prime
+# constants are int literals that dart2js's front end rejects outright
+# ("can't be represented exactly in JavaScript") because they exceed JS's
+# 2^53 safe-integer range — see that file's "dart2js is not supported by
+# KMDB" doc note. `value_codec_test.dart` never reaches that code path, so it
+# stays on the dart2js default.
 cicd_web:
 	dart pub global activate melos
 	melos bootstrap
 	cd packages/kmdb && dart test --platform chrome test/encoding/value_codec_test.dart
+	cd packages/kmdb && dart test --platform chrome --compiler dart2wasm test/vault/vault_hash_kat_test.dart
 .PHONY: cicd_web
 
 # ── Container (Podman) ─────────────────────────────────────────────────────────
