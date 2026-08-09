@@ -92,6 +92,23 @@ void main() {
       expect(h.entries, isEmpty);
     });
 
+    test(
+      'save restricts the history file to owner-only (0600) on POSIX (C-2)',
+      () async {
+        final h = make();
+        h.add('get notes secret-key');
+        await h.save();
+
+        // The history can contain sensitive command arguments and must not be
+        // group/world-readable in a shared-home environment.
+        final mode = io.File(histPath).statSync().mode;
+        expect(mode & 0x1FF, equals(0x180)); // 0o600
+        expect(mode & 0x03F, equals(0)); // no group/other bits
+      },
+      // chmod is POSIX-only; on Windows the file inherits the profile ACL.
+      skip: io.Platform.isWindows ? 'POSIX-only permission check' : null,
+    );
+
     test('caps entries to maxEntries on load', () async {
       // Write more than maxEntries lines to the file.
       final lines = List.generate(History.maxEntries + 5, (i) => 'cmd $i');

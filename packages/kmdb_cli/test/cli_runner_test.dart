@@ -132,6 +132,14 @@ void main() {
       expect(result.stdout, contains('insert'));
     });
 
+    test('help <unknown> exits 64 with a message, not 255 (L-1)', () async {
+      final result = await run(['help', 'no-such-command']);
+      // Regression: an unknown help topic used to escape as an uncaught
+      // UsageException (exit 255). It must now be handled gracefully.
+      expect(result.exitCode, equals(64), reason: result.stderr.toString());
+      expect(result.stderr, contains('no-such-command'));
+    });
+
     test('--format with bad mode exits 1 with error', () async {
       final dbPath = tmp.file('db');
       final result = await run([

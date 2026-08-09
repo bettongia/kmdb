@@ -79,8 +79,27 @@ final class History {
       final file = io.File(_path);
       await file.parent.create(recursive: true);
       await file.writeAsString('${_entries.join('\n')}\n', encoding: utf8);
+      await _restrictPermissions(file);
     } catch (_) {
       // Silently ignore write failures (e.g. read-only home directory).
+    }
+  }
+
+  /// Best-effort restriction of the history file to owner-only (`0600`) on
+  /// POSIX platforms.
+  ///
+  /// The history can contain command arguments — document values, filter
+  /// expressions, keys — that should not be world-readable in a shared-home
+  /// environment. `dart:io` exposes no permission API, so this shells out to
+  /// `chmod` (mirroring `DirectoryCredentialStore`). Failures are swallowed:
+  /// history confidentiality is best-effort and [save] must never crash the
+  /// REPL. No-op on Windows, where the file inherits the profile ACL.
+  Future<void> _restrictPermissions(io.File file) async {
+    if (io.Platform.isWindows) return;
+    try {
+      await io.Process.run('chmod', ['600', file.path]);
+    } catch (_) {
+      // Non-fatal: best-effort only.
     }
   }
 
