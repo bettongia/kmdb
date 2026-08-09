@@ -108,7 +108,17 @@ import 'package:kmdb/src/vault/search/charset_util.dart';
 /// ```
 final class HtmlTextExtractor implements VaultTextExtractor {
   /// Creates an [HtmlTextExtractor].
-  const HtmlTextExtractor();
+  ///
+  /// [limits] bounds the input size this extractor will attempt to parse
+  /// and the depth of the document tree walk it will perform; defaults to
+  /// [ExtractorLimits.defaults]. A document that exceeds either bound is
+  /// declined (`null`) rather than truncated — see [ExtractorLimits] for
+  /// the rationale, and the class-level doc for why the depth cap alone
+  /// does not protect the parser stage.
+  const HtmlTextExtractor({this.limits = ExtractorLimits.defaults});
+
+  /// The resource bounds this extractor honours. See [ExtractorLimits].
+  final ExtractorLimits limits;
 
   /// Element subtrees whose content (and descendants) are never visited —
   /// their text is not prose and would otherwise pollute the extracted text
@@ -206,15 +216,24 @@ final class HtmlTextExtractor implements VaultTextExtractor {
   ///
   /// Both cases are therefore excluded from coverage accounting below —
   /// they are deliberately-defensive, not dead, code.
-  static void _walkNode(dom.Node node, StringBuffer sb) {
+  ///
+  /// [depth] is the current node's nesting depth (0 at the walk root);
+  /// threaded through so [_walkElement] can enforce [ExtractorLimits.maxRecursionDepth]
+  /// at its own recursive descent, per the class-level doc's depth-cap note.
+  static void _walkNode(
+    dom.Node node,
+    StringBuffer sb,
+    int depth,
+    ExtractorLimits limits,
+  ) {
     if (node is dom.Text) {
       sb.write(node.data);
     } else if (node is dom.Element) {
-      _walkElement(node, sb);
+      _walkElement(node, sb, depth, limits);
     } else {
       // coverage:ignore-start
       for (final child in node.nodes) {
-        _walkNode(child, sb);
+        _walkNode(child, sb, depth, limits);
       }
       // coverage:ignore-end
     }
@@ -222,7 +241,19 @@ final class HtmlTextExtractor implements VaultTextExtractor {
 
   /// Walks [element]'s subtree, applying the skip/boundary rules described
   /// in the class-level doc comment.
-  static void _walkElement(dom.Element element, StringBuffer sb) {
+  ///
+  /// Enforces [ExtractorLimits.maxRecursionDepth]: before descending into
+  /// this element's children, the depth counter is incremented and checked.
+  /// A document nested deeper than the limit throws [_RecursionLimitExceeded],
+  /// which propagates up through the recursive calls to [extract]'s
+  /// catch-all — a hostile document must yield `null`, not a
+  /// truncated-but-plausible result.
+  static void _walkElement(
+    dom.Element element,
+    StringBuffer sb,
+    int depth,
+    ExtractorLimits limits,
+  ) {
     final tag = element.localName;
     if (tag != null && _skippedTags.contains(tag)) {
       // Skip the entire subtree — neither this element's descendants' text
@@ -231,8 +262,12 @@ final class HtmlTextExtractor implements VaultTextExtractor {
     }
     final boundary = (tag != null && _blockTags.contains(tag)) ? '\n' : ' ';
     sb.write(boundary);
+    final childDepth = depth + 1;
+    if (childDepth > limits.maxRecursionDepth) {
+      throw const _RecursionLimitExceeded();
+    }
     for (final child in element.nodes) {
-      _walkNode(child, sb);
+      _walkNode(child, sb, childDepth, limits);
     }
     sb.write(boundary);
   }
@@ -242,6 +277,14 @@ final class HtmlTextExtractor implements VaultTextExtractor {
 
   @override
   Future<String?> extract(Uint8List bytes, VaultManifest manifest) async {
+    // Decline oversized input before any parsing begins. This is also the
+    // parser-stage stack-overflow guard: a pathologically nested document is
+    // necessarily large, so this gate catches it before html_parser.parse()
+    // ever builds a tree (see ExtractorLimits' class doc).
+    if (bytes.length > limits.maxInputBytes) {
+      return null;
+    }
+
     try {
       final decoded = decodeText(bytes).text;
       final document = html_parser.parse(decoded);
@@ -252,11 +295,20 @@ final class HtmlTextExtractor implements VaultTextExtractor {
       final root = document.body ?? document;
 
       final buffer = StringBuffer();
-      _walkNode(root, buffer);
+      _walkNode(root, buffer, 0, limits);
       return _collapseWhitespace(buffer.toString());
     } catch (e) {
-      // Never throw, per the VaultTextExtractor contract.
+      // Never throw, per the VaultTextExtractor contract. Catches both
+      // ordinary parse/decode errors and _RecursionLimitExceeded.
       return null;
     }
   }
+}
+
+/// Thrown internally by [HtmlTextExtractor._walkElement] when a document's
+/// tree walk exceeds [ExtractorLimits.maxRecursionDepth]. Caught by
+/// [HtmlTextExtractor.extract]'s catch-all, which returns `null` per the
+/// [VaultTextExtractor] contract. Never escapes the extractor.
+final class _RecursionLimitExceeded implements Exception {
+  const _RecursionLimitExceeded();
 }

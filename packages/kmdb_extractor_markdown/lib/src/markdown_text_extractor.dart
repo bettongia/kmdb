@@ -126,7 +126,16 @@ import 'package:markdown/markdown.dart' as md;
 /// ```
 final class MarkdownTextExtractor implements VaultTextExtractor {
   /// Creates a [MarkdownTextExtractor].
-  const MarkdownTextExtractor();
+  ///
+  /// [limits] bounds the input size this extractor will attempt to parse
+  /// and the depth of the document tree walk it will perform; defaults to
+  /// [ExtractorLimits.defaults]. A document that exceeds either bound is
+  /// declined (`null`) rather than truncated — see [ExtractorLimits] for
+  /// the rationale.
+  const MarkdownTextExtractor({this.limits = ExtractorLimits.defaults});
+
+  /// The resource bounds this extractor honours. See [ExtractorLimits].
+  final ExtractorLimits limits;
 
   /// Block-level tags that get a `\n` boundary (rather than a plain space)
   /// on both sides of their content — mirrors `HtmlTextExtractor`'s
@@ -167,11 +176,21 @@ final class MarkdownTextExtractor implements VaultTextExtractor {
   }
 
   /// Recursively walks [node], appending extracted text to [sb].
-  static void _walkNode(md.Node node, StringBuffer sb) {
+  ///
+  /// [depth] is the current node's nesting depth (0 for the top-level nodes
+  /// passed in from [extract]); threaded through so [_walkElement] can
+  /// enforce [ExtractorLimits.maxRecursionDepth] at its own recursive
+  /// descent.
+  static void _walkNode(
+    md.Node node,
+    StringBuffer sb,
+    int depth,
+    ExtractorLimits limits,
+  ) {
     if (node is md.Text) {
       sb.write(node.text);
     } else if (node is md.Element) {
-      _walkElement(node, sb);
+      _walkElement(node, sb, depth, limits);
     }
     // md.UnparsedContent should not appear in a fully-parsed document (it is
     // an internal placeholder used only mid-parse to gather reference link
@@ -181,7 +200,19 @@ final class MarkdownTextExtractor implements VaultTextExtractor {
 
   /// Walks [element]'s subtree, applying the skip/special-case/boundary
   /// rules described in the class-level doc comment.
-  static void _walkElement(md.Element element, StringBuffer sb) {
+  ///
+  /// Enforces [ExtractorLimits.maxRecursionDepth]: before descending into
+  /// this element's children, the depth counter is incremented and checked.
+  /// A document nested deeper than the limit throws
+  /// [_RecursionLimitExceeded], which propagates up through the recursive
+  /// calls to [extract]'s catch-all — a hostile document must yield `null`,
+  /// not a truncated-but-plausible result.
+  static void _walkElement(
+    md.Element element,
+    StringBuffer sb,
+    int depth,
+    ExtractorLimits limits,
+  ) {
     final tag = element.tag;
 
     if (tag == 'pre') {
@@ -212,8 +243,12 @@ final class MarkdownTextExtractor implements VaultTextExtractor {
     sb.write(boundary);
     final children = element.children;
     if (children != null) {
+      final childDepth = depth + 1;
+      if (childDepth > limits.maxRecursionDepth) {
+        throw const _RecursionLimitExceeded();
+      }
       for (final child in children) {
-        _walkNode(child, sb);
+        _walkNode(child, sb, childDepth, limits);
       }
     }
     sb.write(boundary);
@@ -224,6 +259,14 @@ final class MarkdownTextExtractor implements VaultTextExtractor {
 
   @override
   Future<String?> extract(Uint8List bytes, VaultManifest manifest) async {
+    // Decline oversized input before any parsing begins. This is also the
+    // parser-stage stack-overflow guard: a pathologically nested document is
+    // necessarily large, so this gate catches it before md.Document.parse()
+    // ever builds a tree (see ExtractorLimits' class doc).
+    if (bytes.length > limits.maxInputBytes) {
+      return null;
+    }
+
     try {
       final decoded = decodeText(bytes).text;
       final document = md.Document(
@@ -234,12 +277,21 @@ final class MarkdownTextExtractor implements VaultTextExtractor {
 
       final buffer = StringBuffer();
       for (final node in nodes) {
-        _walkNode(node, buffer);
+        _walkNode(node, buffer, 0, limits);
       }
       return _collapseWhitespace(buffer.toString());
     } catch (e) {
-      // Never throw, per the VaultTextExtractor contract.
+      // Never throw, per the VaultTextExtractor contract. Catches both
+      // ordinary parse/decode errors and _RecursionLimitExceeded.
       return null;
     }
   }
+}
+
+/// Thrown internally by [MarkdownTextExtractor._walkElement] when a
+/// document's tree walk exceeds [ExtractorLimits.maxRecursionDepth]. Caught
+/// by [MarkdownTextExtractor.extract]'s catch-all, which returns `null` per
+/// the [VaultTextExtractor] contract. Never escapes the extractor.
+final class _RecursionLimitExceeded implements Exception {
+  const _RecursionLimitExceeded();
 }

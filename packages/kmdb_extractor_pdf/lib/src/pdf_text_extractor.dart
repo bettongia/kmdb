@@ -63,6 +63,22 @@ import 'package:kmdb/kmdb.dart';
 /// needed — Dart isolates spawning further isolates is a normal, supported
 /// pattern.
 ///
+/// ## Time bound
+///
+/// [betto_pdfium]'s `extractPlainText()` is not a single blocking FFI call —
+/// it is an `async*` stream that issues one FFI round-trip per page to a
+/// process-wide singleton isolate, yielding to the event loop between pages
+/// (see [PdfDocument.extractPlainText]'s own doc). [extract] tracks
+/// cumulative wall-clock elapsed time across that `await for` loop with a
+/// [Stopwatch] and, once elapsed exceeds [ExtractorLimits.maxDuration],
+/// returns `null` without consuming further pages — exiting the loop this
+/// way cancels the underlying page-text subscription (releasing PDFium page
+/// handles) per `await for`'s standard semantics. This bounds standalone and
+/// pipeline use alike, with no isolate machinery. It cannot interrupt a
+/// *single* page hanging in native code — the vault indexing pipeline's
+/// `VaultIndexingIsolate.kWorkTimeout` (strictly greater than
+/// [ExtractorLimits.maxDuration] by default) is the backstop for that case.
+///
 /// ## Known limitation
 ///
 /// The [VaultTextExtractor] contract has no channel for an extractor to
@@ -90,7 +106,16 @@ final class PdfTextExtractor implements VaultTextExtractor {
   /// a text layer for the document to be judged predominantly scanned/image
   /// content (see the class-level doc comment). Defaults to `0.5`, matching
   /// `betto_pdfium`'s own `PdfTextExtractorConfig.scannedPageRatio` default.
-  const PdfTextExtractor({this.scannedPageRatio = 0.5});
+  ///
+  /// [limits] bounds the input size this extractor will attempt to open and
+  /// the cumulative wall-clock time it will spend across the page-text
+  /// stream; defaults to [ExtractorLimits.defaults]. A document that exceeds
+  /// either bound is declined (`null`) — see the "Time bound" section below
+  /// and [ExtractorLimits] for the rationale.
+  const PdfTextExtractor({
+    this.scannedPageRatio = 0.5,
+    this.limits = ExtractorLimits.defaults,
+  });
 
   /// The scanned-page ratio threshold used by [extract] to decide whether a
   /// document is predominantly scanned/image content (see class doc).
@@ -101,11 +126,23 @@ final class PdfTextExtractor implements VaultTextExtractor {
   /// trigger this gate.
   final double scannedPageRatio;
 
+  /// The resource bounds this extractor honours. See [ExtractorLimits].
+  final ExtractorLimits limits;
+
   @override
   Set<String> get supportedMediaTypes => const {'application/pdf'};
 
   @override
   Future<String?> extract(Uint8List bytes, VaultManifest manifest) async {
+    // Decline oversized input before opening the document. Unlike the
+    // HTML/Markdown extractors this is not a stack-overflow guard (PDFium
+    // parsing happens natively, off the Dart call stack), but it is still a
+    // defensive bound for a standalone (non-pipeline) caller — see
+    // ExtractorLimits' class doc.
+    if (bytes.length > limits.maxInputBytes) {
+      return null;
+    }
+
     // `doc` is nullable because `PdfDocument.fromBytes` can throw before ever
     // assigning it (e.g. `PdfError.passwordRequired` / `invalidDocument`) — the
     // `finally` block below must null-check before calling `close()`.
@@ -118,12 +155,22 @@ final class PdfTextExtractor implements VaultTextExtractor {
       // call `doc.isPlainTextExtractable()` here — it internally re-runs
       // `extractPlainText()` to completion, which would extract the document
       // twice for no benefit since we need the same per-page signal it uses.
+      //
+      // The Stopwatch tracks cumulative wall-clock time across the stream —
+      // see the class-level "Time bound" doc. Exceeding the budget returns
+      // null directly from inside the loop, which cancels the underlying
+      // page-text subscription (await for's standard early-exit semantics),
+      // releasing PDFium page handles for any unconsumed pages.
       final pageTexts = <String>[];
       var noTextLayerCount = 0;
+      final stopwatch = Stopwatch()..start();
       await for (final page in doc.extractPlainText()) {
         pageTexts.add(page.text);
         if (!page.hasTextLayer) {
           noTextLayerCount++;
+        }
+        if (stopwatch.elapsed > limits.maxDuration) {
+          return null;
         }
       }
 

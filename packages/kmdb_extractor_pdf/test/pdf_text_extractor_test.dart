@@ -363,5 +363,86 @@ void main() {
         expect(() => utf8.encode(text!), returnsNormally);
       },
     );
+
+    // ── S-8: ExtractorLimits resource bounds ────────────────────────────
+
+    group('ExtractorLimits (S-8)', () {
+      test('input larger than maxInputBytes declines (null) before opening '
+          'the document — a tiny limit keeps the test fast', () async {
+        final extractor = PdfTextExtractor(
+          limits: ExtractorLimits(
+            maxInputBytes: 16,
+            maxRecursionDepth: ExtractorLimits.defaults.maxRecursionDepth,
+            maxDuration: ExtractorLimits.defaults.maxDuration,
+          ),
+        );
+        final bytes = await _fixture('01_basic.pdf');
+        expect(bytes.length, greaterThan(16));
+
+        final text = await extractor.extract(bytes, _manifest('big.pdf'));
+
+        expect(text, isNull);
+      });
+
+      test(
+        'input at or below maxInputBytes is still parsed normally',
+        () async {
+          final bytes = await _fixture('01_basic.pdf');
+          final extractor = PdfTextExtractor(
+            limits: ExtractorLimits(
+              maxInputBytes: bytes.length,
+              maxRecursionDepth: ExtractorLimits.defaults.maxRecursionDepth,
+              maxDuration: ExtractorLimits.defaults.maxDuration,
+            ),
+          );
+
+          final text = await extractor.extract(
+            bytes,
+            _manifest('01_basic.pdf'),
+          );
+
+          expect(text, isNotNull);
+          expect(text, contains('hello'));
+        },
+      );
+
+      test(
+        'a cumulative wall-clock budget of Duration.zero declines (null) '
+        'partway through a real multi-page document — the extractor-level '
+        'budget check, distinct from VaultIndexingIsolate.kWorkTimeout',
+        () async {
+          // maxDuration: Duration.zero trips the cumulative budget check
+          // deterministically after the first page's real FFI round-trip
+          // (elapsed is always > Duration.zero once any work has happened),
+          // without needing to wait out a large artificial delay. This
+          // exercises PdfTextExtractor.extract()'s own Stopwatch-based
+          // budget — a fake VaultTextExtractor at the manager layer cannot
+          // reach this check, since it isn't a PDF extractor at all.
+          final extractor = PdfTextExtractor(
+            limits: ExtractorLimits(
+              maxInputBytes: ExtractorLimits.defaults.maxInputBytes,
+              maxRecursionDepth: ExtractorLimits.defaults.maxRecursionDepth,
+              maxDuration: Duration.zero,
+            ),
+          );
+          // A real, multi-page (26-page) fixture — the budget check runs
+          // once per page, so this reliably has at least one checkpoint
+          // after the first page completes.
+          final bytes = await _fixture('arxiv/2404.16130v2.pdf');
+
+          final text = await extractor.extract(
+            bytes,
+            _manifest('2404.16130v2.pdf'),
+          );
+
+          expect(text, isNull);
+        },
+      );
+
+      test('default limits are ExtractorLimits.defaults', () {
+        const extractor = PdfTextExtractor();
+        expect(extractor.limits, same(ExtractorLimits.defaults));
+      });
+    });
   });
 }
