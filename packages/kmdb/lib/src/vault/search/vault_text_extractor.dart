@@ -15,6 +15,7 @@
 import 'dart:typed_data';
 
 import '../vault_manifest.dart';
+import 'extractor_limits.dart';
 
 /// Interface for vault blob text extractors.
 ///
@@ -49,6 +50,11 @@ import '../vault_manifest.dart';
 /// - Implementations MUST return valid UTF-8 text (or `null`).
 /// - The input [bytes] are the **raw, decrypted** blob bytes. Encryption is
 ///   handled transparently by [VaultStore.getBytes] before calling the extractor.
+/// - Implementations MUST honour an [ExtractorLimits] policy (accepted via
+///   their constructor, defaulting to [ExtractorLimits.defaults]) and decline
+///   extraction (return `null`) — never throw or hang — when a document
+///   exceeds the configured input size, tree-walk recursion depth, or
+///   wall-clock duration bounds. See [ExtractorLimits] for the rationale.
 abstract interface class VaultTextExtractor {
   /// The set of MIME media types this extractor can handle.
   ///

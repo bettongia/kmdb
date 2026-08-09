@@ -59,6 +59,32 @@ Document(encodeHtml: false, extensionSet: ExtensionSet.gitHubWeb)
 
 ---
 
+## Resource bounds
+
+`MarkdownTextExtractor` accepts an `ExtractorLimits` (from `package:kmdb`)
+via its constructor, defaulting to `ExtractorLimits.defaults` (32 MiB input
+size, 512 levels of tree-walk nesting). A document exceeding either bound is
+declined — `extract()` returns `null` for the *whole* document rather than
+truncated text, never throws or hangs:
+
+```dart
+MarkdownTextExtractor(
+  limits: ExtractorLimits(
+    maxInputBytes: 64 * 1024 * 1024,
+    maxRecursionDepth: 256,
+    maxDuration: ExtractorLimits.defaults.maxDuration, // unused by this extractor
+  ),
+);
+```
+
+The input-size bound is checked before any parsing begins — since a
+pathologically nested document is necessarily large, this also serves as
+the first line of defence against a parser-stage stack overflow (the
+recursion-depth bound only protects the extractor's own AST walk over an
+already-parsed document, not the underlying `markdown` package's parser).
+
+---
+
 ## Known limitations
 
 - **Code block content is dropped (v1).** Fenced and indented code block

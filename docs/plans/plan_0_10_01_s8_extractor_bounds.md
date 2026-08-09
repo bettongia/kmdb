@@ -1,6 +1,6 @@
 # Resource bounds for the text extractors (S-8)
 
-**Status**: Investigated
+**Status**: Implementing
 
 _(Q1–Q4 resolved; Q2/Q3 maintainer decisions taken 2026-08-09; the reviewer's
 three final-pass corrections V1–V3 have been folded into Phases 2–3. See "Final
@@ -479,16 +479,20 @@ stale-result. The plan must name both, not offer them as an either/or.
 
 ### Phase 1 — `ExtractorLimits` + the two pure-Dart bounds
 
-- [ ] Define `ExtractorLimits` in core `kmdb` (next to `VaultTextExtractor`,
+- [x] Define `ExtractorLimits` in core `kmdb` (next to `VaultTextExtractor`,
       exported from `package:kmdb/kmdb.dart`), with a **`const` `defaults`** of
       `maxInputBytes = 32 * 1024 * 1024`, `maxRecursionDepth = 512`,
       `maxDuration = Duration(seconds: 20)`. Add
       `{ExtractorLimits limits = ExtractorLimits.defaults}` to the three
       extractors' (and `PlainTextExtractor`'s) constructors, preserving `const`.
-- [ ] **Input-size bound** in all four extractors: decline (`return null`) when
+      Note: `PlainTextExtractor`'s constructor could not stay `const` — its
+      pre-existing `lastCharset` field is mutable (non-`final`), which alone
+      already precluded `const` before this change; documented in its doc
+      comment.
+- [x] **Input-size bound** in all four extractors: decline (`return null`) when
       `bytes.length > limits.maxInputBytes`, **before any parsing** (this is also
       the parser-stage stack-overflow guard — see Q2).
-- [ ] **Recursion-depth bound** in the HTML and Markdown `_walkElement` recursion
+- [x] **Recursion-depth bound** in the HTML and Markdown `_walkElement` recursion
       sites (`html_text_extractor.dart:234-235`, `markdown_text_extractor.dart:216`
       — not the `extract()` entry call): thread a depth counter, increment-then-
       check **before** descending; on exceeding `maxRecursionDepth`, decline
@@ -502,15 +506,15 @@ stale-result. The plan must name both, not offer them as an either/or.
 > stop native work in the process-wide `PdfiumIsolate` singleton (see Review).
 > Implement the mechanism the maintainer confirms from the recast Q3.
 
-- [ ] **Primary bound:** cumulative wall-clock budget inside
+- [x] **Primary bound:** cumulative wall-clock budget inside
       `PdfTextExtractor.extract()` across the `await for (page in doc.extractPlainText())`
       loop — on exceeding `limits.maxDuration`, stop iterating (subscription
       cancellation releases handles) and `return null`. Works standalone and in
       the pipeline; no isolate machinery.
-- [ ] **Backstop (already exists — do not duplicate):** the 30 s
+- [x] **Backstop (already exists — do not duplicate):** the 30 s
       `VaultIndexingIsolate.kWorkTimeout` remains for the single-page native-hang
       case the extractor budget cannot interrupt. Keep `maxDuration < kWorkTimeout`.
-- [ ] **In scope (maintainer confirmed 2026-08-09) — re-spawn on `kWorkTimeout`.**
+- [x] **In scope (maintainer confirmed 2026-08-09) — re-spawn on `kWorkTimeout`.**
       **(V1, corrected against code.)** Do this in the manager's existing
       `sendWork` catch (`vault_search_manager.dart:623-632`), **not** by touching
       `_dead`: `_dead` is private to `VaultIndexingIsolate` (`:228`) with no setter
@@ -526,7 +530,7 @@ stale-result. The plan must name both, not offer them as an either/or.
       (`:645`), not the catch; (b) it cures only **Dart-level** wedging — a
       natively-wedged process-wide `PdfiumIsolate` re-wedges the fresh isolate's
       PDF work (→ RC-25).
-- [ ] **In scope (same decision) — stale-result guard (V2, defense-in-depth, not
+- [x] **In scope (same decision) — stale-result guard (V2, defense-in-depth, not
       the fix).** No protocol change is needed: `VaultWorkItem.sha256` (`:79`) and
       `VaultIndexResult.sha256` (`:114`) already exist; only `_PendingWork`
       (`:416`) gains an `expectedSha256`. In `_onResult` (`:374-384`) — which nulls
@@ -535,39 +539,59 @@ stale-result. The plan must name both, not offer them as an either/or.
       Note honestly: once V1's re-spawn is correct, the old isolate is killed and
       its ports closed, so mis-delivery is **structurally impossible** — this guard
       is belt-and-braces, not the primary fix.
-- [ ] Ensure a timed-out extraction surfaces as `null`/`failed` and, in the
+- [x] Ensure a timed-out extraction surfaces as `null`/`failed` and, in the
       pipeline, does not wedge the indexing queue.
 
 ### Phase 3 — Tests (fault injection, per CLAUDE.md — not golden path)
 
-- [ ] **Deeply-nested HTML** and **Markdown** fixtures (nesting well past the
+- [x] **Deeply-nested HTML** and **Markdown** fixtures (nesting well past the
       depth cap) → assert `null` in bounded time, no stack overflow.
-- [ ] **Oversized input** for each extractor → assert `null` without parsing.
-- [ ] **PDF extractor budget (V3 — needs its OWN seam; the two seams test
+      (`html_text_extractor_test.dart`/`markdown_text_extractor_test.dart`,
+      group `ExtractorLimits (S-8)`, using a tiny `maxRecursionDepth: 5`.)
+- [x] **Oversized input** for each extractor → assert `null` without parsing.
+      (Same groups, plus `plain_text_extractor_test.dart` — new file, since no
+      dedicated `PlainTextExtractor` unit test existed before this plan.)
+- [x] **PDF extractor budget (V3 — needs its OWN seam; the two seams test
       different code).** The 20 s cumulative budget lives *inside*
       `PdfTextExtractor.extract()` (`pdf_text_extractor.dart:123`) — a fake
       `VaultTextExtractor` at the manager layer **cannot** reach it. Test it with a
       **real multi-page fixture + `maxDuration: Duration.zero`** (the repo ships
       `test/fixtures/arxiv/*.pdf` / `large.pdf`; the budget trips deterministically
       after page 1's FFI round-trip) → assert `null`. No new public API on the
-      published package.
-- [ ] **Re-spawn-on-timeout (manager-layer seam):** using a **fake delaying
+      published package. (`pdf_text_extractor_test.dart`, using the 26-page
+      `arxiv/2404.16130v2.pdf` fixture.)
+- [x] **Re-spawn-on-timeout (manager-layer seam):** using a **fake delaying
       `VaultTextExtractor`** (precedent:
       `test/query/kmdb_database_close_isolate_death_test.dart`), drive a work item
       past `kWorkTimeout` and assert the item is `failed` **and the next item is
       served by a fresh isolate** and succeeds.
-- [ ] **Stale-result regression (manager-layer seam):** a late result for a
+      (`vault_search_manager_respawn_test.dart` — new file; real-time test, ~30s
+      wall clock since a spawned isolate's event loop cannot be driven by a
+      virtual/fake clock.)
+- [x] **Stale-result regression (manager-layer seam):** a late result for a
       timed-out item N must NOT complete item N+1 (assert N+1 gets its own result
-      or `failed`, never N's).
-- [ ] **Real hanging/crashing PDF is NOT automatable** — do not attempt a native
+      or `failed`, never N's). Implementation note: with V1 correctly landed, the
+      manager always discards a timed-out item's isolate before sending the next
+      item, which makes the mis-delivery structurally unreachable *through the
+      manager* (confirmed empirically — see the plan's V2 note above). To
+      actually exercise `_onResult`'s sha256 guard, this test drives
+      `VaultIndexingIsolate` directly (bypassing `VaultSearchManager`, no
+      `shutdown()` between sends), reusing the same isolate instance across two
+      `sendWork()` calls — reproducing the interleaving V1 makes unreachable in
+      production. (`vault_indexing_isolate_test.dart`, group "V2 stale-result
+      guard"; also ~35s wall clock for the same reason as the re-spawn test.)
+- [x] **Real hanging/crashing PDF is NOT automatable** — do not attempt a native
       fixture in the suite. Extend/annotate release-checklist **RC-25** (D-1) to
       cover the PDF time-bound expectation at release time.
-- [ ] Golden-path regression: normal PDF/HTML/MD still extract correctly under
+- [x] Golden-path regression: normal PDF/HTML/MD still extract correctly under
       the default limits (use fixtures small/shallow enough to pass the bounds).
+      (Pre-existing golden-path tests continue to pass unmodified against the
+      new default-limits constructor parameter; new `ExtractorLimits (S-8)`
+      groups add explicit "input at/below limit still extracts" cases.)
 
 ### Phase 4 — Spec
 
-- [ ] Document the `ExtractorLimits` policy and the "never throw → null" bound
+- [x] Document the `ExtractorLimits` policy and the "never throw → null" bound
       behaviour in the §24 vault / `VaultTextExtractor` contract section, and note
       the extractor-package READMEs if they describe usage.
 

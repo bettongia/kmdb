@@ -31,6 +31,29 @@ import 'package:kmdb/src/vault/search/vault_text_extractor.dart';
 import 'package:kmdb/src/vault/vault_manifest.dart';
 import 'package:test/test.dart';
 
+/// A [VaultTextExtractor] that delays by a configurable duration per media
+/// type before returning the decoded text — used to drive real, deterministic
+/// timing scenarios (V2's stale-result guard test) without a fake clock,
+/// since a spawned isolate's event loop does not observe a virtual clock.
+final class _DelayingExtractor implements VaultTextExtractor {
+  _DelayingExtractor(this._delays);
+
+  /// mediaType → artificial delay before [extract] returns.
+  final Map<String, Duration> _delays;
+
+  @override
+  Set<String> get supportedMediaTypes => _delays.keys.toSet();
+
+  @override
+  Future<String?> extract(Uint8List bytes, VaultManifest manifest) async {
+    final delay = _delays[manifest.mediaType];
+    if (delay != null && delay > Duration.zero) {
+      await Future<void>.delayed(delay);
+    }
+    return utf8.decode(bytes, allowMalformed: true);
+  }
+}
+
 // ── Test helpers ───────────────────────────────────────────────────────────────
 
 /// Creates a VaultWorkItem with the given bytes and mediaType.
@@ -365,5 +388,88 @@ void main() {
       expect(result.extractedText, equals(text));
       expect(result.chunks, isNotEmpty);
     });
+  });
+
+  // ── V2 (S-8): stale-result guard ────────────────────────────────────────
+  //
+  // These tests exercise VaultIndexingIsolate directly — deliberately NOT
+  // through VaultSearchManager, and deliberately NOT calling shutdown()
+  // between the two sendWork() calls. With VaultSearchManager's V1
+  // re-spawn-on-error policy (see vault_search_manager_respawn_test.dart),
+  // a timed-out item's isolate is always discarded before the next item is
+  // sent, which makes the mis-delivery this guard defends against
+  // structurally impossible to reach through the manager — see the S-8
+  // plan's "V2" note. To actually exercise `_onResult`'s sha256 check, the
+  // test must reuse the SAME isolate instance across both sendWork() calls,
+  // reproducing the interleaving a caller that skips the manager's re-spawn
+  // policy would see.
+
+  group('V2 stale-result guard', () {
+    test(
+      'a late reply for a timed-out item does not complete the next '
+      "item's pending future",
+      timeout: const Timeout(Duration(seconds: 90)),
+      () async {
+        // item1's extraction takes longer than kWorkTimeout (so sendWork's
+        // timeout fires first) but does eventually complete in the
+        // background — the isolate's message loop is still blocked on it,
+        // so item2's message sits in the mailbox until item1 finishes.
+        // item2's extraction is instantaneous.
+        final slowIsolate = await VaultIndexingIsolate.spawn([
+          _DelayingExtractor({
+            'application/x-slow':
+                VaultIndexingIsolate.kWorkTimeout + const Duration(seconds: 5),
+            'text/plain': Duration.zero,
+          }),
+        ]);
+        addTearDown(slowIsolate.shutdown);
+
+        final item1 = VaultWorkItem(
+          sha256: '1' * 64,
+          mediaType: 'application/x-slow',
+          bytes: Uint8List.fromList(utf8.encode('slow item one')),
+          chunkSize: 5,
+          chunkOverlap: 1,
+        );
+        final item2 = VaultWorkItem(
+          sha256: '2' * 64,
+          mediaType: 'text/plain',
+          bytes: Uint8List.fromList(utf8.encode('fast item two')),
+          chunkSize: 5,
+          chunkOverlap: 1,
+        );
+
+        // item1's sendWork() times out at kWorkTimeout (30s) even though
+        // the isolate is still working on it in the background.
+        final item1Stopwatch = Stopwatch()..start();
+        await expectLater(
+          slowIsolate.sendWork(item1),
+          throwsA(isA<StateError>()),
+        );
+        item1Stopwatch.stop();
+        expect(
+          item1Stopwatch.elapsed,
+          greaterThanOrEqualTo(VaultIndexingIsolate.kWorkTimeout),
+        );
+
+        // Send item2 to the SAME isolate immediately. Its message sits in
+        // the isolate's mailbox until item1's still-running extraction
+        // finishes (~5s later) and the isolate's `await for` loop advances.
+        // When item1's late reply arrives, `_onResult` must recognise the
+        // sha256 mismatch against item2's `_PendingWork.expectedSha256` and
+        // drop it — WITHOUT the V2 guard, that late reply would incorrectly
+        // complete item2's pending future with item1's result.
+        final result2 = await slowIsolate.sendWork(item2);
+
+        expect(
+          result2.sha256,
+          equals(item2.sha256),
+          reason:
+              'item2 must receive its OWN result, not item1\'s late, '
+              'mis-delivered reply',
+        );
+        expect(result2.extractedText, equals('fast item two'));
+      },
+    );
   });
 }
