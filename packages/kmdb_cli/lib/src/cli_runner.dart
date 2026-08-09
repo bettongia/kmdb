@@ -249,7 +249,15 @@ abstract final class KmdbCli {
     if (remaining.isNotEmpty && remaining[0] == 'help') {
       if (remaining.length >= 2) {
         final runner = _buildCommandRunner();
-        await runner.run(['help', remaining[1]]);
+        try {
+          await runner.run(['help', remaining[1]]);
+        } on UsageException catch (e) {
+          // An unknown help topic makes package:args throw; report it
+          // gracefully instead of letting it escape as an uncaught
+          // exception (exit 255). 64 is EX_USAGE.
+          io.stderr.writeln(e.message);
+          return 64;
+        }
       } else {
         _printUsage();
       }
