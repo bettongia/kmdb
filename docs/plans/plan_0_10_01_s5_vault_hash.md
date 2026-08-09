@@ -1,8 +1,8 @@
 # Replace the hand-rolled vault SHA-256 with `cryptography`'s `DartSha256` (S-5)
 
-**Status**: Investigated
+**Status**: Implementing
 
-**PR link**: _(none yet)_
+**PR link**: https://github.com/bettongia/kmdb/pull/70
 
 > **Provenance.** Finding **S-5** of the
 > [2026-07-18 release-readiness review](../reviews/release-readiness-review-2026-07-18.md),
@@ -176,25 +176,25 @@ run; do **not** alter the algorithm or output.
 
 ### Phase 1 — Swap SHA-256 to `DartSha256().hashSync()`
 
-- [ ] Import `package:cryptography/dart.dart` in `vault_store.dart`. **No**
+- [x] Import `package:cryptography/dart.dart` in `vault_store.dart`. **No**
       `pubspec.yaml` change — `package:cryptography` is already a dependency.
-- [ ] Rewrite `_computeSha256` (or `computeSha256` directly) to
+- [x] Rewrite `_computeSha256` (or `computeSha256` directly) to
       `const DartSha256().hashSync(bytes).bytes` → lowercase hex, byte-identical
       to today's output. Keep the synchronous `String` signature.
-- [ ] Delete the hand-rolled `_dartSha256` / `_sha256Digest` / `_sha256Prepare`
+- [x] Delete the hand-rolled `_dartSha256` / `_sha256Digest` / `_sha256Prepare`
       and any now-unused SHA-256 constants/tables (no dead code — CLAUDE.md).
-- [ ] Rewrite the inaccurate `:729–755` doc comments to describe the real
+- [x] Rewrite the inaccurate `:729–755` doc comments to describe the real
       (`DartSha256`, pure-Dart, deterministic) implementation and *why* the
       platform factory is deliberately not used (content-address determinism).
 
 ### Phase 2 — Harden CRC32C (keep as-is, close the verification gap)
 
-- [ ] Leave the CRC32C algorithm and output **unchanged**.
-- [ ] **No new seam needed** — `VaultStore.computeCrc32cForTest` (`:722`) already
+- [x] Leave the CRC32C algorithm and output **unchanged**.
+- [x] **No new seam needed** — `VaultStore.computeCrc32cForTest` (`:722`) already
       exposes CRC32C to tests. Just use it.
-- [ ] Fix any parallel misleading CRC32C doc comments (light — the CRC32C doc
+- [x] Fix any parallel misleading CRC32C doc comments (light — the CRC32C doc
       comments are accurate today; the misleading ones are the SHA-256 comments
-      handled in Phase 1).
+      handled in Phase 1). Confirmed: none needed changing.
 
 ### Phase 3 — Tests
 
@@ -205,28 +205,33 @@ Split the tests into **two files**:
 `test/encoding/value_codec_test.dart`, which is the repo's established
 "runs on vm, additionally driven on chrome" pattern.
 
-- [ ] **NIST SHA-256 known-answer vectors** (empty string → `e3b0c442…b7852b855`,
+- [x] **NIST SHA-256 known-answer vectors** (empty string → `e3b0c442…b7852b855`,
       `"abc"` → `ba7816bf…f20015ad`, the 896-bit NIST vector, and `"a"`×10⁶ →
       `cdc76e5c…c7112cd0`) against `computeSha256`. These NIST values **are** the
       pre-swap values by definition (the hand-rolled code was verified to match
       them during this review), so they double as the content-address-stability
       regression — no separate "capture from `main`" step is required for
-      standard inputs.
-- [ ] **Content-address stability** — additionally pin a handful of *fixed
+      standard inputs. `test/vault/vault_hash_kat_test.dart`.
+- [x] **Content-address stability** — additionally pin a handful of *fixed
       arbitrary* byte inputs → their expected sha256 hex, so a future regression
       on non-NIST inputs is caught too. Capture these once from the NIST-verified
       new implementation (they are equivalent to the old output — proven this
-      review).
-- [ ] **CRC32C known-answer vectors** — the standard Castagnoli check value
+      review). Values independently captured via `shasum -a 256`, not from
+      `VaultStore` itself.
+- [x] **CRC32C known-answer vectors** — the standard Castagnoli check value
       (`"123456789"` → `e3069283`, verified this review) plus a couple of fixed
-      inputs, via `computeCrc32cForTest`.
+      inputs, via `computeCrc32cForTest`. CRC32C fixed-input values independently
+      captured via a stand-alone Python Castagnoli table implementation.
 
 **B. Vault round-trip — native only.** Separate file (the sahpool/web adapter
 throws `UnsupportedError` for `listFilesRecursive`, so a round-trip cannot run
 on chrome).
 
-- [ ] **Vault round-trip** — `put` a blob then `getBytes`, asserting the address
+- [x] **Vault round-trip** — `put` a blob then `getBytes`, asserting the address
       and the S-4 recompute-and-compare still hold (native).
+      `test/vault/vault_hash_round_trip_test.dart` — 4 tests: identical-bytes
+      round trip, address equals `computeSha256`, S-4 tamper detection via
+      `getBytes` throwing `VaultContentMismatchException`, and dedup-on-repeat.
 
 **Wire the web run into CI — this is a real gap, not optional.** CI's web lane is
 `make cicd_web` (`make_cicd.mk:135`), which runs an **explicit hardcoded file
@@ -236,28 +241,55 @@ test/encoding/value_codec_test.dart`. It does **not** auto-discover
 CI). A new web test therefore runs on chrome **only if a human types the
 command**, which defeats S-5's continuous web-`int`-semantics guard.
 
-- [ ] Add the file-A path to the `cicd_web` recipe in `make_cicd.mk` (an extra
+- [x] Add the file-A path to the `cicd_web` recipe in `make_cicd.mk` (an extra
       `cd packages/kmdb && dart test --platform chrome test/<new-file>.dart`
       line), so the SHA-256/CRC32C web run executes on every CI push. Editing
       `make_cicd.mk` is in scope for this plan.
+      **Deviation from the plan's literal wording:** the added line uses
+      `--compiler dart2wasm`, not the plain `--platform chrome` the plan
+      sketched. `vault_hash_kat_test.dart` imports `vault_store.dart`, which
+      transitively imports `xxhash.dart` — whose 64-bit prime constants are
+      int literals dart2js's front end rejects outright ("can't be
+      represented exactly in JavaScript", >2^53). `xxhash.dart` already
+      documents "dart2js is not supported by KMDB" for exactly this reason;
+      `value_codec_test.dart` never happened to reach that import path, so
+      the gap was latent until this plan's web wiring surfaced it. Verified
+      green under `--compiler dart2wasm` locally with a real Chrome install
+      (`CHROME_EXECUTABLE` pointed at Chrome.app) — 12/12 tests pass.
 
 ### Phase 4 — Spec
 
-- [ ] Check §24 (vault) and §09 (integrity) for any claim about the hash
+- [x] Check §24 (vault) and §09 (integrity) for any claim about the hash
       implementation; correct to name `cryptography`'s `DartSha256` for SHA-256
       and note CRC32C remains the hand-rolled vault-format checksum. Likely
-      light-touch.
+      light-touch. **Confirmed light-touch — no changes needed.** Neither
+      spec file names an implementation library (no "dart:crypto" / hand-
+      rolled claim to correct); both only describe the algorithm (SHA-256,
+      CRC32C) and format, which remain true.
 
 **Final step — QA sign-off and pre-commit:**
 
-- [ ] `make coverage` — >95% on changed files; ≥90% overall.
-- [ ] Hand off to the **`kmdb-qa` agent** for sign-off (special attention: the
-      content-address-stability assertion actually pins the pre-swap values, and
-      the web run genuinely executes). Do not open a PR until sign-off.
-- [ ] `make pre_commit` green; the vault changes are in `kmdb`, so the scoped
+- [x] `make coverage` — >95% on changed files; ≥90% overall. Overall 94.8%
+      (11347/11974 lines); `kmdb` package alone 95.0% (7324/7707); the
+      modified region of `vault_store.dart` (the SHA-256 swap, lines 706–757)
+      is fully covered — every uncovered line in the file is pre-existing
+      (exception `toString()` overrides, an unrelated `explicitMediaType`
+      validation branch) and untouched by this plan.
+- [x] `kmdb-qa` sign-off (2026-08-09) — **PASS**, no blocking items. QA
+      independently recomputed all six SHA-256 and four CRC32C pins (match) —
+      the content-address-stability table is a genuine regression guard, not a
+      tautology. Confirmed the **dart2wasm** web-run choice is *correct*, not a
+      narrowing: dart2js is a project-level non-target (`xxhash.dart:30-33`), so
+      `--platform chrome` was never achievable; the web-int-semantics risk is
+      closed at the source by deleting the hand-rolled arithmetic. Dead-code
+      removal complete; analyzer clean; §24/§09 name no hash impl library (Phase 4
+      no-op confirmed). One cosmetic header nit (fixed: `round_trip_test` header
+      normalised to the template `https://`/`The Authors.`).
+- [x] `make pre_commit` green; the vault changes are in `kmdb`, so the scoped
       test step covers them — but run `cd packages/kmdb && dart test` for the
-      vault suites too if iterating.
-- [ ] Licence headers (2026) on any new test files.
+      vault suites too if iterating. Full `dart test` in `packages/kmdb` also
+      run standalone: 2505 passed, 12 skipped (E2E), 0 failed.
+- [x] Licence headers (2026) on any new test files.
 
 ## Review (2026-08-09, kmdb-plan-reviewer)
 
@@ -308,4 +340,56 @@ reference moves.
 
 ## Summary
 
-_To be completed when the work is done._
+**Implementation complete; awaiting kmdb-qa sign-off, kmdb-pre-commit gate re-run
+by the coordinating session, and PR.** (This agent has no Agent tool this
+session, so those steps are handed back to the main session per the STOP
+instruction.)
+
+- Swapped `VaultStore`'s hand-rolled FIPS 180-4 SHA-256 (`_dartSha256` /
+  `_sha256Digest` / `_sha256Prepare`, plus `_rotr32` / `_add32` and the
+  `_kSha256Init` / `_kSha256K` constant tables — all deleted) for
+  `package:cryptography`'s pure-Dart, synchronous `DartSha256().hashSync()`
+  (`package:cryptography/dart.dart`, already a direct dependency — no
+  `pubspec.yaml` change). `computeSha256`'s public signature is unchanged
+  (`static String computeSha256(Uint8List bytes)`); `_hexEncode` is kept and
+  now hex-encodes the new digest.
+- CRC32C is untouched — same table, same reflected Castagnoli polynomial,
+  same output. Its doc comments were already accurate, so Phase 2 required no
+  edits beyond confirming that.
+- Rewrote the previously-inaccurate SHA-256 doc comments (`vault_store.dart`
+  ~708–745) to describe the real `DartSha256` implementation and explain why
+  the concrete pure-Dart constructor is used instead of the platform-
+  dispatching `Sha256()` factory: a vault content address must be
+  byte-identical regardless of `cryptography_flutter` registration state, and
+  the factory's `hash()` is `async`.
+- Added `test/vault/vault_hash_kat_test.dart` (no `@TestOn`, runs on VM and
+  Chrome): NIST SHA-256 KATs (empty, `"abc"`, the 896-bit two-block vector,
+  `"a"`×10⁶), a content-address-stability table of fixed non-NIST byte inputs
+  (including all 256 byte values and 64 zero bytes), and CRC32C KATs
+  (Castagnoli check value `"123456789"` → `e3069283`, plus fixed inputs). All
+  expected values were captured with tools outside this codebase (`shasum -a
+  256`; a stand-alone Python Castagnoli-table CRC32C implementation), not
+  from `VaultStore` itself, so they are genuine ground-truth pins.
+- Added `test/vault/vault_hash_round_trip_test.dart` (native-only, not wired
+  into `cicd_web`): `ingest`/`getBytes` round-trip, address-equals-
+  `computeSha256`, an S-4 tamper-detection test (post-ingest blob
+  substitution → `getBytes` throws `VaultContentMismatchException`, proving
+  the swap is wired into the production read path, not just correct as a
+  pure function), and ingest-dedup-on-identical-bytes.
+- Wired the KAT file into CI's `cicd_web` recipe in `make_cicd.mk` — but with
+  `--compiler dart2wasm`, not the plain `--platform chrome` the plan
+  sketched. `vault_hash_kat_test.dart` imports `vault_store.dart`, which
+  transitively imports `xxhash.dart`; that file's 64-bit prime constants are
+  int literals dart2js's front end rejects outright (exceed JS's 2^53-safe-
+  integer range) — a **pre-existing, latent web-compilation gap** documented
+  in `xxhash.dart`'s own doc comment ("dart2js is not supported by KMDB")
+  but never previously hit because `value_codec_test.dart` (the only prior
+  `cicd_web` test) never imported that path. Verified green locally with a
+  real Chrome install and `--compiler dart2wasm`: 12/12 tests pass.
+- Phase 4 (spec check) required no edits: neither §24 (vault) nor §09
+  (integrity) names a hash implementation library, so there was no incorrect
+  claim to correct.
+- Full `packages/kmdb` test suite: 2505 passed, 12 skipped (E2E, opt-in),
+  0 failed. `make coverage`: 94.8% overall, 95.0% for `kmdb` alone; the
+  modified SHA-256 region is 100% covered. `make pre_commit` green
+  (format_check, analyze, license_check, scoped `kmdb` tests).

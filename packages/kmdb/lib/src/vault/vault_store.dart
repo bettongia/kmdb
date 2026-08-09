@@ -19,6 +19,8 @@ library;
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:cryptography/dart.dart';
+
 import '../encryption/encryption_envelope.dart';
 import '../encryption/encryption_provider.dart';
 import '../encryption/value_context.dart';
@@ -725,11 +727,26 @@ class VaultStore {
 
   /// Computes the SHA-256 hash of [bytes] and returns a 64-char lower-case
   /// hex string.
+  ///
+  /// Delegates to `package:cryptography`'s [DartSha256] — a pure-Dart,
+  /// synchronous SHA-256 implementation (`package:cryptography/dart.dart`).
+  /// This deliberately uses the concrete `DartSha256` constructor rather than
+  /// the abstract, platform-dispatching `Sha256()` factory: on hosts where
+  /// `cryptography_flutter` is registered, `Sha256()` would route to a native
+  /// implementation and become `async` (`hash()` returns a `Future`). A vault
+  /// blob's content address must be **byte-identical on every platform
+  /// regardless of registration state** — a plain-Dart CLI run, a
+  /// Flutter+native mobile app, and a web browser must all derive the same
+  /// address for the same bytes — so the address hash stays on the
+  /// synchronous, pure-Dart path unconditionally. (KMDB still uses the
+  /// platform-dispatching `Sha256()` factory elsewhere, e.g. the HMAC
+  /// namespace tokens in `encryption_provider.dart` — just not here, where
+  /// cross-platform determinism outranks throughput.) `Hash.bytes` is the
+  /// raw 32-byte digest with no framing, so it only needs lower-case hex
+  /// encoding via [_hexEncode].
   static String _computeSha256(Uint8List bytes) {
-    // Use dart:crypto's SHA-256 implementation.
-    // We compute it manually using the standard library.
-    final digest = _sha256Digest(bytes);
-    return _hexEncode(digest);
+    final digest = const DartSha256().hashSync(bytes).bytes;
+    return _hexEncode(Uint8List.fromList(digest));
   }
 
   /// Computes the CRC32C checksum of [bytes] and returns an 8-char lower-case
@@ -739,200 +756,6 @@ class VaultStore {
     // Format as 8 lower-case hex characters (zero-padded).
     return checksum.toRadixString(16).padLeft(8, '0').toLowerCase();
   }
-
-  /// SHA-256 implementation using dart:convert's `Converter` pipeline.
-  static Uint8List _sha256Digest(Uint8List bytes) {
-    // Use the dart:crypto digest (available via dart:convert in recent SDKs).
-    // dart:crypto is the recommended approach; dart:convert does not expose it.
-    // We use package:crypto if available, or a built-in equivalent.
-    //
-    // The Dart SDK includes SHA-256 via 'dart:convert' from SDK 3.x.
-    // Use the standard approach: dart:io's sha256 is not available on web.
-    // For cross-platform support, use the pure-Dart implementation.
-
-    // Dart SDK 3.x includes SHA-256 via package:crypto (transitively available).
-    // Here we implement it directly using the dart:convert machinery.
-    return _dartSha256(bytes);
-  }
-
-  static Uint8List _dartSha256(Uint8List data) {
-    // SHA-256 implemented directly using Dart's ByteData operations.
-    // Based on the FIPS 180-4 specification.
-    final message = _sha256Prepare(data);
-    final state = _kSha256Init.toList();
-
-    for (var i = 0; i < message.length; i += 64) {
-      final w = List<int>.filled(64, 0);
-      // Fill first 16 words from the message chunk.
-      for (var j = 0; j < 16; j++) {
-        w[j] =
-            (message[i + j * 4] << 24) |
-            (message[i + j * 4 + 1] << 16) |
-            (message[i + j * 4 + 2] << 8) |
-            message[i + j * 4 + 3];
-      }
-      // Extend to 64 words.
-      for (var j = 16; j < 64; j++) {
-        final s0 =
-            _rotr32(w[j - 15], 7) ^ _rotr32(w[j - 15], 18) ^ (w[j - 15] >>> 3);
-        final s1 =
-            _rotr32(w[j - 2], 17) ^ _rotr32(w[j - 2], 19) ^ (w[j - 2] >>> 10);
-        w[j] = _add32(w[j - 16], _add32(s0, _add32(w[j - 7], s1)));
-      }
-
-      var a = state[0], b = state[1], c = state[2], d = state[3];
-      var e = state[4], f = state[5], g = state[6], h = state[7];
-
-      for (var j = 0; j < 64; j++) {
-        final s1 = _rotr32(e, 6) ^ _rotr32(e, 11) ^ _rotr32(e, 25);
-        final ch = (e & f) ^ (~e & g);
-        final temp1 = _add32(
-          h,
-          _add32(s1, _add32(ch, _add32(_kSha256K[j], w[j]))),
-        );
-        final s0 = _rotr32(a, 2) ^ _rotr32(a, 13) ^ _rotr32(a, 22);
-        final maj = (a & b) ^ (a & c) ^ (b & c);
-        final temp2 = _add32(s0, maj);
-
-        h = g;
-        g = f;
-        f = e;
-        e = _add32(d, temp1);
-        d = c;
-        c = b;
-        b = a;
-        a = _add32(temp1, temp2);
-      }
-
-      state[0] = _add32(state[0], a);
-      state[1] = _add32(state[1], b);
-      state[2] = _add32(state[2], c);
-      state[3] = _add32(state[3], d);
-      state[4] = _add32(state[4], e);
-      state[5] = _add32(state[5], f);
-      state[6] = _add32(state[6], g);
-      state[7] = _add32(state[7], h);
-    }
-
-    final digest = Uint8List(32);
-    for (var i = 0; i < 8; i++) {
-      digest[i * 4] = (state[i] >>> 24) & 0xFF;
-      digest[i * 4 + 1] = (state[i] >>> 16) & 0xFF;
-      digest[i * 4 + 2] = (state[i] >>> 8) & 0xFF;
-      digest[i * 4 + 3] = state[i] & 0xFF;
-    }
-    return digest;
-  }
-
-  /// Pads [data] per the SHA-256 spec: append 1-bit, then zeros, then length.
-  static Uint8List _sha256Prepare(Uint8List data) {
-    final bitLen = data.length * 8;
-    // Pad to 512-bit (64-byte) boundary: data || 0x80 || zeros || 8-byte length
-    var len = data.length + 1;
-    while (len % 64 != 56) {
-      len++;
-    }
-    len += 8;
-    final padded = Uint8List(len);
-    padded.setAll(0, data);
-    padded[data.length] = 0x80;
-    // Write 64-bit big-endian bit length at the end.
-    // bitLen is an int (63-bit in Dart); we only store low 32 bits for now
-    // since blobs over 512MB are not expected in v1.
-    final bd = ByteData.view(padded.buffer, len - 8);
-    bd.setUint32(0, (bitLen >> 32) & 0xFFFFFFFF, Endian.big);
-    bd.setUint32(4, bitLen & 0xFFFFFFFF, Endian.big);
-    return padded;
-  }
-
-  /// Rotates [x] right by [n] bits (32-bit).
-  static int _rotr32(int x, int n) =>
-      ((x >>> n) | (x << (32 - n))) & 0xFFFFFFFF;
-
-  /// Adds two 32-bit integers with wrap-around (unsigned 32-bit addition).
-  static int _add32(int a, int b) => (a + b) & 0xFFFFFFFF;
-
-  // SHA-256 initial hash values (first 32 bits of the fractional parts of the
-  // square roots of the first 8 primes).
-  static const _kSha256Init = [
-    0x6a09e667,
-    0xbb67ae85,
-    0x3c6ef372,
-    0xa54ff53a,
-    0x510e527f,
-    0x9b05688c,
-    0x1f83d9ab,
-    0x5be0cd19,
-  ];
-
-  // SHA-256 round constants (first 32 bits of fractional parts of cube roots
-  // of the first 64 primes).
-  static const _kSha256K = [
-    0x428a2f98,
-    0x71374491,
-    0xb5c0fbcf,
-    0xe9b5dba5,
-    0x3956c25b,
-    0x59f111f1,
-    0x923f82a4,
-    0xab1c5ed5,
-    0xd807aa98,
-    0x12835b01,
-    0x243185be,
-    0x550c7dc3,
-    0x72be5d74,
-    0x80deb1fe,
-    0x9bdc06a7,
-    0xc19bf174,
-    0xe49b69c1,
-    0xefbe4786,
-    0x0fc19dc6,
-    0x240ca1cc,
-    0x2de92c6f,
-    0x4a7484aa,
-    0x5cb0a9dc,
-    0x76f988da,
-    0x983e5152,
-    0xa831c66d,
-    0xb00327c8,
-    0xbf597fc7,
-    0xc6e00bf3,
-    0xd5a79147,
-    0x06ca6351,
-    0x14292967,
-    0x27b70a85,
-    0x2e1b2138,
-    0x4d2c6dfc,
-    0x53380d13,
-    0x650a7354,
-    0x766a0abb,
-    0x81c2c92e,
-    0x92722c85,
-    0xa2bfe8a1,
-    0xa81a664b,
-    0xc24b8b70,
-    0xc76c51a3,
-    0xd192e819,
-    0xd6990624,
-    0xf40e3585,
-    0x106aa070,
-    0x19a4c116,
-    0x1e376c08,
-    0x2748774c,
-    0x34b0bcb5,
-    0x391c0cb3,
-    0x4ed8aa4a,
-    0x5b9cca4f,
-    0x682e6ff3,
-    0x748f82ee,
-    0x78a5636f,
-    0x84c87814,
-    0x8cc70208,
-    0x90befffa,
-    0xa4506ceb,
-    0xbef9a3f7,
-    0xc67178f2,
-  ];
 
   /// CRC32C lookup table.
   static final List<int> _kCrc32cTable = _buildCrc32cTable();
