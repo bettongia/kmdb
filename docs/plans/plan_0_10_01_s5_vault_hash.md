@@ -2,7 +2,7 @@
 
 **Status**: Implementing
 
-**PR link**: _(none yet)_
+**PR link**: https://github.com/bettongia/kmdb/pull/70
 
 > **Provenance.** Finding **S-5** of the
 > [2026-07-18 release-readiness review](../reviews/release-readiness-review-2026-07-18.md),
