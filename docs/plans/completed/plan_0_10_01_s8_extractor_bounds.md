@@ -1,12 +1,12 @@
 # Resource bounds for the text extractors (S-8)
 
-**Status**: Implementing
+**Status**: Complete
 
 _(Q1–Q4 resolved; Q2/Q3 maintainer decisions taken 2026-08-09; the reviewer's
 three final-pass corrections V1–V3 have been folded into Phases 2–3. See "Final
 verification pass (2026-08-09)".)_
 
-**PR link**: _(none yet)_
+**PR link**: [PR #71](https://github.com/bettongia/kmdb/pull/71) (merged 2026-08-10, kmdb-qa PASS)
 
 > **Provenance.** Finding **S-8** of the
 > [2026-07-18 release-readiness review](../reviews/release-readiness-review-2026-07-18.md),
