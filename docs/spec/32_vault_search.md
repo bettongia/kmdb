@@ -198,6 +198,60 @@ The background isolate receives a blob's raw bytes and returns a list of
 Writing each phase before the next begins ensures that a crash between phases
 leaves the blob in the `extracting` state, which recovery resolves.
 
+### Isolate Lifecycle: Timeout, Re-spawn, and Stale Results (S-8, D-1)
+
+`VaultIndexingIsolate.sendWork` wraps the isolate's response in a 30 s
+`kWorkTimeout` (D-1, 2026-07-18 release-readiness review) — the backstop for
+"the isolate is alive but unresponsive," distinct from `onError`/`onExit`
+(D-1's "isolate actually died" case). On expiry, `sendWork`'s returned future
+completes with a `StateError` instead of hanging forever.
+
+**Re-spawn on any `sendWork` failure (V1).** `VaultSearchManager`'s
+`sendWork` catch block discards the isolate on *any* failure — the
+`kWorkTimeout` backstop, an `onError`/`onExit` death, or the `_dead`
+fast-fail path all land here — by capturing the field into a local and
+nulling it *before* awaiting `shutdown()`:
+
+```dart
+final dead = _isolate;
+_isolate = null;
+await dead?.shutdown();
+```
+
+The capture-and-null-before-await ordering matters: it prevents a concurrent
+`close()` (which also shuts the isolate down) from double-driving the same
+instance (double-shutdown is harmless in practice, but the ordering keeps the
+intent unambiguous). The *next* queued item then spawns a fresh isolate
+(`_isolate ??= await VaultIndexingIsolate.spawn(...)`), so a single wedged
+item does not condemn every subsequent item to the same `kWorkTimeout` wait.
+
+Two scope notes:
+
+- Re-spawn does **not** fire on the primary `maxDuration` extractor-budget
+  path (see "Resource Bounds" below) — a `PdfTextExtractor` that declines
+  gracefully returns `null`, so `sendWork` completes *normally* and the
+  manager lands on the `result.isFailed` branch, not the catch block. The
+  isolate stays healthy and is correctly reused for that case.
+- Re-spawn cures **Dart-level** wedging only (a pure-Dart runaway extractor,
+  or slow-but-finishing work). A *natively*-wedged, process-wide
+  `PdfiumIsolate` re-wedges the fresh vault isolate's PDF work too, since all
+  `PdfDocument` instances — regardless of which isolate constructs them —
+  route through the same lazily-spawned singleton. That case is
+  unrecoverable by any in-process action; see release-checklist **RC-25**.
+
+**Stale-result guard (V2, defense-in-depth).** `VaultIndexingIsolate` records
+the expected `sha256` for each in-flight work item (`_PendingWork.expectedSha256`,
+from `VaultWorkItem.sha256` — no new wire protocol needed, since
+`VaultIndexResult.sha256` already echoes it back). If a result arrives whose
+`sha256` does not match the currently in-flight item's expectation, it is
+dropped **without** clearing the in-flight slot, so it cannot abandon a
+*different*, legitimately in-flight item. With V1's re-spawn landed, this
+mis-delivery is **structurally impossible** in the production pipeline — the
+old isolate is killed and its ports closed before any next item is ever
+sent, so a discarded isolate's late reply can never reach a live completer.
+This guard exists as belt-and-braces protection for any future code path
+that might reuse an isolate across a timeout without re-spawning.
+
 ## Chunking
 
 Text is split into overlapping windows of words using `VaultChunker`. Default
@@ -273,6 +327,73 @@ final db = await KmdbDatabase.open(
 Charset detection uses the `decodeText` utility function from WI-2 (`charset_util.dart`),
 which applies the `betto_charset_detector` heuristic and records the detected
 IANA label in the extraction state.
+
+### Resource Bounds (S-8)
+
+All four extractors — `PlainTextExtractor` (core `kmdb`) and the three
+`kmdb_extractor_*` packages — accept an `ExtractorLimits` policy via their
+constructor, defaulting to `ExtractorLimits.defaults`:
+
+| Field               | Default        | Guards against                                    |
+| :------------------- | :-------------- | :-------------------------------------------------- |
+| `maxInputBytes`      | 32 MiB         | Oversized blobs; also the *parser*-stage stack-overflow guard, since a pathologically nested document is necessarily large |
+| `maxRecursionDepth`  | 512            | Pathologically nested HTML/Markdown documents overflowing the *tree-walk* stack (HTML/Markdown only — `PlainTextExtractor`/`PdfTextExtractor` have no recursive walk) |
+| `maxDuration`        | 20 s           | Unbounded extraction wall-clock time (`PdfTextExtractor` only, today — see below) |
+
+`ExtractorLimits` is defined in core `kmdb` (next to `VaultTextExtractor`) and
+exported from `package:kmdb/kmdb.dart`, so all extractor packages share one
+policy type with zero new cross-package dependency. Each bound is
+independently overridable per extractor instance:
+
+```dart
+PdfTextExtractor(
+  limits: ExtractorLimits(
+    maxInputBytes: 64 * 1024 * 1024,
+    maxRecursionDepth: 512,          // unused by PdfTextExtractor
+    maxDuration: Duration(seconds: 10),
+  ),
+);
+```
+
+**Composability with `VaultSearchConfig.maxBlobBytes`.** Inside the vault
+indexing pipeline, `VaultSearchManager` already rejects a blob larger than
+`VaultSearchConfig.maxBlobBytes` (200 MiB) *before* it ever reaches an
+extractor. `ExtractorLimits.maxInputBytes` is an independent, typically
+stricter, second gate that fires *inside* `extract()` — the two compose
+cleanly (the smaller bound always wins) and, because the extractor packages
+are also independently publishable/consumable outside the vault pipeline,
+`maxInputBytes` is the *only* protection a standalone caller gets.
+
+**Never throw — always decline.** Per the `VaultTextExtractor` contract
+(above), exceeding any bound surfaces as a graceful `return null` — the same
+"extraction declined" signal as any other failure — never an exception and
+never a hang:
+
+- **Input size** — checked first, before any parsing, in all four extractors.
+- **Recursion depth** (HTML/Markdown only) — checked at each descent into a
+  child node, immediately before recursing; a document nested deeper than the
+  limit yields `null` for the *whole* extraction, not truncated text, so a
+  hostile document cannot masquerade as a smaller, plausible result.
+- **Wall-clock duration** (`PdfTextExtractor` only) — `betto_pdfium`'s
+  `extractPlainText()` is a page-streaming `async*` (one FFI round-trip per
+  page, yielding to the event loop between pages), so `PdfTextExtractor`
+  tracks cumulative elapsed time with a `Stopwatch` across that stream and
+  returns `null` — which cancels the underlying page-text subscription,
+  releasing PDFium page handles for any unconsumed pages — once elapsed
+  exceeds `maxDuration`. This bound applies standalone and inside the
+  pipeline alike, with no isolate machinery involved.
+
+**Relationship to `VaultIndexingIsolate.kWorkTimeout`.** The pipeline's
+existing 30 s work-item timeout (see "Isolate Lifecycle" under Isolate
+Architecture, above) is a *backstop*, not a duplicate of `maxDuration` —
+`maxDuration` (20 s by default) is deliberately strictly less than
+`kWorkTimeout`, so a PDF that exceeds its own budget declines gracefully
+(`null` → `failed: "Extractor returned null"`) before the backstop ever
+trips. `kWorkTimeout` remains the only bound for the one case `maxDuration`
+cannot interrupt: a *single* page hanging inside native PDFium code, where
+the extractor's own `await` never resumes to check the Stopwatch at all. A
+genuine native hang of the process-wide `PdfiumIsolate` singleton is outside
+what any Dart-level bound can recover — see release-checklist **RC-25**.
 
 ## Script and Language Detection (WI-6)
 

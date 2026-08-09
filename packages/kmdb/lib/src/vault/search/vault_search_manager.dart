@@ -623,6 +623,30 @@ final class VaultSearchManager {
     try {
       result = await _isolate!.sendWork(item);
     } catch (e) {
+      // V1 (S-8): discard the isolate on ANY sendWork failure — the
+      // kWorkTimeout backstop, an onError/onExit death, or the `_dead`
+      // fast-fail path all land here. Re-spawning means the next item is
+      // served by a fresh isolate instead of possibly re-using one that is
+      // wedged, so a repeated timeout does not eat kWorkTimeout again and
+      // again. Capture-and-null the field *before* awaiting shutdown() — a
+      // concurrent close() (which also shuts the isolate down) must not be
+      // able to double-drive this same instance; double-shutdown is
+      // harmless in practice (kill()/RawReceivePort.close() tolerate
+      // repeats), but this ordering keeps the intent unambiguous.
+      //
+      // This does NOT fire on the primary 20s ExtractorLimits.maxDuration
+      // budget path — an extractor that declines gracefully returns `null`,
+      // so sendWork() completes normally and this manager lands on the
+      // `result.isFailed` branch below, not here. The isolate stays healthy
+      // and is correctly reused for that case.
+      //
+      // Honest limitation: this cures Dart-level wedging only. A natively-
+      // wedged process-wide PdfiumIsolate re-wedges the fresh isolate's PDF
+      // work too (see kmdb_extractor_pdf's PdfTextExtractor doc and
+      // release-checklist RC-25).
+      final dead = _isolate;
+      _isolate = null;
+      await dead?.shutdown();
       await _writeExtractStatusToKv(
         sha256,
         VaultExtractionState.failed(sha256, 'Isolate error: $e'),

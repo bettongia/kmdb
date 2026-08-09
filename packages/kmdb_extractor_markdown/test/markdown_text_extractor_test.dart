@@ -16,6 +16,7 @@
 /// isolate) against the synthetic fixtures in `test/fixtures/`.
 library;
 
+import 'dart:convert' show utf8;
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -41,6 +42,12 @@ VaultManifest _manifest(String originalName) => VaultManifest(
   originalName: originalName,
   createdAt: '2026-01-01T00:00:00.000Z',
 );
+
+/// Builds a Markdown document with [depth] levels of nested blockquotes
+/// wrapping [payload] (CommonMark: each additional leading `>` nests one
+/// level deeper) — used by the S-8 recursion-depth bound tests below.
+String _nestedBlockquoteMarkdown(int depth, String payload) =>
+    '${'> ' * depth}$payload\n';
 
 void main() {
   group('MarkdownTextExtractor', () {
@@ -272,6 +279,100 @@ void main() {
         returnsNormally,
       );
       expect(text, isNotNull);
+    });
+
+    // ── S-8: ExtractorLimits resource bounds ────────────────────────────
+
+    group('ExtractorLimits (S-8)', () {
+      test('a document nested deeper than maxRecursionDepth declines (null), '
+          'not truncated text — a tiny limit keeps the test fast', () async {
+        final extractor = MarkdownTextExtractor(
+          limits: ExtractorLimits(
+            maxInputBytes: ExtractorLimits.defaults.maxInputBytes,
+            maxRecursionDepth: 5,
+            maxDuration: ExtractorLimits.defaults.maxDuration,
+          ),
+        );
+        final bytes = Uint8List.fromList(
+          utf8.encode(_nestedBlockquoteMarkdown(20, 'unreachable payload')),
+        );
+
+        String? text;
+        await expectLater(
+          () async =>
+              text = await extractor.extract(bytes, _manifest('deep.md')),
+          returnsNormally,
+          reason: 'a hostile document must decline gracefully, not throw',
+        );
+        expect(text, isNull);
+      });
+
+      test('a document within maxRecursionDepth still extracts normally '
+          '(the depth cap does not misfire on shallow documents)', () async {
+        final extractor = MarkdownTextExtractor(
+          limits: ExtractorLimits(
+            maxInputBytes: ExtractorLimits.defaults.maxInputBytes,
+            maxRecursionDepth: 5,
+            maxDuration: ExtractorLimits.defaults.maxDuration,
+          ),
+        );
+        final bytes = Uint8List.fromList(
+          utf8.encode(_nestedBlockquoteMarkdown(1, 'shallow payload')),
+        );
+
+        final text = await extractor.extract(bytes, _manifest('shallow.md'));
+
+        expect(text, isNotNull);
+        expect(text, contains('shallow payload'));
+      });
+
+      test('input larger than maxInputBytes declines (null) before any '
+          'parsing — a tiny limit keeps the test fast', () async {
+        final extractor = MarkdownTextExtractor(
+          limits: ExtractorLimits(
+            maxInputBytes: 16,
+            maxRecursionDepth: ExtractorLimits.defaults.maxRecursionDepth,
+            maxDuration: ExtractorLimits.defaults.maxDuration,
+          ),
+        );
+        // Well-formed, parseable Markdown — but larger than the 16-byte cap.
+        final bytes = Uint8List.fromList(
+          utf8.encode('# Well within parser limits\n\nSome prose.\n'),
+        );
+        expect(bytes.length, greaterThan(16));
+
+        final text = await extractor.extract(bytes, _manifest('big.md'));
+
+        expect(text, isNull);
+      });
+
+      test(
+        'input at or below maxInputBytes is still parsed normally',
+        () async {
+          final extractor = MarkdownTextExtractor(
+            limits: ExtractorLimits(
+              maxInputBytes: 4096,
+              maxRecursionDepth: ExtractorLimits.defaults.maxRecursionDepth,
+              maxDuration: ExtractorLimits.defaults.maxDuration,
+            ),
+          );
+          final bytes = await _fixture('golden_path.md');
+          expect(bytes.length, lessThanOrEqualTo(4096));
+
+          final text = await extractor.extract(
+            bytes,
+            _manifest('golden_path.md'),
+          );
+
+          expect(text, isNotNull);
+          expect(text, contains('Section Heading'));
+        },
+      );
+
+      test('default limits are ExtractorLimits.defaults', () {
+        const extractor = MarkdownTextExtractor();
+        expect(extractor.limits, same(ExtractorLimits.defaults));
+      });
     });
   });
 }
