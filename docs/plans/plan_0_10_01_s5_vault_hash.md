@@ -275,12 +275,16 @@ command**, which defeats S-5's continuous web-`int`-semantics guard.
       is fully covered — every uncovered line in the file is pre-existing
       (exception `toString()` overrides, an unrelated `explicitMediaType`
       validation branch) and untouched by this plan.
-- [ ] Hand off to the **`kmdb-qa` agent** for sign-off (special attention: the
-      content-address-stability assertion actually pins the pre-swap values, and
-      the web run genuinely executes). Do not open a PR until sign-off.
-      **Not done by this agent** — kmdb-plan-implement has no Agent tool in
-      this session; per instructions, work stops here for the main session to
-      run kmdb-qa → kmdb-pre-commit → PR.
+- [x] `kmdb-qa` sign-off (2026-08-09) — **PASS**, no blocking items. QA
+      independently recomputed all six SHA-256 and four CRC32C pins (match) —
+      the content-address-stability table is a genuine regression guard, not a
+      tautology. Confirmed the **dart2wasm** web-run choice is *correct*, not a
+      narrowing: dart2js is a project-level non-target (`xxhash.dart:30-33`), so
+      `--platform chrome` was never achievable; the web-int-semantics risk is
+      closed at the source by deleting the hand-rolled arithmetic. Dead-code
+      removal complete; analyzer clean; §24/§09 name no hash impl library (Phase 4
+      no-op confirmed). One cosmetic header nit (fixed: `round_trip_test` header
+      normalised to the template `https://`/`The Authors.`).
 - [x] `make pre_commit` green; the vault changes are in `kmdb`, so the scoped
       test step covers them — but run `cd packages/kmdb && dart test` for the
       vault suites too if iterating. Full `dart test` in `packages/kmdb` also
