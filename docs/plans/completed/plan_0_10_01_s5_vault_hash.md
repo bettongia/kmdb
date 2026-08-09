@@ -1,8 +1,8 @@
 # Replace the hand-rolled vault SHA-256 with `cryptography`'s `DartSha256` (S-5)
 
-**Status**: Implementing
+**Status**: Complete
 
-**PR link**: https://github.com/bettongia/kmdb/pull/70
+**PR link**: https://github.com/bettongia/kmdb/pull/70 (merged 2026-08-09)
 
 > **Provenance.** Finding **S-5** of the
 > [2026-07-18 release-readiness review](../reviews/release-readiness-review-2026-07-18.md),
@@ -340,10 +340,10 @@ reference moves.
 
 ## Summary
 
-**Implementation complete; awaiting kmdb-qa sign-off, kmdb-pre-commit gate re-run
-by the coordinating session, and PR.** (This agent has no Agent tool this
-session, so those steps are handed back to the main session per the STOP
-instruction.)
+**Complete — [PR #70](https://github.com/bettongia/kmdb/pull/70) merged
+2026-08-09.** kmdb-qa PASS (independently ground-truthed every content-address
+pin → no vault address moves; confirmed the dart2wasm web target is correct, not
+a narrowing). `make pre_commit` green.
 
 - Swapped `VaultStore`'s hand-rolled FIPS 180-4 SHA-256 (`_dartSha256` /
   `_sha256Digest` / `_sha256Prepare`, plus `_rotr32` / `_add32` and the
