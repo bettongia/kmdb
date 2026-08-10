@@ -40,6 +40,7 @@ import 'package:kmdb/src/encoding/value_codec.dart';
 import 'package:kmdb/src/encryption/value_context.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store_impl.dart';
+import 'package:kmdb/src/engine/kvstore/quarantine.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
 import 'package:kmdb/src/engine/util/hlc.dart';
 import 'package:kmdb/src/engine/compaction/reclamation_policy.dart'
@@ -213,6 +214,9 @@ final class _RefCountKvStore implements KvStore {
 
   @override
   Future<void> resetTombstoneFloor() async {}
+
+  @override
+  Future<void> appendQuarantine(QuarantinedSstable record) async {}
 
   @override
   Future<List<String>> listNamespaces() async => [];

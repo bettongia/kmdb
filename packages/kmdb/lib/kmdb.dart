@@ -32,6 +32,8 @@ export 'src/engine/kvstore/kv_store.dart'
         LegacyDatabaseFormatException;
 export 'src/engine/kvstore/kv_store_impl.dart' show KvStoreImpl;
 export 'src/engine/kvstore/device_id.dart' show DeviceId;
+export 'src/engine/kvstore/quarantine.dart'
+    show QuarantineReason, QuarantinedSstable;
 export 'src/engine/platform/storage_adapter_interface.dart'
     show StorageAdapter, StorageException, LockException;
 export 'src/engine/wal/wal_exceptions.dart' show CorruptedWalException;
@@ -45,6 +47,8 @@ export 'src/sync/hlc_clock.dart' show HlcClock, ClockSkewException;
 export 'src/sync/sync_engine.dart' show SyncEngine;
 export 'src/sync/consolidation_coordinator.dart' show ConsolidationCoordinator;
 export 'src/sync/consolidation_config.dart' show ConsolidationConfig;
+export 'src/sync/pull_result.dart' show PullResult, DeferredSstable;
+export 'src/sync/sync_result.dart' show SyncResult;
 export 'src/sync/sync_context.dart'
     show CancellationToken, SyncContext, SyncCancelledException;
 export 'src/sync/sync_storage_adapter.dart'

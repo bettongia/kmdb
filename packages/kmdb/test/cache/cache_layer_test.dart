@@ -21,6 +21,7 @@ import 'package:kmdb/src/engine/compaction/reclamation_policy.dart'
     show ReclamationPolicyRegistry;
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store_impl.dart';
+import 'package:kmdb/src/engine/kvstore/quarantine.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
 import 'package:kmdb/src/engine/sstable/sstable_info.dart';
 import 'package:kmdb/src/engine/sstable/sstable_writer.dart';
@@ -77,6 +78,9 @@ final class _CountingStore implements KvStore {
   Future<void> dropAllSstables() => _inner.dropAllSstables();
   @override
   Future<void> resetTombstoneFloor() => _inner.resetTombstoneFloor();
+  @override
+  Future<void> appendQuarantine(QuarantinedSstable record) =>
+      _inner.appendQuarantine(record);
   @override
   Future<List<String>> listNamespaces() => _inner.listNamespaces();
   @override

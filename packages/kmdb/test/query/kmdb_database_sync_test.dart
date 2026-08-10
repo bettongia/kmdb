@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'dart:typed_data';
+
 import 'package:kmdb/kmdb.dart';
+import 'package:kmdb/src/engine/sstable/sstable_info.dart';
 import 'package:test/test.dart';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -370,6 +373,113 @@ void main() {
             consolidationConfig: const ConsolidationConfig(threshold: 1),
           ),
           completes,
+        );
+      },
+    );
+  });
+
+  // ── quarantine reporting (A3 / WI-7) ────────────────────────────────────────
+  group('KmdbDatabase quarantine reporting', () {
+    test('pull() surfaces a quarantine; quarantinedSstables() reads the '
+        'durable log; clearQuarantineLog() empties it', () async {
+      final localAdapter = MemoryStorageAdapter();
+      final db = await _openDb(adapter: localAdapter);
+      addTearDown(() => db.close(flush: false));
+
+      final syncAdapter = MemorySyncAdapter();
+      final peerFilename = SstableInfo.flushName(
+        'peer0001',
+        const Hlc(5000, 0),
+        const Hlc(5001, 0),
+      );
+      // Garbage bytes fail the footer checksum → CorruptedSstableException →
+      // the file is quarantined.
+      await syncAdapter.upload(
+        'sstables/$peerFilename',
+        Uint8List.fromList(List.filled(64, 0xAB)),
+      );
+
+      // KmdbDatabase.pull now threads the PullResult out to the host (it used
+      // to discard the engine's return).
+      final result = await db.pull(
+        syncAdapter: syncAdapter,
+        localAdapter: localAdapter,
+      );
+      expect(result.quarantined, hasLength(1));
+      expect(result.quarantined.single.filename, equals(peerFilename));
+
+      // The same drop is durably readable via the public accessor, regardless
+      // of whether the caller inspected the one-shot PullResult.
+      final logged = await db.quarantinedSstables();
+      expect(logged, hasLength(1));
+      expect(logged.single.reason, equals(QuarantineReason.corruptedSstable));
+
+      // The host can acknowledge/clear the log.
+      await db.clearQuarantineLog();
+      expect(await db.quarantinedSstables(), isEmpty);
+    });
+
+    test('sync() returns a SyncResult wrapping the pull result', () async {
+      final localAdapter = MemoryStorageAdapter();
+      final db = await _openDb(adapter: localAdapter);
+      addTearDown(() => db.close(flush: false));
+
+      final syncAdapter = MemorySyncAdapter();
+      final peerFilename = SstableInfo.flushName(
+        'peer0002',
+        const Hlc(6000, 0),
+        const Hlc(6001, 0),
+      );
+      await syncAdapter.upload(
+        'sstables/$peerFilename',
+        Uint8List.fromList(List.filled(64, 0xCD)),
+      );
+
+      final result = await db.sync(
+        syncAdapter: syncAdapter,
+        localAdapter: localAdapter,
+      );
+
+      // Q3: sync() wraps the PullResult in a SyncResult, leaving a documented
+      // slot for future push-side reporting.
+      expect(result.pull.quarantined, hasLength(1));
+      expect(result.pull.quarantined.single.filename, equals(peerFilename));
+    });
+
+    test(
+      'the durable quarantine log is never uploaded to the sync folder',
+      () async {
+        final localAdapter = MemoryStorageAdapter();
+        final db = await _openDb(adapter: localAdapter);
+        addTearDown(() => db.close(flush: false));
+
+        final syncAdapter = MemorySyncAdapter();
+        final peerFilename = SstableInfo.flushName(
+          'peer0003',
+          const Hlc(7000, 0),
+          const Hlc(7001, 0),
+        );
+        await syncAdapter.upload(
+          'sstables/$peerFilename',
+          Uint8List.fromList(List.filled(64, 0xEF)),
+        );
+
+        // Quarantining writes a record to the local-only `$$quarantine` namespace.
+        await db.pull(syncAdapter: syncAdapter, localAdapter: localAdapter);
+        expect(await db.quarantinedSstables(), hasLength(1));
+
+        // Flush the record to a `.local.sst`, then push. Because `$$quarantine`
+        // is a `$$` (local-only) namespace — like `$$fts`/`$$index` — its file
+        // must never leave the device: a peer's corrupt file is this device's
+        // local truth, not a fact about the sync topology.
+        await db.store.flush();
+        await db.push(syncAdapter: syncAdapter, localAdapter: localAdapter);
+
+        final uploaded = await syncAdapter.list('sstables', extension: '.sst');
+        expect(
+          uploaded.where((f) => f.endsWith('.local.sst')),
+          isEmpty,
+          reason: r'$$quarantine must land in .local.sst and never upload',
         );
       },
     );

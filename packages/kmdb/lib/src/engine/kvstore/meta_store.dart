@@ -24,6 +24,7 @@ import '../util/hlc.dart';
 import '../util/xxhash.dart';
 import 'kv_store.dart';
 import 'lsm_engine.dart';
+import 'quarantine.dart';
 
 /// Access to the `$meta` system namespace.
 ///
@@ -585,6 +586,108 @@ final class MetaStore {
   /// deleted index.
   Future<void> deleteRawByName(String name) =>
       _engine.delete(kNamespace, _nameToKey(name));
+
+  // ── Quarantine log (0.10.01 A3 / WI-7) ──────────────────────────────────────
+
+  /// The local-only namespace holding the durable log of permanently
+  /// quarantined peer SSTables.
+  ///
+  /// `SyncEngine.pull` **quarantines** a peer SSTable when it fails ingest
+  /// validation: the file's contents are dropped and the per-peer high-water
+  /// mark is advanced past its `maxHlc`, so it is never re-fetched. This is a
+  /// correct, permanent, one-way decision (see `StaleSstableIngestException`
+  /// for the contrasting *transient* sub-floor skip, which is never logged
+  /// here), but before this namespace existed the only trace of it was a
+  /// console `print` — a per-pull signal for a permanent loss. If the host
+  /// application did not happen to inspect that specific pull's result (a
+  /// background sync, or the process killed mid-cycle), the signal was gone
+  /// forever even though the data loss was not.
+  ///
+  /// `$$quarantine` is local-only (see `isLocalOnly` in `namespace_codec.dart`)
+  /// for the same reason every other `$$…state` namespace is: which files
+  /// *this device* rejected, and why, is a device-local fact about what this
+  /// device downloaded and validated. It is not a fact about the sync
+  /// topology, must not be presented as one, and — unlike the generation
+  /// counter's WI-13 defect shape — there is no cross-device merge semantics
+  /// that would even make sense for it: two devices independently deciding to
+  /// quarantine the same poisoned file is not a conflict to resolve, it is two
+  /// independent, equally-valid device-local facts.
+  ///
+  /// Entries are keyed by [symbolicKey] of `quarantine:{filename}` — see
+  /// [appendQuarantine]'s doc comment for why this makes re-quarantine
+  /// idempotent, and `SyncEngine.pull`'s crash-safety ordering note for why
+  /// the write must land here strictly before the high-water mark advance
+  /// that makes the drop irreversible.
+  static const String kQuarantineNamespace = r'$$quarantine';
+
+  /// Appends [record] to the durable quarantine log in [kQuarantineNamespace].
+  ///
+  /// Issues a standalone [LsmEngine.put] — a WAL append + (when
+  /// [KvStoreConfig.fsyncOnWrite] is enabled) an `fsync` — so the record is
+  /// durable the moment this method returns. `SyncEngine.pull` calls this
+  /// (via the narrow `KvStore.appendQuarantine` seam) from inside the
+  /// per-file rejection branch, strictly before the post-loop high-water mark
+  /// save that makes the quarantine irreversible: if this write throws (e.g.
+  /// a full disk), the exception propagates before the HWM ever advances, so
+  /// the file is safely reconsidered on the next pull rather than being
+  /// silently dropped with no trace.
+  ///
+  /// **Idempotent overwrite.** The key is derived from [record]'s `filename`
+  /// alone (`quarantine:{filename}`), not a random or monotonic ID. A
+  /// filename already begins with the peer's device ID and is globally
+  /// unique (see `SstableInfo`), so re-quarantining the same file after a
+  /// crash between this write and the HWM save (the record persists, but the
+  /// HWM save never happened) is a harmless overwrite of the same key —
+  /// never a duplicate entry.
+  Future<void> appendQuarantine(QuarantinedSstable record) async {
+    final key = symbolicKey('quarantine:${record.filename}');
+    final wrapped = await EncryptionEnvelope.wrap(
+      record.toCbor(),
+      encryption,
+      context: ValueContext(kQuarantineNamespace, key),
+    );
+    await _engine.put(kQuarantineNamespace, key, wrapped);
+  }
+
+  /// Returns every currently-logged [QuarantinedSstable], in no particular
+  /// order.
+  ///
+  /// This is the first scan-based `MetaStore` accessor — every other entry
+  /// point here is a point-read of one known symbolic key, but the quarantine
+  /// log is an open-ended set with no bound on its size (see [appendQuarantine]
+  /// for why unbounded growth is acceptable for 0.1.0: corruption is rare and
+  /// entries are idempotently keyed by filename). Implemented as
+  /// [LsmEngine.scan] over [kQuarantineNamespace], unwrapping each entry with
+  /// its own real key as the [ValueContext] — required because the AES-GCM
+  /// associated data binds `(namespace, key)` per entry (0.10.01 WI-3 /
+  /// finding E-2), and every entry in this namespace has a *different* key.
+  Future<List<QuarantinedSstable>> listQuarantines() async {
+    final records = <QuarantinedSstable>[];
+    await for (final entry in _engine.scan(kQuarantineNamespace)) {
+      final unwrapped = await EncryptionEnvelope.unwrap(
+        entry.value,
+        encryption,
+        context: ValueContext(kQuarantineNamespace, entry.key),
+      );
+      records.add(QuarantinedSstable.fromCbor(unwrapped));
+    }
+    return records;
+  }
+
+  /// Deletes every entry currently in the quarantine log.
+  ///
+  /// This is the host application's acknowledge mechanism (0.1.0 decision:
+  /// clear-all, not per-entry ack — see the A3 plan's Q4). Used by
+  /// `KmdbDatabase.clearQuarantineLog`.
+  Future<void> clearQuarantineLog() async {
+    final keys = <String>[];
+    await for (final entry in _engine.scan(kQuarantineNamespace)) {
+      keys.add(entry.key);
+    }
+    for (final key in keys) {
+      await _engine.delete(kQuarantineNamespace, key);
+    }
+  }
 
   // ── Encryption blob ─────────────────────────────────────────────────────────
 

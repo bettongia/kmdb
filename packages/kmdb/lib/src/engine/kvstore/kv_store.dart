@@ -16,6 +16,7 @@ import 'dart:typed_data';
 
 import '../compaction/reclamation_policy.dart' show ReclamationPolicyRegistry;
 import '../util/hlc.dart';
+import 'quarantine.dart';
 
 // ── KvStore interface ─────────────────────────────────────────────────────────
 
@@ -301,6 +302,15 @@ abstract interface class KvStore {
   /// incoming SSTable is accepted until the next tombstone-dropping compaction.
   /// This is the same state as a freshly-opened database that has never run GC.
   Future<void> resetTombstoneFloor();
+
+  /// Appends [record] to the durable, local-only quarantine log.
+  ///
+  /// A narrow seam for [SyncEngine.pull] to reach `MetaStore.appendQuarantine`
+  /// without holding a `MetaStore` reference directly — mirrors the existing
+  /// [resetTombstoneFloor] / [setTombstoneHorizonProvider] pattern for every
+  /// other SyncEngine-to-engine-state call. See `MetaStore.appendQuarantine`
+  /// for the durability and idempotency guarantees.
+  Future<void> appendQuarantine(QuarantinedSstable record);
 }
 
 // ── StoreStats ────────────────────────────────────────────────────────────────
