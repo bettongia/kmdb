@@ -388,4 +388,43 @@ void main() {
     expect(errText, contains('remote add'));
     expect(errText, isNot(contains('Error executing')));
   });
+
+  // ── R-4: remote configured but never enrolled for sync authentication ────
+  //
+  // A remote can exist in config.json without ever having been created via
+  // `remote add` (e.g. hand-edited, or restored from a config backup without
+  // the accompanying SecretStore). `open()` on the database itself must
+  // still succeed unconditionally (already demonstrated by every test in
+  // this file, which all open `db` in setUp with no sync-auth key involved
+  // at all) — only `sync`/`push`/`pull` may refuse, and cleanly.
+
+  test('a remote configured but never enrolled for sync authentication (no '
+      'SyncSetKey minted) raises a clean SyncAuthException-driven error, not '
+      'a crash (R-4)', () async {
+    // Added directly via KmdbConfig, bypassing RemoteCommand._add — which
+    // is the only code path that mints a sync-authentication key. This
+    // reproduces a remote entry with no corresponding SecretStore key,
+    // e.g. a hand-edited or partially-restored config.json.
+    final config = await KmdbConfig.forDatabase(dbDir.path);
+    config.addRemote('origin', LocalRemoteConfig(path: syncDir.path));
+    await config.save();
+
+    final ctx = _ctx(db, out: out, err: err);
+    final ok = await syncCmd.execute(
+      ctx,
+      [],
+      {},
+      secretStoreOverride: FakeSecretStore(),
+    );
+
+    expect(ok, isFalse);
+    final errText = err.toString();
+    expect(errText, startsWith('Error: '));
+    expect(errText, contains('origin'));
+    expect(errText, contains('remote pair'));
+    // No stack trace: cli_runner.dart's generic handler would include
+    // "Error executing" plus a multi-line trace; ctx.writeError does not.
+    expect(errText, isNot(contains('Error executing')));
+    expect(errText, isNot(contains('#0')));
+  });
 }

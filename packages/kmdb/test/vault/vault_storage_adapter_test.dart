@@ -20,6 +20,7 @@ import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
 import 'package:kmdb/src/sync/auth/default_sync_authenticator.dart';
 import 'package:kmdb/src/sync/auth/sync_artifact_class.dart';
 import 'package:kmdb/src/sync/auth/sync_auth_envelope.dart';
+import 'package:kmdb/src/sync/auth/sync_auth_exception.dart';
 import 'package:kmdb/src/sync/auth/sync_authenticator.dart';
 import 'package:kmdb/src/vault/local_directory_vault_adapter.dart';
 import 'package:kmdb/src/vault/vault_store.dart';
@@ -417,5 +418,124 @@ void main() {
         expect(await deviceBStore.isTombstoned(ref.sha256), isTrue);
       },
     );
+
+    // ── Sync authentication (0.10.01 WI-4 T1, Phase 4 forged-artefact matrix) ──
+
+    test('syncVaultMetadata rejects a forged (raw, un-enveloped) remote '
+        'manifest.json', () async {
+      final ref = await localStore.ingest(
+        bytes: _kContent,
+        hlcTimestamp: '0000000000000001',
+      );
+      await adapter.uploadVaultObject(ref.sha256);
+
+      // Attacker (or a legacy pre-sync-auth remote, R-5) overwrites the
+      // manifest with raw, un-enveloped bytes.
+      final prefix = ref.sha256.substring(0, 2);
+      final suffix = ref.sha256.substring(2);
+      final remoteManifestPath =
+          '${syncRoot.path}/vault/$prefix/$suffix/manifest.json';
+      await File(
+        remoteManifestPath,
+      ).writeAsBytes(utf8.encode('{"forged": true}'));
+
+      final deviceBAdapter = MemoryStorageAdapter();
+      final deviceBStore = _MemVaultStore(
+        deviceBAdapter,
+        '/device_b_forged_manifest',
+      );
+      final deviceBKvStore = TestKvStore()..setRefCount(ref.sha256, 1);
+      final adapterB = LocalDirectoryVaultAdapter(
+        syncRoot: syncRoot.path,
+        localStore: deviceBStore,
+        kvStore: deviceBKvStore,
+        authenticator: authenticator,
+      );
+
+      await expectLater(
+        adapterB.syncVaultMetadata(ref.sha256),
+        throwsA(isA<SyncAuthException>()),
+      );
+      // The forged manifest must never have been accepted as a stub.
+      expect(await deviceBStore.exists(ref.sha256), isFalse);
+    });
+
+    test('syncVaultMetadata rejects a forged (raw, un-enveloped) remote '
+        'tombstone.json', () async {
+      final ref = await localStore.ingest(
+        bytes: _kContent,
+        hlcTimestamp: '0000000000000001',
+      );
+      await localStore.writeTombstone(ref.sha256);
+      await adapter.uploadVaultObject(ref.sha256);
+
+      // Attacker overwrites the tombstone with raw, un-enveloped bytes —
+      // a forged tombstone is a deletion-triggering artefact, so this
+      // must be rejected just as strictly as a forged manifest.
+      final prefix = ref.sha256.substring(0, 2);
+      final suffix = ref.sha256.substring(2);
+      final remoteTombstonePath =
+          '${syncRoot.path}/vault/$prefix/$suffix/tombstone.json';
+      await File(
+        remoteTombstonePath,
+      ).writeAsBytes(utf8.encode('{"forged": true}'));
+
+      final deviceBAdapter = MemoryStorageAdapter();
+      final deviceBStore = _MemVaultStore(
+        deviceBAdapter,
+        '/device_b_forged_tombstone',
+      );
+      final deviceBKvStore = TestKvStore()..setRefCount(ref.sha256, 1);
+      final adapterB = LocalDirectoryVaultAdapter(
+        syncRoot: syncRoot.path,
+        localStore: deviceBStore,
+        kvStore: deviceBKvStore,
+        authenticator: authenticator,
+      );
+
+      await expectLater(
+        adapterB.syncVaultMetadata(ref.sha256),
+        throwsA(isA<SyncAuthException>()),
+      );
+    });
+
+    test('hydrateVaultBlob rejects a forged (raw, un-enveloped) remote blob '
+        'before ever reaching the EncryptionEnvelope/sha256 checks', () async {
+      final ref = await localStore.ingest(
+        bytes: _kContent,
+        hlcTimestamp: '0000000000000001',
+      );
+      await adapter.uploadVaultObject(ref.sha256);
+
+      final prefix = ref.sha256.substring(0, 2);
+      final suffix = ref.sha256.substring(2);
+      final remoteBlobPath = '${syncRoot.path}/vault/$prefix/$suffix/blob';
+      // Raw bytes, no sync-auth envelope at all (distinct from the S-4
+      // test above, which uses a *validly-enveloped* substitution to
+      // isolate the sha256 check specifically).
+      await File(
+        remoteBlobPath,
+      ).writeAsBytes([0x00, ...utf8.encode('forged-no-envelope')]);
+
+      final deviceBAdapter = MemoryStorageAdapter();
+      final deviceBStore = _MemVaultStore(
+        deviceBAdapter,
+        '/device_b_forged_blob',
+      );
+      final deviceBKvStore = TestKvStore()..setRefCount(ref.sha256, 1);
+      final adapterB = LocalDirectoryVaultAdapter(
+        syncRoot: syncRoot.path,
+        localStore: deviceBStore,
+        kvStore: deviceBKvStore,
+        authenticator: authenticator,
+      );
+      await adapterB.syncVaultMetadata(ref.sha256);
+
+      await expectLater(
+        adapterB.hydrateVaultBlob(ref.sha256),
+        throwsA(isA<SyncAuthException>()),
+      );
+      expect(await deviceBStore.isHydrated(ref.sha256), isFalse);
+    });
   });
 }

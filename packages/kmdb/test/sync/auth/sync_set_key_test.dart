@@ -39,6 +39,14 @@ void main() {
       );
     });
 
+    test(
+      'encode throws ArgumentError when syncSetId exceeds 255 UTF-8 bytes',
+      () {
+        final key = SyncSetKey(rootKey: Uint8List(32), syncSetId: 'x' * 256);
+        expect(key.encode, throwsArgumentError);
+      },
+    );
+
     test('encode/decode round-trips', () {
       final key = SyncSetKey.generate();
       final decoded = SyncSetKey.decode(key.encode());

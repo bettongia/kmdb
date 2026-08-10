@@ -18,13 +18,89 @@ import 'package:kmdb/src/sync/auth/default_sync_authenticator.dart';
 import 'package:kmdb/src/sync/auth/sync_artifact_class.dart';
 import 'package:kmdb/src/sync/auth/sync_auth_envelope.dart';
 import 'package:kmdb/src/sync/auth/sync_auth_exception.dart';
+import 'package:kmdb/src/sync/auth/sync_authenticator.dart';
 import 'package:test/test.dart';
 
 Uint8List _key(int seed) =>
     Uint8List.fromList(List.generate(32, (i) => (seed + i) % 256));
 
+/// A [SyncAuthenticator] whose [mac] always returns the wrong length — used
+/// to exercise [SyncAuthEnvelope.wrap]'s defensive contract check, which is
+/// not reachable through the well-behaved [DefaultSyncAuthenticator].
+final class _BadLengthAuthenticator implements SyncAuthenticator {
+  const _BadLengthAuthenticator();
+
+  @override
+  Future<Uint8List> mac(SyncArtifactClass artifactClass, Uint8List message) =>
+      Future.value(Uint8List(4)); // wrong length: SyncAuthEnvelope expects 16
+
+  @override
+  Future<bool> verify(
+    SyncArtifactClass artifactClass,
+    Uint8List message,
+    Uint8List mac,
+  ) => Future.value(false);
+}
+
 void main() {
+  group('SyncAuthEnvelope — every artefact class (Phase 4 forged-artefact '
+      'matrix)', () {
+    for (final artifactClass in SyncArtifactClass.values) {
+      test('$artifactClass: round-trips a genuine artefact and rejects a '
+          'forged one', () async {
+        final auth = DefaultSyncAuthenticator(_key(artifactClass.index + 10));
+        final payload = Uint8List.fromList(
+          'payload-for-$artifactClass'.codeUnits,
+        );
+        const path = 'some/logical/path';
+
+        // Genuine: wrapped and unwrapped under the same authenticator/class
+        // round-trips cleanly.
+        final wrapped = await SyncAuthEnvelope.wrap(
+          payload,
+          auth,
+          artifactClass: artifactClass,
+          relativePath: path,
+        );
+        final unwrapped = await SyncAuthEnvelope.unwrap(
+          wrapped,
+          auth,
+          artifactClass: artifactClass,
+          relativePath: path,
+        );
+        expect(unwrapped, equals(payload));
+
+        // Forged: raw, un-enveloped bytes (an attacker without the
+        // sync-set key cannot produce a valid envelope at all) are
+        // rejected with SyncAuthException, not silently accepted.
+        await expectLater(
+          SyncAuthEnvelope.unwrap(
+            payload,
+            auth,
+            artifactClass: artifactClass,
+            relativePath: path,
+          ),
+          throwsA(isA<SyncAuthException>()),
+        );
+      });
+    }
+  });
+
   group('SyncAuthEnvelope', () {
+    test('wrap throws StateError when the SyncAuthenticator returns a MAC of '
+        'the wrong length (defensive contract check)', () async {
+      final payload = Uint8List.fromList('x'.codeUnits);
+      await expectLater(
+        SyncAuthEnvelope.wrap(
+          payload,
+          const _BadLengthAuthenticator(),
+          artifactClass: SyncArtifactClass.sstable,
+          relativePath: 'sstables/x.sst',
+        ),
+        throwsA(isA<StateError>()),
+      );
+    });
+
     test('wrap/unwrap round-trips the payload', () async {
       final auth = DefaultSyncAuthenticator(_key(1));
       final payload = Uint8List.fromList('sstable-bytes'.codeUnits);

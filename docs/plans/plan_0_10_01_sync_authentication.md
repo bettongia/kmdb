@@ -406,25 +406,82 @@ strip the envelope **before** the rename, or the local blob will contain it.
 
 ### Phase 4 — Tests
 
-- [ ] Forged artefact rejected, per artefact class (all six).
-- [ ] Cross-class replay rejected (a valid SSTable MAC replayed onto a lease /
-      onto a vault tombstone).
-- [ ] Path-relocation rejected (the MAC covers the path).
-- [ ] Enrollment round-trip across two simulated devices; key survives
-      `new-device-id`.
-- [ ] **Q1 peer-suppression regression:** a MAC-failed file naming a real peer
+- [x] Forged artefact rejected, per artefact class (all six).
+      `sync_auth_envelope_test.dart`'s parameterized "every artefact class"
+      group round-trips a genuine artefact and rejects a forged one for
+      each of the six `SyncArtifactClass` values. Additionally at the
+      system level: `vault_storage_adapter_test.dart` gained forged
+      manifest/tombstone/blob tests (raw, un-enveloped remote bytes
+      rejected by `syncVaultMetadata`/`hydrateVaultBlob`); the S-4
+      substitution test now uses a *validly*-enveloped substitution (a T3
+      malicious-peer scenario), since T1 substitution is now structurally
+      blocked one layer earlier.
+- [x] Cross-class replay rejected (a valid SSTable MAC replayed onto a lease /
+      onto a vault tombstone). Unit-level in `sync_auth_envelope_test.dart`;
+      system-level in `sync_auth_sync_engine_integration_test.dart`
+      (`ConsolidationCoordinator` group) — a genuine SSTable envelope
+      replayed onto the `.consolidation-lease` path propagates
+      `SyncAuthException` from `acquireLease`.
+- [x] Path-relocation rejected (the MAC covers the path). Unit-level in
+      `sync_auth_envelope_test.dart`; system-level in
+      `sync_auth_sync_engine_integration_test.dart` — a genuine SSTable
+      envelope copied to a different filename is quarantined on `pull()`.
+- [x] Enrollment round-trip across two simulated devices; key survives
+      `new-device-id`. `remote_command_test.dart`'s `pair` group includes a
+      full two-"device" round-trip (two independent `FakeSecretStore`s,
+      `remote pair show` on one → `remote pair import` on the other).
+      `sync_auth_key_store_test.dart`'s "key survives device-identity
+      changes" test mints a key, calls a real `KvStore.reassignDeviceId`,
+      and confirms the key is unaffected (it is scoped by `(dbDir,
+      remoteName)` only, never `deviceId`).
+- [x] **Q1 peer-suppression regression:** a MAC-failed file naming a real peer
       with a huge `maxHlc` must **not** suppress that peer's subsequent genuine
       SSTables (assert the next real SSTable from that peer still ingests).
-- [ ] **Recovery:** after a rejected artefact, the next `pull()` succeeds and the
-      bad file is skipped pre-download via the quarantine log.
-- [ ] **Fault injection** (`FaultyStorageAdapter`, per CLAUDE.md / 2026-05-22
+      `sync_auth_sync_engine_integration_test.dart` — the load-bearing test:
+      forges a file naming a real peer with a near-maximum `maxHlc`, then has
+      that peer genuinely `push()` real data through the authenticating
+      adapter, and asserts the local device's next `pull()` still ingests it.
+- [x] **Recovery:** after a rejected artefact, the next `pull()` succeeds and the
+      bad file is skipped pre-download via the quarantine log. Verified via a
+      `_DownloadCountingAdapter` decorator: the forged file's `download` count
+      stays at 1 across two `pull()` calls — proof the second pull never
+      re-downloads it, not merely that it re-rejects it.
+- [x] **Fault injection** (`FaultyStorageAdapter`, per CLAUDE.md / 2026-05-22
       review): forged/truncated envelopes against a durability-real adapter, not
-      only the in-memory one; include the Q1 regression here.
-- [ ] **R-4:** a remote-configured-but-**unenrolled** database — `open()`
+      only the in-memory one; include the Q1 regression here. A forged SSTable
+      is quarantined against `FaultyStorageAdapter` (with `fsyncOnWrite: true`,
+      matching `quarantine_crash_ordering_test.dart`'s precedent), a simulated
+      crash follows immediately, and reopening confirms the quarantine record
+      survived and the database is still usable. The Q1 regression itself uses
+      `StorageAdapterNative` (real disk) for the device-under-test, per D-3.
+- [x] **R-4:** a remote-configured-but-**unenrolled** database — `open()`
       succeeds, but `push`/`pull` raise `SyncAuthException` (not a crash). A
       purely local-only database opens fine with no key at all.
-- [ ] Two-envelope ordering in `hydrateVaultBlob` verified (sync-auth strip
-      precedes `EncryptionEnvelope.unwrap` and the sha256 check).
+      `adapter_for_test.dart` (core `adapterFor` throws `SyncAuthException`);
+      `sync_command_test.dart` (full CLI: a remote added directly via
+      `KmdbConfig` — bypassing `RemoteCommand._add`'s auto-mint — renders a
+      clean one-line `SyncAuthException`-driven error, not a stack trace).
+      `open()`-succeeds is demonstrated trivially by every test in every CLI
+      command test file, none of which touch `SecretStore` during `db.open()`.
+- [x] Two-envelope ordering in `hydrateVaultBlob` verified (sync-auth strip
+      precedes `EncryptionEnvelope.unwrap` and the sha256 check). Verified by
+      construction (the code strips+verifies sync-auth before ever calling
+      `EncryptionEnvelope.unwrap`) and by the forged-blob test, which fails
+      with `SyncAuthException` — proving it never reaches the
+      `EncryptionEnvelope`/sha256 stage at all for an unauthenticated blob.
+
+Coverage on new files: `sync_auth_exception.dart` 100%, `sync_auth_envelope.dart`
+97.1%, `sync_artifact_class.dart` 100%, `sync_authenticator.dart` 100% (interface,
+no executable lines), `default_sync_authenticator.dart` 100%,
+`sync_authenticating_adapter.dart` 100%, `sync_set_key.dart` 100%,
+`pairing_code.dart` 98.6%, `web_sync_authenticator.dart`/`_stub.dart`
+(`coverage:ignore-file` — verified via the Chrome test lane instead, per that
+file's doc comment), `sync_auth_key_store.dart` (kmdb_cli) 100%,
+`local_directory_vault_adapter.dart` 100%. Modified existing files stay high
+(`meta_store.dart` 100%, `quarantine.dart` 100%, `remote_command.dart` 100%,
+`remote_config.dart` 100%) with only pre-existing, unrelated gaps remaining in
+large modified files (`sync_engine.dart`, `consolidation_coordinator.dart`,
+`kv_store.dart`, `cache_layer.dart`).
 
 ### Phase 5 — Spec and docs
 
