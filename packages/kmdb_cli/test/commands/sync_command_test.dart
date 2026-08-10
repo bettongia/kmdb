@@ -220,11 +220,18 @@ void main() {
   // ── Sync via named remote ─────────────────────────────────────────────────
 
   test('sync uses origin remote by default', () async {
+    // A shared fake store: `remote add` mints a sync-authentication key
+    // (0.10.01 WI-4 T1) that `sync` must then resolve when wrapping the
+    // adapter — both calls must share the same store, and neither may
+    // touch the real profile-directory-backed default.
+    final secretStore = FakeSecretStore();
+
     final ctxRemote = _ctx(db, out: out, err: err);
     await remoteCmd.execute(
       ctxRemote,
       ['add', 'origin'],
       {'path': syncDir.path},
+      secretStoreOverride: secretStore,
     );
 
     final syncKey2 = _key();
@@ -237,7 +244,12 @@ void main() {
     );
 
     final ctx = _ctx(db, out: out, err: err);
-    final ok = await syncCmd.execute(ctx, [], {});
+    final ok = await syncCmd.execute(
+      ctx,
+      [],
+      {},
+      secretStoreOverride: secretStore,
+    );
     expect(ok, isTrue);
     expect(out.toString(), contains('sync: complete'));
   });

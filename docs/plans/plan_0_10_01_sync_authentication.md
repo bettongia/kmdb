@@ -313,8 +313,12 @@ strip the envelope **before** the rename, or the local blob will contain it.
 - [x] Generate the 256-bit sync-set key (`Random.secure()`, 32 raw bytes) and the
       sync-set identity at `remote add`; store raw bytes via `SecretStore`.
       Implemented as `SyncSetKey` (`sync_set_key.dart`, core) —
-      `SyncSetKey.generate()`; `remote add` wiring is the next checklist item
-      below. Tests: `test/sync/auth/sync_set_key_test.dart`.
+      `SyncSetKey.generate()`; `remote add` now mints and persists it via
+      `kmdb_cli`'s `mintSyncAuthKey`/`sync_auth_key_store.dart`
+      (`dbScopedSecretKey(dbDir, 'sync-auth:$remoteName')`). Tests:
+      `test/sync/auth/sync_set_key_test.dart` (core),
+      `test/commands/remote_command_test.dart` (CLI wiring),
+      `test/config/adapter_for_test.dart` (`adapterFor` wrapping).
 - [x] Pairing code: `KSA1-`-prefixed base32 + checksum, carrying key and sync-set
       identity. base32 appears **only** in the code, never at rest.
       Implemented as `PairingCode` (`pairing_code.dart`, core) — hand-rolled
@@ -324,9 +328,24 @@ strip the envelope **before** the rename, or the local blob will contain it.
       HKDF elsewhere — avoids adding a second hashing dependency). Tests:
       `test/sync/auth/pairing_code_test.dart` (round-trip, whitespace/case
       tolerance, corrupted-checksum rejection, truncation).
-- [ ] `kmdb remote pair show <remote>` / `kmdb remote pair import <remote>
+- [x] `kmdb remote pair show <remote>` / `kmdb remote pair import <remote>
       <code>`. On web, `show` is gated on an extractable key (Q4).
-- [ ] Clear diagnostics when a remote has no key, pointing at enrollment.
+      Implemented in `RemoteCommand._pair`/`_pairShow`/`_pairImport`
+      (`remote_command.dart`). The web-gating half of Q4 does not apply to
+      `kmdb_cli` itself — the CLI is `dart:io`-only and never runs on web;
+      `WebSyncAuthenticator.isExtractable` is the primitive a future web
+      host (`kmdb_ui`, a separate repo) would gate its own "show pairing
+      code" UI on. `remote pair import` requires the remote to already be
+      configured on this device (`remote add` first, with this device's own
+      connection details) — the pairing code carries only the shared key,
+      never path/credentials. Tests: `test/commands/remote_command_test.dart`
+      (`pair` group — show/import validation, a full two-"device" round-trip
+      via two independent `FakeSecretStore`s, malformed-code and
+      not-yet-configured-remote rejection).
+- [x] Clear diagnostics when a remote has no key, pointing at enrollment.
+      `adapterFor` throws `SyncAuthException` naming the remote and pointing
+      at `remote pair` (R-4); `remote pair show` on an unenrolled remote
+      returns a clean CLI error rather than propagating an exception.
 
 ### Phase 3 — Envelope, decorator, and integration
 

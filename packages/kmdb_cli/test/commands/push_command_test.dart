@@ -162,12 +162,19 @@ void main() {
   // ── Push via named remote ─────────────────────────────────────────────────
 
   test('push via named remote uses origin by default', () async {
+    // A shared fake store: `remote add` mints a sync-authentication key
+    // (0.10.01 WI-4 T1) that `push` must then resolve when wrapping the
+    // adapter — both calls must share the same store, and neither may
+    // touch the real profile-directory-backed default.
+    final secretStore = FakeSecretStore();
+
     // Register origin.
     final ctxRemote = _ctx(db, out: out, err: err);
     await remoteCmd.execute(
       ctxRemote,
       ['add', 'origin'],
       {'path': syncDir.path},
+      secretStoreOverride: secretStore,
     );
 
     // Write a document.
@@ -181,18 +188,26 @@ void main() {
     );
 
     final ctx = _ctx(db, out: out, err: err);
-    final ok = await pushCmd.execute(ctx, [], {});
+    final ok = await pushCmd.execute(
+      ctx,
+      [],
+      {},
+      secretStoreOverride: secretStore,
+    );
     expect(ok, isTrue);
     expect(out.toString(), contains('push: complete'));
   });
 
   test('push via explicit remote name', () async {
+    final secretStore = FakeSecretStore();
+
     // Register dropbox remote.
     final ctxRemote = _ctx(db, out: out, err: err);
     await remoteCmd.execute(
       ctxRemote,
       ['add', 'dropbox'],
       {'path': syncDir.path},
+      secretStoreOverride: secretStore,
     );
 
     final pushKey3 = _key();
@@ -205,7 +220,12 @@ void main() {
     );
 
     final ctx = _ctx(db, out: out, err: err);
-    final ok = await pushCmd.execute(ctx, ['dropbox'], {});
+    final ok = await pushCmd.execute(
+      ctx,
+      ['dropbox'],
+      {},
+      secretStoreOverride: secretStore,
+    );
     expect(ok, isTrue);
     expect(out.toString(), contains('push: complete'));
   });

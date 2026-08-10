@@ -21,6 +21,7 @@ import 'package:kmdb/kmdb.dart';
 import 'package:kmdb_cli/src/config/remote_config.dart';
 import 'package:kmdb_cli/src/config/secret_store/directory_secret_store.dart';
 import 'package:kmdb_cli/src/config/secret_store/secret_key.dart';
+import 'package:kmdb_cli/src/config/sync_auth_key_store.dart';
 import 'package:kmdb_google_drive/kmdb_google_drive.dart'
     show GoogleDriveAdapter;
 import 'package:test/test.dart';
@@ -259,6 +260,109 @@ void main() {
       expect(json['syncRoot'], equals('kmdb'));
       expect(json['credentialsPath'], equals('creds.json'));
       expect(json['type'], equals('google-drive'));
+    });
+  });
+
+  // ── Sync authentication (0.10.01 WI-4 T1) ─────────────────────────────────────
+
+  group('adapterFor — sync authentication (remoteName)', () {
+    test('remoteName omitted returns an unwrapped, unauthenticated adapter '
+        '(the --sync-dir one-off bypass)', () async {
+      final config = LocalRemoteConfig(path: tmpDir.path);
+      final adapter = await adapterFor(
+        config,
+        dbDir: dbDir.path,
+        secretStoreOverride: secretStore,
+      );
+      // Not wrapped: an exact LocalDirectoryAdapter, not a decorator.
+      expect(adapter, isA<LocalDirectoryAdapter>());
+      expect(adapter, isNot(isA<SyncAuthenticatingAdapter>()));
+    });
+
+    test('remoteName provided but no key enrolled throws SyncAuthException '
+        '(R-4)', () async {
+      final config = LocalRemoteConfig(path: tmpDir.path);
+      await expectLater(
+        adapterFor(
+          config,
+          dbDir: dbDir.path,
+          remoteName: 'origin',
+          secretStoreOverride: secretStore,
+        ),
+        throwsA(
+          isA<SyncAuthException>().having(
+            (e) => e.message,
+            'message',
+            allOf(contains('origin'), contains('remote pair')),
+          ),
+        ),
+      );
+    });
+
+    test('remoteName provided with an enrolled key returns a '
+        'SyncAuthenticatingAdapter whose uploads are enveloped', () async {
+      await mintSyncAuthKey(
+        dbDir: dbDir.path,
+        remoteName: 'origin',
+        secretStoreOverride: secretStore,
+      );
+
+      final remoteDir = Directory('${tmpDir.path}/remote')..createSync();
+      final config = LocalRemoteConfig(path: remoteDir.path);
+      final adapter = await adapterFor(
+        config,
+        dbDir: dbDir.path,
+        remoteName: 'origin',
+        secretStoreOverride: secretStore,
+      );
+      expect(adapter, isA<SyncAuthenticatingAdapter>());
+
+      final payload = Uint8List.fromList(utf8.encode('sstable-bytes'));
+      await adapter.upload('sstables/a-0-1.sst', payload);
+
+      // The bytes on disk must be enveloped (larger than, and different
+      // from, the raw payload) — reading through the raw
+      // LocalDirectoryAdapter proves the envelope was actually applied at
+      // the storage layer, not merely accepted/no-op'd by the decorator.
+      final raw = await LocalDirectoryAdapter(
+        remoteDir.path,
+      ).download('sstables/a-0-1.sst');
+      expect(raw, isNotNull);
+      expect(raw, isNot(equals(payload)));
+      expect(raw!.length, greaterThan(payload.length));
+
+      // And it round-trips back through the same authenticated adapter.
+      final downloaded = await adapter.download('sstables/a-0-1.sst');
+      expect(downloaded, equals(payload));
+    });
+
+    test('two adapterFor calls for the same remoteName share the same key, so '
+        'artefacts written by one round-trip through the other', () async {
+      await mintSyncAuthKey(
+        dbDir: dbDir.path,
+        remoteName: 'origin',
+        secretStoreOverride: secretStore,
+      );
+      final remoteDir = Directory('${tmpDir.path}/remote')..createSync();
+      final config = LocalRemoteConfig(path: remoteDir.path);
+
+      final writer = await adapterFor(
+        config,
+        dbDir: dbDir.path,
+        remoteName: 'origin',
+        secretStoreOverride: secretStore,
+      );
+      final reader = await adapterFor(
+        config,
+        dbDir: dbDir.path,
+        remoteName: 'origin',
+        secretStoreOverride: secretStore,
+      );
+
+      final payload = Uint8List.fromList(utf8.encode('shared-key'));
+      await writer.upload('highwater/a1b2c3d4.hwm', payload);
+      final downloaded = await reader.download('highwater/a1b2c3d4.hwm');
+      expect(downloaded, equals(payload));
     });
   });
 }
