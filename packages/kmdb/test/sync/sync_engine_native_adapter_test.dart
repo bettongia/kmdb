@@ -39,6 +39,7 @@ import 'dart:io';
 
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store_impl.dart';
+import 'package:kmdb/src/engine/kvstore/quarantine.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_native.dart';
 import 'package:kmdb/src/engine/sstable/sstable_info.dart';
 import 'package:kmdb/src/engine/util/hlc.dart';
@@ -94,7 +95,9 @@ void main() {
 
   group('SyncEngine.pull against StorageAdapterNative (S-1, D-3)', () {
     test('PEER-A/B — a checksum-valid, structurally hostile peer SSTable does '
-        'not crash pull(), and does not produce an OutOfMemoryError', () async {
+        'not crash pull(), and does not produce an OutOfMemoryError (A3 / '
+        'WI-7: reported as QuarantineReason.corruptedSstable, not '
+        'QuarantineReason.outOfMemory)', () async {
       final hostile = patchFooterField(
         buildValidSstable(basePhysical: 9000),
         field: FooterField.filterSize,
@@ -111,7 +114,33 @@ void main() {
       // Must complete without throwing — this is the actual regression:
       // prior to the S-1 fix, this call could surface an uncatchable
       // OutOfMemoryError on this exact adapter.
-      await expectLater(engine.pull(), completes);
+      final result = await engine.pull();
+
+      // A3 / WI-7 finding: `SstableReader.open`'s `_validateFooterBounds`
+      // now rejects an out-of-range `filterSize` *before* any allocation
+      // is attempted (`checkRange` throws `CorruptedSstableException`
+      // directly — see that method's doc comment), so this exact PROBE1
+      // shape no longer reaches `SyncEngine.pull`'s `on OutOfMemoryError`
+      // catch at all; it is caught earlier, by `on CorruptedSstableException`.
+      // `QuarantineReason.outOfMemory` therefore has no currently-known
+      // reachable trigger — every allocation-relevant field in the SSTable
+      // format (filterSize, indexSize, every data-block varint length) is
+      // now bounds-checked before use (see `sstable_reader.dart`'s S-1
+      // comments throughout `_validateFooterBounds`/`_parseIndex`/
+      // `_decodeBlock`). This is a *closed* vulnerability class, not a
+      // testing gap: `QuarantineReason.outOfMemory` and its catch clause
+      // in `SyncEngine.pull` remain in place as defence-in-depth (the
+      // catch is explicit, not a bare `catch`, precisely so it does not
+      // also swallow `SyncCancelledException` — see that method's doc
+      // comment) should a future format change ever reopen an
+      // allocate-before-validate path. `QuarantinedSstable`'s CBOR
+      // round-trip for this reason is covered directly in
+      // `test/engine/quarantine_record_test.dart` instead.
+      expect(result.quarantined, hasLength(1));
+      expect(
+        result.quarantined.single.reason,
+        equals(QuarantineReason.corruptedSstable),
+      );
     });
 
     test('recovery after quarantine — HWM advances past a rejected hostile '

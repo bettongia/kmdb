@@ -18,6 +18,7 @@ import 'dart:typed_data';
 import 'package:kmdb/src/engine/compaction/reclamation_policy.dart'
     show ReclamationPolicyRegistry;
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
+import 'package:kmdb/src/engine/kvstore/quarantine.dart';
 import 'package:kmdb/src/engine/util/hlc.dart';
 import 'package:kmdb/src/vault/vault_recovery.dart';
 
@@ -156,6 +157,9 @@ class TestKvStore implements KvStore {
 
   @override
   Future<void> resetTombstoneFloor() async {}
+
+  @override
+  Future<void> appendQuarantine(QuarantinedSstable record) async {}
 
   @override
   Future<List<String>> listNamespaces() async => [];

@@ -283,6 +283,18 @@ Pin (vault)
   this blob downloaded on this device." Pins do not affect the GC lifecycle;
   a pinned object with zero references is still tombstoned and deleted. See §24.
 
+Quarantine (sync)
+
+: The permanent skipping of a peer SSTable that fails ingest validation
+  (checksum, structural bounds, or an out-of-memory guard). `SyncEngine.pull`
+  advances the peer high-water mark past the file so it is never re-fetched —
+  stopping one hostile or corrupt file from permanently jamming all future sync
+  — and records the drop in the returned `PullResult.quarantined` and in a
+  durable, device-local `$$quarantine` log (queryable via
+  `KmdbDatabase.quarantinedSstables()`). Distinct from a **deferral**
+  (`PullResult.deferred`), which is a *transient* skip of a sub-GC-floor file
+  that is retried later. See §12.
+
 Recovery code
 
 : A 16-word mnemonic encoding 128 bits of entropy, used as an alternative

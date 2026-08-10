@@ -122,6 +122,50 @@ be placed at L2 locally without violating the non-overlapping range invariant.
 Ingesting at L0 ensures the local compaction path runs with full visibility of
 the local key history.
 
+### Quarantine reporting (A3)
+
+Quarantine is *permanent*: advancing the peer high-water mark past a rejected
+file means it is never re-fetched, and consolidation skips it too. That is the
+correct posture for a hostile file, but it makes the same one-way decision for a
+*legitimately corrupt* one (a bad upload, cloud bit-rot) — so the data in that
+file is silently dropped on this device. Before 0.10.01 the only trace was a
+console log line, giving the embedding application no programmatic signal.
+
+`pull()` therefore returns a **`PullResult`**, and `sync()` a **`SyncResult`**
+wrapping it. `PullResult` carries two **structurally distinct** lists:
+
+- `quarantined` — `List<QuarantinedSstable>`: files **permanently** dropped on
+  this pull. Each record carries the peer device id, the filename, the
+  filename-derived `maxHlc` (trustworthy because it is parsed before any of the
+  file's untrusted body is read), a `QuarantineReason` (`corruptedSstable`,
+  `invalidFormat`, `structuralBoundsViolation`, `storageError`, or the
+  defence-in-depth `outOfMemory`), a human-readable `detail`, and a wall-clock
+  `quarantinedAt`. Each dropped file is reported by exactly **one** pull — the
+  one that drops it — because the HWM advance stops it ever being reconsidered.
+- `deferred` — `List<DeferredSstable>`: files **transiently** skipped because
+  their `maxHlc` is at or below the local tombstone-GC floor
+  (`StaleSstableIngestException` — see "Tombstone Retention & Garbage
+  Collection"). The HWM is **not** advanced, so these are retried on a later pull
+  once a newer consolidated file supersedes them. A deferral is never data loss
+  and must never be conflated with a quarantine — that is precisely why the two
+  are separate types.
+
+Because a quarantine is permanent but a `PullResult` is one-shot (an application
+that does not inspect *that* pull's return, e.g. a background sync, would miss
+it), each quarantine is **also** written to a durable, device-local log: the
+local-only `$$quarantine` namespace, which — like every `$$` namespace — lands in
+`.local.sst` and is **never uploaded**. This is correct by classification: a
+peer's corrupt file is this device's local truth, not a fact about the sync
+topology. The log is queryable at any later time via
+`KmdbDatabase.quarantinedSstables()` and cleared (acknowledged) via
+`KmdbDatabase.clearQuarantineLog()`.
+
+**Crash ordering.** The log write is committed *before* the HWM advances, so a
+crash between the two can only leave the fail-safe state — HWM not advanced, file
+reconsidered on the next pull — never the data-losing inverse ("HWM advanced,
+record lost"). Only `quarantined` entries are logged; transient `deferred`
+entries are not.
+
 ## Conflict Resolution
 
 Conflicts arise when two devices write to the same key while offline. Resolution
@@ -267,6 +311,32 @@ All three methods accept the same named parameters:
 
 **Native-only.** These methods use `dart:io` for local SSTable I/O and throw
 `UnsupportedError` on web.
+
+### Return values
+
+`sync()` returns a `SyncResult`, `pull()` a `PullResult`, and `push()` a
+`Future<void>` (it has nothing to report today — `SyncResult` leaves a documented
+slot for future push-side reporting). `PullResult` reports the SSTables this pull
+**quarantined** (permanently dropped) or **deferred** (transiently skipped) — see
+"Quarantine reporting" above. Permanent quarantines are also persisted to a
+durable, device-local log that outlives any single pull:
+
+```dart
+final result = await db.sync(syncAdapter: adapter);
+for (final q in result.pull.quarantined) {
+  // A peer's file was permanently dropped — surface it to the user.
+  print('Dropped ${q.filename} from ${q.peerDeviceId}: ${q.reason}');
+}
+
+// Query the durable log at any later time, independent of any single pull:
+final dropped = await db.quarantinedSstables();
+// ...and acknowledge / clear it once handled:
+await db.clearQuarantineLog();
+```
+
+These signatures are a breaking change from the pre-0.10.01 `Future<void>` and
+land before the `0.1.0` API freeze; they remain `await`-compatible for callers
+that ignore the value.
 
 ### Cancellation and Timeout
 

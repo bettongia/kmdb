@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import '../engine/kvstore/kv_store.dart';
+import '../engine/kvstore/quarantine.dart';
 import '../engine/platform/storage_adapter_interface.dart';
 import '../engine/sstable/sstable_info.dart';
 import '../engine/sstable/sstable_reader.dart';
@@ -22,6 +23,8 @@ import 'sync_storage_adapter.dart';
 import 'consolidation_config.dart';
 import 'consolidation_coordinator.dart';
 import 'highwater.dart';
+import 'pull_result.dart';
+import 'sync_result.dart';
 
 /// Coordinates push/pull synchronisation between a local [KvStore] and the
 /// shared sync folder.
@@ -503,7 +506,47 @@ final class SyncEngine {
   ///    (minHlc ≤ recorded peer HWM), otherwise download and ingest.
   /// 4. Update the HWM for each successfully ingested peer.
   /// 5. Optionally run consolidation if threshold is met.
-  Future<void> pull() async {
+  ///
+  /// Returns a [PullResult] reporting every peer SSTable this call
+  /// permanently quarantined ([PullResult.quarantined]) or transiently
+  /// deferred ([PullResult.deferred]) — see those fields' doc comments.
+  ///
+  /// ## Crash-safety ordering (finding A3 / WI-7)
+  ///
+  /// Quarantine advances the per-peer high-water mark past a rejected file's
+  /// `maxHlc`, which is the mechanism that makes the drop permanent (step 4,
+  /// below) — the file is never re-fetched or reconsidered once the HWM
+  /// clears it. Before this HWM advance is persisted, this method durably
+  /// records the [QuarantinedSstable] to the local-only `$$quarantine` log
+  /// (`_store.appendQuarantine`, called per-file inside the loop, step 3) —
+  /// strictly *before* the single post-loop `hwm.save` (step 4). This
+  /// ordering is deliberate and the only safe one:
+  ///
+  /// - If the log write throws (e.g. a full disk), the exception propagates
+  ///   from *inside* the loop, before the HWM is ever saved — the file is
+  ///   therefore reconsidered on the next pull rather than being silently and
+  ///   permanently dropped with no trace (the fail-safe direction).
+  /// - The dangerous inverse — HWM advanced first, log write lost — is made
+  ///   structurally impossible: no code path here writes the HWM before every
+  ///   in-flight file's quarantine record has already been durably appended.
+  ///
+  /// Each log entry is keyed by filename, so a re-quarantine after a crash
+  /// between the log write and the HWM save (the file is reconsidered, fails
+  /// ingest again, and is quarantined again) is a harmless idempotent
+  /// overwrite — never a duplicate.
+  ///
+  /// ## Cancellation
+  ///
+  /// If [SyncCancelledException] is thrown at any adapter call boundary, it
+  /// propagates uncaught and this method does not return a [PullResult] at
+  /// all — any [QuarantinedSstable]/[DeferredSstable] entries accumulated so
+  /// far in this call are discarded along with the rest of the call stack.
+  /// This is deliberate (see [PullResult]'s cancellation-contract doc
+  /// comment): quarantine records already durably logged before the
+  /// cancellation are unaffected (they were already true and permanent when
+  /// written) and remain queryable via `KmdbDatabase.quarantinedSstables`;
+  /// only the *report* of this specific call's activity is lost.
+  Future<PullResult> pull() async {
     // 1. Load local HWM.
     var hwm =
         await HighwaterMark.load(_remoteHwmPath, _cloudAdapter) ??
@@ -523,6 +566,14 @@ final class SyncEngine {
 
     // Track highest ingested HLC per peer for HWM update.
     final peerMaxHlc = <String, Hlc>{};
+
+    // Accumulate this call's PullResult. Declared before the loop and
+    // returned only after it — no catch/on Exception wraps the loop body, so
+    // SyncCancelledException always propagates uncaught rather than being
+    // trapped while building a partial result (D4 / see the class doc
+    // comment's cancellation section).
+    final quarantined = <QuarantinedSstable>[];
+    final deferred = <DeferredSstable>[];
 
     // 3. Process each remote SSTable from a different device.
     for (final filename in remoteFiles) {
@@ -573,24 +624,34 @@ final class SyncEngine {
       // `KvStore.ingestSstable` can throw for a structurally-invalid file;
       // see the type-by-type notes for why each is included.
       var rejected = false;
+      QuarantineReason? rejectReason;
+      String? rejectDetail;
       try {
         await _store.ingestSstable(filename, bytes);
       } on CorruptedSstableException catch (e) {
         _logRejectedSstable(filename, e);
         rejected = true;
+        rejectReason = QuarantineReason.corruptedSstable;
+        rejectDetail = e.toString();
       } on FormatException catch (e) {
         _logRejectedSstable(filename, e);
         rejected = true;
+        rejectReason = QuarantineReason.invalidFormat;
+        rejectDetail = e.toString();
       } on RangeError catch (e) {
         // A structural bounds violation that slipped past SstableReader's
         // own validation (belt-and-suspenders — see sstable_reader.dart).
         _logRejectedSstable(filename, e);
         rejected = true;
+        rejectReason = QuarantineReason.structuralBoundsViolation;
+        rejectDetail = e.toString();
       } on StorageException catch (e) {
         // Raised by StorageAdapterNative.readFileRange when a footer/index
         // field points past the end of the file (S-1 PROBE2).
         _logRejectedSstable(filename, e);
         rejected = true;
+        rejectReason = QuarantineReason.storageError;
+        rejectDetail = e.toString();
       } on OutOfMemoryError catch (e) {
         // `OutOfMemoryError` is an `Error`, not an `Exception` — a bare
         // `on Exception` clause does not see it (S-1 PROBE1: an attacker-
@@ -601,6 +662,8 @@ final class SyncEngine {
         // in this class so cooperative cancellation always propagates).
         _logRejectedSstable(filename, e);
         rejected = true;
+        rejectReason = QuarantineReason.outOfMemory;
+        rejectDetail = e.toString();
       } on StaleSstableIngestException catch (e) {
         // The SSTable's maxHlc is at or below the local GC floor (H4-FU3).
         // Ingesting it could resurrect tombstone-GC'd data. Skip without
@@ -609,7 +672,9 @@ final class SyncEngine {
         // Unlike the quarantine cases above, this is not corruption — the
         // file is well-formed and will very likely become ingestable again
         // once a newer consolidated file supersedes it, so retry-forever is
-        // the correct behaviour here, not quarantine.
+        // the correct behaviour here, not quarantine. Recorded as a
+        // DeferredSstable — a structurally distinct, never-persisted type
+        // (A3 / Q2) — never as a QuarantinedSstable.
         //
         // Log at WARN: filename, sub-floor HLC, and current floor.
         // ignore: avoid_print — structured logging deferred (Q8 decision).
@@ -618,19 +683,36 @@ final class SyncEngine {
           '${e.filename} maxHlc=${e.maxHlc.toHex()} '
           'floor=${e.floor.toHex()}',
         );
+        deferred.add(
+          DeferredSstable(
+            peerDeviceId: peerDeviceId,
+            filename: e.filename,
+            maxHlc: e.maxHlc,
+            floor: e.floor,
+          ),
+        );
         continue;
       }
 
-      // Track the highest ingested (or quarantined) HLC for this peer. On
-      // the quarantine path, `info.maxHlc` was parsed from the filename
-      // before the untrusted body was ever read — this is safe to use even
-      // though the file itself was rejected.
+      // Quarantine: durably record the rejection BEFORE folding maxHlc into
+      // peerMaxHlc / the post-loop HWM save below (D3 crash-safety ordering
+      // — see this method's class-level "Crash-safety ordering" doc-comment
+      // section). `info.maxHlc` was parsed from the *filename* before the
+      // untrusted body was ever read, so it is safe to persist even though
+      // the file itself was rejected. If `appendQuarantine` throws, the
+      // exception propagates here — before any HWM advance for this or any
+      // later file in this pull — which is the fail-safe direction.
       if (rejected) {
-        // ignore: avoid_print — structured logging deferred (Q8 decision).
-        print(
-          'WARN [SyncEngine.pull] Quarantining $filename: HWM advanced past '
-          'maxHlc=${info.maxHlc.toHex()} without ingesting its contents.',
+        final record = QuarantinedSstable(
+          peerDeviceId: peerDeviceId,
+          filename: filename,
+          maxHlc: info.maxHlc,
+          reason: rejectReason!,
+          detail: rejectDetail!,
+          quarantinedAt: DateTime.now().toUtc(),
         );
+        await _store.appendQuarantine(record);
+        quarantined.add(record);
       }
       final existing = peerMaxHlc[peerDeviceId];
       if (existing == null || info.maxHlc > existing) {
@@ -638,7 +720,10 @@ final class SyncEngine {
       }
     }
 
-    // 4. Update HWM with ingested peer HLCs.
+    // 4. Update HWM with ingested peer HLCs. Every quarantine record for a
+    //    peer folded into peerMaxHlc above has already been durably
+    //    appended to the quarantine log (see the loop above) — this save is
+    //    always the second of the two writes, never the first.
     for (final entry in peerMaxHlc.entries) {
       hwm = hwm.withPeer(entry.key, entry.value);
     }
@@ -648,6 +733,8 @@ final class SyncEngine {
 
     // 5. Optionally run consolidation.
     await _maybeConsolidate(remoteFiles);
+
+    return PullResult(quarantined: quarantined, deferred: deferred);
   }
 
   /// Convenience method that calls [push] then [pull].
@@ -656,9 +743,15 @@ final class SyncEngine {
   /// in that case. Callers that want fire-and-forget pull semantics (receive
   /// incoming changes even when the upload fails) must call [push] and [pull]
   /// separately and handle the push exception themselves.
-  Future<void> sync() async {
+  ///
+  /// Returns a [SyncResult] wrapping the [pull] call's [PullResult]. [push]
+  /// currently reports nothing structured beyond success/failure — see
+  /// [SyncResult]'s doc comment for why it exists as a wrapper today rather
+  /// than returning a bare [PullResult].
+  Future<SyncResult> sync() async {
     await push();
-    await pull();
+    final pullResult = await pull();
+    return SyncResult(pull: pullResult);
   }
 
   // ── Consolidation ────────────────────────────────────────────────────────────

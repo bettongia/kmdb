@@ -1,6 +1,6 @@
 # A3 — Surface SSTable quarantine to the embedding application
 
-**Status**: Investigated
+**Status**: Implementing
 
 **PR link**: _(pending)_
 
@@ -297,103 +297,96 @@ not after. Flag it in the eventual CHANGELOG work (A5 / WI-10).
 
 ## Implementation plan
 
+> **Resume note (2026-08-10).** The first `kmdb-plan-implement` run completed
+> Phases 1–4 and most of Phase 5, then terminated on a billing spend-limit mid
+> way through the `QuarantineReason` mapping tests. The main session resumed the
+> remainder inline: added the `outOfMemory` reason test (via a `TestKvStore`
+> subclass that throws `OutOfMemoryError` from `ingestSstable` — the file-driven
+> trigger no longer exists post-S-1/S-8, which now reject a hostile file as
+> `corruptedSstable` before `malloc`), the sub-floor `deferred` test, the
+> `KmdbDatabase`-level accessor/`SyncResult`/never-synced tests, and all Phase 6
+> docs.
+
 ### Phase 1 — result & record types
 
-- [ ] Add `QuarantineReason` enum (five reasons mapping the caught types) with
-      doc comments **at the engine layer** (D2).
-- [ ] Add `QuarantinedSstable` (immutable: `peerDeviceId`, `filename`, `maxHlc`,
+- [x] Add `QuarantineReason` enum (five reasons mapping the caught types) with
+      doc comments **at the engine layer** (D2). → `engine/kvstore/quarantine.dart`.
+- [x] Add `QuarantinedSstable` (immutable: `peerDeviceId`, `filename`, `maxHlc`,
       `reason`, `detail`, `quarantinedAt`) with CBOR encode/decode and doc
-      comments, **at the engine layer** (e.g. `engine/kvstore/quarantine.dart` —
-      D2). Use `ValueCodec`/CBOR primitives — no hand-rolled parser.
-- [ ] Add `DeferredSstable` (immutable: `peerDeviceId`, `filename`, `maxHlc`,
-      `floor`) as a **distinct** type (Q2/D-corrected) — not a
-      `QuarantinedSstable`. Sync layer.
-- [ ] Add `PullResult` (`quarantined: List<QuarantinedSstable>`,
-      `deferred: List<DeferredSstable>`) and `SyncResult` (wraps a `PullResult`,
-      documented slot for future push reporting — Q3). Sync layer.
-- [ ] Export the new public types from `kmdb.dart`.
+      comments, **at the engine layer** (`engine/kvstore/quarantine.dart` — D2).
+- [x] Add `DeferredSstable` (`peerDeviceId`, `filename`, `maxHlc`, `floor`) as a
+      **distinct** type (Q2/D-corrected). Sync layer (`sync/pull_result.dart`).
+- [x] Add `PullResult` (`quarantined` / `deferred`) and `SyncResult` (wraps a
+      `PullResult`, documented push-reporting slot — Q3). Sync layer.
+- [x] Export the new public types from `kmdb.dart`.
 
 ### Phase 2 — durable log in `MetaStore`
 
-- [ ] Add `kQuarantineNamespace` = `r'$$quarantine'` with a doc comment matching
-      the `kGenStateNamespace`/`kDirtyStateNamespace` house style (why local-only,
-      why never synced).
-- [ ] Add `appendQuarantine(QuarantinedSstable)`: CBOR-encode the record,
-      `EncryptionEnvelope.wrap` with `ValueContext(kQuarantineNamespace, key)`,
-      key = `symbolicKey('quarantine:$filename')`, write via `_engine.put`
-      (idempotent overwrite per D3) — mirroring the existing `$$…state` writers.
-- [ ] Add `listQuarantines()` using `_engine.scan(kQuarantineNamespace)` →
-      per-`KvEntry` `EncryptionEnvelope.unwrap(..., context:
-      ValueContext(kQuarantineNamespace, entry.key))` → CBOR-decode (D5 — first
-      scan-based `MetaStore` accessor; the point-read helpers do not fit).
-- [ ] Add `clearQuarantineLog()` (Q4) — delete every key in the namespace.
+- [x] Add `kQuarantineNamespace` = `r'$$quarantine'` with a house-style doc comment.
+- [x] Add `appendQuarantine(QuarantinedSstable)`: CBOR + `EncryptionEnvelope.wrap`
+      with `ValueContext(kQuarantineNamespace, key)`, key from the filename
+      (idempotent overwrite per D3), via `_engine.put`.
+- [x] Add `listQuarantines()` via `_engine.scan(kQuarantineNamespace)` → per-entry
+      unwrap with `ValueContext(kQuarantineNamespace, entry.key)` → CBOR-decode
+      (D5 — first scan-based `MetaStore` accessor).
+- [x] Add `clearQuarantineLog()` (Q4).
 
 ### Phase 3 — wire `SyncEngine.pull()`
 
-- [ ] Add `appendQuarantine(QuarantinedSstable)` to the **`KvStore` interface**;
-      implement in `KvStoreImpl` as `_meta.appendQuarantine(...)` (D1 — mirrors
-      `resetTombstoneFloor`). Do **not** thread a `MetaStore` into `SyncEngine`.
-- [ ] Change `SyncEngine.pull()` → `Future<PullResult>`. Declare plain
-      `quarantined` / `deferred` `List`s **before** the loop; append to them in
-      the loop; return after it. Introduce **no** `catch`/`on Exception` around
-      the loop body (D4).
-- [ ] On each quarantine, call `_store.appendQuarantine(...)` **inside the
-      `if (rejected)` block** (`:628-634`), i.e. before the post-loop `hwm.save`
-      (D3 — ordering is the whole point). Replace the bare quarantine `print`.
-- [ ] Change `SyncEngine.sync()` → `Future<SyncResult>` (Q3); keep
-      `_logRejectedSstable`'s WARN print as a secondary breadcrumb.
+- [x] Add `appendQuarantine(QuarantinedSstable)` to the **`KvStore` interface**;
+      `KvStoreImpl` delegates to `_meta.appendQuarantine(...)` (D1).
+- [x] `SyncEngine.pull()` → `Future<PullResult>`; plain `quarantined`/`deferred`
+      `List`s built in the loop, no `catch`/`on Exception` wrapper (D4).
+- [x] `_store.appendQuarantine(...)` inside the `if (rejected)` block, before the
+      post-loop `hwm.save` (D3); bare quarantine `print` replaced.
+- [x] `SyncEngine.sync()` → `Future<SyncResult>` (Q3).
 
 ### Phase 4 — public surface on `KmdbDatabase`
 
-- [ ] `KmdbDatabase.pull()` → `Future<PullResult>`; `.sync()` → `Future<SyncResult>`
-      (thread the value, don't discard); `push()` stays `Future<void>`.
-- [ ] Add `KmdbDatabase.quarantinedSstables()` → `Future<List<QuarantinedSstable>>`
-      and `clearQuarantineLog()`, delegating to `_store.meta.…` directly (D1).
+- [x] `KmdbDatabase.pull()` → `Future<PullResult>`; `.sync()` → `Future<SyncResult>`
+      (threaded, not discarded); `push()` stays `Future<void>`.
+- [x] `KmdbDatabase.quarantinedSstables()` + `clearQuarantineLog()` (delegating to
+      `_store.meta.…`, D1).
 
 ### Phase 5 — tests (fault injection, not golden path)
 
-- [ ] Corrupt peer SSTable (crafted via `test/util/hostile_sstable.dart` /
-      `FaultyStorageAdapter`) → `PullResult.quarantined` contains the entry with
-      the right `reason`; the durable log persists it.
-- [ ] **Durability (WAL replay):** after the quarantine, reopen the store
-      (`KvStoreImpl.open` over the *same* on-disk / retained adapter so the WAL
-      genuinely replays) → `quarantinedSstables()` still returns the entry. Do not
-      shortcut with a fresh in-memory store that never replayed.
-- [ ] **Crash-window ordering (the load-bearing durability test — D3):** inject a
-      failure/crash **between** `appendQuarantine` and the `hwm.save` (e.g.
-      `FaultyStorageAdapter` failing the cloud HWM write, or failing the log put).
-      Assert: (a) if the *log* put fails, the HWM is **not** advanced (file
-      reconsidered next pull — fail-safe); (b) if the HWM save fails *after* a
-      successful log put, reopen shows the record present, and a subsequent
-      healthy pull re-quarantines idempotently with **no duplicate** entry and
-      then advances the HWM. A plain happy-path reopen does **not** cover this.
-- [ ] **Never synced:** assert `$$quarantine` lands in `.local.sst` and never
-      appears in the sync root (`isLocalOnly` posture).
-- [ ] **Idempotency:** a second `pull()` does not re-fetch or duplicate the
-      quarantine.
-- [ ] Sub-floor `StaleSstableIngestException` file → appears in `deferred` (as a
-      `DeferredSstable`), **not** `quarantined`, and is **not** persisted; a later
-      pull can still ingest it.
-- [ ] **Cancellation:** cancel mid-pull → `SyncCancelledException` propagates
-      uncaught, no partial `PullResult` is returned (D4).
-- [ ] Cover each `QuarantineReason` mapping.
+- [x] Corrupt peer SSTable → `PullResult.quarantined` with the right `reason`;
+      durable log persists it (`sync_engine_test.dart`).
+- [x] **Durability (WAL replay):** the record survives a genuine reopen
+      (`quarantine_crash_ordering_test.dart` (b)).
+- [x] **Crash-window ordering (D3):** failure injected **between**
+      `appendQuarantine` and `hwm.save` — (a) log-put failure leaves the HWM
+      un-advanced (fail-safe); (b) HWM-save failure after a good log put →
+      record present on reopen, idempotent re-quarantine, no duplicate
+      (`quarantine_crash_ordering_test.dart`).
+- [x] **Never synced:** `$$quarantine` lands in `.local.sst`, never uploaded
+      (`kmdb_database_sync_test.dart`).
+- [x] **Idempotency:** a second `pull()` does not re-fetch/duplicate
+      (`sync_engine_test.dart`).
+- [x] Sub-floor `StaleSstableIngestException` → `deferred` (a `DeferredSstable`),
+      **not** `quarantined`, **not** persisted (`quarantine_reason_coverage_test.dart`).
+- [x] **Cancellation:** pre-cancelled / mid-flight token → `SyncCancelledException`
+      propagates uncaught, no partial result (`sync_cancellation_integration_test.dart`,
+      unmodified — still green under the new return types).
+- [x] Every `QuarantineReason` mapping covered — the four file-driven reasons plus
+      `outOfMemory` via an injected `OutOfMemoryError`
+      (`quarantine_reason_coverage_test.dart`).
 
 ### Phase 6 — docs
 
-- [ ] §12 quarantine-reporting subsection + sync-API return types; §13
-      signatures + `quarantinedSstables()`; §99 glossary "quarantine".
-- [ ] Doc comments on every new public symbol.
-- [ ] Note the breaking-signature change for the eventual CHANGELOG (A5/WI-10).
+- [x] §12 "Quarantine reporting" subsection + "Return values" (new sync-API return
+      types + `quarantinedSstables()`/`clearQuarantineLog()`); §99 glossary
+      "Quarantine (sync)". (§13 lists no sync-method signatures, so no §13 change.)
+- [x] Doc comments on every new public symbol.
+- [x] Breaking-signature change noted in §12 for the eventual CHANGELOG (A5/WI-10).
 
 **Final step — QA sign-off and pre-commit:**
 
 - [ ] Run `make coverage` — confirm >95% on all new files.
-- [ ] Hand off to the **`kmdb-qa` agent** for sign-off (spec alignment, doc
-      comments, test coverage/adequacy, code health). Resolve every blocking
-      item before proceeding. Do not open a PR until sign-off is received.
+- [ ] Hand off to the **`kmdb-qa` agent** for sign-off. (Run from the main
+      session — the resume is inline.)
 - [ ] Run `make pre_commit` — format, analyze, license_check, tests all green.
-      (Note: `make pre_commit` is `kmdb`-only; this change is confined to `kmdb`,
-      so that is sufficient here.)
+      (`make pre_commit` is `kmdb`-only; this change is confined to `kmdb`.)
 - [ ] Verify licence headers on all new files (2026).
 
 ## Summary

@@ -23,6 +23,7 @@ import '../encryption/key_derivation.dart';
 import '../encryption/value_context.dart';
 import '../engine/kvstore/kv_store.dart';
 import '../engine/kvstore/kv_store_impl.dart';
+import '../engine/kvstore/quarantine.dart';
 import '../engine/platform/storage_adapter_interface.dart';
 import '../engine/platform/storage_adapter_native.dart';
 import 'package:betto_inferencing/betto_inferencing.dart';
@@ -32,8 +33,10 @@ import '../search/lexical/fts_manager.dart';
 import '../search/semantic/vec_manager.dart';
 import '../search/vec_index_definition.dart';
 import '../sync/consolidation_config.dart';
+import '../sync/pull_result.dart';
 import '../sync/sync_context.dart';
 import '../sync/sync_engine.dart';
+import '../sync/sync_result.dart';
 import '../sync/sync_storage_adapter.dart';
 import '../vault/search/vault_indexing_status.dart';
 import '../vault/search/vault_search_config.dart';
@@ -818,11 +821,18 @@ final class KmdbDatabase {
   /// [StorageAdapterNative] is constructed (or immediately if [localAdapter] is
   /// supplied but is itself unsupported on web).
   ///
+  /// Returns a [SyncResult] wrapping the pull half's [PullResult] — see
+  /// [SyncEngine.sync] and [PullResult] for what is reported and the
+  /// cancellation contract (no partial result on [SyncCancelledException]).
+  ///
   /// Example:
   /// ```dart
-  /// await db.sync(
+  /// final result = await db.sync(
   ///   syncAdapter: LocalDirectoryAdapter('/path/to/sync-folder'),
   /// );
+  /// if (result.pull.quarantined.isNotEmpty) {
+  ///   // Surface to the user — see also `quarantinedSstables()`.
+  /// }
   ///
   /// // With cancellation and a 30-second timeout:
   /// final token = CancellationToken();
@@ -832,7 +842,7 @@ final class KmdbDatabase {
   ///   timeout: const Duration(seconds: 30),
   /// );
   /// ```
-  Future<void> sync({
+  Future<SyncResult> sync({
     required SyncStorageAdapter syncAdapter,
     String syncRoot = '',
     Set<String>? syncNamespaces,
@@ -850,7 +860,7 @@ final class KmdbDatabase {
       cancel: cancel,
       timeout: timeout,
     );
-    await engine.sync();
+    return engine.sync();
   }
 
   /// Flushes and uploads local SSTables to [syncAdapter].
@@ -885,8 +895,12 @@ final class KmdbDatabase {
   /// See [sync] for full parameter documentation (including [cancel] and
   /// [timeout]).
   ///
+  /// Returns a [PullResult] reporting every peer SSTable this call
+  /// permanently quarantined or transiently deferred — see [SyncEngine.pull]
+  /// for the crash-safety ordering guarantee and the cancellation contract.
+  ///
   /// **Native-only.** See [sync] for web behaviour.
-  Future<void> pull({
+  Future<PullResult> pull({
     required SyncStorageAdapter syncAdapter,
     String syncRoot = '',
     Set<String>? syncNamespaces,
@@ -904,8 +918,34 @@ final class KmdbDatabase {
       cancel: cancel,
       timeout: timeout,
     );
-    await engine.pull();
+    return engine.pull();
   }
+
+  /// Returns every currently-logged [QuarantinedSstable] on this device.
+  ///
+  /// Delegates to `MetaStore.listQuarantines` — the durable, device-local
+  /// `$$quarantine` log that survives across process restarts and missed
+  /// [pull]/[sync] results (finding A3 / WI-7). See [QuarantinedSstable]'s
+  /// doc comment for why this log exists in addition to the per-call
+  /// [PullResult].
+  ///
+  /// Returns an empty list if no peer SSTable has ever been quarantined on
+  /// this device.
+  Future<List<QuarantinedSstable>> quarantinedSstables() =>
+      _store.meta.listQuarantines();
+
+  /// Deletes every entry in the durable quarantine log.
+  ///
+  /// This is the host application's acknowledge mechanism: once the user (or
+  /// application logic) has seen and handled the reported quarantines, call
+  /// this to clear the log. There is no per-entry acknowledgement in 0.1.0 —
+  /// see `MetaStore.clearQuarantineLog`'s doc comment.
+  ///
+  /// This does **not** un-quarantine the underlying files — the per-peer
+  /// high-water mark is unaffected, so the corresponding files remain
+  /// permanently skipped. Clearing the log only discards the historical
+  /// record of *why* they were skipped.
+  Future<void> clearQuarantineLog() => _store.meta.clearQuarantineLog();
 
   /// Constructs a [SyncEngine] with resolved [syncNamespaces], [dbDir], and
   /// [deviceId] from the store.

@@ -16,6 +16,7 @@ import 'dart:typed_data';
 
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store_impl.dart';
+import 'package:kmdb/src/engine/kvstore/quarantine.dart';
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
 import 'package:kmdb/src/engine/sstable/sstable_info.dart';
 import 'package:kmdb/src/engine/sstable/sstable_reader.dart';
@@ -517,7 +518,7 @@ void main() {
           localAdapter,
           'dev00001',
         );
-        await engine.pull();
+        final result = await engine.pull();
 
         // S-1 fix: the peer HWM must advance past the rejected file's maxHlc
         // so it is quarantined rather than re-fetched every cycle — the
@@ -529,6 +530,23 @@ void main() {
         );
         expect(hwm, isNotNull);
         expect(hwm!.peers[peerId], equals(const Hlc(5001, 0)));
+
+        // A3 / WI-7: the returned PullResult reports the quarantine.
+        expect(result.quarantined, hasLength(1));
+        expect(result.deferred, isEmpty);
+        final record = result.quarantined.single;
+        expect(record.peerDeviceId, equals(peerId));
+        expect(record.filename, equals(peerFilename));
+        expect(record.maxHlc, equals(const Hlc(5001, 0)));
+        expect(record.reason, equals(QuarantineReason.corruptedSstable));
+        expect(record.detail, isNotEmpty);
+
+        // A3 / WI-7: the same record is durably logged in $$quarantine —
+        // survives independently of whether the caller inspected the
+        // PullResult.
+        final logged = await store.meta.listQuarantines();
+        expect(logged, hasLength(1));
+        expect(logged.single.filename, equals(peerFilename));
 
         // Note: the raw bytes are written to local `sst/` *before*
         // `ingestAt0` validates them (see `KvStoreImpl.ingestSstable`) — this
@@ -544,12 +562,20 @@ void main() {
         // repeat this test, so instead assert the quarantine is durable by
         // confirming the peer's HWM entry is unchanged by a second pull with
         // no new remote activity.
-        await engine.pull();
+        final secondResult = await engine.pull();
         final hwmAfterSecondPull = await HighwaterMark.load(
           '$_syncRoot/highwater/dev00001.hwm',
           cloudAdapter,
         );
         expect(hwmAfterSecondPull!.peers[peerId], equals(const Hlc(5001, 0)));
+
+        // The second pull did not re-process the already-quarantined file
+        // (its HWM already covers it, so the loop `continue`s before ever
+        // reaching ingest), so it reports no new quarantine — and the durable
+        // log still holds exactly one entry, not two.
+        expect(secondResult.quarantined, isEmpty);
+        final loggedAfterSecondPull = await store.meta.listQuarantines();
+        expect(loggedAfterSecondPull, hasLength(1));
       },
     );
 

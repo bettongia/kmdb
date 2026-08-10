@@ -25,6 +25,7 @@ import 'device_id.dart';
 import 'kv_store.dart';
 import 'lsm_engine.dart';
 import 'meta_store.dart';
+import 'quarantine.dart';
 
 /// Concrete [KvStore] implementation backed by [LsmEngine].
 ///
@@ -379,6 +380,10 @@ final class KvStoreImpl implements KvStore {
   @override
   Future<void> resetTombstoneFloor() =>
       _meta.setTombstoneFloor(const Hlc(0, 0));
+
+  @override
+  Future<void> appendQuarantine(QuarantinedSstable record) =>
+      _meta.appendQuarantine(record);
 
   @override
   Future<void> close({bool flush = true}) async {

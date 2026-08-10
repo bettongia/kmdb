@@ -22,6 +22,7 @@ import '../engine/compaction/reclamation_policy.dart'
     show ReclamationPolicyRegistry;
 import '../engine/kvstore/kv_store.dart';
 import '../engine/kvstore/meta_store.dart';
+import '../engine/kvstore/quarantine.dart';
 import '../engine/util/hlc.dart';
 import 'cache_tier.dart';
 import 'session_cache.dart';
@@ -184,6 +185,10 @@ final class CacheLayer implements KvStore {
 
   @override
   Future<void> resetTombstoneFloor() => _store.resetTombstoneFloor();
+
+  @override
+  Future<void> appendQuarantine(QuarantinedSstable record) =>
+      _store.appendQuarantine(record);
 
   @override
   Future<void> ingestSstable(String filename, Uint8List bytes) =>
