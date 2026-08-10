@@ -43,6 +43,18 @@ VaultManifest _manifest(String originalName) => VaultManifest(
   createdAt: '2026-01-01T00:00:00.000Z',
 );
 
+/// Builds an HTML document with [depth] levels of nested `<div>`s wrapping
+/// [payload] — used by the S-8 recursion-depth bound tests below.
+String _nestedHtml(int depth, String payload) {
+  final open = StringBuffer();
+  final close = StringBuffer();
+  for (var i = 0; i < depth; i++) {
+    open.write('<div>');
+    close.write('</div>');
+  }
+  return '<html><body>$open$payload$close</body></html>';
+}
+
 void main() {
   group('HtmlTextExtractor', () {
     test('supportedMediaTypes is exactly text/html', () {
@@ -217,6 +229,103 @@ void main() {
         returnsNormally,
       );
       expect(text, isNotNull);
+    });
+
+    // ── S-8: ExtractorLimits resource bounds ────────────────────────────
+
+    group('ExtractorLimits (S-8)', () {
+      test('a document nested deeper than maxRecursionDepth declines (null), '
+          'not truncated text — a tiny limit keeps the test fast', () async {
+        final extractor = HtmlTextExtractor(
+          limits: ExtractorLimits(
+            maxInputBytes: ExtractorLimits.defaults.maxInputBytes,
+            maxRecursionDepth: 5,
+            maxDuration: ExtractorLimits.defaults.maxDuration,
+          ),
+        );
+        final bytes = Uint8List.fromList(
+          utf8.encode(_nestedHtml(20, 'unreachable payload')),
+        );
+
+        String? text;
+        await expectLater(
+          () async =>
+              text = await extractor.extract(bytes, _manifest('deep.html')),
+          returnsNormally,
+          reason: 'a hostile document must decline gracefully, not throw',
+        );
+        expect(text, isNull);
+      });
+
+      test('a document within maxRecursionDepth still extracts normally '
+          '(the depth cap does not misfire on shallow documents)', () async {
+        final extractor = HtmlTextExtractor(
+          limits: ExtractorLimits(
+            maxInputBytes: ExtractorLimits.defaults.maxInputBytes,
+            maxRecursionDepth: 5,
+            maxDuration: ExtractorLimits.defaults.maxDuration,
+          ),
+        );
+        final bytes = Uint8List.fromList(
+          utf8.encode(_nestedHtml(2, 'shallow payload')),
+        );
+
+        final text = await extractor.extract(bytes, _manifest('shallow.html'));
+
+        expect(text, isNotNull);
+        expect(text, contains('shallow payload'));
+      });
+
+      test('input larger than maxInputBytes declines (null) before any '
+          'parsing — a tiny limit keeps the test fast', () async {
+        final extractor = HtmlTextExtractor(
+          limits: ExtractorLimits(
+            maxInputBytes: 16,
+            maxRecursionDepth: ExtractorLimits.defaults.maxRecursionDepth,
+            maxDuration: ExtractorLimits.defaults.maxDuration,
+          ),
+        );
+        // Well-formed, parseable HTML — but larger than the 16-byte cap.
+        final bytes = Uint8List.fromList(
+          utf8.encode(
+            '<html><body><p>well within parser limits</p>'
+            '</body></html>',
+          ),
+        );
+        expect(bytes.length, greaterThan(16));
+
+        final text = await extractor.extract(bytes, _manifest('big.html'));
+
+        expect(text, isNull);
+      });
+
+      test(
+        'input at or below maxInputBytes is still parsed normally',
+        () async {
+          final extractor = HtmlTextExtractor(
+            limits: ExtractorLimits(
+              maxInputBytes: 4096,
+              maxRecursionDepth: ExtractorLimits.defaults.maxRecursionDepth,
+              maxDuration: ExtractorLimits.defaults.maxDuration,
+            ),
+          );
+          final bytes = await _fixture('golden_path.html');
+          expect(bytes.length, lessThanOrEqualTo(4096));
+
+          final text = await extractor.extract(
+            bytes,
+            _manifest('golden_path.html'),
+          );
+
+          expect(text, isNotNull);
+          expect(text, contains('Section Heading'));
+        },
+      );
+
+      test('default limits are ExtractorLimits.defaults', () {
+        const extractor = HtmlTextExtractor();
+        expect(extractor.limits, same(ExtractorLimits.defaults));
+      });
     });
   });
 }

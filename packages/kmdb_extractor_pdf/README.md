@@ -54,6 +54,31 @@ searchable chunks) — not `failed` or `unsupported` — consistent with how
 
 ---
 
+## Resource bounds
+
+`PdfTextExtractor` accepts an `ExtractorLimits` (from `package:kmdb`) via its
+constructor, defaulting to `ExtractorLimits.defaults` (32 MiB input size, 20
+second cumulative extraction time). A document exceeding either bound is
+declined — `extract()` returns `null`, never throws or hangs:
+
+```dart
+PdfTextExtractor(
+  limits: ExtractorLimits(
+    maxInputBytes: 64 * 1024 * 1024,
+    maxRecursionDepth: 512, // unused by PdfTextExtractor
+    maxDuration: Duration(seconds: 10),
+  ),
+);
+```
+
+The time bound tracks cumulative wall-clock time across `betto_pdfium`'s
+per-page extraction stream — it interrupts a slow-but-progressing
+multi-page document, but cannot interrupt a *single* page hanging inside
+native PDFium code (see "Known limitations" below and the `package:kmdb`
+`VaultIndexingIsolate.kWorkTimeout` backstop for that case).
+
+---
+
 ## Platform support
 
 Vault search indexing runs exclusively in a native (non-web) indexing
@@ -81,6 +106,13 @@ platforms:
   script extraction quality — treat these as unverified rather than
   guaranteed. This package's test suite exercises real-world multi-column
   fixtures but does not assert a specific layout-preserving behaviour.
+- **A genuinely wedged native call cannot be recovered in-process.** The
+  `maxDuration` bound above only interrupts extraction *between* pages — a
+  single page hung inside native PDFium code never returns control to Dart
+  at all, so no Dart-level timeout can pre-empt it. `betto_pdfium` routes
+  every `PdfDocument` through one lazily-spawned, process-wide singleton
+  isolate, so a genuine native hang or crash there affects every subsequent
+  PDF extraction in the process, not just the one that triggered it.
 
 ---
 

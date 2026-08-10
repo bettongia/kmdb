@@ -16,6 +16,7 @@ import 'dart:typed_data';
 
 import '../vault_manifest.dart';
 import 'charset_util.dart';
+import 'extractor_limits.dart';
 import 'vault_text_extractor.dart';
 
 /// Extracts plain text from `text/plain` vault blobs.
@@ -53,7 +54,21 @@ import 'vault_text_extractor.dart';
 /// ```
 final class PlainTextExtractor implements VaultTextExtractor {
   /// Creates a [PlainTextExtractor].
-  PlainTextExtractor();
+  ///
+  /// [limits] bounds the size of input this extractor will attempt to
+  /// decode; defaults to [ExtractorLimits.defaults]. `PlainTextExtractor`
+  /// has no recursion and does not call into native code, so only
+  /// [ExtractorLimits.maxInputBytes] applies — it decodes all bytes
+  /// unbounded otherwise, which is a defensive concern for the standalone
+  /// (non-pipeline) use case.
+  ///
+  /// Not `const` — [lastCharset] is a mutable, non-final instance field (it
+  /// was already mutable before this change; adding a `final` [limits]
+  /// field alongside it does not make the class constructible as `const`).
+  PlainTextExtractor({this.limits = ExtractorLimits.defaults});
+
+  /// The resource bounds this extractor honours. See [ExtractorLimits].
+  final ExtractorLimits limits;
 
   @override
   Set<String> get supportedMediaTypes => const {'text/plain'};
@@ -71,6 +86,13 @@ final class PlainTextExtractor implements VaultTextExtractor {
   Future<String?> extract(Uint8List bytes, VaultManifest manifest) async {
     // Reset per-call state.
     lastCharset = null;
+
+    // Decline oversized input before any decoding work. This is the
+    // extractor-level counterpart to VaultSearchConfig.maxBlobBytes — the
+    // only protection a standalone (non-pipeline) caller gets.
+    if (bytes.length > limits.maxInputBytes) {
+      return null;
+    }
 
     try {
       final result = decodeText(bytes);

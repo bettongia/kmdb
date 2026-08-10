@@ -891,7 +891,7 @@ contention test that exercises the lease protocol.
 
 ---
 
-### RC-25 — Vault indexing isolate: real native crash recovery (D-1)
+### RC-25 — Vault indexing isolate: real native crash/hang recovery (D-1, S-8)
 
 - **Area:** vault search / durability
 - **Validates:** that a genuine native crash inside a text extractor (e.g.
@@ -900,26 +900,51 @@ contention test that exercises the lease protocol.
   that `KmdbDatabase.close()` still returns and flushes the memtable while
   that isolate is dying, and that `VaultSearchManager.recover()` correctly
   resets the in-flight blob to `pending` on the next open rather than
-  wedging in `extracting` forever.
-- **Why not automated:** the automated suite
-  (`test/query/kmdb_database_close_isolate_death_test.dart`) exercises the
-  Dart-level contract deterministically — an extractor whose `extract()`
-  never returns — and confirms `close()` is bounded and the flush survives.
-  It cannot reproduce an actual OS-level segfault/native-crash signal
-  crossing the isolate boundary, since that requires a real native extractor
-  processing genuinely malformed input (a PDFium crash is not something a
-  portable Dart test can trigger reliably or safely), and platform behaviour
-  for whether `onExit` fires on every kind of native crash is not
+  wedging in `extracting` forever. **Additionally (S-8)**: that a genuine
+  native *hang* (as opposed to a crash) in PDFium behaves exactly as
+  documented — i.e. is **not** recoverable by either Dart-level bound
+  introduced by S-8 (`PdfTextExtractor`'s `ExtractorLimits.maxDuration`
+  cumulative-wall-clock budget, or `VaultSearchManager`'s V1
+  re-spawn-on-`sendWork`-failure policy) — and that the pipeline instead
+  degrades to a bounded, repeating `VaultIndexingIsolate.kWorkTimeout` (30s)
+  failure per PDF item, without wedging non-PDF indexing or crashing the
+  process. This is the expected, documented behaviour (§32
+  "Isolate Lifecycle" / "Resource Bounds") — RC-25 exists to confirm reality
+  matches that documentation, not to try to make a native hang recoverable.
+- **Why not automated:** the automated suite exercises every *Dart-level*
+  seam deterministically: `test/query/kmdb_database_close_isolate_death_test.dart`
+  (an extractor whose `extract()` never returns — confirms `close()` is
+  bounded and the flush survives), and, since S-8,
+  `kmdb_extractor_pdf`'s `pdf_text_extractor_test.dart`
+  (`maxDuration: Duration.zero` against a real multi-page fixture — confirms
+  the extractor-level budget) and `kmdb`'s
+  `vault_search_manager_respawn_test.dart` /
+  `vault_indexing_isolate_test.dart` (confirms V1 re-spawn and the V2
+  stale-result guard using a Dart-level hanging/delaying extractor, real
+  isolates, real `kWorkTimeout` waits). None of these can reproduce an
+  actual OS-level segfault or a genuinely wedged native FFI call inside
+  PDFium's own C code, since that requires a real native extractor
+  processing genuinely malformed/adversarial input — not something a
+  portable Dart test can trigger reliably or safely — and platform
+  behaviour for whether `onExit` fires on every kind of native crash (or
+  whether a native hang ever returns control to Dart at all) is not
   guaranteed to be uniform across macOS/Linux/Windows/web.
 - **Applies when:** before any release that ships `kmdb_extractor_pdf` (or any
   other native-backed `VaultTextExtractor`) alongside vault search; re-verify
-  after any change to `VaultIndexingIsolate`'s spawn/error/exit wiring.
+  after any change to `VaultIndexingIsolate`'s spawn/error/exit wiring, to
+  `PdfTextExtractor`'s time-bound logic, or to `VaultSearchManager`'s
+  re-spawn policy.
 - **Prerequisites:** a native-platform machine; `kmdb_extractor_pdf` (or
   another native extractor) registered via `VaultSearchConfig.extractors`; a
-  small corpus of malformed/fuzzed PDFs known to crash PDFium (or another
+  small corpus of malformed/fuzzed PDFs known to **crash** PDFium (or another
   native parser known to crash on adversarial input — this need not be a
   specific curated corpus, any input that reliably reproduces a native crash
-  in the extractor under test suffices).
+  in the extractor under test suffices); separately, if available, a PDF (or
+  other native-extractor input) known to **hang** PDFium indefinitely rather
+  than crash it (harder to obtain than a crashing sample — if none is
+  available, this half of the check may be skipped with a note in the
+  release log, since the documented behaviour it verifies is already
+  narrowly scoped and the crash-recovery half below still runs).
 - **Steps:**
   1. Open a database with vault search configured, including the native
      extractor under test.
@@ -934,13 +959,36 @@ contention test that exercises the lease protocol.
   5. Confirm the crashed blob's `$$vault:extract:{sha256}` status resets to
      `pending` (not stuck in `extracting`) and that `reindexVault()` or the
      normal startup recovery path re-attempts it.
+  6. **(S-8, if a hanging sample is available)** Ingest a blob known to hang
+     PDFium rather than crash it. Confirm the item eventually fails via the
+     30s `kWorkTimeout` (not the `maxDuration` extractor budget — a true
+     native hang never returns control to `PdfTextExtractor`'s `await`, so
+     its `Stopwatch` check is never reached) and that `$$vault:extract` for
+     that blob records `failed`, not stuck in `extracting`.
+  7. **(S-8)** Ingest a second, ordinary (non-hanging) PDF immediately after.
+     Confirm `VaultSearchManager` re-spawned the isolate (V1) so this item
+     is *not* forced through another 30s wait for non-PDF-routed work — but
+     also confirm that a *third*, PDF-routed item still times out again at
+     ~30s, demonstrating the documented limitation: re-spawn recovers
+     Dart-level wedging but not a natively-wedged, process-wide
+     `PdfiumIsolate` singleton, which every subsequent PDF extraction
+     re-routes to.
 - **Expected result:** no process crash, `close()` bounded and the memtable
   flush intact, and the crashed blob self-heals to a re-indexable state
-  rather than wedging.
+  rather than wedging. For the hang variant: the hung item fails via
+  `kWorkTimeout` (not earlier), non-PDF work on the freshly re-spawned
+  isolate is unaffected, and subsequent PDF-routed work continues to time
+  out (rather than silently hanging forever or corrupting other items'
+  results) — confirming the S-8 spec's documented limitation is the actual,
+  observed behaviour rather than an untested claim.
 - **Related:** `docs/plans/plan_0_10_01_sync_trust_boundary.md` (Phase 3b,
-  D-1), `docs/reviews/release-readiness-review-2026-07-18.md` §6 (D-1),
-  `docs/spec/18_concurrency.md` ("The Vault Indexing Isolate"), RC-21 (the
-  related but distinct process-level-SIGKILL crash recovery check).
+  D-1), `docs/plans/plan_0_10_01_s8_extractor_bounds.md` (S-8, moves to
+  `docs/plans/completed/` once implemented),
+  `docs/reviews/release-readiness-review-2026-07-18.md` §6 (D-1),
+  `docs/spec/18_concurrency.md` ("The Vault Indexing Isolate"),
+  `docs/spec/32_vault_search.md` ("Isolate Lifecycle", "Resource Bounds"),
+  RC-21 (the related but distinct process-level-SIGKILL crash recovery
+  check).
 
 ---
 

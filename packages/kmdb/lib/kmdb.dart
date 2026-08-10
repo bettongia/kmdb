@@ -143,6 +143,7 @@ export 'src/vault/local_directory_vault_adapter_stub.dart'
 // ── Vault search (WI-3) ───────────────────────────────────────────────────────
 export 'src/vault/search/vault_search_config.dart' show VaultSearchConfig;
 export 'src/vault/search/vault_text_extractor.dart' show VaultTextExtractor;
+export 'src/vault/search/extractor_limits.dart' show ExtractorLimits;
 export 'src/vault/search/plain_text_extractor.dart' show PlainTextExtractor;
 export 'src/vault/search/vault_search_hit.dart'
     show VaultSearchResult, VaultSearchHit, VaultChunkContext;

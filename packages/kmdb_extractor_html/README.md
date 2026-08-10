@@ -53,6 +53,32 @@ handles an empty `text/plain` blob.
 
 ---
 
+## Resource bounds
+
+`HtmlTextExtractor` accepts an `ExtractorLimits` (from `package:kmdb`) via
+its constructor, defaulting to `ExtractorLimits.defaults` (32 MiB input
+size, 512 levels of tree-walk nesting). A document exceeding either bound is
+declined — `extract()` returns `null` for the *whole* document rather than
+truncated text, never throws or hangs:
+
+```dart
+HtmlTextExtractor(
+  limits: ExtractorLimits(
+    maxInputBytes: 64 * 1024 * 1024,
+    maxRecursionDepth: 256,
+    maxDuration: ExtractorLimits.defaults.maxDuration, // unused by this extractor
+  ),
+);
+```
+
+The input-size bound is checked before any parsing begins — since a
+pathologically nested document is necessarily large, this also serves as
+the first line of defence against a parser-stage stack overflow (the
+recursion-depth bound only protects the extractor's own tree walk over an
+already-parsed document, not the underlying `html` package's parser).
+
+---
+
 ## Known limitations
 
 - **No charset side-channel.** Raw bytes are decoded via the same WI-2

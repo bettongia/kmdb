@@ -325,7 +325,7 @@ final class VaultIndexingIsolate {
         StateError('VaultIndexingIsolate is no longer running'),
       );
     }
-    final pending = _PendingWork();
+    final pending = _PendingWork(expectedSha256: item.sha256);
     _inflight = pending;
     _sendPort.send(item);
     return pending.completer.future.timeout(
@@ -371,12 +371,29 @@ final class VaultIndexingIsolate {
     _errorExitPort.close();
   }
 
+  /// Handles a result message from the isolate.
+  ///
+  /// V2 (S-8, defense-in-depth): before clearing [_inflight], a
+  /// [VaultIndexResult] message is checked against
+  /// `_inflight!.expectedSha256`. On a mismatch — a stale reply for an item
+  /// that has already timed out and been superseded by a new in-flight item
+  /// — the message is dropped **without** touching [_inflight], so it cannot
+  /// abandon the legitimately in-flight item. With [VaultSearchManager]'s
+  /// re-spawn-on-error policy (V1) this mis-delivery is structurally
+  /// impossible in practice (the old isolate is discarded, so its late
+  /// replies can never reach a new isolate's `_inflight`) — this guard is
+  /// belt-and-braces, not the primary fix.
   void _onResult(dynamic message) {
     final pending = _inflight;
-    _inflight = null;
     if (message is VaultIndexResult) {
+      if (pending != null && message.sha256 != pending.expectedSha256) {
+        // Stale reply — drop it, leaving `_inflight` untouched.
+        return;
+      }
+      _inflight = null;
       pending?.completer.complete(message);
     } else {
+      _inflight = null;
       pending?.completer.completeError(
         StateError('Unexpected message from indexing isolate: $message'),
       );
@@ -413,7 +430,19 @@ final class VaultIndexingIsolate {
 }
 
 /// Holds the completer for an in-flight work item.
+///
+/// [expectedSha256] is recorded from [VaultWorkItem.sha256] at [sendWork]
+/// time and compared against [VaultIndexResult.sha256] in [_onResult] — a
+/// belt-and-braces guard (V2, defense-in-depth) against a stale reply
+/// mis-delivering to the wrong completer. See [_onResult]'s doc comment for
+/// why this is not the primary fix (the manager's re-spawn-on-error policy,
+/// V1, is — see [VaultSearchManager]'s `sendWork` catch block).
 final class _PendingWork {
+  _PendingWork({required this.expectedSha256});
+
+  /// The sha256 of the work item this completer is waiting on.
+  final String expectedSha256;
+
   final completer = Completer<VaultIndexResult>();
 }
 
