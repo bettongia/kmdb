@@ -58,6 +58,21 @@ export 'src/sync/local/local_directory_adapter_stub.dart'
     if (dart.library.io) 'src/sync/local/local_directory_adapter.dart'
     show LocalDirectoryAdapter;
 
+// ── Sync authentication (0.10.01 WI-4 T1) ──────────────────────────────────────
+export 'src/sync/auth/sync_artifact_class.dart' show SyncArtifactClass;
+export 'src/sync/auth/sync_auth_exception.dart' show SyncAuthException;
+export 'src/sync/auth/sync_authenticator.dart' show SyncAuthenticator;
+export 'src/sync/auth/default_sync_authenticator.dart'
+    show DefaultSyncAuthenticator;
+export 'src/sync/auth/sync_auth_envelope.dart' show SyncAuthEnvelope;
+export 'src/sync/auth/sync_authenticating_adapter.dart'
+    show SyncAuthenticatingAdapter;
+export 'src/sync/auth/sync_set_key.dart' show SyncSetKey;
+export 'src/sync/auth/pairing_code.dart' show PairingCode;
+export 'src/sync/auth/web_sync_authenticator_stub.dart'
+    if (dart.library.js_interop) 'src/sync/auth/web_sync_authenticator.dart'
+    show WebSyncAuthenticator;
+
 // ── Value encoding ────────────────────────────────────────────────────────────
 export 'src/encoding/value_codec.dart' show ValueCodec;
 export 'src/engine/util/key_codec.dart' show KeyGenerator, UuidV7KeyGenerator;

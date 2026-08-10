@@ -1,6 +1,6 @@
 # Authenticate sync artefacts against an untrusted provider (T1)
 
-**Status**: Investigated
+**Status**: Implementing
 
 **PR link**: _(none yet)_
 
@@ -269,26 +269,61 @@ strip the envelope **before** the rename, or the local blob will contain it.
 
 ### Phase 1 — `SyncAuthenticator` and the six-class HKDF derivation
 
-- [ ] `Future<Uint8List> mac(Uint8List)` / `Future<bool> verify(...)` in core.
+- [x] `Future<Uint8List> mac(Uint8List)` / `Future<bool> verify(...)` in core.
       **Not** get-key shaped — that would foreclose WebCrypto non-extractable
       keys, StrongBox, and Secure Enclave. `verify` uses a constant-time compare.
-- [ ] Default implementation: root key from `SecretStore`; **six** per-artefact-
+      Implemented as `SyncAuthenticator` (`sync_authenticator.dart`), signature
+      widened to `mac(SyncArtifactClass, Uint8List message)`/`verify(..., mac)`
+      per the six-class design below — see `sync_artifact_class.dart`,
+      `sync_auth_exception.dart`. Tests:
+      `test/sync/auth/default_sync_authenticator_test.dart`,
+      `sync_auth_envelope_test.dart`.
+- [x] Default implementation: root key from `SecretStore`; **six** per-artefact-
       class sub-keys via `Hkdf(hmac: Hmac(Sha256()), outputLength: 32)` with
       distinct `info` labels (`sstable`, `vault-blob`, `vault-manifest`,
       `vault-tombstone`, `hwm`, `lease`), mirroring `_indexTokenSubKey`
       (`encryption_provider.dart:279-287`). MAC = HMAC-SHA256 truncated to 16
       bytes (`mac.bytes.sublist(0, 16)`, matching `indexToken` `:297`) over
-      `lenPrefixed(relativeRemotePath) ‖ payload`.
-- [ ] Web implementation backed by a non-extractable `CryptoKey` (Q4), persisted
+      `lenPrefixed(relativeRemotePath) ‖ payload`. Implemented as
+      `DefaultSyncAuthenticator` + `SyncAuthEnvelope` (wrap/unwrap the
+      transport envelope) + `SyncAuthenticatingAdapter` (the Q2 decorator).
+      "Root key from `SecretStore`" is constructed by the caller
+      (`kmdb_cli`'s `adapterFor`, Phase 2) — `DefaultSyncAuthenticator` itself
+      takes raw bytes, matching `AesGcmEncryptionProvider`'s pattern of not
+      knowing about `SecretStore`/`DekCache` directly.
+- [x] Web implementation backed by a non-extractable `CryptoKey` (Q4), persisted
       in IndexedDB; extractability-policy seam (default non-extractable) for
       future web origination — **origination itself not implemented now**.
+      Implemented as `WebSyncAuthenticator` (`web_sync_authenticator.dart`,
+      conditional-exported via `web_sync_authenticator_stub.dart` +
+      `if (dart.library.js_interop)`), using `SubtleCrypto.importKey`
+      (non-extractable HKDF base key, `usages: ['deriveKey']`) +
+      `SubtleCrypto.deriveKey` (per-class non-extractable HMAC sub-keys) +
+      `SubtleCrypto.sign`/`verify`, persisted via IndexedDB
+      (`persist`/`loadPersisted`). Verified **not hand-waved**: real browser
+      test suite `test/sync/auth/web_sync_authenticator_test.dart` (9 tests,
+      run via `dart test -p chrome`, wired into `make cicd_web`), including a
+      known-answer-vector cross-check against `DefaultSyncAuthenticator`'s
+      native derivation (same root key/message/class → identical 16-byte
+      MAC), proving HKDF/HMAC interop between the native and web
+      implementations.
 
 ### Phase 2 — Key lifecycle and enrollment
 
-- [ ] Generate the 256-bit sync-set key (`Random.secure()`, 32 raw bytes) and the
+- [x] Generate the 256-bit sync-set key (`Random.secure()`, 32 raw bytes) and the
       sync-set identity at `remote add`; store raw bytes via `SecretStore`.
-- [ ] Pairing code: `KSA1-`-prefixed base32 + checksum, carrying key and sync-set
+      Implemented as `SyncSetKey` (`sync_set_key.dart`, core) —
+      `SyncSetKey.generate()`; `remote add` wiring is the next checklist item
+      below. Tests: `test/sync/auth/sync_set_key_test.dart`.
+- [x] Pairing code: `KSA1-`-prefixed base32 + checksum, carrying key and sync-set
       identity. base32 appears **only** in the code, never at rest.
+      Implemented as `PairingCode` (`pairing_code.dart`, core) — hand-rolled
+      RFC 4648 base32 (no existing pure-Dart primitive in the workspace;
+      `crypto`/base32 aren't `kmdb` core deps), checksum via
+      `package:cryptography`'s `Sha256` (already a dependency, used for
+      HKDF elsewhere — avoids adding a second hashing dependency). Tests:
+      `test/sync/auth/pairing_code_test.dart` (round-trip, whitespace/case
+      tolerance, corrupted-checksum rejection, truncation).
 - [ ] `kmdb remote pair show <remote>` / `kmdb remote pair import <remote>
       <code>`. On web, `show` is gated on an extractable key (Q4).
 - [ ] Clear diagnostics when a remote has no key, pointing at enrollment.
