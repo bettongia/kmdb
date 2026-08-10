@@ -70,6 +70,31 @@ enum QuarantineReason {
   /// `Error`, not an `Exception`, and a bare `catch` would also trap
   /// `SyncCancelledException`, which must always propagate uncaught.
   outOfMemory,
+
+  /// The file failed sync-artefact authentication — thrown as
+  /// `SyncAuthException` by the `SyncAuthenticatingAdapter` decorator
+  /// (0.10.01 WI-4 T1) when a downloaded SSTable's envelope MAC does not
+  /// verify, or is missing/malformed entirely.
+  ///
+  /// **Handled differently from every other reason above.** For the five
+  /// reasons above, the file's own `maxHlc` (parsed from its filename,
+  /// before any untrusted body content is read) is trustworthy — the file
+  /// really did come from the named peer, it is merely corrupt or hostile
+  /// in a structural sense, so advancing the peer high-water mark past it
+  /// is safe and is what actually makes the quarantine permanent. Under
+  /// [unauthenticated], the filename itself is **not** trustworthy: an
+  /// attacker with mere write access to the sync folder (but not the
+  /// sync-set key) can name any peer device ID and any `maxHlc` they like.
+  /// Advancing the peer HWM off an attacker-chosen `maxHlc` would hand that
+  /// attacker a permanent denial-of-sync primitive against a specific real
+  /// peer — a single forged file could suppress every subsequent genuine
+  /// SSTable from that peer forever, since `pull`'s `maxHlc <= peerHwm`
+  /// skip check (`sync_engine.dart`) would then reject them all. `pull`
+  /// therefore does **not** advance the peer HWM for this reason; instead,
+  /// the quarantine log entry itself (keyed by filename) becomes the
+  /// re-fetch guard — `pull` consults `KvStore.quarantinedFilenames()`
+  /// before downloading, not after.
+  unauthenticated,
 }
 
 /// A single durable record of a peer SSTable that `SyncEngine.pull` rejected

@@ -17,11 +17,22 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
+import 'package:kmdb/src/sync/auth/default_sync_authenticator.dart';
+import 'package:kmdb/src/sync/auth/sync_artifact_class.dart';
+import 'package:kmdb/src/sync/auth/sync_auth_envelope.dart';
+import 'package:kmdb/src/sync/auth/sync_authenticator.dart';
 import 'package:kmdb/src/vault/local_directory_vault_adapter.dart';
 import 'package:kmdb/src/vault/vault_store.dart';
 import 'package:test/test.dart';
 
 import 'test_kv_store.dart';
+
+/// A fixed 32-byte sync-authentication root key shared by every
+/// [LocalDirectoryVaultAdapter] in this file — simulating multiple devices
+/// enrolled in the same sync-set (0.10.01 WI-4 T1). All adapters must share
+/// one [SyncAuthenticator] instance keyed from this so that device-A writes
+/// verify under device-B's reads.
+final Uint8List _kTestRootKey = Uint8List.fromList(List.generate(32, (i) => i));
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
@@ -54,6 +65,7 @@ void main() {
     late VaultStore localStore;
     late LocalDirectoryVaultAdapter adapter;
     late TestKvStore localKvStore;
+    late SyncAuthenticator authenticator;
 
     setUp(() async {
       // Create fresh temp directories for each test.
@@ -65,11 +77,13 @@ void main() {
       final memAdapter = MemoryStorageAdapter();
       localStore = _MemVaultStore(memAdapter, localDbDir.path);
       localKvStore = TestKvStore();
+      authenticator = DefaultSyncAuthenticator(_kTestRootKey);
 
       adapter = LocalDirectoryVaultAdapter(
         syncRoot: syncRoot.path,
         localStore: localStore,
         kvStore: localKvStore,
+        authenticator: authenticator,
       );
     });
 
@@ -189,6 +203,7 @@ void main() {
           syncRoot: syncRoot.path,
           localStore: deviceBStore,
           kvStore: deviceBKvStore,
+          authenticator: authenticator,
         );
 
         // Sync metadata to device B.
@@ -234,6 +249,7 @@ void main() {
           syncRoot: syncRoot.path,
           localStore: deviceBStore,
           kvStore: deviceBKvStore,
+          authenticator: authenticator,
         );
         await adapterB.syncVaultMetadata(ref.sha256);
         expect(await deviceBStore.isHydrated(ref.sha256), isFalse);
@@ -259,21 +275,37 @@ void main() {
       await adapter.uploadVaultObject(ref.sha256);
 
       // Attacker substitutes the remote blob's bytes in place — simulating
-      // a compromised provider (T1) or malicious peer (T3) with write
-      // access to the sync folder. The manifest (sha256, crc32c) is left
-      // untouched, so this is exactly the "whatever the sync folder holds
-      // becomes the local blob for that address" scenario the review's
-      // S-4 finding describes.
+      // a malicious peer (T3) who legitimately holds the sync-set key (a
+      // shared-key MAC cannot distinguish a malicious key-holder from a
+      // legitimate one — see the plan's Non-goals) but writes mismatched
+      // content. This is the residual attacker S-4 defends against once
+      // sync authentication (0.10.01 WI-4 T1) is in place: T1 (a compromised
+      // provider *without* the key) can no longer even produce a
+      // validly-enveloped substitution at all — that weaker case is covered
+      // by sync_auth_envelope_test.dart, not here. The manifest (sha256,
+      // crc32c) is left untouched, so this is exactly the "whatever the
+      // sync folder holds becomes the local blob for that address" scenario
+      // the review's S-4 finding describes.
       final prefix = ref.sha256.substring(0, 2);
       final suffix = ref.sha256.substring(2);
       // Prefixed with EncryptionFlag.none (0x00) so the substituted bytes
-      // parse as a well-formed (unencrypted) EncryptionEnvelope — this test
-      // is specifically about the SHA-256 content-address check, not
-      // envelope parsing.
+      // parse as a well-formed (unencrypted) EncryptionEnvelope, then
+      // wrapped in a *validly-authenticated* sync-auth envelope (matching
+      // the malicious-key-holder threat model above) — this test is
+      // specifically about the SHA-256 content-address check surviving
+      // *underneath* a passing sync-auth check, not envelope parsing.
+      final substituted = Uint8List.fromList([
+        0x00,
+        ...utf8.encode('attacker-substituted-content'),
+      ]);
+      final enveloped = await SyncAuthEnvelope.wrap(
+        substituted,
+        authenticator,
+        artifactClass: SyncArtifactClass.vaultBlob,
+        relativePath: 'vault/$prefix/$suffix/blob',
+      );
       final remoteBlobPath = '${syncRoot.path}/vault/$prefix/$suffix/blob';
-      await File(
-        remoteBlobPath,
-      ).writeAsBytes([0x00, ...utf8.encode('attacker-substituted-content')]);
+      await File(remoteBlobPath).writeAsBytes(enveloped);
 
       // Device B syncs metadata (stub) then attempts hydration.
       final deviceBAdapter = MemoryStorageAdapter();
@@ -286,6 +318,7 @@ void main() {
         syncRoot: syncRoot.path,
         localStore: deviceBStore,
         kvStore: deviceBKvStore,
+        authenticator: authenticator,
       );
       await adapterB.syncVaultMetadata(ref.sha256);
 
@@ -376,6 +409,7 @@ void main() {
           syncRoot: syncRoot.path,
           localStore: deviceBStore,
           kvStore: deviceBKvStore,
+          authenticator: authenticator,
         );
         await adapterB.syncVaultMetadata(ref.sha256);
 

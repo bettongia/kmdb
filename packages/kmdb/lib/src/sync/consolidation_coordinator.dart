@@ -23,6 +23,7 @@ import '../engine/sstable/sstable_reader.dart';
 import '../engine/sstable/sstable_writer.dart';
 import '../engine/util/hlc.dart';
 import '../engine/util/key_codec.dart';
+import 'auth/sync_auth_exception.dart';
 import 'sync_context.dart';
 import 'sync_storage_adapter.dart';
 import 'consolidation_config.dart';
@@ -480,10 +481,27 @@ final class ConsolidationCoordinator {
 
       for (final filename in sortedInputs.reversed) {
         // Download from sync folder.
-        final bytes = await cloudAdapter.download(
-          safeInputPaths[filename]!,
-          ctx: _ctx,
-        );
+        final Uint8List? bytes;
+        try {
+          bytes = await cloudAdapter.download(
+            safeInputPaths[filename]!,
+            ctx: _ctx,
+          );
+        } on SyncAuthException catch (e) {
+          // Q2 rejection policy: skip this one input, like the
+          // CorruptedSstableException branch below — this device's own
+          // legitimately-authenticated inputs still get consolidated.
+          // Consolidation does not hold a KvStore reference, so — unlike
+          // SyncEngine.pull — there is no durable quarantine log to record
+          // this in; the WARN mirrors this file's existing S-6 rejection
+          // logging.
+          // ignore: avoid_print — structured logging deferred (Q8 decision).
+          print(
+            'WARN [ConsolidationCoordinator.consolidate] Skipping '
+            'unauthenticated input "$filename" (epoch=${lease.epoch}): $e',
+          );
+          continue;
+        }
         if (bytes == null) continue; // file deleted by another device
 
         // Write to a unique-per-run staging path via the local adapter (S-7:

@@ -82,6 +82,8 @@ final class _CountingStore implements KvStore {
   Future<void> appendQuarantine(QuarantinedSstable record) =>
       _inner.appendQuarantine(record);
   @override
+  Future<Set<String>> quarantinedFilenames() => _inner.quarantinedFilenames();
+  @override
   Future<List<String>> listNamespaces() => _inner.listNamespaces();
   @override
   Future<bool> createNamespace(String namespace) =>

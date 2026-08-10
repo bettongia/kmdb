@@ -386,6 +386,9 @@ final class KvStoreImpl implements KvStore {
       _meta.appendQuarantine(record);
 
   @override
+  Future<Set<String>> quarantinedFilenames() => _meta.quarantinedFilenames();
+
+  @override
   Future<void> close({bool flush = true}) async {
     // Only write a tombstone to clear the dirty flag if the flag actually exists
     // in $meta. Writing an unnecessary tombstone would cause a memtable write,

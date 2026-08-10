@@ -674,6 +674,36 @@ final class MetaStore {
     return records;
   }
 
+  /// Returns the bare filenames of every currently-logged
+  /// [QuarantinedSstable] whose [QuarantinedSstable.reason] is
+  /// [QuarantineReason.unauthenticated].
+  ///
+  /// A narrow, cheaper sibling of [listQuarantines] for the one call site
+  /// that only needs to know *which filenames* have already been
+  /// quarantined for that one specific reason: `SyncEngine.pull`'s
+  /// pre-download skip-list consult (0.10.01 WI-4 T1, Q1).
+  ///
+  /// **Deliberately scoped to [QuarantineReason.unauthenticated] only** —
+  /// not every quarantine reason. For the five other reasons, quarantine's
+  /// existing re-fetch guard is the peer high-water mark advance (`pull`
+  /// skips a filename once its `maxHlc` is at or below the recorded peer
+  /// HWM): that guard is exactly what makes the A3/WI-7 crash-safety
+  /// ordering test meaningful — a crash between the durable log write and
+  /// the HWM save must let a *subsequent* pull legitimately re-download and
+  /// re-attempt the same file, because the HWM was never actually advanced.
+  /// A blanket "skip every previously-logged filename" pre-download check
+  /// would silently defeat that retry (verified: doing so broke
+  /// `quarantine_crash_ordering_test.dart`'s scenario (b) — the file was
+  /// never re-attempted, so the HWM never advanced on the healthy retry
+  /// either). [QuarantineReason.unauthenticated] is the one reason with no
+  /// HWM advance at all (a MAC-failed file's `maxHlc` is attacker-
+  /// controlled — see [QuarantinedSstable.reason]'s doc comment), so it is
+  /// the one reason that actually needs the log itself as the gate.
+  Future<Set<String>> quarantinedFilenames() async => (await listQuarantines())
+      .where((r) => r.reason == QuarantineReason.unauthenticated)
+      .map((r) => r.filename)
+      .toSet();
+
   /// Deletes every entry currently in the quarantine log.
   ///
   /// This is the host application's acknowledge mechanism (0.1.0 decision:

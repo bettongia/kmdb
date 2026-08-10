@@ -311,6 +311,15 @@ abstract interface class KvStore {
   /// other SyncEngine-to-engine-state call. See `MetaStore.appendQuarantine`
   /// for the durability and idempotency guarantees.
   Future<void> appendQuarantine(QuarantinedSstable record);
+
+  /// Returns the bare filenames of every currently-logged quarantined
+  /// SSTable whose reason is `QuarantineReason.unauthenticated`, as a set.
+  ///
+  /// A narrow seam mirroring [appendQuarantine], for `SyncEngine.pull`'s
+  /// pre-download skip-list consult (0.10.01 WI-4 T1, Q1) — see
+  /// `MetaStore.quarantinedFilenames` for why this is scoped to that one
+  /// reason rather than every quarantine reason.
+  Future<Set<String>> quarantinedFilenames();
 }
 
 // ── StoreStats ────────────────────────────────────────────────────────────────

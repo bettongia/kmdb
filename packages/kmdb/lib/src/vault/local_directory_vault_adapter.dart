@@ -22,6 +22,9 @@ import '../encryption/encryption_envelope.dart';
 import '../encryption/encryption_provider.dart';
 import '../encryption/value_context.dart';
 import '../engine/kvstore/kv_store.dart';
+import '../sync/auth/sync_artifact_class.dart';
+import '../sync/auth/sync_auth_envelope.dart';
+import '../sync/auth/sync_authenticator.dart';
 import 'vault_manifest.dart';
 import 'vault_storage_adapter.dart';
 import 'vault_store.dart';
@@ -68,6 +71,25 @@ import 'vault_store.dart';
 ///
 /// A crash between steps 1 and 2 leaves an orphan staging file, which
 /// [VaultRecovery] sweeps on the next open.
+///
+/// ## Sync authentication (0.10.01 WI-4 T1, Q3)
+///
+/// Vault artefacts never pass through a [SyncStorageAdapter] — this adapter
+/// talks to the remote side with raw `dart:io` `File` I/O — so the core
+/// `SyncAuthenticatingAdapter` decorator (which wraps
+/// `SyncStorageAdapter.upload`/`download`) cannot reach them. Every read
+/// and write of remote content in this class is therefore manually wrapped
+/// with [SyncAuthEnvelope], across three artefact classes:
+/// [SyncArtifactClass.vaultManifest], [SyncArtifactClass.vaultBlob], and
+/// [SyncArtifactClass.vaultTombstone] (a separate class from the manifest —
+/// a forged or suppressed tombstone drives vault garbage collection, so it
+/// earns its own sub-key rather than folding under the manifest's).
+///
+/// [hydrateVaultBlob] has two *nested* envelopes with different lifetimes:
+/// the sync-auth envelope (a channel property, stripped on arrival) and the
+/// [EncryptionEnvelope] (stored-at-rest). The sync-auth envelope is always
+/// stripped and verified **first** — see that method's doc comment for the
+/// full ordering.
 final class LocalDirectoryVaultAdapter implements VaultStorageAdapter {
   /// Creates a [LocalDirectoryVaultAdapter].
   ///
@@ -79,10 +101,13 @@ final class LocalDirectoryVaultAdapter implements VaultStorageAdapter {
   /// [encryption] must match the provider active on this database; when
   /// non-null, `$vault` ref count entries are encrypted and must be decrypted
   /// before the producer-side guard in [VaultStore.createStub] can read them.
+  /// [_authenticator] authenticates every remote vault artefact this device
+  /// reads or writes (0.10.01 WI-4 T1) — see the class doc comment.
   LocalDirectoryVaultAdapter({
     required this._syncRoot,
     required this._localStore,
     required this._kvStore,
+    required this._authenticator,
     this.encryption,
   });
 
@@ -94,6 +119,9 @@ final class LocalDirectoryVaultAdapter implements VaultStorageAdapter {
 
   /// The local KV store, used to verify the `$vault` ref before stub creation.
   final KvStore _kvStore;
+
+  /// Authenticates every remote vault artefact — see the class doc comment.
+  final SyncAuthenticator _authenticator;
 
   /// Active encryption provider, or `null` for plaintext databases.
   ///
@@ -124,6 +152,34 @@ final class LocalDirectoryVaultAdapter implements VaultStorageAdapter {
   String _remoteTombstonePath(String sha256) =>
       '${_remoteHashDir(sha256)}/tombstone.json';
 
+  // ── Sync-auth logical path helpers ────────────────────────────────────────
+  //
+  // Distinct from the _remote*Path helpers above: the MAC covers a path
+  // *relative to the sync root*, not the full filesystem path (which
+  // embeds _syncRoot — a local mount point that may differ across devices
+  // for the same logical remote, e.g. a NAS mounted under a different local
+  // path on each machine). This mirrors SyncAuthenticatingAdapter's use of
+  // the bare paths SyncEngine/ConsolidationCoordinator/HighwaterMark pass to
+  // SyncStorageAdapter, which likewise never include a filesystem root.
+
+  /// Returns the logical (sync-root-relative) hash directory for [sha256].
+  String _logicalHashDir(String sha256) {
+    final prefix = sha256.substring(0, 2);
+    final suffix = sha256.substring(2);
+    return 'vault/$prefix/$suffix';
+  }
+
+  /// Returns the logical path of the `manifest.json` for [sha256].
+  String _logicalManifestPath(String sha256) =>
+      '${_logicalHashDir(sha256)}/manifest.json';
+
+  /// Returns the logical path of the `blob` file for [sha256].
+  String _logicalBlobPath(String sha256) => '${_logicalHashDir(sha256)}/blob';
+
+  /// Returns the logical path of the `tombstone.json` for [sha256].
+  String _logicalTombstonePath(String sha256) =>
+      '${_logicalHashDir(sha256)}/tombstone.json';
+
   // ── VaultStorageAdapter implementation ───────────────────────────────────
 
   @override
@@ -135,8 +191,14 @@ final class LocalDirectoryVaultAdapter implements VaultStorageAdapter {
       final localManifestBytes = await _localStore.adapter.readFile(
         _localStore.manifestPath(sha256),
       );
+      final enveloped = await SyncAuthEnvelope.wrap(
+        localManifestBytes,
+        _authenticator,
+        artifactClass: SyncArtifactClass.vaultManifest,
+        relativePath: _logicalManifestPath(sha256),
+      );
       await remoteManifest.parent.create(recursive: true);
-      await remoteManifest.writeAsBytes(localManifestBytes, flush: true);
+      await remoteManifest.writeAsBytes(enveloped, flush: true);
     }
     // If remote manifest already exists, skip (first-writer-wins).
 
@@ -147,8 +209,14 @@ final class LocalDirectoryVaultAdapter implements VaultStorageAdapter {
       final localBlobPath = _localStore.blobPath(sha256);
       if (await _localStore.adapter.fileExists(localBlobPath)) {
         final blobBytes = await _localStore.adapter.readFile(localBlobPath);
+        final enveloped = await SyncAuthEnvelope.wrap(
+          blobBytes,
+          _authenticator,
+          artifactClass: SyncArtifactClass.vaultBlob,
+          relativePath: _logicalBlobPath(sha256),
+        );
         await remoteBlob.parent.create(recursive: true);
-        await remoteBlob.writeAsBytes(blobBytes, flush: true);
+        await remoteBlob.writeAsBytes(enveloped, flush: true);
       }
     }
     // Remote blob already present: skip (content-identical by design).
@@ -161,7 +229,13 @@ final class LocalDirectoryVaultAdapter implements VaultStorageAdapter {
         final tombstoneBytes = await _localStore.adapter.readFile(
           localTombstonePath,
         );
-        await remoteTombstone.writeAsBytes(tombstoneBytes, flush: true);
+        final enveloped = await SyncAuthEnvelope.wrap(
+          tombstoneBytes,
+          _authenticator,
+          artifactClass: SyncArtifactClass.vaultTombstone,
+          relativePath: _logicalTombstonePath(sha256),
+        );
+        await remoteTombstone.writeAsBytes(enveloped, flush: true);
       }
     }
   }
@@ -184,8 +258,16 @@ final class LocalDirectoryVaultAdapter implements VaultStorageAdapter {
       );
     }
 
-    // Read the remote manifest.
-    final manifestBytes = await remoteManifest.readAsBytes();
+    // Read and authenticate the remote manifest (0.10.01 WI-4 T1) — a
+    // forged or tampered manifest must be rejected before its content ever
+    // drives VaultStore.createStub, not merely before it lands on disk.
+    final rawManifestBytes = await remoteManifest.readAsBytes();
+    final manifestBytes = await SyncAuthEnvelope.unwrap(
+      rawManifestBytes,
+      _authenticator,
+      artifactClass: SyncArtifactClass.vaultManifest,
+      relativePath: _logicalManifestPath(sha256),
+    );
     final manifest = VaultManifest.fromJsonString(utf8.decode(manifestBytes));
 
     // Delegate to VaultStore.createStub which checks the producer-side
@@ -200,7 +282,13 @@ final class LocalDirectoryVaultAdapter implements VaultStorageAdapter {
     // Sync tombstone.json if present on the remote.
     final remoteTombstone = File(_remoteTombstonePath(sha256));
     if (remoteTombstone.existsSync()) {
-      final tombstoneBytes = await remoteTombstone.readAsBytes();
+      final rawTombstoneBytes = await remoteTombstone.readAsBytes();
+      final tombstoneBytes = await SyncAuthEnvelope.unwrap(
+        rawTombstoneBytes,
+        _authenticator,
+        artifactClass: SyncArtifactClass.vaultTombstone,
+        relativePath: _logicalTombstonePath(sha256),
+      );
       await _localStore.adapter.writeFile(
         _localStore.tombstonePath(sha256),
         tombstoneBytes,
@@ -227,7 +315,31 @@ final class LocalDirectoryVaultAdapter implements VaultStorageAdapter {
       );
     }
 
-    final blobBytes = await remoteBlob.readAsBytes();
+    final rawBlobBytes = await remoteBlob.readAsBytes();
+
+    // ## Two-envelope ordering (0.10.01 WI-4 T1, Q3)
+    //
+    // There are two nested envelopes with different lifetimes, and the
+    // order below is deliberate:
+    // 1. Strip + verify the sync-auth envelope FIRST — it is a channel
+    //    property (this device's proof that a sync-set-key holder produced
+    //    these bytes), stripped immediately on arrival. A bad/missing MAC
+    //    throws SyncAuthException here, before anything below ever runs —
+    //    an unauthenticated blob must never reach the encryption-unwrap or
+    //    content-address check, let alone local disk.
+    // 2. THEN EncryptionEnvelope.unwrap — a stored-at-rest property; the
+    //    plaintext extracted here is what the sha256 check verifies.
+    // 3. THEN the sha256 content-address check (S-4).
+    // 4. THEN stage the still-EncryptionEnvelope-wrapped bytes and rename —
+    //    the *sync-auth* envelope is never staged/persisted locally (it is
+    //    channel-only), but the encryption envelope is (it is the at-rest
+    //    format `VaultStore.getBytes` expects to unwrap later).
+    final blobBytes = await SyncAuthEnvelope.unwrap(
+      rawBlobBytes,
+      _authenticator,
+      artifactClass: SyncArtifactClass.vaultBlob,
+      relativePath: _logicalBlobPath(sha256),
+    );
 
     // S-4 (2026-07-18 release-readiness review): verify content against its
     // claimed address *before* it ever reaches local disk under a trusted

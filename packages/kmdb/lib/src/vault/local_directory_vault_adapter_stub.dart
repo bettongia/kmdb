@@ -18,6 +18,7 @@
 // on these platforms.
 
 import '../engine/kvstore/kv_store.dart';
+import '../sync/auth/sync_authenticator.dart';
 import 'vault_storage_adapter.dart';
 import 'vault_store.dart';
 
@@ -31,6 +32,7 @@ final class LocalDirectoryVaultAdapter implements VaultStorageAdapter {
     required String syncRoot,
     required VaultStore localStore,
     required KvStore kvStore,
+    required SyncAuthenticator authenticator,
   }) {
     throw UnsupportedError(
       'LocalDirectoryVaultAdapter is not supported on web/WASM. '

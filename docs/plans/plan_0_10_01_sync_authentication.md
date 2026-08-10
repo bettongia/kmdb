@@ -349,28 +349,60 @@ strip the envelope **before** the rename, or the local blob will contain it.
 
 ### Phase 3 — Envelope, decorator, and integration
 
-- [ ] Envelope frame `[magic "KSA" (3B)][version 0x01 (1B)][MAC (16B)][payload]`.
-- [ ] Core `SyncStorageAdapter` **decorator** (Q2) handling
+- [x] Envelope frame `[magic "KSA" (3B)][version 0x01 (1B)][MAC (16B)][payload]`.
+      `SyncAuthEnvelope` (Phase 1).
+- [x] Core `SyncStorageAdapter` **decorator** (Q2) handling
       `upload`/`download`/`compareAndSwap`/`getEtag`/`list` per the Q2 table;
       `download` throws `SyncAuthException` on bad/missing MAC. Constructed at the
-      adapter-wiring point.
-- [ ] Wire the decorator so it covers **all** channel sites: `SyncEngine.push`
-      (`:263`) / `pull` (`:549`) / `_fullResync` (`:454`); `ConsolidationCoordinator`
-      input download (`:483`), consolidated upload (`:544`), lease download/CAS
-      (`:371/:721/:391/:411`); `HighwaterMark.load` (`:88`) / `save` (`:179`).
-- [ ] Apply the **per-site rejection policy** in the Q2 table (pull → quarantine
+      adapter-wiring point. `SyncAuthenticatingAdapter` (Phase 1); wired at
+      `kmdb_cli`'s `adapterFor` (Phase 2).
+- [x] Wire the decorator so it covers **all** channel sites: `SyncEngine.push`
+      / `pull` / `_fullResync`; `ConsolidationCoordinator` input download,
+      consolidated upload, lease download/CAS; `HighwaterMark.load`/`save`.
+      Verified structurally rather than site-by-site: `SyncEngine`,
+      `ConsolidationCoordinator`, and `HighwaterMark` all reach the sync
+      folder exclusively through the single `SyncStorageAdapter` instance
+      they are constructed with — wrapping that one instance at
+      `adapterFor` therefore covers every one of their internal call sites
+      automatically. No changes were needed inside `HighwaterMark` at all.
+- [x] Apply the **per-site rejection policy** in the Q2 table (pull → quarantine
       `unauthenticated` + `continue`, **no HWM advance**; own-HWM/lease →
-      propagate; peer-HWM/consolidation-input → skip).
-- [ ] **Q1 recovery wiring:** add `QuarantineReason.unauthenticated` (engine
-      layer); add `KvStore.quarantinedFilenames()` delegating to `_meta`; load the
-      quarantined set at the top of `pull()` and skip listed files **before**
-      download; branch the HWM advance on reason.
-- [ ] **Vault manual threading** (Q3): `SyncAuthenticator` at the six
+      propagate (no catch needed — already the default); peer-HWM (in
+      `_checkAndHandleEviction`)/consolidation-input → skip via a new
+      `on SyncAuthException` catch; `_fullResync` → skip + quarantine
+      (uniquely safe to quarantine here since the local HWM is already reset
+      to `Hlc(0,0)` in the same method).
+- [x] **Q1 recovery wiring:** added `QuarantineReason.unauthenticated` (engine
+      layer); added `KvStore.quarantinedFilenames()`/`MetaStore
+      .quarantinedFilenames()` delegating to a `listQuarantines()` filter;
+      load the quarantined set at the top of `pull()` and skip listed files
+      **before** download; branch the HWM advance on reason (no advance for
+      `unauthenticated`, existing advance retained for the other five).
+      **Deviation from the literal plan text, found via a real test
+      failure:** `quarantinedFilenames()` is scoped to
+      `QuarantineReason.unauthenticated` **only**, not every reason — a
+      blanket "skip every previously-quarantined filename" pre-download
+      check breaks `quarantine_crash_ordering_test.dart` scenario (b): for
+      the five other reasons, the *existing* re-fetch guard is the peer HWM
+      advance itself, and a crash between the log write and that advance
+      must let a subsequent pull legitimately retry the same file. Only
+      `unauthenticated` has no HWM advance at all, so it is the one reason
+      that actually needs the log as its own gate. Documented in
+      `MetaStore.quarantinedFilenames`'s doc comment.
+- [x] **Vault manual threading** (Q3): `SyncAuthenticator` at the six
       `LocalDirectoryVaultAdapter` File I/O sites; two-envelope ordering in
-      `hydrateVaultBlob`; constructor gains the authenticator.
-- [ ] Reject unauthenticated or badly-authenticated artefacts. **No
+      `hydrateVaultBlob`; constructor gains the authenticator (`required
+      this._authenticator`, private-named-parameter pattern). Updated the
+      two existing test files that construct `LocalDirectoryVaultAdapter`
+      (`vault_storage_adapter_test.dart`, `vault_sync_integration_test.dart`)
+      to share one key across simulated devices; the S-4 content-substitution
+      test now enveloped its "attacker-substituted" fixture under the shared
+      key (a T3 malicious-peer scenario — T1, without the key, is now
+      structurally blocked one layer earlier, at sync-auth, before ever
+      reaching the sha256 check).
+- [x] Reject unauthenticated or badly-authenticated artefacts. **No
       tolerated-fallback mode** — an "accept unauthenticated for now" switch is a
-      downgrade attack.
+      downgrade attack. No such switch exists anywhere in this implementation.
 
 ### Phase 4 — Tests
 

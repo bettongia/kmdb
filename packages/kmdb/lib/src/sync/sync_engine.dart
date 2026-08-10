@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'dart:typed_data';
+
 import '../engine/kvstore/kv_store.dart';
 import '../engine/kvstore/quarantine.dart';
 import '../engine/platform/storage_adapter_interface.dart';
 import '../engine/sstable/sstable_info.dart';
 import '../engine/sstable/sstable_reader.dart';
 import '../engine/util/hlc.dart';
+import 'auth/sync_auth_exception.dart';
 import 'sync_context.dart';
 import 'sync_storage_adapter.dart';
 import 'consolidation_config.dart';
@@ -360,10 +363,20 @@ final class SyncEngine {
     // Compute min(livePeers.currentHlc) — excluding self and stale peers.
     Hlc? livePeerMin;
     for (final filename in allHwmFiles) {
-      final hwm = await HighwaterMark.load(
-        '$_remoteHwmDir/$filename',
-        _cloudAdapter,
-      );
+      final HighwaterMark? hwm;
+      try {
+        hwm = await HighwaterMark.load(
+          '$_remoteHwmDir/$filename',
+          _cloudAdapter,
+        );
+      } on SyncAuthException {
+        // A peer's HWM failed authentication (0.10.01 WI-4 T1, Q2 rejection
+        // table): skip that one peer's contribution to the eviction check
+        // rather than aborting the whole check — a forged/tampered peer
+        // HWM must not be able to block this device's own re-admission
+        // logic for every *other*, legitimately-authenticated peer.
+        continue;
+      }
       if (hwm == null) continue;
       if (hwm.deviceId == _deviceId) continue; // exclude self
 
@@ -454,10 +467,40 @@ final class SyncEngine {
     //    - Consolidated set (4-segment filenames, if coordinator ran).
     //    - Individual flush SSTables (3-segment filenames, if no consolidation).
     for (final filename in remoteFiles) {
-      final bytes = await _cloudAdapter.download(
-        '$_remoteSstDir/$filename',
-        ctx: _ctx,
-      );
+      final Uint8List? bytes;
+      try {
+        bytes = await _cloudAdapter.download(
+          '$_remoteSstDir/$filename',
+          ctx: _ctx,
+        );
+      } on SyncAuthException catch (e) {
+        // Unlike pull()'s Q1 handling, it is always safe to quarantine here:
+        // _fullResync has already reset the local HWM to Hlc(0, 0) (step 1a
+        // above), so there is no peer high-water mark this record could
+        // poison — the peer-suppression attack Q1 defends against in pull()
+        // does not apply to this method. Recorded for audit visibility
+        // (0.10.01 WI-4 T1) using best-effort peerDeviceId/maxHlc parsed
+        // from the filename; a filename that doesn't even parse falls back
+        // to Hlc(0, 0), matching this method's already-defensive posture
+        // toward malformed remote filenames.
+        Hlc maxHlc = const Hlc(0, 0);
+        try {
+          maxHlc = SstableInfo.parse(filename).maxHlc;
+        } catch (_) {
+          // Unparseable filename — keep the Hlc(0, 0) sentinel.
+        }
+        await _store.appendQuarantine(
+          QuarantinedSstable(
+            peerDeviceId: _safeDeviceId(filename),
+            filename: filename,
+            maxHlc: maxHlc,
+            reason: QuarantineReason.unauthenticated,
+            detail: e.message,
+            quarantinedAt: DateTime.now().toUtc(),
+          ),
+        );
+        continue;
+      }
       if (bytes == null) continue; // file removed between list and download
 
       try {
@@ -501,15 +544,37 @@ final class SyncEngine {
   ///
   /// Steps:
   /// 1. Read local HWM.
-  /// 2. List all remote SSTables.
+  /// 2. List all remote SSTables and load the durable quarantine log's
+  ///    filename set (0.10.01 WI-4 T1, Q1) — see the pre-download skip-list
+  ///    note below.
   /// 3. For each SSTable from a different device: skip if already ingested
-  ///    (minHlc ≤ recorded peer HWM), otherwise download and ingest.
+  ///    (minHlc ≤ recorded peer HWM) or already quarantined, otherwise
+  ///    download and ingest. A download that fails sync authentication
+  ///    (`SyncAuthException`) is quarantined under
+  ///    [QuarantineReason.unauthenticated] and skipped *without* advancing
+  ///    the peer HWM — see "Q1" below.
   /// 4. Update the HWM for each successfully ingested peer.
   /// 5. Optionally run consolidation if threshold is met.
   ///
   /// Returns a [PullResult] reporting every peer SSTable this call
   /// permanently quarantined ([PullResult.quarantined]) or transiently
   /// deferred ([PullResult.deferred]) — see those fields' doc comments.
+  ///
+  /// ## Q1 — the quarantine log is the re-fetch guard for unauthenticated files
+  ///
+  /// For every reason *except* [QuarantineReason.unauthenticated], the
+  /// crash-safety ordering below (advance the HWM only after the quarantine
+  /// record is durable) is what prevents re-fetching a permanently-dropped
+  /// file. [QuarantineReason.unauthenticated] never advances the HWM at all
+  /// (see the inline comment at its download site) — a MAC-failed file's
+  /// filename, and therefore its claimed `maxHlc`, is attacker-controlled,
+  /// so trusting it to advance a peer's HWM would let one forged file
+  /// permanently suppress that peer's genuine data. With no HWM advance,
+  /// the **quarantine log itself** is the only thing preventing an
+  /// infinite re-download/re-reject loop of the same forged file: this
+  /// method loads the full set of already-quarantined filenames once, at
+  /// the top (step 2), and skips any listed filename *before* attempting a
+  /// download for it.
   ///
   /// ## Crash-safety ordering (finding A3 / WI-7)
   ///
@@ -564,6 +629,17 @@ final class SyncEngine {
       ctx: _ctx,
     );
 
+    // Load the set of already-quarantined filenames once (0.10.01 WI-4 T1,
+    // Q1). A file quarantined under QuarantineReason.unauthenticated never
+    // had its peer HWM advanced — advancing it would be exactly the
+    // peer-suppression primitive Q1 exists to prevent, since the filename's
+    // maxHlc is attacker-controlled for a MAC-failed file. Without that HWM
+    // advance, the *log* is the only thing standing between this device and
+    // re-downloading (and re-rejecting) the same forged file every pull
+    // cycle — so it must be consulted before download, not only recorded
+    // after.
+    final quarantinedFilenames = await _store.quarantinedFilenames();
+
     // Track highest ingested HLC per peer for HWM update.
     final peerMaxHlc = <String, Hlc>{};
 
@@ -585,6 +661,12 @@ final class SyncEngine {
       final localPath = '$_sstDir/$filename';
       if (await _localAdapter.fileExists(localPath)) continue;
 
+      // Pre-download quarantine skip-list consult (Q1) — see the comment
+      // above quarantinedFilenames' loading. Must run before any download
+      // attempt: this is the only re-fetch guard for a MAC-failed file,
+      // since that file's peer HWM was never advanced.
+      if (quarantinedFilenames.contains(filename)) continue;
+
       // Check high-water mark: skip SSTables we have already processed.
       final SstableInfo info;
       try {
@@ -597,10 +679,42 @@ final class SyncEngine {
       if (peerHwm != null && info.maxHlc <= peerHwm) continue;
 
       // Download the SSTable.
-      final bytes = await _cloudAdapter.download(
-        '$_remoteSstDir/$filename',
-        ctx: _ctx,
-      );
+      //
+      // ## Q1 — verify the MAC before any HWM decision
+      //
+      // SyncAuthEnvelope authentication happens inside the
+      // SyncAuthenticatingAdapter decorator wrapping _cloudAdapter (applied
+      // once, at the adapter-wiring point — see that class's doc comment),
+      // so a bad or missing MAC surfaces here as SyncAuthException. Unlike
+      // every ingest-failure reason below, `info.maxHlc` is NOT trustworthy
+      // in this branch: the filename (and therefore maxHlc) is exactly what
+      // an attacker with mere write access to the sync folder controls,
+      // since they hold no sync-set key to forge a valid envelope for real
+      // content. Advancing peerMaxHlc/the HWM off it would let a single
+      // forged file — naming a real peer with a huge maxHlc — permanently
+      // suppress every subsequent genuine SSTable from that peer (see the
+      // Q1 peer-suppression regression test). So this branch quarantines
+      // and `continue`s *before* reaching the peerMaxHlc fold at the bottom
+      // of the loop, never after it.
+      final Uint8List? bytes;
+      try {
+        bytes = await _cloudAdapter.download(
+          '$_remoteSstDir/$filename',
+          ctx: _ctx,
+        );
+      } on SyncAuthException catch (e) {
+        final record = QuarantinedSstable(
+          peerDeviceId: peerDeviceId,
+          filename: filename,
+          maxHlc: info.maxHlc,
+          reason: QuarantineReason.unauthenticated,
+          detail: e.message,
+          quarantinedAt: DateTime.now().toUtc(),
+        );
+        await _store.appendQuarantine(record);
+        quarantined.add(record);
+        continue;
+      }
       if (bytes == null) continue; // file removed between list and download
 
       // Validate footer checksum before ingestion.
