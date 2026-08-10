@@ -159,3 +159,7 @@ export 'src/encryption/encryption_error.dart'
 export 'src/encryption/encryption_provider.dart'
     show EncryptionProvider, AesGcmEncryptionProvider;
 export 'src/encryption/value_context.dart' show ValueContext;
+
+// ── Secret storage (WI-4 SecretStore precursor) ────────────────────────────────
+export 'src/secret/secret_store.dart'
+    show SecretStore, InMemorySecretStore, SecretPermissionException;

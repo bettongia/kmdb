@@ -91,7 +91,7 @@ final class History {
   /// The history can contain command arguments — document values, filter
   /// expressions, keys — that should not be world-readable in a shared-home
   /// environment. `dart:io` exposes no permission API, so this shells out to
-  /// `chmod` (mirroring `DirectoryCredentialStore`). Failures are swallowed:
+  /// `chmod` (mirroring `DirectorySecretStore`). Failures are swallowed:
   /// history confidentiality is best-effort and [save] must never crash the
   /// REPL. No-op on Windows, where the file inherits the profile ACL.
   Future<void> _restrictPermissions(io.File file) async {

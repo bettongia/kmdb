@@ -840,18 +840,21 @@ contention test that exercises the lease protocol.
   (Phase A native-assets investigation), `packages/kmdb_cli/README.md`
   (`dart build cli` bundle workflow).
 
-### RC-24 — `kmdb_cli` credential store: real-OS permission verification
+### RC-24 — `kmdb_cli` secret store: real-OS permission verification
 
 - **Area:** platform / `kmdb_cli`
-- **Validates:** that `DirectoryCredentialStore` actually produces the
+- **Validates:** that `DirectorySecretStore` actually produces the
   permissions its design claims on a real OS, not just under this
   development environment's sandboxed `chmod`/`stat()` calls — macOS and
-  Linux should show the credential file at `600` and its `local/` parent at
-  `700`; Windows should show the credentials file landing under the user's
-  own profile-inherited ACLs with no separate enforcement attempted.
+  Linux should show the credential file at `600` and its profile-directory
+  root at `700`; Windows should show the credentials file landing under the
+  user's own profile-inherited ACLs with no separate enforcement attempted.
+  Also confirm the root actually resolves under the OS profile directory
+  (`%APPDATA%\kmdb` / `~/.config/kmdb`), not the database directory — the
+  whole point of the profile-directory move that closed review finding C-1.
 - **Why not automated:** the automated suite (`packages/kmdb_cli/test/config/
-  credential_store/directory_credential_store_test.dart`) already exercises
-  the `chmod`/`stat()` logic deterministically on whichever POSIX OS runs the
+  secret_store/directory_secret_store_test.dart`) already exercises the
+  `chmod`/`stat()` logic deterministically on whichever POSIX OS runs the
   test (this development environment and CI both run on macOS — see RC-23),
   and the Windows no-op behaviour is `skip:`-guarded to run for real only on
   a Windows machine. What is not automatable anywhere is an independent,
@@ -859,8 +862,7 @@ contention test that exercises the lease protocol.
   claimed outside of Dart's own `stat()` view of them — the kind of
   "trust but verify with a second tool" check this checklist exists for.
 - **Applies when:** before any release, and after any change to
-  `packages/kmdb_cli/lib/src/config/credential_store/
-  directory_credential_store.dart`.
+  `packages/kmdb_cli/lib/src/config/secret_store/directory_secret_store.dart`.
 - **Prerequisites:** a macOS, a Linux, and (optionally) a Windows machine or
   CI runner; no cloud credentials needed — a `google-drive` remote can be
   registered with dummy `--client-id`/`--client-secret` values since the
@@ -871,23 +873,31 @@ contention test that exercises the lease protocol.
      after) the browser consent step once the credentials file has been
      written, or, more simply, run any command that write-through-refreshes
      an already-present credentials file.
-  2. Run `ls -la {dbDir}/local/` and confirm `google_credentials.json` shows
-     `-rw-------` (`600`) and the `local/` directory itself shows `drwx------`
-     (`700`).
-  3. On Windows: run the same `remote add` flow, then confirm via `icacls
-     {dbDir}\local\google_credentials.json` that the effective permissions
-     are inherited from the user's profile (owner + Administrators/SYSTEM
-     only) — no `kmdb_cli`-set ACL should be present.
+  2. Confirm the file was written under `~/.config/kmdb/` (not under
+     `{dbDir}/local/`). Run `ls -la ~/.config/kmdb/` and confirm the scoped
+     credential file shows `-rw-------` (`600`) and `~/.config/kmdb/` itself
+     shows `drwx------` (`700`).
+  3. On Windows: run the same `remote add` flow, then confirm the credential
+     file was written under `%APPDATA%\kmdb\`, and via `icacls` that its
+     effective permissions are inherited from the user's profile (owner +
+     Administrators/SYSTEM only) — no `kmdb_cli`-set ACL should be present.
   4. Deliberately loosen the file with `chmod 644` (macOS/Linux) and re-run a
      `push`/`pull`/`sync` against that remote; confirm the CLI hard-refuses
      with a one-line `Error: ... Fix with: chmod 600 ...` message (no stack
      trace) rather than silently syncing.
+  5. Run `kmdb <db> credentials prune --dry-run` then `kmdb <db> credentials
+     prune`, and confirm they only ever report/remove keys scoped to this
+     database — set up a second database on the same machine with its own
+     `google-drive` remote first, and confirm its credential is left
+     untouched by the first database's prune.
 - **Expected result:** `600`/`700` on macOS and Linux, no `kmdb_cli`-added ACL
-  on Windows, and a clean hard-refusal on a deliberately loosened file —
-  matching `docs/spec/33_cli_credential_store.md`'s documented permission
-  model.
+  on Windows, a clean hard-refusal on a deliberately loosened file, and
+  `credentials prune` never touching a different database's secret —
+  matching `docs/spec/33_cli_credential_store.md`'s documented permission and
+  key-scoping model.
 - **Related:** `docs/spec/33_cli_credential_store.md`,
-  `docs/plans/completed/plan_0_09_cli_keychain_credentials.md`.
+  `docs/plans/completed/plan_0_09_cli_keychain_credentials.md`,
+  `docs/plans/completed/plan_0_10_01_secret_store.md`.
 
 ---
 

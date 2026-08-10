@@ -1092,14 +1092,14 @@ confidentiality reconciliation plan (Q7), naming a future CLI-hardening item
 as the right place to close it.
 
 That item shipped as the `kmdb_cli` credential store (§33): rather than
-database-level encryption, the file and its containing `local/` directory are
+database-level encryption, the file and its containing profile directory are
 now permission-hardened (POSIX: `chmod 700`/`600`, hard-refuse on read if
-either has drifted looser — the OpenSSH/`gcloud` model) via
-`CredentialStore`/`DirectoryCredentialStore`. This closes the "plaintext,
-no protection at all" gap the file's contents (a live OAuth token) had before;
-see §33 for the full design, including why directory-permission hardening was
-chosen over OS-native keychain integration (deferred, see
-`docs/roadmap/9_99.md`).
+either has drifted looser — the OpenSSH/`gcloud` model) via the core
+`SecretStore` interface and `kmdb_cli`'s `DirectorySecretStore`. This closes
+the "plaintext, no protection at all" gap the file's contents (a live OAuth
+token) had before; see §33 for the full design, including why
+directory-permission hardening was chosen over OS-native keychain integration
+(deferred, see `docs/roadmap/9_99.md`).
 
 #### 10. `MetaStore.appendTombstoneFloorAdvance` writes unencrypted (accepted, dead code)
 

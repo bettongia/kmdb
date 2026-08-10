@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'package:kmdb/kmdb.dart' show SyncStorageAdapter;
+import 'package:kmdb/kmdb.dart'
+    show SecretPermissionException, SecretStore, SyncStorageAdapter;
 
-import '../config/credential_store.dart';
 import '../config/remote_config.dart';
 import 'command.dart';
 import 'sync_helpers.dart';
@@ -66,8 +66,14 @@ final class SyncCommand extends CliCommand {
   Future<bool> execute(
     CommandContext ctx,
     List<String> args,
-    Map<String, dynamic> flags,
-  ) async {
+    Map<String, dynamic> flags, {
+    // Injectable secret store, used by tests to avoid exercising the real
+    // permission-hardened filesystem store (which is now rooted at the
+    // real per-user profile directory, not a temp dbDir — see
+    // `RemoteCommand`'s identical pattern for why this extra optional
+    // parameter is legal and safe for `cli_runner.dart`).
+    SecretStore? secretStoreOverride,
+  }) async {
     final storeInfo = await ctx.store.storeInfo();
     final dbDir = storeInfo.dbDir;
     final deviceId = storeInfo.deviceId;
@@ -93,15 +99,19 @@ final class SyncCommand extends CliCommand {
       return false;
     }
 
-    // adapterFor is wrapped in its own try: a loose-permission credential
-    // (CredentialPermissionException) or missing-credentials (StateError)
+    // adapterFor is wrapped in its own try: a loose-permission secret
+    // (SecretPermissionException) or missing-credentials (StateError)
     // failure here must render as a clean one-line CLI error, not the
     // stack-trace-printing generic handler in cli_runner.dart — this call
     // site was previously unwrapped, so both exceptions propagated there.
     final SyncStorageAdapter syncAdapter;
     try {
-      syncAdapter = await adapterFor(remote, dbDir: dbDir);
-    } on CredentialPermissionException catch (e) {
+      syncAdapter = await adapterFor(
+        remote,
+        dbDir: dbDir,
+        secretStoreOverride: secretStoreOverride,
+      );
+    } on SecretPermissionException catch (e) {
       ctx.writeError(e.toString());
       return false;
     } on StateError catch (e) {

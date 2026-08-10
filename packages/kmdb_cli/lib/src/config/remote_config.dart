@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import 'dart:convert';
-import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:googleapis_auth/auth_io.dart';
 import 'package:googleapis_auth/googleapis_auth.dart';
@@ -22,7 +22,8 @@ import 'package:kmdb/kmdb.dart';
 import 'package:kmdb/kmdb_config.dart';
 import 'package:kmdb_google_drive/kmdb_google_drive.dart';
 
-import 'credential_store.dart';
+import 'secret_store/directory_secret_store.dart';
+import 'secret_store/secret_key.dart';
 
 // Re-export the config types so existing CLI imports of this file continue to
 // resolve without change.  New code should import from
@@ -42,22 +43,24 @@ export 'package:kmdb/kmdb_config.dart'
 /// asynchronous.  All call sites (sync, push, pull commands) are already
 /// `async` and simply `await` this function.
 ///
-/// [dbDir] — the local database directory.  Used to locate the Google Drive
-/// credentials file at `{dbDir}/local/{credentialsPath}`.
+/// [dbDir] — the local database directory.  Used to scope the [SecretStore]
+/// key the Google Drive credentials are stored under (see
+/// [dbScopedSecretKey]) — not to locate a file within [dbDir] itself, unlike
+/// the former `{dbDir}/local/`-rooted design.
 ///
-/// [credentialStoreOverride] — an injectable [CredentialStore], used by tests
-/// to avoid exercising the real permission-hardened filesystem store.
-/// Defaults to `null`, in which case [CredentialStore.forPlatform] resolves
-/// the real store rooted at [dbDir].
+/// [secretStoreOverride] — an injectable [SecretStore], used by tests to
+/// avoid exercising the real permission-hardened filesystem store. Defaults
+/// to `null`, in which case [DirectorySecretStore.forPlatform] resolves the
+/// real store rooted at the per-user profile config directory.
 ///
 /// Throws [StateError] if Google Drive credentials are missing (i.e. the user
 /// has not yet run `kmdb <db> remote add --type google-drive`). Throws
-/// [CredentialPermissionException] if the stored credentials are found with
+/// [SecretPermissionException] if the stored credentials are found with
 /// looser-than-expected POSIX permissions.
 Future<SyncStorageAdapter> adapterFor(
   RemoteConfig remote, {
   required String dbDir,
-  CredentialStore? credentialStoreOverride,
+  SecretStore? secretStoreOverride,
 }) async {
   switch (remote) {
     case LocalRemoteConfig(:final path):
@@ -67,7 +70,7 @@ Future<SyncStorageAdapter> adapterFor(
       final authClient = await _loadGoogleDriveAuthClient(
         dbDir: dbDir,
         credentialsPath: credentialsPath,
-        credentialStoreOverride: credentialStoreOverride,
+        secretStoreOverride: secretStoreOverride,
       );
       return GoogleDriveAdapter(authClient, syncRoot: syncRoot);
   }
@@ -75,46 +78,43 @@ Future<SyncStorageAdapter> adapterFor(
 
 // ── Google Drive credential helpers ──────────────────────────────────────────
 
-/// Loads and (if expired) refreshes Google Drive OAuth credentials from
-/// `{dbDir}/local/{credentialsPath}`.
+/// Loads and (if expired) refreshes Google Drive OAuth credentials from the
+/// permission-hardened [SecretStore], under the key
+/// `dbScopedSecretKey(dbDir, credentialsPath)`.
 ///
-/// The credentials file is created by `kmdb remote add --type google-drive`
-/// after a successful OAuth consent flow.  The format is the JSON returned by
+/// The credentials are written by `kmdb remote add --type google-drive` after
+/// a successful OAuth consent flow.  The format is the JSON returned by
 /// [AccessCredentials.toJson].
 ///
-/// [credentialStoreOverride] — an injectable [CredentialStore]; defaults to
-/// `null`, in which case [CredentialStore.forPlatform] resolves the real
-/// store rooted at [dbDir].
+/// [secretStoreOverride] — an injectable [SecretStore]; defaults to `null`,
+/// in which case [DirectorySecretStore.forPlatform] resolves the real store
+/// rooted at the per-user profile config directory.
 ///
-/// Throws [StateError] if the credentials file is absent. Throws
-/// [CredentialPermissionException] if the stored credentials are found with
+/// Throws [StateError] if the credentials are absent. Throws
+/// [SecretPermissionException] if the stored credentials are found with
 /// looser-than-expected POSIX permissions.
 Future<AuthClient> _loadGoogleDriveAuthClient({
   required String dbDir,
   required String credentialsPath,
-  CredentialStore? credentialStoreOverride,
+  SecretStore? secretStoreOverride,
 }) async {
-  final store =
-      credentialStoreOverride ?? CredentialStore.forPlatform(dbDir: dbDir);
-  final fullPath = [
-    dbDir,
-    'local',
-    credentialsPath,
-  ].join(Platform.pathSeparator);
+  final store = secretStoreOverride ?? DirectorySecretStore.forPlatform();
+  final key = dbScopedSecretKey(dbDir, credentialsPath);
 
-  // read() returns null when the credentials file is absent, distinct from
-  // permission failures (which throw CredentialPermissionException) or
-  // successful reads (which return the secret JSON).
-  final secretJson = await store.read(credentialsPath);
-  if (secretJson == null) {
+  // read() returns null when the credentials are absent, distinct from
+  // permission failures (which throw SecretPermissionException) or
+  // successful reads (which return the secret bytes).
+  final secretBytes = await store.read(key);
+  if (secretBytes == null) {
     throw StateError(
-      'Google Drive credentials not found at $fullPath.\n'
-      "Run 'kmdb <db> remote add --type google-drive <name> --folder <name> "
-      "--client-id <id> --client-secret <secret>' to authorise.",
+      'Google Drive credentials not found for this database.\n'
+      "Re-run 'kmdb <db> remote add --type google-drive <name> --folder "
+      "<name> --client-id <id> --client-secret <secret>' to authorise.",
     );
   }
 
   try {
+    final secretJson = utf8.decode(secretBytes);
     final json = jsonDecode(secretJson) as Map<String, dynamic>;
     final credentials = AccessCredentials.fromJson(json);
     final base = http.Client();
@@ -129,14 +129,18 @@ Future<AuthClient> _loadGoogleDriveAuthClient({
       final refreshed = await refreshCredentials(clientId, credentials, base);
 
       // Persist the refreshed token through the same store used to read it,
-      // so the rewritten file re-asserts the store's permission model
-      // (chmod 600) rather than relying on File.writeAsString preserving the
-      // existing mode. writeAsString on an existing file does preserve its
-      // mode in practice, so this is belt-and-braces, but routing through
-      // `store.write` keeps a single source of truth for the invariant.
+      // so the rewritten secret re-asserts the store's permission model
+      // (chmod 600) rather than relying on the filesystem preserving the
+      // existing mode. In practice the mode is preserved on overwrite, so
+      // this is belt-and-braces, but routing through `store.write` keeps a
+      // single source of truth for the invariant.
       await store.write(
-        credentialsPath,
-        jsonEncode({...refreshed.toJson(), ..._clientIdJson(clientId)}),
+        key,
+        Uint8List.fromList(
+          utf8.encode(
+            jsonEncode({...refreshed.toJson(), ..._clientIdJson(clientId)}),
+          ),
+        ),
       );
 
       return authenticatedClient(base, refreshed);
@@ -146,8 +150,9 @@ Future<AuthClient> _loadGoogleDriveAuthClient({
     return authenticatedClient(base, credentials);
   } on FormatException catch (e) {
     throw StateError(
-      'Failed to parse Google Drive credentials at $fullPath: $e\n'
-      "Run 'kmdb <db> remote add --type google-drive <name> ...' to re-authorise.",
+      'Failed to parse Google Drive credentials for this database: $e\n'
+      "Re-run 'kmdb <db> remote add --type google-drive <name> ...' to "
+      're-authorise.',
     );
   }
 }

@@ -20,6 +20,7 @@ import 'package:betto_inferencing/betto_inferencing.dart';
 import 'package:kmdb/kmdb.dart';
 
 import 'commands/collections_command.dart';
+import 'commands/credentials_command.dart';
 import 'commands/encryption_command.dart';
 import 'commands/command.dart';
 import 'commands/create_collection_command.dart';
@@ -98,6 +99,7 @@ final _commands = <String, CliCommand>{
     const VersionsCommand(),
     const PromoteCommand(),
     const EncryptionCommand(),
+    const CredentialsCommand(),
   ])
     cmd.name: cmd,
 };
