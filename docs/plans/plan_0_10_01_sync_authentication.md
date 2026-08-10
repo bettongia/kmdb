@@ -485,12 +485,46 @@ large modified files (`sync_engine.dart`, `consolidation_coordinator.dart`,
 
 ### Phase 5 — Spec and docs
 
-- [ ] Rewrite §31's threat model for the T1-active adversary; state plainly that
+- [x] Rewrite §31's threat model for the T1-active adversary; state plainly that
       T3 is out of scope, with a pointer to the proposal.
-- [ ] New spec section for sync authentication (take the next available `NN`).
-- [ ] Update §12 (sync), §24 (vault), §33 (credential store).
-- [ ] Release-checklist entries for what CI cannot cover: cross-device
+      `docs/spec/31_encryption.md`'s "Threat Model" subsection now states
+      explicitly that it is a confidentiality (passive-adversary) model
+      only, names T1 as the active adversary §34 closes, and names T3 (the
+      malicious peer) as out of scope for both layers, pointing at
+      `docs/proposals/device_identity.md`.
+- [x] New spec section for sync authentication (take the next available `NN`).
+      `docs/spec/34_sync_authentication.md` — confirmed to render as §34 via
+      a real `make doc_site_html` build (Pandoc's positional numbering is
+      not visible from the Markdown alone; verified in `site/spec.html`
+      rather than assumed).
+- [x] Update §12 (sync), §24 (vault), §33 (credential store).
+      §12 gained a new "Sync artefact authentication" subsection (12.4.2)
+      and updated the `QuarantineReason` enumeration to include
+      `unauthenticated`. §24 gained a "Sync artefact authentication"
+      subsection (24.8.2) documenting the six manual threading sites and
+      the two-envelope ordering. §33 gained a "Sync-authentication key
+      storage" subsection documenting the `SecretStore`-seam mint/load/
+      import/delete lifecycle. Also updated: `docs/spec/00_index.md` (§34
+      added to the abstract, Part 7, and the Subsystem Status table) and
+      `docs/spec/99_glossary.md` (new `SyncAuthenticator`, `Sync-set key`,
+      `SyncAuthException` entries).
+- [x] Release-checklist entries for what CI cannot cover: cross-device
       enrollment, real-provider authenticated sync.
+      RC-26 (cross-device pairing-code enrollment round-trip on two real
+      machines) and RC-27 (real-provider — Google Drive/iCloud —
+      authenticated sync soak, including a raw-bytes envelope-header
+      spot-check) added to `docs/spec/28_release_checklist.md`.
+
+**Deviation from the plan's literal instruction (documented, not silent):**
+one pre-existing spec inconsistency was discovered (not introduced) while
+verifying the §34 build: `docs/spec/00_index.md`, `01_overview.md`, and
+`03a_attribute_registry.md` all reference the Glossary as "§99" — its
+filename prefix, not its actual rendered position (which was §34 before
+this plan's insertion, and is now §35). This predates this plan (the
+reference was already wrong when Glossary rendered as §34) and is outside
+this plan's scope (sync authentication, not spec-numbering hygiene) — left
+as a follow-up for a future doc-maintenance pass rather than fixed here,
+per the plan-implement agent's discipline against unrelated scope creep.
 
 **Final step — QA sign-off and pre-commit:**
 

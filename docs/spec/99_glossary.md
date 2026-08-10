@@ -317,6 +317,31 @@ RRF (Reciprocal Rank Fusion)
   original paper, configurable) and `rank_r(d)` is the document's 1-based
   position in list `r`.
 
+SyncAuthenticator
+
+: The `mac`/`verify` interface (not get-key-shaped) that computes and
+  verifies the keyed MAC protecting every sync-folder artefact against a
+  write-capable-but-unkeyed adversary (T1). `DefaultSyncAuthenticator`
+  (native, a raw root key in memory) and `WebSyncAuthenticator`
+  (browser, a non-extractable WebCrypto `CryptoKey`) are the two
+  implementations. See §34.
+
+Sync-set key
+
+: The 256-bit root key (`SyncSetKey`) minted per remote at `remote add`
+  time, from which `SyncAuthenticator` derives six per-artefact-class
+  HKDF sub-keys. Re-provisionable (unlike the DEK) — losing it costs
+  nothing beyond re-enrolling every device via `remote pair`. Carried
+  between devices as a `PairingCode` (`KSA1-`-prefixed base32 + checksum).
+  See §34.
+
+SyncAuthException
+
+: Thrown when a sync-folder artefact fails authentication — a bad or
+  missing MAC (`SyncAuthEnvelope.unwrap`), or (R-4) no `SyncSetKey`
+  enrolled for the remote at all. Distinguishes "this artefact is not
+  trustworthy" from every other sync-time exception in §12. See §34.
+
 SyncCancelledException
 
 : The exception thrown by `SyncContext.throwIfExpired()` — and by cloud

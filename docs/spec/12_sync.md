@@ -136,12 +136,15 @@ wrapping it. `PullResult` carries two **structurally distinct** lists:
 
 - `quarantined` — `List<QuarantinedSstable>`: files **permanently** dropped on
   this pull. Each record carries the peer device id, the filename, the
-  filename-derived `maxHlc` (trustworthy because it is parsed before any of the
-  file's untrusted body is read), a `QuarantineReason` (`corruptedSstable`,
-  `invalidFormat`, `structuralBoundsViolation`, `storageError`, or the
-  defence-in-depth `outOfMemory`), a human-readable `detail`, and a wall-clock
-  `quarantinedAt`. Each dropped file is reported by exactly **one** pull — the
-  one that drops it — because the HWM advance stops it ever being reconsidered.
+  filename-derived `maxHlc`, a `QuarantineReason` (`corruptedSstable`,
+  `invalidFormat`, `structuralBoundsViolation`, `storageError`, the
+  defence-in-depth `outOfMemory`, or `unauthenticated` — see below), a
+  human-readable `detail`, and a wall-clock `quarantinedAt`. For the first
+  five reasons the file is reported by exactly **one** pull — the one that
+  drops it — because the HWM advance stops it ever being reconsidered.
+  **`unauthenticated` is the one exception to that trustworthy-`maxHlc`
+  claim and to the single-report property** — see "Sync artefact
+  authentication" below and §34 (Q1) for why.
 - `deferred` — `List<DeferredSstable>`: files **transiently** skipped because
   their `maxHlc` is at or below the local tombstone-GC floor
   (`StaleSstableIngestException` — see "Tombstone Retention & Garbage
@@ -165,6 +168,40 @@ crash between the two can only leave the fail-safe state — HWM not advanced, f
 reconsidered on the next pull — never the data-losing inverse ("HWM advanced,
 record lost"). Only `quarantined` entries are logged; transient `deferred`
 entries are not.
+
+### Sync artefact authentication (0.10.01 WI-4 T1)
+
+Everything above assumes every file found in the sync folder is genuine
+simply because it is there. §34 closes that assumption: when a remote is
+enrolled for sync authentication, every SSTable, HWM file, and
+consolidation lease this device uploads is wrapped in a keyed-MAC envelope
+(`SyncAuthEnvelope`) before it reaches the adapter's `upload`/
+`compareAndSwap`, and every one it downloads is verified and stripped
+before it reaches this protocol's own logic — transparently, via a
+`SyncStorageAdapter` decorator wired in once at the adapter-construction
+point, not by any change to the sync cycle itself. `list()` is unaffected
+(filenames are never enveloped), so nothing in the "Sync Folder Structure"
+diagram above changes shape; only each file's *stored bytes* gain a 20-byte
+header.
+
+The one place this protocol's own logic **does** change is the quarantine
+composition described above: a file that fails authentication is
+quarantined under the sixth `QuarantineReason.unauthenticated`, but —
+unlike the other five reasons — **without advancing the peer HWM**, because
+an unauthenticated file's filename (and therefore its claimed `maxHlc`) is
+attacker-controlled. Trusting it the way the other five reasons trust their
+already-authenticated `maxHlc` would let a single forged file permanently
+suppress a real peer's entire subsequent data stream. Without that HWM
+advance, `pull()` instead consults the quarantine log's filename set
+**before** every download, so the same forged file is never re-fetched.
+See §34 (Q1) for the full mechanism and the regression this composition
+closes.
+
+Vault artefacts (§24) are authenticated the same way in spirit but by a
+different mechanism: `LocalDirectoryVaultAdapter` talks to the sync folder
+via raw `dart:io` `File` I/O, not a `SyncStorageAdapter`, so the manifest,
+blob, and tombstone envelopes are applied and stripped manually at each of
+its six file I/O sites rather than by a shared decorator.
 
 ## Conflict Resolution
 
