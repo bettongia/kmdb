@@ -12,16 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'dart:convert';
 import 'dart:io' as io;
+import 'dart:typed_data';
 
 import 'package:kmdb/kmdb.dart';
 import 'package:kmdb_cli/src/commands/command.dart';
 import 'package:kmdb_cli/src/commands/pull_command.dart';
 import 'package:kmdb_cli/src/commands/remote_command.dart';
 import 'package:kmdb_cli/src/commands/sync_helpers.dart';
+import 'package:kmdb_cli/src/config/secret_store/directory_secret_store.dart';
+import 'package:kmdb_cli/src/config/secret_store/secret_key.dart';
 import 'package:kmdb/kmdb_config.dart';
 import 'package:kmdb_cli/src/database_opener.dart';
 import 'package:test/test.dart';
+
+import '../support/fake_secret_store.dart';
 
 /// Generates a valid UUIDv7 key.
 String _key() => const UuidV7KeyGenerator().next();
@@ -260,7 +266,7 @@ void main() {
 
   // ── Credential permission errors (N8 surfacing) ───────────────────────────
   //
-  // adapterFor's call site in pull_command.dart wraps CredentialPermissionException
+  // adapterFor's call site in pull_command.dart wraps SecretPermissionException
   // (and the pre-existing missing-credentials StateError) so both render as a
   // clean one-line CLI error rather than propagating to cli_runner.dart's
   // generic, stack-trace-printing handler.
@@ -276,16 +282,23 @@ void main() {
       );
       await config.save();
 
-      // Write the credentials file directly (bypassing the OAuth flow,
-      // which is untestable) at umask-default permissions — i.e. loose.
-      final localDir = io.Directory('${dbDir.path}/local')
-        ..createSync(recursive: true);
-      final credFile = io.File('${localDir.path}/google_credentials.json')
-        ..writeAsStringSync('{}');
+      // Seed the credential through a real, temp-rooted DirectorySecretStore
+      // (never the real profile directory) so the write is correctly
+      // permission-hardened, then loosen it to exercise the refusal path.
+      final secretRoot = io.Directory('${tmpDir.path}/secret-root');
+      final secretStore = DirectorySecretStore(root: secretRoot.path);
+      final key = dbScopedSecretKey(dbDir.path, 'google_credentials.json');
+      await secretStore.write(key, Uint8List.fromList(utf8.encode('{}')));
+      final credFile = io.File('${secretRoot.path}/$key');
       io.Process.runSync('chmod', ['644', credFile.path]);
 
       final ctx = _ctx(db, out: out, err: err);
-      final ok = await pullCmd.execute(ctx, ['gdrive'], {});
+      final ok = await pullCmd.execute(
+        ctx,
+        ['gdrive'],
+        {},
+        secretStoreOverride: secretStore,
+      );
 
       expect(ok, isFalse);
       final errText = err.toString();
@@ -295,7 +308,7 @@ void main() {
       expect(errText, isNot(contains('#0')));
     },
     skip: io.Platform.isWindows
-        ? 'POSIX-only: DirectoryCredentialStore performs no permission '
+        ? 'POSIX-only: DirectorySecretStore performs no permission '
               'checks on Windows.'
         : false,
   );
@@ -307,7 +320,12 @@ void main() {
     await config.save();
 
     final ctx = _ctx(db, out: out, err: err);
-    final ok = await pullCmd.execute(ctx, ['gdrive'], {});
+    final ok = await pullCmd.execute(
+      ctx,
+      ['gdrive'],
+      {},
+      secretStoreOverride: FakeSecretStore(),
+    );
 
     expect(ok, isFalse);
     final errText = err.toString();

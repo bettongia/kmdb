@@ -93,16 +93,21 @@ Corpus stats
   counts). Stored under `$$fts:corpus:{ns}:{field}`. Used to compute `avgdl`
   at query time and `IDF` in BM25 scoring.
 
-CredentialStore
+SecretStore
 
-: The `kmdb_cli`-only storage abstraction for CLI-managed cloud sync
-  credentials (currently: the Google Drive OAuth blob written by `kmdb remote
-  add --type google-drive`). The one implementation shipped,
-  `DirectoryCredentialStore`, hardens `{dbDir}/local/` with POSIX permissions
-  (`chmod 700` directory, `chmod 600` file) and hard-refuses reads when either
-  has drifted looser — the OpenSSH/`gcloud` directory-permission model, not an
-  OS-native keychain. Per-machine, non-synced; entirely outside the database
-  encryption boundary. See §33.
+: The byte-oriented host-provided-secret-storage interface, defined in `kmdb`
+  core (`lib/src/secret/secret_store.dart`) alongside its in-memory default,
+  `InMemorySecretStore`. Mirrors `DekCache`'s architecture: an interface in
+  core, platform/host-backed implementations supplied from outside the
+  package. `kmdb_cli`'s `DirectorySecretStore` is the shipped filesystem
+  implementation — rooted at the per-user profile config directory
+  (`%APPDATA%\kmdb` / `~/.config/kmdb`) by default, hardened with POSIX
+  permissions (`chmod 700` directory, `chmod 600` file) and hard-refusing
+  reads when either has drifted looser (`SecretPermissionException`) — the
+  OpenSSH/`gcloud` directory-permission model, not an OS-native keychain. Used
+  today for CLI-managed cloud sync credentials (the Google Drive OAuth blob
+  written by `kmdb remote add --type google-drive`); per-machine, non-synced,
+  entirely outside the database encryption boundary. See §33.
 
 CRC32C
 

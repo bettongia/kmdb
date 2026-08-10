@@ -12,15 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'dart:convert';
 import 'dart:io' as io;
+import 'dart:typed_data';
 
 import 'package:kmdb/kmdb.dart';
 import 'package:kmdb_cli/src/commands/command.dart';
 import 'package:kmdb_cli/src/commands/remote_command.dart';
+import 'package:kmdb_cli/src/config/secret_store/directory_secret_store.dart';
+import 'package:kmdb_cli/src/config/secret_store/secret_key.dart';
 import 'package:kmdb/kmdb_config.dart';
 import 'package:test/test.dart';
 
-import '../support/fake_credential_store.dart';
+import '../support/fake_secret_store.dart';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -213,20 +217,26 @@ void main() {
       );
       await config.save();
 
-      final fakeStore = FakeCredentialStore()
-        ..secrets['google_credentials.json'] = '{"token":"abc"}';
+      final expectedKey = dbScopedSecretKey(
+        dbDir.path,
+        'google_credentials.json',
+      );
+      final fakeStore = FakeSecretStore()
+        ..secrets[expectedKey] = Uint8List.fromList(
+          utf8.encode('{"token":"abc"}'),
+        );
 
       final ctx = _ctx(db, out: out, err: err);
       final ok = await cmd.execute(
         ctx,
         ['remove', 'gdrive'],
         {},
-        credentialStoreOverride: fakeStore,
+        secretStoreOverride: fakeStore,
       );
 
       expect(ok, isTrue);
-      expect(fakeStore.deleteCalls, ['google_credentials.json']);
-      expect(fakeStore.secrets.containsKey('google_credentials.json'), isFalse);
+      expect(fakeStore.deleteCalls, [expectedKey]);
+      expect(fakeStore.secrets.containsKey(expectedKey), isFalse);
     },
   );
 
@@ -236,13 +246,13 @@ void main() {
       final ctx1 = _ctx(db, out: out, err: err);
       await cmd.execute(ctx1, ['add', 'origin'], {'path': '/tmp/sync'});
 
-      final fakeStore = FakeCredentialStore();
+      final fakeStore = FakeSecretStore();
       final ctx2 = _ctx(db, out: out, err: err);
       final ok = await cmd.execute(
         ctx2,
         ['remove', 'origin'],
         {},
-        credentialStoreOverride: fakeStore,
+        secretStoreOverride: fakeStore,
       );
 
       expect(ok, isTrue);
@@ -250,22 +260,52 @@ void main() {
     },
   );
 
-  test('remove: actually deletes the credentials file on disk (real store, no '
-      'injection)', () async {
+  test('remove: actually deletes the credential from the real store (rooted at '
+      'a temp directory, not the real profile directory)', () async {
     final config = await KmdbConfig.forDatabase(dbDir.path);
     config.addRemote('gdrive', GoogleDriveRemoteConfig(syncRoot: 'kmdb-sync'));
     await config.save();
 
-    final localDir = io.Directory('${dbDir.path}/local')
-      ..createSync(recursive: true);
-    final credFile = io.File('${localDir.path}/google_credentials.json')
-      ..writeAsStringSync('{"token":"abc"}');
+    final secretRoot = io.Directory('${tmpDir.path}/secret-root');
+    final realStore = DirectorySecretStore(root: secretRoot.path);
+    final key = dbScopedSecretKey(dbDir.path, 'google_credentials.json');
+    await realStore.write(
+      key,
+      Uint8List.fromList(utf8.encode('{"token":"abc"}')),
+    );
+
+    final ctx = _ctx(db, out: out, err: err);
+    final ok = await cmd.execute(
+      ctx,
+      ['remove', 'gdrive'],
+      {},
+      secretStoreOverride: realStore,
+    );
+
+    expect(ok, isTrue);
+    expect(await realStore.read(key), isNull);
+  });
+
+  // ── Default store resolution (no override) ─────────────────────────────────
+  //
+  // Exercises `secretStoreOverride ?? DirectorySecretStore.forPlatform()` for
+  // real — every other `remove` test in this file deliberately injects a
+  // store to keep isolation from the real machine profile directory. Safe
+  // here because dbDir is a freshly-generated temp directory, so its scoped
+  // key cannot already exist in the real store, and `delete()` is a no-op
+  // for an absent key — nothing is ever written to the real ~/.config/kmdb
+  // (or %APPDATA%\kmdb) directory by this test.
+  test('remove: without an override, resolves the real '
+      'DirectorySecretStore.forPlatform() default (delete-of-absent-key, no '
+      'fixture)', () async {
+    final config = await KmdbConfig.forDatabase(dbDir.path);
+    config.addRemote('gdrive', GoogleDriveRemoteConfig(syncRoot: 'kmdb-sync'));
+    await config.save();
 
     final ctx = _ctx(db, out: out, err: err);
     final ok = await cmd.execute(ctx, ['remove', 'gdrive'], {});
 
     expect(ok, isTrue);
-    expect(credFile.existsSync(), isFalse);
   });
 
   // ── list ─────────────────────────────────────────────────────────────────────

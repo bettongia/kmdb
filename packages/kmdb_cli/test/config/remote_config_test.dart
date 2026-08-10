@@ -13,14 +13,15 @@
 // limitations under the License.
 
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:googleapis_auth/googleapis_auth.dart';
 import 'package:kmdb/kmdb.dart';
-import 'package:kmdb_cli/src/config/credential_store.dart';
 import 'package:kmdb_cli/src/config/remote_config.dart';
+import 'package:kmdb_cli/src/config/secret_store/secret_key.dart';
 import 'package:test/test.dart';
 
-import '../support/fake_credential_store.dart';
+import '../support/fake_secret_store.dart';
 
 /// Creates a valid (non-expired) [AccessCredentials] JSON payload for use in
 /// test credential fixtures.
@@ -220,49 +221,57 @@ void main() {
       'throws StateError for GoogleDriveRemoteConfig without credentials',
       () async {
         final config = GoogleDriveRemoteConfig(syncRoot: 'kmdb-sync');
-        // No credentials file exists under /tmp/nonexistent-db/local/ so a
-        // StateError is expected.
+        // Injected empty store — no credential exists under any key, so a
+        // StateError is expected. (An injected store is used rather than
+        // the real default so this test never touches the real machine's
+        // profile secret directory.)
         await expectLater(
-          adapterFor(config, dbDir: '/tmp/nonexistent-db'),
+          adapterFor(
+            config,
+            dbDir: '/tmp/nonexistent-db',
+            secretStoreOverride: FakeSecretStore(),
+          ),
           throwsStateError,
         );
       },
     );
   });
 
-  // ── adapterFor — credentialStoreOverride injection seam ───────────────────
+  // ── adapterFor — secretStoreOverride injection seam ────────────────────────
   //
   // These tests exercise the same paths as the ones above, but via an
-  // injected FakeCredentialStore rather than the real filesystem, proving
+  // injected FakeSecretStore rather than the real filesystem, proving
   // adapterFor's optional override parameter actually plumbs through to
   // _loadGoogleDriveAuthClient rather than always resolving the real store.
 
-  group('adapterFor — credentialStoreOverride', () {
+  group('adapterFor — secretStoreOverride', () {
     test('returns GoogleDriveAdapter when the injected store has a '
         'non-expired credential', () async {
-      final fakeStore = FakeCredentialStore()
-        ..secrets['google_credentials.json'] = _validCredentialsJson();
+      const dbDir = '/tmp/unused-with-override';
+      final fakeStore = FakeSecretStore()
+        ..secrets[dbScopedSecretKey(dbDir, 'google_credentials.json')] =
+            Uint8List.fromList(utf8.encode(_validCredentialsJson()));
       final config = GoogleDriveRemoteConfig(syncRoot: 'kmdb-sync');
 
       final adapter = await adapterFor(
         config,
-        dbDir: '/tmp/unused-with-override',
-        credentialStoreOverride: fakeStore,
+        dbDir: dbDir,
+        secretStoreOverride: fakeStore,
       );
 
       expect(adapter, isA<SyncStorageAdapter>());
     });
 
     test('throws StateError when the injected store has no credential for '
-        'the account', () async {
-      final fakeStore = FakeCredentialStore();
+        'the key', () async {
+      final fakeStore = FakeSecretStore();
       final config = GoogleDriveRemoteConfig(syncRoot: 'kmdb-sync');
 
       await expectLater(
         adapterFor(
           config,
           dbDir: '/tmp/unused-with-override',
-          credentialStoreOverride: fakeStore,
+          secretStoreOverride: fakeStore,
         ),
         throwsA(
           isA<StateError>().having(
@@ -275,11 +284,11 @@ void main() {
     });
 
     test(
-      'propagates CredentialPermissionException from the injected store',
+      'propagates SecretPermissionException from the injected store',
       () async {
-        final fakeStore = FakeCredentialStore()
-          ..readError = CredentialPermissionException(
-            path: '/db/local/google_credentials.json',
+        final fakeStore = FakeSecretStore()
+          ..readError = SecretPermissionException(
+            path: '/profile/kmdb/some-scoped-key',
             actualMode: 0x1A4,
             expectedMode: 0x180,
           );
@@ -289,9 +298,9 @@ void main() {
           adapterFor(
             config,
             dbDir: '/tmp/unused-with-override',
-            credentialStoreOverride: fakeStore,
+            secretStoreOverride: fakeStore,
           ),
-          throwsA(isA<CredentialPermissionException>()),
+          throwsA(isA<SecretPermissionException>()),
         );
       },
     );

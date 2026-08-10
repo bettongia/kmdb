@@ -14,13 +14,18 @@
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:googleapis_auth/googleapis_auth.dart';
 import 'package:kmdb/kmdb.dart';
 import 'package:kmdb_cli/src/config/remote_config.dart';
+import 'package:kmdb_cli/src/config/secret_store/directory_secret_store.dart';
+import 'package:kmdb_cli/src/config/secret_store/secret_key.dart';
 import 'package:kmdb_google_drive/kmdb_google_drive.dart'
     show GoogleDriveAdapter;
 import 'package:test/test.dart';
+
+import '../support/fake_secret_store.dart';
 
 // ── Credential helpers ─────────────────────────────────────────────────────
 
@@ -50,29 +55,19 @@ String _validCredentialsJson({
   });
 }
 
-/// Writes [content] to [file] and, on POSIX, hardens the file to `600` and
-/// [localDir] to `700` — matching the permissions `DirectoryCredentialStore
-/// .write` establishes in production.
-///
-/// Fixtures written directly via `File.writeAsStringSync` (bypassing
-/// `DirectoryCredentialStore`) land at the process umask, typically `644`
-/// (group/world-readable). Under the hard-refuse read path, `adapterFor`
-/// would throw `CredentialPermissionException` instead of exercising the
-/// behaviour each test actually wants to assert on, so every fixture that
-/// reaches `adapterFor` must be hardened immediately after writing. This is
-/// a no-op on Windows, where `DirectoryCredentialStore` performs no
-/// chmod/stat checks at all.
-void _writeHardenedFixture(File file, String content, Directory localDir) {
-  file.writeAsStringSync(content);
-  if (Platform.isWindows) return;
-  final dirResult = Process.runSync('chmod', ['700', localDir.path]);
-  if (dirResult.exitCode != 0) {
-    throw StateError('chmod 700 ${localDir.path} failed: ${dirResult.stderr}');
-  }
-  final fileResult = Process.runSync('chmod', ['600', file.path]);
-  if (fileResult.exitCode != 0) {
-    throw StateError('chmod 600 ${file.path} failed: ${fileResult.stderr}');
-  }
+/// Seeds [store] with [content] under the key `adapterFor` will look up for
+/// [dbDir] + [credentialsPath] — i.e. `dbScopedSecretKey(dbDir,
+/// credentialsPath)`. Mirrors what `RemoteCommand._authoriseGoogleDrive`
+/// writes in production, minus the real OAuth flow.
+void _seedCredential(
+  FakeSecretStore store,
+  String dbDir,
+  String credentialsPath,
+  String content,
+) {
+  store.secrets[dbScopedSecretKey(dbDir, credentialsPath)] = Uint8List.fromList(
+    utf8.encode(content),
+  );
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────
@@ -80,12 +75,12 @@ void _writeHardenedFixture(File file, String content, Directory localDir) {
 void main() {
   late Directory tmpDir;
   late Directory dbDir;
-  late Directory localDir;
+  late FakeSecretStore secretStore;
 
   setUp(() {
     tmpDir = Directory.systemTemp.createTempSync('adapter_for_test_');
     dbDir = Directory('${tmpDir.path}/db')..createSync();
-    localDir = Directory('${dbDir.path}/local')..createSync();
+    secretStore = FakeSecretStore();
   });
 
   tearDown(() {
@@ -95,20 +90,24 @@ void main() {
   // ── Missing credentials ─────────────────────────────────────────────────────
 
   group('adapterFor — GoogleDriveRemoteConfig', () {
-    test('throws StateError when credentials file is absent', () async {
+    test('throws StateError when credentials are absent', () async {
       final config = GoogleDriveRemoteConfig(syncRoot: 'kmdb-sync');
       await expectLater(
-        adapterFor(config, dbDir: dbDir.path),
+        adapterFor(config, dbDir: dbDir.path, secretStoreOverride: secretStore),
         throwsStateError,
       );
     });
 
     test(
-      'StateError message contains instructions to run remote add',
+      'StateError message contains instructions to re-run remote add',
       () async {
         final config = GoogleDriveRemoteConfig(syncRoot: 'kmdb-sync');
         await expectLater(
-          adapterFor(config, dbDir: dbDir.path),
+          adapterFor(
+            config,
+            dbDir: dbDir.path,
+            secretStoreOverride: secretStore,
+          ),
           throwsA(
             isA<StateError>().having(
               (e) => e.message,
@@ -123,77 +122,85 @@ void main() {
     test(
       'returns GoogleDriveAdapter when non-expired credentials are present',
       () async {
-        // Write valid (non-expired) credentials to the expected path.
-        final credFile = File('${localDir.path}/google_credentials.json');
-        _writeHardenedFixture(credFile, _validCredentialsJson(), localDir);
+        _seedCredential(
+          secretStore,
+          dbDir.path,
+          'google_credentials.json',
+          _validCredentialsJson(),
+        );
 
         final config = GoogleDriveRemoteConfig(syncRoot: 'kmdb-sync');
-        // adapterFor reads the credentials file, sees the token has not
-        // expired, and returns an authenticated GoogleDriveAdapter without
-        // making any network calls.
-        final adapter = await adapterFor(config, dbDir: dbDir.path);
+        // adapterFor reads the credentials, sees the token has not expired,
+        // and returns an authenticated GoogleDriveAdapter without making any
+        // network calls.
+        final adapter = await adapterFor(
+          config,
+          dbDir: dbDir.path,
+          secretStoreOverride: secretStore,
+        );
         expect(adapter, isA<GoogleDriveAdapter>());
       },
     );
 
     test('uses custom credentialsPath from config', () async {
       const customCreds = 'my_creds.json';
-      final credFile = File('${localDir.path}/$customCreds');
-      _writeHardenedFixture(credFile, _validCredentialsJson(), localDir);
+      _seedCredential(
+        secretStore,
+        dbDir.path,
+        customCreds,
+        _validCredentialsJson(),
+      );
 
       final config = GoogleDriveRemoteConfig(
         syncRoot: 'kmdb-sync',
         credentialsPath: customCreds,
       );
-      final adapter = await adapterFor(config, dbDir: dbDir.path);
+      final adapter = await adapterFor(
+        config,
+        dbDir: dbDir.path,
+        secretStoreOverride: secretStore,
+      );
       expect(adapter, isA<GoogleDriveAdapter>());
     });
 
-    test('StateError when credentials file contains invalid JSON', () async {
-      final credFile = File('${localDir.path}/google_credentials.json');
-      // Hardened even though this fixture is deliberately invalid JSON: an
-      // un-hardened (umask-default) file would trip the permission refusal
-      // before ever reaching the JSON parse, masking the behaviour this test
-      // actually wants to assert on (FormatException -> StateError).
-      _writeHardenedFixture(credFile, '{ invalid json }}', localDir);
+    test('StateError when credentials contain invalid JSON', () async {
+      _seedCredential(
+        secretStore,
+        dbDir.path,
+        'google_credentials.json',
+        '{ invalid json }}',
+      );
 
       final config = GoogleDriveRemoteConfig(syncRoot: 'kmdb-sync');
       await expectLater(
-        adapterFor(config, dbDir: dbDir.path),
+        adapterFor(config, dbDir: dbDir.path, secretStoreOverride: secretStore),
         throwsStateError,
       );
     });
 
-    // ── google_credentials.json is never in the sync path ─────────────────────
+    // ── Credentials are stored outside dbDir entirely ─────────────────────────
     //
-    // The credentials file lives under {dbDir}/local/ and is explicitly
-    // outside the sync root.  The SyncEngine only uploads files emitted by
-    // the LSM engine (SSTables, HWM, lease), never {dbDir}/local/ contents.
-    //
-    // This test verifies the file path invariant: credentials are stored
-    // at {dbDir}/local/{credentialsPath}, which is inside the local-only
-    // subdirectory that SyncEngine never touches.
-    test(
-      'google_credentials.json is stored in local/ (not in sync root)',
-      () async {
-        final credFile = File('${localDir.path}/google_credentials.json');
-        credFile.writeAsStringSync(_validCredentialsJson());
+    // This is the whole point of the profile-dir move that closes review
+    // finding C-1: unlike the former {dbDir}/local/-rooted design, no
+    // credential file is ever written anywhere under dbDir — the real
+    // DirectorySecretStore is rooted at the per-user profile config
+    // directory, entirely outside any database's own directory tree (and
+    // therefore also outside the sync root, which SyncEngine only ever
+    // populates from LSM-emitted files).
+    test('credentials are never written anywhere under dbDir', () async {
+      final secretRoot = Directory('${tmpDir.path}/secret-root');
+      final realStore = DirectorySecretStore(root: secretRoot.path);
+      await realStore.write(
+        dbScopedSecretKey(dbDir.path, 'google_credentials.json'),
+        Uint8List.fromList(utf8.encode(_validCredentialsJson())),
+      );
 
-        // Confirm the credentials are stored under {dbDir}/local/, which is
-        // the CLI-only, non-synced subdirectory. Compared against
-        // `localDir.path` directly (rather than rejoining with
-        // `Platform.pathSeparator`) since `localDir` and `credFile` were both
-        // built with a literal `/` above — on Windows, joining with `\`
-        // would produce a separator that never appears in either path.
-        expect(credFile.path, contains(localDir.path));
-        // The credentials file must NOT be at the database root (which is
-        // the sync root for SSTable uploads).
-        expect(
-          File('${dbDir.path}/google_credentials.json').existsSync(),
-          isFalse,
-        );
-      },
-    );
+      // dbDir was created empty in setUp and is never touched by the secret
+      // store — its directory tree stays empty.
+      expect(dbDir.listSync(recursive: true), isEmpty);
+      // The secret does live somewhere — just not under dbDir.
+      expect(secretRoot.listSync(), isNotEmpty);
+    });
 
     test(
       'adapterFor returns LocalDirectoryAdapter for LocalRemoteConfig',
@@ -203,14 +210,35 @@ void main() {
         expect(adapter, isA<LocalDirectoryAdapter>());
       },
     );
+
+    // ── Default store resolution (no override) ────────────────────────────────
+    //
+    // Exercises `secretStoreOverride ?? DirectorySecretStore.forPlatform()`
+    // for real — the one call site every other test in this file
+    // deliberately avoids to keep isolation from the real machine profile
+    // directory. Safe here because dbDir is a freshly-generated temp
+    // directory, so its scoped key cannot already exist in the real store,
+    // and this is a pure *read* (adapterFor never writes on the
+    // missing-credentials path) — nothing is ever written to the real
+    // ~/.config/kmdb (or %APPDATA%\kmdb) directory by this test.
+    test(
+      'without an override, adapterFor resolves the real '
+      'DirectorySecretStore.forPlatform() default (read-only, no fixture)',
+      () async {
+        final config = GoogleDriveRemoteConfig(syncRoot: 'kmdb-sync');
+        await expectLater(
+          adapterFor(config, dbDir: dbDir.path),
+          throwsStateError,
+        );
+      },
+    );
   });
 
   // ── GoogleDriveRemoteConfig credential path invariant ─────────────────────
   //
-  // The credentialsPath is always relative: it is joined with {dbDir}/local/
-  // inside _loadGoogleDriveAuthClient.  Relative paths are significant:
-  // they prevent the CLI from accidentally resolving credentials outside the
-  // database directory (path traversal safety).
+  // The credentialsPath is always relative: it is combined with dbDir inside
+  // dbScopedSecretKey. Relative paths are significant: they prevent the CLI
+  // from accidentally resolving credentials outside the intended scope.
   group('GoogleDriveRemoteConfig — credentials path invariant', () {
     test('default credentialsPath is relative (not absolute)', () {
       final config = GoogleDriveRemoteConfig(syncRoot: 'sync');
