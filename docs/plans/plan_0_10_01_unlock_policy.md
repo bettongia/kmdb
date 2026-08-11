@@ -4,7 +4,7 @@
 > `plan_0_10_01_cli_session_agent.md` (reviewer round 2). This plan is the
 > SC-1-closing unit: wrapped-copy DEK + native biometric + headless opt-out.
 
-**Status**: **Investigated** (2026-08-11) — Q1–Q7 resolved and verified against the code; no open design decisions remain. See "Reviewer re-check (round 3)" for the sign-off and two non-blocking test-coverage directives the implementer must honour.
+**Status**: **Implementing** (2026-08-11) — Q1–Q7 resolved and verified against the code; no open design decisions remain. See "Reviewer re-check (round 3)" for the sign-off and two non-blocking test-coverage directives the implementer must honour.
 
 **PR link**: _(none yet)_
 
@@ -259,31 +259,45 @@ section number.
 
 ### Phase 1 — Core: remove `DekCache`, add the authenticated wrapped-DEK unwrap
 
-- [ ] Remove `DekCache` / `InMemoryDekCache` and every reference (core + the
+- [x] Remove `DekCache` / `InMemoryDekCache` and every reference (core + the
       `FlutterSecureDekCache` in `kmdb_flutter`, deferring the *replacement*
       platform impl to Phase 3 — Phase 1 leaves native hosts on the passphrase
-      path, which is correct and green).
-- [ ] Refactor the `kmdb_database.dart` open path so **every** branch obtains the
+      path, which is correct and green). Also removed `dek_cache_test.dart`
+      and `flutter_secure_dek_cache_test.dart`.
+- [x] Refactor the `kmdb_database.dart` open path so **every** branch obtains the
       DEK by an authenticated unwrap (passphrase, recovery, or — once Phase 3
       lands — biometric); delete the raw-DEK cache-hit return at `:751-753`.
-- [ ] Add `EncryptionConfig.tryUnwrapWithBiometric` (thin `unwrapDek` wrapper)
+- [x] Add `EncryptionConfig.tryUnwrapWithBiometric` (thin `unwrapDek` wrapper)
       and a `KEKSource` abstraction the open path consults, so a wrong passphrase
       is **always** rejected regardless of prior unlock state.
-- [ ] Define the **per-device local** store for the biometric-wrapped DEK (see
+- [x] Define the **per-device local** store for the biometric-wrapped DEK (see
       the design decision above) — `SecretStore`-backed on native, keyed per db.
-      Nothing biometric is written to `enc:blob`.
-- [ ] `KmdbDatabase.lock()` — discard the in-memory DEK, force a fresh unwrap.
-- [ ] Core enrolment API `enableBiometricUnlock(BiometricKekProvider)` /
+      Nothing biometric is written to `enc:blob`. `dbScopedSecretKey`/
+      `isSecretKeyForDb` promoted from `kmdb_cli` to
+      `packages/kmdb/lib/src/secret/secret_key.dart` (CLI-agnostic doc
+      comment), re-exported from `kmdb.dart`; `crypto: ^3.0.0` and
+      `path: ^1.9.0` added as genuine new direct deps of `kmdb`.
+- [x] `KmdbDatabase.lock()` — discard the in-memory DEK, force a fresh unwrap.
+      Implemented via a new `EncryptionProvider.lock()` on the interface;
+      `AesGcmEncryptionProvider.lock()` zeroes the DEK bytes in place and
+      gates `encrypt`/`decrypt`/`indexToken`/`dek` behind a `_locked` flag
+      that throws the new `EncryptionErrorCode.databaseLocked`.
+- [x] Core enrolment API `enableBiometricUnlock(BiometricKekProvider)` /
       `disableBiometricUnlock()` (Q7) — write/delete the biometric wrap in
       `SecretStore` from an unlocked session. (The real provider lands in Phase 3;
-      Phase 1 exercises it with a fake `BiometricKekProvider`.)
-- [ ] **Additive `EncryptionConfig` refactor** (Q7): retain `passphrase:` /
+      Phase 1 exercises it with a fake `BiometricKekProvider` in
+      `kmdb_database_encryption_test.dart`.)
+- [x] **Additive `EncryptionConfig` refactor** (Q7): retain `passphrase:` /
       `recoveryCode:` constructors, add `KEKSource` + `.biometric(...)` +
       `ReauthPolicy`; **absorb all fallout in this one commit** — the 5 `dekCache:`
       sites and the `kmdb.dart` `DekCache` export removed here, ~30 other
-      `EncryptionConfig(` sites unaffected by staying additive.
-- [ ] **Checkpoint:** commit `WI-5 Phase 1: remove DekCache, authenticated
-      wrapped-DEK unwrap, lock()` (green).
+      `EncryptionConfig(` sites unaffected by staying additive. Also added
+      `EncryptionErrorCode.biometricUnavailable` (fail-closed: no enrolled
+      wrap, or the re-auth interval has lapsed) alongside `databaseLocked`.
+- [x] **Checkpoint:** commit `WI-5 Phase 1: remove DekCache, authenticated
+      wrapped-DEK unwrap, lock()` (green). `dart analyze` clean across all 7
+      workspace packages; `kmdb` (2620 tests), `kmdb_cli` (1228 tests), and
+      `kmdb_flutter` (4 tests, via `flutter test`) all green.
 
 ### Phase 2 — Re-authentication policy (default-on, 14-day, enforced)
 

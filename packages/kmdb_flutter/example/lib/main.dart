@@ -18,8 +18,12 @@
 ///
 /// 1. Calling `KmdbFlutter.initialize()` in `main()` to register native
 ///    AES-256-GCM / Argon2id acceleration via `cryptography_flutter`.
-/// 2. Using `FlutterSecureDekCache` so the user is prompted for their
-///    passphrase only once per device, not on every app launch.
+/// 2. Provisioning an encrypted database with a passphrase. Every unlock —
+///    passphrase, recovery code, or (once enrolled) biometric — is an
+///    authenticated unwrap; there is no DEK session cache to configure. See
+///    `EncryptionConfig.biometric` and `KmdbDatabase.enableBiometricUnlock`
+///    in `kmdb` for the biometric-unlock path this package's native
+///    `BiometricKekProvider` implementation feeds.
 ///
 /// This example does not include a real `StorageAdapter` — replace
 /// `_buildAdapter()` with the appropriate platform adapter from `kmdb`.
@@ -60,16 +64,11 @@ class _KmdbFlutterExampleAppState extends State<KmdbFlutterExampleApp> {
       // This example just shows the wiring; it will throw because
       // `_buildAdapter()` is a stub.
       //
-      // FlutterSecureDekCache persists the DEK in Keychain / Keystore so
-      // subsequent opens do not require re-entering the passphrase.
-      final dekCache = FlutterSecureDekCache();
-
-      // Provision a new encrypted database (createResult generates the DEK
-      // and wraps it; the dekCache is stored alongside the config so subsequent
-      // opens re-use the cached DEK rather than running Argon2id again).
+      // Provision a new encrypted database (createResult generates the DEK,
+      // wraps it under both the passphrase and a one-time recovery code, and
+      // persists the wrapped copies to enc:blob).
       final encryptionResult = await EncryptionConfig.createResult(
         passphrase: 'demo-passphrase',
-        dekCache: dekCache,
       );
 
       print('Recovery code (store safely): ${encryptionResult.recoveryCode}');

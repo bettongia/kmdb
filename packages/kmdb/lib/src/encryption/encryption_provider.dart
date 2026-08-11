@@ -114,6 +114,17 @@ abstract interface class EncryptionProvider {
   /// "DEK rotation and index tokens" note. A future "change the DEK" feature
   /// would invalidate every token and require a full index rebuild.
   Future<String> indexToken(String message);
+
+  /// Discards the in-memory DEK and any derived key material, and makes every
+  /// subsequent [encrypt]/[decrypt]/[indexToken] call throw
+  /// [EncryptionErrorCode.databaseLocked] (WI-5, closing SC-1).
+  ///
+  /// Called by `KmdbDatabase.lock()`. There is no in-place unlock — a locked
+  /// provider is permanently unusable; the caller must call
+  /// `KmdbDatabase.open` again to obtain a fresh, unlocked instance.
+  ///
+  /// Idempotent: calling [lock] on an already-locked provider is a no-op.
+  void lock();
 }
 
 /// AES-256-GCM implementation of [EncryptionProvider].
@@ -157,17 +168,28 @@ final class AesGcmEncryptionProvider implements EncryptionProvider {
 
   final Uint8List _dek;
 
+  /// Set by [lock]. Once `true`, every [encrypt]/[decrypt]/[indexToken]/[dek]
+  /// call throws [EncryptionErrorCode.databaseLocked] instead of touching the
+  /// (already-zeroed) DEK bytes.
+  bool _locked = false;
+
   /// AES-256-GCM instance from the `cryptography` package.
   ///
   /// 16-byte MAC length (GCM tag) is the standard and is non-negotiable for
   /// AES-GCM; the `cryptography` package default is also 16.
   static final _algorithm = AesGcm.with256bits(nonceLength: 12);
 
+  /// Throws [EncryptionErrorCode.databaseLocked] if [lock] has been called.
+  void _checkNotLocked() {
+    if (_locked) throw EncryptionError.databaseLocked();
+  }
+
   @override
   Future<Uint8List> encrypt(
     Uint8List plaintext, {
     required Uint8List aad,
   }) async {
+    _checkNotLocked();
     final secretKey = SecretKey(_dek);
     // Generate a fresh random 96-bit nonce for each call.
     // cryptography.AesGcm.newNonce() uses a cryptographically secure RNG.
@@ -199,6 +221,7 @@ final class AesGcmEncryptionProvider implements EncryptionProvider {
     Uint8List ciphertext, {
     required Uint8List aad,
   }) async {
+    _checkNotLocked();
     // Minimum size: 12 (nonce) + 0 (empty plaintext) + 16 (tag) = 28 bytes.
     const int kNonceLength = 12;
     const int kTagLength = 16;
@@ -243,10 +266,15 @@ final class AesGcmEncryptionProvider implements EncryptionProvider {
 
   /// Returns the raw DEK bytes.
   ///
-  /// Exposed for key-management operations (re-wrap, change-passphrase) that
-  /// need to extract the DEK from an unlocked provider. Must not be stored or
-  /// logged.
-  Uint8List get dek => Uint8List.fromList(_dek);
+  /// Exposed for key-management operations (re-wrap, change-passphrase,
+  /// biometric enrolment) that need to extract the DEK from an unlocked
+  /// provider. Must not be stored or logged.
+  ///
+  /// Throws [EncryptionErrorCode.databaseLocked] if [lock] has been called.
+  Uint8List get dek {
+    _checkNotLocked();
+    return Uint8List.fromList(_dek);
+  }
 
   // ── Namespace token derivation (Gap 2, Q4) ─────────────────────────────────
 
@@ -287,6 +315,7 @@ final class AesGcmEncryptionProvider implements EncryptionProvider {
 
   @override
   Future<String> indexToken(String message) async {
+    _checkNotLocked();
     final subKey = await _indexTokenSubKey();
     final mac = await _hmacSha256.calculateMac(
       utf8.encode(message),
@@ -296,5 +325,21 @@ final class AesGcmEncryptionProvider implements EncryptionProvider {
     // the [EncryptionProvider.indexToken] doc comment for the rationale.
     final truncated = mac.bytes.sublist(0, 16);
     return truncated.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  }
+
+  @override
+  void lock() {
+    if (_locked) return; // Idempotent.
+    _locked = true;
+    // Zero the DEK bytes in place so no live reference to the key material
+    // survives lock() — including any reference a caller obtained earlier via
+    // the [dek] getter before this call (Uint8List content is mutable even
+    // though the [_dek] field reference is final).
+    _dek.fillRange(0, _dek.length, 0);
+    // Also drop the memoized index-token sub-key derivation so a stale
+    // in-flight or already-resolved Future cannot be reused post-lock; any
+    // future indexToken() call is refused by _checkNotLocked() before this
+    // field would even be consulted.
+    _indexTokenSubKeyFuture = null;
   }
 }

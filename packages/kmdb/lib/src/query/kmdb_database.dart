@@ -12,20 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'dart:convert' show utf8;
 import 'dart:typed_data';
 
 import '../cache/cache_layer.dart';
+import '../encryption/biometric_kek_provider.dart';
 import '../encryption/encryption_blob.dart';
 import '../encryption/encryption_config.dart';
 import '../encryption/encryption_error.dart';
 import '../encryption/encryption_provider.dart';
+import '../encryption/kek_source.dart';
 import '../encryption/key_derivation.dart';
+import '../encryption/reauth_policy.dart';
 import '../encryption/value_context.dart';
 import '../engine/kvstore/kv_store.dart';
 import '../engine/kvstore/kv_store_impl.dart';
 import '../engine/kvstore/quarantine.dart';
 import '../engine/platform/storage_adapter_interface.dart';
 import '../engine/platform/storage_adapter_native.dart';
+import '../secret/secret_key.dart';
+import '../secret/secret_store.dart';
 import 'package:betto_inferencing/betto_inferencing.dart';
 import 'package:betto_zstd/betto_zstd.dart' show ZstdSimple;
 import '../search/fts_index_definition.dart';
@@ -151,6 +157,7 @@ final class KmdbDatabase {
     required this._ftsIndexes,
     required this._vecIndexes,
     required this._embeddingModel,
+    required this._secretStore,
     EncryptionProvider? encryption,
     VaultStore? vaultStore,
     VaultGc? vaultGc,
@@ -223,6 +230,13 @@ final class KmdbDatabase {
   final VaultStore? _vaultStore;
   final VaultSearchManager? _vaultSearchManager;
   final VaultRefInterceptor? _vaultRefInterceptor;
+
+  /// The per-device local secret store backing the unlock policy (WI-5,
+  /// closing SC-1): the biometric-wrapped DEK and the "passphrase last used"
+  /// re-authentication timestamp. Never the synced `enc:blob` — see the
+  /// [KEKSource]/[ReauthPolicy] doc comments for why this state is
+  /// device-local rather than `$meta`.
+  final SecretStore _secretStore;
 
   /// The version write augmentor, always registered. Emits `$ver:` entries for
   /// every document write in collections where versioning is enabled.
@@ -348,6 +362,23 @@ final class KmdbDatabase {
     /// invariant is violated (e.g. encrypted database opened without config,
     /// or wrong passphrase).
     EncryptionConfig? encryptionConfig,
+
+    /// The per-device local secret store backing the unlock policy (WI-5,
+    /// closing SC-1): the biometric-wrapped DEK and the "passphrase last
+    /// used" re-authentication timestamp. Defaults to [InMemorySecretStore]
+    /// — mirroring the historical default-to-in-memory pattern for
+    /// encryption — which means biometric unlock and re-auth-interval
+    /// tracking do not persist across process restarts unless a durable
+    /// store (e.g. a native keychain-backed implementation, or `kmdb_cli`'s
+    /// `DirectorySecretStore`) is supplied. Never stores anything from
+    /// `enc:blob` — this store is strictly device-local state.
+    SecretStore? secretStore,
+
+    /// Clock used for the re-authentication interval check
+    /// ([ReauthPolicy.interval]). Defaults to [DateTime.now]. Overridable so
+    /// tests can exercise interval-lapse behaviour without a real 14-day
+    /// wait.
+    DateTime Function()? now,
   }) async {
     // Initialise the Zstd compression module before any I/O begins.
     //
@@ -385,6 +416,12 @@ final class KmdbDatabase {
       deviceId: deviceId,
     );
 
+    // Resolve the secret store and clock defaults. Mirrors the historical
+    // default-to-in-memory pattern used for encryption: existing callers and
+    // tests that never supply either parameter are unaffected.
+    final resolvedSecretStore = secretStore ?? InMemorySecretStore();
+    final resolvedNow = now ?? DateTime.now;
+
     // Everything below can throw before a KmdbDatabase is fully constructed
     // (most commonly EncryptionError from the bootstrap on a bad passphrase
     // or recovery code). `store` has already acquired the exclusive LOCK file
@@ -406,6 +443,8 @@ final class KmdbDatabase {
         store,
         encryptionConfig,
         path,
+        resolvedSecretStore,
+        resolvedNow,
       );
 
       // Assign the late-bound EncryptionProvider to MetaStore immediately —
@@ -638,6 +677,7 @@ final class KmdbDatabase {
         ftsIndexes: ftsIndexes,
         vecIndexes: vecIndexes,
         embeddingModel: embeddingModel,
+        secretStore: resolvedSecretStore,
         encryption: encryption,
         vaultStore: vaultStore,
         vaultGc: vaultGc,
@@ -658,6 +698,38 @@ final class KmdbDatabase {
 
   // ── Encryption bootstrap ────────────────────────────────────────────────────
 
+  /// `SecretStore` key name for the biometric-wrapped DEK — see
+  /// [dbScopedSecretKey]. Per-device local state, never `$meta`.
+  static const String _kBiometricWrapSecretName = 'dek.wrap.biometric';
+
+  /// `SecretStore` key name for the "passphrase last used" re-authentication
+  /// timestamp — see [dbScopedSecretKey]. Per-device local state, never
+  /// `$meta` (a synced timestamp would let a peer's plain last-write-wins
+  /// move it backwards, exactly the class of hazard `MetaStore
+  /// .kGenStateNamespace`'s doc comment describes for the cache-generation
+  /// counter).
+  static const String _kPassphraseLastUsedSecretName = 'passphrase.lastused';
+
+  /// Encodes [time] for storage under [_kPassphraseLastUsedSecretName] — the
+  /// UTF-8 bytes of its ISO-8601 string form. A human-legible, unambiguous
+  /// encoding is preferred over a packed binary timestamp because
+  /// `SecretStore` values are otherwise opaque and this one is small enough
+  /// that legibility costs nothing.
+  static Uint8List _encodeTimestamp(DateTime time) =>
+      Uint8List.fromList(utf8.encode(time.toIso8601String()));
+
+  /// Decodes a timestamp previously written by [_encodeTimestamp]. Returns
+  /// `null` (rather than throwing) if [bytes] is not valid — a corrupted or
+  /// foreign value is treated the same as "no timestamp recorded", which
+  /// [ReauthPolicy.permitsBiometric] already fails closed on.
+  static DateTime? _decodeTimestamp(Uint8List bytes) {
+    try {
+      return DateTime.parse(utf8.decode(bytes));
+    } on FormatException {
+      return null;
+    }
+  }
+
   /// Runs the 4-state encryption bootstrap immediately after [KvStoreImpl.open].
   ///
   /// Reads the `enc:blob` from `$meta` (plaintext CBOR — non-circular) and
@@ -669,14 +741,22 @@ final class KmdbDatabase {
   /// | Yes                | No                           | Throws [EncryptionError.databaseIsEncrypted]. |
   /// | No                 | Yes (unlock)                 | Throws [EncryptionError.databaseIsNotEncrypted]. |
   /// | No                 | Yes (create)                 | Provisions encryption: writes `enc:blob`, returns provider. |
-  /// | Yes                | Yes (unlock)                 | Unwraps DEK. Returns provider, or throws [EncryptionError.badCredentials]. |
+  /// | Yes                | Yes (unlock)                 | Unwraps DEK via the config's [KEKSource]. Returns provider, or throws [EncryptionError.badCredentials] / [EncryptionError.biometricUnavailable]. |
+  ///
+  /// Every unlock path (passphrase, recovery code, biometric) goes through an
+  /// authenticated unwrap — there is no cache-hit shortcut that returns a DEK
+  /// without verifying credentials (WI-5, closing SC-1: a warm session DEK
+  /// cache used to let a deliberately wrong passphrase silently open the
+  /// database).
   ///
   /// Returns the [EncryptionProvider] to thread into all collaborators, or
   /// `null` for an unencrypted database.
   static Future<EncryptionProvider?> _runEncryptionBootstrap(
     KvStoreImpl store,
     EncryptionConfig? encryptionConfig,
-    String dbId,
+    String dbDir,
+    SecretStore secretStore,
+    DateTime Function() now,
   ) async {
     final blob = await store.meta.getEncryptionBlob();
     final blobPresent = blob != null;
@@ -730,9 +810,13 @@ final class KmdbDatabase {
       // have been fsynced on the write path.
       await store.meta.putEncryptionBlob(newBlob);
 
-      // Cache the DEK for this session so the user is not re-prompted on
-      // repeated opens (relevant when a FlutterSecureDekCache is injected).
-      await encryptionConfig.dekCache.store(dbId, dek);
+      // Record the re-authentication timestamp at provision time — the
+      // passphrase was just supplied in plaintext to create this database,
+      // which counts as a passphrase-use event for ReauthPolicy purposes.
+      await secretStore.write(
+        dbScopedSecretKey(dbDir, _kPassphraseLastUsedSecretName),
+        _encodeTimestamp(now()),
+      );
 
       return encryptionConfig.buildProvider(dek);
     }
@@ -744,35 +828,97 @@ final class KmdbDatabase {
       throw EncryptionError.databaseIsNotEncrypted();
     }
 
-    // State 5: enc:blob present + unlock config supplied — unwrap the DEK.
-    // Try the DEK cache first to avoid re-running Argon2id (Argon2id at the
-    // default parameters takes ~200ms, so skipping it on repeated opens is
-    // a significant UX improvement when a FlutterSecureDekCache is injected).
-    final cachedDek = await encryptionConfig!.dekCache.read(dbId);
-    if (cachedDek != null) {
-      return encryptionConfig.buildProvider(cachedDek);
-    }
-
+    // State 5: enc:blob present + unlock config supplied — unwrap the DEK via
+    // whichever KEKSource this config selects. Each branch is an
+    // authenticated unwrap; none can return a DEK without verifying
+    // credentials against the wrapped copy.
     final existingBlob = blob!;
+    Uint8List? dek;
 
-    // Try passphrase unwrap (Argon2id + AES-GCM).
-    Uint8List? dek = await encryptionConfig.tryUnwrapWithPassphrase(
-      existingBlob.wrappedDekPassphrase,
-      existingBlob.argon2Salt,
-    );
+    switch (encryptionConfig!.kekSource) {
+      case PassphraseKekSource():
+        dek = await encryptionConfig.tryUnwrapWithPassphrase(
+          existingBlob.wrappedDekPassphrase,
+          existingBlob.argon2Salt,
+        );
+        if (dek != null) {
+          await secretStore.write(
+            dbScopedSecretKey(dbDir, _kPassphraseLastUsedSecretName),
+            _encodeTimestamp(now()),
+          );
+        }
 
-    // Try recovery-code unwrap if passphrase didn't work.
-    dek ??= await encryptionConfig.tryUnwrapWithRecovery(
-      existingBlob.wrappedDekRecovery,
-    );
+      case RecoveryCodeKekSource():
+        dek = await encryptionConfig.tryUnwrapWithRecovery(
+          existingBlob.wrappedDekRecovery,
+        );
+        if (dek != null) {
+          // The recovery code is an equally strong user-held secret as the
+          // passphrase — successfully presenting it is just as valid a
+          // re-authentication event, so it also refreshes the interval.
+          await secretStore.write(
+            dbScopedSecretKey(dbDir, _kPassphraseLastUsedSecretName),
+            _encodeTimestamp(now()),
+          );
+        }
+
+      case BiometricKekSource(:final provider):
+        dek = await _unwrapBiometric(
+          existingBlob,
+          encryptionConfig,
+          provider,
+          secretStore,
+          dbDir,
+          now,
+        );
+    }
 
     if (dek == null) {
       throw EncryptionError.badCredentials();
     }
 
-    // Cache the DEK and return the provider.
-    await encryptionConfig.dekCache.store(dbId, dek);
     return encryptionConfig.buildProvider(dek);
+  }
+
+  /// Handles the [BiometricKekSource] branch of [_runEncryptionBootstrap].
+  ///
+  /// Fail-closed (Q7 / SC-1 hardening): the biometric wrap must be present in
+  /// [secretStore] *and* the [EncryptionConfig.reauthPolicy] must currently
+  /// permit biometric unlock, or this throws
+  /// [EncryptionError.biometricUnavailable] rather than falling through to
+  /// any other unlock path. Only once both checks pass does this obtain a KEK
+  /// from [provider] and attempt the authenticated unwrap — a wrap/KEK
+  /// mismatch (e.g. a corrupted wrap) surfaces as a `null` return, which the
+  /// caller turns into [EncryptionError.badCredentials].
+  static Future<Uint8List?> _unwrapBiometric(
+    EncryptionBlob blob,
+    EncryptionConfig encryptionConfig,
+    BiometricKekProvider provider,
+    SecretStore secretStore,
+    String dbDir,
+    DateTime Function() now,
+  ) async {
+    final wrapped = await secretStore.read(
+      dbScopedSecretKey(dbDir, _kBiometricWrapSecretName),
+    );
+    if (wrapped == null) {
+      // Never enrolled (or disabled via disableBiometricUnlock) on this
+      // device — fail closed rather than falling through silently.
+      throw EncryptionError.biometricUnavailable();
+    }
+
+    final lastUsedBytes = await secretStore.read(
+      dbScopedSecretKey(dbDir, _kPassphraseLastUsedSecretName),
+    );
+    final lastUsed = lastUsedBytes != null
+        ? _decodeTimestamp(lastUsedBytes)
+        : null;
+    if (!encryptionConfig.reauthPolicy.permitsBiometric(lastUsed, now())) {
+      throw EncryptionError.biometricUnavailable();
+    }
+
+    final kek = await provider.obtainKek();
+    return encryptionConfig.tryUnwrapWithBiometric(wrapped, kek);
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
@@ -1281,8 +1427,12 @@ final class KmdbDatabase {
   /// Throws [EncryptionError.badCredentials] if [currentConfig] does not
   /// unlock the existing blob.
   ///
-  /// On success, the in-memory [DekCache] in [currentConfig] is updated with
-  /// the DEK (so it can be reused without re-running Argon2id).
+  /// On success, the "passphrase last used" re-authentication timestamp is
+  /// refreshed (successfully presenting the current passphrase/recovery code
+  /// is itself a re-authentication event). If biometric unlock was
+  /// previously enrolled via [enableBiometricUnlock], it remains valid — the
+  /// DEK itself does not change, only its passphrase wrapping, so the
+  /// existing biometric wrap still unwraps correctly.
   ///
   /// Example:
   /// ```dart
@@ -1351,13 +1501,95 @@ final class KmdbDatabase {
     // Step 3: Write the updated blob durably.
     await _store.meta.putEncryptionBlob(updatedBlob);
 
-    // Clear the old cached DEK (it was valid under the old passphrase KEK but
-    // the dbId key is unchanged — a FlutterSecureDekCache keyed by dbId would
-    // still serve the DEK, but we overwrite it to ensure freshness).
+    // Refresh the re-authentication timestamp: presenting currentConfig's
+    // credentials successfully (Step 1) is a passphrase/recovery-code
+    // authentication event, so it should count toward the ReauthPolicy
+    // interval the same way a passphrase unlock via open() does.
     final info = await _store.storeInfo();
-    await currentConfig.dekCache.clear(info.dbDir);
-    // Cache the DEK under the new config so future opens don't re-prompt.
-    await newPassphraseConfig.dekCache.store(info.dbDir, dek);
+    await _secretStore.write(
+      dbScopedSecretKey(info.dbDir, _kPassphraseLastUsedSecretName),
+      _encodeTimestamp(DateTime.now()),
+    );
+  }
+
+  // ── Unlock policy — lock and biometric enrolment (WI-5, closes SC-1) ───────
+
+  /// Discards the in-memory DEK, making this instance unusable for encrypted
+  /// reads/writes until the caller calls [open] again for a fresh,
+  /// authenticated unlock.
+  ///
+  /// A no-op on a plaintext (unencrypted) database. The host decides *when*
+  /// to call this — KMDB does not observe OS lifecycle events (e.g. app
+  /// backgrounding) itself; see [onResume] for the corresponding cache-only
+  /// hook a host wires into its own lifecycle observer.
+  ///
+  /// After [lock], every [KmdbCollection] operation that would touch an
+  /// encrypted value throws [EncryptionErrorCode.databaseLocked] — there is
+  /// no in-place unlock; the caller must discard this instance and call
+  /// [open] again.
+  void lock() => _encryption?.lock();
+
+  /// Enrols biometric unlock for this database on this device.
+  ///
+  /// Requires the database to be **currently unlocked** with an encrypted
+  /// [EncryptionProvider] — call this from an already-open session (e.g.
+  /// right after a passphrase [open], with the user's explicit consent to
+  /// enable biometric unlock). Obtains a KEK from [provider], wraps the
+  /// current DEK under it, and persists the wrap to the per-device
+  /// [SecretStore] supplied to [open] (never to the synced `enc:blob`).
+  ///
+  /// After this call, `EncryptionConfig.biometric(provider)` can be used to
+  /// unlock this database on this device — subject to
+  /// [EncryptionConfig.reauthPolicy].
+  ///
+  /// Throws [StateError] if the database is plaintext or currently
+  /// [lock]ed (no DEK available to wrap).
+  ///
+  /// Example:
+  /// ```dart
+  /// final db = await KmdbDatabase.open(
+  ///   path: path, adapter: adapter,
+  ///   encryptionConfig: EncryptionConfig(passphrase: 'my-passphrase'),
+  ///   secretStore: mySecretStore,
+  /// );
+  /// await db.enableBiometricUnlock(myBiometricKekProvider);
+  /// ```
+  Future<void> enableBiometricUnlock(BiometricKekProvider provider) async {
+    final encryption = _encryption;
+    if (encryption is! AesGcmEncryptionProvider) {
+      throw StateError(
+        'enableBiometricUnlock requires an unlocked, encrypted database '
+        '(the database is either plaintext or currently locked).',
+      );
+    }
+    // AesGcmEncryptionProvider.dek throws EncryptionErrorCode.databaseLocked
+    // if lock() was already called — propagates as-is rather than being
+    // re-wrapped, since that error already names the precondition clearly.
+    final dek = encryption.dek;
+    final kek = await provider.obtainKek();
+    final wrapped = await KeyDerivation.wrapDek(dek, kek);
+
+    final info = await _store.storeInfo();
+    await _secretStore.write(
+      dbScopedSecretKey(info.dbDir, _kBiometricWrapSecretName),
+      wrapped,
+    );
+  }
+
+  /// Removes the enrolled biometric wrap for this database on this device.
+  ///
+  /// After this call, `EncryptionConfig.biometric(...)` can no longer unlock
+  /// this database on this device — [open] throws
+  /// [EncryptionError.biometricUnavailable] (fail-closed), and the passphrase
+  /// or recovery code is required. A fresh [enableBiometricUnlock] call
+  /// re-enrols.
+  ///
+  /// A no-op if biometric unlock was never enrolled.
+  Future<void> disableBiometricUnlock() async {
+    final info = await _store.storeInfo();
+    await _secretStore.delete(
+      dbScopedSecretKey(info.dbDir, _kBiometricWrapSecretName),
+    );
   }
 
   /// The cache-aware read path.

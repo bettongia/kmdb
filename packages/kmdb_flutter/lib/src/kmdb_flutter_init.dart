@@ -55,8 +55,9 @@ import 'package:cryptography_flutter/cryptography_flutter.dart';
 /// 1. It is explicit and documents the intent in `main()`.
 /// 2. It ensures the plugin is active before any code that runs between
 ///    `WidgetsFlutterBinding.ensureInitialized()` and `runApp()`.
-/// 3. It provides a stable call site for future additions (e.g. registering
-///    `FlutterSecureDekCache` defaults, pre-warming the Argon2id isolate).
+/// 3. It provides a stable call site for future additions (e.g. pre-warming
+///    the Argon2id isolate, or defaulting the biometric `BiometricKekProvider`
+///    implementation added for the unlock-policy wrapped-DEK model).
 abstract final class KmdbFlutter {
   /// Whether [initialize] has been called for this process.
   static bool _initialized = false;

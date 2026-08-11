@@ -14,17 +14,18 @@
 
 import 'dart:typed_data';
 
-/// @docImport 'package:kmdb/src/encryption/dek_cache.dart';
-
 /// Byte-oriented storage abstraction for host-provided secret storage.
 ///
-/// This is the core-package seam a future `SyncAuthenticator` root key (and
-/// any other core-owned secret) reads through. It mirrors [DekCache]'s
-/// architecture one-for-one: an `abstract interface class` in core, an
-/// in-memory default in this same file ([InMemorySecretStore]), and
-/// platform/host-backed implementations supplied from outside the package —
-/// e.g. `kmdb_cli`'s `DirectorySecretStore`, a permission-hardened
-/// filesystem store rooted at the per-user profile config directory.
+/// This is the core-package seam that `KmdbDatabase.open`'s unlock-policy
+/// bootstrap reads/writes through — the per-device biometric-wrapped DEK and
+/// "passphrase last used" re-authentication timestamp (WI-5, closing SC-1;
+/// see `dbScopedSecretKey` in `secret_key.dart`) — and that a future
+/// `SyncAuthenticator` root key (or any other core-owned secret) can reuse.
+/// It is an `abstract interface class` in core, with an in-memory default in
+/// this same file ([InMemorySecretStore]), and platform/host-backed
+/// implementations supplied from outside the package — e.g. `kmdb_cli`'s
+/// `DirectorySecretStore`, a permission-hardened filesystem store rooted at
+/// the per-user profile config directory.
 ///
 /// Unlike `kmdb_cli`'s former `CredentialStore` (string-oriented,
 /// `write(account, secretJson)`), this interface is byte-oriented: a root
