@@ -301,14 +301,34 @@ section number.
 
 ### Phase 2 — Re-authentication policy (default-on, 14-day, enforced)
 
-- [ ] Store a **per-device, local-only** "passphrase last used" timestamp (NOT
+> **Note:** the mechanism (timestamp storage, `open()` enforcement,
+> `ReauthPolicy` variants) was necessarily built together with Phase 1's
+> `KEKSource`/fail-closed biometric branch — the branch cannot exist without
+> something to enforce. Phase 2's own work is verifying the *policy
+> semantics* with dedicated tests (below), confirming per-checklist-item that
+> each behaviour Phase 1 implemented is actually correct.
+
+- [x] Store a **per-device, local-only** "passphrase last used" timestamp (NOT
       `$meta` — see the design decision; same store as Phase 1's biometric wrap).
-- [ ] Enforce in `KmdbDatabase.open()`: once the interval lapses, refuse the
+      (Landed in Phase 1: `_kPassphraseLastUsedSecretName`.)
+- [x] Enforce in `KmdbDatabase.open()`: once the interval lapses, refuse the
       biometric path and require the passphrase. Host-configurable interval +
-      "always require passphrase".
-- [ ] **Suppressible** opt-out for headless deployments — an explicit, documented
+      "always require passphrase". (Landed in Phase 1: `ReauthPolicy.interval`/
+      `.alwaysRequirePassphrase`, enforced in `_unwrapBiometric`.) Verified in
+      Phase 2 by `reauth_policy_test.dart`'s injected-clock integration tests:
+      within-interval succeeds, 15-day-lapsed interval throws
+      `EncryptionErrorCode.biometricUnavailable` (and the passphrase path still
+      works afterward — not bricked), `alwaysRequirePassphrase` refuses even
+      immediately post-enrolment.
+- [x] **Suppressible** opt-out for headless deployments — an explicit, documented
       API naming the deployment shape (not a bare boolean), per proposal §4.6.
-- [ ] **Checkpoint:** commit `WI-5 Phase 2: default-on periodic re-auth policy`.
+      (Landed in Phase 1: `ReauthPolicy.headlessSession()`.) Verified in Phase 2:
+      biometric unlock succeeds even ~10 years after the recorded passphrase use.
+- [x] **Checkpoint:** commit `WI-5 Phase 2: default-on periodic re-auth policy`.
+      New `test/encryption/reauth_policy_test.dart` (12 tests: 8 pure
+      `ReauthPolicy.permitsBiometric` unit tests + 4 `KmdbDatabase.open`
+      integration tests with an injected clock) — all green; `dart analyze`
+      clean.
 
 ### Phase 3 — Platform KEK: native biometric (`kmdb_flutter`)
 
