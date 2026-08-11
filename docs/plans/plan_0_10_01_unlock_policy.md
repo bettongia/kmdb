@@ -1,6 +1,10 @@
-# Unlock policy — close SC-1 with a wrapped-copy DEK model, re-auth, and a CLI agent
+# Unlock policy — close SC-1 with a wrapped-copy DEK model and re-auth
 
-**Status**: Questions — Q1–Q7 resolved (Q7 + the two corrections folded 2026-08-11, round 3); ready for reviewer re-check → Investigated. See "Design resolutions" (Q1–Q7) and "Reviewer re-check (round 2)".
+> The CLI session agent originally in this plan is split into
+> `plan_0_10_01_cli_session_agent.md` (reviewer round 2). This plan is the
+> SC-1-closing unit: wrapped-copy DEK + native biometric + headless opt-out.
+
+**Status**: **Investigated** (2026-08-11) — Q1–Q7 resolved and verified against the code; no open design decisions remain. See "Reviewer re-check (round 3)" for the sign-off and two non-blocking test-coverage directives the implementer must honour.
 
 **PR link**: _(none yet)_
 
@@ -641,6 +645,53 @@ Q1–Q6 resolved (see "Design resolutions (round 2)" and "Reviewer re-check
       Q7 — the reword exposed the enrol/idempotency gap).
 
 </details>
+
+## Reviewer re-check (round 3 — 2026-08-11): SIGN-OFF → `Investigated`
+
+Q7 and the two corrections close cleanly. The plan now clears the
+implementation-readiness bar: a Sonnet implementer could execute it without
+making a significant design decision.
+
+**Q7 (biometric enrolment + `obtainKek()`) — resolved.**
+- The write side is now a named core API: `enableBiometricUnlock(BiometricKekProvider)`
+  (unlocked-DB precondition, `wrapDek` → `SecretStore` under
+  `dbScopedSecretKey(dbDir, 'dek.wrap.biometric')`) with a paired
+  `disableBiometricUnlock()`. Added to Phase 1's checklist, exercised in Phase 1
+  with a fake provider. That was the missing entry point — it exists now.
+- The `obtainKek()` correctness bug is fixed: the contract is **idempotent
+  get-or-create per db-scoped key**, stated on the interface (Q2/Q7) *and* in the
+  Phase 3 checklist, which is reworded from "generate" to "create on first use,
+  return the same KEK thereafter." Enrol and unlock now derive the same KEK, so
+  `unwrapDek` succeeds; `biometryCurrentSet` invalidation destroying the item gives
+  auto-disable for free. Internally consistent.
+- Fail-closed gating is explicit: biometric branch runs only if a wrap exists;
+  absent wrap or absent/stale timestamp → passphrase. Timestamp written on
+  passphrase unlock + provision only, never by biometric — so it tracks passphrase
+  recency correctly.
+
+**Corrections — folded correctly.** `crypto` is now stated as a genuine new direct
+dep of `kmdb`; the promoted `dbScopedSecretKey` doc comment is flagged for a
+CLI-agnostic rewrite; the `EncryptionConfig` refactor is pinned **additive** (5
+`dekCache:` sites + the `kmdb.dart` export, all in Phase 1's one commit), which is
+the low-churn, greenness-preserving choice.
+
+**Two non-blocking directives for the implementer** (design fully determines the
+expected behaviour; the ≥95% coverage gate will force them anyway — named here so
+they are not missed):
+1. **Extend the Phase 5 matrix** with (a) an enrol→close→reopen-with-biometric
+   happy round-trip (proves enrol and unlock derive the same KEK — the exact bug
+   Q7 fixed), (b) `disableBiometricUnlock()` → subsequent biometric open refused,
+   passphrase required, and (c) fail-closed: a biometric `KEKSource` with **no**
+   wrap present in `SecretStore` falls back to requiring the passphrase (never
+   silently opens).
+2. **The Q6 standalone paragraph predates Q7** and still reads "generate … return
+   it from `obtainKek()`" without the idempotency qualifier. The **Phase 3
+   checklist (lines ~297–305) is authoritative**; if the two ever conflict during
+   implementation, follow the Phase 3 checklist + Q7, not the Q6 prose.
+
+Everything else verified in rounds 1–2 still holds (SC-1 removal completeness, the
+`$meta`-syncs premise behind the per-device-local decision, the single-`unwrapDek`
+chokepoint, per-phase greenness). **Promoted to `Investigated`.**
 
 ## Summary
 
