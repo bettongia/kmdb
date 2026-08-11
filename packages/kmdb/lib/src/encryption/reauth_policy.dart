@@ -64,6 +64,62 @@ sealed class ReauthPolicy {
 
   /// Suppresses the re-authentication check entirely — the explicit opt-out
   /// for headless/server deployments (see the class doc comment).
+  ///
+  /// ## Headless unlock pattern (WI-5 Phase 4)
+  ///
+  /// A headless deployment (worker/server process, no user present to prompt)
+  /// unlocks **once at process start** and holds the [KmdbDatabase] open for
+  /// the process lifetime; "re-authentication" is simply restarting the
+  /// process. There is no CLI-session-agent-style persistent unlocked state
+  /// here — that is a separate subsystem (see the CLI session agent plan).
+  /// Two shapes, both library-side hooks with no new API beyond what already
+  /// exists:
+  ///
+  /// 1. **Plain passphrase, read non-interactively.** The common case — no
+  ///    [KEKSource.biometric] involved at all, so [ReauthPolicy] is moot
+  ///    (the interval only ever gates the biometric path). The host reads the
+  ///    passphrase from wherever its deployment platform injects secrets
+  ///    (systemd's `$CREDENTIALS_DIRECTORY`, Docker's `/run/secrets`, a
+  ///    Kubernetes secret volume mount) and passes it straight through:
+  ///
+  ///    ```dart
+  ///    final credDir = Platform.environment['CREDENTIALS_DIRECTORY'] ??
+  ///        '/run/secrets';
+  ///    final passphrase =
+  ///        await File(p.join(credDir, 'kmdb-passphrase')).readAsString();
+  ///    final db = await KmdbDatabase.open(
+  ///      path: dbPath,
+  ///      adapter: adapter,
+  ///      encryptionConfig: EncryptionConfig(passphrase: passphrase.trim()),
+  ///    );
+  ///    ```
+  ///
+  /// 2. **A machine-bound `BiometricKekProvider`, with the check suppressed.**
+  ///    `BiometricKekProvider` is not literally biometric-specific — it is
+  ///    "any local authenticator that releases a KEK" (see its doc comment).
+  ///    A server that wants to skip re-deriving the Argon2id KEK on every
+  ///    restart can implement a provider that reads a machine-bound key from
+  ///    the same kind of mounted secret directory (or a KMS/HSM), and pair it
+  ///    with [ReauthPolicy.headlessSession] so the (meaningless, for a
+  ///    process with no user) interval check never fires:
+  ///
+  ///    ```dart
+  ///    final db = await KmdbDatabase.open(
+  ///      path: dbPath,
+  ///      adapter: adapter,
+  ///      encryptionConfig: EncryptionConfig.biometric(
+  ///        myMachineKeyProvider, // reads from $CREDENTIALS_DIRECTORY, a KMS, etc.
+  ///        reauthPolicy: const ReauthPolicy.headlessSession(),
+  ///      ),
+  ///      secretStore: mySecretStore, // durable across restarts — see SecretStore
+  ///    );
+  ///    ```
+  ///
+  ///    [secretStore] itself can be a directory-backed implementation rooted
+  ///    at a persistent volume so the biometric-style wrap survives container
+  ///    restarts (`kmdb_cli`'s `DirectorySecretStore` is the reference
+  ///    implementation of this shape, though it is CLI-scoped, not exported
+  ///    from core).
   const factory ReauthPolicy.headlessSession() = _HeadlessSessionReauthPolicy;
 
   /// Returns whether a biometric unlock is currently permitted.

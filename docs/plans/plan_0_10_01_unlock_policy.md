@@ -366,12 +366,23 @@ section number.
 
 ### Phase 4 — Server / headless handling
 
-- [ ] Session = process lifetime; the Phase 2 policy is suppressed via the
+- [x] Session = process lifetime; the Phase 2 policy is suppressed via the
       documented `ReauthPolicy.headlessSession()` opt-out; passphrase injected
       non-interactively through the `SecretStore` directory backend
       (`$CREDENTIALS_DIRECTORY`, `/run/secrets`, k8s mounts). Library-side hook
-      only — `kmdb_server` is a separate proposal.
-- [ ] **Checkpoint:** commit `WI-5 Phase 4: headless/server unlock hook`.
+      only — `kmdb_server` is a separate proposal. Two patterns documented on
+      `ReauthPolicy.headlessSession()`'s doc comment: (1) plain passphrase read
+      non-interactively from a mounted secret (no `KEKSource.biometric`
+      involved — `ReauthPolicy` is moot for that path, already covered by the
+      State-5 unlock tests); (2) a machine-bound `BiometricKekProvider` (KMS/
+      HSM/mounted-secret analogue of a real biometric prompt) paired with
+      `headlessSession()`.
+- [x] **Checkpoint:** commit `WI-5 Phase 4: headless/server unlock hook`. New
+      `test/encryption/headless_server_unlock_test.dart` (2 tests): a single
+      "worker start" unlock survives 5 simulated restarts spanning ~10 years of
+      injected clock time with no passphrase re-entry; a control test proving
+      `headlessSession()` is load-bearing (the same setup *without* it is
+      refused once the default interval lapses). `dart analyze` clean.
 
 ### Phase 5 — Tests (edge/fault, not golden-path)
 

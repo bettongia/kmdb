@@ -64,10 +64,13 @@ void main() {
     const policy = ReauthPolicy.interval(Duration(days: 14));
     final now = DateTime(2026, 8, 11);
 
-    test('permits biometric when the passphrase was used within the interval', () {
-      final lastUsed = now.subtract(const Duration(days: 13));
-      expect(policy.permitsBiometric(lastUsed, now), isTrue);
-    });
+    test(
+      'permits biometric when the passphrase was used within the interval',
+      () {
+        final lastUsed = now.subtract(const Duration(days: 13));
+        expect(policy.permitsBiometric(lastUsed, now), isTrue);
+      },
+    );
 
     test('permits biometric exactly at the interval boundary', () {
       final lastUsed = now.subtract(const Duration(days: 14));
@@ -101,114 +104,123 @@ void main() {
     const policy = ReauthPolicy.headlessSession();
     final now = DateTime(2026, 8, 11);
 
-    test('permits biometric with no recorded timestamp (no periodic prompt)', () {
-      expect(policy.permitsBiometric(null, now), isTrue);
-    });
+    test(
+      'permits biometric with no recorded timestamp (no periodic prompt)',
+      () {
+        expect(policy.permitsBiometric(null, now), isTrue);
+      },
+    );
 
-    test('permits biometric no matter how long ago the passphrase was used', () {
-      final longAgo = now.subtract(const Duration(days: 3650));
-      expect(policy.permitsBiometric(longAgo, now), isTrue);
-    });
+    test(
+      'permits biometric no matter how long ago the passphrase was used',
+      () {
+        final longAgo = now.subtract(const Duration(days: 3650));
+        expect(policy.permitsBiometric(longAgo, now), isTrue);
+      },
+    );
   });
 
   // ── Integration tests (KmdbDatabase.open, injected clock) ───────────────
 
-  group('ReauthPolicy enforcement at KmdbDatabase.open (interval, default)', () {
-    test(
-      'biometric unlock succeeds while within the default 14-day interval',
-      () async {
-        final secretStore = InMemorySecretStore();
-        final provider = _FakeBiometricKekProvider();
-        var clock = DateTime(2026, 1, 1);
+  group(
+    'ReauthPolicy enforcement at KmdbDatabase.open (interval, default)',
+    () {
+      test(
+        'biometric unlock succeeds while within the default 14-day interval',
+        () async {
+          final secretStore = InMemorySecretStore();
+          final provider = _FakeBiometricKekProvider();
+          var clock = DateTime(2026, 1, 1);
 
-        final result = await EncryptionConfig.createResult(
-          passphrase: _kPassphrase,
-        );
-        final adapter = MemoryStorageAdapter();
-        final db1 = await KmdbDatabase.open(
-          path: '/db',
-          adapter: adapter,
-          config: KvStoreConfig.forTesting(),
-          encryptionConfig: result.config,
-          secretStore: secretStore,
-          now: () => clock,
-        );
-        await db1.enableBiometricUnlock(provider);
-        await db1.close();
+          final result = await EncryptionConfig.createResult(
+            passphrase: _kPassphrase,
+          );
+          final adapter = MemoryStorageAdapter();
+          final db1 = await KmdbDatabase.open(
+            path: '/db',
+            adapter: adapter,
+            config: KvStoreConfig.forTesting(),
+            encryptionConfig: result.config,
+            secretStore: secretStore,
+            now: () => clock,
+          );
+          await db1.enableBiometricUnlock(provider);
+          await db1.close();
 
-        // Advance the clock by 10 days — still within the 14-day interval.
-        clock = clock.add(const Duration(days: 10));
+          // Advance the clock by 10 days — still within the 14-day interval.
+          clock = clock.add(const Duration(days: 10));
 
-        final db2 = await KmdbDatabase.open(
-          path: '/db',
-          adapter: adapter,
-          config: KvStoreConfig.forTesting(),
-          encryptionConfig: EncryptionConfig.biometric(provider),
-          secretStore: secretStore,
-          now: () => clock,
-        );
-        await db2.close();
-      },
-      timeout: const Timeout(Duration(seconds: 120)),
-    );
-
-    test(
-      'biometric unlock is refused once the default 14-day interval lapses',
-      () async {
-        final secretStore = InMemorySecretStore();
-        final provider = _FakeBiometricKekProvider();
-        var clock = DateTime(2026, 1, 1);
-
-        final result = await EncryptionConfig.createResult(
-          passphrase: _kPassphrase,
-        );
-        final adapter = MemoryStorageAdapter();
-        final db1 = await KmdbDatabase.open(
-          path: '/db',
-          adapter: adapter,
-          config: KvStoreConfig.forTesting(),
-          encryptionConfig: result.config,
-          secretStore: secretStore,
-          now: () => clock,
-        );
-        await db1.enableBiometricUnlock(provider);
-        await db1.close();
-
-        // Advance the clock by 15 days — past the 14-day interval.
-        clock = clock.add(const Duration(days: 15));
-
-        await expectLater(
-          () => KmdbDatabase.open(
+          final db2 = await KmdbDatabase.open(
             path: '/db',
             adapter: adapter,
             config: KvStoreConfig.forTesting(),
             encryptionConfig: EncryptionConfig.biometric(provider),
             secretStore: secretStore,
             now: () => clock,
-          ),
-          throwsA(
-            isA<EncryptionError>().having(
-              (e) => e.code,
-              'code',
-              EncryptionErrorCode.biometricUnavailable,
-            ),
-          ),
-        );
+          );
+          await db2.close();
+        },
+        timeout: const Timeout(Duration(seconds: 120)),
+      );
 
-        // The passphrase path must still work — the database is not bricked.
-        final db2 = await KmdbDatabase.open(
-          path: '/db',
-          adapter: adapter,
-          config: KvStoreConfig.forTesting(),
-          encryptionConfig: EncryptionConfig(passphrase: _kPassphrase),
-          secretStore: secretStore,
-          now: () => clock,
-        );
-        await db2.close();
-      },
-      timeout: const Timeout(Duration(seconds: 120)),
-    );
-  });
+      test(
+        'biometric unlock is refused once the default 14-day interval lapses',
+        () async {
+          final secretStore = InMemorySecretStore();
+          final provider = _FakeBiometricKekProvider();
+          var clock = DateTime(2026, 1, 1);
+
+          final result = await EncryptionConfig.createResult(
+            passphrase: _kPassphrase,
+          );
+          final adapter = MemoryStorageAdapter();
+          final db1 = await KmdbDatabase.open(
+            path: '/db',
+            adapter: adapter,
+            config: KvStoreConfig.forTesting(),
+            encryptionConfig: result.config,
+            secretStore: secretStore,
+            now: () => clock,
+          );
+          await db1.enableBiometricUnlock(provider);
+          await db1.close();
+
+          // Advance the clock by 15 days — past the 14-day interval.
+          clock = clock.add(const Duration(days: 15));
+
+          await expectLater(
+            () => KmdbDatabase.open(
+              path: '/db',
+              adapter: adapter,
+              config: KvStoreConfig.forTesting(),
+              encryptionConfig: EncryptionConfig.biometric(provider),
+              secretStore: secretStore,
+              now: () => clock,
+            ),
+            throwsA(
+              isA<EncryptionError>().having(
+                (e) => e.code,
+                'code',
+                EncryptionErrorCode.biometricUnavailable,
+              ),
+            ),
+          );
+
+          // The passphrase path must still work — the database is not bricked.
+          final db2 = await KmdbDatabase.open(
+            path: '/db',
+            adapter: adapter,
+            config: KvStoreConfig.forTesting(),
+            encryptionConfig: EncryptionConfig(passphrase: _kPassphrase),
+            secretStore: secretStore,
+            now: () => clock,
+          );
+          await db2.close();
+        },
+        timeout: const Timeout(Duration(seconds: 120)),
+      );
+    },
+  );
 
   group('ReauthPolicy.alwaysRequirePassphrase enforcement at open', () {
     test(
