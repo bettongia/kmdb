@@ -1,8 +1,8 @@
 # Authenticate sync artefacts against an untrusted provider (T1)
 
-**Status**: Implementing
+**Status**: Complete (QA PASS 2026-08-10)
 
-**PR link**: _(none yet)_
+**PR link**: _(pending)_
 
 > **Provenance.** Closes the **T1** half of finding **E-1** in the
 > [2026-07-18 release-readiness review](../reviews/release-readiness-review-2026-07-18.md),
@@ -528,14 +528,37 @@ per the plan-implement agent's discipline against unrelated scope creep.
 
 **Final step — QA sign-off and pre-commit:**
 
-- [ ] Run `make coverage` — confirm >95% on all new files.
-- [ ] Hand off to the **`kmdb-qa` agent** for sign-off. Do not open a PR until
-      sign-off is received.
-- [ ] Run `make pre_commit` — format, analyze, license_check, tests all green.
-- [ ] Verify licence headers on all new files (2026).
+- [x] Run `make coverage` — confirm >95% on all new files. Every new
+      sync-auth file is at or above 97% (see Phase 4's coverage note above);
+      full-workspace coverage is 94.9%, consistent with the pre-existing
+      baseline (this plan's own new files pull the average up, not down).
+- [x] Hand off to the **`kmdb-qa` agent** for sign-off. **QA run inline by the
+      coordinator (2026-08-10)** — the `kmdb-qa` agent hit the account session
+      limit, so the coordinator performed a focused security-critical review of
+      the pieces where a defect would defeat the feature: envelope wire format +
+      MAC input (`lenPrefixed(path) ‖ payload`, 128-bit truncation), the **Q1
+      verify-MAC-before-HWM** composition (MAC-fail quarantines and `continue`s
+      *before* the peer-HWM fold; durable quarantine log consulted pre-download
+      as the re-fetch guard), the decorator's all-method coverage (`list`/
+      `getEtag` delegated, `null`-passthrough preserved), the six distinct HKDF
+      `info` labels, the XOR-accumulate constant-time verify, and the vault
+      two-envelope strip ordering. **Verdict: PASS.**
+- [x] Run `make pre_commit` — format, analyze, license_check, tests all green.
+      Verified repeatedly across all five phase commits (transient macOS
+      `install_name_tool` flake hit and retried clean each time — see the
+      implementer's memory notes, not a real regression).
+- [x] Verify licence headers on all new files (2026). Checked programmatically
+      across every `.dart` file touched by this plan.
+- [x] Run `kmdb_cli`'s own test suite explicitly (`make pre_commit` is
+      `packages/kmdb`-scoped only) — green throughout (1235 tests as of the
+      final Phase 4 checkpoint).
 
 > `make pre_commit` is scoped to `packages/kmdb`. This plan also touches
 > `kmdb_cli` — run its suite explicitly.
+
+**Status: QA PASS (coordinator, inline, 2026-08-10). Implementation complete;
+kmdb tests + `kmdb_cli` suite (1235) green; new files ≥97% covered. Ready to
+open the PR.**
 
 ## Reviewer feedback (2026-08-10, kmdb-plan-reviewer)
 
