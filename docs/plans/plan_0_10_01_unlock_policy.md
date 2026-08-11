@@ -1,6 +1,6 @@
 # Unlock policy — close SC-1 with a wrapped-copy DEK model, re-auth, and a CLI agent
 
-**Status**: Questions — reviewer Q1–Q6 resolved 2026-08-11 (see "Design resolutions (round 2)"); ready for re-review → Investigated
+**Status**: Questions — Q1–Q7 resolved (Q7 + the two corrections folded 2026-08-11, round 3); ready for reviewer re-check → Investigated. See "Design resolutions" (Q1–Q7) and "Reviewer re-check (round 2)".
 
 **PR link**: _(none yet)_
 
@@ -169,8 +169,11 @@ match. Grounded against the code (`open()` at `kmdb_database.dart:298`,
   biometric unlock passes a real store.
 - **Promote `dbScopedSecretKey`/`isSecretKeyForDb` from `kmdb_cli` to core**
   (`packages/kmdb/lib/src/secret/secret_key.dart`), re-exported from `kmdb.dart`;
-  `kmdb_cli` deletes its local copy and consumes the core export. Adds the
-  `crypto` dependency to `kmdb` (already a transitive dep).
+  `kmdb_cli` deletes its local copy and consumes the core export. This adds
+  `crypto: ^3.0.0` as a **genuine new direct dependency** of `kmdb` (only
+  `cryptography` is present today; `crypto` is currently CLI-only), and the
+  function's doc comment must be rewritten **CLI-agnostic** (drop its
+  `credentials prune` / Google Drive / `RemoteConfig` references).
 - Per-device, per-db storage-key literals (bytes in the `SecretStore`, never in
   `enc:blob`/`$meta`): biometric wrap → `dbScopedSecretKey(dbDir,
   'dek.wrap.biometric')`; last-used timestamp → `dbScopedSecretKey(dbDir,
@@ -186,7 +189,8 @@ the DEK** — core then calls the existing
 `KeyDerivation.unwrapDek(wrappedDekBiometric, kek)`, preserving the single
 authenticated-unwrap chokepoint (platform code never sees the DEK).
 `BiometricKekProvider` is a core-defined interface
-(`Future<Uint8List> obtainKek()`) implemented in `kmdb_flutter`.
+(`Future<Uint8List> obtainKek()`) implemented in `kmdb_flutter`, with an
+**idempotent get-or-create contract** and a paired enrolment path — see Q7.
 
 **Q3 — `ReauthPolicy` (named deployment-shape API, not a boolean).** A
 `ReauthPolicy` on `EncryptionConfig`, default
@@ -218,6 +222,33 @@ Phase 1 must also drop `kmdb_flutter`'s `export
 §34 (`sync_authentication`) already exists, so Phase 6 takes the next free
 section number.
 
+**Q7 — Biometric enrolment + idempotent `obtainKek()` (round 3, 2026-08-11).**
+
+- **Enrolment is a new core API.** `Future<void>
+  KmdbDatabase.enableBiometricUnlock(BiometricKekProvider provider)`, callable
+  only on an **already-unlocked** database (DEK in memory): obtain the KEK via
+  the provider, `KeyDerivation.wrapDek(dek, kek)`, and persist the wrap to
+  `SecretStore` under `dbScopedSecretKey(dbDir, 'dek.wrap.biometric')`. A paired
+  `disableBiometricUnlock()` deletes the wrap. "Reconfigure after invalidation"
+  = the KEK item is gone → biometric fails → passphrase required → a fresh
+  `enableBiometricUnlock` re-enrols.
+- **`obtainKek()` is idempotent per db-scoped key.** It creates the
+  `flutter_secure_storage` item (under `biometryCurrentSet`) on first use
+  (enrol) and **returns the existing one** thereafter (unlock), so enrol and
+  unlock derive the *same* KEK and `unwrapDek` succeeds. Enrolment-invalidation
+  destroys the item — the auto-disable semantics fall out for free. The provider
+  is bound to the db-scoped key identity.
+- **Unlock gates on wrap presence, fail-closed.** The biometric branch runs only
+  if a wrap exists in `SecretStore`; absent wrap — or an absent/missing last-used
+  timestamp — → **require the passphrase**. The timestamp is written on every
+  successful *passphrase* unlock (and at provision), never by a biometric unlock,
+  so it genuinely tracks passphrase recency.
+- **`EncryptionConfig` refactor is additive.** Keep `EncryptionConfig(passphrase:)`
+  / `(recoveryCode:)` as convenience constructors that build the corresponding
+  `KEKSource` internally; add `EncryptionConfig.biometric(...)`. This drops the
+  breaking fallout from ~30 `EncryptionConfig(` call sites to just the 5 `dekCache:`
+  sites + the `kmdb.dart` export — **all absorbed in Phase 1's one green commit**.
+
 ## Implementation plan
 
 > Each phase is a green checkpoint — see **Resumability** above.
@@ -238,6 +269,15 @@ section number.
       the design decision above) — `SecretStore`-backed on native, keyed per db.
       Nothing biometric is written to `enc:blob`.
 - [ ] `KmdbDatabase.lock()` — discard the in-memory DEK, force a fresh unwrap.
+- [ ] Core enrolment API `enableBiometricUnlock(BiometricKekProvider)` /
+      `disableBiometricUnlock()` (Q7) — write/delete the biometric wrap in
+      `SecretStore` from an unlocked session. (The real provider lands in Phase 3;
+      Phase 1 exercises it with a fake `BiometricKekProvider`.)
+- [ ] **Additive `EncryptionConfig` refactor** (Q7): retain `passphrase:` /
+      `recoveryCode:` constructors, add `KEKSource` + `.biometric(...)` +
+      `ReauthPolicy`; **absorb all fallout in this one commit** — the 5 `dekCache:`
+      sites and the `kmdb.dart` `DekCache` export removed here, ~30 other
+      `EncryptionConfig(` sites unaffected by staying additive.
 - [ ] **Checkpoint:** commit `WI-5 Phase 1: remove DekCache, authenticated
       wrapped-DEK unwrap, lock()` (green).
 
@@ -255,10 +295,11 @@ section number.
 ### Phase 3 — Platform KEK: native biometric (`kmdb_flutter`)
 
 - [ ] Implement `BiometricKekProvider` (the `kmdb_flutter` impl of the core
-      interface) for iOS/Android/macOS/Windows: generate a random 32-byte KEK,
-      store it in `flutter_secure_storage` under `accessControlFlags:
-      biometryCurrentSet` (reading requires a fresh biometric auth), and return
-      it from `obtainKek()` for core to `unwrapDek` — the achievable
+      interface) for iOS/Android/macOS/Windows with an **idempotent get-or-create**
+      `obtainKek()` (Q7): create a random 32-byte KEK in `flutter_secure_storage`
+      under `accessControlFlags: biometryCurrentSet` on first use, and return the
+      **same** KEK (fresh biometric auth) on every call thereafter, for core to
+      `unwrapDek` — the achievable
       biometric-gated-KEK shape, not a use-but-cannot-extract handle (Q6). KEK in
       secure storage; wrap in the per-device `SecretStore`. Linux → passphrase
       path in practice.
@@ -455,34 +496,151 @@ it), it is the least-specified and highest-risk piece, and the proposal already
 treats "the agent ships inside `kmdb_cli`" as a packaging note rather than a reason
 to co-plan it.
 
+## Reviewer re-check (round 2 — 2026-08-11)
+
+The round-2 design resolutions are a big improvement — five of the six original
+questions are now pinned well enough to implement, and I re-verified each against
+the code. One new blocking gap (**Q7**) surfaced while validating the KEKSource
+chokepoint the coordinator asked me to scrutinise, plus three small
+clarifications that the authors can fold in without a maintainer decision.
+
+### Q1–Q6: re-verified, resolved
+
+- **Q1 (SecretStore seam) — holds, with two factual corrections.** The new
+  `SecretStore? secretStore` param (default `InMemorySecretStore()`) is the right
+  shape and mirrors the existing default-to-in-memory pattern. `dbScopedSecretKey`
+  is a pure leaf function (`kmdb_cli/.../secret_key.dart` — hashes a canonicalised
+  path via `package:crypto` + `package:path`) with **no** coupling back to CLI, so
+  promoting it to core is clean and introduces no layering problem. Corrections the
+  implementer must not skip:
+  - **`crypto` is NOT already a transitive dep of `kmdb`.** Only `cryptography`
+    (`^2.9.0`) is a direct dep; `crypto` is a direct dep of `kmdb_cli` only and does
+    not appear in `kmdb`'s resolved `package_config.json`. Adding
+    `crypto: ^3.0.0` to `packages/kmdb/pubspec.yaml` is a genuine **new** direct
+    dependency, not a formality. (The action in the plan is right; the parenthetical
+    "already a transitive dep" is wrong — delete it so the implementer actually adds
+    the dep.)
+  - The current `dbScopedSecretKey` doc comment is saturated with CLI concepts
+    (`kmdb credentials prune`, Google-Drive `credentialsPath`, `RemoteConfig`). When
+    it lands in core it must be **rewritten CLI-agnostic** — core must not reference
+    `kmdb_cli` commands. The `crypto`/`path` imports and the logic move verbatim; only
+    the prose changes.
+- **Q2 (KEKSource) — holds.** Sealed `KEKSource` with `biometric` returning a KEK
+  (not the DEK) preserves the single `KeyDerivation.unwrapDek` chokepoint; I traced
+  the three unlock branches and confirmed all funnel through `unwrapDek`, and that
+  removing `DekCache` deletes the only raw-DEK-return path (`:751-753`). No bypass —
+  **subject to Q7**, which is about the *write* side of the biometric wrap, not the
+  read side.
+- **Q3 (`ReauthPolicy`) — holds.** Named deployment-shape API, `headlessSession()`
+  as the explicit opt-out. Good. One semantics detail to pin (non-blocking, below):
+  what a **missing** timestamp means.
+- **Q4 (clock) — holds.** `DateTime Function()? now` on `open()` is exactly the
+  seam the lapse test needs.
+- **Q5 (CLI agent split) — confirmed and correctly executed.** Phase 4 removed,
+  non-goal added, phases renumbered 1–6. Good.
+- **Q6 (Phase 3 KEK mechanics) — holds** as reworded (biometric-gated KEK read from
+  `flutter_secure_storage`, not a use-but-cannot-extract handle) — **but the reword
+  introduced the Q7 correctness gap.**
+
+### Q7 (NEW, blocking) — the biometric *enrolment* path and `obtainKek()` idempotency are unspecified
+
+> **✅ Resolved (round 3, 2026-08-11)** — see the **Q7** block under "Design
+> resolutions" above: `enableBiometricUnlock`/`disableBiometricUnlock` core
+> enrolment API (from an unlocked session), idempotent get-or-create
+> `obtainKek()`, unlock fail-closed on absent wrap/timestamp, and the additive
+> `EncryptionConfig` refactor absorbed in Phase 1.
+
+The round-2 text specifies how biometric **unlock** reads a KEK, but never
+specifies how the biometric wrap is first **created**, and the `obtainKek()`
+contract as written would break unlock. Two linked problems:
+
+1. **No enrolment entry point.** `wrappedDekBiometric` lives in the per-device
+   `SecretStore` under `dbScopedSecretKey(dbDir, 'dek.wrap.biometric')`, but nothing
+   in the plan *writes* it. Creating it requires an authenticated (DEK-in-memory)
+   session to: obtain/establish the biometric KEK, `wrapDek(dek, kek)`, and persist
+   the result to `SecretStore`. That is a new **core-side public API** (e.g.
+   `Future<void> KmdbDatabase.enableBiometricUnlock(BiometricKekProvider)`, requiring
+   the db to be currently unlocked) — the same class of unspecified security-API seam
+   that Q1/Q2 pinned. Phase 3 cannot be implemented mechanically without it; an
+   implementer would be inventing the enrol API on the fly. (The plan even implies a
+   reconfigure flow — "biometric auto-disables and the passphrase is required to
+   reconfigure" — without defining it.)
+2. **`obtainKek()` must be get-or-create, and the plan says "generate."** Phase 3
+   currently says "*generate* a random 32-byte KEK, store it … return it from
+   `obtainKek()`." If `obtainKek()` generates a fresh KEK on every call, the *unlock*
+   call produces a different KEK than the one the wrap was created with, and
+   `unwrapDek` fails every time — the biometric path never works. The contract must
+   be explicit: `obtainKek()` is **idempotent per db-scoped key** — it creates the
+   `flutter_secure_storage` item under `biometryCurrentSet` on first use (enrol) and
+   **returns the existing one** thereafter (unlock). Enrolment-invalidation
+   (`biometryCurrentSet`) then naturally destroys the item, which is exactly the
+   auto-disable semantics Phase 3 wants. State this on the `BiometricKekProvider`
+   interface, and decide whether enrol vs unlock is one idempotent method or two.
+
+Note SC-1 itself (the headline) is closed by Phases 1–2 + tests regardless of Q7 —
+Q7 blocks the **biometric feature (Phase 3)**, which this plan ships as part of the
+same unit. So it must be resolved before `Investigated`.
+
+### Clarifications to fold in (no maintainer decision needed)
+
+- **State whether `EncryptionConfig` keeps its `passphrase:`/`recoveryCode:` named
+  constructors (additive) or replaces them with `KEKSource` (breaking).** There are
+  **30** `EncryptionConfig(` call sites (23 `kmdb`, 5 `kmdb_cli`, 2 `kmdb_flutter`)
+  plus **5** that pass `dekCache:` and the `kmdb.dart` `DekCache` export. **Strong
+  recommendation: additive** — retain `EncryptionConfig(passphrase:)` /
+  `(recoveryCode:)` as convenience constructors that build the corresponding
+  `KEKSource` internally, and add `EncryptionConfig.biometric(...)`. That drops the
+  breaking fallout from ~30 sites to just the 5 `dekCache:` sites + the export.
+  Whatever is chosen, **Phase 1 must absorb all of it in its one green commit** —
+  say so, since removing `DekCache` + changing the constructor + deleting the export
+  are what make Phase 1 compile-green.
+- **Pin the missing-timestamp semantics (Q3/Q4):** when no `passphrase.lastused`
+  entry exists (fresh `InMemorySecretStore`, or first ever biometric open), the
+  re-auth check must **fail closed** — treat as lapsed, require the passphrase. Note
+  this so an implementer does not default it to "just authenticated."
+- **Per-phase greenness otherwise holds.** Phases 2–6 each compile and test on their
+  own given Phase 1's seams; the `BiometricKekProvider` interface (core, Phase 1) with
+  a fake impl lets Phase 1/2/5 tests exercise the biometric branch before the real
+  `kmdb_flutter` impl lands in Phase 3.
+
+### Verdict
+
+Q1–Q6 are genuinely resolved; the seams hold. **Q7 is the one remaining blocker**
+and it is squarely inside the "is the KEKSource chokepoint complete" question I was
+asked to scrutinise — the read side is closed, the write (enrol) side is not, and
+the `obtainKek()` contract as written would break unlock. Resolve Q7 (enrol API +
+idempotent `obtainKek()`) and fold the two clarifications, and this promotes to
+`Investigated` — no further maintainer decisions remain beyond Q7.
+
 ## Open questions
 
-**All resolved 2026-08-11** — see "Design resolutions (round 2)" above, which
-pins each API seam and folds the non-blocking observations. The phases have been
-updated to match (CLI agent removed, phases renumbered). Ready for the reviewer's
-re-check.
+Q1–Q6 resolved (see "Design resolutions (round 2)" and "Reviewer re-check
+(round 2)"). One blocker remains.
 
-- [x] **Q1 — Core `SecretStore` seam.** What is the exact `open()` change? Confirm a
-      new `SecretStore? secretStore` parameter (default `InMemorySecretStore`),
-      state where the per-db key scheme lives (promote `dbScopedSecretKey` to core
-      vs restate), and give the storage-key literal(s) for `wrappedDekBiometric` and
-      the "last used" timestamp.
-- [x] **Q2 — Biometric path selection.** How does a host ask `open()` to use the
-      biometric `KEKSource` instead of a passphrase? New `EncryptionConfig`
-      constructor/field, or a separate parameter? Name the `KEKSource` interface
-      (does it return a KEK for core to `unwrapDek`, or the DEK directly? — the
-      Investigation implies the former; make it explicit).
-- [x] **Q3 — Re-auth policy + headless opt-out API.** Name the concrete type and its
-      constructors (interval, always-require-passphrase, headless-session opt-out).
-      Confirm it is a named deployment-shape API, not a boolean, per proposal §4.6.
-- [x] **Q4 — Clock injection.** Add an injectable `now`/`Clock` seam to the re-auth
-      enforcement in `open()` so the interval-lapse test is writable.
-- [x] **Q5 — Split the CLI session agent (Phase 4) into its own plan?** Reviewer
-      recommends yes. Maintainer to confirm; if yes, remove Phase 4 here and drop a
-      pointer to the new plan.
-- [x] **Q6 — Phase 3 KEK mechanics.** Reword the "non-extractable KEK" language to
-      the achievable `flutter_secure_storage` shape and state which store holds the
-      KEK vs the wrap.
+- [ ] **Q7 — Biometric enrolment API + `obtainKek()` idempotency.** (a) Name the
+      core-side enrol entry point that writes `wrappedDekBiometric` to `SecretStore`
+      from an unlocked session (e.g. `KmdbDatabase.enableBiometricUnlock(provider)`,
+      requires DEK in memory) and where reconfigure/disable lives. (b) State on
+      `BiometricKekProvider` that `obtainKek()` is **get-or-create / idempotent per
+      db-scoped key** (creates the `biometryCurrentSet` item on enrol, returns the
+      existing one on unlock) — the current "generate a random KEK" wording would
+      make every unlock fail. (c) Decide enrol-vs-unlock: one idempotent method or
+      two. Then update Phase 1 (interface) and Phase 3 (impl + enrol flow).
+
+<details>
+<summary>Round 1 questions (all resolved — kept for history)</summary>
+
+- [x] **Q1 — Core `SecretStore` seam.** Resolved: `open()` gains `SecretStore?`;
+      `dbScopedSecretKey` promoted to core; key literals pinned.
+- [x] **Q2 — Biometric path selection.** Resolved: sealed `KEKSource`, biometric
+      returns a KEK, `unwrapDek` chokepoint preserved.
+- [x] **Q3 — Re-auth policy + headless opt-out API.** Resolved: `ReauthPolicy`.
+- [x] **Q4 — Clock injection.** Resolved: `DateTime Function()? now`.
+- [x] **Q5 — Split the CLI session agent.** Resolved: split confirmed.
+- [x] **Q6 — Phase 3 KEK mechanics.** Resolved: biometric-gated-KEK shape (but see
+      Q7 — the reword exposed the enrol/idempotency gap).
+
+</details>
 
 ## Summary
 
