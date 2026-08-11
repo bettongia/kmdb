@@ -1,6 +1,6 @@
 # Unlock policy — close SC-1 with a wrapped-copy DEK model, re-auth, and a CLI agent
 
-**Status**: Open (ready for `kmdb-plan-reviewer`)
+**Status**: Questions — reviewer Q1–Q6 resolved 2026-08-11 (see "Design resolutions (round 2)"); ready for re-review → Investigated
 
 **PR link**: _(none yet)_
 
@@ -75,7 +75,10 @@ frictionless and not regressing the CLI/scripting ergonomics.
   "always require passphrase" policy toggle covers the coercion case bluntly
   for now.
 - **MDM / enterprise policy override.** Out of scope for a library.
-- **Extracting a session-agent package.** The agent ships inside `kmdb_cli`.
+- **The CLI session agent.** Split into its own plan
+  `plan_0_10_01_cli_session_agent.md` (reviewer round 2) — it addresses the
+  separate CLI-Argon2id ergonomics finding, not SC-1, and is a substantial
+  subsystem (IPC, Windows named-pipe/ACL, lifecycle). Sequenced after WI-5.
 
 ## Settled design decisions
 
@@ -152,6 +155,69 @@ native, keyed per database — never in `enc:blob`. This refines the proposal's
   `kmdb_flutter`. Enrolment invalidation (`biometryCurrentSet`) defeats the
   "attacker enrols their own finger" case.
 
+## Design resolutions (round 2 — 2026-08-11, reviewer Q1–Q6)
+
+The reviewer's six questions are resolved here; the phases below are updated to
+match. Grounded against the code (`open()` at `kmdb_database.dart:298`,
+`EncryptionConfig`, `KeyDerivation.unwrapDek`).
+
+**Q1 — Core `SecretStore` seam (the central integration point).**
+
+- `KmdbDatabase.open()` gains `SecretStore? secretStore` (default
+  `InMemorySecretStore()`) — mirroring how encryption defaulted to an in-memory
+  cache, so existing callers/tests are unaffected and a host wanting persistent
+  biometric unlock passes a real store.
+- **Promote `dbScopedSecretKey`/`isSecretKeyForDb` from `kmdb_cli` to core**
+  (`packages/kmdb/lib/src/secret/secret_key.dart`), re-exported from `kmdb.dart`;
+  `kmdb_cli` deletes its local copy and consumes the core export. Adds the
+  `crypto` dependency to `kmdb` (already a transitive dep).
+- Per-device, per-db storage-key literals (bytes in the `SecretStore`, never in
+  `enc:blob`/`$meta`): biometric wrap → `dbScopedSecretKey(dbDir,
+  'dek.wrap.biometric')`; last-used timestamp → `dbScopedSecretKey(dbDir,
+  'passphrase.lastused')`. The wrap **must** live outside the encrypted DB
+  (chicken-and-egg: it is needed to derive the DEK that opens the DB) — which is
+  exactly why the per-device local `SecretStore` is its home.
+
+**Q2 — Biometric path selection + the `KEKSource` contract.** A sealed
+`KEKSource` on `EncryptionConfig` selects the unwrap path:
+`KEKSource.passphrase(String)` / `KEKSource.recoveryCode(String)` /
+`KEKSource.biometric(BiometricKekProvider)`. **`biometric` returns a KEK, not
+the DEK** — core then calls the existing
+`KeyDerivation.unwrapDek(wrappedDekBiometric, kek)`, preserving the single
+authenticated-unwrap chokepoint (platform code never sees the DEK).
+`BiometricKekProvider` is a core-defined interface
+(`Future<Uint8List> obtainKek()`) implemented in `kmdb_flutter`.
+
+**Q3 — `ReauthPolicy` (named deployment-shape API, not a boolean).** A
+`ReauthPolicy` on `EncryptionConfig`, default
+`ReauthPolicy.interval(Duration(days: 14))`: `.interval(Duration)` (biometric
+refused once the interval since last passphrase use lapses),
+`.alwaysRequirePassphrase()`, and `.headlessSession()` (the explicit
+server opt-out — no periodic re-auth; session = process lifetime). Enforced in
+`open()`; `headlessSession()` suppresses the check.
+
+**Q4 — Clock injection.** `open()` gains `DateTime Function()? now` (default
+`DateTime.now`), threaded into the re-auth comparison so the interval-lapse test
+sets a fake clock instead of sleeping 14 days.
+
+**Q5 — CLI session agent split: CONFIRMED.** Phase 4 (CLI session agent) is
+removed and becomes `plan_0_10_01_cli_session_agent.md`, sequenced after WI-5.
+
+**Q6 — Phase 3 KEK mechanics (achievable shape).** Not a use-but-cannot-extract
+handle: generate a random 32-byte KEK, store it in `flutter_secure_storage`
+under `accessControlFlags: biometryCurrentSet` (reading requires a fresh
+biometric auth), return it from `obtainKek()`, and `unwrapDek` the DEK in core.
+**KEK in platform secure storage (biometric-gated); wrap in the per-device
+`SecretStore`.**
+
+**Non-blocking observations folded in:** the Phase 1→3 intermediate state is a
+valid green checkpoint (native/CLI run full Argon2id per open until Phase 3) —
+Phase 1 must also drop `kmdb_flutter`'s `export
+'src/flutter_secure_dek_cache.dart'`, the library-doc example, and
+`flutter_secure_dek_cache_test.dart`; release-checklist entries use **RC-28+**;
+§34 (`sync_authentication`) already exists, so Phase 6 takes the next free
+section number.
+
 ## Implementation plan
 
 > Each phase is a green checkpoint — see **Resumability** above.
@@ -188,60 +254,59 @@ native, keyed per database — never in `enc:blob`. This refines the proposal's
 
 ### Phase 3 — Platform KEK: native biometric (`kmdb_flutter`)
 
-- [ ] Implement the non-extractable KEK source for iOS/Android/macOS/Windows via
-      `flutter_secure_storage` `accessControlFlags` (`biometryCurrentSet`), wiring
-      it into Phase 1's `KEKSource`. Linux → passphrase path in practice.
+- [ ] Implement `BiometricKekProvider` (the `kmdb_flutter` impl of the core
+      interface) for iOS/Android/macOS/Windows: generate a random 32-byte KEK,
+      store it in `flutter_secure_storage` under `accessControlFlags:
+      biometryCurrentSet` (reading requires a fresh biometric auth), and return
+      it from `obtainKek()` for core to `unwrapDek` — the achievable
+      biometric-gated-KEK shape, not a use-but-cannot-extract handle (Q6). KEK in
+      secure storage; wrap in the per-device `SecretStore`. Linux → passphrase
+      path in practice.
 - [ ] Enrolment-invalidation semantics: adding a finger/face invalidates the KEK;
       biometric auto-disables and the passphrase is required to reconfigure.
 - [ ] **Checkpoint:** commit `WI-5 Phase 3: kmdb_flutter biometric KEK`. *(Run
       `kmdb_flutter`'s own tests — `make pre_commit` is `kmdb`-scoped only.)*
 
-### Phase 4 — CLI session agent (`kmdb_cli`)
-
-- [ ] ssh-agent-style agent: DEK in **agent process memory**, owner-only socket
-      (reuse the credential-store / `SecretStore` permission model), **idle
-      timeout + absolute cap**, `kmdb … lock` ends it, never outlives the login
-      session. Single-database first (namespace later via `dbScopedSecretKey`).
-- [ ] `kmdb … unlock` / `lock` CLI surface; clear diagnostics.
-- [ ] **Checkpoint:** commit `WI-5 Phase 4: CLI session agent`. *(Run `kmdb_cli`
-      tests explicitly.)*
-
-### Phase 5 — Server / headless handling
+### Phase 4 — Server / headless handling
 
 - [ ] Session = process lifetime; the Phase 2 policy is suppressed via the
-      documented deployment-shape opt-out; passphrase injected non-interactively
-      through the `SecretStore` directory backend (`$CREDENTIALS_DIRECTORY`,
-      `/run/secrets`, k8s mounts). Library-side hook only — `kmdb_server` is a
-      separate proposal.
-- [ ] **Checkpoint:** commit `WI-5 Phase 5: headless/server unlock hook`.
+      documented `ReauthPolicy.headlessSession()` opt-out; passphrase injected
+      non-interactively through the `SecretStore` directory backend
+      (`$CREDENTIALS_DIRECTORY`, `/run/secrets`, k8s mounts). Library-side hook
+      only — `kmdb_server` is a separate proposal.
+- [ ] **Checkpoint:** commit `WI-5 Phase 4: headless/server unlock hook`.
 
-### Phase 6 — Tests (edge/fault, not golden-path)
+### Phase 5 — Tests (edge/fault, not golden-path)
 
 - [ ] **The SC-1 regression (headline):** a wrong passphrase is **rejected**
       even with a prior successful unlock / warm platform key. This test must
       fail on `main` today.
 - [ ] Biometric enrolment-invalidation forces passphrase re-config.
-- [ ] Re-auth interval lapse → biometric path refused, passphrase required.
+- [ ] Re-auth interval lapse → biometric path refused, passphrase required
+      (drives the injected `now` clock — Q4 — not a real 14-day wait).
 - [ ] `lock()` discards the DEK; the next open re-authenticates.
 - [ ] **The "last used" timestamp is local-only** — a device idle for a month is
       not fast-forwarded by a peer's recent timestamp (the `$meta`-LWW
       regression; assert it would fail if the field were synced).
-- [ ] Agent: idle expiry, absolute-cap expiry, `lock` immediacy, no-outlive-login.
-- [ ] Headless opt-out suppresses the policy; without it, the policy applies.
-- [ ] **Checkpoint:** commit `WI-5 Phase 6: test matrix`.
+- [ ] Headless opt-out (`ReauthPolicy.headlessSession()`) suppresses the policy;
+      without it, the policy applies.
+- [ ] **Checkpoint:** commit `WI-5 Phase 5: test matrix`.
 
-### Phase 7 — Spec & docs
+### Phase 6 — Spec & docs
 
 - [ ] **§31** — replace the DEK-cache section with the wrapped-copy model; add
       the policy, the platform matrix, and the honest §6 limitations (coercion,
       compromised host, root/jailbreak). **Must not be reconciled by describing
       the current code.**
 - [ ] **§19** (platform) — the platform matrix.
-- [ ] **§33** (CLI credential store) — the session agent.
-- [ ] **§28** — release-checklist entries for what CI cannot cover: biometric
-      enrolment invalidation, coerced re-auth behaviour, agent expiry.
+- [ ] **§33** (CLI credential store) — note the session agent is specified in
+      `plan_0_10_01_cli_session_agent.md` (split out).
+- [ ] **§28** — release-checklist entries (**RC-28+**) for what CI cannot cover:
+      biometric enrolment invalidation, coerced re-auth behaviour.
+- [ ] New spec section (next free `NN` — §34 `sync_authentication` already
+      exists) for the unlock/wrapped-copy model, or fold into §31.
 - [ ] Roadmap WI-5 row updated in-branch (moves with the PR).
-- [ ] **Checkpoint:** commit `WI-5 Phase 7: spec + docs`.
+- [ ] **Checkpoint:** commit `WI-5 Phase 6: spec + docs`.
 
 **Final step — QA sign-off and pre-commit:**
 
@@ -254,6 +319,170 @@ native, keyed per database — never in `enc:blob`. This refines the proposal's
 > This plan touches **`kmdb`, `kmdb_flutter`, and `kmdb_cli`**. `make pre_commit`
 > is `packages/kmdb`-scoped only — run `kmdb_flutter` and `kmdb_cli` suites
 > explicitly (`cd packages/<pkg> && dart test`).
+
+## Reviewer feedback (2026-08-11)
+
+### Verdict: strong design, not yet mechanically implementable — split the CLI agent out
+
+The problem is real and correctly diagnosed, the wrapped-copy approach is the
+right shape, and the one new design decision this plan adds is **correct and I
+endorse it**. But there are several load-bearing API seams the plan asserts
+"reuse X" without pinning the actual interface change, plus one phase (the CLI
+session agent) that is a substantial new subsystem underspecified for mechanical
+execution. Those must close before `Investigated`.
+
+### What I verified in the code (all confirmed)
+
+- **`$meta` syncs.** `isLocalOnly` (`lib/src/engine/util/namespace_codec.dart:148`)
+  returns true **only** for the `$$` prefix; `$meta` is single-`$`, so it is *not*
+  local-only. `enc:blob` therefore rides the sync channel. The core premise holds.
+- **`enc:blob` fields.** `EncryptionBlob` (`encryption_blob.dart`) carries exactly
+  `salt` / `wdekP` / `wdekR` (+ informational `m`/`t`/`p`). Passphrase and recovery
+  wraps derive from user-held secrets (`KeyDerivation.deriveKekFromPassphrase` /
+  `deriveKekFromRecoveryEntropy`) that are device-independent, so they *correctly
+  stay* in the synced blob. Nothing device-bound is in there today.
+- **The SC-1 site is exactly as described.** `kmdb_database.dart:751-753` returns
+  `buildProvider(cachedDek)` on a warm-cache hit with no passphrase check. The
+  passphrase/recovery unwrap only runs on the cache *miss* (`:759`/`:765`).
+- **Every raw-DEK path routes through `dekCache`**: bootstrap `:735` (store after
+  provision), `:751` (the bug), `:774` (store after unwrap); `changePassphrase`
+  `:1358`/`:1360`. `KeyDerivation.unwrapDek` is the sole authenticated unwrap and
+  is what `tryUnwrapWithBiometric` will wrap. So removing `DekCache` wholesale does
+  close every unauthenticated path — **SC-1 removal completeness checks out**, and
+  `changePassphrase` (`:1306`/`:1358`/`:1360`) is correctly in the investigation.
+
+### Design decision #1 (biometric wrap = per-device local): CONFIRMED, endorsed
+
+Storing `wrappedDekBiometric` and the "passphrase last used" timestamp in
+per-device local state rather than `enc:blob` is correct and well-reasoned. A
+device-bound KEK's wrap is useless on every other device, and putting *any*
+device-specific field in `$meta` reopens exactly the LWW-collision class that WI-11
+(SC-10) and WI-14 spent this whole track eliminating (both moved state out of
+`$meta` into `$$`-local namespaces for this reason). This refinement of the
+proposal's "third entry in `enc:blob`" framing is right. No change needed to the
+decision itself — but it creates the API gap in Q1 below.
+
+### Blocking gaps (why this is `Questions`, not `Investigated`)
+
+1. **The core `open()` → `SecretStore` seam is asserted but never specified — this
+   is the single biggest gap.** `KmdbDatabase.open()` (signature at `:298-351`)
+   has **no** `secretStore` parameter today, and there is **no native
+   keychain-backed `SecretStore` anywhere** — the only concrete impls are
+   `InMemorySecretStore` (core) and `DirectorySecretStore` (`kmdb_cli`).
+   `dbScopedSecretKey` also lives in `kmdb_cli`, not core. So "reuse the
+   `SecretStore` seam from PR #73, keyed per db" is under-defined: the plan must
+   state the *new* `open()` parameter (e.g. `SecretStore? secretStore` defaulting
+   to `InMemorySecretStore`), where the per-db key scheme lives now that core needs
+   it (promote `dbScopedSecretKey` to core, or restate it), and what the biometric
+   wrap's key literal is. Without this an implementer is inventing the central
+   integration point. (See Q1.)
+
+2. **How a host *requests* the biometric path, and how the re-auth policy is
+   configured, is unspecified.** `EncryptionConfig` today only carries
+   `passphrase`/`recoveryCode`. Phase 1 adds "a `KEKSource` abstraction the open
+   path consults," but nothing says how a caller selects biometric-vs-passphrase at
+   `open()`, nor where the interval / "always require passphrase" / headless
+   opt-out are passed. These are new public API surfaces (a `KEKSource` type, a
+   re-auth-policy type). The plan must name them concretely — an implementer must
+   not invent the public API of a security feature on the fly. (See Q2, Q3.)
+
+3. **The re-auth interval test needs an injectable clock.** Phase 2 enforces a
+   14-day lapse in `open()` and Phase 6 tests "interval lapse → biometric refused,"
+   but there is no wall-clock seam in `open()` today and the plan adds none. Pin a
+   `DateTime Function()? now` (or `Clock`) injection point, or the lapse test is
+   unwritable without sleeping 14 days. (See Q4.)
+
+4. **The CLI session agent (Phase 4) is a whole subsystem, underspecified, and
+   should be its own plan.** The requirements list (memory-resident DEK, owner-only
+   socket, idle+absolute cap, `lock` immediacy, no-outlive-login) restates the
+   proposal's *goals* but leaves every mechanical decision open: IPC transport and
+   **Windows** story (the "credential-store permission model" is POSIX
+   `chmod`/`SecretPermissionException` — there is no Windows named-pipe ACL design
+   here, and Windows is a supported CLI/CI target), the wire protocol, how a
+   command discovers/spawns the agent, and how "never outlives the login session"
+   is actually enforced per-OS (`$XDG_RUNTIME_DIR` on Linux; macOS/Windows have no
+   equivalent stated). This is the highest-risk component (a new place a DEK lives)
+   and it does **not** close SC-1 — it solves the *separate* CLI-Argon2id-ergonomics
+   finding. **Recommendation: cut Phase 4 into its own `Investigated`-gated plan**
+   (`plan_0_10_01_cli_session_agent.md`). Doing so shrinks this plan to the SC-1
+   fix + biometric + headless opt-out + tests + docs, which holds together cleanly,
+   and de-risks the quota-death resumability concern that motivated the
+   commit-per-phase discipline. (See Q5.)
+
+5. **The headless opt-out API is intent-only.** Phase 2/5 correctly say "explicit,
+   documented API naming the deployment shape, not a bare boolean" — but do not name
+   the type. Pin it (e.g. `ReauthPolicy.headlessSession()` vs
+   `ReauthPolicy.interval(Duration)` vs `ReauthPolicy.alwaysRequirePassphrase()`),
+   since Phase 6 asserts "without it, the policy applies" and needs a concrete API
+   to test. Folds into Q3.
+
+### Non-blocking observations (address in-plan, do not need a decision from the maintainer)
+
+- **Phase 1 ↔ Phase 3 coherence is fine, but state the intermediate shape.**
+  Removing `FlutterSecureDekCache` in Phase 1 does **not** break `kmdb_flutter`'s
+  compilation — but the implementer must also drop the
+  `export 'src/flutter_secure_dek_cache.dart';` line and the library-doc example in
+  `kmdb_flutter.dart`, delete `flutter_secure_dek_cache_test.dart`, and accept that
+  between Phase 1 and Phase 3 `kmdb_flutter` exposes only `KmdbFlutter.initialize()`
+  and every native/CLI `open()` runs full Argon2id (~200 ms) per open. That is an
+  acceptable green intermediate — say so explicitly so it is not mistaken for a
+  regression at review time.
+- **"Non-extractable KEK" over-claims `flutter_secure_storage`.** That API stores
+  and *returns* bytes gated behind an access-control policy; it does not hand back a
+  use-but-cannot-extract key handle (unlike a raw Keystore/SE key). The real Phase 3
+  shape is: a random KEK stored under `accessControlFlags: biometryCurrentSet` (read
+  requires biometric auth, i.e. extractable-only-after-auth), used to
+  `unwrapDek(wrappedDekBiometric, kek)`. Structurally still sound (no path yields a
+  DEK without auth) — but reword Phase 3 so the implementer builds the achievable
+  thing, and decide which store holds the KEK vs the wrap (KEK in secure storage
+  gated; wrap in the per-device `SecretStore`).
+- **RC numbering.** Next free release-checklist entry is **RC-28** (latest on
+  `main` is RC-27), not implied elsewhere — use RC-28+ in Phase 7.
+- **§34 already exists** (`sync_authentication`) — the "sank the device-identity
+  design" reference the plan leans on is `docs/spec/34` / the WI-11/WI-14 history;
+  cite it so §31's new limitations section can point at the precedent.
+- **`changePassphrase` keys the cache by `info.dbDir` while `open()` keys by
+  `path`** (`:1358`/`:1360` vs `:735`/`:751`/`:774`). Pre-existing latent
+  inconsistency; since Phase 1 deletes both, just make sure the replacement
+  per-device store uses **one** canonical db key on both paths.
+
+### Scope call
+
+Hold Phases 1–3, 5, 6, 7 as one plan (the SC-1 fix + biometric + headless opt-out
++ tests + spec — a coherent, shippable unit that fully closes SC-1). **Split Phase
+4 (CLI session agent) into its own plan.** It is separable (SC-1 is closed without
+it), it is the least-specified and highest-risk piece, and the proposal already
+treats "the agent ships inside `kmdb_cli`" as a packaging note rather than a reason
+to co-plan it.
+
+## Open questions
+
+**All resolved 2026-08-11** — see "Design resolutions (round 2)" above, which
+pins each API seam and folds the non-blocking observations. The phases have been
+updated to match (CLI agent removed, phases renumbered). Ready for the reviewer's
+re-check.
+
+- [x] **Q1 — Core `SecretStore` seam.** What is the exact `open()` change? Confirm a
+      new `SecretStore? secretStore` parameter (default `InMemorySecretStore`),
+      state where the per-db key scheme lives (promote `dbScopedSecretKey` to core
+      vs restate), and give the storage-key literal(s) for `wrappedDekBiometric` and
+      the "last used" timestamp.
+- [x] **Q2 — Biometric path selection.** How does a host ask `open()` to use the
+      biometric `KEKSource` instead of a passphrase? New `EncryptionConfig`
+      constructor/field, or a separate parameter? Name the `KEKSource` interface
+      (does it return a KEK for core to `unwrapDek`, or the DEK directly? — the
+      Investigation implies the former; make it explicit).
+- [x] **Q3 — Re-auth policy + headless opt-out API.** Name the concrete type and its
+      constructors (interval, always-require-passphrase, headless-session opt-out).
+      Confirm it is a named deployment-shape API, not a boolean, per proposal §4.6.
+- [x] **Q4 — Clock injection.** Add an injectable `now`/`Clock` seam to the re-auth
+      enforcement in `open()` so the interval-lapse test is writable.
+- [x] **Q5 — Split the CLI session agent (Phase 4) into its own plan?** Reviewer
+      recommends yes. Maintainer to confirm; if yes, remove Phase 4 here and drop a
+      pointer to the new plan.
+- [x] **Q6 — Phase 3 KEK mechanics.** Reword the "non-extractable KEK" language to
+      the achievable `flutter_secure_storage` shape and state which store holds the
+      KEK vs the wrap.
 
 ## Summary
 
