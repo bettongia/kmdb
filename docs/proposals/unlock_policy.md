@@ -322,6 +322,36 @@ expands the API surface; see §9 Q5.
 
 ## 9. Open questions
 
+> **All resolved in a maintainer design session (2026-08-10).** Recorded here so
+> the WI-5 plan can be authored without re-deriving them:
+>
+> 1. **Session-agent DEK** lives in **agent process memory** (never on disk),
+>    bounded by **both an idle timeout and an absolute cap** (the `sudo` /
+>    `op signin` model), whichever fires first; `kmdb ... lock` ends it
+>    immediately and it never outlives the login session.
+> 2. **Multi-database agent: single-database first.** When multi-DB support
+>    lands, namespace sessions with the same per-database hash-scoping introduced
+>    for `SecretStore` (`dbScopedSecretKey`, PR #73), not a new scheme.
+> 3. **Web WebAuthn-PRF is deferred to a follow-up plan.** It needs
+>    browser-support verification and web is already a reduced platform (no
+>    semantic search). WI-5 ships the core wrapped-DEK model + mobile biometric +
+>    CLI agent + server headless; the web path is scoped out to avoid staking the
+>    release on an unverified browser API.
+> 4. **Default re-authentication interval: 14 days**, host-overridable (lengthen,
+>    shorten, or "always require passphrase").
+> 5. **Per-operation escalation (§7) is a follow-up, not in WI-5.** The
+>    "always require passphrase" toggle covers the coercion case bluntly for now;
+>    per-operation escalation is a later refinement (it widens the API surface).
+> 6. **MDM / enterprise policy override: out of scope** for a library.
+> 7. **Migration: none.** KMDB is unreleased; `DekCache` is simply removed —
+>    consistent with the standing no-migration position.
+>
+> The scope decision (Q3) means WI-5 = **core wrapped-DEK model + mobile
+> biometric + CLI session agent + server headless handling**, with web PRF and
+> per-operation escalation as explicit follow-ups.
+
+The original questions, for reference:
+
 1. **Where does the session agent's DEK live**, and what is its lifetime bound —
    idle timeout, absolute expiry, or both? (§4.4)
 2. **Does the agent need to support multiple databases** concurrently, and if so
