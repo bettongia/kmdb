@@ -2,7 +2,7 @@
 
 **Status**: Complete (QA PASS 2026-08-10)
 
-**PR link**: _(pending)_
+**PR link**: [PR #74](https://github.com/bettongia/kmdb/pull/74)
 
 > **Provenance.** Closes the **T1** half of finding **E-1** in the
 > [2026-07-18 release-readiness review](../reviews/release-readiness-review-2026-07-18.md),
