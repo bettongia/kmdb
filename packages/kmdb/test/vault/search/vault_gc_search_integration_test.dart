@@ -219,6 +219,9 @@ final class _RefCountKvStore implements KvStore {
   Future<void> appendQuarantine(QuarantinedSstable record) async {}
 
   @override
+  Future<Set<String>> quarantinedFilenames() async => {};
+
+  @override
   Future<List<String>> listNamespaces() async => [];
 
   @override

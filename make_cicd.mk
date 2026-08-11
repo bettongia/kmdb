@@ -143,11 +143,19 @@ cicd_flutter:
 # 2^53 safe-integer range — see that file's "dart2js is not supported by
 # KMDB" doc note. `value_codec_test.dart` never reaches that code path, so it
 # stays on the dart2js default.
+#
+# The sync-auth test (0.10.01 WI-4 T1) exercises WebSyncAuthenticator's real
+# WebCrypto (SubtleCrypto) + IndexedDB code paths — the only way to verify
+# that implementation is "realisable, not hand-waved" per the plan's Q4
+# design record. It includes a known-answer-vector cross-check against
+# DefaultSyncAuthenticator's native derivation (see
+# default_sync_authenticator_test.dart's matching KAT test).
 cicd_web:
 	dart pub global activate melos
 	melos bootstrap
 	cd packages/kmdb && dart test --platform chrome test/encoding/value_codec_test.dart
 	cd packages/kmdb && dart test --platform chrome --compiler dart2wasm test/vault/vault_hash_kat_test.dart
+	cd packages/kmdb && dart test --platform chrome test/sync/auth/web_sync_authenticator_test.dart
 .PHONY: cicd_web
 
 # ── Container (Podman) ─────────────────────────────────────────────────────────

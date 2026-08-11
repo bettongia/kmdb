@@ -16,12 +16,13 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:googleapis_auth/auth_io.dart';
-import 'package:kmdb/kmdb.dart' show SecretStore;
+import 'package:kmdb/kmdb.dart' show PairingCode, SecretStore, SyncSetKey;
 import 'package:kmdb/kmdb_config.dart';
 import 'package:kmdb_google_drive/kmdb_google_drive.dart' show kDriveFileScope;
 
 import '../config/secret_store/directory_secret_store.dart';
 import '../config/secret_store/secret_key.dart';
+import '../config/sync_auth_key_store.dart';
 import 'command.dart';
 
 /// Manages named sync remotes for a KMDB database.
@@ -38,10 +39,26 @@ import 'command.dart';
 ///           [--credentials <file>] [--force]
 /// kmdb <db> remote remove <name>
 /// kmdb <db> remote list
+/// kmdb <db> remote pair show <name>
+/// kmdb <db> remote pair import <name> <code>
 /// ```
 ///
-/// The first positional argument is the subcommand. For `add` and `remove`,
-/// the second positional argument is the remote name.
+/// The first positional argument is the subcommand. For `add`, `remove`, and
+/// `pair show`/`pair import`, the second positional argument is the remote
+/// name.
+///
+/// ## Sync authentication (0.10.01 WI-4 T1)
+///
+/// `remote add` mints a fresh 256-bit sync-set key for the new remote
+/// automatically — every artefact this device uploads to that remote is
+/// authenticated (`SyncAuthEnvelope`) with it, and every artefact downloaded
+/// is verified against it. A second device joining the same remote must
+/// **also** run its own `remote add` (to configure its own connection
+/// details — path, Drive credentials, etc.) and then
+/// `remote pair import <name> <code>` using a code printed by
+/// `remote pair show <name>` on an already-enrolled device, so both devices
+/// share the same key. Without this, the two devices' artefacts fail
+/// authentication for each other — see `SyncAuthException`.
 final class RemoteCommand extends CliCommand {
   /// Creates a [RemoteCommand].
   const RemoteCommand();
@@ -59,7 +76,9 @@ final class RemoteCommand extends CliCommand {
       '                 --client-id <oauth-client-id> --client-secret <secret>\n'
       '                 [--credentials <file>] [--force]\n'
       '       remote remove <name>\n'
-      '       remote list';
+      '       remote list\n'
+      '       remote pair show <name>\n'
+      '       remote pair import <name> <code>';
 
   @override
   Future<bool> execute(
@@ -99,10 +118,16 @@ final class RemoteCommand extends CliCommand {
         );
       case 'list':
         return _list(ctx);
+      case 'pair':
+        return _pair(
+          ctx,
+          args.sublist(1),
+          secretStoreOverride: secretStoreOverride,
+        );
       default:
         ctx.writeError(
           "remote: unknown subcommand '$subcommand'. "
-          'Expected: add, remove, list.',
+          'Expected: add, remove, list, pair.',
         );
         return false;
     }
@@ -209,6 +234,21 @@ final class RemoteCommand extends CliCommand {
       // coverage:ignore-end
     }
 
+    // Mint a fresh sync-set key for this remote (0.10.01 WI-4 T1, Q-C: one
+    // key per remote). This is what makes a single-device `remote add`
+    // "just work" without an explicit pairing step — pairing is only needed
+    // when a *second* device joins the same remote (see `remote pair`).
+    // Minted unconditionally, including for `--force` re-adds: re-adding an
+    // existing remote is a re-provisioning event, and R-5's design already
+    // treats "the sync folder's authentication key changed" as something
+    // every device must re-pair for, not something a silent key reuse could
+    // paper over.
+    await mintSyncAuthKey(
+      dbDir: dbDir,
+      remoteName: name,
+      secretStoreOverride: secretStoreOverride,
+    );
+
     ctx.out.writeln("Remote '$name' added (type: $type).");
     return true;
   }
@@ -264,6 +304,15 @@ final class RemoteCommand extends CliCommand {
       await store.delete(dbScopedSecretKey(dbDir, credentialsPath));
     }
 
+    // Delete the sync-authentication key too — every remote has one
+    // (minted by `remote add`), regardless of type, so this cleanup is
+    // unconditional rather than gated on a specific `RemoteConfig` subtype.
+    await deleteSyncAuthKey(
+      dbDir: dbDir,
+      remoteName: name,
+      secretStoreOverride: secretStoreOverride,
+    );
+
     ctx.out.writeln("Remote '$name' removed.");
     return true;
   }
@@ -297,6 +346,141 @@ final class RemoteCommand extends CliCommand {
           ctx.out.writeln('$rname\tgoogle-drive\t$syncRoot');
       }
     }
+    return true;
+  }
+
+  // ── pair ───────────────────────────────────────────────────────────────────
+
+  /// Dispatches `remote pair show`/`remote pair import` (0.10.01 WI-4 T1).
+  Future<bool> _pair(
+    CommandContext ctx,
+    List<String> args, {
+    SecretStore? secretStoreOverride,
+  }) async {
+    if (args.isEmpty) {
+      ctx.writeError(
+        'remote pair: subcommand required (show, import).\n'
+        'Usage: remote pair show <name>\n'
+        '       remote pair import <name> <code>',
+      );
+      return false;
+    }
+    final dbDir = (await ctx.store.storeInfo()).dbDir;
+    final subcommand = args[0];
+    switch (subcommand) {
+      case 'show':
+        return _pairShow(
+          ctx,
+          args.sublist(1),
+          dbDir,
+          secretStoreOverride: secretStoreOverride,
+        );
+      case 'import':
+        return _pairImport(
+          ctx,
+          args.sublist(1),
+          dbDir,
+          secretStoreOverride: secretStoreOverride,
+        );
+      default:
+        ctx.writeError(
+          "remote pair: unknown subcommand '$subcommand'. "
+          'Expected: show, import.',
+        );
+        return false;
+    }
+  }
+
+  /// Prints the pairing code for an already-enrolled remote, so a second
+  /// device can `remote pair import` it.
+  Future<bool> _pairShow(
+    CommandContext ctx,
+    List<String> args,
+    String dbDir, {
+    SecretStore? secretStoreOverride,
+  }) async {
+    if (args.isEmpty) {
+      ctx.writeError('remote pair show: remote name required.');
+      return false;
+    }
+    final name = args[0];
+
+    final key = await loadSyncAuthKey(
+      dbDir: dbDir,
+      remoteName: name,
+      secretStoreOverride: secretStoreOverride,
+    );
+    if (key == null) {
+      ctx.writeError(
+        "remote pair show: remote '$name' has no sync-authentication key. "
+        "Run 'remote add $name ...' first (it mints a key automatically), "
+        "or check the remote name with 'remote list'.",
+      );
+      return false;
+    }
+
+    ctx.out.writeln(await PairingCode.encode(key));
+    return true;
+  }
+
+  /// Installs a pairing code's key as the sync-authentication key for an
+  /// already-configured remote, so this device shares the same key as the
+  /// device that ran `remote pair show`.
+  ///
+  /// The remote must already exist in this device's own `config.json` —
+  /// the pairing code carries only the shared key material, never
+  /// connection details (path, Drive folder/credentials), so this device
+  /// must have separately run its own `remote add` for [args]`[0]` first.
+  Future<bool> _pairImport(
+    CommandContext ctx,
+    List<String> args,
+    String dbDir, {
+    SecretStore? secretStoreOverride,
+  }) async {
+    if (args.length < 2) {
+      ctx.writeError(
+        'remote pair import: remote name and pairing code required.\n'
+        'Usage: remote pair import <name> <code>',
+      );
+      return false;
+    }
+    final name = args[0];
+    final code = args[1];
+
+    final KmdbConfig config;
+    try {
+      config = await KmdbConfig.forDatabase(dbDir);
+    } on FormatException catch (e) {
+      ctx.writeError(e.message);
+      return false;
+    }
+    if (!config.remotes.containsKey(name)) {
+      ctx.writeError(
+        "remote pair import: no remote named '$name' is configured on "
+        "this device. Run 'remote add $name --type <type> ...' first "
+        '(with this device\'s own connection details), then re-run this '
+        'command.',
+      );
+      return false;
+    }
+
+    final SyncSetKey key;
+    try {
+      key = await PairingCode.decode(code);
+    } on FormatException catch (e) {
+      ctx.writeError('remote pair import: invalid pairing code: ${e.message}');
+      return false;
+    }
+
+    await importSyncAuthKey(
+      dbDir: dbDir,
+      remoteName: name,
+      key: key,
+      secretStoreOverride: secretStoreOverride,
+    );
+    ctx.out.writeln(
+      "Remote '$name' enrolled with the shared sync-authentication key.",
+    );
     return true;
   }
 

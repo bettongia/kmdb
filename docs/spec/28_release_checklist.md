@@ -1002,6 +1002,107 @@ contention test that exercises the lease protocol.
 
 ---
 
+### RC-26 — Sync authentication: cross-device enrollment round-trip
+
+- **Area:** cloud sync / `kmdb_cli`
+- **Validates:** that `remote pair show`/`remote pair import` actually work
+  across two independent, physically separate machines — not just two
+  simulated devices sharing an in-process `FakeSecretStore` (the automated
+  suite's `sync_auth_key_store_test.dart`/`remote_command_test.dart`
+  round-trip tests). Also validates the pairing code's real-world
+  transcribability: can a human actually read, type, or copy-paste a
+  `KSA1-...` code between two machines without a tool-assisted round-trip?
+- **Why not automated:** the automated suite exercises the cryptographic
+  and CLI logic exhaustively with in-memory/fake secret stores on one
+  process, which proves the mechanism is correct but not that two real
+  `DirectorySecretStore.forPlatform()` instances on two real OS installs,
+  connected by a human copying a pairing code, actually converge on
+  authenticated sync.
+- **Applies when:** before any release, and after any change to
+  `packages/kmdb_cli/lib/src/commands/remote_command.dart`,
+  `packages/kmdb/lib/src/sync/auth/pairing_code.dart`, or
+  `packages/kmdb/lib/src/sync/auth/sync_set_key.dart`.
+- **Prerequisites:** two physically separate machines (or two disjoint user
+  profiles on the same machine, to get two independent
+  `DirectorySecretStore.forPlatform()` roots), a shared local-directory or
+  Dropbox/OneDrive-style sync folder reachable from both, and `kmdb_cli`
+  built on both.
+- **Steps:**
+  1. On device A: `kmdb <db> init`, then `kmdb <db> remote add origin --type
+     local --path <shared-folder>`. Confirm `remote add` reports success —
+     this mints a fresh `SyncSetKey` for `origin` automatically.
+  2. On device A: `kmdb <db> remote pair show origin` and copy the printed
+     `KSA1-...` code by hand (retype it, don't script the transfer — the
+     point is to validate the human-transcription path, including the
+     checksum's typo-catching property).
+  3. On device B: `kmdb <db> init` against a **separate** copy of the
+     database directory (or a fresh empty one, to receive via sync), then
+     `kmdb <db> remote add origin --type local --path <same-shared-folder>`
+     (this also auto-mints a key on device B — expected to be overwritten
+     next).
+  4. On device B: `kmdb <db> remote pair import origin <code-from-step-2>`
+     using the hand-transcribed code. Confirm success.
+  5. Write a document on device A, `kmdb <db> push`. On device B, `kmdb <db>
+     pull` and confirm the document arrives.
+  6. Deliberately mistype one character of the pairing code on a third
+     attempt and confirm `remote pair import` reports a clean checksum-
+     mismatch `FormatException`-derived error, not a crash or a
+     silently-installed wrong key.
+- **Expected result:** the pairing code transfers correctly by hand, the
+  two devices converge on the same `SyncSetKey`, `push`/`pull` succeed with
+  no `SyncAuthException`, and a deliberately-corrupted code is cleanly
+  rejected rather than silently accepted or crashing the CLI.
+- **Related:** `docs/spec/34_sync_authentication.md` (Enrollment),
+  `docs/spec/33_cli_credential_store.md` (Sync-authentication key storage),
+  `docs/plans/completed/plan_0_10_01_sync_authentication.md`.
+
+### RC-27 — Sync authentication: real-provider authenticated sync soak
+
+- **Area:** cloud sync
+- **Validates:** that `SyncAuthenticatingAdapter` behaves correctly against
+  a **real** cloud provider (Google Drive, iCloud) over an extended,
+  realistic sync session — not just `MemorySyncAdapter`/`LocalDirectoryAdapter`
+  in the automated suite. In particular: that the provider never mutates,
+  re-encodes, or strips bytes in a way that corrupts the 20-byte envelope
+  header (e.g. a provider-side text-mode line-ending transform, unlikely
+  but never verified against a real backend), and that consolidation
+  (which authenticates the lease via `compareAndSwap`) still functions
+  correctly against the provider's real eventual-consistency/CAS behaviour
+  once every artefact is enveloped.
+- **Why not automated:** RC-2/RC-9/RC-13 already cover real-provider sync
+  soak testing for the pre-existing (unauthenticated) protocol; this entry
+  is the same class of check specifically for the sync-authentication
+  layer, which those entries predate and do not exercise. Real cloud
+  credentials, quota, and non-determinism are exactly what this checklist
+  exists to cover instead of CI.
+- **Applies when:** before any release, and after any change to
+  `packages/kmdb/lib/src/sync/auth/sync_authenticating_adapter.dart` or the
+  concrete cloud adapters (`kmdb_google_drive`, `kmdb_icloud`).
+- **Prerequisites:** real Google Drive and/or iCloud credentials (see
+  RC-1/RC-12 for setup), two enrolled devices per RC-26.
+- **Steps:**
+  1. Enroll two devices against a real Google Drive (or iCloud) remote per
+     RC-26's steps 1–4, using the real cloud adapter instead of
+     `LocalRemoteConfig`.
+  2. Run a multi-cycle push/pull soak (mirroring RC-2's duration/cadence)
+     with both devices writing concurrently, long enough to trigger at
+     least one consolidation round.
+  3. Confirm every SSTable, HWM file, and the consolidation lease
+     round-trip correctly through the real provider — download the raw
+     bytes of at least one uploaded artefact directly from the provider's
+     web UI or API and confirm the 20-byte `KSA` envelope header is intact
+     byte-for-byte.
+  4. Confirm no `SyncAuthException` is ever raised for a genuine,
+     non-tampered artefact over the full soak duration.
+- **Expected result:** the soak completes with no spurious
+  `SyncAuthException`, consolidation succeeds at least once, and the raw
+  provider-stored bytes for a sampled artefact show an intact envelope
+  header.
+- **Related:** `docs/spec/34_sync_authentication.md`, RC-2, RC-9, RC-13,
+  `docs/plans/completed/plan_0_10_01_sync_authentication.md`.
+
+---
+
 ## Release log
 
 | Version      | Date         | Tester | Checks run  | Result      | Notes              |

@@ -655,13 +655,21 @@ the recommended pattern to document intent and ensure activation before
 
 ### Threat Model
 
-Encryption in KMDB is designed to protect **document content** against two
-specific adversaries:
+**This section is a confidentiality (passive-adversary) threat model only.**
+Prior to 0.10.01 WI-4, this was the *only* adversary KMDB's sync design
+considered at all — the sync folder was implicitly trusted: anything found
+there was assumed genuine simply because it was in the sync folder. That
+implicit trust is now closed by a **separate, orthogonal layer** — sync
+authentication (§34) — which this section does not describe and does not
+depend on. The two layers protect against different, independent
+adversaries and are deliberately decoupled (sync authentication does not
+require encryption to be enabled, and vice versa):
 
-1. **The cloud storage provider** (and anyone with access to the synced files).
-   KMDB syncs whole SSTable files — the provider receives the complete on-disk
-   representation of every flushed and consolidated SSTable. The encryption
-   scheme ensures that the provider cannot read document values from those files
+1. **The cloud storage provider** (and anyone with access to the synced files)
+   **reading** data — a **passive** adversary. KMDB syncs whole SSTable
+   files — the provider receives the complete on-disk representation of every
+   flushed and consolidated SSTable. The encryption scheme in this section
+   ensures that a passive reader cannot read document values from those files
    without the DEK.
 2. **Physical access to a device** by an adversary who does **not** know the
    passphrase (e.g. a lost or stolen phone). Because the DEK is wrapped under a
@@ -678,8 +686,37 @@ Encryption is **not** designed to:
   KMDB process's memory. The DEK is held in plaintext in process memory for the
   lifetime of an open database; an adversary with that level of access has
   already won.
+- **Authenticate the provenance of synced artefacts.** A passive reader (1)
+  above is explicitly *not* assumed to write anything back. The realistic
+  escalation of that adversary — **a compromised cloud account** (a phished
+  password, a stolen OAuth token, a third-party app with Drive scope) — is an
+  **active** adversary: it can write to the sync folder while authenticated
+  as the legitimate user, and neither this section's confidentiality
+  guarantees nor full-disk/at-rest encryption on the provider's side helps
+  against it, because the attacker is not defeating either of those — it is
+  simply using the account's own write access. This active-but-unkeyed
+  adversary is called **T1** in §34, and closing it (SSTable, vault, HWM, and
+  consolidation-lease authentication via a HMAC keyed by an independent
+  sync-set key) is that section's entire subject, not this one's.
+  - **T1 is explicitly out of scope for this section** and was never claimed
+    to be in scope — see the note above. §34's Threat Model section states
+    this plainly for its own layer, so a reader who arrives at either
+    section first sees a consistent, cross-referenced boundary.
+  - **A malicious *peer* device that legitimately holds both the DEK and (if
+    sync authentication is enabled) the sync-set key — "T3" in §34's
+    terminology — is out of scope for *both* layers.** A shared-key MAC
+    cannot distinguish a malicious key-holder from a legitimate one, and
+    neither can a shared DEK: any device that has been legitimately enrolled
+    can always produce ciphertext/envelopes that authenticate and decrypt
+    correctly for content it chooses to write. This is a fundamentally
+    different problem (per-device identity and revocation, not a shared
+    secret) and is deferred to
+    [`docs/proposals/device_identity.md`](../proposals/device_identity.md).
 
-The remainder of this section honestly enumerates what is and is not protected.
+The remainder of this section honestly enumerates what is and is not protected
+**against the passive-provider and lost-device adversaries above** — none of
+the bullets below should be read as an authenticity claim; see §34 for that
+axis.
 
 ### Protected (encrypted)
 

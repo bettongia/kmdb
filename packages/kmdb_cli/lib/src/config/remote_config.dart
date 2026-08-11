@@ -24,6 +24,7 @@ import 'package:kmdb_google_drive/kmdb_google_drive.dart';
 
 import 'secret_store/directory_secret_store.dart';
 import 'secret_store/secret_key.dart';
+import 'sync_auth_key_store.dart';
 
 // Re-export the config types so existing CLI imports of this file continue to
 // resolve without change.  New code should import from
@@ -48,6 +49,18 @@ export 'package:kmdb/kmdb_config.dart'
 /// [dbScopedSecretKey]) — not to locate a file within [dbDir] itself, unlike
 /// the former `{dbDir}/local/`-rooted design.
 ///
+/// [remoteName] — the configured name of [remote] (e.g. `'origin'`), used to
+/// scope the sync-authentication [SyncSetKey] (0.10.01 WI-4 T1) this
+/// function reads via [loadSyncAuthKey] and wraps the returned adapter with.
+/// When `null` — the CLI's `--sync-dir` one-off bypass, which has no saved
+/// remote identity to key a [SyncSetKey] by — the returned adapter is
+/// **unauthenticated**, exactly matching that flag's pre-existing "bypasses
+/// saved remotes" escape-hatch semantics. Every *named* remote is always
+/// wrapped: `remote add` mints a key automatically (see
+/// [RemoteCommand._add]), so a named remote with no key can only mean it was
+/// never fully enrolled (R-4) — this function throws [SyncAuthException]
+/// rather than silently syncing unauthenticated in that case.
+///
 /// [secretStoreOverride] — an injectable [SecretStore], used by tests to
 /// avoid exercising the real permission-hardened filesystem store. Defaults
 /// to `null`, in which case [DirectorySecretStore.forPlatform] resolves the
@@ -56,15 +69,18 @@ export 'package:kmdb/kmdb_config.dart'
 /// Throws [StateError] if Google Drive credentials are missing (i.e. the user
 /// has not yet run `kmdb <db> remote add --type google-drive`). Throws
 /// [SecretPermissionException] if the stored credentials are found with
-/// looser-than-expected POSIX permissions.
+/// looser-than-expected POSIX permissions. Throws [SyncAuthException] (R-4)
+/// if [remoteName] is non-null but no [SyncSetKey] has been enrolled for it.
 Future<SyncStorageAdapter> adapterFor(
   RemoteConfig remote, {
   required String dbDir,
+  String? remoteName,
   SecretStore? secretStoreOverride,
 }) async {
+  final SyncStorageAdapter inner;
   switch (remote) {
     case LocalRemoteConfig(:final path):
-      return LocalDirectoryAdapter(path);
+      inner = LocalDirectoryAdapter(path);
 
     case GoogleDriveRemoteConfig(:final syncRoot, :final credentialsPath):
       final authClient = await _loadGoogleDriveAuthClient(
@@ -72,8 +88,29 @@ Future<SyncStorageAdapter> adapterFor(
         credentialsPath: credentialsPath,
         secretStoreOverride: secretStoreOverride,
       );
-      return GoogleDriveAdapter(authClient, syncRoot: syncRoot);
+      inner = GoogleDriveAdapter(authClient, syncRoot: syncRoot);
   }
+
+  if (remoteName == null) return inner; // --sync-dir one-off: unauthenticated
+
+  final key = await loadSyncAuthKey(
+    dbDir: dbDir,
+    remoteName: remoteName,
+    secretStoreOverride: secretStoreOverride,
+  );
+  if (key == null) {
+    throw SyncAuthException(
+      'No sync-authentication key enrolled for remote "$remoteName". '
+      "This should not happen for a remote created with 'remote add' "
+      '(which mints a key automatically) — if this remote was added on '
+      "another device, run 'kmdb <db> remote pair show' there, then "
+      "'kmdb <db> remote pair import $remoteName <code>' here.",
+    );
+  }
+  return SyncAuthenticatingAdapter(
+    inner,
+    DefaultSyncAuthenticator(key.rootKey),
+  );
 }
 
 // ── Google Drive credential helpers ──────────────────────────────────────────
