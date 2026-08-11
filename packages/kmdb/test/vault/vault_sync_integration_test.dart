@@ -23,6 +23,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:kmdb/src/engine/platform/storage_adapter_memory.dart';
+import 'package:kmdb/src/sync/auth/default_sync_authenticator.dart';
 import 'package:kmdb/src/vault/local_directory_vault_adapter.dart';
 import 'package:kmdb/src/vault/vault_store.dart';
 import 'package:test/test.dart';
@@ -32,6 +33,11 @@ import 'test_kv_store.dart';
 // ── Test doubles ──────────────────────────────────────────────────────────────
 
 import 'package:kmdb/src/vault/media_type_detector.dart';
+
+/// A fixed 32-byte sync-authentication root key shared by both simulated
+/// devices in this file (0.10.01 WI-4 T1) — both must be enrolled in the
+/// same sync-set for device-A writes to verify under device-B's reads.
+final Uint8List _kTestRootKey = Uint8List.fromList(List.generate(32, (i) => i));
 
 final class _NoOpDetector implements MediaTypeDetector {
   const _NoOpDetector();
@@ -85,6 +91,7 @@ void main() {
         syncRoot: syncRoot.path,
         localStore: deviceAStore,
         kvStore: deviceAKvStore,
+        authenticator: DefaultSyncAuthenticator(_kTestRootKey),
       );
 
       // Device B: separate in-memory vault store + local directory sync adapter.
@@ -95,6 +102,11 @@ void main() {
         syncRoot: syncRoot.path,
         localStore: deviceBStore,
         kvStore: deviceBKvStore,
+        // Same key as device A — both devices are enrolled in the same
+        // sync-set (0.10.01 WI-4 T1); DefaultSyncAuthenticator is stateless
+        // over the key bytes, so a fresh instance from the same key
+        // material is equivalent to sharing one instance.
+        authenticator: DefaultSyncAuthenticator(_kTestRootKey),
       );
     });
 

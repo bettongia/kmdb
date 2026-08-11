@@ -17,18 +17,51 @@ import 'package:kmdb/kmdb.dart';
 import 'package:kmdb/kmdb_config.dart';
 import 'command.dart';
 
+/// The [RemoteConfig] resolved by [SyncHelpers.resolveRemote], paired with
+/// its configured remote [name] (0.10.01 WI-4 T1).
+///
+/// [name] is used to scope the sync-authentication key `adapterFor` reads
+/// via `remoteName` — see [SyncHelpers.resolveRemote]'s doc comment for why
+/// it is `null` only for the `--sync-dir` one-off bypass.
+final class ResolvedRemote {
+  /// Creates a [ResolvedRemote].
+  const ResolvedRemote({required this.remote, required this.name});
+
+  /// The resolved remote configuration.
+  final RemoteConfig remote;
+
+  /// The configured remote name, or `null` for the `--sync-dir` one-off
+  /// bypass (which has no saved remote identity).
+  final String? name;
+}
+
 /// Shared logic for `push`, `pull`, and `sync` commands.
 abstract final class SyncHelpers {
   SyncHelpers._();
 
-  /// Resolves a [RemoteConfig] from the command's positional [args] and [flags].
+  /// Resolves a [RemoteConfig] (and its configured name) from the command's
+  /// positional [args] and [flags].
   ///
   /// Resolution order:
   ///
   /// 1. If `--sync-dir` is present in [flags], return an ad-hoc
-  ///    [LocalRemoteConfig] pointing at that path.
+  ///    [LocalRemoteConfig] pointing at that path, with `name: null` — see
+  ///    the return-value doc below for why.
   /// 2. If [args] is non-empty, look up the named remote in config.
   /// 3. If [args] is empty, look up the remote named `'origin'` in config.
+  ///
+  /// ## Return value: `name` is `null` only for the `--sync-dir` bypass
+  ///
+  /// [ResolvedRemote.name] is the configured remote name for every
+  /// config-backed remote (cases 2 and 3), and `null` **only** for the
+  /// `--sync-dir` one-off bypass (case 1) — that path has no saved remote
+  /// identity to scope a sync-authentication key by (0.10.01 WI-4 T1), so
+  /// callers pass `name` straight through to `adapterFor`'s `remoteName`
+  /// parameter, which treats `null` the same way: skip authentication
+  /// rather than silently fabricate a key for the ephemeral path
+  /// (`--sync-dir` was already an "escape hatch that bypasses saved
+  /// remotes" before this plan; that bypass now also means "and its
+  /// authentication").
   ///
   /// Throws [ArgumentError] if:
   /// - Both a positional remote name and `--sync-dir` are supplied.
@@ -36,7 +69,7 @@ abstract final class SyncHelpers {
   /// - No positional remote and no `origin` remote is configured.
   ///
   /// Throws [FormatException] if config.json is corrupt.
-  static Future<RemoteConfig> resolveRemote(
+  static Future<ResolvedRemote> resolveRemote(
     String dbDir,
     List<String> args,
     Map<String, dynamic> flags,
@@ -51,9 +84,13 @@ abstract final class SyncHelpers {
       );
     }
 
-    // One-off sync-dir: bypass config entirely.
+    // One-off sync-dir: bypass config entirely. No saved remote name exists
+    // to scope a sync-authentication key by — name is deliberately null.
     if (syncDir != null) {
-      return LocalRemoteConfig(path: syncDir);
+      return ResolvedRemote(
+        remote: LocalRemoteConfig(path: syncDir),
+        name: null,
+      );
     }
 
     // Look up by name or default to 'origin'.
@@ -73,7 +110,7 @@ abstract final class SyncHelpers {
       throw ArgumentError("remote '$name' not found.");
     }
 
-    return remote;
+    return ResolvedRemote(remote: remote, name: name);
   }
 
   /// Returns the set of collections to sync.

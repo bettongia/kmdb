@@ -21,8 +21,11 @@ abstract: |
   §26 (document versioning — a full audit trail of prior writes with promote
   support), §29–30 (Google Drive and Apple iCloud cloud adapters), §31
   (value-level AES-256-GCM encryption), §32 (vault search — extracted-text
-  indexing over attached files), and §33 (CLI credential store hardening). §1
-  is now a System Overview, absorbing the former standalone primer.
+  indexing over attached files), and §33 (CLI credential store hardening).
+  v2.5 adds §34 (sync authentication — MAC-based provenance for every
+  SSTable, vault, high-water-mark, and consolidation-lease artefact against
+  an untrusted-but-authenticated cloud provider). §1 is now a System
+  Overview, absorbing the former standalone primer.
 ...
 
 ## Contents by Part
@@ -39,7 +42,7 @@ renumbering.
 - **Part 4 — Platform:** §19
 - **Part 5 — Text search:** §20–§23
 - **Part 6 — Content, schema & versioning:** §24, §25, §26, §32
-- **Part 7 — Security:** §31, §33
+- **Part 7 — Security:** §31, §33, §34
 - **Part 8 — Cloud adapters:** §29, §30
 - **Part 9 — Testing & release:** §27, §28
 - **Part 10 — Reference:** §99 Glossary
@@ -68,5 +71,6 @@ authoritative, actively-maintained version of this list.
 | Encryption | §31 | Implemented |
 | Vault search | §32 | Implemented |
 | CLI credential store | §33 | Implemented |
+| Sync authentication | §34 | Implemented |
 | Test harness | §27 | Implemented |
 | Release checklist | §28 | Living document — updated per release |

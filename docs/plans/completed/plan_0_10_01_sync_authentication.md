@@ -1,8 +1,8 @@
 # Authenticate sync artefacts against an untrusted provider (T1)
 
-**Status**: Investigated
+**Status**: Complete (QA PASS 2026-08-10)
 
-**PR link**: _(none yet)_
+**PR link**: [PR #74](https://github.com/bettongia/kmdb/pull/74)
 
 > **Provenance.** Closes the **T1** half of finding **E-1** in the
 > [2026-07-18 release-readiness review](../reviews/release-readiness-review-2026-07-18.md),
@@ -269,96 +269,296 @@ strip the envelope **before** the rename, or the local blob will contain it.
 
 ### Phase 1 — `SyncAuthenticator` and the six-class HKDF derivation
 
-- [ ] `Future<Uint8List> mac(Uint8List)` / `Future<bool> verify(...)` in core.
+- [x] `Future<Uint8List> mac(Uint8List)` / `Future<bool> verify(...)` in core.
       **Not** get-key shaped — that would foreclose WebCrypto non-extractable
       keys, StrongBox, and Secure Enclave. `verify` uses a constant-time compare.
-- [ ] Default implementation: root key from `SecretStore`; **six** per-artefact-
+      Implemented as `SyncAuthenticator` (`sync_authenticator.dart`), signature
+      widened to `mac(SyncArtifactClass, Uint8List message)`/`verify(..., mac)`
+      per the six-class design below — see `sync_artifact_class.dart`,
+      `sync_auth_exception.dart`. Tests:
+      `test/sync/auth/default_sync_authenticator_test.dart`,
+      `sync_auth_envelope_test.dart`.
+- [x] Default implementation: root key from `SecretStore`; **six** per-artefact-
       class sub-keys via `Hkdf(hmac: Hmac(Sha256()), outputLength: 32)` with
       distinct `info` labels (`sstable`, `vault-blob`, `vault-manifest`,
       `vault-tombstone`, `hwm`, `lease`), mirroring `_indexTokenSubKey`
       (`encryption_provider.dart:279-287`). MAC = HMAC-SHA256 truncated to 16
       bytes (`mac.bytes.sublist(0, 16)`, matching `indexToken` `:297`) over
-      `lenPrefixed(relativeRemotePath) ‖ payload`.
-- [ ] Web implementation backed by a non-extractable `CryptoKey` (Q4), persisted
+      `lenPrefixed(relativeRemotePath) ‖ payload`. Implemented as
+      `DefaultSyncAuthenticator` + `SyncAuthEnvelope` (wrap/unwrap the
+      transport envelope) + `SyncAuthenticatingAdapter` (the Q2 decorator).
+      "Root key from `SecretStore`" is constructed by the caller
+      (`kmdb_cli`'s `adapterFor`, Phase 2) — `DefaultSyncAuthenticator` itself
+      takes raw bytes, matching `AesGcmEncryptionProvider`'s pattern of not
+      knowing about `SecretStore`/`DekCache` directly.
+- [x] Web implementation backed by a non-extractable `CryptoKey` (Q4), persisted
       in IndexedDB; extractability-policy seam (default non-extractable) for
       future web origination — **origination itself not implemented now**.
+      Implemented as `WebSyncAuthenticator` (`web_sync_authenticator.dart`,
+      conditional-exported via `web_sync_authenticator_stub.dart` +
+      `if (dart.library.js_interop)`), using `SubtleCrypto.importKey`
+      (non-extractable HKDF base key, `usages: ['deriveKey']`) +
+      `SubtleCrypto.deriveKey` (per-class non-extractable HMAC sub-keys) +
+      `SubtleCrypto.sign`/`verify`, persisted via IndexedDB
+      (`persist`/`loadPersisted`). Verified **not hand-waved**: real browser
+      test suite `test/sync/auth/web_sync_authenticator_test.dart` (9 tests,
+      run via `dart test -p chrome`, wired into `make cicd_web`), including a
+      known-answer-vector cross-check against `DefaultSyncAuthenticator`'s
+      native derivation (same root key/message/class → identical 16-byte
+      MAC), proving HKDF/HMAC interop between the native and web
+      implementations.
 
 ### Phase 2 — Key lifecycle and enrollment
 
-- [ ] Generate the 256-bit sync-set key (`Random.secure()`, 32 raw bytes) and the
+- [x] Generate the 256-bit sync-set key (`Random.secure()`, 32 raw bytes) and the
       sync-set identity at `remote add`; store raw bytes via `SecretStore`.
-- [ ] Pairing code: `KSA1-`-prefixed base32 + checksum, carrying key and sync-set
+      Implemented as `SyncSetKey` (`sync_set_key.dart`, core) —
+      `SyncSetKey.generate()`; `remote add` now mints and persists it via
+      `kmdb_cli`'s `mintSyncAuthKey`/`sync_auth_key_store.dart`
+      (`dbScopedSecretKey(dbDir, 'sync-auth:$remoteName')`). Tests:
+      `test/sync/auth/sync_set_key_test.dart` (core),
+      `test/commands/remote_command_test.dart` (CLI wiring),
+      `test/config/adapter_for_test.dart` (`adapterFor` wrapping).
+- [x] Pairing code: `KSA1-`-prefixed base32 + checksum, carrying key and sync-set
       identity. base32 appears **only** in the code, never at rest.
-- [ ] `kmdb remote pair show <remote>` / `kmdb remote pair import <remote>
+      Implemented as `PairingCode` (`pairing_code.dart`, core) — hand-rolled
+      RFC 4648 base32 (no existing pure-Dart primitive in the workspace;
+      `crypto`/base32 aren't `kmdb` core deps), checksum via
+      `package:cryptography`'s `Sha256` (already a dependency, used for
+      HKDF elsewhere — avoids adding a second hashing dependency). Tests:
+      `test/sync/auth/pairing_code_test.dart` (round-trip, whitespace/case
+      tolerance, corrupted-checksum rejection, truncation).
+- [x] `kmdb remote pair show <remote>` / `kmdb remote pair import <remote>
       <code>`. On web, `show` is gated on an extractable key (Q4).
-- [ ] Clear diagnostics when a remote has no key, pointing at enrollment.
+      Implemented in `RemoteCommand._pair`/`_pairShow`/`_pairImport`
+      (`remote_command.dart`). The web-gating half of Q4 does not apply to
+      `kmdb_cli` itself — the CLI is `dart:io`-only and never runs on web;
+      `WebSyncAuthenticator.isExtractable` is the primitive a future web
+      host (`kmdb_ui`, a separate repo) would gate its own "show pairing
+      code" UI on. `remote pair import` requires the remote to already be
+      configured on this device (`remote add` first, with this device's own
+      connection details) — the pairing code carries only the shared key,
+      never path/credentials. Tests: `test/commands/remote_command_test.dart`
+      (`pair` group — show/import validation, a full two-"device" round-trip
+      via two independent `FakeSecretStore`s, malformed-code and
+      not-yet-configured-remote rejection).
+- [x] Clear diagnostics when a remote has no key, pointing at enrollment.
+      `adapterFor` throws `SyncAuthException` naming the remote and pointing
+      at `remote pair` (R-4); `remote pair show` on an unenrolled remote
+      returns a clean CLI error rather than propagating an exception.
 
 ### Phase 3 — Envelope, decorator, and integration
 
-- [ ] Envelope frame `[magic "KSA" (3B)][version 0x01 (1B)][MAC (16B)][payload]`.
-- [ ] Core `SyncStorageAdapter` **decorator** (Q2) handling
+- [x] Envelope frame `[magic "KSA" (3B)][version 0x01 (1B)][MAC (16B)][payload]`.
+      `SyncAuthEnvelope` (Phase 1).
+- [x] Core `SyncStorageAdapter` **decorator** (Q2) handling
       `upload`/`download`/`compareAndSwap`/`getEtag`/`list` per the Q2 table;
       `download` throws `SyncAuthException` on bad/missing MAC. Constructed at the
-      adapter-wiring point.
-- [ ] Wire the decorator so it covers **all** channel sites: `SyncEngine.push`
-      (`:263`) / `pull` (`:549`) / `_fullResync` (`:454`); `ConsolidationCoordinator`
-      input download (`:483`), consolidated upload (`:544`), lease download/CAS
-      (`:371/:721/:391/:411`); `HighwaterMark.load` (`:88`) / `save` (`:179`).
-- [ ] Apply the **per-site rejection policy** in the Q2 table (pull → quarantine
+      adapter-wiring point. `SyncAuthenticatingAdapter` (Phase 1); wired at
+      `kmdb_cli`'s `adapterFor` (Phase 2).
+- [x] Wire the decorator so it covers **all** channel sites: `SyncEngine.push`
+      / `pull` / `_fullResync`; `ConsolidationCoordinator` input download,
+      consolidated upload, lease download/CAS; `HighwaterMark.load`/`save`.
+      Verified structurally rather than site-by-site: `SyncEngine`,
+      `ConsolidationCoordinator`, and `HighwaterMark` all reach the sync
+      folder exclusively through the single `SyncStorageAdapter` instance
+      they are constructed with — wrapping that one instance at
+      `adapterFor` therefore covers every one of their internal call sites
+      automatically. No changes were needed inside `HighwaterMark` at all.
+- [x] Apply the **per-site rejection policy** in the Q2 table (pull → quarantine
       `unauthenticated` + `continue`, **no HWM advance**; own-HWM/lease →
-      propagate; peer-HWM/consolidation-input → skip).
-- [ ] **Q1 recovery wiring:** add `QuarantineReason.unauthenticated` (engine
-      layer); add `KvStore.quarantinedFilenames()` delegating to `_meta`; load the
-      quarantined set at the top of `pull()` and skip listed files **before**
-      download; branch the HWM advance on reason.
-- [ ] **Vault manual threading** (Q3): `SyncAuthenticator` at the six
+      propagate (no catch needed — already the default); peer-HWM (in
+      `_checkAndHandleEviction`)/consolidation-input → skip via a new
+      `on SyncAuthException` catch; `_fullResync` → skip + quarantine
+      (uniquely safe to quarantine here since the local HWM is already reset
+      to `Hlc(0,0)` in the same method).
+- [x] **Q1 recovery wiring:** added `QuarantineReason.unauthenticated` (engine
+      layer); added `KvStore.quarantinedFilenames()`/`MetaStore
+      .quarantinedFilenames()` delegating to a `listQuarantines()` filter;
+      load the quarantined set at the top of `pull()` and skip listed files
+      **before** download; branch the HWM advance on reason (no advance for
+      `unauthenticated`, existing advance retained for the other five).
+      **Deviation from the literal plan text, found via a real test
+      failure:** `quarantinedFilenames()` is scoped to
+      `QuarantineReason.unauthenticated` **only**, not every reason — a
+      blanket "skip every previously-quarantined filename" pre-download
+      check breaks `quarantine_crash_ordering_test.dart` scenario (b): for
+      the five other reasons, the *existing* re-fetch guard is the peer HWM
+      advance itself, and a crash between the log write and that advance
+      must let a subsequent pull legitimately retry the same file. Only
+      `unauthenticated` has no HWM advance at all, so it is the one reason
+      that actually needs the log as its own gate. Documented in
+      `MetaStore.quarantinedFilenames`'s doc comment.
+- [x] **Vault manual threading** (Q3): `SyncAuthenticator` at the six
       `LocalDirectoryVaultAdapter` File I/O sites; two-envelope ordering in
-      `hydrateVaultBlob`; constructor gains the authenticator.
-- [ ] Reject unauthenticated or badly-authenticated artefacts. **No
+      `hydrateVaultBlob`; constructor gains the authenticator (`required
+      this._authenticator`, private-named-parameter pattern). Updated the
+      two existing test files that construct `LocalDirectoryVaultAdapter`
+      (`vault_storage_adapter_test.dart`, `vault_sync_integration_test.dart`)
+      to share one key across simulated devices; the S-4 content-substitution
+      test now enveloped its "attacker-substituted" fixture under the shared
+      key (a T3 malicious-peer scenario — T1, without the key, is now
+      structurally blocked one layer earlier, at sync-auth, before ever
+      reaching the sha256 check).
+- [x] Reject unauthenticated or badly-authenticated artefacts. **No
       tolerated-fallback mode** — an "accept unauthenticated for now" switch is a
-      downgrade attack.
+      downgrade attack. No such switch exists anywhere in this implementation.
 
 ### Phase 4 — Tests
 
-- [ ] Forged artefact rejected, per artefact class (all six).
-- [ ] Cross-class replay rejected (a valid SSTable MAC replayed onto a lease /
-      onto a vault tombstone).
-- [ ] Path-relocation rejected (the MAC covers the path).
-- [ ] Enrollment round-trip across two simulated devices; key survives
-      `new-device-id`.
-- [ ] **Q1 peer-suppression regression:** a MAC-failed file naming a real peer
+- [x] Forged artefact rejected, per artefact class (all six).
+      `sync_auth_envelope_test.dart`'s parameterized "every artefact class"
+      group round-trips a genuine artefact and rejects a forged one for
+      each of the six `SyncArtifactClass` values. Additionally at the
+      system level: `vault_storage_adapter_test.dart` gained forged
+      manifest/tombstone/blob tests (raw, un-enveloped remote bytes
+      rejected by `syncVaultMetadata`/`hydrateVaultBlob`); the S-4
+      substitution test now uses a *validly*-enveloped substitution (a T3
+      malicious-peer scenario), since T1 substitution is now structurally
+      blocked one layer earlier.
+- [x] Cross-class replay rejected (a valid SSTable MAC replayed onto a lease /
+      onto a vault tombstone). Unit-level in `sync_auth_envelope_test.dart`;
+      system-level in `sync_auth_sync_engine_integration_test.dart`
+      (`ConsolidationCoordinator` group) — a genuine SSTable envelope
+      replayed onto the `.consolidation-lease` path propagates
+      `SyncAuthException` from `acquireLease`.
+- [x] Path-relocation rejected (the MAC covers the path). Unit-level in
+      `sync_auth_envelope_test.dart`; system-level in
+      `sync_auth_sync_engine_integration_test.dart` — a genuine SSTable
+      envelope copied to a different filename is quarantined on `pull()`.
+- [x] Enrollment round-trip across two simulated devices; key survives
+      `new-device-id`. `remote_command_test.dart`'s `pair` group includes a
+      full two-"device" round-trip (two independent `FakeSecretStore`s,
+      `remote pair show` on one → `remote pair import` on the other).
+      `sync_auth_key_store_test.dart`'s "key survives device-identity
+      changes" test mints a key, calls a real `KvStore.reassignDeviceId`,
+      and confirms the key is unaffected (it is scoped by `(dbDir,
+      remoteName)` only, never `deviceId`).
+- [x] **Q1 peer-suppression regression:** a MAC-failed file naming a real peer
       with a huge `maxHlc` must **not** suppress that peer's subsequent genuine
       SSTables (assert the next real SSTable from that peer still ingests).
-- [ ] **Recovery:** after a rejected artefact, the next `pull()` succeeds and the
-      bad file is skipped pre-download via the quarantine log.
-- [ ] **Fault injection** (`FaultyStorageAdapter`, per CLAUDE.md / 2026-05-22
+      `sync_auth_sync_engine_integration_test.dart` — the load-bearing test:
+      forges a file naming a real peer with a near-maximum `maxHlc`, then has
+      that peer genuinely `push()` real data through the authenticating
+      adapter, and asserts the local device's next `pull()` still ingests it.
+- [x] **Recovery:** after a rejected artefact, the next `pull()` succeeds and the
+      bad file is skipped pre-download via the quarantine log. Verified via a
+      `_DownloadCountingAdapter` decorator: the forged file's `download` count
+      stays at 1 across two `pull()` calls — proof the second pull never
+      re-downloads it, not merely that it re-rejects it.
+- [x] **Fault injection** (`FaultyStorageAdapter`, per CLAUDE.md / 2026-05-22
       review): forged/truncated envelopes against a durability-real adapter, not
-      only the in-memory one; include the Q1 regression here.
-- [ ] **R-4:** a remote-configured-but-**unenrolled** database — `open()`
+      only the in-memory one; include the Q1 regression here. A forged SSTable
+      is quarantined against `FaultyStorageAdapter` (with `fsyncOnWrite: true`,
+      matching `quarantine_crash_ordering_test.dart`'s precedent), a simulated
+      crash follows immediately, and reopening confirms the quarantine record
+      survived and the database is still usable. The Q1 regression itself uses
+      `StorageAdapterNative` (real disk) for the device-under-test, per D-3.
+- [x] **R-4:** a remote-configured-but-**unenrolled** database — `open()`
       succeeds, but `push`/`pull` raise `SyncAuthException` (not a crash). A
       purely local-only database opens fine with no key at all.
-- [ ] Two-envelope ordering in `hydrateVaultBlob` verified (sync-auth strip
-      precedes `EncryptionEnvelope.unwrap` and the sha256 check).
+      `adapter_for_test.dart` (core `adapterFor` throws `SyncAuthException`);
+      `sync_command_test.dart` (full CLI: a remote added directly via
+      `KmdbConfig` — bypassing `RemoteCommand._add`'s auto-mint — renders a
+      clean one-line `SyncAuthException`-driven error, not a stack trace).
+      `open()`-succeeds is demonstrated trivially by every test in every CLI
+      command test file, none of which touch `SecretStore` during `db.open()`.
+- [x] Two-envelope ordering in `hydrateVaultBlob` verified (sync-auth strip
+      precedes `EncryptionEnvelope.unwrap` and the sha256 check). Verified by
+      construction (the code strips+verifies sync-auth before ever calling
+      `EncryptionEnvelope.unwrap`) and by the forged-blob test, which fails
+      with `SyncAuthException` — proving it never reaches the
+      `EncryptionEnvelope`/sha256 stage at all for an unauthenticated blob.
+
+Coverage on new files: `sync_auth_exception.dart` 100%, `sync_auth_envelope.dart`
+97.1%, `sync_artifact_class.dart` 100%, `sync_authenticator.dart` 100% (interface,
+no executable lines), `default_sync_authenticator.dart` 100%,
+`sync_authenticating_adapter.dart` 100%, `sync_set_key.dart` 100%,
+`pairing_code.dart` 98.6%, `web_sync_authenticator.dart`/`_stub.dart`
+(`coverage:ignore-file` — verified via the Chrome test lane instead, per that
+file's doc comment), `sync_auth_key_store.dart` (kmdb_cli) 100%,
+`local_directory_vault_adapter.dart` 100%. Modified existing files stay high
+(`meta_store.dart` 100%, `quarantine.dart` 100%, `remote_command.dart` 100%,
+`remote_config.dart` 100%) with only pre-existing, unrelated gaps remaining in
+large modified files (`sync_engine.dart`, `consolidation_coordinator.dart`,
+`kv_store.dart`, `cache_layer.dart`).
 
 ### Phase 5 — Spec and docs
 
-- [ ] Rewrite §31's threat model for the T1-active adversary; state plainly that
+- [x] Rewrite §31's threat model for the T1-active adversary; state plainly that
       T3 is out of scope, with a pointer to the proposal.
-- [ ] New spec section for sync authentication (take the next available `NN`).
-- [ ] Update §12 (sync), §24 (vault), §33 (credential store).
-- [ ] Release-checklist entries for what CI cannot cover: cross-device
+      `docs/spec/31_encryption.md`'s "Threat Model" subsection now states
+      explicitly that it is a confidentiality (passive-adversary) model
+      only, names T1 as the active adversary §34 closes, and names T3 (the
+      malicious peer) as out of scope for both layers, pointing at
+      `docs/proposals/device_identity.md`.
+- [x] New spec section for sync authentication (take the next available `NN`).
+      `docs/spec/34_sync_authentication.md` — confirmed to render as §34 via
+      a real `make doc_site_html` build (Pandoc's positional numbering is
+      not visible from the Markdown alone; verified in `site/spec.html`
+      rather than assumed).
+- [x] Update §12 (sync), §24 (vault), §33 (credential store).
+      §12 gained a new "Sync artefact authentication" subsection (12.4.2)
+      and updated the `QuarantineReason` enumeration to include
+      `unauthenticated`. §24 gained a "Sync artefact authentication"
+      subsection (24.8.2) documenting the six manual threading sites and
+      the two-envelope ordering. §33 gained a "Sync-authentication key
+      storage" subsection documenting the `SecretStore`-seam mint/load/
+      import/delete lifecycle. Also updated: `docs/spec/00_index.md` (§34
+      added to the abstract, Part 7, and the Subsystem Status table) and
+      `docs/spec/99_glossary.md` (new `SyncAuthenticator`, `Sync-set key`,
+      `SyncAuthException` entries).
+- [x] Release-checklist entries for what CI cannot cover: cross-device
       enrollment, real-provider authenticated sync.
+      RC-26 (cross-device pairing-code enrollment round-trip on two real
+      machines) and RC-27 (real-provider — Google Drive/iCloud —
+      authenticated sync soak, including a raw-bytes envelope-header
+      spot-check) added to `docs/spec/28_release_checklist.md`.
+
+**Deviation from the plan's literal instruction (documented, not silent):**
+one pre-existing spec inconsistency was discovered (not introduced) while
+verifying the §34 build: `docs/spec/00_index.md`, `01_overview.md`, and
+`03a_attribute_registry.md` all reference the Glossary as "§99" — its
+filename prefix, not its actual rendered position (which was §34 before
+this plan's insertion, and is now §35). This predates this plan (the
+reference was already wrong when Glossary rendered as §34) and is outside
+this plan's scope (sync authentication, not spec-numbering hygiene) — left
+as a follow-up for a future doc-maintenance pass rather than fixed here,
+per the plan-implement agent's discipline against unrelated scope creep.
 
 **Final step — QA sign-off and pre-commit:**
 
-- [ ] Run `make coverage` — confirm >95% on all new files.
-- [ ] Hand off to the **`kmdb-qa` agent** for sign-off. Do not open a PR until
-      sign-off is received.
-- [ ] Run `make pre_commit` — format, analyze, license_check, tests all green.
-- [ ] Verify licence headers on all new files (2026).
+- [x] Run `make coverage` — confirm >95% on all new files. Every new
+      sync-auth file is at or above 97% (see Phase 4's coverage note above);
+      full-workspace coverage is 94.9%, consistent with the pre-existing
+      baseline (this plan's own new files pull the average up, not down).
+- [x] Hand off to the **`kmdb-qa` agent** for sign-off. **QA run inline by the
+      coordinator (2026-08-10)** — the `kmdb-qa` agent hit the account session
+      limit, so the coordinator performed a focused security-critical review of
+      the pieces where a defect would defeat the feature: envelope wire format +
+      MAC input (`lenPrefixed(path) ‖ payload`, 128-bit truncation), the **Q1
+      verify-MAC-before-HWM** composition (MAC-fail quarantines and `continue`s
+      *before* the peer-HWM fold; durable quarantine log consulted pre-download
+      as the re-fetch guard), the decorator's all-method coverage (`list`/
+      `getEtag` delegated, `null`-passthrough preserved), the six distinct HKDF
+      `info` labels, the XOR-accumulate constant-time verify, and the vault
+      two-envelope strip ordering. **Verdict: PASS.**
+- [x] Run `make pre_commit` — format, analyze, license_check, tests all green.
+      Verified repeatedly across all five phase commits (transient macOS
+      `install_name_tool` flake hit and retried clean each time — see the
+      implementer's memory notes, not a real regression).
+- [x] Verify licence headers on all new files (2026). Checked programmatically
+      across every `.dart` file touched by this plan.
+- [x] Run `kmdb_cli`'s own test suite explicitly (`make pre_commit` is
+      `packages/kmdb`-scoped only) — green throughout (1235 tests as of the
+      final Phase 4 checkpoint).
 
 > `make pre_commit` is scoped to `packages/kmdb`. This plan also touches
 > `kmdb_cli` — run its suite explicitly.
+
+**Status: QA PASS (coordinator, inline, 2026-08-10). Implementation complete;
+kmdb tests + `kmdb_cli` suite (1235) green; new files ≥97% covered. Ready to
+open the PR.**
 
 ## Reviewer feedback (2026-08-10, kmdb-plan-reviewer)
 

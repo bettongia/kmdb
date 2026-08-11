@@ -2,12 +2,15 @@
 
 ## Overview
 
-`kmdb_cli` manages one class of secret today: the Google Drive OAuth
-credentials (`AccessCredentials.toJson()` plus `client_id`/`client_secret`)
-written by `kmdb <db> remote add --type google-drive` and consumed by the
-`push`/`pull`/`sync` commands. This is a **per-machine, non-synced, CLI-only**
-secret — it never touches the `kmdb` core database, `EncryptionProvider`, or
-any synced surface (see §31 gap 9).
+`kmdb_cli` manages two classes of secret on the `SecretStore` seam: the
+Google Drive OAuth credentials described in this section, and — since
+0.10.01 WI-4 T1 — each enrolled remote's sync-authentication root key (see
+"Sync-authentication key storage" below and §34 for the cryptographic
+design). Both are **per-machine, non-synced, CLI-only** secrets — neither
+touches the `kmdb` core database, `EncryptionProvider`, or any synced
+surface (see §31 gap 9): the Google Drive credentials are `AccessCredentials
+.toJson()` plus `client_id`/`client_secret`, written by `kmdb <db> remote
+add --type google-drive` and consumed by the `push`/`pull`/`sync` commands.
 
 The storage seam is `SecretStore`, a byte-oriented interface defined in `kmdb`
 core (`lib/src/secret/secret_store.dart`) — not `kmdb_cli` — alongside its
@@ -21,9 +24,10 @@ implementation shipped today.
 > was `kmdb_cli`-only (`CredentialStore`/`DirectoryCredentialStore`),
 > string-oriented (`write(account, secretJson)`), and rooted at
 > `{dbDir}/local/`. It was promoted to a byte-oriented core interface so the
-> `SyncAuthenticator`'s root-key storage (a separate, later plan) can build on
-> the same seam, and re-rooted at the per-user profile config directory to
-> close review finding **C-1** — see "Profile-directory rooting" below.
+> `SyncAuthenticator`'s root-key storage (0.10.01 WI-4 T1, a separate, later
+> plan — now landed, see "Sync-authentication key storage" below) can build
+> on the same seam, and re-rooted at the per-user profile config directory
+> to close review finding **C-1** — see "Profile-directory rooting" below.
 
 The design deliberately follows the model OpenSSH (`~/.ssh`, refuses to use a
 key file it finds group/world-readable) and `gcloud` (`~/.config/gcloud` on
@@ -201,6 +205,42 @@ for the same reason.
   original `CredentialStore` design, `remote remove` deleted only the
   `config.json` entry and left the credentials file behind — a stale,
   still-valid OAuth token orphaned with no config entry pointing at it.
+
+## Sync-authentication key storage (0.10.01 WI-4 T1)
+
+Each named remote's `SyncSetKey` (§34) — the 256-bit root key
+`SyncAuthenticator` derives its six per-artefact-class sub-keys from — is
+stored on this same `SecretStore` seam, via
+`sync_auth_key_store.dart`'s `mintSyncAuthKey`/`loadSyncAuthKey`/
+`importSyncAuthKey`/`deleteSyncAuthKey`, keyed by
+`dbScopedSecretKey(dbDir, 'sync-auth:$remoteName')` — the same key-naming
+helper the Google Drive credentials use, with a `sync-auth:` prefix so the
+two secret classes can never collide under the same `(dbDir, remoteName)`.
+
+Lifecycle, mirroring the Google Drive credential sites above:
+
+- **Mint:** `RemoteCommand._add` calls `mintSyncAuthKey` unconditionally,
+  for every remote type, immediately after `config.save()` succeeds — this
+  is what makes a single-device `remote add` "just work" with no separate
+  enrollment step (see §34's Enrollment design). Re-running `remote add
+  --force` re-mints (an intentional re-provisioning event, not a stale-key
+  bug).
+- **Import:** `RemoteCommand._pairImport` (`kmdb <db> remote pair import
+  <name> <code>`) decodes a `PairingCode` from another device's `remote
+  pair show` and calls `importSyncAuthKey`, overwriting whatever key `remote
+  add` auto-minted on this device.
+- **Read:** `adapterFor` (`remote_config.dart`) calls `loadSyncAuthKey` when
+  wrapping the returned adapter in `SyncAuthenticatingAdapter`; `null` (no
+  key enrolled) raises `SyncAuthException` naming the remote and pointing at
+  `remote pair` — R-4 in §34.
+- **Delete:** `RemoteCommand._remove` calls `deleteSyncAuthKey`
+  unconditionally (every remote has a key, regardless of type), alongside
+  the Google Drive credential cleanup above.
+
+The `--sync-dir` one-off bypass (all three of `push`/`pull`/`sync`) has no
+saved remote identity to scope a key by, so it deliberately stays
+**unauthenticated** — an extension of the flag's pre-existing "bypasses
+saved remotes" escape-hatch semantics, not a new gap.
 
 ## `kmdb credentials prune`
 

@@ -336,6 +336,46 @@ abstract interface class VaultStorageAdapter {
 }
 ```
 
+### Sync artefact authentication (0.10.01 WI-4 T1)
+
+`VaultStorageAdapter`'s reference implementation, `LocalDirectoryVaultAdapter`,
+talks to the sync folder via raw `dart:io` `File` I/O — never through a
+`SyncStorageAdapter` — so it cannot be authenticated by the single
+`SyncStorageAdapter` decorator §34/§12 describe for SSTables, HWM files, and
+the consolidation lease. When a remote is enrolled for sync authentication,
+`LocalDirectoryVaultAdapter` instead threads a `SyncAuthenticator` manually
+at each of its six remote File I/O sites, across **three** artefact classes:
+
+| Class | Sites | Remote path bound into the MAC |
+| :--- | :--- | :--- |
+| `vaultManifest` | `uploadVaultObject` write, `syncVaultMetadata` read | `vault/{prefix}/{suffix}/manifest.json` |
+| `vaultBlob` | `uploadVaultObject` write, `hydrateVaultBlob` read | `vault/{prefix}/{suffix}/blob` |
+| `vaultTombstone` | `uploadVaultObject` write, `syncVaultMetadata` read | `vault/{prefix}/{suffix}/tombstone.json` |
+
+`tombstone.json` is its own class, distinct from the manifest — a forged or
+suppressed tombstone drives vault garbage collection, so it earns its own
+sub-key rather than folding into the manifest's. The bound path is
+**sync-root-relative** (never includes the local mount point the sync root
+happens to live at on this device — see §34's path-binding rationale), so
+the same logical path authenticates identically regardless of where a given
+device has the remote mounted.
+
+**Two-envelope ordering in `hydrateVaultBlob`.** A downloaded blob carries
+two nested envelopes with different lifetimes: the sync-auth envelope (a
+channel property — proof a sync-set-key holder produced these bytes,
+stripped immediately on arrival) and, inside it, the `EncryptionEnvelope`
+(a stored-at-rest property — see "Encryption" below). The order is fixed
+and load-bearing: strip and verify the sync-auth envelope **first**; only
+then does `EncryptionEnvelope.unwrap` and the SHA-256 content-address check
+("Content verification" below) run. An unauthenticated blob — one an
+attacker without the sync-set key forged or substituted — is rejected with
+`SyncAuthException` before it ever reaches the encryption or content-address
+layers, and long before any bytes are staged to `vault/staging/`.
+
+An unauthenticated or forged vault artefact throws `SyncAuthException`; no
+tolerated-fallback mode exists (a "accept unauthenticated for now" switch
+would be a downgrade attack — see §34).
+
 ### Conflict Avoidance
 
 `blob` files have no conflict: two devices writing the same SHA-256 hash

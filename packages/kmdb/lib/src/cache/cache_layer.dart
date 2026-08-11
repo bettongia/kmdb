@@ -191,6 +191,9 @@ final class CacheLayer implements KvStore {
       _store.appendQuarantine(record);
 
   @override
+  Future<Set<String>> quarantinedFilenames() => _store.quarantinedFilenames();
+
+  @override
   Future<void> ingestSstable(String filename, Uint8List bytes) =>
       _store.ingestSstable(filename, bytes);
 

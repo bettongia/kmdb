@@ -13,7 +13,11 @@
 // limitations under the License.
 
 import 'package:kmdb/kmdb.dart'
-    show SecretPermissionException, SecretStore, SyncStorageAdapter;
+    show
+        SecretPermissionException,
+        SecretStore,
+        SyncAuthException,
+        SyncStorageAdapter;
 
 import '../config/remote_config.dart';
 import 'command.dart';
@@ -82,9 +86,9 @@ final class PushCommand extends CliCommand {
     final dbDir = (await ctx.store.storeInfo()).dbDir;
 
     // Resolve the remote configuration.
-    final RemoteConfig remote;
+    final ResolvedRemote resolved;
     try {
-      remote = await SyncHelpers.resolveRemote(dbDir, args, flags);
+      resolved = await SyncHelpers.resolveRemote(dbDir, args, flags);
     } on ArgumentError catch (e) {
       ctx.writeError(e.message as String);
       return false;
@@ -115,14 +119,18 @@ final class PushCommand extends CliCommand {
     final SyncStorageAdapter syncAdapter;
     try {
       syncAdapter = await adapterFor(
-        remote,
+        resolved.remote,
         dbDir: dbDir,
+        remoteName: resolved.name,
         secretStoreOverride: secretStoreOverride,
       );
     } on SecretPermissionException catch (e) {
       ctx.writeError(e.toString());
       return false;
     } on StateError catch (e) {
+      ctx.writeError(e.message);
+      return false;
+    } on SyncAuthException catch (e) {
       ctx.writeError(e.message);
       return false;
     }
