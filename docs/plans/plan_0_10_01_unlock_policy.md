@@ -386,19 +386,62 @@ section number.
 
 ### Phase 5 — Tests (edge/fault, not golden-path)
 
-- [ ] **The SC-1 regression (headline):** a wrong passphrase is **rejected**
+New `test/encryption/unlock_policy_test.dart` (11 tests) plus the two
+non-blocking directives from the reviewer's round-3 sign-off.
+
+- [x] **The SC-1 regression (headline):** a wrong passphrase is **rejected**
       even with a prior successful unlock / warm platform key. This test must
-      fail on `main` today.
-- [ ] Biometric enrolment-invalidation forces passphrase re-config.
-- [ ] Re-auth interval lapse → biometric path refused, passphrase required
-      (drives the injected `now` clock — Q4 — not a real 14-day wait).
-- [ ] `lock()` discards the DEK; the next open re-authenticates.
-- [ ] **The "last used" timestamp is local-only** — a device idle for a month is
+      fail on `main` today. `'a deliberately wrong passphrase is rejected
+      even with a prior successful unlock AND a warm, enrolled biometric wrap
+      present'` — verified this test genuinely exercises the fixed code path
+      (traced against the removed `kmdb_database.dart:751-753` cache-hit
+      return the plan's Problem Statement cites).
+- [x] Biometric enrolment-invalidation forces passphrase re-config. Simulated
+      (no real hardware available) by deleting the wrap directly from
+      `SecretStore` — the same externally-observable effect as the platform
+      refusing to release an invalidated item. Covers the full cycle:
+      invalidated → refused → passphrase still works → re-enrolment restores
+      biometric unlock.
+- [x] Re-auth interval lapse → biometric path refused, passphrase required
+      (drives the injected `now` clock — Q4 — not a real 14-day wait). Landed
+      in Phase 2's `reauth_policy_test.dart` (not duplicated here — this
+      file's own doc comment cross-references it).
+- [x] `lock()` discards the DEK; the next open re-authenticates. 3 tests:
+      further access on the locked instance throws `databaseLocked`, a fresh
+      `open()` re-authenticates and reads prior data; a no-op on a plaintext
+      database; idempotent (calling twice does not throw). Also documented
+      (on `lock()` itself) and worked around in the test: `close()` after
+      `lock()` must use `flush: false`, since a flush-triggered compaction
+      reads (and needs to decrypt) the `$meta` namespace listing — a
+      pre-existing coupling in `LsmEngine`, orthogonal to this plan's scope,
+      that a locked provider now surfaces. No data loss: anything written
+      before `lock()` is already WAL-durable and replays on the next `open()`
+      regardless of whether it was flushed to an SSTable.
+- [x] **The "last used" timestamp is local-only** — a device idle for a month is
       not fast-forwarded by a peer's recent timestamp (the `$meta`-LWW
-      regression; assert it would fail if the field were synced).
-- [ ] Headless opt-out (`ReauthPolicy.headlessSession()`) suppresses the policy;
-      without it, the policy applies.
-- [ ] **Checkpoint:** commit `WI-5 Phase 5: test matrix`.
+      regression; assert it would fail if the field were synced). Two-layer
+      guard: (a) structural — `EncryptionBlob`'s encoded CBOR map key set is
+      asserted to be exactly the seven documented fields, proving the
+      biometric wrap / timestamp can never ride the synced `enc:blob`; (b)
+      behavioural — a device (`SecretStore`) with no recorded passphrase use
+      is refused biometric unlock even though a separate, peer-simulating
+      `SecretStore` has a fresh timestamp — nothing crosses between stores.
+- [x] Headless opt-out (`ReauthPolicy.headlessSession()`) suppresses the policy;
+      without it, the policy applies. Landed in Phase 4's
+      `headless_server_unlock_test.dart` (not duplicated here).
+- [x] **Round-3 non-blocking directive (a):** enrol → close → reopen-with-
+      biometric round trip. Landed in Phase 1's
+      `kmdb_database_encryption_test.dart` smoke test (not duplicated here).
+- [x] **Round-3 non-blocking directive (b):** `disableBiometricUnlock()` →
+      subsequent biometric open refused, passphrase required. 2 new tests
+      (including a no-op-when-never-enrolled edge case).
+- [x] **Round-3 non-blocking directive (c):** fail-closed — a biometric
+      `KEKSource` with no wrap ever present in `SecretStore` falls back to
+      requiring the passphrase. 2 new tests (never-enrolled-on-this-device;
+      and the enc:blob-shared/other-device-SecretStore-empty variant).
+- [x] **Checkpoint:** commit `WI-5 Phase 5: test matrix`. `dart analyze`
+      clean; the new file's 11 tests pass reliably across repeated runs; full
+      `test/encryption/` directory (203 tests) green.
 
 ### Phase 6 — Spec & docs
 

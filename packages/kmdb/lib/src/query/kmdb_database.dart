@@ -1527,6 +1527,16 @@ final class KmdbDatabase {
   /// encrypted value throws [EncryptionErrorCode.databaseLocked] — there is
   /// no in-place unlock; the caller must discard this instance and call
   /// [open] again.
+  ///
+  /// **Releasing this instance after [lock]:** call [close] with
+  /// `flush: false` rather than the default `flush: true`. A flush that
+  /// triggers compaction reads the `$meta` namespace listing, which is
+  /// encrypted the same as any other value — on a locked instance that read
+  /// throws [EncryptionErrorCode.databaseLocked] and [close] itself fails,
+  /// leaving the storage lock held. This loses no durability: [lock] does not
+  /// discard already-written data, and anything appended to the WAL before
+  /// [lock] was called is already fsynced and will be replayed on the next
+  /// [open] regardless of whether it was ever flushed to an SSTable.
   void lock() => _encryption?.lock();
 
   /// Enrols biometric unlock for this database on this device.
