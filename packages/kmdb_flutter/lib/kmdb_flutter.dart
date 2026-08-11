@@ -21,15 +21,17 @@
 ///    hardware-accelerated AES-256-GCM and Argon2id on iOS and Android.
 ///    Call once in `main()` after `WidgetsFlutterBinding.ensureInitialized()`.
 ///
-/// 2. A native `BiometricKekProvider` implementation for the unlock-policy
-///    wrapped-DEK model (WI-5, closing SC-1) — biometric-gated unlock backed
-///    by `flutter_secure_storage`'s `accessControlFlags:
-///    [AccessControlFlag.biometryCurrentSet]`. There is no persistent DEK
-///    session cache in this package (or in `kmdb` core) any more: a warm
-///    cache that skipped credential verification was SC-1 itself. Every
-///    unlock — passphrase, recovery code, or biometric — is an authenticated
-///    unwrap; see `EncryptionConfig.biometric` and
-///    `KmdbDatabase.enableBiometricUnlock` in `kmdb`.
+/// 2. [FlutterBiometricKekProvider] — a native `BiometricKekProvider`
+///    implementation for the unlock-policy wrapped-DEK model (WI-5, closing
+///    SC-1) — biometric-gated unlock backed by `flutter_secure_storage`'s
+///    `accessControlFlags: [AccessControlFlag.biometryCurrentSet]` (iOS /
+///    macOS) or `AndroidOptions.biometric(enforceBiometrics: true)`
+///    (Android). There is no persistent DEK session cache in this package
+///    (or in `kmdb` core) any more: a warm cache that skipped credential
+///    verification was SC-1 itself. Every unlock — passphrase, recovery
+///    code, or biometric — is an authenticated unwrap; see
+///    [EncryptionConfig.biometric] and `KmdbDatabase.enableBiometricUnlock`
+///    in `kmdb`.
 ///
 /// ## Quick start
 ///
@@ -47,10 +49,16 @@
 ///     adapter: adapter,
 ///     encryptionConfig: EncryptionConfig(passphrase: 'my-passphrase'),
 ///   );
+///
+///   // Optionally enrol biometric unlock (native platforms only):
+///   await db.enableBiometricUnlock(
+///     FlutterBiometricKekProvider(dbDir: '/path/to/db'),
+///   );
 ///   // ...
 ///   runApp(MyApp(db: db));
 /// }
 /// ```
 library;
 
+export 'src/flutter_biometric_kek_provider.dart';
 export 'src/kmdb_flutter_init.dart';

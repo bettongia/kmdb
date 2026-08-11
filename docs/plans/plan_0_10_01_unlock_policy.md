@@ -332,7 +332,7 @@ section number.
 
 ### Phase 3 — Platform KEK: native biometric (`kmdb_flutter`)
 
-- [ ] Implement `BiometricKekProvider` (the `kmdb_flutter` impl of the core
+- [x] Implement `BiometricKekProvider` (the `kmdb_flutter` impl of the core
       interface) for iOS/Android/macOS/Windows with an **idempotent get-or-create**
       `obtainKek()` (Q7): create a random 32-byte KEK in `flutter_secure_storage`
       under `accessControlFlags: biometryCurrentSet` on first use, and return the
@@ -340,11 +340,29 @@ section number.
       `unwrapDek` — the achievable
       biometric-gated-KEK shape, not a use-but-cannot-extract handle (Q6). KEK in
       secure storage; wrap in the per-device `SecretStore`. Linux → passphrase
-      path in practice.
-- [ ] Enrolment-invalidation semantics: adding a finger/face invalidates the KEK;
+      path in practice. `FlutterBiometricKekProvider` in
+      `lib/src/flutter_biometric_kek_provider.dart`: iOS/macOS use
+      `accessControlFlags: [AccessControlFlag.biometryCurrentSet]`; Android uses
+      `AndroidOptions.biometric(enforceBiometrics: true, biometricType:
+      strongBiometricOnly)`; Windows/Linux have no biometric-gating option in
+      `flutter_secure_storage` at all (not just Linux) — documented as an
+      explicit limitation in the class doc comment (both fall back to
+      OS-login-gated-only storage, no real biometric prompt). Storage key
+      derived via the promoted `dbScopedSecretKey(dbDir, 'kek.biometric')`.
+- [x] Enrolment-invalidation semantics: adding a finger/face invalidates the KEK;
       biometric auto-disables and the passphrase is required to reconfigure.
-- [ ] **Checkpoint:** commit `WI-5 Phase 3: kmdb_flutter biometric KEK`. *(Run
+      (Falls out automatically from the OS access-control policy — no explicit
+      handling needed in `FlutterBiometricKekProvider`; see its doc comment.
+      Not independently testable without real hardware — flagged for §28
+      RC-28+ in Phase 6.)
+- [x] **Checkpoint:** commit `WI-5 Phase 3: kmdb_flutter biometric KEK`. *(Run
       `kmdb_flutter`'s own tests — `make pre_commit` is `kmdb`-scoped only.)*
+      New `test/flutter_biometric_kek_provider_test.dart` (5 tests, via
+      `FlutterSecureStorage.setMockInitialValues`): idempotent get-or-create
+      across repeated calls *and* across fresh provider instances (simulating
+      a process restart), 32-byte KEK length, per-database key scoping,
+      randomness smoke check. `flutter analyze` clean; all 9 `kmdb_flutter`
+      tests green (4 pre-existing + 5 new).
 
 ### Phase 4 — Server / headless handling
 
