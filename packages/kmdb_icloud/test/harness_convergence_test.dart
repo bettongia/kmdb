@@ -86,22 +86,18 @@ void main() {
       timeout: const Timeout(Duration(seconds: 60)),
     );
 
-    test(
-      'three devices converge via the shared iCloud simulator',
-      () async {
-        final manager = TestManager(
-          config: _iCloudSimulatorConfig(
-            deviceCount: 3,
-            durationSeconds: 2,
-            seed: 22222,
-          ),
+    test('three devices converge via the shared iCloud simulator', () async {
+      final manager = TestManager(
+        config: _iCloudSimulatorConfig(
+          deviceCount: 3,
+          durationSeconds: 2,
           seed: 22222,
-        );
-        final report = await manager.run();
-        expect(report.passed, isTrue, reason: report.toString());
-      },
-      timeout: const Timeout(Duration(seconds: 90)),
-    );
+        ),
+        seed: 22222,
+      );
+      final report = await manager.run();
+      expect(report.passed, isTrue, reason: report.toString());
+    }, timeout: const Timeout(Duration(seconds: 90)));
 
     test(
       'SimulatorICloudQuotaAdapter.safeOperationThreshold reflects iCloud quota',

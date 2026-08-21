@@ -252,7 +252,10 @@ final class LocalDirectoryAdapter implements SyncStorageAdapter {
       final lockedBytes = await raf.read(length);
       final lockedEtag = XxHash64.toHex(XxHash64.digest(lockedBytes));
       if (lockedEtag != expectedEtag) return false;
-      return _writeViaTempRename(file, newBytes);
+      // `await` (not a bare `return`) so the write completes *before* the
+      // `finally` unlocks and closes the file handle — a bare return would
+      // release the lock while the temp-write/rename is still in flight.
+      return await _writeViaTempRename(file, newBytes);
     } finally {
       try {
         await raf.unlock();

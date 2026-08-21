@@ -31,12 +31,12 @@ jobs:
 
       - uses: dart-lang/setup-dart@v1
         with:
-          # Pinned to match the Dart the team runs locally and the Dart that
-          # Flutter stable (3.44.x) bundles. `stable` floated to 3.13.1 on
-          # 2026-08-18, whose `dart format` reformats files formatted by 3.12,
-          # breaking the format_check gate on unrelated files. Bump this
-          # deliberately (with a workspace-wide reformat) rather than floating.
-          sdk: "3.12.2"
+          # Pinned for reproducibility — matches the Dart the team runs locally
+          # and the Dart that Flutter 3.47.1 bundles. Bump deliberately (with a
+          # workspace-wide `dart format`) rather than floating on `stable`,
+          # whose formatter output changes between releases and breaks the
+          # format_check gate on otherwise-untouched files.
+          sdk: "3.13.1"
 
       - name: Cache pub dependencies
         uses: actions/cache@v5
@@ -103,12 +103,12 @@ jobs:
 
       - uses: dart-lang/setup-dart@v1
         with:
-          # Pinned to match the Dart the team runs locally and the Dart that
-          # Flutter stable (3.44.x) bundles. `stable` floated to 3.13.1 on
-          # 2026-08-18, whose `dart format` reformats files formatted by 3.12,
-          # breaking the format_check gate on unrelated files. Bump this
-          # deliberately (with a workspace-wide reformat) rather than floating.
-          sdk: "3.12.2"
+          # Pinned for reproducibility — matches the Dart the team runs locally
+          # and the Dart that Flutter 3.47.1 bundles. Bump deliberately (with a
+          # workspace-wide `dart format`) rather than floating on `stable`,
+          # whose formatter output changes between releases and breaks the
+          # format_check gate on otherwise-untouched files.
+          sdk: "3.13.1"
 
       - name: Cache pub dependencies
         uses: actions/cache@v5
@@ -133,12 +133,12 @@ jobs:
 
       - uses: dart-lang/setup-dart@v1
         with:
-          # Pinned to match the Dart the team runs locally and the Dart that
-          # Flutter stable (3.44.x) bundles. `stable` floated to 3.13.1 on
-          # 2026-08-18, whose `dart format` reformats files formatted by 3.12,
-          # breaking the format_check gate on unrelated files. Bump this
-          # deliberately (with a workspace-wide reformat) rather than floating.
-          sdk: "3.12.2"
+          # Pinned for reproducibility — matches the Dart the team runs locally
+          # and the Dart that Flutter 3.47.1 bundles. Bump deliberately (with a
+          # workspace-wide `dart format`) rather than floating on `stable`,
+          # whose formatter output changes between releases and breaks the
+          # format_check gate on otherwise-untouched files.
+          sdk: "3.13.1"
 
       - name: Cache pub dependencies
         uses: actions/cache@v5
@@ -165,6 +165,11 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
+          # Pinned to Flutter 3.47.1 (bundles Dart 3.13.1) for reproducibility —
+          # matches the pinned dart-lang/setup-dart SDK and local dev. Floating
+          # `channel: stable` drifts the bundled Dart's formatter and breaks the
+          # format_check gate; bump this together with the setup-dart pin.
+          flutter-version: "3.47.1"
           channel: stable
 
       - name: Cache pub dependencies
@@ -195,6 +200,11 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
+          # Pinned to Flutter 3.47.1 (bundles Dart 3.13.1) for reproducibility —
+          # matches the pinned dart-lang/setup-dart SDK and local dev. Floating
+          # `channel: stable` drifts the bundled Dart's formatter and breaks the
+          # format_check gate; bump this together with the setup-dart pin.
+          flutter-version: "3.47.1"
           channel: stable
 
       - name: Install lcov
@@ -225,12 +235,12 @@ jobs:
 
       - uses: dart-lang/setup-dart@v1
         with:
-          # Pinned to match the Dart the team runs locally and the Dart that
-          # Flutter stable (3.44.x) bundles. `stable` floated to 3.13.1 on
-          # 2026-08-18, whose `dart format` reformats files formatted by 3.12,
-          # breaking the format_check gate on unrelated files. Bump this
-          # deliberately (with a workspace-wide reformat) rather than floating.
-          sdk: "3.12.2"
+          # Pinned for reproducibility — matches the Dart the team runs locally
+          # and the Dart that Flutter 3.47.1 bundles. Bump deliberately (with a
+          # workspace-wide `dart format`) rather than floating on `stable`,
+          # whose formatter output changes between releases and breaks the
+          # format_check gate on otherwise-untouched files.
+          sdk: "3.13.1"
 
       - name: Cache pub dependencies
         uses: actions/cache@v5

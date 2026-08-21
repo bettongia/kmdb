@@ -60,17 +60,13 @@ void main() {
   });
 
   group('write — POSIX permission hardening', () {
-    test(
-      'creates root at 700 and the secret file at 600',
-      () async {
-        await store.write('creds', _bytes([1, 2, 3]));
+    test('creates root at 700 and the secret file at 600', () async {
+      await store.write('creds', _bytes([1, 2, 3]));
 
-        expect(await _modeOf(rootDir), 0x1C0); // 0o700
-        final file = File(p.join(rootDir.path, 'creds'));
-        expect(await _modeOf(file), 0x180); // 0o600
-      },
-      skip: Platform.isWindows ? _posixOnly : false,
-    );
+      expect(await _modeOf(rootDir), 0x1C0); // 0o700
+      final file = File(p.join(rootDir.path, 'creds'));
+      expect(await _modeOf(file), 0x180); // 0o600
+    }, skip: Platform.isWindows ? _posixOnly : false);
 
     test('creates root if it does not already exist', () async {
       expect(rootDir.existsSync(), isFalse);
@@ -252,16 +248,12 @@ void main() {
   // docs/spec/28_release_checklist.md covers the manual Windows
   // verification this automated suite cannot perform in this environment.
   group('Windows (no permission enforcement)', () {
-    test(
-      'write does not attempt to chmod',
-      () async {
-        // If write() attempted to shell out to chmod on Windows, it would
-        // either throw (no chmod binary) or be a slow no-op subprocess; a
-        // successful, fast write is evidence no chmod was attempted.
-        await expectLater(store.write('creds', _bytes([1, 2, 3])), completes);
-      },
-      skip: Platform.isWindows ? false : _windowsOnly,
-    );
+    test('write does not attempt to chmod', () async {
+      // If write() attempted to shell out to chmod on Windows, it would
+      // either throw (no chmod binary) or be a slow no-op subprocess; a
+      // successful, fast write is evidence no chmod was attempted.
+      await expectLater(store.write('creds', _bytes([1, 2, 3])), completes);
+    }, skip: Platform.isWindows ? false : _windowsOnly);
 
     test(
       'read succeeds even when the fixture file has loose permissions',

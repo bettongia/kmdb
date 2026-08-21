@@ -133,82 +133,78 @@ void main() {
       timeout: const Timeout(Duration(seconds: 120)),
     );
 
-    test(
-      'no undecryptable user data after provisioning crash',
-      () async {
-        // This is the key invariant: there must NEVER be encrypted user data
-        // without a readable enc:blob.
-        //
-        // In KMDB's design this is guaranteed by construction:
-        // open() writes enc:blob BEFORE returning, and user data can only be
-        // written after open() returns. So enc:blob is always written before
-        // any user value in the WAL — they cannot arrive in reverse order.
-        //
-        // This test verifies the invariant by trying to insert data after open,
-        // then crashing and checking the post-crash state is consistent.
+    test('no undecryptable user data after provisioning crash', () async {
+      // This is the key invariant: there must NEVER be encrypted user data
+      // without a readable enc:blob.
+      //
+      // In KMDB's design this is guaranteed by construction:
+      // open() writes enc:blob BEFORE returning, and user data can only be
+      // written after open() returns. So enc:blob is always written before
+      // any user value in the WAL — they cannot arrive in reverse order.
+      //
+      // This test verifies the invariant by trying to insert data after open,
+      // then crashing and checking the post-crash state is consistent.
 
-        final faultyAdapter = FaultyStorageAdapter();
-        final result = await EncryptionConfig.createResult(
-          passphrase: _kPassphrase,
-        );
+      final faultyAdapter = FaultyStorageAdapter();
+      final result = await EncryptionConfig.createResult(
+        passphrase: _kPassphrase,
+      );
 
-        final db = await KmdbDatabase.open(
+      final db = await KmdbDatabase.open(
+        path: '/db',
+        adapter: faultyAdapter,
+        config: KvStoreConfig.forTesting(),
+        encryptionConfig: result.config,
+      );
+
+      // Write a user document (encrypted).
+      final col = db.collection<Map<String, dynamic>>(
+        name: 'data',
+        codec: const _MapCodec(),
+      );
+      final docKey = _keyGen.next();
+      await col.put({'_id': docKey, 'value': 'secret-value'});
+
+      // Crash without flushing — WAL records are volatile.
+      await db.close(flush: false);
+      faultyAdapter.crash();
+
+      // After crash: either the DB is in an empty/unencrypted state (all WAL
+      // records lost), or enc:blob + user data both survived (consistent).
+      // Verify by trying to open. Any outcome is acceptable as long as we can
+      // open it (possibly empty, possibly with data) or get a clear error.
+      bool consistentStateAchieved = false;
+
+      // Try plaintext open.
+      try {
+        final db2 = await KmdbDatabase.open(
           path: '/db',
           adapter: faultyAdapter,
           config: KvStoreConfig.forTesting(),
-          encryptionConfig: result.config,
         );
-
-        // Write a user document (encrypted).
-        final col = db.collection<Map<String, dynamic>>(
-          name: 'data',
-          codec: const _MapCodec(),
-        );
-        final docKey = _keyGen.next();
-        await col.put({'_id': docKey, 'value': 'secret-value'});
-
-        // Crash without flushing — WAL records are volatile.
-        await db.close(flush: false);
-        faultyAdapter.crash();
-
-        // After crash: either the DB is in an empty/unencrypted state (all WAL
-        // records lost), or enc:blob + user data both survived (consistent).
-        // Verify by trying to open. Any outcome is acceptable as long as we can
-        // open it (possibly empty, possibly with data) or get a clear error.
-        bool consistentStateAchieved = false;
-
-        // Try plaintext open.
-        try {
-          final db2 = await KmdbDatabase.open(
+        // Plaintext open succeeded — no encrypted data in a state that requires
+        // decryption. Consistent state: enc:blob and user data both lost to crash.
+        consistentStateAchieved = true;
+        await db2.close();
+      } on EncryptionError catch (e) {
+        if (e.code == EncryptionErrorCode.databaseIsEncrypted) {
+          // enc:blob survived — open with the passphrase to verify no corrupt data.
+          final db3 = await KmdbDatabase.open(
             path: '/db',
             adapter: faultyAdapter,
             config: KvStoreConfig.forTesting(),
+            encryptionConfig: EncryptionConfig(passphrase: _kPassphrase),
           );
-          // Plaintext open succeeded — no encrypted data in a state that requires
-          // decryption. Consistent state: enc:blob and user data both lost to crash.
+          // If we get here without exception, the database is decryptable.
           consistentStateAchieved = true;
-          await db2.close();
-        } on EncryptionError catch (e) {
-          if (e.code == EncryptionErrorCode.databaseIsEncrypted) {
-            // enc:blob survived — open with the passphrase to verify no corrupt data.
-            final db3 = await KmdbDatabase.open(
-              path: '/db',
-              adapter: faultyAdapter,
-              config: KvStoreConfig.forTesting(),
-              encryptionConfig: EncryptionConfig(passphrase: _kPassphrase),
-            );
-            // If we get here without exception, the database is decryptable.
-            consistentStateAchieved = true;
-            await db3.close();
-          } else {
-            rethrow;
-          }
+          await db3.close();
+        } else {
+          rethrow;
         }
+      }
 
-        expect(consistentStateAchieved, isTrue);
-      },
-      timeout: const Timeout(Duration(seconds: 120)),
-    );
+      expect(consistentStateAchieved, isTrue);
+    }, timeout: const Timeout(Duration(seconds: 120)));
   });
 }
 
