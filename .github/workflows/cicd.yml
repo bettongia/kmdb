@@ -31,7 +31,12 @@ jobs:
 
       - uses: dart-lang/setup-dart@v1
         with:
-          sdk: stable
+          # Pinned to match the Dart the team runs locally and the Dart that
+          # Flutter stable (3.44.x) bundles. `stable` floated to 3.13.1 on
+          # 2026-08-18, whose `dart format` reformats files formatted by 3.12,
+          # breaking the format_check gate on unrelated files. Bump this
+          # deliberately (with a workspace-wide reformat) rather than floating.
+          sdk: "3.12.2"
 
       - name: Cache pub dependencies
         uses: actions/cache@v5
@@ -98,7 +103,12 @@ jobs:
 
       - uses: dart-lang/setup-dart@v1
         with:
-          sdk: stable
+          # Pinned to match the Dart the team runs locally and the Dart that
+          # Flutter stable (3.44.x) bundles. `stable` floated to 3.13.1 on
+          # 2026-08-18, whose `dart format` reformats files formatted by 3.12,
+          # breaking the format_check gate on unrelated files. Bump this
+          # deliberately (with a workspace-wide reformat) rather than floating.
+          sdk: "3.12.2"
 
       - name: Cache pub dependencies
         uses: actions/cache@v5
@@ -123,7 +133,12 @@ jobs:
 
       - uses: dart-lang/setup-dart@v1
         with:
-          sdk: stable
+          # Pinned to match the Dart the team runs locally and the Dart that
+          # Flutter stable (3.44.x) bundles. `stable` floated to 3.13.1 on
+          # 2026-08-18, whose `dart format` reformats files formatted by 3.12,
+          # breaking the format_check gate on unrelated files. Bump this
+          # deliberately (with a workspace-wide reformat) rather than floating.
+          sdk: "3.12.2"
 
       - name: Cache pub dependencies
         uses: actions/cache@v5
@@ -210,7 +225,12 @@ jobs:
 
       - uses: dart-lang/setup-dart@v1
         with:
-          sdk: stable
+          # Pinned to match the Dart the team runs locally and the Dart that
+          # Flutter stable (3.44.x) bundles. `stable` floated to 3.13.1 on
+          # 2026-08-18, whose `dart format` reformats files formatted by 3.12,
+          # breaking the format_check gate on unrelated files. Bump this
+          # deliberately (with a workspace-wide reformat) rather than floating.
+          sdk: "3.12.2"
 
       - name: Cache pub dependencies
         uses: actions/cache@v5
