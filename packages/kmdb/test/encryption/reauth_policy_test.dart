@@ -219,6 +219,77 @@ void main() {
         },
         timeout: const Timeout(Duration(seconds: 120)),
       );
+
+      test('biometric unlock fails closed when the stored re-auth timestamp is '
+          'corrupt — an unparseable timestamp is treated as "never", forcing '
+          'the passphrase rather than being silently permitted', () async {
+        final secretStore = InMemorySecretStore();
+        final provider = _FakeBiometricKekProvider();
+        // The clock never advances past the interval here — the refusal must
+        // come purely from the corrupt timestamp failing closed, not from a
+        // lapsed interval (that path is covered by the test above).
+        final clock = DateTime(2026, 1, 1);
+
+        final result = await EncryptionConfig.createResult(
+          passphrase: _kPassphrase,
+        );
+        final adapter = MemoryStorageAdapter();
+        final db1 = await KmdbDatabase.open(
+          path: '/db',
+          adapter: adapter,
+          config: KvStoreConfig.forTesting(),
+          encryptionConfig: result.config,
+          secretStore: secretStore,
+          now: () => clock,
+        );
+        await db1.enableBiometricUnlock(provider);
+        await db1.close();
+
+        // Corrupt the persisted "passphrase last used" timestamp in place,
+        // simulating a truncated or garbled SecretStore entry. The key is
+        // db-scoped as `${hash}-passphrase.lastused`; locate it by suffix so
+        // the test does not depend on the private scope-name constant.
+        final timestampKey = (await secretStore.list()).singleWhere(
+          (k) => k.endsWith('-passphrase.lastused'),
+        );
+        await secretStore.write(
+          timestampKey,
+          Uint8List.fromList('not-a-timestamp'.codeUnits),
+        );
+
+        // Default interval policy: an unparseable timestamp decodes to null,
+        // which ReauthPolicy fails closed on — biometric is refused even
+        // though the interval has NOT lapsed.
+        await expectLater(
+          () => KmdbDatabase.open(
+            path: '/db',
+            adapter: adapter,
+            config: KvStoreConfig.forTesting(),
+            encryptionConfig: EncryptionConfig.biometric(provider),
+            secretStore: secretStore,
+            now: () => clock,
+          ),
+          throwsA(
+            isA<EncryptionError>().having(
+              (e) => e.code,
+              'code',
+              EncryptionErrorCode.biometricUnavailable,
+            ),
+          ),
+        );
+
+        // The passphrase path is unaffected — the database is not bricked,
+        // and opening with it rewrites a valid timestamp.
+        final db2 = await KmdbDatabase.open(
+          path: '/db',
+          adapter: adapter,
+          config: KvStoreConfig.forTesting(),
+          encryptionConfig: EncryptionConfig(passphrase: _kPassphrase),
+          secretStore: secretStore,
+          now: () => clock,
+        );
+        await db2.close();
+      }, timeout: const Timeout(Duration(seconds: 120)));
     },
   );
 
