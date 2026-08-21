@@ -445,19 +445,21 @@ non-blocking directives from the reviewer's round-3 sign-off.
 
 ### Phase 6 — Spec & docs
 
-- [ ] **§31** — replace the DEK-cache section with the wrapped-copy model; add
+- [x] **§31** — replace the DEK-cache section with the wrapped-copy model; add
       the policy, the platform matrix, and the honest §6 limitations (coercion,
       compromised host, root/jailbreak). **Must not be reconciled by describing
       the current code.**
-- [ ] **§19** (platform) — the platform matrix.
-- [ ] **§33** (CLI credential store) — note the session agent is specified in
+- [x] **§19** (platform) — the platform matrix.
+- [x] **§33** (CLI credential store) — note the session agent is specified in
       `plan_0_10_01_cli_session_agent.md` (split out).
-- [ ] **§28** — release-checklist entries (**RC-28+**) for what CI cannot cover:
-      biometric enrolment invalidation, coerced re-auth behaviour.
-- [ ] New spec section (next free `NN` — §34 `sync_authentication` already
-      exists) for the unlock/wrapped-copy model, or fold into §31.
-- [ ] Roadmap WI-5 row updated in-branch (moves with the PR).
-- [ ] **Checkpoint:** commit `WI-5 Phase 6: spec + docs`.
+- [x] **§28** — release-checklist entries (**RC-28+**) for what CI cannot cover:
+      biometric enrolment invalidation, coerced re-auth behaviour. (RC-28,
+      RC-29 added.)
+- [x] New spec section — folded into §31 (Unlock Policy, Biometric Wrap,
+      Enrolment and Lock, Re-authentication Policy, Platform Support,
+      Limitations), no new `NN` section.
+- [x] Roadmap WI-5 row updated in-branch (moves with the PR).
+- [x] **Checkpoint:** commit `WI-5 Phase 6: spec + docs`.
 
 **Final step — QA sign-off and pre-commit:**
 

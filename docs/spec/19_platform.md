@@ -174,6 +174,7 @@ releasing the lock handle — the handle is released by the Worker's termination
 | Lexical text search | ✓                                        | ✗ (deferred)                               |
 | Semantic search     | ✓ (ONNX via betto_inferencing)           | ✗ (deferred)                               |
 | Vault               | ✓                                        | ✗ (deferred)                               |
+| Biometric unlock (`KEKSource.biometric`) | ✓ iOS/macOS/Android (biometric-gated); Windows/Linux: no biometric-gating primitive available, secure-storage-only fallback (see §31 "Platform Support") | ✗ (deferred — WebAuthn-PRF follow-up, see §31) |
 
 ## Package Structure
 

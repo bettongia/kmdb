@@ -13,12 +13,15 @@ surface (see §31 gap 9): the Google Drive credentials are `AccessCredentials
 add --type google-drive` and consumed by the `push`/`pull`/`sync` commands.
 
 The storage seam is `SecretStore`, a byte-oriented interface defined in `kmdb`
-core (`lib/src/secret/secret_store.dart`) — not `kmdb_cli` — alongside its
-in-memory default, `InMemorySecretStore`. It mirrors `DekCache`'s
-architecture: an `abstract interface class` in core, an in-memory default in
-the same file, and platform/host-backed implementations supplied from outside
-the package. `kmdb_cli`'s `DirectorySecretStore` is the one filesystem
-implementation shipped today.
+core (`lib/src/secret/secret_store.dart`) — not `kmdb_cli`. It is an
+`abstract interface class` with an in-memory default (`InMemorySecretStore`)
+in the same file, and platform/host-backed implementations supplied from
+outside the package. `kmdb_cli`'s `DirectorySecretStore` is one filesystem
+implementation shipped today; a second consumer is core's own unlock-policy
+bootstrap (0.10.01 WI-5, §31 "Unlock Policy") — the per-device biometric-
+wrapped DEK and re-authentication timestamp `KmdbDatabase.open(secretStore:)`
+reads/writes are the same seam, keyed via the same `dbScopedSecretKey`
+promoted from `kmdb_cli` to core alongside this work.
 
 > **History.** Prior to the 0.10.01 `SecretStore` precursor plan, this seam
 > was `kmdb_cli`-only (`CredentialStore`/`DirectoryCredentialStore`),
@@ -98,14 +101,19 @@ protecting, regardless of where any particular database happens to live.
 every KMDB database on the machine** — unlike the old per-`dbDir` root, a bare
 key (e.g. the default `credentialsPath`, `google_credentials.json`) is not
 collision-free on its own. `kmdb_cli` closes this at the call-site layer with
-`dbScopedSecretKey(dbDir, name)`
-(`lib/src/config/secret_store/secret_key.dart`): the canonicalised absolute
-`dbDir` path, filesystem-sanitised (path separators and Windows drive-letter
-colons replaced with `_`), joined with `name`. This is deliberately **not**
-hashed, so `credentials prune`'s listing/diagnostic output stays legible.
-`isSecretKeyForDb(key, dbDir)` is the inverse predicate, used by `prune` (see
-below) to recognise which of the store's (possibly multi-database) keys belong
-to the current database at all, before applying any orphan check.
+`dbScopedSecretKey(dbDir, name)` — promoted from `kmdb_cli` to core
+(0.10.01 WI-5, so the unlock-policy bootstrap could reuse it) and now living
+at `packages/kmdb/lib/src/secret/secret_key.dart`, re-exported from
+`kmdb.dart`: a fixed-length hex SHA-256 digest of the canonicalised absolute
+`dbDir` path, joined to `name` with a single `-` delimiter. `isSecretKeyForDb
+(key, dbDir)` is the inverse predicate, used by `prune` (see below) to
+recognise which of the store's (possibly multi-database) keys belong to the
+current database at all, before applying any orphan check. (An earlier
+sanitised-path-prefix scheme, replaced for boundary-safety and injectivity —
+see the function's own doc comment for the collision it fixed — is why
+`credentials prune`'s diagnostic output shows a hash prefix rather than a
+legible path; an accepted trade-off for a mechanism whose whole job is to
+never touch another database's secret.)
 
 ### Permission model
 
@@ -297,6 +305,21 @@ this design was not built. The package survey research remains valid and is
 preserved as prior art in [docs/roadmap/9_99.md](../roadmap/9_99.md) for
 whoever picks up native backend support later; the `SecretStore` interface
 already provides the seam it would slot into.
+
+## Not (yet) implemented: CLI session agent
+
+A separate, related problem — avoiding a repeated Argon2id passphrase prompt
+across CLI invocations within one login session (the ssh-agent / `op signin`
+shape: DEK held in agent process memory, bounded by an idle timeout *and* an
+absolute cap, `kmdb … lock` ends it immediately, never outlives the login
+session) — is **not** addressed by this `SecretStore`-backed credential
+store. It is a distinct subsystem (new IPC transport, wire protocol, and a
+Windows named-pipe/ACL story this store's POSIX-permission model does not
+cover) split out of the original 0.10.01 WI-5 unlock-policy plan into its own,
+not-yet-`Investigated` plan: `docs/plans/plan_0_10_01_cli_session_agent.md`.
+It is sequenced after the unlock-policy work this section's core
+`SecretStore` seam now also serves (see "Key scoping" above and §31 "Unlock
+Policy").
 
 ## Known limitation: write is not atomic
 

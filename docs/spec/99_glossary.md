@@ -7,7 +7,7 @@ coordinates) belong in the [attribute registry](03a_attribute_registry.md), not
 here; see the [spec-authoring guide](README.md) for the division. Several
 entries below still carry storage detail that is a **registry candidate** — it
 should migrate once the registry opens the relevant family (key material:
-`DEK`, `KEK`, `Wrapped DEK`, `DekCache`; namespaces: `$$`, `isLocalOnly`,
+`DEK`, `KEK`, `Wrapped DEK`, `KEKSource`; namespaces: `$$`, `isLocalOnly`,
 `$vault:{sha256}`, `$$vault:fts:`, `$$vault:vec:idx:`).
 
 `$$` (double-dollar prefix)
