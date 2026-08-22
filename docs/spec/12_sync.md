@@ -986,18 +986,28 @@ to enforce the contract:
   which maps to `open(O_CREAT | O_EXCL)` on POSIX and `CreateFile(CREATE_NEW)`
   on Windows. This is an atomic kernel call — exactly one caller wins; all
   others get an exception mapped to `false`.
-- **Update-if-match** (`ifMatchEtag != null`): an exclusive `fcntl` advisory
-  lock (`FileLock.blockingExclusive`) is acquired on the existing file before
-  re-reading its ETag and is held until the write completes, serialising the
-  read-compare-write **among cooperating processes that open the file's current
-  inode before any writer replaces it**. Because the write is applied via
-  temp-file + `rename` (for crash-atomicity), it swaps in a *new* inode while
-  the lock is held on the original; a second writer that opened the path before
-  that rename can therefore still lose an update once the lock is released. This
+- **Update-if-match** (`ifMatchEtag != null`): an exclusive advisory lock
+  (`FileLock.blockingExclusive`) is acquired on the existing file before
+  re-reading its ETag, serialising the read-compare-write **among cooperating
+  processes that open the file's current inode before any writer replaces it**.
+  Because the write is applied via temp-file + `rename` (for crash-atomicity),
+  it swaps in a *new* inode; a second writer that opened the path before that
+  rename can therefore still lose an update once the lock is released. This
   residual open-before-rename window is a deliberate scope boundary — the only
   atomic-update caller is single-coordinator lease renewal, which is never
   issued concurrently — see the `_updateWithLock` doc-comment for the full
   rationale and the crash-atomicity-vs-lost-update tradeoff.
+    - **POSIX** (`flock`/`fcntl`, advisory): the lock is held **across the
+      temp-rename**, released strictly after the write completes — a
+      cooperating writer cannot begin its own compare-and-write while a write
+      is in flight.
+    - **Windows** (`LockFileEx`, mandatory): the locked ETag re-read requires
+      the target's handle to stay open, but Windows refuses to rename a file
+      over a path that has an open handle — the two are mutually exclusive.
+      The handle is therefore released and closed **before** the rename, so
+      the "released strictly after the write" ordering is a **POSIX-only**
+      guarantee; Windows widens the residual window to close→rename (same
+      out-of-scope class).
 
 These primitives are effective for the intra-host, multi-process use case (e.g.
 two CLI processes or two app instances sharing a local sync directory). They do

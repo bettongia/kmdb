@@ -378,60 +378,69 @@ void main() {
       }
     });
 
-    test('unlock is observed only after the write completes, not while it is '
-        'still in flight', () async {
-      final gate = Completer<void>();
-      final probe = _OrderingProbeAdapter(orderingTempDir.path, gate: gate);
+    test(
+      'unlock is observed only after the write completes, not while it is '
+      'still in flight',
+      skip: Platform.isWindows
+          ? 'unlock-after-write is a POSIX-only guarantee: Windows must close '
+                'the locked handle before the rename (see _updateWithLock), so '
+                'the ordering deliberately differs. Windows correctness of the '
+                'update path is covered by the atomic-mode conformance tests.'
+          : null,
+      () async {
+        final gate = Completer<void>();
+        final probe = _OrderingProbeAdapter(orderingTempDir.path, gate: gate);
 
-      // Seed the file and capture its ETag so compareAndSwap takes the
-      // *update* path (_updateWithLock), not create-if-absent.
-      await probe.upload('f', Uint8List.fromList([1]));
-      final etag = await probe.getEtag('f');
+        // Seed the file and capture its ETag so compareAndSwap takes the
+        // *update* path (_updateWithLock), not create-if-absent.
+        await probe.upload('f', Uint8List.fromList([1]));
+        final etag = await probe.getEtag('f');
 
-      // Fire compareAndSwap without awaiting: it will reach the gated
-      // writeViaTempRename override and suspend there, still holding the
-      // advisory lock.
-      final future = probe.compareAndSwap(
-        'f',
-        Uint8List.fromList([2]),
-        ifMatchEtag: etag,
-      );
+        // Fire compareAndSwap without awaiting: it will reach the gated
+        // writeViaTempRename override and suspend there, still holding the
+        // advisory lock.
+        final future = probe.compareAndSwap(
+          'f',
+          Uint8List.fromList([2]),
+          ifMatchEtag: etag,
+        );
 
-      // Wait deterministically until the call reaches the gated write, rather
-      // than polling a fixed number of event-loop turns. The dart:io
-      // open/lock/read that precedes the gated write completes on its own
-      // schedule — a turn-count poll under-waits on a slow/contended CI runner
-      // (observed: an empty log after 100 zero-delay turns), which is exactly
-      // the I/O-timing fragility this seam exists to avoid.
-      await probe.reachedWrite.future.timeout(
-        const Duration(seconds: 30),
-        onTimeout: () =>
-            fail('compareAndSwap never reached the gated writeViaTempRename'),
-      );
-      expect(probe.log, contains('write:start'));
+        // Wait deterministically until the call reaches the gated write, rather
+        // than polling a fixed number of event-loop turns. The dart:io
+        // open/lock/read that precedes the gated write completes on its own
+        // schedule — a turn-count poll under-waits on a slow/contended CI runner
+        // (observed: an empty log after 100 zero-delay turns), which is exactly
+        // the I/O-timing fragility this seam exists to avoid.
+        await probe.reachedWrite.future.timeout(
+          const Duration(seconds: 30),
+          onTimeout: () =>
+              fail('compareAndSwap never reached the gated writeViaTempRename'),
+        );
+        expect(probe.log, contains('write:start'));
 
-      // The crux of the regression: on the unfixed code (a bare `return`
-      // of the write's future, not `return await`), the `finally` block
-      // runs immediately once the statement executes — releasing the
-      // lock before the write completes — so `unlock` would already be
-      // in the log at this point. On the fixed code, `_updateWithLock`
-      // is suspended on the `await`, so `finally` (and thus `unlock`)
-      // has not run yet.
-      expect(
-        probe.log,
-        isNot(contains('unlock')),
-        reason:
-            'the advisory lock must not be released before the write '
-            'completes',
-      );
+        // The crux of the regression: on the unfixed code (a bare `return`
+        // of the write's future, not `return await`), the `finally` block
+        // runs immediately once the statement executes — releasing the
+        // lock before the write completes — so `unlock` would already be
+        // in the log at this point. On the fixed code, `_updateWithLock`
+        // is suspended on the `await`, so `finally` (and thus `unlock`)
+        // has not run yet.
+        expect(
+          probe.log,
+          isNot(contains('unlock')),
+          reason:
+              'the advisory lock must not be released before the write '
+              'completes',
+        );
 
-      // Let the write proceed and complete the call.
-      gate.complete();
-      final result = await future;
+        // Let the write proceed and complete the call.
+        gate.complete();
+        final result = await future;
 
-      expect(result, isTrue);
-      expect(probe.log, equals(['write:start', 'write:end', 'unlock']));
-      expect(await probe.download('f'), equals(Uint8List.fromList([2])));
-    });
+        expect(result, isTrue);
+        expect(probe.log, equals(['write:start', 'write:end', 'unlock']));
+        expect(await probe.download('f'), equals(Uint8List.fromList([2])));
+      },
+    );
   });
 }

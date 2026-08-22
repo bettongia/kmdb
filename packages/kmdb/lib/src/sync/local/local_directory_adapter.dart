@@ -260,6 +260,15 @@ base class LocalDirectoryAdapter implements SyncStorageAdapter {
   /// through the locked `raf` (same inode throughout), which trades away the
   /// crash-atomicity that the temp-rename pattern provides — a tension this
   /// project resolves in favour of crash-atomicity here.
+  ///
+  /// **Platform note (ordering is POSIX-only).** The "lock released strictly
+  /// after the write completes" ordering holds on POSIX, where the lock is
+  /// held across the temp-rename. It cannot hold on **Windows**: the locked
+  /// ETag re-read requires the target's handle to stay open, but Windows
+  /// refuses to rename a file over a path that has an open handle — the two
+  /// are mutually exclusive. On Windows the handle is therefore released and
+  /// closed *before* the rename, which reopens the narrow close->rename
+  /// lost-update window described above (still out of scope, same rationale).
   Future<bool> _updateWithLock(
     File file,
     String resolvedPath,
@@ -279,6 +288,10 @@ base class LocalDirectoryAdapter implements SyncStorageAdapter {
     // access to byte ranges it holds the lock on, so reading through `raf`
     // itself works on every platform.
     final raf = await file.open(mode: FileMode.append);
+    // On Windows the locked handle must be closed *before* the temp-rename
+    // (see the platform branch below); track whether that early release
+    // already ran so the `finally` does not double-release.
+    var handleReleasedEarly = false;
     try {
       await raf.lock(FileLock.blockingExclusive);
       // Re-read ETag inside the lock so any write that completed before we
@@ -288,9 +301,28 @@ base class LocalDirectoryAdapter implements SyncStorageAdapter {
       final lockedBytes = await raf.read(length);
       final lockedEtag = XxHash64.toHex(XxHash64.digest(lockedBytes));
       if (lockedEtag != expectedEtag) return false;
-      // `await` here (not a bare `return`) is load-bearing: `finally` below
-      // releases the lock and closes the handle, and must only run once the
-      // write (temp write + fsync + rename) has actually completed —
+
+      if (Platform.isWindows) {
+        // Windows cannot rename a file over a path that still has an open
+        // handle (`LockFileEx` byte-range locks bring share-mode denial),
+        // yet the locked ETag re-read above *requires* that same handle to
+        // stay open on Windows — the two are mutually exclusive. So release
+        // and close the handle here, before the temp-rename. This reopens a
+        // narrow close->rename lost-update window on Windows (a cooperating
+        // writer could take the lock between our release and the rename) —
+        // the same residual class this method already declares out of scope
+        // (see the doc comment above), and unreachable for the sole
+        // atomic-update caller (single-coordinator lease renewal, never
+        // concurrent). POSIX keeps the lock across the rename below and has
+        // no such window. The unlock-strictly-after-write ordering is
+        // therefore a POSIX-only guarantee.
+        handleReleasedEarly = true;
+        await releaseLock(raf);
+        return await writeViaTempRename(file, newBytes);
+      }
+      // POSIX: `await` here (not a bare `return`) is load-bearing: `finally`
+      // below releases the lock and closes the handle, and must only run once
+      // the write (temp write + fsync + rename) has actually completed —
       // otherwise a concurrent cooperating writer can acquire the lock and
       // begin its own compare-and-write while this write is still in
       // flight, reintroducing the lost-update race this method exists to
@@ -301,7 +333,7 @@ base class LocalDirectoryAdapter implements SyncStorageAdapter {
       // the unlock/close relative to the write's completion.
       return await writeViaTempRename(file, newBytes);
     } finally {
-      await releaseLock(raf);
+      if (!handleReleasedEarly) await releaseLock(raf);
     }
   }
 
