@@ -4,9 +4,9 @@
 > `plan_0_10_01_cli_session_agent.md` (reviewer round 2). This plan is the
 > SC-1-closing unit: wrapped-copy DEK + native biometric + headless opt-out.
 
-**Status**: **Implementing** (2026-08-11) — Q1–Q7 resolved and verified against the code; no open design decisions remain. See "Reviewer re-check (round 3)" for the sign-off and two non-blocking test-coverage directives the implementer must honour.
+**Status**: **Complete** (merged 2026-08-22, [PR #75](https://github.com/bettongia/kmdb/pull/75)) — all 6 phases landed; SC-1 closed (`DekCache` removed, authenticated wrapped-DEK unwrap); biometric KEK, default-on `ReauthPolicy`, and headless hook shipped. Q1–Q7 resolved and verified against the code during planning.
 
-**PR link**: _(none yet)_
+**PR link**: [PR #75](https://github.com/bettongia/kmdb/pull/75) (squash-merged 2026-08-22)
 
 > **Provenance.** Implements finding **SC-1** from the
 > [2026-07-18 release-readiness review](../reviews/release-readiness-review-2026-07-18.md),
