@@ -16,7 +16,6 @@ import 'dart:io' as io;
 
 import 'package:kmdb/kmdb.dart';
 import 'package:kmdb_cli/src/config/secret_store/directory_secret_store.dart';
-import 'package:kmdb_cli/src/config/secret_store/secret_key.dart';
 import 'package:kmdb_cli/src/config/sync_auth_key_store.dart';
 import 'package:test/test.dart';
 

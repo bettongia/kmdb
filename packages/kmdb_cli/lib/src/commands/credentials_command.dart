@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'package:kmdb/kmdb.dart' show SecretStore;
+import 'package:kmdb/kmdb.dart'
+    show SecretStore, dbScopedSecretKey, isSecretKeyForDb;
 import 'package:kmdb/kmdb_config.dart' show GoogleDriveRemoteConfig, KmdbConfig;
 
 import '../config/secret_store/directory_secret_store.dart';
-import '../config/secret_store/secret_key.dart';
 import 'command.dart';
 
 /// Manages secrets held in the CLI's permission-hardened [SecretStore]

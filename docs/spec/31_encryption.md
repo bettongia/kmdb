@@ -370,28 +370,198 @@ final decoded = RecoveryCode.decode(code); // Uint8List(16)
 of words or contains an unknown word. It is case-insensitive and tolerant of
 extra whitespace.
 
-## DEK Cache
+## Unlock Policy
 
-The `DekCache` interface provides a session-scoped cache for the decrypted DEK
-so that Argon2id derivation is only run once per database open.
+**Closes SC-1** (2026-07-18 release-readiness review). Prior to 0.10.01 WI-5,
+`KmdbDatabase.open()`'s unlock path checked an in-memory `DekCache` *before*
+verifying credentials — if the cache was warm (the recommended mobile
+configuration, via `FlutterSecureDekCache`), the cached DEK was returned
+unconditionally, with the supplied passphrase never checked at all. Any
+string — including a deliberately wrong one — opened the database as long as
+the cache was warm. This silently defeated the coerced-unlock posture the
+passphrase exists for ("I'll unlock my phone, but not give you the app
+passphrase"). **The `DekCache` interface has been removed entirely**, not
+patched: there is no code path left that can return a DEK without an
+authenticated unwrap.
+
+Every unlock — passphrase, recovery code, or biometric — is now an
+**authenticated unwrap** of one of three wrapped copies of the DEK. A wrong
+credential is always rejected, regardless of any prior successful unlock on
+the same process or device.
+
+### KEKSource
+
+`EncryptionConfig` selects one of three `KEKSource` variants:
+
+| Constructor                            | KEKSource                | Unwraps                                                       |
+| :-------------------------------------- | :------------------------ | :-------------------------------------------------------------- |
+| `EncryptionConfig(passphrase: ...)`     | `KEKSource.passphrase`    | `enc:blob.wdekP` via Argon2id                                   |
+| `EncryptionConfig(recoveryCode: ...)`   | `KEKSource.recoveryCode`  | `enc:blob.wdekR` via HKDF                                       |
+| `EncryptionConfig.biometric(provider)`  | `KEKSource.biometric`     | the per-device local biometric wrap (below), via a KEK from `provider.obtainKek()` |
+
+`KmdbDatabase.open()`'s bootstrap (see _Bootstrap Sequence_ above) branches on
+`kekSource` for State 5 (unlock): each branch is an independent authenticated
+unwrap, and none can return a DEK without the unwrap succeeding.
+
+### The Biometric Wrap — Per-Device Local State, Not `enc:blob`
+
+The passphrase- and recovery-wrapped DEK copies (`wdekP`/`wdekR`) live in the
+synced `enc:blob`, because their KEKs derive from user-held secrets that are
+identical on every device. The **biometric KEK is device-bound** — a
+platform-secured key (Secure Enclave / Keystore / Credential Manager) that
+does not exist, and could not be meaningfully used, on any other device. A
+third `wrappedDekBiometric` entry therefore lives in **per-device local
+state**, never in `enc:blob`:
+
+- Storage: a `SecretStore` (core interface — `packages/kmdb/lib/src/secret/
+  secret_store.dart`; §33 documents `kmdb_cli`'s `DirectorySecretStore`
+  implementation) supplied to `KmdbDatabase.open(secretStore:)`, defaulting
+  to `InMemorySecretStore` — mirroring the historical default-to-in-memory
+  pattern for encryption itself.
+- Key: `dbScopedSecretKey(dbDir, 'dek.wrap.biometric')`.
+- Alongside it, the same store holds `dbScopedSecretKey(dbDir,
+  'passphrase.lastused')` — an ISO-8601 timestamp of the most recent
+  successful passphrase or recovery-code unlock, used by _Re-authentication
+  Policy_ below.
+
+Putting either value in the synced `enc:blob` would (a) be useless on every
+other device, (b) leak per-device biometric-enrolment state across the sync
+set, and (c) reopen the exact `$meta`-LWW-resurrection hazard that the
+0.10.01 WI-11/WI-13/WI-14 device-local-state moves (see gap 4's update notes
+above, and `docs/spec/12_sync.md`'s "`$meta` vs `$$` classification rule")
+spent that whole track closing: a peer's plain last-write-wins on a shared
+field can move it *backwards* and resurrect stale state.
+
+### Enrolment and Lock
 
 ```dart
-abstract interface class DekCache {
-  Future<Uint8List?> read(String dbId);
-  Future<void> store(String dbId, Uint8List dek);
-  Future<void> clear(String dbId);
-}
+// Enrol biometric unlock from an already-unlocked session:
+await db.enableBiometricUnlock(myBiometricKekProvider);
+
+// Disable it (a subsequent biometric open is refused; passphrase required):
+await db.disableBiometricUnlock();
+
+// Discard the in-memory DEK — the instance is unusable until a fresh open():
+db.lock();
 ```
 
-The default implementation `InMemoryDekCache` stores the DEK in a `Map` in
-process memory. The `FlutterSecureDekCache` from the `kmdb_flutter` add-on
-package stores the DEK in Flutter's `FlutterSecureStorage` (iOS Keychain /
-Android Keystore) — recommended for production mobile apps.
+`enableBiometricUnlock(BiometricKekProvider)` requires the database to be
+currently unlocked (an `AesGcmEncryptionProvider`, not `null` and not
+`lock()`ed): it calls `provider.obtainKek()`, wraps the live DEK under the
+returned KEK, and writes the wrap to `SecretStore`. `disableBiometricUnlock()`
+deletes it — a no-op if biometric unlock was never enrolled.
 
-If the DEK is found in the cache, Argon2id is skipped and the cached DEK is used
-directly (only AES-GCM decryption of `enc:blob` is still performed to confirm
-the cached key is correct). Clearing the cache requires re-derivation on the
-next open.
+`BiometricKekProvider.obtainKek()` must be **idempotent get-or-create per
+db-scoped identity**: it creates the underlying platform-secured KEK on first
+use (enrolment) and returns the *same* KEK on every subsequent call (unlock).
+If it generated a fresh KEK on every call, enrolment and unlock would derive
+different keys and `unwrapDek` would fail on every biometric open.
+Enrolment-invalidation (e.g. a new fingerprint enrolled under
+`accessControlFlags: biometryCurrentSet`) destroying the underlying platform
+item is what gives "biometric auto-disables, passphrase required to
+reconfigure" for free — no explicit invalidation handling is needed in a
+provider implementation.
+
+`lock()` discards the DEK in place — `EncryptionProvider.lock()` zeroes the
+DEK bytes and gates further `encrypt`/`decrypt`/`indexToken` calls behind
+`EncryptionErrorCode.databaseLocked`. There is no in-place unlock — the
+caller must discard the instance and call `KmdbDatabase.open()` again for a
+fresh, authenticated unwrap. **Releasing a locked instance:** call
+`close(flush: false)`, not the default `flush: true` — a flush that triggers
+compaction reads the `$meta` namespace listing, which is encrypted the same
+as any other value, and that read throws `databaseLocked` on a locked
+provider. No durability is lost: anything written before `lock()` is already
+WAL-fsynced and replays on the next `open()` regardless of whether it was
+flushed to an SSTable.
+
+### Re-authentication Policy (`ReauthPolicy`)
+
+Biometric unlock is a **data-loss control**, not primarily a hardening
+measure: a user who never re-enters their passphrase and then hits a
+biometric invalidation (new fingerprint, OS reinstall, device migration) has
+effectively lost the database — nothing else proves they still know the
+passphrase. `ReauthPolicy` forces periodic passphrase re-entry to keep that
+knowledge fresh, and secondarily blunts (does not solve — see _Limitations_
+below) the coerced-unlock case.
+
+| Variant                                              | Behaviour                                                                                                                                                                                     |
+| :----------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ReauthPolicy.interval(Duration)` (default: 14 days)  | Biometric unlock is permitted only while the passphrase/recovery-code was used within `interval`. A missing timestamp (never recorded) is treated as **lapsed** — fail closed, never silently permitted. |
+| `ReauthPolicy.alwaysRequirePassphrase()`              | Biometric unlock is never permitted — the coercion case, handled bluntly.                                                                                                                    |
+| `ReauthPolicy.headlessSession()`                      | Suppresses the check entirely — the explicit, documented opt-out for headless/server deployments (session = process lifetime; no timer, no periodic prompt; restarting the process is the only "re-auth" event). |
+
+Enforced inside `KmdbDatabase.open()`'s `KEKSource.biometric` branch: an
+absent wrap **or** a policy-refused timestamp both throw
+`EncryptionError.biometricUnavailable` (fail-closed) — never a silent
+fall-through to another unlock path. `EncryptionConfig.reauthPolicy` carries
+the policy; it has no effect on passphrase/recovery-code configs (the
+interval only ever gates the biometric shortcut).
+
+### Platform Support
+
+See §19's "Platform feature matrix" for the summary row. `kmdb_flutter`'s
+`FlutterBiometricKekProvider` is the reference `BiometricKekProvider`
+implementation:
+
+| Platform        | Biometric gating | Mechanism                                                                                                                                                                    |
+| :--------------- | :----------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| iOS / macOS      | ✓                  | `flutter_secure_storage` `accessControlFlags: [AccessControlFlag.biometryCurrentSet]`, `KeychainAccessibility.first_unlock_this_device` (never synced to iCloud Keychain)     |
+| Android          | ✓                  | `AndroidOptions.biometric(enforceBiometrics: true, biometricType: AndroidBiometricType.strongBiometricOnly)`                                                                |
+| Windows / Linux  | ✗                  | `flutter_secure_storage` has no biometric-gating option on either platform — the KEK is stored securely (DPAPI / platform keyring) but reading it does **not** prompt for authentication; gated only by OS login. The passphrase path is recommended here. |
+| Web              | ✗ (deferred)       | No `BiometricKekProvider` implementation ships for web — a WebAuthn-PRF-backed KEK is a documented follow-up (see the WI-5 plan's non-goals), not yet built.                |
+
+Server/headless deployments do not need real biometric hardware at all:
+`BiometricKekProvider` is not literally biometric-specific — it is "any local
+authenticator that releases a KEK". A server can implement a provider backed
+by a KMS/HSM or a mounted-secret file, paired with
+`ReauthPolicy.headlessSession()`. See `ReauthPolicy.headlessSession`'s doc
+comment for the full pattern, including non-interactive passphrase injection
+from `$CREDENTIALS_DIRECTORY`/`/run/secrets`/Kubernetes secret mounts. The
+CLI session agent (a separate subsystem — see
+`docs/plans/plan_0_10_01_cli_session_agent.md`) is the interactive-CLI
+analogue; it is not part of this section.
+
+### Limitations
+
+Honest boundaries of what the unlock policy does and does not protect
+against — read alongside "Threat Model & Confidentiality Boundaries" above,
+which this section does not replace:
+
+- **Coercion is blunted, not solved.** `ReauthPolicy.alwaysRequirePassphrase()`
+  and the default 14-day interval make a *stale* biometric unlock refuse a
+  coerced device-unlock attempt, but they do nothing once the interval is
+  fresh: a device unlocked by its owner within the last 14 days and then
+  coerced (e.g. "unlock your phone" under duress) still yields the DEK via
+  biometric, because the attacker is presenting the same biometric factor the
+  legitimate owner would. This is a fundamental limit of any
+  convenience-vs-security trade-off with a *recently used* fast path, not a
+  defect specific to this design — see the originating proposal
+  (`docs/proposals/unlock_policy.md`) §9 for the considered alternatives.
+- **A fully-compromised local OS defeats everything, as it already did before
+  this work.** The DEK is held in plaintext in process memory for the
+  lifetime of an open database — an adversary who can read the running KMDB
+  process's memory, or who controls the OS the biometric prompt itself runs
+  on, has already won regardless of the unlock policy (this restates the
+  existing "Threat Model" section's stated non-goal above; the unlock policy
+  changes *how* the DEK is obtained, not what protects it once obtained).
+- **A rooted/jailbroken device weakens the platform guarantees this design
+  relies on.** `accessControlFlags: biometryCurrentSet` and Android's
+  `setUserAuthenticationRequired` are OS-enforced access-control policies —
+  their integrity assumes an intact, unmodified OS/Secure-Enclave/Keystore
+  boundary. Root/jailbreak access can, depending on the specific exploit,
+  extract Keystore-protected key material or bypass the biometric gate
+  entirely; KMDB has no independent defense against this once the platform's
+  own security boundary is broken. This is a platform-security limitation
+  inherited, not introduced, by this design.
+- **`SecretStore` durability is host-chosen, and a lost store means a lost
+  biometric shortcut, not lost data.** If the biometric wrap or the re-auth
+  timestamp is lost (e.g. an in-memory store across a process restart, or a
+  host-provided store that is itself cleared), biometric unlock simply
+  becomes unavailable (`EncryptionErrorCode.biometricUnavailable`,
+  fail-closed) and the passphrase or recovery code is required — this is a
+  UX regression, never a confidentiality or data-loss failure, since the DEK
+  itself is unaffected and the passphrase/recovery-wrapped copies in
+  `enc:blob` are untouched.
 
 ## Vault Encryption
 
@@ -508,6 +678,8 @@ access, co-occurrence).
 | `cannotProvisionNonEmptyDatabase` | Attempt to provision encryption on a non-empty database                                       |
 | `decryptionFailed`                | Decryption failed for a reason other than wrong credentials                                   |
 | `encryptionFailed`                | Encryption failed during a write                                                              |
+| `biometricUnavailable`            | `KEKSource.biometric` supplied, but no wrap is enrolled for this database on this device, or `ReauthPolicy` has refused it (fail-closed) — see _Unlock Policy_ |
+| `databaseLocked`                  | An `encrypt`/`decrypt`/`indexToken` call was made after `KmdbDatabase.lock()` discarded the DEK — see _Unlock Policy_ |
 
 ## API Reference
 
@@ -520,23 +692,43 @@ EncryptionConfig(passphrase: 'my-secure-passphrase')
 // Unlock with recovery code (State 5):
 EncryptionConfig(recoveryCode: 'able acid aged ...')
 
+// Unlock with a biometric-gated KEK (State 5 — see "Unlock Policy" above;
+// requires prior enrolment via KmdbDatabase.enableBiometricUnlock):
+EncryptionConfig.biometric(
+  myBiometricKekProvider,
+  reauthPolicy: const ReauthPolicy.interval(Duration(days: 14)), // default
+)
+
 // Provision (State 4 — use the result to show the recovery code):
 final result = await EncryptionConfig.createResult(passphrase: '...');
 final db = await KmdbDatabase.open(..., encryptionConfig: result.config);
 // Show result.recoveryCode to the user (one-time event).
 ```
 
-### `KmdbDatabase.open()` — encryption parameter
+### `KmdbDatabase.open()` — encryption parameters
 
 ```dart
 final db = await KmdbDatabase.open(
   path: '/path/to/db',
   adapter: adapter,
   encryptionConfig: EncryptionConfig(passphrase: 'passphrase'),
+  secretStore: mySecretStore, // optional — see "Unlock Policy" above; defaults to InMemorySecretStore
+  now: () => DateTime.now(),  // optional — injectable clock for ReauthPolicy.interval tests
 );
 ```
 
-The `encryptionConfig` parameter is `null` for plaintext databases.
+`encryptionConfig` is `null` for plaintext databases. `secretStore` and `now`
+are consulted only by the `KEKSource.biometric` branch (the per-device
+biometric wrap and the `ReauthPolicy` interval check, respectively) — they
+have no effect on passphrase/recovery-code unlock or on plaintext databases.
+
+### `KmdbDatabase.lock()` / `enableBiometricUnlock()` / `disableBiometricUnlock()`
+
+```dart
+db.lock();                                          // discard the DEK — see "Enrolment and Lock" above
+await db.enableBiometricUnlock(myBiometricKekProvider);
+await db.disableBiometricUnlock();
+```
 
 ### `EncryptionProvider` / `AesGcmEncryptionProvider`
 
@@ -561,15 +753,19 @@ and the codec computes `aad` internally via `context.toAad()`.
   required. On web, it runs in the same isolate and can take several seconds per
   derivation. Applications should show a loading indicator and perform
   derivation off the main isolate when possible.
-- The `kmdb_flutter` add-on package provides:
-  - `FlutterSecureDekCache` — caches the DEK in iOS Keychain / Android Keystore.
+- There is no DEK session cache on any platform (see _Unlock Policy_ above) —
+  every open is an authenticated unwrap. The `kmdb_flutter` add-on package
+  provides:
+  - `FlutterBiometricKekProvider` — the native `BiometricKekProvider`
+    implementation backed by `flutter_secure_storage`; see _Platform
+    Support_ above for the per-platform biometric-gating matrix.
   - `KmdbFlutter.initialize()` — registers `cryptography_flutter` for
     hardware-accelerated AES-GCM on iOS (Secure Enclave) and Android (Keystore).
 
 ### Flutter Integration
 
 Flutter apps should use the `kmdb_flutter` add-on package to enable both
-persistent DEK caching and hardware-accelerated cryptography. Add it to your
+biometric unlock and hardware-accelerated cryptography. Add it to your
 `pubspec.yaml`:
 
 ```yaml
@@ -596,51 +792,40 @@ void main() async {
   final db = await KmdbDatabase.open(
     path: '/path/to/db',
     adapter: adapter,
-    encryptionConfig: EncryptionConfig(
-      passphrase: 'my-secure-passphrase',
-      // Persist the DEK in Keychain/Keystore so the user is only prompted
-      // once per device, not on every app launch.
-      dekCache: FlutterSecureDekCache(),
-    ),
+    encryptionConfig: EncryptionConfig(passphrase: 'my-secure-passphrase'),
   );
+
+  // Optionally enrol biometric unlock so the user is only prompted for their
+  // passphrase once per device (subject to ReauthPolicy — see above), not on
+  // every app launch:
+  await db.enableBiometricUnlock(FlutterBiometricKekProvider(dbDir: '/path/to/db'));
 
   runApp(MyApp(db: db));
 }
 ```
 
-#### DEK storage key
+On a later launch, unlock with the enrolled biometric instead:
 
-`FlutterSecureDekCache` derives a Keychain/Keystore key from the database path
-using `kmdb_dek_<base64url(utf8(path))>` (no padding). The key is stable as long
-as the database path is byte-identical across launches.
-
-**Path-stability caveat (iOS):** On iOS, the app sandbox container path can
-change after an OS restore or device migration. If it does, `read` returns
-`null` and the user is re-prompted for their passphrase — a graceful
-degradation, not data loss. The roadmap 0.07 `PlatformIdStore` abstraction is
-designed to provide a stable cross-path device identifier that will resolve this
-limitation; `FlutterSecureDekCache` is its intended first consumer.
+```dart
+final db = await KmdbDatabase.open(
+  path: '/path/to/db',
+  adapter: adapter,
+  encryptionConfig: EncryptionConfig.biometric(
+    FlutterBiometricKekProvider(dbDir: '/path/to/db'),
+  ),
+  secretStore: mySecretStore, // must be the SAME store instance/backing used at enrolment
+);
+```
 
 #### Web
 
-Web does not use `FlutterSecureDekCache`. The project's position is that DEKs
-are not persisted in browser storage (v1). Flutter web apps should omit the
-`dekCache` parameter (or use the default `InMemoryDekCache`) and re-derive the
-DEK from the passphrase on each page load. See RC-16 in
-`docs/spec/28_release_checklist.md` for the web Argon2id timing verification.
-
-#### Accessibility defaults
-
-| Platform | Default                                          |
-| :------- | :----------------------------------------------- |
-| iOS      | `KeychainAccessibility.first_unlock_this_device` |
-| macOS    | `KeychainAccessibility.first_unlock_this_device` |
-| Android  | `AndroidOptions()` (AES-GCM/NoPadding, RSA-OAEP) |
-
-The "this device" variant on iOS/macOS ensures the DEK is **never synced to
-iCloud Keychain**. Hosts that need tighter access control (biometric gate,
-Secure Enclave) can supply custom `IOSOptions`/`MacOsOptions`/`AndroidOptions`
-to the `FlutterSecureDekCache` constructor.
+Web has no `BiometricKekProvider` implementation (see _Platform Support_
+above — deferred, WebAuthn-PRF follow-up). Flutter web apps should use the
+passphrase path and re-derive the DEK from the passphrase on each page load —
+there is no DEK persisted in browser storage regardless (the project's
+position, unchanged from prior versions: DEKs are never persisted in browser
+storage). See RC-16 in `docs/spec/28_release_checklist.md` for the web
+Argon2id timing verification.
 
 #### `KmdbFlutter.initialize()` idempotency
 
@@ -675,7 +860,15 @@ require encryption to be enabled, and vice versa):
    passphrase (e.g. a lost or stolen phone). Because the DEK is wrapped under a
    passphrase-derived (Argon2id) KEK and never persisted in plaintext, an
    attacker who cannot supply the passphrase or recovery code cannot decrypt
-   document values from the on-disk database.
+   document values from the on-disk database. **This claim was false prior to
+   0.10.01 WI-5** (SC-1, 2026-07-18 release-readiness review): a warm session
+   DEK cache returned the DEK without ever checking the supplied passphrase,
+   so *any* string opened the database whenever the cache was warm — the
+   normal state on a recommended mobile configuration. The `DekCache`
+   interface has been removed entirely; see _Unlock Policy_ above for the
+   current wrapped-copy model and its still-honest limitations (biometric
+   unlock is a *bounded* convenience shortcut, not an exception to this
+   claim).
 
 Encryption is **not** designed to:
 

@@ -526,9 +526,11 @@ contention test that exercises the lease protocol.
   1. Argon2id key derivation completes in a reasonable time on a web browser
      (target: ≤ 5 s on a mid-range device) using the default parameters (m = 64
      MiB, t = 3, p = 1).
-  2. Re-deriving the KEK on every `KmdbDatabase.open()` call (because
-     `InMemoryDekCache` is session-scoped and does not persist across page
-     loads) is acceptable UX — or a loading indicator is shown.
+  2. Re-deriving the KEK on every `KmdbDatabase.open()` call (there is no DEK
+     cache at all as of 0.10.01 WI-5 — every open is an authenticated unwrap,
+     and web has no `BiometricKekProvider` to skip it with — see
+     `docs/spec/31_encryption.md`'s "Unlock Policy") is acceptable UX — or a
+     loading indicator is shown.
   3. The first encrypted write after `open()` succeeds (Argon2id is fully
      initialised before `open()` returns).
 - **Why not automated:** `dart test -p chrome` runs in a sandboxed Worker
@@ -595,13 +597,19 @@ contention test that exercises the lease protocol.
 
 ---
 
-### RC-18 — `kmdb_flutter`: DEK round-trip and native crypto acceleration
+### RC-18 — `kmdb_flutter`: biometric unlock round-trip and native crypto acceleration
 
 - **Area:** encryption / platform (Flutter mobile/desktop)
 - **Validates:**
-  1. `FlutterSecureDekCache` persists the DEK across app restarts: store DEK →
-     kill app process → relaunch → `read` returns the DEK without re-prompting
-     the user for their passphrase.
+  1. `FlutterBiometricKekProvider` round-trips across app restarts on real
+     biometric hardware: enrol (`KmdbDatabase.enableBiometricUnlock`) → kill
+     app process → relaunch → `EncryptionConfig.biometric(provider)` prompts
+     Face ID/Touch ID/Android biometric and unlocks without the passphrase.
+     (Confirms `obtainKek()`'s idempotent get-or-create contract holds across
+     a genuine process restart, not just repeated in-process calls — the unit
+     tests in `packages/kmdb_flutter/test/` use
+     `FlutterSecureStorage.setMockInitialValues`, which cannot exercise a real
+     platform biometric prompt at all.)
   2. `KmdbFlutter.initialize()` actually enables native AES-256-GCM and Argon2id
      hardware acceleration on a real device (i.e.
      `FlutterCryptography.isPluginPresent` is `true` after the call and
@@ -610,38 +618,45 @@ contention test that exercises the lease protocol.
      (Argon2id ≤ 2 s with native acceleration; the pure-Dart path may reach 10+
      s on low-end hardware).
 - **Why not automated:** `flutter_secure_storage` platform-channel calls are
-  mocked in `flutter_test`; the real Keychain/Keystore write-then-kill-then-read
-  cycle requires a physical or simulator device. Native crypto acceleration is
-  confirmed by `FlutterCryptography.isPluginPresent`, which is always `false`
-  under `flutter_test`. Timing depends on device hardware and cannot be asserted
-  in a headless test.
+  mocked in `flutter_test`, and the mock ignores `accessControlFlags`/
+  `enforceBiometrics` entirely — no unit test can trigger or verify a real
+  biometric authentication prompt, which requires a physical or simulator
+  device with an enrolled biometric. Native crypto acceleration is confirmed
+  by `FlutterCryptography.isPluginPresent`, which is always `false` under
+  `flutter_test`. Timing depends on device hardware and cannot be asserted in
+  a headless test.
 - **Applies when:** `kmdb_flutter` is introduced or updated; before any release
   that ships `kmdb_flutter` as a recommended add-on; after changes to
-  `FlutterSecureDekCache` or `KmdbFlutter.initialize()`.
-- **Prerequisites:** an iOS simulator or device (for Keychain) or Android
-  emulator/device (for Keystore); Xcode or Android Studio; Flutter SDK
-  installed.
+  `FlutterBiometricKekProvider` or `KmdbFlutter.initialize()`.
+- **Prerequisites:** an iOS simulator/device or Android emulator/device with a
+  biometric enrolled (Face ID/Touch ID/fingerprint — simulators support a
+  synthetic "enrolled" biometric for this purpose); Xcode or Android Studio;
+  Flutter SDK installed.
 - **Steps:**
   1. Build and run the `packages/kmdb_flutter/example/` app on an iOS simulator
-     or Android emulator.
-  2. Open an encrypted database with
-     `EncryptionConfig(passphrase: 'test', dekCache: FlutterSecureDekCache())`.
-     Verify the app opens without error.
+     or Android emulator with a biometric enrolled.
+  2. Provision an encrypted database with `EncryptionConfig(passphrase:
+     'test')`, then call `db.enableBiometricUnlock(FlutterBiometricKekProvider
+     (dbDir: dbPath))`. Verify it completes without error.
   3. Write a document (to confirm encryption is active) and close the app
      process (terminate, not just background).
-  4. Relaunch the app and reopen the same database path. Verify: a. No
-     passphrase prompt appears — the DEK was loaded from Keychain/Keystore. b.
-     The previously written document is readable.
+  4. Relaunch the app and reopen the same database path with
+     `EncryptionConfig.biometric(FlutterBiometricKekProvider(dbDir: dbPath))`.
+     Verify: a. A biometric prompt (Face ID/Touch ID/fingerprint) appears —
+     not a passphrase field. b. After authenticating, the previously written
+     document is readable.
   5. Inspect `FlutterCryptography.isPluginPresent` after
      `KmdbFlutter.initialize()`; confirm it is `true`.
   6. Time a passphrase unlock with and without `initialize()` on a mid-range
      device; confirm the native path is faster (target: ≤ 2 s; pure-Dart: ≥ 5
      s).
-- **Expected result:** steps 3–4 confirm DEK persistence; step 5 confirms plugin
-  registration; step 6 confirms measurable acceleration on real hardware.
-- **Related:** `docs/plans/completed/plan_kmdb_flutter.md`,
-  `docs/spec/31_encryption.md` (Flutter Integration subsection), RC-16 (web
-  Argon2id timing).
+- **Expected result:** steps 3–4 confirm the biometric wrap round-trips across
+  a real process restart with a genuine platform prompt; step 5 confirms
+  plugin registration; step 6 confirms measurable acceleration on real
+  hardware.
+- **Related:** `docs/plans/plan_0_10_01_unlock_policy.md`,
+  `docs/spec/31_encryption.md` ("Unlock Policy" / "Flutter Integration"
+  subsections), RC-16 (web Argon2id timing), RC-28, RC-29.
 
 ---
 
@@ -1100,6 +1115,106 @@ contention test that exercises the lease protocol.
   header.
 - **Related:** `docs/spec/34_sync_authentication.md`, RC-2, RC-9, RC-13,
   `docs/plans/completed/plan_0_10_01_sync_authentication.md`.
+
+---
+
+### RC-28 — Biometric enrolment invalidation (real hardware)
+
+- **Area:** encryption / platform (Flutter mobile)
+- **Validates:** that adding or removing a fingerprint/face on a real device
+  actually invalidates the `accessControlFlags: biometryCurrentSet` (iOS/
+  macOS) or `AndroidOptions.biometric(enforceBiometrics: true)` (Android) KEK
+  item, so `FlutterBiometricKekProvider.obtainKek()` fails on the next call —
+  surfacing to core as `EncryptionErrorCode.biometricUnavailable`
+  (fail-closed) rather than a stale or silently-succeeding read. The unit
+  tests in `packages/kmdb/test/encryption/unlock_policy_test.dart` and
+  `packages/kmdb_flutter/test/` *simulate* invalidation (deleting the
+  `SecretStore` entry directly / a mocked platform channel that ignores
+  access-control policy) precisely because there is no way to trigger a real
+  OS-level biometric-enrolment-change event from a headless test.
+- **Why not automated:** enrolling or removing a fingerprint/face requires
+  physical interaction with a device's biometric sensor (or simulator
+  biometric-enrollment menu) and cannot be scripted from `flutter_test` or
+  any CI runner.
+- **Applies when:** before any release that ships `FlutterBiometricKekProvider`
+  as a recommended unlock path; after changes to its `accessControlFlags`/
+  `AndroidOptions.biometric` configuration.
+- **Prerequisites:** an iOS simulator/device or Android emulator/device that
+  supports adding/removing a biometric enrollment (Simulator: Features →
+  Face ID/Touch ID → Enrolled, toggle off/on or "Non-matching Face"; Android
+  emulator: Settings → Security → biometric enrollment).
+- **Steps:**
+  1. On a device with a biometric enrolled, provision an encrypted database
+     and call `db.enableBiometricUnlock(FlutterBiometricKekProvider(dbDir:
+     dbPath))`.
+  2. Close and reopen with `EncryptionConfig.biometric(provider)`; confirm it
+     succeeds (sanity check).
+  3. Invalidate the enrollment: add a new fingerprint/face (iOS/macOS:
+     `accessControlFlags: biometryCurrentSet` invalidates on *any* enrollment
+     change, not just removal; Android: remove and re-add a fingerprint under
+     Settings).
+  4. Reopen with `EncryptionConfig.biometric(provider)` again. Confirm the
+     open throws (surfaces to the app as a failure to obtain the KEK — on
+     iOS/macOS this is typically a `PlatformException` from
+     `flutter_secure_storage` before `EncryptionError.biometricUnavailable`
+     is ever reached, since the KEK item itself is now unreadable at the
+     platform layer).
+  5. Confirm `EncryptionConfig(passphrase: 'test')` still opens the database
+     successfully (the passphrase path is unaffected by the invalidation).
+  6. Call `db.enableBiometricUnlock(provider)` again from that unlocked
+     session; confirm biometric unlock is restored.
+- **Expected result:** step 4 fails (never silently succeeds with stale
+  access); step 5 confirms the passphrase path survives invalidation
+  unaffected; step 6 confirms re-enrolment restores biometric unlock — the
+  full "auto-disable, passphrase required to reconfigure" cycle the design
+  claims (`docs/spec/31_encryption.md`, "Enrolment and Lock").
+- **Related:** `docs/plans/plan_0_10_01_unlock_policy.md`,
+  `docs/spec/31_encryption.md` ("Unlock Policy"), RC-18.
+
+### RC-29 — Coerced re-auth behaviour: `ReauthPolicy` on a real device
+
+- **Area:** encryption / platform (Flutter mobile)
+- **Validates:** that `ReauthPolicy`'s interval actually forces a passphrase
+  prompt on a real device after the interval lapses — the automated suite
+  (`packages/kmdb/test/encryption/reauth_policy_test.dart`) proves the
+  *policy logic* via an injected clock, but never exercises the real
+  human-facing flow: an app that enrolled biometric unlock, was used daily
+  for under 14 days, then wasn't opened for 15+ days, must fall back to
+  prompting for the passphrase rather than either (a) silently unlocking via
+  a stale biometric permission or (b) crashing/bricking.
+- **Why not automated:** requires the system clock to genuinely advance past
+  the interval (or the device's clock to be manually adjusted forward,
+  itself a manual, human-supervised step not safe to script against a shared
+  CI device), and requires observing the actual UI prompt an app built on
+  `kmdb_flutter` shows when `EncryptionError.biometricUnavailable` is thrown
+  — a UI-level integration point outside `kmdb`/`kmdb_flutter`'s own test
+  trees.
+- **Applies when:** before any release that ships `ReauthPolicy` as a
+  documented feature; after changes to the default interval or to
+  `ReauthPolicy.interval`'s enforcement in `KmdbDatabase.open()`.
+- **Prerequisites:** a device (real or simulator) whose system clock can be
+  manually advanced; a minimal host app wired to `kmdb_flutter` that catches
+  `EncryptionErrorCode.biometricUnavailable` and falls back to a passphrase
+  prompt.
+- **Steps:**
+  1. Provision an encrypted database and enrol biometric unlock. Confirm
+     biometric unlock succeeds.
+  2. Advance the device's system clock forward by 15 days (past the default
+     14-day interval).
+  3. Attempt to open with `EncryptionConfig.biometric(provider)`. Confirm the
+     app's fallback UI is shown (not a crash, not a silent open) and that
+     supplying the correct passphrase there succeeds.
+  4. Reset the device clock to the correct time afterward (required cleanup —
+     a skewed clock affects other host-app behaviour and, on a shared
+     device/simulator, other tests).
+- **Expected result:** step 3 demonstrates the real, human-visible
+  consequence of an interval lapse — a passphrase prompt, not a silent
+  bypass or crash — validating the "data-loss control" framing
+  `docs/spec/31_encryption.md`'s "Re-authentication Policy" section claims
+  for this feature.
+- **Related:** `docs/plans/plan_0_10_01_unlock_policy.md`,
+  `docs/spec/31_encryption.md` ("Re-authentication Policy" /
+  "Limitations"), RC-18, RC-28.
 
 ---
 

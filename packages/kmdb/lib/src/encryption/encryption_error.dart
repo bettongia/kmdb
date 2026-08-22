@@ -47,6 +47,29 @@ enum EncryptionErrorCode {
 
   /// AES-GCM encryption failed.
   encryptionFailed,
+
+  /// Biometric unlock ([KEKSource.biometric]) is unavailable: either no
+  /// biometric wrap has been enrolled for this database on this device (see
+  /// `KmdbDatabase.enableBiometricUnlock`), or the [ReauthPolicy] requires an
+  /// explicit passphrase because the re-authentication interval has lapsed.
+  ///
+  /// This is distinct from [badCredentials] — it does not mean the biometric
+  /// factor itself was presented and failed, only that the biometric
+  /// *pathway* cannot be used right now. The caller should retry
+  /// `KmdbDatabase.open` with a passphrase or recovery-code
+  /// [EncryptionConfig] (0.10.01 WI-5 — closes SC-1's "warm cache bypasses
+  /// the passphrase" defect by making every unwrap authenticated, including
+  /// this fail-closed gate on the biometric path).
+  biometricUnavailable,
+
+  /// The database's [EncryptionProvider] has been [KmdbDatabase.lock]ed —
+  /// its in-memory DEK has been discarded and it can no longer encrypt or
+  /// decrypt values.
+  ///
+  /// The caller must call `KmdbDatabase.open` again (a fresh unwrap) to
+  /// resume using the database; there is no in-place unlock on a locked
+  /// instance.
+  databaseLocked,
 }
 
 /// Exception thrown for all encryption-layer failures.
@@ -106,6 +129,29 @@ final class EncryptionError implements Exception {
         'Cannot provision encryption on a non-empty database. '
         'Only empty databases can be encrypted at creation time.',
       );
+
+  /// Constructs an [EncryptionErrorCode.biometricUnavailable] error.
+  ///
+  /// Thrown when a [KEKSource.biometric] config is supplied but no biometric
+  /// wrap is enrolled for this database on this device, or the re-auth
+  /// interval has lapsed. Fail-closed: never silently falls through to an
+  /// unauthenticated open.
+  factory EncryptionError.biometricUnavailable() => const EncryptionError(
+    EncryptionErrorCode.biometricUnavailable,
+    'Biometric unlock is unavailable — no enrolled biometric wrap for this '
+    'database on this device, or the re-authentication interval has '
+    'lapsed. Supply a passphrase or recovery-code EncryptionConfig instead.',
+  );
+
+  /// Constructs an [EncryptionErrorCode.databaseLocked] error.
+  ///
+  /// Thrown by [EncryptionProvider.encrypt]/[EncryptionProvider.decrypt]
+  /// calls made after [KmdbDatabase.lock] discarded the in-memory DEK.
+  factory EncryptionError.databaseLocked() => const EncryptionError(
+    EncryptionErrorCode.databaseLocked,
+    'Database is locked — the in-memory DEK has been discarded. Call '
+    'KmdbDatabase.open again to unlock it.',
+  );
 
   /// The kind of encryption failure.
   final EncryptionErrorCode code;

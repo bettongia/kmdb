@@ -79,6 +79,12 @@ final class _XorProvider implements EncryptionProvider {
   @override
   Future<String> indexToken(String message) async =>
       message.hashCode.toRadixString(16).padLeft(8, '0');
+
+  // Not exercised by this file's tests (which cover ValueCodec's
+  // encrypt/decrypt layering, not the WI-5 lock() semantics); a no-op stub
+  // satisfies the interface.
+  @override
+  void lock() {}
 }
 
 /// Wrong-key [EncryptionProvider] that always throws [EncryptionError.badCredentials].
@@ -104,6 +110,9 @@ final class _BadKeyProvider implements EncryptionProvider {
   @override
   Future<String> indexToken(String message) async =>
       throw const EncryptionError(EncryptionErrorCode.encryptionFailed, 'test');
+
+  @override
+  void lock() {}
 }
 
 void main() {

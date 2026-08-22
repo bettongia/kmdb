@@ -16,12 +16,12 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:googleapis_auth/auth_io.dart';
-import 'package:kmdb/kmdb.dart' show PairingCode, SecretStore, SyncSetKey;
+import 'package:kmdb/kmdb.dart'
+    show PairingCode, SecretStore, SyncSetKey, dbScopedSecretKey;
 import 'package:kmdb/kmdb_config.dart';
 import 'package:kmdb_google_drive/kmdb_google_drive.dart' show kDriveFileScope;
 
 import '../config/secret_store/directory_secret_store.dart';
-import '../config/secret_store/secret_key.dart';
 import '../config/sync_auth_key_store.dart';
 import 'command.dart';
 

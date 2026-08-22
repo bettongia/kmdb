@@ -12,16 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/// @docImport 'package:kmdb/src/secret/secret_store.dart';
+
 /// Unit tests for [dbScopedSecretKey]/[isSecretKeyForDb] — the per-database
-/// scope hash that keeps `kmdb credentials prune` from ever touching another
-/// database's secret in the globally-shared profile secret store. The
+/// scope hash that keeps a shared [SecretStore] (e.g. `kmdb_cli`'s
+/// `DirectorySecretStore`, or the unlock-policy bootstrap's biometric-wrap /
+/// re-auth-timestamp keys) from ever mixing up two databases' secrets. The
 /// boundary-safety and injectivity cases below are the ones a plain
-/// encoded-path prefix got wrong (QA finding, 2026-08-10).
+/// encoded-path prefix got wrong (QA finding, 2026-08-10, originally caught
+/// via `kmdb_cli`'s `credentials prune`, the first consumer of this
+/// function).
 library;
 
 import 'dart:io' as io;
 
-import 'package:kmdb_cli/src/config/secret_store/secret_key.dart';
+import 'package:kmdb/src/secret/secret_key.dart';
 import 'package:test/test.dart';
 
 void main() {

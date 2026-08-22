@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'package:kmdb/src/encryption/dek_cache.dart';
+import 'dart:typed_data';
+
+import 'package:kmdb/src/encryption/biometric_kek_provider.dart';
 import 'package:kmdb/src/encryption/encryption_config.dart';
 import 'package:kmdb/src/encryption/encryption_error.dart';
 import 'package:kmdb/src/engine/kvstore/kv_store.dart';
@@ -21,7 +23,22 @@ import 'package:kmdb/src/engine/util/key_codec.dart';
 import 'package:kmdb/src/query/kmdb_codec.dart';
 import 'package:kmdb/src/query/kmdb_collection.dart';
 import 'package:kmdb/src/query/kmdb_database.dart';
+import 'package:kmdb/src/secret/secret_store.dart';
 import 'package:test/test.dart';
+
+/// A [BiometricKekProvider] test double satisfying the idempotent
+/// get-or-create contract via a fixed KEK — enrolling and unlocking always
+/// derive the same key, matching a real platform implementation's behaviour
+/// as long as the underlying platform item has not been invalidated.
+final class _FakeBiometricKekProvider implements BiometricKekProvider {
+  _FakeBiometricKekProvider([Uint8List? kek])
+    : _kek = kek ?? Uint8List.fromList(List.generate(32, (i) => i));
+
+  final Uint8List _kek;
+
+  @override
+  Future<Uint8List> obtainKek() async => Uint8List.fromList(_kek);
+}
 
 // ── Test model ────────────────────────────────────────────────────────────────
 
@@ -57,8 +74,17 @@ final _keyGen = SequentialKeyGenerator();
 String _key() => _keyGen.next();
 
 /// Opens a fresh in-memory database with the given [encryptionConfig].
+///
+/// [secretStore] and [now] are threaded straight to [KmdbDatabase.open] so
+/// tests exercising the unlock policy (biometric enrolment, re-auth interval
+/// lapse) can share a durable [SecretStore] and an injectable clock across
+/// open/close cycles — the default (a fresh [InMemorySecretStore] per call)
+/// would otherwise silently discard the biometric wrap and re-auth timestamp
+/// on every reopen.
 Future<(KmdbDatabase, KmdbCollection<_Note>, MemoryStorageAdapter)> _openFresh({
   EncryptionConfig? encryptionConfig,
+  SecretStore? secretStore,
+  DateTime Function()? now,
 }) async {
   final adapter = MemoryStorageAdapter();
   final db = await KmdbDatabase.open(
@@ -66,21 +92,29 @@ Future<(KmdbDatabase, KmdbCollection<_Note>, MemoryStorageAdapter)> _openFresh({
     adapter: adapter,
     config: KvStoreConfig.forTesting(),
     encryptionConfig: encryptionConfig,
+    secretStore: secretStore,
+    now: now,
   );
   final col = db.collection(name: 'notes', codec: _codec);
   return (db, col, adapter);
 }
 
 /// Re-opens the same [adapter] with a new [KmdbDatabase].
+///
+/// See [_openFresh] for [secretStore]/[now].
 Future<(KmdbDatabase, KmdbCollection<_Note>)> _reopen(
   MemoryStorageAdapter adapter, {
   EncryptionConfig? encryptionConfig,
+  SecretStore? secretStore,
+  DateTime Function()? now,
 }) async {
   final db = await KmdbDatabase.open(
     path: '/db',
     adapter: adapter,
     config: KvStoreConfig.forTesting(),
     encryptionConfig: encryptionConfig,
+    secretStore: secretStore,
+    now: now,
   );
   final col = db.collection(name: 'notes', codec: _codec);
   return (db, col);
@@ -409,41 +443,62 @@ void main() {
     );
   });
 
-  // ── DEK cache integration ────────────────────────────────────────────────────
+  // ── Biometric enrolment (WI-5 unlock policy, Phase 1) ──────────────────────────
+  //
+  // The deeper edge-case matrix (enrolment-invalidation, re-auth interval
+  // lapse, disableBiometricUnlock, fail-closed-when-no-wrap) lives in
+  // unlock_policy_test.dart (Phase 5) — this group only exercises the
+  // enableBiometricUnlock API surface added in Phase 1, with a fake
+  // BiometricKekProvider per the plan's Phase 1 checklist.
 
-  group('DEK cache integration', () {
+  group('Biometric enrolment (Phase 1 smoke test)', () {
     test(
-      'InMemoryDekCache allows reopen without re-deriving from passphrase',
+      'enableBiometricUnlock + biometric reopen round-trips the same data',
       () async {
-        // Use the same DekCache instance across both open() calls.
-        // The second open() reads from InMemoryDekCache and skips Argon2id.
-        final cache = InMemoryDekCache();
+        // A single shared SecretStore across both open() calls — the default
+        // (a fresh InMemorySecretStore per open()) would silently discard the
+        // biometric wrap on reopen, since it is per-device *local* state
+        // (never the synced enc:blob).
+        final secretStore = InMemorySecretStore();
+        final provider = _FakeBiometricKekProvider();
+
         final result = await EncryptionConfig.createResult(
           passphrase: _kPassphrase,
-          dekCache: cache,
         );
-
         final (db1, col1, adapter) = await _openFresh(
           encryptionConfig: result.config,
+          secretStore: secretStore,
         );
         final id = _key();
-        await col1.put(_Note(id: id, text: 'cached-value'));
+        await col1.put(_Note(id: id, text: 'biometric-value'));
+
+        // Enrol biometric unlock from the unlocked session.
+        await db1.enableBiometricUnlock(provider);
         await db1.close();
 
-        // Second open — uses the same cache (DEK already stored, no Argon2id).
-        final unlockConfig = EncryptionConfig(
-          passphrase: _kPassphrase,
-          dekCache: cache,
-        );
+        // Reopen with a biometric EncryptionConfig — no passphrase supplied.
         final (db2, col2) = await _reopen(
           adapter,
-          encryptionConfig: unlockConfig,
+          encryptionConfig: EncryptionConfig.biometric(provider),
+          secretStore: secretStore,
         );
         final note = await col2.get(id);
-        expect(note?.text, equals('cached-value'));
+        expect(note?.text, equals('biometric-value'));
         await db2.close();
       },
       timeout: const Timeout(Duration(seconds: 120)),
+    );
+
+    test(
+      'enableBiometricUnlock throws StateError on a plaintext database',
+      () async {
+        final (db, _, _) = await _openFresh();
+        await expectLater(
+          () => db.enableBiometricUnlock(_FakeBiometricKekProvider()),
+          throwsA(isA<StateError>()),
+        );
+        await db.close();
+      },
     );
   });
 

@@ -114,9 +114,17 @@ melos:
 
     coverage:generate:
       description: Test all packages with coverage
+      # The `lcov --summary` here is a decorative per-package report — the real
+      # >=90% gate is the awk-parse in make_cicd.mk, which reads lcov's printed
+      # output through a pipe and so tolerates lcov's exit code. `|| true` keeps
+      # this informational summary from failing the build under lcov 2.0
+      # (ubuntu-noble runners), which — unlike lcov 1.x and 2.3+ — exits
+      # non-zero on Dart's line-only tracefiles ("functions/branches: no data
+      # found"). Coverage data itself is unaffected; test_with_coverage already
+      # gates real test/coverage-generation failures via the `&&`.
       run: |
         dart run coverage:test_with_coverage &&
-        lcov --ignore-errors empty --summary coverage/lcov.info
+        { lcov --ignore-errors empty --summary coverage/lcov.info || true; }
       exec:
         concurrency: 2
       packageFilters:
@@ -128,7 +136,10 @@ melos:
         - rm -rf $MELOS_ROOT_PATH/site/coverage
         - mkdir -p $MELOS_ROOT_PATH/site/coverage
         - coverage:aggregate
-        - lcov --summary site/coverage/lcov.info
+        # Decorative combined summary; see coverage:generate for why `|| true`
+        # (lcov 2.0 on ubuntu-noble exits non-zero on line-only tracefiles).
+        # The real >=90% gate is make_cicd.mk's awk-parse of this same output.
+        - lcov --ignore-errors empty --summary site/coverage/lcov.info || true
 
     coverage:aggregate:
       description: Combine the package coverage files

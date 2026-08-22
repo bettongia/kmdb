@@ -14,9 +14,11 @@
 
 import 'dart:typed_data';
 
-import 'dek_cache.dart';
+import 'biometric_kek_provider.dart';
 import 'encryption_provider.dart';
+import 'kek_source.dart';
 import 'key_derivation.dart';
+import 'reauth_policy.dart';
 import 'recovery_code.dart';
 
 /// Configures how an existing encrypted database is unlocked, or how a new
@@ -44,6 +46,17 @@ import 'recovery_code.dart';
 /// );
 /// ```
 ///
+/// Or with a biometric-gated KEK (see [EncryptionConfig.biometric] — requires
+/// prior enrolment via `KmdbDatabase.enableBiometricUnlock`):
+///
+/// ```dart
+/// final db = await KmdbDatabase.open(
+///   path: path,
+///   adapter: adapter,
+///   encryptionConfig: EncryptionConfig.biometric(myBiometricKekProvider),
+/// );
+/// ```
+///
 /// ## Creating a new encrypted database
 ///
 /// ```dart
@@ -58,35 +71,42 @@ import 'recovery_code.dart';
 /// print('Recovery code: ${result.recoveryCode}');
 /// ```
 ///
-/// ## DEK caching
+/// ## Unlock model (WI-5, closing SC-1)
 ///
-/// By default the [dekCache] is an [InMemoryDekCache] (the DEK is held for the
-/// current process lifetime only). On Flutter mobile/desktop, inject a
-/// `FlutterSecureDekCache` from the `kmdb_flutter` add-on package to persist
-/// the DEK across app restarts without re-prompting the user.
+/// There is no DEK cache. Every unlock — passphrase, recovery code, or
+/// biometric — goes through an authenticated unwrap of one of three wrapped
+/// copies of the DEK (see [KEKSource]); a warm cache can no longer bypass
+/// credential verification, which was SC-1 (a deliberately wrong passphrase
+/// used to silently open the database whenever a session cache was warm).
+/// [reauthPolicy] governs how long a biometric unlock remains valid before
+/// the passphrase is required again — see [ReauthPolicy].
 final class EncryptionConfig {
-  /// Creates an unlock config for an existing encrypted database.
+  /// Creates an unlock config for an existing encrypted database using a
+  /// user-supplied passphrase or recovery code.
   ///
-  /// Exactly one of [passphrase] or [recoveryCode] must be supplied.
+  /// Exactly one of [passphrase] or [recoveryCode] must be supplied. To
+  /// unlock with a biometric-gated KEK instead, use [EncryptionConfig.biometric].
   ///
-  /// [dekCache] is the session DEK cache. Defaults to [InMemoryDekCache].
-  /// Inject a `FlutterSecureDekCache` on Flutter mobile/desktop apps.
+  /// [reauthPolicy] is accepted for API symmetry with [EncryptionConfig.biometric]
+  /// but has no effect on this config — the re-authentication policy only
+  /// gates the biometric unlock path.
   EncryptionConfig({
     String? passphrase,
     String? recoveryCode,
-    DekCache? dekCache,
+    this.reauthPolicy = const ReauthPolicy.interval(Duration(days: 14)),
   }) : _passphrase = passphrase,
        _recoveryCode = recoveryCode,
+       _biometricProvider = null,
        _provisioning = false,
        _provisioningDek = null,
        _provisioningSalt = null,
-       _provisioningRecoveryEntropy = null,
-       dekCache = dekCache ?? InMemoryDekCache() {
+       _provisioningRecoveryEntropy = null {
     if (passphrase == null && recoveryCode == null) {
       throw ArgumentError(
         'Exactly one of passphrase or recoveryCode must be supplied to '
         'EncryptionConfig. To create a new encrypted database, use '
-        'EncryptionConfig.createResult().',
+        'EncryptionConfig.createResult(). To unlock with a biometric KEK, '
+        'use EncryptionConfig.biometric().',
       );
     }
     if (passphrase != null && recoveryCode != null) {
@@ -95,6 +115,29 @@ final class EncryptionConfig {
       );
     }
   }
+
+  /// Creates an unlock config for an existing encrypted database using a
+  /// biometric-gated KEK.
+  ///
+  /// [provider] must satisfy [BiometricKekProvider]'s idempotent
+  /// get-or-create contract. Requires that biometric unlock was previously
+  /// enrolled for this database on this device via
+  /// `KmdbDatabase.enableBiometricUnlock` — otherwise `KmdbDatabase.open`
+  /// throws [EncryptionErrorCode.biometricUnavailable] (fail-closed).
+  ///
+  /// [reauthPolicy] governs how long the biometric unlock remains valid
+  /// before the passphrase is required again. Defaults to a 14-day
+  /// [ReauthPolicy.interval].
+  EncryptionConfig.biometric(
+    BiometricKekProvider provider, {
+    this.reauthPolicy = const ReauthPolicy.interval(Duration(days: 14)),
+  }) : _passphrase = null,
+       _recoveryCode = null,
+       _biometricProvider = provider,
+       _provisioning = false,
+       _provisioningDek = null,
+       _provisioningSalt = null,
+       _provisioningRecoveryEntropy = null;
 
   /// Creates a provisioning config that creates a new encrypted database.
   ///
@@ -105,13 +148,13 @@ final class EncryptionConfig {
     required Uint8List dek,
     required Uint8List salt,
     required Uint8List recoveryEntropy,
-    DekCache? dekCache,
   }) : _recoveryCode = null,
+       _biometricProvider = null,
        _provisioning = true,
        _provisioningDek = dek,
        _provisioningSalt = salt,
        _provisioningRecoveryEntropy = recoveryEntropy,
-       dekCache = dekCache ?? InMemoryDekCache();
+       reauthPolicy = const ReauthPolicy.interval(Duration(days: 14));
 
   /// Creates a new [EncryptionConfig] that provisions encryption on a new
   /// database and returns it alongside the one-time recovery code.
@@ -130,7 +173,6 @@ final class EncryptionConfig {
   /// ```
   static Future<EncryptionSetupResult> createResult({
     required String passphrase,
-    DekCache? dekCache,
   }) async {
     // Generate fresh DEK, Argon2id salt, and recovery entropy.
     final dek = await KeyDerivation.generateDek();
@@ -143,7 +185,6 @@ final class EncryptionConfig {
       dek: dek,
       salt: salt,
       recoveryEntropy: recoveryEntropy,
-      dekCache: dekCache,
     );
     return EncryptionSetupResult(config: config, recoveryCode: recoveryCode);
   }
@@ -152,6 +193,7 @@ final class EncryptionConfig {
 
   final String? _passphrase;
   final String? _recoveryCode;
+  final BiometricKekProvider? _biometricProvider;
 
   /// Whether this config was created via [_provision] (creates a new DB).
   final bool _provisioning;
@@ -161,9 +203,10 @@ final class EncryptionConfig {
   final Uint8List? _provisioningSalt;
   final Uint8List? _provisioningRecoveryEntropy;
 
-  /// The DEK session cache. Stores the unwrapped DEK after the first unlock so
-  /// the user is not re-prompted for their passphrase each session.
-  final DekCache dekCache;
+  /// Governs how long a biometric unlock remains valid before
+  /// `KmdbDatabase.open` requires the passphrase again. Only meaningful for
+  /// configs created via [EncryptionConfig.biometric] — see [ReauthPolicy].
+  final ReauthPolicy reauthPolicy;
 
   /// Whether this config will provision a new encrypted database.
   ///
@@ -172,6 +215,22 @@ final class EncryptionConfig {
   /// `false` → this is an unlock config; the existing wrapped DEK is
   ///           unwrapped with the supplied credentials.
   bool get isProvisioning => _provisioning;
+
+  /// The [KEKSource] this config selects for unlock.
+  ///
+  /// Only valid for unlock configs (i.e. [isProvisioning] is `false`) — the
+  /// encryption bootstrap consults this to pick the unwrap branch. Exactly
+  /// one of the three constructors ([EncryptionConfig.new],
+  /// [EncryptionConfig.biometric]) set the corresponding private field, so
+  /// this always resolves to a single, unambiguous source for a
+  /// non-provisioning config.
+  KEKSource get kekSource {
+    final provider = _biometricProvider;
+    if (provider != null) return KEKSource.biometric(provider);
+    final passphrase = _passphrase;
+    if (passphrase != null) return KEKSource.passphrase(passphrase);
+    return KEKSource.recoveryCode(_recoveryCode!);
+  }
 
   // ── Internal bootstrap API ─────────────────────────────────────────────────
 
@@ -243,6 +302,20 @@ final class EncryptionConfig {
     if (kek == null) return null;
     return KeyDerivation.unwrapDek(wrappedDek, kek);
   }
+
+  /// Unwraps [wrappedDek] using [kek] — a thin wrapper over
+  /// [KeyDerivation.unwrapDek] for the biometric path.
+  ///
+  /// Unlike [tryUnwrapWithPassphrase]/[tryUnwrapWithRecovery], the KEK is
+  /// supplied directly rather than derived from this config's fields: the
+  /// caller (the encryption bootstrap) obtains it from this config's
+  /// [BiometricKekProvider] and reads the wrapped DEK from the per-device
+  /// `SecretStore` before calling this. Returns `null` if the GCM tag does
+  /// not match (wrong or stale KEK).
+  Future<Uint8List?> tryUnwrapWithBiometric(
+    Uint8List wrappedDek,
+    Uint8List kek,
+  ) => KeyDerivation.unwrapDek(wrappedDek, kek);
 
   /// Wraps [dek] under the passphrase KEK derived from [salt].
   ///

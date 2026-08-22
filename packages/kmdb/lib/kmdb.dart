@@ -164,8 +164,8 @@ export 'src/vault/search/vault_search_hit.dart'
     show VaultSearchResult, VaultSearchHit, VaultChunkContext;
 export 'src/vault/search/vault_indexing_status.dart' show VaultIndexingStatus;
 
-// ── Encryption (Phase 12) ─────────────────────────────────────────────────────
-export 'src/encryption/dek_cache.dart' show DekCache, InMemoryDekCache;
+// ── Encryption (Phase 12; unlock policy 0.10.01 WI-5) ──────────────────────────
+export 'src/encryption/biometric_kek_provider.dart' show BiometricKekProvider;
 export 'src/encryption/encryption_blob.dart' show EncryptionBlob;
 export 'src/encryption/encryption_config.dart'
     show EncryptionConfig, EncryptionSetupResult;
@@ -173,8 +173,11 @@ export 'src/encryption/encryption_error.dart'
     show EncryptionError, EncryptionErrorCode;
 export 'src/encryption/encryption_provider.dart'
     show EncryptionProvider, AesGcmEncryptionProvider;
+export 'src/encryption/kek_source.dart' show KEKSource;
+export 'src/encryption/reauth_policy.dart' show ReauthPolicy;
 export 'src/encryption/value_context.dart' show ValueContext;
 
-// ── Secret storage (WI-4 SecretStore precursor) ────────────────────────────────
+// ── Secret storage (WI-4 SecretStore precursor; WI-5 unlock policy) ────────────
+export 'src/secret/secret_key.dart' show dbScopedSecretKey, isSecretKeyForDb;
 export 'src/secret/secret_store.dart'
     show SecretStore, InMemorySecretStore, SecretPermissionException;

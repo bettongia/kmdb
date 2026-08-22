@@ -31,10 +31,9 @@
 /// @docImport 'remote_config.dart';
 library;
 
-import 'package:kmdb/kmdb.dart' show SecretStore, SyncSetKey;
+import 'package:kmdb/kmdb.dart' show SecretStore, SyncSetKey, dbScopedSecretKey;
 
 import 'secret_store/directory_secret_store.dart';
-import 'secret_store/secret_key.dart';
 
 /// Returns the [SecretStore] key under which [remoteName]'s [SyncSetKey] is
 /// stored, scoped to [dbDir].

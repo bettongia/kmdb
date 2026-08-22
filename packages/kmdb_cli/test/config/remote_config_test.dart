@@ -18,7 +18,6 @@ import 'dart:typed_data';
 import 'package:googleapis_auth/googleapis_auth.dart';
 import 'package:kmdb/kmdb.dart';
 import 'package:kmdb_cli/src/config/remote_config.dart';
-import 'package:kmdb_cli/src/config/secret_store/secret_key.dart';
 import 'package:test/test.dart';
 
 import '../support/fake_secret_store.dart';
