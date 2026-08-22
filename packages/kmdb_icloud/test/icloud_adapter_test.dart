@@ -858,9 +858,13 @@ void main() {
   // The test is NOT part of per-commit CI; it is registered in the release
   // checklist as RC-13.
   group('iCloud real-service integration', () {
-    test('placeholder: e2e tests run with ICLOUD_TEST_CONTAINER set', () {
-      // Intentionally empty — the real e2e path is manual (RC-13).
-    }, skip: 'Credential-gated; run manually with ICLOUD_TEST_CONTAINER set');
+    test(
+      'placeholder: e2e tests run with ICLOUD_TEST_CONTAINER set',
+      () {
+        // Intentionally empty — the real e2e path is manual (RC-13).
+      },
+      skip: 'Credential-gated; run manually with ICLOUD_TEST_CONTAINER set',
+    );
   }, tags: ['e2e']);
 }
 

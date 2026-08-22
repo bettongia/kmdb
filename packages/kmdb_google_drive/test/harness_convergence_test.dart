@@ -87,18 +87,22 @@ void main() {
       timeout: const Timeout(Duration(seconds: 60)),
     );
 
-    test('three devices converge via the shared Drive simulator', () async {
-      final manager = TestManager(
-        config: _driveSimulatorConfig(
-          deviceCount: 3,
-          durationSeconds: 2,
+    test(
+      'three devices converge via the shared Drive simulator',
+      () async {
+        final manager = TestManager(
+          config: _driveSimulatorConfig(
+            deviceCount: 3,
+            durationSeconds: 2,
+            seed: 22222,
+          ),
           seed: 22222,
-        ),
-        seed: 22222,
-      );
-      final report = await manager.run();
-      expect(report.passed, isTrue, reason: report.toString());
-    }, timeout: const Timeout(Duration(seconds: 90)));
+        );
+        final report = await manager.run();
+        expect(report.passed, isTrue, reason: report.toString());
+      },
+      timeout: const Timeout(Duration(seconds: 90)),
+    );
 
     test(
       'SimulatorQuotaAdapter.safeOperationThreshold reflects Drive quota',

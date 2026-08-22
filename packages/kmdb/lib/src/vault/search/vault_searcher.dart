@@ -716,14 +716,14 @@ final class VaultSearcher<T> {
       final adapter = _vaultStore.adapter;
       if (!await adapter.fileExists(chunksPath) ||
           !await adapter.fileExists(textPath)) {
-        return await _placeholderContext(sha256, fieldPath);
+        return _placeholderContext(sha256, fieldPath);
       }
 
       final chunksBytes = await _manager.readExtractArtifact(chunksPath);
       final chunksList = json.decode(utf8.decode(chunksBytes)) as List;
 
       if (chunksList.isEmpty) {
-        return await _placeholderContext(sha256, fieldPath);
+        return _placeholderContext(sha256, fieldPath);
       }
 
       // Build a VaultRef for this sha256 and wire it to the store so callers
