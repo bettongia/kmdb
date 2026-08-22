@@ -37,12 +37,20 @@ final class _OrderingProbeAdapter extends LocalDirectoryAdapter {
   /// released; completing it lets the write (and thus the unlock) proceed.
   final Completer<void> gate;
 
+  /// Completed the instant `writeViaTempRename` is entered (before it suspends
+  /// on [gate]). The test awaits this rather than polling a fixed number of
+  /// event-loop turns — the dart:io open/lock/read that precedes the gated
+  /// write can take arbitrarily long on a slow or contended CI runner, so a
+  /// turn-count poll under-waits there. Awaiting this signal is deterministic.
+  final Completer<void> reachedWrite = Completer<void>();
+
   /// Ordering of events observed during a `compareAndSwap` call.
   final List<String> log = [];
 
   @override
   Future<bool> writeViaTempRename(File file, Uint8List bytes) async {
     log.add('write:start');
+    if (!reachedWrite.isCompleted) reachedWrite.complete();
     await gate.future;
     final result = await super.writeViaTempRename(file, bytes);
     log.add('write:end');
@@ -389,14 +397,17 @@ void main() {
         ifMatchEtag: etag,
       );
 
-      // Pump the event loop until the call reaches the gated write. This
-      // bounded poll (not a fixed-count pump) tolerates the real
-      // dart:io async file-open/lock/read I/O that precedes the gated
-      // call, without over-fitting to a specific number of event-loop
-      // turns.
-      for (var i = 0; i < 100 && probe.log.isEmpty; i++) {
-        await Future<void>.delayed(Duration.zero);
-      }
+      // Wait deterministically until the call reaches the gated write, rather
+      // than polling a fixed number of event-loop turns. The dart:io
+      // open/lock/read that precedes the gated write completes on its own
+      // schedule — a turn-count poll under-waits on a slow/contended CI runner
+      // (observed: an empty log after 100 zero-delay turns), which is exactly
+      // the I/O-timing fragility this seam exists to avoid.
+      await probe.reachedWrite.future.timeout(
+        const Duration(seconds: 30),
+        onTimeout: () =>
+            fail('compareAndSwap never reached the gated writeViaTempRename'),
+      );
       expect(probe.log, contains('write:start'));
 
       // The crux of the regression: on the unfixed code (a bare `return`
