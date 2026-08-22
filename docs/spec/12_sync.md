@@ -988,8 +988,16 @@ to enforce the contract:
   others get an exception mapped to `false`.
 - **Update-if-match** (`ifMatchEtag != null`): an exclusive `fcntl` advisory
   lock (`FileLock.blockingExclusive`) is acquired on the existing file before
-  re-reading its ETag, ensuring the read-compare-write sequence is serialised
-  against other cooperative processes on the same host.
+  re-reading its ETag and is held until the write completes, serialising the
+  read-compare-write **among cooperating processes that open the file's current
+  inode before any writer replaces it**. Because the write is applied via
+  temp-file + `rename` (for crash-atomicity), it swaps in a *new* inode while
+  the lock is held on the original; a second writer that opened the path before
+  that rename can therefore still lose an update once the lock is released. This
+  residual open-before-rename window is a deliberate scope boundary — the only
+  atomic-update caller is single-coordinator lease renewal, which is never
+  issued concurrently — see the `_updateWithLock` doc-comment for the full
+  rationale and the crash-atomicity-vs-lost-update tradeoff.
 
 These primitives are effective for the intra-host, multi-process use case (e.g.
 two CLI processes or two app instances sharing a local sync directory). They do

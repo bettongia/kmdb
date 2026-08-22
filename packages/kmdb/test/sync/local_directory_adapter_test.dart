@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -19,6 +20,41 @@ import 'package:kmdb/src/sync/local/local_directory_adapter.dart';
 import 'package:test/test.dart';
 
 import 'package:kmdb/test_support.dart';
+
+/// Test double for the `_updateWithLock` ordering-probe regression test.
+///
+/// Overrides the two `@visibleForTesting`/`@protected` seams
+/// ([LocalDirectoryAdapter.writeViaTempRename] and
+/// [LocalDirectoryAdapter.releaseLock]) to record an ordering [log] and to
+/// let the test hold the write open on a [gate] `Completer` while the lock
+/// is still held — deterministically proving the lock is not released until
+/// the write actually completes.
+final class _OrderingProbeAdapter extends LocalDirectoryAdapter {
+  _OrderingProbeAdapter(super.rootPath, {required this.gate})
+    : super(atomicCas: true);
+
+  /// Held open by the test until it has asserted the lock is not yet
+  /// released; completing it lets the write (and thus the unlock) proceed.
+  final Completer<void> gate;
+
+  /// Ordering of events observed during a `compareAndSwap` call.
+  final List<String> log = [];
+
+  @override
+  Future<bool> writeViaTempRename(File file, Uint8List bytes) async {
+    log.add('write:start');
+    await gate.future;
+    final result = await super.writeViaTempRename(file, bytes);
+    log.add('write:end');
+    return result;
+  }
+
+  @override
+  Future<void> releaseLock(RandomAccessFile raf) async {
+    log.add('unlock');
+    await super.releaseLock(raf);
+  }
+}
 
 void main() {
   // Non-atomic mode (default): conformance suite runs with expectAtomicCas=false.
@@ -308,5 +344,83 @@ void main() {
     );
     final etag2 = await adapter.getEtag('f');
     expect(etag1, isNot(equals(etag2)));
+  });
+
+  // ── _updateWithLock unlock/write ordering regression ────────────────────────
+  //
+  // Regression test for the unlock-ordering bug fixed alongside this test:
+  // `_updateWithLock`'s locked `try` block used to `return` the write's
+  // future without `await`ing it, so the enclosing `finally` (which unlocks
+  // and closes the file handle) ran *before* the write completed. A
+  // concurrent cooperating writer could then acquire the lock and begin its
+  // own compare-and-write while the first writer's temp-rename was still in
+  // flight. A golden-path assertion (write succeeds, bytes correct) passes
+  // both before and after the fix, so it cannot guard this — this test
+  // instead observes the *ordering* of events via two test-only seams
+  // (`writeViaTempRename` / `releaseLock`), gated on a `Completer` so the
+  // result is deterministic rather than dependent on I/O scheduling.
+  group('LocalDirectoryAdapter _updateWithLock ordering (atomicCas: true)', () {
+    late Directory orderingTempDir;
+    setUp(() {
+      orderingTempDir = Directory.systemTemp.createTempSync('lda_ordering_');
+    });
+    tearDown(() {
+      if (orderingTempDir.existsSync()) {
+        orderingTempDir.deleteSync(recursive: true);
+      }
+    });
+
+    test('unlock is observed only after the write completes, not while it is '
+        'still in flight', () async {
+      final gate = Completer<void>();
+      final probe = _OrderingProbeAdapter(orderingTempDir.path, gate: gate);
+
+      // Seed the file and capture its ETag so compareAndSwap takes the
+      // *update* path (_updateWithLock), not create-if-absent.
+      await probe.upload('f', Uint8List.fromList([1]));
+      final etag = await probe.getEtag('f');
+
+      // Fire compareAndSwap without awaiting: it will reach the gated
+      // writeViaTempRename override and suspend there, still holding the
+      // advisory lock.
+      final future = probe.compareAndSwap(
+        'f',
+        Uint8List.fromList([2]),
+        ifMatchEtag: etag,
+      );
+
+      // Pump the event loop until the call reaches the gated write. This
+      // bounded poll (not a fixed-count pump) tolerates the real
+      // dart:io async file-open/lock/read I/O that precedes the gated
+      // call, without over-fitting to a specific number of event-loop
+      // turns.
+      for (var i = 0; i < 100 && probe.log.isEmpty; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(probe.log, contains('write:start'));
+
+      // The crux of the regression: on the unfixed code (a bare `return`
+      // of the write's future, not `return await`), the `finally` block
+      // runs immediately once the statement executes — releasing the
+      // lock before the write completes — so `unlock` would already be
+      // in the log at this point. On the fixed code, `_updateWithLock`
+      // is suspended on the `await`, so `finally` (and thus `unlock`)
+      // has not run yet.
+      expect(
+        probe.log,
+        isNot(contains('unlock')),
+        reason:
+            'the advisory lock must not be released before the write '
+            'completes',
+      );
+
+      // Let the write proceed and complete the call.
+      gate.complete();
+      final result = await future;
+
+      expect(result, isTrue);
+      expect(probe.log, equals(['write:start', 'write:end', 'unlock']));
+      expect(await probe.download('f'), equals(Uint8List.fromList([2])));
+    });
   });
 }

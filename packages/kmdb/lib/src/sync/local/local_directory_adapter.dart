@@ -18,6 +18,8 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:meta/meta.dart';
+
 import '../../engine/util/xxhash.dart';
 import '../sync_context.dart';
 import '../sync_storage_adapter.dart';
@@ -71,7 +73,14 @@ import '../sync_storage_adapter.dart';
 /// // True local disk shared between processes on the same host: opt in.
 /// final adapter = LocalDirectoryAdapter('/var/lib/kmdb-sync', atomicCas: true);
 /// ```
-final class LocalDirectoryAdapter implements SyncStorageAdapter {
+// This is a `base` class (not `final`) so that
+// `local_directory_adapter_test.dart` can `extend` it with a test-only
+// subclass that overrides the `writeViaTempRename`/`releaseLock` seams (see
+// their doc comments below). `base` still forbids `implements` from outside
+// this library, so callers cannot bypass the concrete filesystem behaviour
+// via a fake implementing [SyncStorageAdapter]'s interface through this
+// class.
+base class LocalDirectoryAdapter implements SyncStorageAdapter {
   /// Creates a [LocalDirectoryAdapter] rooted at [rootPath].
   ///
   /// [rootPath] is the base directory for all remote paths. It is created if
@@ -161,7 +170,7 @@ final class LocalDirectoryAdapter implements SyncStorageAdapter {
       // gates on [providesAtomicCas] so this path is only reached when the
       // caller has acknowledged the racy semantics (atomicCas: false).
       if (file.existsSync()) return false;
-      return _writeViaTempRename(file, newBytes);
+      return writeViaTempRename(file, newBytes);
     }
 
     // ETag provided — update only if the current ETag matches.
@@ -171,7 +180,7 @@ final class LocalDirectoryAdapter implements SyncStorageAdapter {
     // Non-atomic fallback: racy read-check-write.
     final currentEtag = await getEtag(path);
     if (currentEtag != ifMatchEtag) return false;
-    return _writeViaTempRename(file, newBytes);
+    return writeViaTempRename(file, newBytes);
   }
 
   /// Atomically creates [file] with [bytes] using `File.create(exclusive: true)`
@@ -188,7 +197,7 @@ final class LocalDirectoryAdapter implements SyncStorageAdapter {
     return true;
   }
 
-  /// Monotonic counter mixed into [_writeViaTempRename]'s temp filename.
+  /// Monotonic counter mixed into [writeViaTempRename]'s temp filename.
   ///
   /// A microsecond timestamp alone is not a reliable uniqueness source under
   /// concurrent contention: multiple `compareAndSwap` calls issued in the
@@ -203,7 +212,17 @@ final class LocalDirectoryAdapter implements SyncStorageAdapter {
   /// Writes [bytes] to [file] via a temp-file rename. Returns `true` on
   /// success; swallows rename errors (another concurrent writer won) and
   /// returns `false`.
-  Future<bool> _writeViaTempRename(File file, Uint8List bytes) async {
+  ///
+  /// This is only `@visibleForTesting`/`@protected` rather than private so
+  /// that a test subclass can override it to observe write-completion timing
+  /// (see `local_directory_adapter_test.dart`'s ordering-probe test, which
+  /// gates this method on a `Completer` to deterministically prove
+  /// [_updateWithLock] releases its lock only after the write finishes). It
+  /// is not part of the public API and must not be called from outside this
+  /// class or its test doubles.
+  @visibleForTesting
+  @protected
+  Future<bool> writeViaTempRename(File file, Uint8List bytes) async {
     final tmpPath =
         '${file.path}.cas-tmp-${DateTime.now().microsecondsSinceEpoch}'
         '-${_tmpCounter++}';
@@ -221,9 +240,26 @@ final class LocalDirectoryAdapter implements SyncStorageAdapter {
   }
 
   /// Updates [file] with [newBytes] if and only if the current content hash
-  /// matches [expectedEtag]. Uses an advisory lock to serialise concurrent
-  /// writers within the same process (and across processes on the same host
-  /// that cooperate via `fcntl` advisory locks).
+  /// matches [expectedEtag].
+  ///
+  /// The advisory lock serialises the read-compare-write **only among
+  /// writers that open [file]'s current inode before any writer renames a
+  /// replacement over it** (cooperating processes on the same host, since
+  /// `RandomAccessFile.lock` maps to `flock`/`fcntl` on POSIX). It does
+  /// **not** close the following residual window: [writeViaTempRename]
+  /// replaces the path with a *new* inode (temp file + `rename`), while the
+  /// lock is held on the *original* inode via `raf`. A second cooperative
+  /// writer that opened the path before the first writer's rename holds a
+  /// handle to the now-stale inode; once the first writer releases the lock,
+  /// the second re-reads through its own (stale) handle, can match the
+  /// pre-update ETag, and overwrite the first writer's change. This is a
+  /// deliberate scope boundary, not an oversight: the only production caller
+  /// of the atomic *update* path is `ConsolidationCoordinator` lease renewal,
+  /// which a single coordinator does not issue concurrently, so real-world
+  /// exposure is low. Closing it fully would require mutating in place
+  /// through the locked `raf` (same inode throughout), which trades away the
+  /// crash-atomicity that the temp-rename pattern provides — a tension this
+  /// project resolves in favour of crash-atomicity here.
   Future<bool> _updateWithLock(
     File file,
     String resolvedPath,
@@ -252,13 +288,38 @@ final class LocalDirectoryAdapter implements SyncStorageAdapter {
       final lockedBytes = await raf.read(length);
       final lockedEtag = XxHash64.toHex(XxHash64.digest(lockedBytes));
       if (lockedEtag != expectedEtag) return false;
-      return _writeViaTempRename(file, newBytes);
+      // `await` here (not a bare `return`) is load-bearing: `finally` below
+      // releases the lock and closes the handle, and must only run once the
+      // write (temp write + fsync + rename) has actually completed —
+      // otherwise a concurrent cooperating writer can acquire the lock and
+      // begin its own compare-and-write while this write is still in
+      // flight, reintroducing the lost-update race this method exists to
+      // prevent. Note this does not change the boolean returned to the
+      // caller: an `async` function already flattens `return futureValue;`
+      // to await it, so `compareAndSwap`'s caller always waited for the
+      // write either way — the only behavioural change is the ordering of
+      // the unlock/close relative to the write's completion.
+      return await writeViaTempRename(file, newBytes);
     } finally {
-      try {
-        await raf.unlock();
-      } catch (_) {}
-      await raf.close();
+      await releaseLock(raf);
     }
+  }
+
+  /// Releases the advisory lock on [raf] and closes the handle.
+  ///
+  /// Extracted from [_updateWithLock]'s `finally` block purely as a test
+  /// seam: `@visibleForTesting`/`@protected` so a test subclass can override
+  /// it to log when the unlock actually happens, which is how
+  /// `local_directory_adapter_test.dart`'s ordering-probe test proves the
+  /// unlock happens after (not during) [writeViaTempRename]. Not part of the
+  /// public API.
+  @visibleForTesting
+  @protected
+  Future<void> releaseLock(RandomAccessFile raf) async {
+    try {
+      await raf.unlock();
+    } catch (_) {}
+    await raf.close();
   }
 
   @override
