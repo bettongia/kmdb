@@ -1,6 +1,6 @@
 # LocalDirectoryAdapter: await the write before the lock is released (CAS ordering)
 
-**Status**: Questions
+**Status**: Investigated
 
 **PR link**: _(none yet)_
 
@@ -48,7 +48,15 @@ The one-line fix is unambiguous, but two decisions must be made before an
 implementer can execute mechanically. See the **Reviewer notes (2026-08-22)**
 section for the full reasoning behind each.
 
-- [ ] **Q1 — Pin exactly one test strategy (blocking).** The plan currently
+- [x] **Q1 — Pin exactly one test strategy (blocking).**
+      **DECISION (2026-08-22, user): the deterministic gated-seam ordering
+      probe** (the reviewer's recommended approach — see Reviewer notes). Add the
+      two `@visibleForTesting @protected` seams and assert the
+      `[write:start, write:end, unlock]` ordering; do not rely on the
+      non-deterministic contention test or on lint-as-guard. The test-only seams
+      in production code are accepted as within the project's fault-injection
+      mandate. The reviewer's numbered recipe below is the spec to implement.
+      The plan currently
       offers two under-specified options and tells the implementer to "land
       whichever most reliably fails." Neither is directly implementable as
       written, and one is unreliable:
@@ -76,8 +84,18 @@ section for the full reasoning behind each.
         real multi-process contention — but note the lint is inactive until
         the 3.13.1 toolchain migration lands, leaving a coverage gap until
         then.
-- [ ] **Q2 — Is the fix actually sufficient for the advertised guarantee?
-      (blocking)** `_writeViaTempRename` replaces the target *path* with a
+- [x] **Q2 — Is the fix actually sufficient for the advertised guarantee?
+      (blocking)** **DECISION (2026-08-22, user): the residual lost-update window
+      is OUT OF SCOPE — option (a).** Keep the crash-atomic temp-rename, fix the
+      ordering bug, and **narrow the class doc-comment** so it advertises only
+      what the fix guarantees (the lock serialises the read-compare-write among
+      cooperative writers that opened the *same inode* before any rename; it does
+      not close the open-before-rename lost-update window). Rationale: the only
+      atomic-update caller is single-coordinator lease renewal (no concurrent
+      renewals — negligible exposure), and switching to in-place truncate+write
+      would trade away crash-atomicity, which this project weights heavily.
+      Q1's test therefore asserts **ordering only** (unlock-after-write), not
+      cross-inode atomicity. `_writeViaTempRename` replaces the target *path* with a
       **new inode** (temp file + `rename`), but the advisory lock is held on
       the **original inode** via `raf`. A second cooperative writer that opens
       the path *before* the rename gets a handle to the old inode, blocks on
@@ -99,7 +117,7 @@ section for the full reasoning behind each.
       `raf` (keeps the lock and mutation on the same inode, but trades away
       the crash-atomicity temp-rename provides — a real tension worth an
       explicit call). Q2's answer also determines what Q1's test must assert.
-- [ ] **Q3 — (informational, no decision) returned-bool semantics.** Confirmed
+- [x] **Q3 — (informational, no decision) returned-bool semantics.** Confirmed
       that `return await` does **not** change the boolean returned to the
       caller. An `async` function already flattens `return futureValue;`, so
       the caller of `compareAndSwap` always waited for the write regardless;
@@ -121,22 +139,39 @@ section for the full reasoning behind each.
   lock and closes the handle.
 - **Testing — must exercise the ordering, not just the result.** A golden-path
   assertion (write succeeds, bytes correct) passes both before and after the
-  fix, so it does not guard the bug. Prefer a fault-injection / instrumentation
-  approach against the durability-blind trap called out in CLAUDE.md:
-  - Option A: wrap/observe the adapter so the test can assert that at the moment
-    `unlock()`/`close()` are invoked, the temp-rename has already happened
-    (e.g. via a `FaultyStorageAdapter`-style hook or a spy on file ops).
-  - Option B: a concurrency test — two `compareAndSwap(atomicCas: true)` calls
-    contending on the same key; assert last-writer-wins semantics hold and no
-    interleaving corrupts the file (this should be flaky-before / stable-after).
-  Land whichever most reliably fails on the unfixed code.
+  fix, so it does not guard the bug. **The test strategy is now pinned (Q1
+  decision): the deterministic gated-seam ordering probe** specified in the
+  Reviewer notes numbered recipe and captured in the Implementation plan. The
+  two earlier options considered here (a `FaultyStorageAdapter`-style hook, and
+  a two-writer contention test) were rejected — the former is a category error
+  (`FaultyStorageAdapter` implements the wrong interface) and the latter is
+  non-deterministic. See the Q1 note above for the full reasoning.
 
 ## Implementation plan
 
 - [ ] Change `:255` to `return await _writeViaTempRename(file, newBytes);` with a
       comment explaining the lock/close ordering (do not disturb `:164`/`:174`).
-- [ ] Add a regression test under `packages/kmdb/test/…/local_directory_adapter…`
-      that fails on the current code and passes after the fix (see Investigation).
+      Note in the comment (per Q3) that this does **not** change the boolean
+      returned to the caller — only that the `finally` now runs after the write.
+- [ ] **Add the two test seams (Q1 decision).** Rename `_writeViaTempRename` to a
+      `@visibleForTesting @protected writeViaTempRename` (callsites dispatch
+      through `this`), and extract the `finally` body's unlock+close into a
+      `@visibleForTesting @protected releaseLock(raf)` that the `finally` calls.
+      Document both as test seams.
+- [ ] **Add the deterministic ordering-probe regression test** under
+      `packages/kmdb/test/…/local_directory_adapter…`, per the reviewer's numbered
+      recipe: a test subclass gates `writeViaTempRename` on a `Completer`, logs
+      `write:start`/`write:end`/`unlock`, seeds the file + captures its ETag to
+      force the *update* path, calls `compareAndSwap` without awaiting, pumps the
+      loop, asserts `unlock` is **not** yet logged (fails on unfixed code),
+      then completes the gate and asserts final order
+      `[write:start, write:end, unlock]`.
+- [ ] **Narrow the class doc-comment (Q2 decision).** Restate the atomic-update
+      guarantee to what temp-rename+lock actually delivers — the lock serialises
+      the compare-and-write among writers that opened the same inode before any
+      rename — and explicitly note the open-before-rename lost-update window is
+      not closed (out of scope; low exposure via single-coordinator lease
+      renewal).
 - [ ] Confirm existing `LocalDirectoryAdapter` tests still pass.
 
 **Final step — QA sign-off and pre-commit:**
@@ -212,11 +247,34 @@ lint-as-guard + a release-checklist entry (next free is RC-28 per §28) for a
 real two-process contention run on a local POSIX filesystem — and say so
 explicitly in the plan rather than leaving it to the implementer.
 
-**Implementation-readiness verdict.** Blocked on Q1 and Q2. The fix line is
-mechanical, but "add a test" is not yet executable: the two offered options are
-respectively non-implementable and non-deterministic, and Q2 may change the
-write mechanism (and therefore what the test asserts). Resolve Q1+Q2, pin the
-single test, and this is ready for `Investigated`.
+**Implementation-readiness verdict (round 2, 2026-08-22 — Investigated).**
+Q1 and Q2 are resolved and recorded; Q3 confirmed. Re-verified against HEAD:
+`:255`/`:164`/`:174`, the `try`/`finally` at `:246–261`, and the sole
+atomic-update caller (`consolidation_coordinator.dart:412`) are as described.
+Mechanical-readiness checks all pass:
+
+- The seam design is executable: `writeViaTempRename` has three in-class
+  callsites (`:164`, `:174`, `:255`) that dispatch virtually through `this`, so
+  a test subclass override intercepts them; `releaseLock(raf)` cleanly extracts
+  the `finally` body. `meta: ^1.18.3` is already a direct dependency and
+  `@visibleForTesting` has precedent in `lib/` (`fts_manager.dart`,
+  `vault_indexing_isolate.dart`) — the implementer only needs to add the
+  `package:meta/meta.dart` import (trivial).
+- I traced the gated ordering probe for both forms: unfixed `return future`
+  runs the `finally` before the write completes → `unlock` present after a loop
+  pump → assertion fails as required; fixed `return await` suspends
+  `_updateWithLock` on the gate → `unlock` absent → passes, final order
+  `[write:start, write:end, unlock]`. Deterministic, no I/O timing.
+- The chosen strategy is fully automatable, so **no release-checklist (RC)
+  entry is required** — the RC-28 fallback path was not taken.
+- Test target is the existing `test/sync/local_directory_adapter_test.dart`
+  (or a sibling); the class doc-comment to narrow is the `_updateWithLock`
+  doc block at `:223–226`.
+
+One stale contradiction was found and fixed during this pass: the Investigation
+"Testing" bullet still offered the two rejected options as a live choice; it now
+points to the pinned Q1 decision. No open questions remain. **Ready — status set
+to `Investigated`.**
 
 ## Summary
 

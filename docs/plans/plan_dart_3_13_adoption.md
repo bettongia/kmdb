@@ -23,24 +23,33 @@ the repo cannot benefit from 3.13.1's analyzer/lint improvements.
 
 Adopting 3.13.1 is **not** a pure version bump — it was attempted in PR #75
 (commit `011fe65`, reverted by `git revert`) and failed CI on a real,
-reproducible external-dependency incompatibility. That blocker must be resolved
-before the pins move.
+reproducible external-dependency incompatibility. **That blocker is now
+resolved** (see the two ✅ questions below); the remaining work is mechanical.
 
 ## Open questions
 
-- [ ] **Why does `betto_pdfium` fail to index on Linux under Dart 3.13.1?**
-      The `database_opener_test.dart` "lexical hits over plain/HTML/Markdown/PDF"
-      test reported `VaultIndexingStatus(total: 4, indexed: 3, … failed: 1)` on
-      the CI Linux runner (twice, not a flake); it passes on macOS/3.13.1 and on
-      Linux/3.12.2. By elimination the failing blob is the **PDF** fixture — the
-      only fixture backed by a native library. Root cause is unknown: likely a
-      `code_assets` (1.2.1 → 2.0.0 available) / `native_toolchain_c`
-      (0.19.3 → 0.19.4 available) native-assets API change in 3.13 that
-      betto_pdfium's build hook does not yet handle on Linux.
-- [ ] **Where does the fix land?** `betto_pdfium` is an **external package**
-      (https://github.com/bettongia/pdfium), pinned via `dependency_overrides`.
-      The fix is most likely an upstream change in that repo (rebuild hook for
-      code_assets 2.0), released and re-pinned here — not a change in kmdb.
+- [x] **Why does `betto_pdfium` fail to index on Linux under Dart 3.13.1?**
+      **RESOLVED (2026-08-22).** Not a native-build regression and not a
+      `code_assets`/`native_toolchain_c` API change — betto_pdfium builds and
+      loads on every platform under 3.13. The real cause: in a **Pub workspace**,
+      `dart test` run from a member package (`packages/kmdb_cli`) stages the
+      bundled `libpdfium.so` to the **workspace root** `.dart_tool/lib/`, not the
+      member's own. betto_pdfium's runtime loader (`_openLibrary`) probed only
+      `$cwd/.dart_tool/lib/` (the member dir) → miss; the bare-name
+      `LD_LIBRARY_PATH` fallback then fails inside PDFium's **spawned isolate**
+      (which does not inherit the test runner's `LD_LIBRARY_PATH`) →
+      `cannot open shared object file`, swallowed into the blob's `failed`
+      status. Confirmed via the throwaway `diag-313` workflow (runs 32549820366 /
+      32549986422). betto_pdfium's own CI never hit it because its tests inject
+      an explicit dylib path via `nativeDylibPath()`, bypassing bundled-asset
+      resolution. Surfaced under 3.13 only because 3.13 changed workspace
+      native-asset staging behaviour.
+- [x] **Where does the fix land?** **RESOLVED.** Upstream in `betto_pdfium`
+      ([PR #5](https://github.com/bettongia/pdfium/pull/5), merged) — a walk-up
+      helper (`dartToolLibCandidates`) that probes each ancestor's
+      `.dart_tool/lib/` on Linux/macOS/Windows. Released as **0.1.0-dev.4**
+      (published to pub.dev 2026-08-22). kmdb re-pins to `0.1.0-dev.4`; no kmdb
+      code change needed for the loader itself.
 - [ ] **Are other native-asset consumers affected on Linux/3.13.1?**
       Check `betto_zstd` (native-asset build hook, used everywhere) and
       `betto_onnxrt` (semantic search) — do their Linux native builds still work
@@ -76,9 +85,20 @@ reverted) — carry these forward so they are not rediscovered:
      `return _placeholderContext(…)` inside the try; fix with `return await` so
      the (unlikely) errors route through the enclosing rethrow/catch handlers.
 
-3. **The blocker — pdfium on Linux.** As above (open questions). This is the
-   only thing that actually failed CI; format + analyze + the full kmdb/kmdb_cli
-   test suites and the macOS/Windows/web jobs all went green under 3.13.1.
+3. **The blocker — pdfium on Linux — RESOLVED.** Root-caused to a Pub-workspace
+   native-library resolution gap (staging at the workspace root, loader probing
+   only the member dir); fixed upstream in betto_pdfium 0.1.0-dev.4 (see the ✅
+   open questions above). This was the only thing that actually failed CI; format
+   + analyze + the full kmdb/kmdb_cli test suites and the macOS/Windows/web jobs
+   all went green under 3.13.1. Adoption now just re-pins the dependency and moves
+   the toolchain pins.
+
+   > **Diagnostic scaffolding — already cleaned up (2026-08-22).** The throwaway
+   > `.github/workflows/diag_313.yml` and the `[DART313-DIAG]` prints (two in
+   > `vault_search_manager.dart`, one in `pdf_text_extractor.dart`) lived only on
+   > branch `20260822_dart_3_13_isolate_diag`, which has been **deleted (local +
+   > remote)**. `main` never carried the marker — verified clean. No revert on
+   > `main` is needed.
 
 4. **CI pin mechanics.** `cicd.yml` has four `dart-lang/setup-dart` jobs
    (`sdk:`) and two `subosito/flutter-action` jobs. Both must move together:
@@ -98,12 +118,18 @@ reverted) — carry these forward so they are not rediscovered:
 
 Sequenced so the blocker is resolved before the pins move.
 
-- [ ] **Investigate & fix the pdfium Linux break.** Reproduce on a Linux
-      environment under Dart 3.13.1; identify the native-assets API change; fix
-      in the `betto_pdfium` repo (likely code_assets 2.0 build-hook migration);
-      publish and re-pin the override here. Confirm
-      `packages/kmdb_cli/test/database_opener_test.dart` "lexical hits over …
-      PDF" indexes all 4 fixtures on Linux/3.13.1.
+- [x] **Fix the pdfium Linux break — DONE.** Root-caused (Pub-workspace
+      native-library resolution) and fixed upstream in betto_pdfium
+      ([PR #5](https://github.com/bettongia/pdfium/pull/5)), published as
+      **0.1.0-dev.4** (2026-08-22). Remaining kmdb-side action is the re-pin
+      below and the final Linux/3.13.1 verification.
+- [ ] **Re-pin `betto_pdfium` to `0.1.0-dev.4`** in the root `pubspec.yaml`
+      `dependency_overrides` (currently a `git`/older pin) and `dart pub upgrade`.
+      Confirm `packages/kmdb_cli/test/database_opener_test.dart` "lexical hits
+      over … PDF" indexes all 4 fixtures on Linux/3.13.1.
+- [ ] **Delete the diagnostic scaffolding** — the throwaway `diag-313` workflow
+      and the three `[DART313-DIAG]` prints (see Investigation §3). Verify `main`
+      is clean of the marker before adoption.
 - [ ] **Confirm other native consumers on Linux/3.13.1** (betto_zstd,
       betto_onnxrt) — see open questions.
 - [ ] **Bump CI pins** in `.github/workflows/cicd.yml`: `setup-dart sdk` →
