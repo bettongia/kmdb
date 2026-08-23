@@ -109,22 +109,19 @@ void main() {
       },
     );
 
-    test(
-      'throws ArgumentError when vecIndexes is non-empty but embeddingModel is null',
-      () async {
-        final vec = VecIndexDefinition(collection: 'docs', field: 'body');
-        await expectLater(
-          () => _openDb(vecIndexes: [vec]),
-          throwsA(
-            isA<ArgumentError>().having(
-              (e) => e.message,
-              'message',
-              contains('embeddingModel is required'),
-            ),
+    test('throws ArgumentError when vecIndexes is non-empty but embeddingModel is null', () async {
+      final vec = VecIndexDefinition(collection: 'docs', field: 'body');
+      await expectLater(
+        () => _openDb(vecIndexes: [vec]),
+        throwsA(
+          isA<ArgumentError>().having(
+            (e) => e.message,
+            'message',
+            contains('embeddingModel is required'),
           ),
-        );
-      },
-    );
+        ),
+      );
+    });
 
     test(
       'opens successfully with vecIndexes and provided embeddingModel',

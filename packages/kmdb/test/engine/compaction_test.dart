@@ -111,10 +111,8 @@ void main() {
 
       final r1 = await SstableReader.open('$_sstDir/a.sst', adapter);
       final r2 = await SstableReader.open('$_sstDir/b.sst', adapter);
-      final merged = await MergeIterator([
-        r1.scan(),
-        r2.scan(),
-      ]).entries.toList();
+      final merged = await MergeIterator([r1.scan(), r2.scan()]).entries
+          .toList();
 
       expect(merged.length, equals(4));
       // Verify ascending order.
@@ -134,10 +132,8 @@ void main() {
       // Source 0 = new (index 0 = higher priority).
       final rNew = await SstableReader.open('$_sstDir/new.sst', adapter);
       final rOld = await SstableReader.open('$_sstDir/old.sst', adapter);
-      final merged = await MergeIterator([
-        rNew.scan(),
-        rOld.scan(),
-      ]).entries.toList();
+      final merged = await MergeIterator([rNew.scan(), rOld.scan()]).entries
+          .toList();
 
       expect(merged.length, equals(1));
       expect(merged[0].value, equals(_val(99)));
@@ -219,9 +215,8 @@ void main() {
       expect(reader.entryCount, equals(4));
 
       // Manifest should reflect the new state.
-      final state = await ManifestReader(
-        adapter: adapter,
-      ).replay(_manifestPath);
+      final state = await ManifestReader(adapter: adapter)
+          .replay(_manifestPath);
       expect(state.levels[1]!.map((m) => m.filename), contains(outFilename));
       expect(state.levels[0], isEmpty);
     });

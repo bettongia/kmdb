@@ -13,7 +13,9 @@
 // limitations under the License.
 
 import '../../commands/command.dart';
+
 import 'package:kmdb/kmdb_config.dart';
+
 import '../../database_opener.dart';
 import '../dot_command.dart';
 import '../prompt.dart';
@@ -26,8 +28,10 @@ import '../session_state.dart';
 /// Callback used by `.open` to replace the current [CommandContext].
 ///
 /// Returns the new context, or `null` if opening failed.
-typedef OpenCallback =
-    Future<CommandContext?> Function(String dbPath, SessionState state);
+typedef OpenCallback = Future<CommandContext?> Function(
+  String dbPath,
+  SessionState state,
+);
 
 /// `.open <path>` — closes the current database and opens a new one.
 ///

@@ -264,56 +264,53 @@ void main() {
     // Regression tests for the monotonic-epoch fix. The wallClock is injectable
     // so the tests can simulate an NTP clock jump backwards.
 
-    test(
-      'epoch is monotonically greater after clock-backwards acquisition',
-      () async {
-        // Clock starts at a high value. Device A acquires a lease with this
-        // epoch and lets it expire (TTL=0 by setting expiresAt in the past).
-        const clockHigh = 1_000_000;
-        final clockLow = 900_000; // simulates NTP correction backwards
+    test('epoch is monotonically greater after clock-backwards acquisition', () async {
+      // Clock starts at a high value. Device A acquires a lease with this
+      // epoch and lets it expire (TTL=0 by setting expiresAt in the past).
+      const clockHigh = 1_000_000;
+      final clockLow = 900_000; // simulates NTP correction backwards
 
-        // Step 1: write an expired lease directly to simulate a prior acquisition
-        // by any device (could be us, could be a peer).
-        final expiredLease = ConsolidationLease(
-          holder: 'otherdev',
-          acquiredAt: clockHigh,
-          expiresAt: 1, // already expired at any nowMs > 1
-          epoch: clockHigh,
-          inputFiles: ['a.sst'],
-        );
-        await cloudAdapter.upload(
-          '$syncRoot/.consolidation-lease',
-          expiredLease.toBytes(),
-        );
+      // Step 1: write an expired lease directly to simulate a prior acquisition
+      // by any device (could be us, could be a peer).
+      final expiredLease = ConsolidationLease(
+        holder: 'otherdev',
+        acquiredAt: clockHigh,
+        expiresAt: 1, // already expired at any nowMs > 1
+        epoch: clockHigh,
+        inputFiles: ['a.sst'],
+      );
+      await cloudAdapter.upload(
+        '$syncRoot/.consolidation-lease',
+        expiredLease.toBytes(),
+      );
 
-        // Step 2: Device B's clock has jumped backwards to clockLow. It acquires
-        // the lease. Without the fix, epoch = clockLow = 900_000 < 1_000_000.
-        // With the fix, epoch = max(clockHigh + 1, clockLow) = 1_000_001.
-        final clockBackwards = _FixedClock(clockLow);
-        final coordinatorB = ConsolidationCoordinator(
-          deviceId: deviceId,
-          cloudAdapter: cloudAdapter,
-          localAdapter: localAdapter,
-          syncRoot: syncRoot,
-          dbDir: dbDir,
-          config: ConsolidationConfig.forTesting(),
-          wallClock: clockBackwards.call,
-        );
+      // Step 2: Device B's clock has jumped backwards to clockLow. It acquires
+      // the lease. Without the fix, epoch = clockLow = 900_000 < 1_000_000.
+      // With the fix, epoch = max(clockHigh + 1, clockLow) = 1_000_001.
+      final clockBackwards = _FixedClock(clockLow);
+      final coordinatorB = ConsolidationCoordinator(
+        deviceId: deviceId,
+        cloudAdapter: cloudAdapter,
+        localAdapter: localAdapter,
+        syncRoot: syncRoot,
+        dbDir: dbDir,
+        config: ConsolidationConfig.forTesting(),
+        wallClock: clockBackwards.call,
+      );
 
-        final newLease = await coordinatorB.acquireLease(['b.sst']);
-        expect(newLease, isNotNull, reason: 'should succeed — expired lease');
-        // The new epoch must exceed the prior epoch regardless of clock direction.
-        expect(
-          newLease!.epoch,
-          greaterThan(clockHigh),
-          reason:
-              'epoch must be monotonically greater than prior epoch '
-              '(was $clockHigh), got ${newLease.epoch}',
-        );
-        // Specifically: max(1_000_000 + 1, 900_000) = 1_000_001.
-        expect(newLease.epoch, equals(clockHigh + 1));
-      },
-    );
+      final newLease = await coordinatorB.acquireLease(['b.sst']);
+      expect(newLease, isNotNull, reason: 'should succeed — expired lease');
+      // The new epoch must exceed the prior epoch regardless of clock direction.
+      expect(
+        newLease!.epoch,
+        greaterThan(clockHigh),
+        reason:
+            'epoch must be monotonically greater than prior epoch '
+            '(was $clockHigh), got ${newLease.epoch}',
+      );
+      // Specifically: max(1_000_000 + 1, 900_000) = 1_000_001.
+      expect(newLease.epoch, equals(clockHigh + 1));
+    });
 
     test('epoch equals nowMs when no prior lease exists', () async {
       // No lease file present — first-ever acquisition. Epoch should be nowMs.

@@ -515,30 +515,27 @@ void main() {
 
   // ── rawCollection via KmdbDatabase.collection() equivalence ──────────────
 
-  group(
-    'rawCollection equivalence to collection(name:, codec:RawDocumentCodec())',
-    () {
-      test(
-        'rawCollection and manual RawDocumentCodec collection behave identically',
-        () async {
-          final db = await _open();
+  group('rawCollection equivalence to collection(name:, codec:RawDocumentCodec())', () {
+    test(
+      'rawCollection and manual RawDocumentCodec collection behave identically',
+      () async {
+        final db = await _open();
 
-          final raw = db.rawCollection('things');
-          final manual = db.collection(
-            name: 'things',
-            codec: const RawDocumentCodec(),
-          );
+        final raw = db.rawCollection('things');
+        final manual = db.collection(
+          name: 'things',
+          codec: const RawDocumentCodec(),
+        );
 
-          // Write via rawCollection and read back via manual collection.
-          final inserted = await raw.insert({'x': 1});
-          final key = inserted['_id'] as String;
+        // Write via rawCollection and read back via manual collection.
+        final inserted = await raw.insert({'x': 1});
+        final key = inserted['_id'] as String;
 
-          final retrieved = await manual.get(key);
-          expect(retrieved!['x'], equals(1));
+        final retrieved = await manual.get(key);
+        expect(retrieved!['x'], equals(1));
 
-          await db.close();
-        },
-      );
-    },
-  );
+        await db.close();
+      },
+    );
+  });
 }

@@ -323,9 +323,8 @@ void main() {
         await store.flush();
 
         final manifestName = await _currentManifest(adapter);
-        final edits = await ManifestReader(
-          adapter: adapter,
-        ).replayEdits('$_dbDir/$manifestName');
+        final edits = await ManifestReader(adapter: adapter)
+            .replayEdits('$_dbDir/$manifestName');
 
         var filesSeen = 0;
         for (final edit in edits) {
@@ -468,9 +467,8 @@ void main() {
 
         // Read the manifest and find the add edit for the peer file.
         final manifestName = await _currentManifest(adapter);
-        final edits = await ManifestReader(
-          adapter: adapter,
-        ).replayEdits('$_dbDir/$manifestName');
+        final edits = await ManifestReader(adapter: adapter)
+            .replayEdits('$_dbDir/$manifestName');
 
         final ingestMeta = _findIngestMeta(edits, peerFilename);
         expect(
@@ -576,9 +574,8 @@ void main() {
       // The file must never appear in the manifest — it was rejected
       // before the VersionEdit that would have admitted it was appended.
       final manifestName = await _currentManifest(inner);
-      final edits = await ManifestReader(
-        adapter: inner,
-      ).replayEdits('$_dbDir/$manifestName');
+      final edits = await ManifestReader(adapter: inner)
+          .replayEdits('$_dbDir/$manifestName');
 
       expect(_findIngestMeta(edits, peerFilename), isNull);
     });
@@ -601,9 +598,8 @@ void main() {
 
       // Capture source metadata for files owned by _deviceId before rename.
       final manifestNameBefore = await _currentManifest(adapter);
-      final stateBefore = await ManifestReader(
-        adapter: adapter,
-      ).replay('$_dbDir/$manifestNameBefore');
+      final stateBefore = await ManifestReader(adapter: adapter)
+          .replay('$_dbDir/$manifestNameBefore');
 
       final sourceMetaMap = <String, SstableMeta>{};
       for (final metas in stateBefore.levels.values) {
@@ -622,9 +618,8 @@ void main() {
 
       // Read the rename VersionEdit from the manifest.
       final manifestNameAfter = await _currentManifest(adapter);
-      final edits = await ManifestReader(
-        adapter: adapter,
-      ).replayEdits('$_dbDir/$manifestNameAfter');
+      final edits = await ManifestReader(adapter: adapter)
+          .replayEdits('$_dbDir/$manifestNameAfter');
 
       final addedByNew = <String, SstableMeta>{};
       for (final edit in edits) {

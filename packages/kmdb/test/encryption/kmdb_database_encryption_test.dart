@@ -147,71 +147,61 @@ void main() {
 
   // ── State 4: provisioning (no blob, create config) ────────────────────────────
 
-  group(
-    'Encrypted database provisioning (State 4)',
-    () {
-      test(
-        'createResult returns a config and a 16-word recovery code',
-        () async {
-          final result = await EncryptionConfig.createResult(
-            passphrase: _kPassphrase,
-          );
-          expect(result.recoveryCode.split(' '), hasLength(16));
-          expect(result.config.isProvisioning, isTrue);
-        },
+  group('Encrypted database provisioning (State 4)', () {
+    test('createResult returns a config and a 16-word recovery code', () async {
+      final result = await EncryptionConfig.createResult(
+        passphrase: _kPassphrase,
       );
+      expect(result.recoveryCode.split(' '), hasLength(16));
+      expect(result.config.isProvisioning, isTrue);
+    });
 
-      test('provisioned database opens successfully', () async {
-        final result = await EncryptionConfig.createResult(
-          passphrase: _kPassphrase,
-        );
-        final (db, col, adapter) = await _openFresh(
-          encryptionConfig: result.config,
-        );
-        await db.close();
-        expect(col, isNotNull);
-        expect(adapter, isNotNull);
-      });
-
-      test('put and get round-trips in an encrypted database', () async {
-        final result = await EncryptionConfig.createResult(
-          passphrase: _kPassphrase,
-        );
-        final (db, col, _) = await _openFresh(encryptionConfig: result.config);
-        final id = _key();
-        await col.put(_Note(id: id, text: 'secret'));
-        final note = await col.get(id);
-        expect(note?.text, equals('secret'));
-        await db.close();
-      });
-
-      test(
-        'provisioning on a non-empty database throws cannotProvisionNonEmptyDatabase',
-        () async {
-          // Open plaintext, insert data, close.
-          final (db1, col1, adapter) = await _openFresh();
-          await col1.put(_Note(id: _key(), text: 'data'));
-          await db1.close();
-
-          // Now try to provision encryption — must fail.
-          final result = await EncryptionConfig.createResult(
-            passphrase: _kPassphrase,
-          );
-          expect(
-            () async => _reopen(adapter, encryptionConfig: result.config),
-            throwsA(
-              isA<EncryptionError>().having(
-                (e) => e.code,
-                'code',
-                EncryptionErrorCode.cannotProvisionNonEmptyDatabase,
-              ),
-            ),
-          );
-        },
+    test('provisioned database opens successfully', () async {
+      final result = await EncryptionConfig.createResult(
+        passphrase: _kPassphrase,
       );
-    },
-    timeout: const Timeout(Duration(seconds: 120)),
-  );
+      final (db, col, adapter) = await _openFresh(
+        encryptionConfig: result.config,
+      );
+      await db.close();
+      expect(col, isNotNull);
+      expect(adapter, isNotNull);
+    });
+
+    test('put and get round-trips in an encrypted database', () async {
+      final result = await EncryptionConfig.createResult(
+        passphrase: _kPassphrase,
+      );
+      final (db, col, _) = await _openFresh(encryptionConfig: result.config);
+      final id = _key();
+      await col.put(_Note(id: id, text: 'secret'));
+      final note = await col.get(id);
+      expect(note?.text, equals('secret'));
+      await db.close();
+    });
+
+    test('provisioning on a non-empty database throws cannotProvisionNonEmptyDatabase', () async {
+      // Open plaintext, insert data, close.
+      final (db1, col1, adapter) = await _openFresh();
+      await col1.put(_Note(id: _key(), text: 'data'));
+      await db1.close();
+
+      // Now try to provision encryption — must fail.
+      final result = await EncryptionConfig.createResult(
+        passphrase: _kPassphrase,
+      );
+      expect(
+        () async => _reopen(adapter, encryptionConfig: result.config),
+        throwsA(
+          isA<EncryptionError>().having(
+            (e) => e.code,
+            'code',
+            EncryptionErrorCode.cannotProvisionNonEmptyDatabase,
+          ),
+        ),
+      );
+    });
+  }, timeout: const Timeout(Duration(seconds: 120)));
 
   // ── State 5: unlock (blob present, config supplied) ───────────────────────────
 
@@ -267,45 +257,38 @@ void main() {
       timeout: const Timeout(Duration(seconds: 120)),
     );
 
-    test(
-      'wrong passphrase throws EncryptionError.badCredentials',
-      () async {
-        final result = await EncryptionConfig.createResult(
-          passphrase: _kPassphrase,
-        );
-        final (db1, _, adapter) = await _openFresh(
-          encryptionConfig: result.config,
-        );
-        await db1.close();
+    test('wrong passphrase throws EncryptionError.badCredentials', () async {
+      final result = await EncryptionConfig.createResult(
+        passphrase: _kPassphrase,
+      );
+      final (db1, _, adapter) = await _openFresh(
+        encryptionConfig: result.config,
+      );
+      await db1.close();
 
-        final wrongConfig = EncryptionConfig(passphrase: 'wrong-passphrase');
-        await expectLater(
-          () async => _reopen(adapter, encryptionConfig: wrongConfig),
-          throwsA(
-            isA<EncryptionError>().having(
-              (e) => e.code,
-              'code',
-              EncryptionErrorCode.badCredentials,
-            ),
+      final wrongConfig = EncryptionConfig(passphrase: 'wrong-passphrase');
+      await expectLater(
+        () async => _reopen(adapter, encryptionConfig: wrongConfig),
+        throwsA(
+          isA<EncryptionError>().having(
+            (e) => e.code,
+            'code',
+            EncryptionErrorCode.badCredentials,
           ),
-        );
+        ),
+      );
 
-        // The failed open must not leak the store it partially opened before
-        // the bootstrap threw — that store already holds the exclusive LOCK,
-        // so a leaked lock would surface here as a LockException on retry
-        // with the correct passphrase (regression test for the resource leak
-        // that caused Windows CI temp-dir cleanup failures: a partial open
-        // failing after KvStoreImpl.open() but before KmdbDatabase.open()
-        // returns left the lock — and, on Windows, real file handles — held
-        // for the caller's process lifetime).
-        final (db2, _) = await _reopen(
-          adapter,
-          encryptionConfig: result.config,
-        );
-        await db2.close();
-      },
-      timeout: const Timeout(Duration(seconds: 120)),
-    );
+      // The failed open must not leak the store it partially opened before
+      // the bootstrap threw — that store already holds the exclusive LOCK,
+      // so a leaked lock would surface here as a LockException on retry
+      // with the correct passphrase (regression test for the resource leak
+      // that caused Windows CI temp-dir cleanup failures: a partial open
+      // failing after KvStoreImpl.open() but before KmdbDatabase.open()
+      // returns left the lock — and, on Windows, real file handles — held
+      // for the caller's process lifetime).
+      final (db2, _) = await _reopen(adapter, encryptionConfig: result.config);
+      await db2.close();
+    }, timeout: const Timeout(Duration(seconds: 120)));
 
     test(
       'multiple documents are stored encrypted and readable after reopen',
@@ -342,31 +325,27 @@ void main() {
   // ── State 2: encrypted DB opened without config ──────────────────────────────
 
   group('Encrypted database opened without config (State 2)', () {
-    test(
-      'throws EncryptionError.databaseIsEncrypted',
-      () async {
-        final result = await EncryptionConfig.createResult(
-          passphrase: _kPassphrase,
-        );
-        final (db1, _, adapter) = await _openFresh(
-          encryptionConfig: result.config,
-        );
-        await db1.close();
+    test('throws EncryptionError.databaseIsEncrypted', () async {
+      final result = await EncryptionConfig.createResult(
+        passphrase: _kPassphrase,
+      );
+      final (db1, _, adapter) = await _openFresh(
+        encryptionConfig: result.config,
+      );
+      await db1.close();
 
-        // Open without supplying any encryption config.
-        expect(
-          () async => _reopen(adapter),
-          throwsA(
-            isA<EncryptionError>().having(
-              (e) => e.code,
-              'code',
-              EncryptionErrorCode.databaseIsEncrypted,
-            ),
+      // Open without supplying any encryption config.
+      expect(
+        () async => _reopen(adapter),
+        throwsA(
+          isA<EncryptionError>().having(
+            (e) => e.code,
+            'code',
+            EncryptionErrorCode.databaseIsEncrypted,
           ),
-        );
-      },
-      timeout: const Timeout(Duration(seconds: 120)),
-    );
+        ),
+      );
+    }, timeout: const Timeout(Duration(seconds: 120)));
   });
 
   // ── State 3: unlock config on plaintext DB ────────────────────────────────────
@@ -505,72 +484,64 @@ void main() {
   // ── Passphrase change ────────────────────────────────────────────────────────
 
   group('Passphrase change', () {
-    test(
-      'data is accessible after changing the passphrase',
-      () async {
-        const newPassphrase = 'new-passphrase-456';
+    test('data is accessible after changing the passphrase', () async {
+      const newPassphrase = 'new-passphrase-456';
 
-        // Provision with the initial passphrase and write some data.
-        final result = await EncryptionConfig.createResult(
-          passphrase: _kPassphrase,
-        );
-        final (db1, col1, adapter) = await _openFresh(
-          encryptionConfig: result.config,
-        );
-        final id = _key();
-        await col1.put(_Note(id: id, text: 'before-passphrase-change'));
+      // Provision with the initial passphrase and write some data.
+      final result = await EncryptionConfig.createResult(
+        passphrase: _kPassphrase,
+      );
+      final (db1, col1, adapter) = await _openFresh(
+        encryptionConfig: result.config,
+      );
+      final id = _key();
+      await col1.put(_Note(id: id, text: 'before-passphrase-change'));
 
-        // Change the passphrase while the database is still open.
-        await db1.changePassphrase(
-          currentConfig: EncryptionConfig(passphrase: _kPassphrase),
-          newPassphrase: newPassphrase,
-        );
-        await db1.close();
+      // Change the passphrase while the database is still open.
+      await db1.changePassphrase(
+        currentConfig: EncryptionConfig(passphrase: _kPassphrase),
+        newPassphrase: newPassphrase,
+      );
+      await db1.close();
 
-        // Open with the NEW passphrase — data must be readable.
-        final (db2, col2) = await _reopen(
+      // Open with the NEW passphrase — data must be readable.
+      final (db2, col2) = await _reopen(
+        adapter,
+        encryptionConfig: EncryptionConfig(passphrase: newPassphrase),
+      );
+      final note = await col2.get(id);
+      expect(note?.text, equals('before-passphrase-change'));
+      await db2.close();
+    }, timeout: const Timeout(Duration(seconds: 120)));
+
+    test('old passphrase is rejected after change', () async {
+      const newPassphrase = 'another-passphrase';
+      final result = await EncryptionConfig.createResult(
+        passphrase: _kPassphrase,
+      );
+      final (db1, _, adapter) = await _openFresh(
+        encryptionConfig: result.config,
+      );
+      await db1.changePassphrase(
+        currentConfig: EncryptionConfig(passphrase: _kPassphrase),
+        newPassphrase: newPassphrase,
+      );
+      await db1.close();
+
+      // Old passphrase must fail.
+      expect(
+        () async => _reopen(
           adapter,
-          encryptionConfig: EncryptionConfig(passphrase: newPassphrase),
-        );
-        final note = await col2.get(id);
-        expect(note?.text, equals('before-passphrase-change'));
-        await db2.close();
-      },
-      timeout: const Timeout(Duration(seconds: 120)),
-    );
-
-    test(
-      'old passphrase is rejected after change',
-      () async {
-        const newPassphrase = 'another-passphrase';
-        final result = await EncryptionConfig.createResult(
-          passphrase: _kPassphrase,
-        );
-        final (db1, _, adapter) = await _openFresh(
-          encryptionConfig: result.config,
-        );
-        await db1.changePassphrase(
-          currentConfig: EncryptionConfig(passphrase: _kPassphrase),
-          newPassphrase: newPassphrase,
-        );
-        await db1.close();
-
-        // Old passphrase must fail.
-        expect(
-          () async => _reopen(
-            adapter,
-            encryptionConfig: EncryptionConfig(passphrase: _kPassphrase),
+          encryptionConfig: EncryptionConfig(passphrase: _kPassphrase),
+        ),
+        throwsA(
+          isA<EncryptionError>().having(
+            (e) => e.code,
+            'code',
+            EncryptionErrorCode.badCredentials,
           ),
-          throwsA(
-            isA<EncryptionError>().having(
-              (e) => e.code,
-              'code',
-              EncryptionErrorCode.badCredentials,
-            ),
-          ),
-        );
-      },
-      timeout: const Timeout(Duration(seconds: 120)),
-    );
+        ),
+      );
+    }, timeout: const Timeout(Duration(seconds: 120)));
   });
 }

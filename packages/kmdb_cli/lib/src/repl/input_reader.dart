@@ -74,8 +74,10 @@ abstract class InputReader {
 ///
 /// Receives the current line [text] and cursor [position] (byte offset into
 /// [text]). Returns a (possibly empty) list of completion candidates.
-typedef CompletionCallback =
-    Future<List<String>> Function(String text, int position);
+typedef CompletionCallback = Future<List<String>> Function(
+  String text,
+  int position,
+);
 
 // ── ByteQueue ─────────────────────────────────────────────────────────────────
 

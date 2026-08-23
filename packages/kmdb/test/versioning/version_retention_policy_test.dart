@@ -98,17 +98,20 @@ void main() {
   group('VersionRetentionPolicy.filterGroup', () {
     // ── Keep-N boundary ───────────────────────────────────────────────────────
 
-    test('keep-N retains exactly maxVersions entries (count boundary)', () async {
-      const policy = VersionRetentionPolicy(VersionConfig(maxVersions: 3));
-      // 5 versions; only 3 should be kept (newest 3).
-      final now = 5000 * _kMsPerDay;
-      final entries = await _entriesAt([100, 200, 300, 400, 500]);
-      final kept = policy.filterGroup(entries, nowMs: now);
-      // Kept entries are sorted ascending; the newest 3 are at ms 300, 400, 500.
-      expect(kept.length, equals(3));
-      final keptMs = kept.map((e) => KeyCodec.decodeHlc(e.key).physicalMs);
-      expect(keptMs, containsAll([300, 400, 500]));
-    });
+    test(
+      'keep-N retains exactly maxVersions entries (count boundary)',
+      () async {
+        const policy = VersionRetentionPolicy(VersionConfig(maxVersions: 3));
+        // 5 versions; only 3 should be kept (newest 3).
+        final now = 5000 * _kMsPerDay;
+        final entries = await _entriesAt([100, 200, 300, 400, 500]);
+        final kept = policy.filterGroup(entries, nowMs: now);
+        // Kept entries are sorted ascending; the newest 3 are at ms 300, 400, 500.
+        expect(kept.length, equals(3));
+        final keptMs = kept.map((e) => KeyCodec.decodeHlc(e.key).physicalMs);
+        expect(keptMs, containsAll([300, 400, 500]));
+      },
+    );
 
     test('keep-N always retains the newest entry (rank 1)', () async {
       // Even with maxVersions: 1, the newest entry is always kept.

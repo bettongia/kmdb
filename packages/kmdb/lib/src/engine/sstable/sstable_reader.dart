@@ -488,9 +488,8 @@ final class SstableReader {
 
     // Read the restart array: it sits between the entries and the checksum.
     // The 4 bytes before the checksum (at offset data.length - 4) are numRestarts.
-    final numRestarts = ByteData.sublistView(
-      data,
-    ).getUint32(data.length - 4, Endian.little);
+    final numRestarts = ByteData.sublistView(data)
+        .getUint32(data.length - 4, Endian.little);
     // Entries occupy data[0, data.length - (numRestarts+1)*4).
     final entriesEnd = data.length - (numRestarts + 1) * 4;
     if (entriesEnd < 0) {

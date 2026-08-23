@@ -607,43 +607,40 @@ void main() {
       },
     );
 
-    test(
-      'index with empty stored modelId is treated as a match (pre-identity)',
-      () async {
-        final pathA = 'vec_empty_id_${Object().hashCode}';
-        final adapter = MemoryStorageAdapter();
+    test('index with empty stored modelId is treated as a match (pre-identity)', () async {
+      final pathA = 'vec_empty_id_${Object().hashCode}';
+      final adapter = MemoryStorageAdapter();
 
-        // Open without building — state is undefined (empty modelId).
-        final modelA = _ConfigurableIdEmbeddingModel('any-model');
-        final dbA = await KmdbDatabase.open(
-          path: pathA,
-          adapter: adapter,
-          vecIndexes: [VecIndexDefinition(collection: 'docs', field: 'body')],
-          embeddingModel: modelA,
-        );
-        // Do NOT call ensureBuilt — state stays undefined with empty modelId.
+      // Open without building — state is undefined (empty modelId).
+      final modelA = _ConfigurableIdEmbeddingModel('any-model');
+      final dbA = await KmdbDatabase.open(
+        path: pathA,
+        adapter: adapter,
+        vecIndexes: [VecIndexDefinition(collection: 'docs', field: 'body')],
+        embeddingModel: modelA,
+      );
+      // Do NOT call ensureBuilt — state stays undefined with empty modelId.
 
-        // The undefined index must not be marked stale (empty id = no mismatch).
-        var state = await _loadVecState(dbA, 'docs', 'body');
-        expect(state.status, equals(VecIndexStatus.undefined));
-        expect(state.modelId, isEmpty);
+      // The undefined index must not be marked stale (empty id = no mismatch).
+      var state = await _loadVecState(dbA, 'docs', 'body');
+      expect(state.status, equals(VecIndexStatus.undefined));
+      expect(state.modelId, isEmpty);
 
-        await dbA.close();
+      await dbA.close();
 
-        // Reopen — checkAndTransitionOnOpen sees empty modelId → no stale mark.
-        final dbB = await KmdbDatabase.open(
-          path: pathA,
-          adapter: adapter,
-          vecIndexes: [VecIndexDefinition(collection: 'docs', field: 'body')],
-          embeddingModel: modelA,
-        );
-        state = await _loadVecState(dbB, 'docs', 'body');
-        // Still undefined, not stale — empty id is a match.
-        expect(state.status, equals(VecIndexStatus.undefined));
+      // Reopen — checkAndTransitionOnOpen sees empty modelId → no stale mark.
+      final dbB = await KmdbDatabase.open(
+        path: pathA,
+        adapter: adapter,
+        vecIndexes: [VecIndexDefinition(collection: 'docs', field: 'body')],
+        embeddingModel: modelA,
+      );
+      state = await _loadVecState(dbB, 'docs', 'body');
+      // Still undefined, not stale — empty id is a match.
+      expect(state.status, equals(VecIndexStatus.undefined));
 
-        await dbB.close();
-      },
-    );
+      await dbB.close();
+    });
 
     test('ensureBuilt stamps modelId on first build', () async {
       final adapter = MemoryStorageAdapter();

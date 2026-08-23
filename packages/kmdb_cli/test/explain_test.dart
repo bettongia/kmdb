@@ -159,9 +159,9 @@ void main() {
             break;
           }
         }
-        final explainMap =
-            json.decode(raw.substring(firstBrace, end + 1))
-                as Map<String, dynamic>;
+        final explainMap = json.decode(
+          raw.substring(firstBrace, end + 1),
+        ) as Map<String, dynamic>;
         final explain = explainMap['_explain'] as Map<String, dynamic>;
 
         expect(explain['strategy'], 'fullScan');
@@ -254,9 +254,9 @@ void main() {
           break;
         }
       }
-      final explainMap =
-          json.decode(raw.substring(firstBrace, end + 1))
-              as Map<String, dynamic>;
+      final explainMap = json.decode(
+        raw.substring(firstBrace, end + 1),
+      ) as Map<String, dynamic>;
       expect(explainMap, contains('_explain'));
 
       final explain = explainMap['_explain'] as Map<String, dynamic>;
@@ -539,9 +539,9 @@ void main() {
           break;
         }
       }
-      final explainMap =
-          json.decode(raw.substring(firstBrace, end + 1))
-              as Map<String, dynamic>;
+      final explainMap = json.decode(
+        raw.substring(firstBrace, end + 1),
+      ) as Map<String, dynamic>;
       final explain = explainMap['_explain'] as Map<String, dynamic>;
       expect(explain['strategy'], 'fullScan');
       final filters = explain['filters'] as List<dynamic>;

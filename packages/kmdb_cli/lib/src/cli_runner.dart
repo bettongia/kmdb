@@ -53,7 +53,9 @@ import 'commands/verify_command.dart';
 import 'commands/vault/vault_command.dart';
 import 'commands/versions_command.dart';
 import 'commands/promote_command.dart';
+
 import 'package:kmdb/kmdb_config.dart';
+
 import 'database_opener.dart';
 import 'output/output_mode.dart';
 import 'repl/repl_config.dart';
@@ -774,8 +776,7 @@ abstract final class KmdbCli {
           ..argParser.addOption(
             'format',
             abbr: 'f',
-            help:
-                'Output format: json (default), compact, ndjson, table, csv, line',
+            help: 'Output format: json (default), compact, ndjson, table, csv, line',
             valueHelp: 'format',
           )
           ..argParser.addOption(

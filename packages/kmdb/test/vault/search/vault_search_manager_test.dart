@@ -504,39 +504,36 @@ void main() {
       expect(status.failed, equals(0));
     });
 
-    test(
-      'counts stub: blob manifest on disk but no local blob file (not hydrated)',
-      () async {
-        final manager = _makeManager(kvStore, vaultStore);
-        addTearDown(manager.close);
+    test('counts stub: blob manifest on disk but no local blob file (not hydrated)', () async {
+      final manager = _makeManager(kvStore, vaultStore);
+      addTearDown(manager.close);
 
-        // Simulate a stub by writing a manifest file without a blob file.
-        // vaultIndexingStatus uses VaultStore.listAllHashes (filesystem-based)
-        // so we write the manifest file directly to the MemoryStorageAdapter.
-        final sha256 = 'cc' * 32; // 64-char hex placeholder
-        final hashDir = vaultStore.hashDir(sha256);
-        final manifest = {
-          'sha256': sha256,
-          'size': 0,
-          'crc32c': '00000000',
-          'mediaType': 'text/plain',
-          'originalName': 'stub.txt',
-          'createdAt': 'test',
-          'encrypted': false,
-        };
-        await adapter.createDirectory(hashDir);
-        await adapter.writeFile(
-          vaultStore.manifestPath(sha256),
-          Uint8List.fromList(utf8.encode(json.encode(manifest))),
-        );
-        // Do NOT write the blob file — this makes it a stub.
+      // Simulate a stub by writing a manifest file without a blob file.
+      // vaultIndexingStatus uses VaultStore.listAllHashes (filesystem-based)
+      // so we write the manifest file directly to the MemoryStorageAdapter.
+      final sha256 = 'cc' * 32; // 64-char hex placeholder
+      final hashDir = vaultStore.hashDir(sha256);
+      final manifest = {
+        'sha256': sha256,
+        'size': 0,
+        'crc32c': '00000000',
+        'mediaType': 'text/plain',
+        'originalName': 'stub.txt',
+        'createdAt': 'test',
+        'encrypted': false,
+      };
+      await adapter.createDirectory(hashDir);
+      await adapter.writeFile(
+        vaultStore.manifestPath(sha256),
+        Uint8List.fromList(utf8.encode(json.encode(manifest))),
+      );
+      // Do NOT write the blob file — this makes it a stub.
 
-        final status = await manager.vaultIndexingStatus();
-        expect(status.total, equals(1));
-        expect(status.stub, equals(1));
-        expect(status.indexed, equals(0));
-      },
-    );
+      final status = await manager.vaultIndexingStatus();
+      expect(status.total, equals(1));
+      expect(status.stub, equals(1));
+      expect(status.indexed, equals(0));
+    });
   });
 
   // ── reindexVault() ────────────────────────────────────────────────────────
@@ -1309,66 +1306,59 @@ void main() {
       },
     );
 
-    test(
-      'extracting state + text.txt + chunks.json → rebuilds index from files',
-      () async {
-        // Simulate a crash between filesystem writes and the final WriteBatch:
-        // text.txt and chunks_v1.json exist but state is still `extracting`.
-        final sha256 = await _ingest(
-          vaultStore,
-          Uint8List.fromList(
-            utf8.encode('Recovery test content paragraph here'),
-          ),
-        );
+    test('extracting state + text.txt + chunks.json → rebuilds index from files', () async {
+      // Simulate a crash between filesystem writes and the final WriteBatch:
+      // text.txt and chunks_v1.json exist but state is still `extracting`.
+      final sha256 = await _ingest(
+        vaultStore,
+        Uint8List.fromList(utf8.encode('Recovery test content paragraph here')),
+      );
 
-        // Write extracting status manually (overriding whatever state is there).
-        final extractState = VaultExtractionState.extracting(sha256);
-        final stateBytes = await extractState.encode();
-        await kvStore.writeBatchInternal(
-          WriteBatch()..put(
-            '$kVaultExtractPrefix$sha256',
-            kVaultCorpusSentinelKey,
-            stateBytes,
-          ),
-        );
+      // Write extracting status manually (overriding whatever state is there).
+      final extractState = VaultExtractionState.extracting(sha256);
+      final stateBytes = await extractState.encode();
+      await kvStore.writeBatchInternal(
+        WriteBatch()..put(
+          '$kVaultExtractPrefix$sha256',
+          kVaultCorpusSentinelKey,
+          stateBytes,
+        ),
+      );
 
-        // Write filesystem artifacts as if steps 4–5 completed but step 6 did
-        // not. Use _writePlaintextArtifact so the flag-byte prefix is present
-        // (WI-10), exercising the real file-rebuild recovery branch.
-        final extractDir = '${vaultStore.hashDir(sha256)}/extract';
-        await adapter.createDirectory(extractDir);
-        await _writePlaintextArtifact(
-          adapter,
-          '$extractDir/text.txt',
-          Uint8List.fromList(
-            utf8.encode('Recovery test content paragraph here'),
-          ),
-        );
-        final chunksJson = json.encode([
-          {'index': 0, 'byteStart': 0, 'byteEnd': 36, 'wordCount': 5},
-        ]);
-        await _writePlaintextArtifact(
-          adapter,
-          '$extractDir/chunks_v1.json',
-          Uint8List.fromList(utf8.encode(chunksJson)),
-        );
+      // Write filesystem artifacts as if steps 4–5 completed but step 6 did
+      // not. Use _writePlaintextArtifact so the flag-byte prefix is present
+      // (WI-10), exercising the real file-rebuild recovery branch.
+      final extractDir = '${vaultStore.hashDir(sha256)}/extract';
+      await adapter.createDirectory(extractDir);
+      await _writePlaintextArtifact(
+        adapter,
+        '$extractDir/text.txt',
+        Uint8List.fromList(utf8.encode('Recovery test content paragraph here')),
+      );
+      final chunksJson = json.encode([
+        {'index': 0, 'byteStart': 0, 'byteEnd': 36, 'wordCount': 5},
+      ]);
+      await _writePlaintextArtifact(
+        adapter,
+        '$extractDir/chunks_v1.json',
+        Uint8List.fromList(utf8.encode(chunksJson)),
+      );
 
-        // Run recover().
-        final manager = _makeManager(kvStore, vaultStore);
-        addTearDown(manager.close);
-        await manager.recover();
+      // Run recover().
+      final manager = _makeManager(kvStore, vaultStore);
+      addTearDown(manager.close);
+      await manager.recover();
 
-        // Give recovery async tasks time to commit the WriteBatch.
-        await Future<void>.delayed(const Duration(milliseconds: 200));
+      // Give recovery async tasks time to commit the WriteBatch.
+      await Future<void>.delayed(const Duration(milliseconds: 200));
 
-        final state = await _readState(kvStore, sha256);
-        expect(
-          state?.status,
-          equals(VaultExtractionStatus.indexed),
-          reason: 'Recovery from files should produce indexed state',
-        );
-      },
-    );
+      final state = await _readState(kvStore, sha256);
+      expect(
+        state?.status,
+        equals(VaultExtractionStatus.indexed),
+        reason: 'Recovery from files should produce indexed state',
+      );
+    });
 
     test('extracting state + text.txt + chunks.json → recovery preserves '
         'previously-computed script/language fields (WI-6)', () async {
@@ -2570,33 +2560,30 @@ void _indexingStatusTests() {
         expect(a.hashCode, equals(b.hashCode));
       });
 
-      test(
-        'non-const equal instances are equal (exercises field comparison chain)',
-        () {
-          // Non-const so Dart does NOT canonicalise them: identical() is
-          // false, forcing the field-by-field && chain in operator==.
-          final a = VaultIndexingStatus(
-            total: 6,
-            indexed: 4,
-            pending: 1,
-            extracting: 0,
-            failed: 1,
-            unsupported: 0,
-            stub: 0,
-          );
-          final b = VaultIndexingStatus(
-            total: 6,
-            indexed: 4,
-            pending: 1,
-            extracting: 0,
-            failed: 1,
-            unsupported: 0,
-            stub: 0,
-          );
-          expect(a == b, isTrue);
-          expect(a.hashCode, equals(b.hashCode));
-        },
-      );
+      test('non-const equal instances are equal (exercises field comparison chain)', () {
+        // Non-const so Dart does NOT canonicalise them: identical() is
+        // false, forcing the field-by-field && chain in operator==.
+        final a = VaultIndexingStatus(
+          total: 6,
+          indexed: 4,
+          pending: 1,
+          extracting: 0,
+          failed: 1,
+          unsupported: 0,
+          stub: 0,
+        );
+        final b = VaultIndexingStatus(
+          total: 6,
+          indexed: 4,
+          pending: 1,
+          extracting: 0,
+          failed: 1,
+          unsupported: 0,
+          stub: 0,
+        );
+        expect(a == b, isTrue);
+        expect(a.hashCode, equals(b.hashCode));
+      });
 
       test('instances with different counts are not equal', () {
         const a = VaultIndexingStatus(

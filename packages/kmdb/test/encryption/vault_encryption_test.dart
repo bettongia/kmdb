@@ -274,30 +274,27 @@ void main() {
       },
     );
 
-    test(
-      'encrypted database: originalName is not visible in manifest.json on disk',
-      () async {
-        final store = _TestVaultStore(adapter, encryption: provider);
-        const secretName = 'confidential-salary-report.xlsx';
-        final data = _bytes('encrypted originalName test');
-        final ref = await store.ingest(
-          bytes: data,
-          hlcTimestamp: _hlc,
-          originalName: secretName,
-        );
+    test('encrypted database: originalName is not visible in manifest.json on disk', () async {
+      final store = _TestVaultStore(adapter, encryption: provider);
+      const secretName = 'confidential-salary-report.xlsx';
+      final data = _bytes('encrypted originalName test');
+      final ref = await store.ingest(
+        bytes: data,
+        hlcTimestamp: _hlc,
+        originalName: secretName,
+      );
 
-        final rawJson = String.fromCharCodes(
-          adapter.files[store.manifestPath(ref.sha256)]!,
-        );
-        expect(
-          rawJson,
-          isNot(contains(secretName)),
-          reason:
-              'Plaintext originalName must not appear anywhere in '
-              'manifest.json when encryption is active',
-        );
-      },
-    );
+      final rawJson = String.fromCharCodes(
+        adapter.files[store.manifestPath(ref.sha256)]!,
+      );
+      expect(
+        rawJson,
+        isNot(contains(secretName)),
+        reason:
+            'Plaintext originalName must not appear anywhere in '
+            'manifest.json when encryption is active',
+      );
+    });
 
     test(
       'encrypted database: getManifest() transparently decrypts originalName',
@@ -430,63 +427,56 @@ void main() {
       kvStore = TestKvStore();
     });
 
-    test(
-      'full GC cycle: ingest → ref count written encrypted → delete → sweep reclaims blob',
-      () async {
-        final store = _TestVaultStore(adapter, encryption: provider);
-        final gc = VaultGc(
-          store: store,
-          kvStore: kvStore,
-          encryption: provider,
-        );
+    test('full GC cycle: ingest → ref count written encrypted → delete → sweep reclaims blob', () async {
+      final store = _TestVaultStore(adapter, encryption: provider);
+      final gc = VaultGc(store: store, kvStore: kvStore, encryption: provider);
 
-        // Step 1: Ingest a blob (simulates the write path).
-        final data = _bytes('gc-cycle-secret');
-        final ref = await store.ingest(bytes: data, hlcTimestamp: _hlc);
-        final sha256 = ref.sha256;
+      // Step 1: Ingest a blob (simulates the write path).
+      final data = _bytes('gc-cycle-secret');
+      final ref = await store.ingest(bytes: data, hlcTimestamp: _hlc);
+      final sha256 = ref.sha256;
 
-        // Step 2: Seed an encrypted ref count entry (simulates what
-        // VaultRefInterceptor writes when a document referencing this blob is
-        // created). The entry is a ValueCodec-encoded map with the provider.
-        final encryptedRefCountBytes = await ValueCodec.encode(
-          {'refCount': 1},
-          context: ValueContext(
-            '$kVaultNamespace:$sha256',
-            kVaultRefCountSentinelKey,
-          ),
-          encryption: provider,
-        );
-        kvStore.setRawRefCount(sha256, encryptedRefCountBytes);
+      // Step 2: Seed an encrypted ref count entry (simulates what
+      // VaultRefInterceptor writes when a document referencing this blob is
+      // created). The entry is a ValueCodec-encoded map with the provider.
+      final encryptedRefCountBytes = await ValueCodec.encode(
+        {'refCount': 1},
+        context: ValueContext(
+          '$kVaultNamespace:$sha256',
+          kVaultRefCountSentinelKey,
+        ),
+        encryption: provider,
+      );
+      kvStore.setRawRefCount(sha256, encryptedRefCountBytes);
 
-        // Blob should be present and the ref count readable when the correct
-        // provider is supplied.
-        expect(await store.isHydrated(sha256), isTrue);
+      // Blob should be present and the ref count readable when the correct
+      // provider is supplied.
+      expect(await store.isHydrated(sha256), isTrue);
 
-        // Step 3: Decrement to zero — write a tombstone (simulates document
-        // deletion). Use a zero ref count entry and tombstone to mimic what
-        // VaultRefInterceptor.decrement does: it deletes the entry and calls
-        // gc.onZeroRefs. Here we clear the ref and create the tombstone directly.
-        kvStore.clearRefCount(sha256);
-        await gc.onZeroRefs(sha256);
+      // Step 3: Decrement to zero — write a tombstone (simulates document
+      // deletion). Use a zero ref count entry and tombstone to mimic what
+      // VaultRefInterceptor.decrement does: it deletes the entry and calls
+      // gc.onZeroRefs. Here we clear the ref and create the tombstone directly.
+      kvStore.clearRefCount(sha256);
+      await gc.onZeroRefs(sha256);
 
-        // Tombstone should now be present.
-        expect(await store.isTombstoned(sha256), isTrue);
+      // Tombstone should now be present.
+      expect(await store.isTombstoned(sha256), isTrue);
 
-        // Step 4: Run the GC sweep. With the encryption provider threaded
-        // through, VaultRefCount.read can decode the (now absent) entry, which
-        // is treated as RefCountAbsent → zero refs → safe to delete.
-        final result = await gc.sweep();
+      // Step 4: Run the GC sweep. With the encryption provider threaded
+      // through, VaultRefCount.read can decode the (now absent) entry, which
+      // is treated as RefCountAbsent → zero refs → safe to delete.
+      final result = await gc.sweep();
 
-        // The blob must have been reclaimed.
-        expect(result.deleted, equals(1));
-        expect(result.retainedUndecodable, equals(0));
-        expect(
-          await store.exists(sha256),
-          isFalse,
-          reason: 'blob should have been GC\'d',
-        );
-      },
-    );
+      // The blob must have been reclaimed.
+      expect(result.deleted, equals(1));
+      expect(result.retainedUndecodable, equals(0));
+      expect(
+        await store.exists(sha256),
+        isFalse,
+        reason: 'blob should have been GC\'d',
+      );
+    });
 
     test(
       'sweep retains blob when ref count is encrypted and no provider is given',

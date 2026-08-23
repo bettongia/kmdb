@@ -172,62 +172,56 @@ void main() {
   // at the first throwIfExpired() boundary. The message must contain "deadline".
 
   group('deadline integration (expired deadline)', () {
-    test(
-      'push throws SyncCancelledException with "deadline" message when timeout already expired',
-      () async {
-        // Use a deadline in the past so it is already expired when checked.
-        final ctx = SyncContext(
-          deadline: DateTime.now().subtract(const Duration(seconds: 1)),
-        );
+    test('push throws SyncCancelledException with "deadline" message when timeout already expired', () async {
+      // Use a deadline in the past so it is already expired when checked.
+      final ctx = SyncContext(
+        deadline: DateTime.now().subtract(const Duration(seconds: 1)),
+      );
 
-        // Use a tracking adapter that honours ctx (calls throwIfExpired at
-        // entry of each ctx-carrying method) so the expired deadline is detected.
-        final engine = _makeEngine(
-          store,
-          _TrackingAdapter(MemorySyncAdapter(), onCall: () {}),
-          localAdapter,
-          ctx: ctx,
-        );
+      // Use a tracking adapter that honours ctx (calls throwIfExpired at
+      // entry of each ctx-carrying method) so the expired deadline is detected.
+      final engine = _makeEngine(
+        store,
+        _TrackingAdapter(MemorySyncAdapter(), onCall: () {}),
+        localAdapter,
+        ctx: ctx,
+      );
 
-        await expectLater(
-          engine.push(),
-          throwsA(
-            isA<SyncCancelledException>().having(
-              (e) => e.message.toLowerCase(),
-              'message',
-              contains('deadline'),
-            ),
+      await expectLater(
+        engine.push(),
+        throwsA(
+          isA<SyncCancelledException>().having(
+            (e) => e.message.toLowerCase(),
+            'message',
+            contains('deadline'),
           ),
-        );
-      },
-    );
+        ),
+      );
+    });
 
-    test(
-      'pull throws SyncCancelledException with "deadline" message when timeout already expired',
-      () async {
-        final ctx = SyncContext(
-          deadline: DateTime.now().subtract(const Duration(seconds: 1)),
-        );
+    test('pull throws SyncCancelledException with "deadline" message when timeout already expired', () async {
+      final ctx = SyncContext(
+        deadline: DateTime.now().subtract(const Duration(seconds: 1)),
+      );
 
-        final engine = _makeEngine(
-          store,
-          _TrackingAdapter(MemorySyncAdapter(), onCall: () {}),
-          localAdapter,
-          ctx: ctx,
-        );
+      final engine = _makeEngine(
+        store,
+        _TrackingAdapter(MemorySyncAdapter(), onCall: () {}),
+        localAdapter,
+        ctx: ctx,
+      );
 
-        await expectLater(
-          engine.pull(),
-          throwsA(
-            isA<SyncCancelledException>().having(
-              (e) => e.message.toLowerCase(),
-              'message',
-              contains('deadline'),
-            ),
+      await expectLater(
+        engine.pull(),
+        throwsA(
+          isA<SyncCancelledException>().having(
+            (e) => e.message.toLowerCase(),
+            'message',
+            contains('deadline'),
           ),
-        );
-      },
-    );
+        ),
+      );
+    });
   });
 
   // ── Mid-flight cancellation via GatedSyncAdapter ───────────────────────────
@@ -240,56 +234,50 @@ void main() {
   // future races against the barrier, waking the blocked call immediately.
 
   group('mid-flight cancellation (GatedSyncAdapter)', () {
-    test(
-      'push throws SyncCancelledException when cancelled while list is blocked mid-flight',
-      () async {
-        final token = CancellationToken();
-        final ctx = SyncContext(cancel: token);
+    test('push throws SyncCancelledException when cancelled while list is blocked mid-flight', () async {
+      final token = CancellationToken();
+      final ctx = SyncContext(cancel: token);
 
-        final inner = MemorySyncAdapter();
-        final gated = GatedSyncAdapter(inner);
+      final inner = MemorySyncAdapter();
+      final gated = GatedSyncAdapter(inner);
 
-        // Block the first adapter call (list) so push suspends mid-flight.
-        gated.holdList();
+      // Block the first adapter call (list) so push suspends mid-flight.
+      gated.holdList();
 
-        final engine = _makeEngine(store, gated, localAdapter, ctx: ctx);
+      final engine = _makeEngine(store, gated, localAdapter, ctx: ctx);
 
-        // Start push — it will call store.flush() (synchronous) then block at
-        // the gated list() call.
-        final pushFuture = engine.push();
+      // Start push — it will call store.flush() (synchronous) then block at
+      // the gated list() call.
+      final pushFuture = engine.push();
 
-        // Cancel while push is suspended at the list() barrier.
-        token.cancel();
+      // Cancel while push is suspended at the list() barrier.
+      token.cancel();
 
-        // The push must throw without the inner adapter completing the list.
-        await expectLater(pushFuture, throwsA(isA<SyncCancelledException>()));
+      // The push must throw without the inner adapter completing the list.
+      await expectLater(pushFuture, throwsA(isA<SyncCancelledException>()));
 
-        // Inner MemorySyncAdapter should be empty — no upload was completed.
-        expect(inner.fileCount, equals(0));
-      },
-    );
+      // Inner MemorySyncAdapter should be empty — no upload was completed.
+      expect(inner.fileCount, equals(0));
+    });
 
-    test(
-      'pull throws SyncCancelledException when cancelled while list is blocked mid-flight',
-      () async {
-        final token = CancellationToken();
-        final ctx = SyncContext(cancel: token);
+    test('pull throws SyncCancelledException when cancelled while list is blocked mid-flight', () async {
+      final token = CancellationToken();
+      final ctx = SyncContext(cancel: token);
 
-        final inner = MemorySyncAdapter();
-        final gated = GatedSyncAdapter(inner);
+      final inner = MemorySyncAdapter();
+      final gated = GatedSyncAdapter(inner);
 
-        gated.holdList();
+      gated.holdList();
 
-        final engine = _makeEngine(store, gated, localAdapter, ctx: ctx);
+      final engine = _makeEngine(store, gated, localAdapter, ctx: ctx);
 
-        final pullFuture = engine.pull();
+      final pullFuture = engine.pull();
 
-        // Cancel while pull is suspended at the list() barrier.
-        token.cancel();
+      // Cancel while pull is suspended at the list() barrier.
+      token.cancel();
 
-        await expectLater(pullFuture, throwsA(isA<SyncCancelledException>()));
-      },
-    );
+      await expectLater(pullFuture, throwsA(isA<SyncCancelledException>()));
+    });
 
     test(
       'cancelled mid-flight call does not complete the underlying operation',
@@ -329,25 +317,22 @@ void main() {
   // adapter propagates independently of any cancellation wiring.
 
   group('LockConflictException isolation', () {
-    test(
-      'LockConflictException from adapter propagates without being confused with SyncCancelledException',
-      () async {
-        // Use a no-op context (non-cancelled) so the engine has a live ctx.
-        final ctx = SyncContext(cancel: CancellationToken());
+    test('LockConflictException from adapter propagates without being confused with SyncCancelledException', () async {
+      // Use a no-op context (non-cancelled) so the engine has a live ctx.
+      final ctx = SyncContext(cancel: CancellationToken());
 
-        final throwingAdapter = _LockConflictAdapter();
-        final engine = _makeEngine(
-          store,
-          throwingAdapter,
-          localAdapter,
-          ctx: ctx,
-        );
+      final throwingAdapter = _LockConflictAdapter();
+      final engine = _makeEngine(
+        store,
+        throwingAdapter,
+        localAdapter,
+        ctx: ctx,
+      );
 
-        // LockConflictException must propagate as-is, not be caught/repackaged
-        // as SyncCancelledException by any catch site in the engine.
-        await expectLater(engine.push(), throwsA(isA<LockConflictException>()));
-      },
-    );
+      // LockConflictException must propagate as-is, not be caught/repackaged
+      // as SyncCancelledException by any catch site in the engine.
+      await expectLater(engine.push(), throwsA(isA<LockConflictException>()));
+    });
   });
 
   // ── PartitionableAdapter forwarding ───────────────────────────────────────

@@ -330,9 +330,8 @@ final class FtsManager implements WriteAugmentor {
     // Language-aware stemming (WI-6, Q6, revised 2026-07-07): margin-gated
     // detection — cheap and deterministic enough to recompute on every write,
     // with no persistence needed (unlike the vault path's isolate boundary).
-    final languageCode = detectLanguageForStemming(
-      fieldValue,
-    ).stemmerLanguageCode;
+    final languageCode = detectLanguageForStemming(fieldValue)
+        .stemmerLanguageCode;
     final tokens = preprocess(
       fieldValue,
       createDefaultTokenizer(),
@@ -400,9 +399,8 @@ final class FtsManager implements WriteAugmentor {
       return;
     }
 
-    final newLanguageCode = detectLanguageForStemming(
-      newFieldValue,
-    ).stemmerLanguageCode;
+    final newLanguageCode = detectLanguageForStemming(newFieldValue)
+        .stemmerLanguageCode;
     final newTokens = preprocess(
       newFieldValue,
       createDefaultTokenizer(),
@@ -592,9 +590,8 @@ final class FtsManager implements WriteAugmentor {
         final fieldValue = _extractFieldValue(doc, field);
         if (fieldValue == null) continue;
 
-        final buildLanguageCode = detectLanguageForStemming(
-          fieldValue,
-        ).stemmerLanguageCode;
+        final buildLanguageCode = detectLanguageForStemming(fieldValue)
+            .stemmerLanguageCode;
         final tokens = preprocess(
           fieldValue,
           createDefaultTokenizer(),
@@ -741,9 +738,8 @@ final class FtsManager implements WriteAugmentor {
     // detection — same policy as the write path above, so short/keyword-style
     // queries reliably default to English rather than a spuriously-confident
     // wrong-language guess (see `language_detection.dart`).
-    final queryLanguageCode = detectLanguageForStemming(
-      query,
-    ).stemmerLanguageCode;
+    final queryLanguageCode = detectLanguageForStemming(query)
+        .stemmerLanguageCode;
     final queryTerms = preprocess(
       query,
       createDefaultTokenizer(),

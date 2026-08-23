@@ -211,9 +211,8 @@ void main() {
     });
 
     test('returns false and writes to err for unknown command', () async {
-      final ok = await CommandsCommand(
-        const {},
-      ).execute(state, ctx, ['nonexistent']);
+      final ok = await CommandsCommand(const {})
+          .execute(state, ctx, ['nonexistent']);
 
       expect(ok, isFalse);
       expect(err.toString(), contains("unknown command 'nonexistent'"));

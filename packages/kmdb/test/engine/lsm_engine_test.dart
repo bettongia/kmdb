@@ -613,36 +613,33 @@ void main() {
   // eliminates all reliance on DateTime.now() inside the write path.
 
   group('LsmEngine — HLC clock injection', () {
-    test(
-      'monotonic ordering: successive writes get strictly increasing HLCs',
-      () async {
-        // Freeze the wall clock at a fixed millisecond. Both writes happen within
-        // the same "millisecond" so the logical counter must increment.
-        const frozenMs = 1_000_000_000;
-        final clock = HlcClock(wallClock: () => frozenMs);
+    test('monotonic ordering: successive writes get strictly increasing HLCs', () async {
+      // Freeze the wall clock at a fixed millisecond. Both writes happen within
+      // the same "millisecond" so the logical counter must increment.
+      const frozenMs = 1_000_000_000;
+      final clock = HlcClock(wallClock: () => frozenMs);
 
-        final adapter = _newAdapter();
-        final store = await openWithClock(adapter, clock);
+      final adapter = _newAdapter();
+      final store = await openWithClock(adapter, clock);
 
-        await store.put('ns', _key(1), _bytes('a'));
-        await store.put('ns', _key(2), _bytes('b'));
+      await store.put('ns', _key(1), _bytes('a'));
+      await store.put('ns', _key(2), _bytes('b'));
 
-        // currentHlc reflects the most-recently issued HLC. After two puts
-        // into the same frozen millisecond the logical counter should be ≥ 1.
-        final hlcStr = (await store.storeInfo()).currentHlc;
-        // Format: 12-hex-physical:4-hex-logical
-        final parts = hlcStr.split(':');
-        expect(parts, hasLength(2), reason: 'expected <physical>:<logical>');
-        final logical = int.parse(parts[1], radix: 16);
-        expect(
-          logical,
-          greaterThanOrEqualTo(1),
-          reason: 'second write must have logical > 0 in the same ms',
-        );
+      // currentHlc reflects the most-recently issued HLC. After two puts
+      // into the same frozen millisecond the logical counter should be ≥ 1.
+      final hlcStr = (await store.storeInfo()).currentHlc;
+      // Format: 12-hex-physical:4-hex-logical
+      final parts = hlcStr.split(':');
+      expect(parts, hasLength(2), reason: 'expected <physical>:<logical>');
+      final logical = int.parse(parts[1], radix: 16);
+      expect(
+        logical,
+        greaterThanOrEqualTo(1),
+        reason: 'second write must have logical > 0 in the same ms',
+      );
 
-        await store.close();
-      },
-    );
+      await store.close();
+    });
 
     test('clock advances after SSTable ingest', () async {
       // Wall clock fixed at 1 000 000 ms. Ingest a peer SSTable whose maxHlc
@@ -708,44 +705,41 @@ void main() {
       },
     );
 
-    test(
-      'flush filename contains the expected HLC physical timestamp',
-      () async {
-        // Freeze wall clock at a known value. After a flush the SSTable filename
-        // must embed that physical timestamp in its encoded HLC segments.
-        const frozenMs = 0xABCDEF; // arbitrary fixed millisecond
-        final clock = HlcClock(wallClock: () => frozenMs);
+    test('flush filename contains the expected HLC physical timestamp', () async {
+      // Freeze wall clock at a known value. After a flush the SSTable filename
+      // must embed that physical timestamp in its encoded HLC segments.
+      const frozenMs = 0xABCDEF; // arbitrary fixed millisecond
+      final clock = HlcClock(wallClock: () => frozenMs);
 
-        final adapter = _newAdapter();
-        final store = await openWithClock(adapter, clock);
+      final adapter = _newAdapter();
+      final store = await openWithClock(adapter, clock);
 
-        // Write one entry then flush explicitly.
-        await store.put('ns', _key(1), _bytes('hello'));
-        await store.flush();
+      // Write one entry then flush explicitly.
+      await store.put('ns', _key(1), _bytes('hello'));
+      await store.flush();
 
-        // Find the SSTable file created in the sst/ directory.
-        final sstFiles = await adapter.listFiles(
-          '$_dbDir/sst',
-          extension: '.sst',
-        );
-        expect(
-          sstFiles,
-          isNotEmpty,
-          reason: 'flush should have created an SSTable',
-        );
+      // Find the SSTable file created in the sst/ directory.
+      final sstFiles = await adapter.listFiles(
+        '$_dbDir/sst',
+        extension: '.sst',
+      );
+      expect(
+        sstFiles,
+        isNotEmpty,
+        reason: 'flush should have created an SSTable',
+      );
 
-        // The filename format is: {deviceId}-{minHlcHex}-{maxHlcHex}.sst
-        // Parse and verify the physical component matches the injected clock.
-        final info = SstableInfo.parse(sstFiles.first);
-        expect(
-          info.minHlc.physicalMs,
-          equals(frozenMs),
-          reason: 'SSTable minHlc physical must match injected wall clock',
-        );
+      // The filename format is: {deviceId}-{minHlcHex}-{maxHlcHex}.sst
+      // Parse and verify the physical component matches the injected clock.
+      final info = SstableInfo.parse(sstFiles.first);
+      expect(
+        info.minHlc.physicalMs,
+        equals(frozenMs),
+        reason: 'SSTable minHlc physical must match injected wall clock',
+      );
 
-        await store.close();
-      },
-    );
+      await store.close();
+    });
   });
 
   // ── H4-FU3: tombstone GC floor — ingest-side horizon floor ────────────────
@@ -1160,8 +1154,7 @@ void main() {
         await expectLater(
           store.ingestSstable(postFloorFilename, postFloorBytes),
           completes,
-          reason:
-              'with zeroed floor, post-actual-floor SSTable must still be accepted',
+          reason: 'with zeroed floor, post-actual-floor SSTable must still be accepted',
         );
 
         await store.close();

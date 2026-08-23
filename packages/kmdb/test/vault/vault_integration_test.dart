@@ -608,32 +608,29 @@ void main() {
       },
     );
 
-    test(
-      'get() wires vault URIs inside a nested map (_wireVaultRefsInMap recursion)',
-      () async {
-        // Exercises the nested-map recursion branch (line 699) in
-        // _wireVaultRefsInMap.
-        const fakeSha256 =
-            'aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899';
-        final vaultUri = 'kmdb-vault://sha256/$fakeSha256';
-        const docId = '01900000000070809000000000000072';
+    test('get() wires vault URIs inside a nested map (_wireVaultRefsInMap recursion)', () async {
+      // Exercises the nested-map recursion branch (line 699) in
+      // _wireVaultRefsInMap.
+      const fakeSha256 =
+          'aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899';
+      final vaultUri = 'kmdb-vault://sha256/$fakeSha256';
+      const docId = '01900000000070809000000000000072';
 
-        final docBytes = await ValueCodec.encode({
-          'name': 'nested-doc',
-          'meta': {'attachment': vaultUri, 'other': 'plain'},
-        }, context: ValueContext('items', docId));
-        await vaultDb.store.put('items', docId, docBytes);
+      final docBytes = await ValueCodec.encode({
+        'name': 'nested-doc',
+        'meta': {'attachment': vaultUri, 'other': 'plain'},
+      }, context: ValueContext('items', docId));
+      await vaultDb.store.put('items', docId, docBytes);
 
-        final col = vaultDb.collection(name: 'items', codec: _RawCodec());
-        final fetched = await col.get(docId);
-        expect(fetched, isNotNull);
+      final col = vaultDb.collection(name: 'items', codec: _RawCodec());
+      final fetched = await col.get(docId);
+      expect(fetched, isNotNull);
 
-        final meta = fetched!['meta'] as Map<String, dynamic>;
-        // The nested vault URI must be wired.
-        expect(meta['attachment'], isA<VaultRef>());
-        expect((meta['attachment'] as VaultRef).sha256, equals(fakeSha256));
-        expect(meta['other'], isA<String>());
-      },
-    );
+      final meta = fetched!['meta'] as Map<String, dynamic>;
+      // The nested vault URI must be wired.
+      expect(meta['attachment'], isA<VaultRef>());
+      expect((meta['attachment'] as VaultRef).sha256, equals(fakeSha256));
+      expect(meta['other'], isA<String>());
+    });
   });
 }

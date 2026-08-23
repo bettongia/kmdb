@@ -53,9 +53,10 @@ final class RestoreCommand extends CliCommand {
 
     final Stream<String> lines;
     if (inputPath != null) {
-      lines = io.File(
-        inputPath,
-      ).openRead().transform(utf8.decoder).transform(const LineSplitter());
+      lines = io.File(inputPath)
+          .openRead()
+          .transform(utf8.decoder)
+          .transform(const LineSplitter());
     } else {
       lines = io.stdin.transform(utf8.decoder).transform(const LineSplitter());
     }

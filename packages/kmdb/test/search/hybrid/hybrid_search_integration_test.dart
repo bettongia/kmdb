@@ -317,41 +317,38 @@ void main() {
   // ── Partial-index correctness ───────────────────────────────────────────────
 
   group('partial-index correctness', () {
-    test(
-      'document in BM25 top results but not semantic top results appears in hybrid',
-      () async {
-        final db = await _openHybridDb();
-        final col = db.collection(name: 'articles', codec: _codec);
+    test('document in BM25 top results but not semantic top results appears in hybrid', () async {
+      final db = await _openHybridDb();
+      final col = db.collection(name: 'articles', codec: _codec);
 
-        // Insert documents with query term for BM25 match.
-        await col.insert({'body': 'database database database storage'});
-        await col.insert({'body': 'database management system'});
+      // Insert documents with query term for BM25 match.
+      await col.insert({'body': 'database database database storage'});
+      await col.insert({'body': 'database management system'});
 
-        // Request only 1 candidate from each leg — ensures some documents
-        // may only appear in one leg.
-        final result = await col.search(
-          'database',
-          fields: ['body'],
-          candidates: 1,
-          limit: 10,
+      // Request only 1 candidate from each leg — ensures some documents
+      // may only appear in one leg.
+      final result = await col.search(
+        'database',
+        fields: ['body'],
+        candidates: 1,
+        limit: 10,
+      );
+
+      // Even with limited candidates, the result should not be empty.
+      expect(result.hits, isNotEmpty);
+      // Each hit should have been in at least one index leg.
+      for (final hit in result.hits) {
+        final hasBm25 = hit.fieldScores.containsKey('body:bm25');
+        final hasCosine = hit.fieldScores.containsKey('body:cosine');
+        expect(
+          hasBm25 || hasCosine,
+          isTrue,
+          reason:
+              'Hit ${hit.id} has no component score — should come from at '
+              'least one leg',
         );
-
-        // Even with limited candidates, the result should not be empty.
-        expect(result.hits, isNotEmpty);
-        // Each hit should have been in at least one index leg.
-        for (final hit in result.hits) {
-          final hasBm25 = hit.fieldScores.containsKey('body:bm25');
-          final hasCosine = hit.fieldScores.containsKey('body:cosine');
-          expect(
-            hasBm25 || hasCosine,
-            isTrue,
-            reason:
-                'Hit ${hit.id} has no component score — should come from at '
-                'least one leg',
-          );
-        }
-      },
-    );
+      }
+    });
 
     test(
       'candidates=5 limits each leg to 5 candidates (at most 10 in pool)',
@@ -381,49 +378,40 @@ void main() {
   // ── Filter integration ──────────────────────────────────────────────────────
 
   group('filter pre-filtering', () {
-    test(
-      'filter resolves candidateIds once before both legs; non-matching documents excluded',
-      () async {
-        final db = await _openHybridDb();
-        final col = db.collection(name: 'articles', codec: _codec);
+    test('filter resolves candidateIds once before both legs; non-matching documents excluded', () async {
+      final db = await _openHybridDb();
+      final col = db.collection(name: 'articles', codec: _codec);
 
-        // Published: true documents.
-        await col.insert({
-          'body': 'database storage engine',
-          'published': true,
-        });
-        await col.insert({
-          'body': 'database query language',
-          'published': true,
-        });
-        // Published: false — should be excluded from results.
-        await col.insert({
-          'body': 'database system architecture',
-          'published': false,
-        });
+      // Published: true documents.
+      await col.insert({'body': 'database storage engine', 'published': true});
+      await col.insert({'body': 'database query language', 'published': true});
+      // Published: false — should be excluded from results.
+      await col.insert({
+        'body': 'database system architecture',
+        'published': false,
+      });
 
-        final result = await col.search(
-          'database',
-          fields: ['body'],
-          filter: Field('published').equals(true),
+      final result = await col.search(
+        'database',
+        fields: ['body'],
+        filter: Field('published').equals(true),
+      );
+
+      expect(result.hits, isNotEmpty);
+      for (final hit in result.hits) {
+        expect(
+          hit.document['published'],
+          isTrue,
+          reason: 'Non-published document should have been filtered out',
         );
-
-        expect(result.hits, isNotEmpty);
-        for (final hit in result.hits) {
-          expect(
-            hit.document['published'],
-            isTrue,
-            reason: 'Non-published document should have been filtered out',
-          );
-        }
-        // The excluded doc must not appear.
-        final ids = result.hits.map((h) => h.id).toSet();
-        for (final hit in result.hits) {
-          expect(hit.document['published'], isTrue);
-        }
-        expect(ids.length, lessThanOrEqualTo(2));
-      },
-    );
+      }
+      // The excluded doc must not appear.
+      final ids = result.hits.map((h) => h.id).toSet();
+      for (final hit in result.hits) {
+        expect(hit.document['published'], isTrue);
+      }
+      expect(ids.length, lessThanOrEqualTo(2));
+    });
 
     test('filter that matches no documents returns empty result', () async {
       final db = await _openHybridDb();

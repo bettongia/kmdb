@@ -222,34 +222,26 @@ void main() {
       expect(result.hits.first.score, closeTo(1.0 / 61.0, 1e-10));
     });
 
-    test(
-      'fieldScores map contains bm25 and cosine keys for document in both lists',
-      () {
-        final lexHits = [
-          _hit(id: 'doc', rank: 1, score: 0.8, fieldScores: {'body:bm25': 0.8}),
-        ];
-        final vecHits = [
-          _hit(
-            id: 'doc',
-            rank: 1,
-            score: 0.7,
-            fieldScores: {'body:cosine': 0.7},
-          ),
-        ];
+    test('fieldScores map contains bm25 and cosine keys for document in both lists', () {
+      final lexHits = [
+        _hit(id: 'doc', rank: 1, score: 0.8, fieldScores: {'body:bm25': 0.8}),
+      ];
+      final vecHits = [
+        _hit(id: 'doc', rank: 1, score: 0.7, fieldScores: {'body:cosine': 0.7}),
+      ];
 
-        final result = mergeWithRrf<String>(
-          lexicalHits: lexHits,
-          semanticHits: vecHits,
-          limit: 10,
-          offset: 0,
-          metadata: _meta(),
-        );
+      final result = mergeWithRrf<String>(
+        lexicalHits: lexHits,
+        semanticHits: vecHits,
+        limit: 10,
+        offset: 0,
+        metadata: _meta(),
+      );
 
-        final hit = result.hits.first;
-        expect(hit.fieldScores['body:bm25'], closeTo(0.8, 1e-6));
-        expect(hit.fieldScores['body:cosine'], closeTo(0.7, 1e-6));
-      },
-    );
+      final hit = result.hits.first;
+      expect(hit.fieldScores['body:bm25'], closeTo(0.8, 1e-6));
+      expect(hit.fieldScores['body:cosine'], closeTo(0.7, 1e-6));
+    });
 
     test('fieldScores has only bm25 key for document only in lexical list', () {
       final lexHits = [
@@ -408,86 +400,80 @@ void main() {
       },
     );
 
-    test(
-      'multi-field: per-field scores for different fields tracked independently',
-      () {
-        // doc_a appears in both field 'title' (BM25) and field 'body' (cosine).
-        final lexHits = [
-          _hit(
-            id: 'doc_a',
-            rank: 1,
-            score: 0.9,
-            fieldScores: {'title:bm25': 0.9},
-          ),
-        ];
-        final vecHits = [
-          _hit(
-            id: 'doc_a',
-            rank: 1,
-            score: 0.85,
-            fieldScores: {'body:cosine': 0.85},
-          ),
-        ];
+    test('multi-field: per-field scores for different fields tracked independently', () {
+      // doc_a appears in both field 'title' (BM25) and field 'body' (cosine).
+      final lexHits = [
+        _hit(
+          id: 'doc_a',
+          rank: 1,
+          score: 0.9,
+          fieldScores: {'title:bm25': 0.9},
+        ),
+      ];
+      final vecHits = [
+        _hit(
+          id: 'doc_a',
+          rank: 1,
+          score: 0.85,
+          fieldScores: {'body:cosine': 0.85},
+        ),
+      ];
 
-        final result = mergeWithRrf<String>(
-          lexicalHits: lexHits,
-          semanticHits: vecHits,
-          limit: 10,
-          offset: 0,
-          metadata: _meta(searched: ['title', 'body']),
-        );
+      final result = mergeWithRrf<String>(
+        lexicalHits: lexHits,
+        semanticHits: vecHits,
+        limit: 10,
+        offset: 0,
+        metadata: _meta(searched: ['title', 'body']),
+      );
 
-        final hit = result.hits.first;
-        // Both component scores present.
-        expect(hit.fieldScores['title:bm25'], closeTo(0.9, 1e-6));
-        expect(hit.fieldScores['body:cosine'], closeTo(0.85, 1e-6));
-        // Per-field RRF keys.
-        expect(hit.fieldScores['title'], isNotNull);
-        expect(hit.fieldScores['body'], isNotNull);
-        // Both field RRF keys equal the overall document RRF score.
-        expect(hit.fieldScores['title'], closeTo(hit.score, 1e-10));
-        expect(hit.fieldScores['body'], closeTo(hit.score, 1e-10));
-      },
-    );
+      final hit = result.hits.first;
+      // Both component scores present.
+      expect(hit.fieldScores['title:bm25'], closeTo(0.9, 1e-6));
+      expect(hit.fieldScores['body:cosine'], closeTo(0.85, 1e-6));
+      // Per-field RRF keys.
+      expect(hit.fieldScores['title'], isNotNull);
+      expect(hit.fieldScores['body'], isNotNull);
+      // Both field RRF keys equal the overall document RRF score.
+      expect(hit.fieldScores['title'], closeTo(hit.score, 1e-10));
+      expect(hit.fieldScores['body'], closeTo(hit.score, 1e-10));
+    });
 
-    test(
-      'multi-field: document in both indexes for one field but only BM25 for another',
-      () {
-        // doc_a: 'title:bm25' from lex, 'title:cosine' from vec, 'body:bm25'
-        // from lex but no 'body:cosine' from vec.
-        final lexHits = [
-          _hit(
-            id: 'doc_a',
-            rank: 1,
-            score: 0.9,
-            fieldScores: {'title:bm25': 0.9, 'body:bm25': 0.6},
-          ),
-        ];
-        final vecHits = [
-          _hit(
-            id: 'doc_a',
-            rank: 1,
-            score: 0.85,
-            fieldScores: {'title:cosine': 0.85},
-            // no 'body:cosine' — body not indexed in vec
-          ),
-        ];
+    test('multi-field: document in both indexes for one field but only BM25 for another', () {
+      // doc_a: 'title:bm25' from lex, 'title:cosine' from vec, 'body:bm25'
+      // from lex but no 'body:cosine' from vec.
+      final lexHits = [
+        _hit(
+          id: 'doc_a',
+          rank: 1,
+          score: 0.9,
+          fieldScores: {'title:bm25': 0.9, 'body:bm25': 0.6},
+        ),
+      ];
+      final vecHits = [
+        _hit(
+          id: 'doc_a',
+          rank: 1,
+          score: 0.85,
+          fieldScores: {'title:cosine': 0.85},
+          // no 'body:cosine' — body not indexed in vec
+        ),
+      ];
 
-        final result = mergeWithRrf<String>(
-          lexicalHits: lexHits,
-          semanticHits: vecHits,
-          limit: 10,
-          offset: 0,
-          metadata: _meta(searched: ['title', 'body']),
-        );
+      final result = mergeWithRrf<String>(
+        lexicalHits: lexHits,
+        semanticHits: vecHits,
+        limit: 10,
+        offset: 0,
+        metadata: _meta(searched: ['title', 'body']),
+      );
 
-        final hit = result.hits.first;
-        expect(hit.fieldScores.containsKey('title:bm25'), isTrue);
-        expect(hit.fieldScores.containsKey('title:cosine'), isTrue);
-        expect(hit.fieldScores.containsKey('body:bm25'), isTrue);
-        expect(hit.fieldScores.containsKey('body:cosine'), isFalse);
-      },
-    );
+      final hit = result.hits.first;
+      expect(hit.fieldScores.containsKey('title:bm25'), isTrue);
+      expect(hit.fieldScores.containsKey('title:cosine'), isTrue);
+      expect(hit.fieldScores.containsKey('body:bm25'), isTrue);
+      expect(hit.fieldScores.containsKey('body:cosine'), isFalse);
+    });
 
     test('metadata is passed through to the result', () {
       final meta = _meta(

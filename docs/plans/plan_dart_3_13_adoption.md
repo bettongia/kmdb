@@ -1,6 +1,6 @@
 # Adopt Dart 3.13.1 / Flutter 3.47.1 across dev and CI
 
-**Status**: Investigated
+**Status**: Implementing
 
 **PR link**: _(none yet)_
 
@@ -173,13 +173,16 @@ Sequenced so the blocker is resolved before the pins move.
       ([PR #5](https://github.com/bettongia/pdfium/pull/5)), published as
       **0.1.0-dev.4** (2026-08-22). Remaining kmdb-side action is the re-pin
       below and the final Linux/3.13.1 verification.
-- [ ] **Re-pin `betto_pdfium` to `0.1.0-dev.4`** in the root `pubspec.yaml`
+- [x] **Re-pin `betto_pdfium` to `0.1.0-dev.4`** in the root `pubspec.yaml`
       `dependency_overrides` (currently pinned to exactly `0.1.0-dev.3`, line 50)
       and `dart pub upgrade`. Confirm
       `packages/kmdb_cli/test/database_opener_test.dart` "lexical hits over … PDF"
       indexes all 4 fixtures on Linux/3.13.1. **Note:** this pin bump and the CI
       toolchain bump below MUST land together — dev.4's build hook requires Dart
       3.13, so it will not compile under the current 3.12.2-pinned CI.
+      Done: pin bumped, `pubspec.lock` updated (`dart pub upgrade`, confirmed
+      `betto_pdfium: 0.1.0-dev.4` in lockfile). PDF fixture test run pending
+      until CI verification (local run tracked below).
 - [x] **Delete the diagnostic scaffolding — DONE (2026-08-22).** The throwaway
       `diag-313` workflow and the `[DART313-DIAG]` prints were already removed
       before this adoption began. Re-verified against HEAD on 2026-08-23
@@ -188,17 +191,17 @@ Sequenced so the blocker is resolved before the pins move.
 - [x] **Confirm other native consumers on Linux/3.13.1 — RESOLVED (2026-08-23,
       reviewer).** betto_zstd and betto_onnxrt are both fine — see the answered
       open question above. The final full-matrix run is the standing confirmation.
-- [ ] **Bump CI pins** in `.github/workflows/cicd.yml`: `setup-dart sdk`
+- [x] **Bump CI pins** in `.github/workflows/cicd.yml`: `setup-dart sdk`
       `"3.12.2"` → `"3.13.1"` (×4 — the `build`, `test-macos`, `test-windows`,
       `test-web` jobs) and `flutter-action flutter-version` `"3.44.4"` →
       `"3.47.1"` (×2 — `test-icloud`, `test-flutter`). Update the (identical,
       repeated) pin-rationale comment blocks accordingly. Keep
       `flutter-action`'s `channel: stable` line but rely on the pinned
       `flutter-version` (do not let it float).
-- [ ] **Bump the `environment: sdk` floor to `^3.13.0`** in all 10 pubspec
+- [x] **Bump the `environment: sdk` floor to `^3.13.0`** in all 10 pubspec
       files (root + 9 packages — see the Decision in Investigation). Leave the
       `flutter: ">=3.29.0"` constraint in `kmdb_flutter`/`kmdb_icloud` unchanged.
-- [ ] **Reformat the workspace** with 3.13.1 (`dart format packages/`) and commit
+- [x] **Reformat the workspace** with 3.13.1 (`dart format packages/`) and commit
       the whitespace-only churn. The drift set at review time (2026-08-23) was 10
       files (`kmdb/test/encryption/{encryption_crash,kmdb_database_encryption}_test.dart`,
       `kmdb_cli/test/config/secret_store/directory_secret_store_test.dart`,
@@ -208,13 +211,27 @@ Sequenced so the blocker is resolved before the pins move.
       `kmdb_icloud/test/{harness_convergence,icloud_adapter}_test.dart`) —
       re-derive at implementation time as the set may shift, but expect
       whitespace/wrapping only.
-- [ ] **Fix the two `vault_searcher.dart` lint sites** (`:719`, `:726`): change
+      Done: `make format` at implementation time reformatted **98 files**
+      (larger set than the reviewer's 10 — expected drift given time elapsed
+      since the review sample). Spot-checked several diffs (`cli_runner.dart`,
+      `icloud_adapter_test.dart`) — all changes are import-blank-line and
+      line-wrap reflow only, no semantic changes. The transient
+      `analyzer.exclude` blocks that `flutter pub get`/`make prepare`
+      auto-injected into `kmdb_flutter/analysis_options.yaml`,
+      `kmdb_icloud/analysis_options.yaml`, and
+      `kmdb_icloud/example/analysis_options.yaml` were reverted (not
+      committed), per the plan's note that these are transient.
+- [x] **Fix the two `vault_searcher.dart` lint sites** (`:719`, `:726`): change
       `return _placeholderContext(sha256, fieldPath);` to
       `return await _placeholderContext(sha256, fieldPath);`. Then confirm the
       new-lint set is clean: `dart analyze` across all packages (expect zero
       `unawaited_return_in_try_block`) + `flutter analyze` on `kmdb_flutter` and
       `kmdb_icloud`. `local_directory_adapter.dart` is already clean (PR #76).
-- [ ] **Update docs that name the toolchain version.** Reviewer survey
+      Done: both sites fixed; `make analyze` clean across all 7 Dart packages
+      (0 issues), `flutter analyze` clean on `kmdb_flutter` and `kmdb_icloud`
+      (0 issues each). Confirmed `local_directory_adapter.dart` still uses
+      `return await writeViaTempRename(...)` at lines 321/334.
+- [x] **Update docs that name the toolchain version.** Reviewer survey
       (2026-08-23): the release checklist (`docs/spec/28_release_checklist.md`)
       and CLAUDE.md do **not** hard-pin a version, so no change there. The only
       live doc to update is `docs/roadmap/0_10_01.md` — its WI-5 row (line ~65)
@@ -224,20 +241,63 @@ Sequenced so the blocker is resolved before the pins move.
       3.13 minimum in the release notes** (WI-9 gate). Completed plans under
       `docs/plans/completed/` that mention the old pin are historical — do not
       edit them.
-- [ ] Roadmap pointer updated in-branch (moves with the PR).
+      Done: WI-5 row's parenthetical now points to the completed follow-up; the
+      gate paragraph (~629) and the "Follow-ups discovered during WI-5" entry
+      (~768) both flipped to ✅ **Complete** with the concrete landed changes,
+      and the follow-up entry explicitly directs WI-9 to record the Dart 3.13
+      minimum in release notes at release time (confirmed no separate release
+      notes file exists yet — `CHANGELOG.md` is an unpopulated placeholder,
+      `docs/spec/28_release_checklist.md`/`CLAUDE.md` verified unpinned, per
+      the reviewer's survey). Historical completed plans left untouched.
+- [x] Roadmap pointer updated in-branch (moves with the PR).
 
 **Final step — QA sign-off and pre-commit:**
 
-- [ ] Run `make coverage` — confirm >95% on all new files.
+- [x] Run `make coverage` — confirm >95% on all new files.
+      Done: overall workspace coverage 94.9% (11916/12553 lines across 221
+      source files) — `kmdb` 95.2%, `kmdb_cli` 95.2%, `kmdb_harness` 90.0%,
+      `kmdb_google_drive` 94.9%, extractors 100%. All packages individually
+      clear the CLAUDE.md 90% floor. This PR touches no test/coverage-relevant
+      code (2 one-line `await` additions + formatting), so the ~0.1pp
+      difference from the previously-recorded 95% workspace baseline reflects
+      normal drift since that baseline was set, not a regression introduced
+      here.
 - [ ] Hand off to the **`kmdb-qa` agent** for sign-off (spec alignment, doc
       comments, test coverage/adequacy, code health). Resolve every blocking
       item before proceeding. Do not open a PR until sign-off is received.
-- [ ] Run `make pre_commit` — format, analyze, license_check, tests all green
+      **Not performed by kmdb-plan-implement** — this implementation session
+      had no Agent-launcher tool available to invoke `kmdb-qa`. Per the
+      coordinator's explicit instruction for this task, the mechanical checks
+      below were run directly instead, and QA sign-off is deferred to the
+      coordinator to arrange.
+- [x] Run `make pre_commit` — format, analyze, license_check, tests all green
       (on 3.13.1 by then).
-- [ ] Verify licence headers on all new files (2026).
+      Done: full `make pre_commit` green (`dart format --set-exit-if-changed`:
+      0 changed; `dart analyze`: 0 issues across all 7 Dart packages;
+      `addlicense --check`: clean; `pre_commit_test` (kmdb suite): 2647 passed,
+      12 intentionally skipped E2E). Additionally ran the full test suite for
+      every other package not covered by `pre_commit_test`'s `kmdb`-only scope
+      — `kmdb_cli` (1228 passed), `kmdb_harness` (153 passed),
+      `kmdb_google_drive` (117 passed), the three extractors (34/19/21
+      passed), `kmdb_flutter` (`flutter test`, 9 passed), `kmdb_icloud`
+      (`flutter test`, 128 passed, 1 credential-gated skip) — all green.
+      `flutter analyze` on `kmdb_flutter` and `kmdb_icloud`: 0 issues each.
+- [x] Verify licence headers on all new files (2026).
+      Done: no new source files were created by this plan (pubspec/CI-yaml
+      edits, a workspace reformat, and two one-line `await` additions to an
+      existing file) — nothing requires a new license header. `addlicense
+      --check` (via `make pre_commit`) confirms the existing header set is
+      still intact after the reformat.
 - [ ] Confirm the **full CI matrix is green under 3.13.1** — this is the whole
       point; the build + all five platform jobs must pass, especially
       `test-icloud` (format) and any job touching pdfium.
+      **Cannot be confirmed from this session** — CI only runs once the PR is
+      pushed/opened. All-equivalent local checks (format, analyze, license,
+      full test suite across every package including `kmdb_cli`'s PDF-fixture
+      lexical-search test) pass under the local 3.13.1 toolchain on macOS; the
+      Linux-specific pdfium native-asset-resolution behaviour this PR exists
+      to unblock can only be verified by the actual Linux CI job. Left
+      unchecked for the coordinator to confirm once CI completes.
 
 ## Review (2026-08-23, kmdb-plan-reviewer)
 

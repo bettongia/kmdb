@@ -107,9 +107,8 @@ void main() {
     // Write a malformed config.json into the database's local/ dir so that
     // KmdbConfig.load throws a FormatException when resolving the remote.
     final localDir = io.Directory('${dbDir.path}/local')..createSync();
-    io.File(
-      '${localDir.path}/config.json',
-    ).writeAsStringSync('{ this is not valid json }');
+    io.File('${localDir.path}/config.json')
+        .writeAsStringSync('{ this is not valid json }');
 
     final ctx = _ctx(db, out: out, err: err);
     // Use a named remote (not --sync-dir) so the command loads config.json.
@@ -393,27 +392,24 @@ void main() {
       },
     );
 
-    test(
-      'orphaned collection is unregistered and config cleared when all docs tombstoned',
-      () async {
-        // Simulate a collection that has been entirely deleted (all tombstones).
-        // We can achieve this by registering the namespace without inserting any
-        // documents — createNamespace registers it but leaves it empty.
-        await db.store.createNamespace('contacts');
-        final config = KmdbConfig.empty();
-        config.addIndex('contacts', 'city');
-        expect(config.indexesForCollection('contacts'), hasLength(1));
+    test('orphaned collection is unregistered and config cleared when all docs tombstoned', () async {
+      // Simulate a collection that has been entirely deleted (all tombstones).
+      // We can achieve this by registering the namespace without inserting any
+      // documents — createNamespace registers it but leaves it empty.
+      await db.store.createNamespace('contacts');
+      final config = KmdbConfig.empty();
+      config.addIndex('contacts', 'city');
+      expect(config.indexesForCollection('contacts'), hasLength(1));
 
-        final ctx = makeCtx(db, config);
-        await SyncHelpers.purgeOrphanedIndexes(ctx, dbDir.path);
+      final ctx = makeCtx(db, config);
+      await SyncHelpers.purgeOrphanedIndexes(ctx, dbDir.path);
 
-        // Index config should be cleared.
-        expect(config.indexesForCollection('contacts'), isEmpty);
-        // Namespace should be unregistered.
-        final namespaces = await db.store.listNamespaces();
-        expect(namespaces, isNot(contains('contacts')));
-      },
-    );
+      // Index config should be cleared.
+      expect(config.indexesForCollection('contacts'), isEmpty);
+      // Namespace should be unregistered.
+      final namespaces = await db.store.listNamespaces();
+      expect(namespaces, isNot(contains('contacts')));
+    });
 
     test(
       'cleanup runs for multiple orphaned collections in one pass',

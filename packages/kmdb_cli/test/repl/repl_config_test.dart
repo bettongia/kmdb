@@ -50,9 +50,9 @@ void main() {
     test('written file contains all expected keys', () async {
       await ReplConfig(filePath: configPath).load(SessionState());
 
-      final json =
-          jsonDecode(await io.File(configPath).readAsString())
-              as Map<String, dynamic>;
+      final json = jsonDecode(
+        await io.File(configPath).readAsString(),
+      ) as Map<String, dynamic>;
       for (final key in [
         'bail',
         'color',
@@ -196,9 +196,8 @@ void main() {
     });
 
     test('wrong type for bool field is ignored', () async {
-      await io.File(
-        configPath,
-      ).writeAsString(jsonEncode({'bail': 'yes', 'timer': 1}));
+      await io.File(configPath)
+          .writeAsString(jsonEncode({'bail': 'yes', 'timer': 1}));
       final state = SessionState();
       await ReplConfig(filePath: configPath).load(state);
 
@@ -246,9 +245,8 @@ void main() {
 
     test('uses cacheDir from config when present', () async {
       const customDir = '/custom/model/cache';
-      await io.File(
-        configPath,
-      ).writeAsString(jsonEncode({'cacheDir': customDir}));
+      await io.File(configPath)
+          .writeAsString(jsonEncode({'cacheDir': customDir}));
       final config = ReplConfig(filePath: configPath);
       await config.load(SessionState());
 
@@ -309,9 +307,8 @@ void main() {
 
     test('returns the configured cacheDir when present', () async {
       const customDir = '/custom/model/cache';
-      await io.File(
-        configPath,
-      ).writeAsString(jsonEncode({'cacheDir': customDir}));
+      await io.File(configPath)
+          .writeAsString(jsonEncode({'cacheDir': customDir}));
 
       final dir = await ReplConfig.readCacheDir(filePath: configPath);
       expect(dir, equals(customDir));
@@ -338,9 +335,8 @@ void main() {
     test(
       'falls back to the default when cacheDir is whitespace-only',
       () async {
-        await io.File(
-          configPath,
-        ).writeAsString(jsonEncode({'cacheDir': '   '}));
+        await io.File(configPath)
+            .writeAsString(jsonEncode({'cacheDir': '   '}));
 
         final dir = await ReplConfig.readCacheDir(filePath: configPath);
         expect(dir, endsWith('.kmdb_cache'));

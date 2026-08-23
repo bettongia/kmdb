@@ -323,20 +323,17 @@ void main() {
       expect(records, isEmpty);
     });
 
-    test(
-      'entirely empty WAL file → treated as no WAL, returns empty stream',
-      () async {
-        // An empty file (zero bytes) is a valid edge case: power loss before any
-        // record was written. The reader must return an empty stream, not crash.
-        final adapter = MemoryStorageAdapter();
-        const path = '$_dir/wal-empty.log';
-        await adapter.writeFile(path, Uint8List(0));
+    test('entirely empty WAL file → treated as no WAL, returns empty stream', () async {
+      // An empty file (zero bytes) is a valid edge case: power loss before any
+      // record was written. The reader must return an empty stream, not crash.
+      final adapter = MemoryStorageAdapter();
+      const path = '$_dir/wal-empty.log';
+      await adapter.writeFile(path, Uint8List(0));
 
-        final reader = _reader(adapter);
-        final records = await reader.replay(path).toList();
-        expect(records, isEmpty);
-      },
-    );
+      final reader = _reader(adapter);
+      final records = await reader.replay(path).toList();
+      expect(records, isEmpty);
+    });
 
     test(
       'multiple WAL files: second has valid frames after first corruption',
@@ -495,34 +492,31 @@ void main() {
       );
     });
 
-    test(
-      'replayStrict throws on short trailing bytes (< 9 bytes, incomplete header)',
-      () async {
-        final adapter = MemoryStorageAdapter();
-        final writer = _writer(adapter);
+    test('replayStrict throws on short trailing bytes (< 9 bytes, incomplete header)', () async {
+      final adapter = MemoryStorageAdapter();
+      final writer = _writer(adapter);
 
-        await writer.writePut(
-          sequence: const Hlc(1, 0),
-          namespace: 'ns',
-          keyBytes: _key,
-          value: _value,
-        );
+      await writer.writePut(
+        sequence: const Hlc(1, 0),
+        namespace: 'ns',
+        keyBytes: _key,
+        value: _value,
+      );
 
-        final path = writer.activePath;
-        final existing = await adapter.readFile(path);
-        // Append only 4 bytes — too short for a header.
-        final truncated = Uint8List(existing.length + 4);
-        truncated.setAll(0, existing);
-        truncated.fillRange(existing.length, truncated.length, 0xAA);
-        await adapter.writeFile(path, truncated);
+      final path = writer.activePath;
+      final existing = await adapter.readFile(path);
+      // Append only 4 bytes — too short for a header.
+      final truncated = Uint8List(existing.length + 4);
+      truncated.setAll(0, existing);
+      truncated.fillRange(existing.length, truncated.length, 0xAA);
+      await adapter.writeFile(path, truncated);
 
-        final strictReader = _reader(adapter);
-        await expectLater(
-          strictReader.replayStrict(path).toList(),
-          throwsA(isA<CorruptedWalException>()),
-        );
-      },
-    );
+      final strictReader = _reader(adapter);
+      await expectLater(
+        strictReader.replayStrict(path).toList(),
+        throwsA(isA<CorruptedWalException>()),
+      );
+    });
   });
 
   group('WalRecordType', () {
@@ -594,25 +588,22 @@ void main() {
       expect(WalBatchFrame.tryDecode(bytes, 0), isNull);
     });
 
-    test(
-      'truncation at every byte boundary returns null (no partial decode)',
-      () {
-        // Two-entry frame; truncate progressively from the end.
-        final full = WalBatchFrame([
-          makePut(const Hlc(1, 0), 'ns', [0x01, 0x02]),
-          makeDel(const Hlc(2, 0), 'ns'),
-        ]).encode();
-        // Truncating any byte breaks either the structural read or the checksum.
-        for (var cut = 1; cut < full.length; cut++) {
-          final truncated = Uint8List.sublistView(full, 0, cut);
-          expect(
-            WalBatchFrame.tryDecode(truncated, 0),
-            isNull,
-            reason: 'truncation at byte $cut must yield null',
-          );
-        }
-      },
-    );
+    test('truncation at every byte boundary returns null (no partial decode)', () {
+      // Two-entry frame; truncate progressively from the end.
+      final full = WalBatchFrame([
+        makePut(const Hlc(1, 0), 'ns', [0x01, 0x02]),
+        makeDel(const Hlc(2, 0), 'ns'),
+      ]).encode();
+      // Truncating any byte breaks either the structural read or the checksum.
+      for (var cut = 1; cut < full.length; cut++) {
+        final truncated = Uint8List.sublistView(full, 0, cut);
+        expect(
+          WalBatchFrame.tryDecode(truncated, 0),
+          isNull,
+          reason: 'truncation at byte $cut must yield null',
+        );
+      }
+    });
 
     test('payload bit-flip in any entry invalidates the whole frame', () {
       // A bit-flip past the header — i.e. inside one of the entries — must

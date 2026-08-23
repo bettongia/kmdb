@@ -394,9 +394,8 @@ void main() {
         final dbPath = tmp.file('db');
         // Create a local/ dir with a malformed config.json.
         io.Directory('$dbPath/local').createSync(recursive: true);
-        io.File(
-          '$dbPath/local/config.json',
-        ).writeAsStringSync('not-valid-json');
+        io.File('$dbPath/local/config.json')
+            .writeAsStringSync('not-valid-json');
 
         final result = await _run([dbPath, 'scan', 'ns']);
         // Command should still run despite config error.
@@ -409,20 +408,12 @@ void main() {
   // ── Encryption scenarios ──────────────────────────────────────────────────
 
   group('encryption scenarios', () {
-    test(
-      '<db> init --passphrase <pp> on new DB → exit 0, err contains recovery code',
-      () async {
-        final dbPath = tmp.file('encrypted_db');
-        final result = await _run([
-          dbPath,
-          'init',
-          '--passphrase',
-          'mypass123',
-        ]);
-        expect(result.code, equals(0));
-        expect(result.err, contains('Recovery code'));
-      },
-    );
+    test('<db> init --passphrase <pp> on new DB → exit 0, err contains recovery code', () async {
+      final dbPath = tmp.file('encrypted_db');
+      final result = await _run([dbPath, 'init', '--passphrase', 'mypass123']);
+      expect(result.code, equals(0));
+      expect(result.err, contains('Recovery code'));
+    });
 
     test(
       '--passphrase <pp> <db> scan ns on existing encrypted DB → exit 0',
@@ -449,25 +440,22 @@ void main() {
       },
     );
 
-    test(
-      'wrong passphrase on encrypted DB → exit 1, err contains encryption error',
-      () async {
-        final dbPath = tmp.file('encrypted_db3');
-        // Create encrypted DB first.
-        await _run([dbPath, 'init', '--passphrase', 'correctpass']);
+    test('wrong passphrase on encrypted DB → exit 1, err contains encryption error', () async {
+      final dbPath = tmp.file('encrypted_db3');
+      // Create encrypted DB first.
+      await _run([dbPath, 'init', '--passphrase', 'correctpass']);
 
-        // Open with wrong passphrase.
-        final result = await _run([
-          '--passphrase',
-          'wrongpass',
-          dbPath,
-          'scan',
-          'ns',
-        ]);
-        expect(result.code, equals(1));
-        expect(result.err, isNotEmpty);
-      },
-    );
+      // Open with wrong passphrase.
+      final result = await _run([
+        '--passphrase',
+        'wrongpass',
+        dbPath,
+        'scan',
+        'ns',
+      ]);
+      expect(result.code, equals(1));
+      expect(result.err, isNotEmpty);
+    });
   });
 
   // ── Error fallback ────────────────────────────────────────────────────────
@@ -491,14 +479,17 @@ void main() {
   // ── Additional cli_runner coverage tests ─────────────────────────────────
 
   group('remaining.isEmpty after flag parsing', () {
-    test('only-flags with no db path → exit 1, "database path required"', () async {
-      // --no-flush is consumed by the global flag parser (sets flushOnExit=false)
-      // but adds nothing to `remaining`. After parsing, remaining.isEmpty is true,
-      // so the runner reaches the "database path required" guard (lines 257-260).
-      final result = await _run(['--no-flush']);
-      expect(result.code, equals(1));
-      expect(result.err, contains('database path required'));
-    });
+    test(
+      'only-flags with no db path → exit 1, "database path required"',
+      () async {
+        // --no-flush is consumed by the global flag parser (sets flushOnExit=false)
+        // but adds nothing to `remaining`. After parsing, remaining.isEmpty is true,
+        // so the runner reaches the "database path required" guard (lines 257-260).
+        final result = await _run(['--no-flush']);
+        expect(result.code, equals(1));
+        expect(result.err, contains('database path required'));
+      },
+    );
 
     test('--continue-on-error with no db path → exit 1', () async {
       // Same pattern: --continue-on-error is consumed but leaves remaining empty.
@@ -558,43 +549,40 @@ void main() {
       },
     );
 
-    test(
-      '--recovery-code with valid code on existing encrypted DB → exit 0',
-      () async {
-        final dbPath = tmp.file('rc_success_db');
-        // Create encrypted DB with passphrase; capture the recovery code.
-        final initResult = await _run([
-          dbPath,
-          'init',
-          '--passphrase',
-          'secret123',
-        ]);
-        expect(initResult.code, equals(0), reason: initResult.err);
+    test('--recovery-code with valid code on existing encrypted DB → exit 0', () async {
+      final dbPath = tmp.file('rc_success_db');
+      // Create encrypted DB with passphrase; capture the recovery code.
+      final initResult = await _run([
+        dbPath,
+        'init',
+        '--passphrase',
+        'secret123',
+      ]);
+      expect(initResult.code, equals(0), reason: initResult.err);
 
-        // Parse the recovery code from stderr — format: "  Recovery code: <code>"
-        final recoveryCode = initResult.err
-            .split('\n')
-            .firstWhere((l) => l.contains('Recovery code:'), orElse: () => '')
-            .split('Recovery code:')
-            .last
-            .trim();
-        expect(
-          recoveryCode,
-          isNotEmpty,
-          reason: 'No recovery code found in init output',
-        );
+      // Parse the recovery code from stderr — format: "  Recovery code: <code>"
+      final recoveryCode = initResult.err
+          .split('\n')
+          .firstWhere((l) => l.contains('Recovery code:'), orElse: () => '')
+          .split('Recovery code:')
+          .last
+          .trim();
+      expect(
+        recoveryCode,
+        isNotEmpty,
+        reason: 'No recovery code found in init output',
+      );
 
-        // Use the valid recovery code to open the encrypted DB.
-        final result = await _run([
-          '--recovery-code',
-          recoveryCode,
-          dbPath,
-          'scan',
-          'ns',
-        ]);
-        expect(result.code, equals(0), reason: result.err);
-      },
-    );
+      // Use the valid recovery code to open the encrypted DB.
+      final result = await _run([
+        '--recovery-code',
+        recoveryCode,
+        dbPath,
+        'scan',
+        'ns',
+      ]);
+      expect(result.code, equals(0), reason: result.err);
+    });
   });
 
   group('help <command> exercises _buildCommandRunner', () {

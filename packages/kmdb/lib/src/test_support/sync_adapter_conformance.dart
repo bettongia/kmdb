@@ -381,73 +381,61 @@ void _runCancellationConformanceTests({
 
     // ── Mid-flight cancellation via GatedSyncAdapter ──────────────────────────
 
-    test(
-      'list throws SyncCancelledException when cancelled while blocked mid-flight',
-      () async {
-        final token = CancellationToken();
-        final ctx = SyncContext(cancel: token);
-        final gated = GatedSyncAdapter(factory());
-        gated.holdList();
+    test('list throws SyncCancelledException when cancelled while blocked mid-flight', () async {
+      final token = CancellationToken();
+      final ctx = SyncContext(cancel: token);
+      final gated = GatedSyncAdapter(factory());
+      gated.holdList();
 
-        // Start the call — it blocks at the barrier.
-        final listFuture = gated.list('dir', extension: '.sst', ctx: ctx);
+      // Start the call — it blocks at the barrier.
+      final listFuture = gated.list('dir', extension: '.sst', ctx: ctx);
 
-        // Cancel mid-flight.
-        token.cancel();
+      // Cancel mid-flight.
+      token.cancel();
 
-        // The call must throw without the underlying operation completing.
-        await expectLater(listFuture, throwsA(isA<SyncCancelledException>()));
-      },
-    );
+      // The call must throw without the underlying operation completing.
+      await expectLater(listFuture, throwsA(isA<SyncCancelledException>()));
+    });
 
-    test(
-      'download throws SyncCancelledException when cancelled while blocked mid-flight',
-      () async {
-        final token = CancellationToken();
-        final ctx = SyncContext(cancel: token);
-        final gated = GatedSyncAdapter(factory());
-        gated.holdDownload();
+    test('download throws SyncCancelledException when cancelled while blocked mid-flight', () async {
+      final token = CancellationToken();
+      final ctx = SyncContext(cancel: token);
+      final gated = GatedSyncAdapter(factory());
+      gated.holdDownload();
 
-        final future = gated.download('path/file.bin', ctx: ctx);
-        token.cancel();
+      final future = gated.download('path/file.bin', ctx: ctx);
+      token.cancel();
 
-        await expectLater(future, throwsA(isA<SyncCancelledException>()));
-      },
-    );
+      await expectLater(future, throwsA(isA<SyncCancelledException>()));
+    });
 
-    test(
-      'upload throws SyncCancelledException when cancelled while blocked mid-flight',
-      () async {
-        final token = CancellationToken();
-        final ctx = SyncContext(cancel: token);
-        final gated = GatedSyncAdapter(factory());
-        gated.holdUpload();
+    test('upload throws SyncCancelledException when cancelled while blocked mid-flight', () async {
+      final token = CancellationToken();
+      final ctx = SyncContext(cancel: token);
+      final gated = GatedSyncAdapter(factory());
+      gated.holdUpload();
 
-        final future = gated.upload(
-          'path/file.bin',
-          Uint8List.fromList([1]),
-          ctx: ctx,
-        );
-        token.cancel();
+      final future = gated.upload(
+        'path/file.bin',
+        Uint8List.fromList([1]),
+        ctx: ctx,
+      );
+      token.cancel();
 
-        await expectLater(future, throwsA(isA<SyncCancelledException>()));
-      },
-    );
+      await expectLater(future, throwsA(isA<SyncCancelledException>()));
+    });
 
-    test(
-      'delete throws SyncCancelledException when cancelled while blocked mid-flight',
-      () async {
-        final token = CancellationToken();
-        final ctx = SyncContext(cancel: token);
-        final gated = GatedSyncAdapter(factory());
-        gated.holdDelete();
+    test('delete throws SyncCancelledException when cancelled while blocked mid-flight', () async {
+      final token = CancellationToken();
+      final ctx = SyncContext(cancel: token);
+      final gated = GatedSyncAdapter(factory());
+      gated.holdDelete();
 
-        final future = gated.delete('path/file.bin', ctx: ctx);
-        token.cancel();
+      final future = gated.delete('path/file.bin', ctx: ctx);
+      token.cancel();
 
-        await expectLater(future, throwsA(isA<SyncCancelledException>()));
-      },
-    );
+      await expectLater(future, throwsA(isA<SyncCancelledException>()));
+    });
 
     test(
       'compareAndSwap throws SyncCancelledException when cancelled mid-flight',
@@ -468,20 +456,17 @@ void _runCancellationConformanceTests({
       },
     );
 
-    test(
-      'getEtag throws SyncCancelledException when cancelled while blocked mid-flight',
-      () async {
-        final token = CancellationToken();
-        final ctx = SyncContext(cancel: token);
-        final gated = GatedSyncAdapter(factory());
-        gated.holdGetEtag();
+    test('getEtag throws SyncCancelledException when cancelled while blocked mid-flight', () async {
+      final token = CancellationToken();
+      final ctx = SyncContext(cancel: token);
+      final gated = GatedSyncAdapter(factory());
+      gated.holdGetEtag();
 
-        final future = gated.getEtag('path/file.bin', ctx: ctx);
-        token.cancel();
+      final future = gated.getEtag('path/file.bin', ctx: ctx);
+      token.cancel();
 
-        await expectLater(future, throwsA(isA<SyncCancelledException>()));
-      },
-    );
+      await expectLater(future, throwsA(isA<SyncCancelledException>()));
+    });
   });
 }
 

@@ -237,55 +237,49 @@ void main() {
       expect(encoded[0], equals(EncryptionFlag.none.byte));
     });
 
-    test(
-      'encrypted values are longer than plaintext by at least 28 bytes',
-      () async {
-        final dek = await KeyDerivation.generateDek();
-        final provider = AesGcmEncryptionProvider(dek);
-        final doc = {'key': 'value'};
+    test('encrypted values are longer than plaintext by at least 28 bytes', () async {
+      final dek = await KeyDerivation.generateDek();
+      final provider = AesGcmEncryptionProvider(dek);
+      final doc = {'key': 'value'};
 
-        final plain = await ValueCodec.encode(doc, context: _ctx);
-        final encrypted = await ValueCodec.encode(
-          doc,
-          context: _ctx,
-          encryption: provider,
-        );
+      final plain = await ValueCodec.encode(doc, context: _ctx);
+      final encrypted = await ValueCodec.encode(
+        doc,
+        context: _ctx,
+        encryption: provider,
+      );
 
-        // Encrypted = EncryptionFlag (1B) + nonce (12B) + ciphertext + tag (16B)
-        // Plaintext = EncryptionFlag (1B) + CompressionFlag (1B) + CBOR payload
-        // The overhead should be 1 (outer flag reduction) + 28 (nonce+tag) bytes.
-        // But the ciphertext wraps the [compression_flag][payload], which is the
-        // same as the plaintext body. Net overhead: 28 bytes (nonce+tag), minus
-        // the 1 byte we remove (compression flag now inside ciphertext) = 27.
-        // In practice, encrypted is plain.length - 1 + 28 = plain.length + 27.
-        expect(encrypted.length, greaterThanOrEqualTo(plain.length + 27));
-      },
-    );
+      // Encrypted = EncryptionFlag (1B) + nonce (12B) + ciphertext + tag (16B)
+      // Plaintext = EncryptionFlag (1B) + CompressionFlag (1B) + CBOR payload
+      // The overhead should be 1 (outer flag reduction) + 28 (nonce+tag) bytes.
+      // But the ciphertext wraps the [compression_flag][payload], which is the
+      // same as the plaintext body. Net overhead: 28 bytes (nonce+tag), minus
+      // the 1 byte we remove (compression flag now inside ciphertext) = 27.
+      // In practice, encrypted is plain.length - 1 + 28 = plain.length + 27.
+      expect(encrypted.length, greaterThanOrEqualTo(plain.length + 27));
+    });
 
-    test(
-      'compression flag is hidden inside ciphertext (not visible as byte 1)',
-      () async {
-        final dek = await KeyDerivation.generateDek();
-        final provider = AesGcmEncryptionProvider(dek);
-        final doc = {
-          for (var i = 0; i < 30; i++) 'k_$i': 'v' * 50,
-        }; // large enough to be compressed
+    test('compression flag is hidden inside ciphertext (not visible as byte 1)', () async {
+      final dek = await KeyDerivation.generateDek();
+      final provider = AesGcmEncryptionProvider(dek);
+      final doc = {
+        for (var i = 0; i < 30; i++) 'k_$i': 'v' * 50,
+      }; // large enough to be compressed
 
-        final encoded = await ValueCodec.encode(
-          doc,
-          context: _ctx,
-          encryption: provider,
-        );
-        // Byte 0 = EncryptionFlag.aesGcm (0x01). Byte 1 onwards is the nonce
-        // (random bytes) — NOT a CompressionFlag. Verify byte 1 is not 0x00 or
-        // 0x01 (the only valid CompressionFlag values) at least sometimes, or
-        // simply that we cannot safely parse it as a CompressionFlag.
-        expect(encoded[0], equals(EncryptionFlag.aesGcm.byte));
-        // The ciphertext (byte 1...) contains the nonce, so the compression flag
-        // is not exposed. We confirm the outer byte is aesGcm, which is the key
-        // invariant.
-      },
-    );
+      final encoded = await ValueCodec.encode(
+        doc,
+        context: _ctx,
+        encryption: provider,
+      );
+      // Byte 0 = EncryptionFlag.aesGcm (0x01). Byte 1 onwards is the nonce
+      // (random bytes) — NOT a CompressionFlag. Verify byte 1 is not 0x00 or
+      // 0x01 (the only valid CompressionFlag values) at least sometimes, or
+      // simply that we cannot safely parse it as a CompressionFlag.
+      expect(encoded[0], equals(EncryptionFlag.aesGcm.byte));
+      // The ciphertext (byte 1...) contains the nonce, so the compression flag
+      // is not exposed. We confirm the outer byte is aesGcm, which is the key
+      // invariant.
+    });
 
     test(
       'two encryptions of the same doc produce different ciphertexts',
@@ -392,28 +386,25 @@ void main() {
       },
     );
 
-    test(
-      'plaintext value decoded with provider still works (flag=0x00 path)',
-      () async {
-        // An unencrypted value (flag=0x00) decoded with an encryption provider
-        // should still return the correct document. The provider is only invoked
-        // when flag=0x01.
-        final dek = await KeyDerivation.generateDek();
-        final provider = AesGcmEncryptionProvider(dek);
-        final doc = {'greeting': 'hello'};
+    test('plaintext value decoded with provider still works (flag=0x00 path)', () async {
+      // An unencrypted value (flag=0x00) decoded with an encryption provider
+      // should still return the correct document. The provider is only invoked
+      // when flag=0x01.
+      final dek = await KeyDerivation.generateDek();
+      final provider = AesGcmEncryptionProvider(dek);
+      final doc = {'greeting': 'hello'};
 
-        final plainEncoded = await ValueCodec.encode(
-          doc,
-          context: _ctx,
-        ); // no encryption
-        final decoded = await ValueCodec.decode(
-          plainEncoded,
-          context: _ctx,
-          encryption: provider,
-        );
-        expect(decoded, equals(doc));
-      },
-    );
+      final plainEncoded = await ValueCodec.encode(
+        doc,
+        context: _ctx,
+      ); // no encryption
+      final decoded = await ValueCodec.decode(
+        plainEncoded,
+        context: _ctx,
+        encryption: provider,
+      );
+      expect(decoded, equals(doc));
+    });
   });
 
   // ── EncryptionFlag enum ───────────────────────────────────────────────────────

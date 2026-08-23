@@ -32,8 +32,10 @@ import '../engine/platform/storage_adapter_interface.dart';
 import '../engine/platform/storage_adapter_native.dart';
 import '../secret/secret_key.dart';
 import '../secret/secret_store.dart';
+
 import 'package:betto_inferencing/betto_inferencing.dart';
 import 'package:betto_zstd/betto_zstd.dart' show ZstdSimple;
+
 import '../search/fts_index_definition.dart';
 import '../search/lexical/fts_manager.dart';
 import '../search/semantic/vec_manager.dart';

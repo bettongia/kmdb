@@ -14,6 +14,7 @@
 
 import 'package:kmdb/kmdb.dart';
 import 'package:kmdb/kmdb_config.dart';
+
 import 'command.dart';
 
 /// Assigns a fresh device identity to the database.

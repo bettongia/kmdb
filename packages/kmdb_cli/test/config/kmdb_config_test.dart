@@ -368,9 +368,8 @@ void main() {
     test('throws FormatException when indexes is not a list', () async {
       final localDir = io.Directory('${tmpDir.path}/local');
       localDir.createSync();
-      io.File(
-        '${tmpDir.path}/local/config.json',
-      ).writeAsStringSync(jsonEncode({'indexes': 'oops'}));
+      io.File('${tmpDir.path}/local/config.json')
+          .writeAsStringSync(jsonEncode({'indexes': 'oops'}));
       expect(
         () => KmdbConfig.forDatabase(tmpDir.path),
         throwsA(
@@ -546,9 +545,8 @@ void main() {
     test('throws FormatException when ftsIndexes is not a list', () async {
       final localDir = io.Directory('${tmpDir.path}/local');
       localDir.createSync();
-      io.File(
-        '${tmpDir.path}/local/config.json',
-      ).writeAsStringSync(jsonEncode({'ftsIndexes': 'bad'}));
+      io.File('${tmpDir.path}/local/config.json')
+          .writeAsStringSync(jsonEncode({'ftsIndexes': 'bad'}));
       expect(
         () => KmdbConfig.forDatabase(tmpDir.path),
         throwsA(
@@ -634,9 +632,8 @@ void main() {
       () async {
         final localDir = io.Directory('${tmpDir.path}/local');
         localDir.createSync();
-        io.File(
-          '${tmpDir.path}/local/config.json',
-        ).writeAsStringSync(jsonEncode({'embeddingModel': 'bad'}));
+        io.File('${tmpDir.path}/local/config.json')
+            .writeAsStringSync(jsonEncode({'embeddingModel': 'bad'}));
         expect(
           () => KmdbConfig.forDatabase(tmpDir.path),
           throwsA(
@@ -696,34 +693,31 @@ void main() {
       },
     );
 
-    test(
-      'throws FormatException with migration message for legacy modelPath',
-      () async {
-        // Config written before this plan used "modelPath" — must get an
-        // actionable migration message rather than a generic missing-field error.
-        final localDir = io.Directory('${tmpDir.path}/local');
-        localDir.createSync();
-        io.File('${tmpDir.path}/local/config.json').writeAsStringSync(
-          jsonEncode({
-            'embeddingModel': {'type': 'onnx', 'modelPath': '/models/bge.onnx'},
-          }),
-        );
-        expect(
-          () => KmdbConfig.forDatabase(tmpDir.path),
-          throwsA(
-            isA<FormatException>().having(
-              (e) => e.message,
-              'message',
-              allOf(
-                contains('modelPath'),
-                contains('no longer supported'),
-                contains('modelId'),
-              ),
+    test('throws FormatException with migration message for legacy modelPath', () async {
+      // Config written before this plan used "modelPath" — must get an
+      // actionable migration message rather than a generic missing-field error.
+      final localDir = io.Directory('${tmpDir.path}/local');
+      localDir.createSync();
+      io.File('${tmpDir.path}/local/config.json').writeAsStringSync(
+        jsonEncode({
+          'embeddingModel': {'type': 'onnx', 'modelPath': '/models/bge.onnx'},
+        }),
+      );
+      expect(
+        () => KmdbConfig.forDatabase(tmpDir.path),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            allOf(
+              contains('modelPath'),
+              contains('no longer supported'),
+              contains('modelId'),
             ),
           ),
-        );
-      },
-    );
+        ),
+      );
+    });
 
     test('round-trips embeddingModel through save/load', () async {
       final config = await KmdbConfig.forDatabase(tmpDir.path);
@@ -860,9 +854,8 @@ void main() {
     test('throws FormatException when vecIndexes is not a list', () async {
       final localDir = io.Directory('${tmpDir.path}/local');
       localDir.createSync();
-      io.File(
-        '${tmpDir.path}/local/config.json',
-      ).writeAsStringSync(jsonEncode({'vecIndexes': 'bad'}));
+      io.File('${tmpDir.path}/local/config.json')
+          .writeAsStringSync(jsonEncode({'vecIndexes': 'bad'}));
       expect(
         () => KmdbConfig.forDatabase(tmpDir.path),
         throwsA(

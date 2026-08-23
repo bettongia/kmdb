@@ -21,9 +21,8 @@ import 'vault_chunk.dart';
 import 'vault_search_config.dart';
 
 /// English stop words — loaded once, shared across all [VaultChunker] instances.
-final _englishStopWords = getStopWords(
-  Locale.fromSubtags(languageCode: 'en'),
-).listing;
+final _englishStopWords = getStopWords(Locale.fromSubtags(languageCode: 'en'))
+    .listing;
 
 /// Result of a [VaultChunker.chunk] call.
 ///

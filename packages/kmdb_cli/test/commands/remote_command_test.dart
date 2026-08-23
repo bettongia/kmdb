@@ -764,9 +764,8 @@ void main() {
     Future<void> writeCorruptConfig() async {
       final localDir = io.Directory('${dbDir.path}/local');
       localDir.createSync(recursive: true);
-      io.File(
-        '${dbDir.path}/local/config.json',
-      ).writeAsStringSync('NOT VALID JSON !!!');
+      io.File('${dbDir.path}/local/config.json')
+          .writeAsStringSync('NOT VALID JSON !!!');
     }
 
     // Lines 168-169 in remote_command.dart: FormatException from

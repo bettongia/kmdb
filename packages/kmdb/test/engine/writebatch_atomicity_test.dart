@@ -290,59 +290,56 @@ void main() {
   });
 
   group('H2 — in-process atomicity', () {
-    test(
-      'writeEvents only fires after all memtable mutations are visible',
-      () async {
-        // After the fix, the engine applies all memtable mutations synchronously
-        // (no `await` between them) BEFORE emitting any write event. So any
-        // subscriber that re-reads in response to a write event must see every
-        // entry of the batch — never a prefix.
-        final adapter = MemoryStorageAdapter();
-        final (store, _) = await _open(adapter);
+    test('writeEvents only fires after all memtable mutations are visible', () async {
+      // After the fix, the engine applies all memtable mutations synchronously
+      // (no `await` between them) BEFORE emitting any write event. So any
+      // subscriber that re-reads in response to a write event must see every
+      // entry of the batch — never a prefix.
+      final adapter = MemoryStorageAdapter();
+      final (store, _) = await _open(adapter);
 
-        const n = 20;
-        // Subscribe to write events; on each event, re-read every key in the
-        // batch and record which keys are visible. If memtable application were
-        // not synchronous-after-fsync, an early event could be observed with a
-        // partially-applied batch.
-        final observations = <List<bool>>[];
-        final sub = store.writeEvents.listen((ns) {
-          if (ns != 'tasks') return;
-          // Read synchronously inside the event handler — but get() is async, so
-          // we await each. Even with awaits, every memtable mutation has already
-          // landed before the event fired, so all 20 keys must be present.
-          Future.microtask(() async {
-            final present = <bool>[];
-            for (var i = 0; i < n; i++) {
-              present.add(await store.get('tasks', _key(i)) != null);
-            }
-            observations.add(present);
-          });
+      const n = 20;
+      // Subscribe to write events; on each event, re-read every key in the
+      // batch and record which keys are visible. If memtable application were
+      // not synchronous-after-fsync, an early event could be observed with a
+      // partially-applied batch.
+      final observations = <List<bool>>[];
+      final sub = store.writeEvents.listen((ns) {
+        if (ns != 'tasks') return;
+        // Read synchronously inside the event handler — but get() is async, so
+        // we await each. Even with awaits, every memtable mutation has already
+        // landed before the event fired, so all 20 keys must be present.
+        Future.microtask(() async {
+          final present = <bool>[];
+          for (var i = 0; i < n; i++) {
+            present.add(await store.get('tasks', _key(i)) != null);
+          }
+          observations.add(present);
         });
+      });
 
-        final batch = WriteBatch();
-        for (var i = 0; i < n; i++) {
-          batch.put('tasks', _key(i), _bytes('v$i'));
-        }
-        await store.writeBatch(batch);
-        // Give microtasks a chance to drain.
-        await Future<void>.delayed(Duration.zero);
-        await sub.cancel();
+      final batch = WriteBatch();
+      for (var i = 0; i < n; i++) {
+        batch.put('tasks', _key(i), _bytes('v$i'));
+      }
+      await store.writeBatch(batch);
+      // Give microtasks a chance to drain.
+      await Future<void>.delayed(Duration.zero);
+      await sub.cancel();
 
-        expect(observations, isNotEmpty);
-        for (final present in observations) {
-          expect(
-            present.every((p) => p),
-            isTrue,
-            reason:
-                'event subscriber observed partial batch: $present — the batch '
-                'must be fully visible by the time writeEvents fires',
-          );
-        }
+      expect(observations, isNotEmpty);
+      for (final present in observations) {
+        expect(
+          present.every((p) => p),
+          isTrue,
+          reason:
+              'event subscriber observed partial batch: $present — the batch '
+              'must be fully visible by the time writeEvents fires',
+        );
+      }
 
-        await store.close();
-      },
-    );
+      await store.close();
+    });
   });
 
   group('H2 — meta fold (D2)', () {

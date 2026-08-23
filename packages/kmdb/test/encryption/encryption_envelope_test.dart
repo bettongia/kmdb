@@ -103,23 +103,20 @@ void main() {
       expect(unwrapped, equals(payload));
     });
 
-    test(
-      'provider present: wire format is [EncryptionFlag.aesGcm][nonce|ciphertext|tag]',
-      () async {
-        final dek = await KeyDerivation.generateDek();
-        final provider = AesGcmEncryptionProvider(dek);
-        final payload = _bytes([42, 42, 42]);
+    test('provider present: wire format is [EncryptionFlag.aesGcm][nonce|ciphertext|tag]', () async {
+      final dek = await KeyDerivation.generateDek();
+      final provider = AesGcmEncryptionProvider(dek);
+      final payload = _bytes([42, 42, 42]);
 
-        final wrapped = await EncryptionEnvelope.wrap(
-          payload,
-          provider,
-          context: _ctx,
-        );
-        expect(wrapped[0], equals(EncryptionFlag.aesGcm.byte));
-        // Ciphertext body must not contain the plaintext verbatim.
-        expect(wrapped.sublist(1), isNot(equals(payload)));
-      },
-    );
+      final wrapped = await EncryptionEnvelope.wrap(
+        payload,
+        provider,
+        context: _ctx,
+      );
+      expect(wrapped[0], equals(EncryptionFlag.aesGcm.byte));
+      // Ciphertext body must not contain the plaintext verbatim.
+      expect(wrapped.sublist(1), isNot(equals(payload)));
+    });
 
     test('provider present: zero-length payload round-trips', () async {
       final dek = await KeyDerivation.generateDek();

@@ -146,45 +146,42 @@ void main() {
       return (store, adapter);
     }
 
-    test(
-      r'$$vault:fts: entries land only in .local.sst files after flush',
-      () async {
-        final sha256 = 'b' * 64;
-        final (store, adapter) = await setupAndFlush(sha256);
+    test(r'$$vault:fts: entries land only in .local.sst files after flush', () async {
+      final sha256 = 'b' * 64;
+      final (store, adapter) = await setupAndFlush(sha256);
 
-        final sstFiles = await adapter.listFiles(_sstDir);
-        final syncableFiles = sstFiles
-            .where((f) => f.endsWith('.sst') && !f.endsWith('.local.sst'))
-            .toList();
+      final sstFiles = await adapter.listFiles(_sstDir);
+      final syncableFiles = sstFiles
+          .where((f) => f.endsWith('.sst') && !f.endsWith('.local.sst'))
+          .toList();
 
-        expect(
-          syncableFiles,
-          isNotEmpty,
-          reason: 'Expected at least one syncable .sst after mixed flush',
-        );
+      expect(
+        syncableFiles,
+        isNotEmpty,
+        reason: 'Expected at least one syncable .sst after mixed flush',
+      );
 
-        // Assert $$vault: bytes are NOT in syncable .sst files.
-        // The internal key encodes the namespace as a length-prefixed UTF-8
-        // string, so the ASCII bytes of '$$vault:' appear literally in the raw
-        // key bytes of any $$vault:-namespaced entry.
-        for (final filename in syncableFiles) {
-          final path = '$_sstDir/$filename';
-          final reader = await SstableReader.open(path, adapter);
-          await for (final entry in reader.scan()) {
-            final rawKey = String.fromCharCodes(entry.key);
-            expect(
-              rawKey.contains(r'$$vault:'),
-              isFalse,
-              reason:
-                  // ignore: unnecessary_string_escapes
-                  'Syncable SSTable $filename must not contain \$\$vault: entries',
-            );
-          }
+      // Assert $$vault: bytes are NOT in syncable .sst files.
+      // The internal key encodes the namespace as a length-prefixed UTF-8
+      // string, so the ASCII bytes of '$$vault:' appear literally in the raw
+      // key bytes of any $$vault:-namespaced entry.
+      for (final filename in syncableFiles) {
+        final path = '$_sstDir/$filename';
+        final reader = await SstableReader.open(path, adapter);
+        await for (final entry in reader.scan()) {
+          final rawKey = String.fromCharCodes(entry.key);
+          expect(
+            rawKey.contains(r'$$vault:'),
+            isFalse,
+            reason:
+                // ignore: unnecessary_string_escapes
+                'Syncable SSTable $filename must not contain \$\$vault: entries',
+          );
         }
+      }
 
-        await store.close();
-      },
-    );
+      await store.close();
+    });
 
     test(
       r'$$vault:fts: entries ARE present in .local.sst files after flush',

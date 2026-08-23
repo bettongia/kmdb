@@ -183,38 +183,35 @@ void main() {
 
     // ── syncVaultMetadata ─────────────────────────────────────────────────
 
-    test(
-      'syncVaultMetadata creates a stub (manifest, no blob) locally',
-      () async {
-        // First upload a local object to the sync vault.
-        final ref = await localStore.ingest(
-          bytes: _kContent,
-          hlcTimestamp: '0000000000000001',
-        );
-        await adapter.uploadVaultObject(ref.sha256);
+    test('syncVaultMetadata creates a stub (manifest, no blob) locally', () async {
+      // First upload a local object to the sync vault.
+      final ref = await localStore.ingest(
+        bytes: _kContent,
+        hlcTimestamp: '0000000000000001',
+      );
+      await adapter.uploadVaultObject(ref.sha256);
 
-        // Create a fresh local store that simulates another device (no objects).
-        final deviceBAdapter = MemoryStorageAdapter();
-        final deviceBStore = _MemVaultStore(deviceBAdapter, '/device_b');
-        final deviceBKvStore = TestKvStore();
-        // Simulate the ref arriving via SSTable ingest before metadata sync —
-        // the ordering precondition documented on [syncVaultMetadata].
-        deviceBKvStore.setRefCount(ref.sha256, 1);
-        final adapterB = LocalDirectoryVaultAdapter(
-          syncRoot: syncRoot.path,
-          localStore: deviceBStore,
-          kvStore: deviceBKvStore,
-          authenticator: authenticator,
-        );
+      // Create a fresh local store that simulates another device (no objects).
+      final deviceBAdapter = MemoryStorageAdapter();
+      final deviceBStore = _MemVaultStore(deviceBAdapter, '/device_b');
+      final deviceBKvStore = TestKvStore();
+      // Simulate the ref arriving via SSTable ingest before metadata sync —
+      // the ordering precondition documented on [syncVaultMetadata].
+      deviceBKvStore.setRefCount(ref.sha256, 1);
+      final adapterB = LocalDirectoryVaultAdapter(
+        syncRoot: syncRoot.path,
+        localStore: deviceBStore,
+        kvStore: deviceBKvStore,
+        authenticator: authenticator,
+      );
 
-        // Sync metadata to device B.
-        await adapterB.syncVaultMetadata(ref.sha256);
+      // Sync metadata to device B.
+      await adapterB.syncVaultMetadata(ref.sha256);
 
-        // Device B should have manifest.json but no blob → stub.
-        expect(await deviceBStore.exists(ref.sha256), isTrue);
-        expect(await deviceBStore.isHydrated(ref.sha256), isFalse);
-      },
-    );
+      // Device B should have manifest.json but no blob → stub.
+      expect(await deviceBStore.exists(ref.sha256), isTrue);
+      expect(await deviceBStore.isHydrated(ref.sha256), isFalse);
+    });
 
     test(
       'syncVaultMetadata throws StateError when remote manifest missing',
@@ -345,29 +342,26 @@ void main() {
       },
     );
 
-    test(
-      'hydrateVaultBlob throws StateError when remote blob is absent',
-      () async {
-        // Create a remote manifest without a blob (simulates a stub-only remote).
-        final sha256 = VaultStore.computeSha256(_kContent);
-        final crc32c = VaultStore.computeCrc32cForTest(_kContent);
-        final prefix = sha256.substring(0, 2);
-        final suffix = sha256.substring(2);
-        final remoteDir = Directory('${syncRoot.path}/vault/$prefix/$suffix')
-          ..createSync(recursive: true);
-        File('${remoteDir.path}/manifest.json').writeAsStringSync(
-          '{"schemaVersion":1,"sha256":"$sha256","size":${_kContent.length},'
-          '"crc32c":"$crc32c","mediaType":"application/octet-stream",'
-          '"originalName":"test","createdAt":"0000000000000001"}',
-        );
-        // No blob file written.
+    test('hydrateVaultBlob throws StateError when remote blob is absent', () async {
+      // Create a remote manifest without a blob (simulates a stub-only remote).
+      final sha256 = VaultStore.computeSha256(_kContent);
+      final crc32c = VaultStore.computeCrc32cForTest(_kContent);
+      final prefix = sha256.substring(0, 2);
+      final suffix = sha256.substring(2);
+      final remoteDir = Directory('${syncRoot.path}/vault/$prefix/$suffix')
+        ..createSync(recursive: true);
+      File('${remoteDir.path}/manifest.json').writeAsStringSync(
+        '{"schemaVersion":1,"sha256":"$sha256","size":${_kContent.length},'
+        '"crc32c":"$crc32c","mediaType":"application/octet-stream",'
+        '"originalName":"test","createdAt":"0000000000000001"}',
+      );
+      // No blob file written.
 
-        await expectLater(
-          adapter.hydrateVaultBlob(sha256),
-          throwsA(isA<StateError>()),
-        );
-      },
-    );
+      await expectLater(
+        adapter.hydrateVaultBlob(sha256),
+        throwsA(isA<StateError>()),
+      );
+    });
 
     // ── Tombstone sync ────────────────────────────────────────────────────
 
@@ -435,9 +429,8 @@ void main() {
       final suffix = ref.sha256.substring(2);
       final remoteManifestPath =
           '${syncRoot.path}/vault/$prefix/$suffix/manifest.json';
-      await File(
-        remoteManifestPath,
-      ).writeAsBytes(utf8.encode('{"forged": true}'));
+      await File(remoteManifestPath)
+          .writeAsBytes(utf8.encode('{"forged": true}'));
 
       final deviceBAdapter = MemoryStorageAdapter();
       final deviceBStore = _MemVaultStore(
@@ -476,9 +469,8 @@ void main() {
       final suffix = ref.sha256.substring(2);
       final remoteTombstonePath =
           '${syncRoot.path}/vault/$prefix/$suffix/tombstone.json';
-      await File(
-        remoteTombstonePath,
-      ).writeAsBytes(utf8.encode('{"forged": true}'));
+      await File(remoteTombstonePath)
+          .writeAsBytes(utf8.encode('{"forged": true}'));
 
       final deviceBAdapter = MemoryStorageAdapter();
       final deviceBStore = _MemVaultStore(
@@ -513,9 +505,8 @@ void main() {
       // Raw bytes, no sync-auth envelope at all (distinct from the S-4
       // test above, which uses a *validly-enveloped* substitution to
       // isolate the sha256 check specifically).
-      await File(
-        remoteBlobPath,
-      ).writeAsBytes([0x00, ...utf8.encode('forged-no-envelope')]);
+      await File(remoteBlobPath)
+          .writeAsBytes([0x00, ...utf8.encode('forged-no-envelope')]);
 
       final deviceBAdapter = MemoryStorageAdapter();
       final deviceBStore = _MemVaultStore(

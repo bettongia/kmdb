@@ -323,9 +323,8 @@ void main() {
       // from, the raw payload) — reading through the raw
       // LocalDirectoryAdapter proves the envelope was actually applied at
       // the storage layer, not merely accepted/no-op'd by the decorator.
-      final raw = await LocalDirectoryAdapter(
-        remoteDir.path,
-      ).download('sstables/a-0-1.sst');
+      final raw = await LocalDirectoryAdapter(remoteDir.path)
+          .download('sstables/a-0-1.sst');
       expect(raw, isNotNull);
       expect(raw, isNot(equals(payload)));
       expect(raw!.length, greaterThan(payload.length));
