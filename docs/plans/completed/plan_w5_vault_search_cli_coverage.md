@@ -1,6 +1,6 @@
 # Vault search CLI positive-path coverage
 
-**Status**: Investigated
+**Status**: Complete
 
 **PR link**: _(none yet)_
 
@@ -164,14 +164,14 @@ file.
 
 ## Implementation plan
 
-- [ ] **Add a deterministic index-completion helper** to
+- [x] **Add a deterministic index-completion helper** to
       `test/commands/vault/vault_search_commands_test.dart`, e.g.
       `Future<void> _awaitIndexed(KmdbDatabase db, {int atLeast = 1, Duration
       timeout = const Duration(seconds: 5)})` that polls
       `db.vaultIndexingStatus()` every 20 ms until `status.indexed >= atLeast`,
       throwing `TimeoutException` on the deadline. Mirror
       `vault_search_manager_test.dart:_awaitTerminal`.
-- [ ] **Add a "searchable document" helper** that (a) ingests a text blob via
+- [x] **Add a "searchable document" helper** that (a) ingests a text blob via
       `db.vaultStore!.ingest(bytes: utf8.encode('<distinctive searchable
       text>'), hlcTimestamp: …, originalName: 'test.txt')` returning the
       `sha256`, and (b) inserts a raw document referencing it:
@@ -179,35 +179,46 @@ file.
       'kmdb-vault://sha256/$sha256'})`. Use text containing a term that stems
       distinctly (e.g. `'quantum'`) so a matching/non-matching query pair is
       unambiguous.
-- [ ] **`vault search` positive path** (new group, `_openVaultSearchDb()`):
+- [x] **`vault search` positive path** (new group, `_openVaultSearchDb()`):
       ingest + reference + `_awaitIndexed`, then
       `VaultSearchCommand().execute(ctx, ['<matching term>'], {'collection':
       'docs', 'mode': 'lexical'})`. Assert `ok == true`, the output contains the
       results header (collection + query), the inserted doc's id, and `score=`.
-- [ ] **`vault search` miss path**: same setup, query a term **not** present;
+- [x] **`vault search` miss path**: same setup, query a term **not** present;
       assert `ok == true` and output contains `No vault search results`.
-- [ ] **`vault reindex` positive path**: ingest + reference + `_awaitIndexed`,
+- [x] **`vault reindex` positive path**: ingest + reference + `_awaitIndexed`,
       then `VaultReindexCommand().execute(ctx, [], {})`. Assert `ok == true` and
       the output reports a non-zero queued count (`contains('Queued 1 vault
       blob')` or a `RegExp(r'Queued (\d+)')` group > 0).
-- [ ] **`vault status` positive path**: **replace** the existing flaky
+- [x] **`vault status` positive path**: **replace** the existing flaky
       `status with indexed blob` group (which uses `Future.delayed(200ms)` and
       only asserts `total > 0`) with a group that uses `_awaitIndexed` and
       asserts the `Indexed:` line is ≥ 1 (regex `RegExp(r'Indexed:\s+(\d+)')`),
       in addition to `Total blobs:` ≥ 1. Keep asserting `ok == true`.
-- [ ] Do **not** add or assert any `--json` output — no such flag exists (see
+- [x] Do **not** add or assert any `--json` output — no such flag exists (see
       Investigation).
-- [ ] Keep all existing negative-path tests unchanged; this plan only adds the
+- [x] Keep all existing negative-path tests unchanged; this plan only adds the
       positive paths (and hardens the one flaky status test).
 
 **Final step — QA sign-off and pre-commit:**
 
-- [ ] Run `make coverage` — confirm ≥ baseline. (This is `kmdb_cli` — run
+- [x] Run `make coverage` — confirm ≥ baseline. (This is `kmdb_cli` — run
       `cd packages/kmdb_cli && dart test` explicitly; `make pre_commit`'s scoped
       step is `kmdb`-only.)
-- [ ] Hand off to the **`kmdb-qa` agent** for sign-off.
-- [ ] Run `make pre_commit` — format, analyze, license_check, tests all green.
-- [ ] Verify licence headers on any new files (2026).
+- [x] Hand off to the **`kmdb-qa` agent** for sign-off. **PASS (2026-08-24)** —
+      the coordinator ran `kmdb-qa`; verdict: all checklist items implemented,
+      the search-hit test empirically proven to depend on the docref (QA
+      swapped the URI for a non-URI string and confirmed the test then fails,
+      then reverted), coverage ≥ baseline, format/analysis clean, and the two
+      reported failures independently confirmed sandbox-environmental. Zero
+      blocking issues.
+- [x] Run `make pre_commit` — format, analyze, license_check, tests all green.
+      (Run directly via Bash in this session, since `kmdb-pre-commit` was also
+      unavailable as an invokable agent; the mechanical gate itself passed
+      cleanly: format_check, analyze — 7 packages, license_check, and the
+      scoped `kmdb` test suite — 2647 tests passed.)
+- [x] Verify licence headers on any new files (2026). No new files were
+      created — only the existing (already-licensed) test file was edited.
 
 ## Reviewer notes (2026-08-23, kmdb-plan-reviewer)
 
@@ -238,4 +249,27 @@ addition; the coverage impact is on `kmdb_cli` (run its suite explicitly — the
 
 ## Summary
 
-_To be completed when the work is done._
+- Added positive-path coverage to
+  `packages/kmdb_cli/test/commands/vault/vault_search_commands_test.dart` for
+  `vault search`, `vault reindex`, and `vault status` — no production code
+  changed.
+- Added two test-only helpers: `_awaitIndexed()` (deterministic poll on
+  `db.vaultIndexingStatus()`, mirroring the core `_awaitTerminal` pattern) and
+  `_ingestSearchableDocument()` (ingests a distinctive `text/plain` blob and
+  inserts a `docs` document referencing it via its `kmdb-vault://sha256/…`
+  URI, satisfying the docref prerequisite for a search hit).
+- New tests: a ranked-hit search assertion (`--mode lexical`, header +
+  `id=<docId>` + `score=`), a no-match search assertion, a non-zero
+  `vault reindex` queued-count assertion, and a hardened `vault status`
+  assertion (replacing the old `Future.delayed(200ms)` test) that polls to
+  `indexed` and asserts both `Total blobs:` and `Indexed:` are ≥ 1.
+- All existing negative-path tests kept unchanged.
+- `kmdb_cli` suite: 35/35 tests pass in the target file; full package suite
+  passes (two unrelated failures only occur under the sandboxed tool
+  environment, where real `~/.config/kmdb` filesystem access is denied by
+  design — confirmed pre-existing and unrelated by reproducing them outside
+  this change and with the sandbox disabled).
+- `dart analyze` clean; `make coverage` (workspace overall) 95.0%;
+  `kmdb_cli`-only coverage (computed from `site/coverage/lcov.info`,
+  `packages/kmdb_cli/` prefix) 95.51% (3045/3188 lines), at/above the prior
+  95.4% baseline.
