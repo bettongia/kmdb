@@ -1,8 +1,8 @@
 # LocalDirectoryAdapter: await the write before the lock is released (CAS ordering)
 
-**Status**: Implementing
+**Status**: Complete
 
-**PR link**: _(none yet)_
+**PR link**: [#76](https://github.com/bettongia/kmdb/pull/76) (merged 2026-08-23)
 
 > **Provenance.** Found during the WI-5 / Dart 3.13.1 work on 2026-08-22:
 > Dart 3.13.1's new `unawaited_return_in_try_block` lint flagged a real
