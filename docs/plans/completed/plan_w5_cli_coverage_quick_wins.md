@@ -2,7 +2,7 @@
 
 **Status**: Complete
 
-**PR link**: _(none yet)_
+**PR link**: [#78](https://github.com/bettongia/kmdb/pull/78)
 
 > **Provenance.** Produced by the WI-10 / W5 CLI test-**adequacy** audit
 > (`kmdb-qa`, 2026-08-23), which found the roadmap's "never swept" CLI list
