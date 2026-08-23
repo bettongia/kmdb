@@ -23,9 +23,13 @@
 //    in _scanForVaultUris (lines 224-226).
 //  - Vault dump where a document has a vault URI stub (not hydrated) →
 //    stubsSkipped incremented (line 163).
+//  - Standard NDJSON dump with a poisoned/undecodable value (S-2 hardening):
+//    the dump must skip the bad document (reporting it via `err`) and still
+//    emit the good document, rather than aborting the whole dump.
 
 import 'dart:convert';
 import 'dart:io' as io;
+import 'dart:typed_data';
 
 import 'package:kmdb/kmdb.dart';
 import 'package:kmdb_cli/src/commands/command.dart';
@@ -107,6 +111,39 @@ Future<(KmdbDatabase, CommandContext)> _openCtx({
 
 void main() {
   tearDown(MemoryStorageAdapter.releaseAllLocks);
+
+  group('DumpCommand', () {
+    test(
+      'standard NDJSON dump skips a poisoned value and keeps going (S-2)',
+      () async {
+        final outSink = _Sink();
+        final errSink = _Sink();
+        final (db, ctx) = await _openCtx(out: outSink, err: errSink);
+        addTearDown(db.close);
+
+        // A good document, inserted through the collection API.
+        final col = ctx.rawCollection('notes');
+        await col.insert({'title': 'good note'});
+
+        // A second key in the same collection whose stored value is not
+        // decodable CBOR — simulates a corrupted/poisoned value (S-2).
+        const poisonedId = '01900000000070809000000000000099';
+        await db.store.put(
+          'notes',
+          poisonedId,
+          Uint8List.fromList([0xFF, 0xFE, 0xFD]),
+        );
+
+        final ok = await const DumpCommand().execute(ctx, [], {});
+
+        // The dump must survive the poisoned value and still emit the good
+        // document, reporting the skip via the error sink.
+        expect(ok, isTrue);
+        expect(outSink.toString(), contains('good note'));
+        expect(errSink.toString(), contains('Skipping'));
+      },
+    );
+  });
 
   group('DumpCommand --vault', () {
     test(

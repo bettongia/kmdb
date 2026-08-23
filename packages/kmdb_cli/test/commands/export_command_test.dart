@@ -17,12 +17,16 @@
 // These tests cover:
 //  - Missing collection argument → false + error
 //  - Basic NDJSON export (golden path)
+//  - Standard NDJSON export with a poisoned/undecodable value (S-2
+//    hardening): the export must skip the bad document (reporting it via
+//    `err`) and still emit the good document.
 //  - Vault export without vault configured → false + error
 //
 // Subprocess round-trip (export + import) is covered in cli_runner_test.dart.
 
 import 'dart:convert';
 import 'dart:io' as io;
+import 'dart:typed_data';
 
 import 'package:kmdb/kmdb.dart';
 import 'package:kmdb_cli/src/commands/command.dart';
@@ -238,6 +242,37 @@ void main() {
           .whereType<io.File>();
       expect(files, isEmpty, reason: 'no vault URI docs → no packages');
     });
+
+    test(
+      'standard NDJSON export skips a poisoned value and keeps going (S-2)',
+      () async {
+        final outSink = _Sink();
+        final errSink = _Sink();
+        final (db, ctx) = await _openCtx(out: outSink, err: errSink);
+        addTearDown(db.close);
+
+        // A good document, inserted through the collection API.
+        final col = ctx.rawCollection('notes');
+        await col.insert({'title': 'good note'});
+
+        // A second key in the same collection whose stored value is not
+        // decodable CBOR — simulates a corrupted/poisoned value (S-2).
+        const poisonedId = '019000000000708090000000000000aa';
+        await db.store.put(
+          'notes',
+          poisonedId,
+          Uint8List.fromList([0xFF, 0xFE, 0xFD]),
+        );
+
+        final result = await const ExportCommand().execute(ctx, ['notes'], {});
+
+        // The export must survive the poisoned value and still emit the
+        // good document, reporting the skip via the error sink.
+        expect(result, isTrue);
+        expect(outSink.toString(), contains('good note'));
+        expect(errSink.toString(), contains('Skipping'));
+      },
+    );
 
     test(
       'vault export: document with stub vault URI is skipped (stubsSkipped++)',
