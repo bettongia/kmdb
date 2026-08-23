@@ -2,7 +2,7 @@
 
 **Status**: Complete
 
-**PR link**: _(none yet)_
+**PR link**: [#80](https://github.com/bettongia/kmdb/pull/80)
 
 > **Provenance.** Discovered by the W5 CLI quick-wins work
 > ([plan](completed/plan_w5_cli_coverage_quick_wins.md), item #4, PR #78) and
