@@ -17,15 +17,21 @@
 ///
 /// These tests focus on:
 /// - Error handling (missing vault, missing vault search config, missing args)
-/// - Output structure when vault search is configured
+/// - Output structure when vault search is configured, on both the empty
+///   collection and, positively, an indexed blob with a real document
+///   docref — ingesting via a real [VaultSearchManager] pipeline (the core
+///   `PlainTextExtractor`, no ONNX/model dependency) and asserting a genuine
+///   ranked hit, non-zero reindex count, and non-zero status counts
 /// - Metadata contract (name, description, usage, configureArgParser)
 ///
-/// Note: Full search result rendering requires a real [VaultSearchManager]
-/// which indexes blobs asynchronously. The majority of the search path is
-/// already covered by VaultSearchManager and VaultSearcher unit tests in the
-/// kmdb package. These CLI tests verify the command wiring and error paths.
+/// Note: the deeper mechanics of ranking, scoring, and candidate selection are
+/// already covered by `VaultSearchManager` and `VaultSearcher` unit tests in
+/// the `kmdb` package; these CLI tests verify the command wiring, output
+/// shapes, and end-to-end plumbing (docref requirement, async indexing
+/// completion) rather than re-deriving that coverage.
 library;
 
+import 'dart:async' show TimeoutException;
 import 'dart:convert' show utf8;
 import 'dart:typed_data';
 
@@ -115,6 +121,58 @@ CommandContext _ctx(KmdbDatabase db, {StringBuffer? out, StringBuffer? err}) =>
       out: out ?? StringBuffer(),
       err: err ?? StringBuffer(),
     );
+
+/// Polls [db.vaultIndexingStatus] until at least [atLeast] blobs have reached
+/// the `indexed` terminal state, or throws [TimeoutException] on [timeout].
+///
+/// Mirrors the core `_awaitTerminal` helper in
+/// `vault_search_manager_test.dart` — deterministic polling instead of a
+/// fixed `Future.delayed`, since the indexing isolate's completion time is
+/// not guaranteed.
+Future<void> _awaitIndexed(
+  KmdbDatabase db, {
+  int atLeast = 1,
+  Duration timeout = const Duration(seconds: 5),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (DateTime.now().isBefore(deadline)) {
+    final status = await db.vaultIndexingStatus();
+    if (status.indexed >= atLeast) return;
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+  }
+  throw TimeoutException(
+    'Timed out waiting for $atLeast vault blob(s) to reach indexed status',
+  );
+}
+
+/// Ingests a distinctive, searchable text blob into [db]'s vault and inserts
+/// a document into the `docs` collection that references it via its
+/// `kmdb-vault://sha256/{sha256}` URI.
+///
+/// A search hit requires both: the blob must be indexed, *and* some document
+/// in the searched collection must reference the blob (`VaultRefInterceptor`
+/// writes the `$vault:docref:{sha256}` entry that scopes search candidates —
+/// see `vault_searcher.dart`'s `_candidatesForNamespace`). Ingesting alone is
+/// not sufficient to produce a search hit.
+///
+/// Returns the sha256 of the ingested blob and the id of the document that
+/// references it (the `docs` collection's own UUIDv7 key), so callers can
+/// assert on both.
+Future<({String sha256, String docId})> _ingestSearchableDocument(
+  KmdbDatabase db,
+) async {
+  final ref = await db.vaultStore!.ingest(
+    bytes: Uint8List.fromList(
+      utf8.encode('a treatise on quantum mechanics and wave functions'),
+    ),
+    hlcTimestamp: '0000000000000001',
+    originalName: 'test.txt',
+  );
+  final doc = await db.rawCollection('docs').insert({
+    'attachment': 'kmdb-vault://sha256/${ref.sha256}',
+  });
+  return (sha256: ref.sha256, docId: doc['_id'] as String);
+}
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -270,6 +328,53 @@ void main() {
         expect(out.toString(), contains('No vault search results'));
       });
     });
+
+    group('search with an indexed, docref\'d blob', () {
+      late KmdbDatabase db;
+      late StringBuffer out;
+      late StringBuffer err;
+      late String docId;
+
+      setUp(() async {
+        db = await _openVaultSearchDb();
+        out = StringBuffer();
+        err = StringBuffer();
+        // Ingest a distinctive blob, reference it from a `docs` document, and
+        // wait until the async indexing pipeline reaches `indexed` — a search
+        // hit requires both the docref and the terminal indexed state.
+        final ingested = await _ingestSearchableDocument(db);
+        await _awaitIndexed(db);
+        docId = ingested.docId;
+      });
+      tearDown(() => db.close());
+
+      test('returns a ranked hit for a matching term', () async {
+        final ok = await const VaultSearchCommand().execute(
+          _ctx(db, out: out, err: err),
+          ['quantum'],
+          {'collection': 'docs', 'mode': 'lexical'},
+        );
+        expect(ok, isTrue);
+        final output = out.toString();
+        expect(output, contains('Vault search results for "quantum"'));
+        expect(output, contains('docs'));
+        expect(output, contains('id=$docId'));
+        expect(output, contains('score='));
+      });
+
+      test('reports no results for a non-matching term', () async {
+        final ok = await const VaultSearchCommand().execute(
+          _ctx(db, out: out, err: err),
+          ['zzznonexistentzzz'],
+          {'collection': 'docs', 'mode': 'lexical'},
+        );
+        expect(ok, isTrue);
+        expect(
+          out.toString(),
+          contains('No vault search results for "zzznonexistentzzz"'),
+        );
+      });
+    });
   });
 
   // ── VaultReindexCommand ────────────────────────────────────────────────────
@@ -373,6 +478,34 @@ void main() {
           out.toString(),
           anyOf(contains('No vault blobs'), contains('nothing to')),
         );
+      });
+    });
+
+    group('reindex with an indexed blob', () {
+      late KmdbDatabase db;
+      late StringBuffer out;
+      late StringBuffer err;
+
+      setUp(() async {
+        db = await _openVaultSearchDb();
+        out = StringBuffer();
+        err = StringBuffer();
+        // reindexVault() only counts blobs already `indexed` or `extracting`
+        // — a `pending` blob is left as-is and not counted, so the blob must
+        // reach `indexed` before reindex is invoked.
+        await _ingestSearchableDocument(db);
+        await _awaitIndexed(db);
+      });
+      tearDown(() => db.close());
+
+      test('returns true and reports a non-zero queued count', () async {
+        final ok = await const VaultReindexCommand().execute(
+          _ctx(db, out: out, err: err),
+          [],
+          {},
+        );
+        expect(ok, isTrue);
+        expect(out.toString(), contains('Queued 1 vault blob'));
       });
     });
   });
@@ -512,11 +645,12 @@ void main() {
         db = await _openVaultSearchDb();
         out = StringBuffer();
         err = StringBuffer();
-        // Ingest a blob to have at least one pending entry in the status.
+        // Ingest a blob and deterministically wait for it to reach the
+        // `indexed` terminal state — polling vaultIndexingStatus() rather
+        // than a fixed delay avoids flakiness under isolate scheduling
+        // variance (CLAUDE.md durability/determinism guidance).
         await _ingest(db.vaultStore!);
-        // Small wait to allow the VaultSearchManager isolate to process the blob.
-        // In unit tests, the isolate processes immediately for text/plain blobs.
-        await Future<void>.delayed(const Duration(milliseconds: 200));
+        await _awaitIndexed(db);
       });
       tearDown(() => db.close());
 
@@ -529,25 +663,25 @@ void main() {
         expect(ok, isTrue);
       });
 
-      test('total count is at least 1 when a blob has been ingested', () async {
+      test('total and indexed counts are at least 1', () async {
         await const VaultStatusCommand().execute(
           _ctx(db, out: out, err: err),
           [],
           {},
         );
-        // The output must show "Total blobs:" followed by a number > 0.
-        // We don't hardcode which lifecycle state the blob is in because
-        // the isolate may have completed indexing by the time the status runs.
         final output = out.toString();
-        // Check that the Total line is not "0".
+
         final totalMatch = RegExp(r'Total blobs:\s+(\d+)').firstMatch(output);
         expect(
           totalMatch,
           isNotNull,
           reason: 'Total blobs line must be present',
         );
-        final total = int.parse(totalMatch!.group(1)!);
-        expect(total, greaterThan(0));
+        expect(int.parse(totalMatch!.group(1)!), greaterThan(0));
+
+        final indexedMatch = RegExp(r'Indexed:\s+(\d+)').firstMatch(output);
+        expect(indexedMatch, isNotNull, reason: 'Indexed line must be present');
+        expect(int.parse(indexedMatch!.group(1)!), greaterThanOrEqualTo(1));
       });
     });
   });
