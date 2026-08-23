@@ -369,6 +369,46 @@ void main() {
       expect(result.code, equals(1));
       expect(result.err, contains('dot-commands'));
     });
+
+    test('without --continue-on-error, a script aborts at the first failing '
+        'line (the second line never runs)', () async {
+      // The `--continue-on-error` test above proves both lines run when the
+      // flag is set; this proves the flag actually changes behaviour: by
+      // default, a failing line must stop the script before the next line.
+      final dbPath = tmp.file('db');
+      final scriptPath = tmp.file('abort_script.kmdb');
+      io.File(scriptPath).writeAsStringSync(
+        'not_a_cmd\ncollections create marker_collection_never_created\n',
+      );
+
+      final result = await _run(['--read', scriptPath, dbPath]);
+      expect(result.code, equals(1));
+      expect(result.err, contains('unknown command'));
+      // The second line's distinctive output must be absent — proving it
+      // never ran.
+      expect(result.out, isNot(contains('marker_collection_never_created')));
+    });
+
+    test('--read script mutation round-trip: an insert on one line is visible '
+        'to a scan on a later line', () async {
+      final dbPath = tmp.file('db');
+      final scriptPath = tmp.file('mutate_script.kmdb');
+      // --read lines are whitespace-tokenised (`CliRunner._tokenize`), so
+      // --value must be compact JSON with no internal spaces. The
+      // tokenizer also strips quote characters wherever they toggle quote
+      // mode, so the JSON's own double quotes must be shielded by wrapping
+      // the whole value in single quotes — otherwise the double quotes
+      // around "k"/"roundtrip_value" would be silently stripped, breaking
+      // the JSON.
+      io.File(scriptPath).writeAsStringSync(
+        "insert roundtrip_ns --value '{\"k\":\"roundtrip_value\"}'\n"
+        'scan roundtrip_ns\n',
+      );
+
+      final result = await _run(['--read', scriptPath, dbPath]);
+      expect(result.code, equals(0));
+      expect(result.out, contains('roundtrip_value'));
+    });
   });
 
   // ── --output file scenarios ───────────────────────────────────────────────

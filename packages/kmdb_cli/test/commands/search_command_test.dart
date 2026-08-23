@@ -14,6 +14,7 @@
 
 import 'dart:convert';
 import 'dart:io' as io;
+import 'dart:typed_data';
 
 import 'package:kmdb/kmdb.dart';
 import 'package:kmdb_cli/src/commands/command.dart';
@@ -1046,5 +1047,59 @@ void main() {
       expect(result, isFalse);
       expect(err.toString(), contains("unknown --mode value 'invalid_mode'"));
     });
+  });
+
+  // ── search: query failed catch (poisoned stored document) ──────────────────
+
+  group('SearchCommand — query failed catch', () {
+    test(
+      'a poisoned stored document surfaces as "search: query failed" '
+      '(S-2-adjacent: FtsManager.search fetches the doc unguarded)',
+      () async {
+        // Seed a doc whose body contains a distinctive term so the FTS
+        // posting list points at it.
+        final (:db, :ids) = await _seedDb(
+          bodies: ['a distinctivetermxyz appears here'],
+        );
+        addTearDown(db.close);
+
+        final config = KmdbConfig.empty();
+        config.addFtsIndex('docs', 'body');
+
+        // Force the lazy FTS index build now, while the source document is
+        // still good — the index is `undefined` until its first query, at
+        // which point it does a full rebuild scan straight from the source
+        // documents. If that rebuild scan happened *after* poisoning (see
+        // below), it would simply skip the poisoned doc during the build (no
+        // posting is ever created) and the later query would report "no
+        // results" rather than throwing.
+        await SearchCommand().execute(_ctx(db, config: config), [
+          'docs',
+          'distinctivetermxyz',
+        ], {});
+
+        // Overwrite the already-indexed document's stored value with
+        // undecodable bytes, using the same raw-put seam as
+        // restore_verify_test.dart. This must happen in the *same* session:
+        // FTS indexes rebuild lazily from the (now garbage) source doc on
+        // reopen and would drop the term→docId posting, so a fresh session
+        // would never reach the throw.
+        await db.store.put(
+          'docs',
+          ids[0],
+          Uint8List.fromList([0xFF, 0xFE, 0xFD]),
+        );
+
+        final err = StringBuffer();
+        final ok = await SearchCommand().execute(
+          _ctx(db, config: config, err: err),
+          ['docs', 'distinctivetermxyz'],
+          {},
+        );
+
+        expect(ok, isFalse);
+        expect(err.toString(), contains('search: query failed'));
+      },
+    );
   });
 }

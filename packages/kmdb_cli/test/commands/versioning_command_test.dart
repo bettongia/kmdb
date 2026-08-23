@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'dart:convert';
+
 import 'package:kmdb/kmdb.dart';
 import 'package:kmdb_cli/src/commands/command.dart';
 import 'package:kmdb_cli/src/commands/versions_command.dart';
@@ -87,6 +89,31 @@ void main() {
       expect(output, contains('is_delete'));
       await db.close();
     });
+
+    test('a deleted key renders a version with is_delete == true (not just '
+        'the label present)', () async {
+      final (db, out, err) = await _openDb();
+      final col = db.rawCollection('notes');
+      final key = UuidV7KeyGenerator().next();
+      await col.put({'body': 'v1', '_id': key});
+      await col.delete(key);
+
+      final ctx = _ctx(db, out: out, err: err);
+      final ok = await _versionsCmd.execute(ctx, ['notes', key], {});
+      expect(ok, isTrue);
+
+      final docs = json.decode(out.toString()) as List;
+      final deleteVersions = docs
+          .cast<Map<String, dynamic>>()
+          .where((d) => d['is_delete'] == true)
+          .toList();
+      expect(
+        deleteVersions,
+        isNotEmpty,
+        reason: 'expected at least one version with is_delete == true',
+      );
+      await db.close();
+    });
   });
 
   // ── promote command ──────────────────────────────────────────────────────────
@@ -156,6 +183,19 @@ void main() {
       // Verify value was restored.
       final current = await col.get(key);
       expect(current?['body'], equals('original'));
+
+      // Extend: the promotion itself creates a new version entry whose
+      // `promoted_from` records the source version's HLC — `versions`
+      // (run again, after the promote) must render that field.
+      final versionsOut = StringBuffer();
+      final versionsCtx = _ctx(db, out: versionsOut, err: err);
+      final versionsOk = await _versionsCmd.execute(versionsCtx, [
+        'notes',
+        key,
+      ], {});
+      expect(versionsOk, isTrue);
+      expect(versionsOut.toString(), contains('promoted_from'));
+
       await db.close();
     });
   });
