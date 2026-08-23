@@ -415,6 +415,34 @@ void main() {
       );
       await db.close();
     });
+
+    test('builtAt is stamped once the index reaches current', () async {
+      final alice = _Person(id: _key(), name: 'Alice', age: 30, city: 'London');
+      final (db, col) = await openWithCurrentIndex([alice]);
+
+      // The helper spins until getOrActivate reports `current` — by that
+      // point _buildIndex's completion transition should have stamped
+      // builtAt with a real, parseable ISO-8601 UTC timestamp.
+      final state = await db.indexManager.getOrActivate('people', 'name');
+      expect(state.status.name, 'current');
+      expect(state.builtAt, isNotEmpty);
+      // Must round-trip through DateTime.parse without throwing — this also
+      // exercises the CBOR encode (_persistState) / decode (_loadState)
+      // path, since getOrActivate reads state back via getState → _loadState
+      // → _decodeState rather than returning an in-memory value.
+      expect(() => DateTime.parse(state.builtAt), returnsNormally);
+      await db.close();
+    });
+
+    test('builtAt is empty for an index that has not yet built', () async {
+      // Open with an index declared but do not trigger any query, so the
+      // build never launches and the state stays `undefined`.
+      final (db, _) = await _open(indexes: [_nameIndex]);
+      final state = await db.indexManager.getState('people', 'name');
+      expect(state.status.name, 'undefined');
+      expect(state.builtAt, isEmpty);
+      await db.close();
+    });
   });
 
   // ── FilterPlan detail ─────────────────────────────────────────────────────────
