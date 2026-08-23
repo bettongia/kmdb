@@ -1,8 +1,8 @@
 # Adopt Dart 3.13.1 / Flutter 3.47.1 across dev and CI
 
-**Status**: Implementing
+**Status**: Complete
 
-**PR link**: _(none yet)_
+**PR link**: [#77](https://github.com/bettongia/kmdb/pull/77) (merged 2026-08-23)
 
 > **Provenance.** Split out during the WI-5 unlock-policy work
 > ([PR #75](https://github.com/bettongia/kmdb/pull/75)) on 2026-08-22. Local dev
@@ -341,4 +341,30 @@ by the existing CI matrix.
 
 ## Summary
 
-_To be completed when the work is done._
+Adopted **Dart 3.13.1 / Flutter 3.47.1** across dev and CI (PR #77, merged
+2026-08-23), closing the toolchain gap opened by WI-5's temporary 3.12.2 pin and
+clearing the WI-9 release prerequisite. betto_pdfium re-pinned `0.1.0-dev.3` →
+`0.1.0-dev.4` (the Pub-workspace native-library resolution fix); the 6 CI
+toolchain pins moved to 3.13.1/3.47.1; the SDK floor raised to `^3.13.0` across
+all 10 pubspecs (declaring a Dart 3.13 release minimum); the two
+`vault_searcher.dart` `unawaited_return_in_try_block` sites fixed with
+`return await`; the workspace reformatted under 3.13.1 (98 files, whitespace);
+roadmap updated. `kmdb-plan-reviewer` → Investigated; `kmdb-qa` → sign-off.
+
+**Post-CI deltas** (forced by the full matrix, both from Dart 3.13's shift to
+shared *workspace-root* native-asset staging colliding with melos concurrency-2
+`test_dart`):
+
+- **Windows** could not delete/restage a loaded `zstd.dll`
+  (`PathAccessException: Access is denied`).
+- **macOS** raced two concurrent codesigns of the shared `libonnxruntime.dylib`
+  (`Failed to codesign ... replacing existing signature`) — intermittent, so it
+  slipped two runs before firing.
+
+Both fixed by adding a `test_dart_serial` melos script (concurrency 1) and
+pointing `cicd_macos` and `cicd_windows` at it; Linux stays at concurrency 2
+(immune — no codesign, and a loaded `.so` replaces in place). Final full matrix
+(build + macOS + Windows + web + icloud + flutter) green under 3.13.1/3.47.1.
+
+Side effect: CI and local dev now run the same toolchain, ending the
+format-drift commit-hook friction that dogged the preceding PRs.
