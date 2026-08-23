@@ -187,6 +187,39 @@ section for the full reasoning behind each.
       renewal).
 - [x] Confirm existing `LocalDirectoryAdapter` tests still pass.
 
+### Post-CI deltas (forced by the CI matrix, after the first QA sign-off)
+
+Two issues the local (macOS) run could not surface, both fixed and re-QA'd:
+
+- [x] **CI-flake in the ordering probe (Linux/Windows).** The probe waited for
+      the gated write by pumping a fixed 100 `Future.delayed(Duration.zero)`
+      turns before asserting `write:start`. On a slower/contended CI runner the
+      dart:io open/lock/read preceding the gated write had not completed within
+      those turns → empty log → false failure. Replaced the turn-count poll with
+      a deterministic signal: the probe completes a `reachedWrite` `Completer`
+      the instant it enters the write, and the test awaits that (30s timeout).
+      Fails-before/passes-after preserved.
+- [x] **Windows lock-vs-rename conflict — the fix is POSIX-only.** `return await`
+      keeps the advisory lock's handle open across the temp-rename. On Windows
+      the locked ETag re-read *requires* that handle open (mandatory
+      `LockFileEx`), but Windows refuses to rename over a path with an open
+      handle — the two are mutually exclusive. The `await`-before-close fix
+      therefore broke the atomic update on Windows (two pre-existing atomic-mode
+      conformance tests + the new ordering test failed on the Windows CI lane
+      only; on `main` the bare `return` closed the handle before the async rename
+      completed, so Windows worked — the old ordering bug was load-bearing
+      there). Fix: **platform-branch `_updateWithLock`.** POSIX unchanged (lock
+      held across the rename). Windows releases+closes the handle *before* the
+      rename (guarded by a `handleReleasedEarly` flag so `finally` does not
+      double-release), reopening the narrow close→rename lost-update window — the
+      same class Q2 declared out of scope. The unlock-strictly-after-write
+      ordering is now a **POSIX-only** guarantee: the ordering probe is skipped
+      on Windows (Windows update-path correctness is covered by the atomic-mode
+      conformance suite), and both the `_updateWithLock` doc-comment and
+      `docs/spec/12_sync.md`'s Update-if-match bullet are split into POSIX/Windows
+      to say so. Full CI matrix (build + web + icloud + macOS + flutter +
+      Windows) green.
+
 **Final step — QA sign-off and pre-commit:**
 
 - [x] Run `make coverage` — confirm >95% on all new/changed files.
@@ -209,6 +242,14 @@ section for the full reasoning behind each.
       PR description. QA's one non-blocking WARN — `docs/spec/12_sync.md`'s CAS
       bullet overstated the guarantee — has been **addressed in this PR** by
       narrowing that bullet to match the code doc-comment (inode caveat).
+      **Delta re-QA (2026-08-23): sign-off received** for the post-CI Windows
+      platform branch, the POSIX-only guarantee framing, the Windows test skip,
+      and the deterministic-wait probe. QA verified the Windows handle lifecycle
+      by inspection on all five exit paths (no leak, no double-release), and
+      confirmed the doc-comment ↔ §12 ↔ code are consistent. Two non-blocking
+      notes: (1) `_updateWithLock`'s `resolvedPath` param is unused (pre-existing,
+      leave for the next touch of this file); (2) this plan record — now updated
+      here.
 - [ ] Run `make pre_commit` — format, analyze, license_check, tests all green.
       Ran the four checks directly via `make`/`melos` (same tool gap as
       above — could not invoke the `kmdb-pre-commit` agent itself):
@@ -345,13 +386,31 @@ Documented the residual open-before-rename lost-update window as a deliberate
 out-of-scope boundary (Q2) in both the `_updateWithLock` doc-comment and the
 `docs/spec/12_sync.md` CAS bullet, keeping the crash-atomic temp-rename.
 
-Pipeline: `kmdb-plan-reviewer` → Investigated; `kmdb-qa` → sign-off (final→base
-accepted, §12 aligned in-PR). Tests: `local_directory_adapter_test.dart` 59/59;
-full `kmdb` suite 2,647 pass. Coverage: `kmdb` 95.3%, every changed line
-exercised. Both changed Dart files are format/analyze clean; the local
-whole-workspace format_check/analyze failures are the pre-existing 3.12/3.13
-toolchain drift owned by `plan_dart_3_13_adoption.md`, not this change.
+The CI matrix then forced two deltas the local (macOS) run could not surface
+(see "Post-CI deltas" above): the ordering probe's turn-count poll was a CI
+flake (replaced with a deterministic `reachedWrite` signal), and the
+`await`-before-close fix broke the atomic update **on Windows** (the locked ETag
+re-read needs the target handle open, but Windows cannot rename over an open
+handle). Resolved by platform-branching `_updateWithLock` — POSIX holds the lock
+across the rename (the fix); Windows releases+closes before the rename — making
+the unlock-after-write ordering a **POSIX-only** guarantee, recorded in the
+doc-comment and `§12`. Full CI matrix (build + web + icloud + macOS + flutter +
+Windows) green.
 
-Branch/worktree: `20260822_plan_local_directory_adapter_unlock_ordering`. The
-commit was handed off to the human (the global pre-commit hook fails on the
-pre-existing 3.13 drift under the local toolchain). PR: _(link on creation)_.
+Pipeline: `kmdb-plan-reviewer` → Investigated; `kmdb-qa` → sign-off, then a
+**delta re-QA** (2026-08-23) sign-off for the Windows branch + deterministic
+probe (handle lifecycle verified on all five exit paths; doc/§12/code
+consistent). `final`→`base` accepted; §12 aligned in-PR. Tests:
+`local_directory_adapter_test.dart` 59/59 (ordering probe skipped on Windows —
+covered there by the atomic-mode conformance suite); full `kmdb` suite 2,647
+pass. Coverage: `kmdb` 95.3%, every changed line exercised. All changed files
+format/analyze clean; the local whole-workspace format_check/analyze failures
+are the pre-existing 3.12/3.13 toolchain drift owned by
+`plan_dart_3_13_adoption.md`, not this change.
+
+Branch/worktree: `20260822_plan_local_directory_adapter_unlock_ordering`. Also
+carries a temporary exact `betto_pdfium: 0.1.0-dev.3` override pin (dev.4's
+native-asset hook is Dart 3.13, incompatible with the 3.12.2-pinned CI) — the
+3.13 adoption removes it. Commits handed off to the human (the global
+pre-commit hook fails on the pre-existing 3.13 drift under the local toolchain).
+PR: _(link on creation)_.
