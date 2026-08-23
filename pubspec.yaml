@@ -91,6 +91,22 @@ melos:
         dirExists: test
         flutter: false
 
+    # Serial variant of `test_dart`, used by the Windows CI job. Under Dart 3.13
+    # native assets stage to the shared *workspace-root* `.dart_tool/lib/`, and
+    # Windows refuses to delete/restage a DLL (e.g. `zstd.dll`) that a
+    # concurrently-running package's `dart test` process still holds loaded —
+    # producing `PathAccessException: Cannot delete file ... Access is denied`.
+    # POSIX (Linux/macOS) can replace a loaded shared library, so they keep the
+    # faster concurrency-2 `test_dart`; only Windows needs serialisation.
+    test_dart_serial:
+      description: Test all pure Dart packages serially (Windows CI)
+      run: dart test
+      exec:
+        concurrency: 1
+      packageFilters:
+        dirExists: test
+        flutter: false
+
     pre_commit_test:
       description: Test packages prior to commit
       exec: dart test
