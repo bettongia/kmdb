@@ -91,15 +91,21 @@ melos:
         dirExists: test
         flutter: false
 
-    # Serial variant of `test_dart`, used by the Windows CI job. Under Dart 3.13
-    # native assets stage to the shared *workspace-root* `.dart_tool/lib/`, and
-    # Windows refuses to delete/restage a DLL (e.g. `zstd.dll`) that a
-    # concurrently-running package's `dart test` process still holds loaded —
-    # producing `PathAccessException: Cannot delete file ... Access is denied`.
-    # POSIX (Linux/macOS) can replace a loaded shared library, so they keep the
-    # faster concurrency-2 `test_dart`; only Windows needs serialisation.
+    # Serial variant of `test_dart`, used by the macOS and Windows CI jobs.
+    # Under Dart 3.13 native assets stage to the shared *workspace-root*
+    # `.dart_tool/lib/`, so two packages' `dart test` processes (concurrency 2)
+    # race over the same staged native library:
+    #   - Windows: refuses to delete/restage a DLL (`zstd.dll`) that the other
+    #     process still holds loaded → `PathAccessException: ... Access is
+    #     denied`.
+    #   - macOS: two concurrent codesigns of the same dylib
+    #     (`libonnxruntime.dylib`) collide → `Failed to codesign ... replacing
+    #     existing signature`.
+    # Linux is immune (no codesign; a loaded `.so` can be replaced in place), so
+    # its build/coverage job keeps the faster concurrency-2 path. macOS/Windows
+    # serialise so no two package test processes stage the shared lib at once.
     test_dart_serial:
-      description: Test all pure Dart packages serially (Windows CI)
+      description: Test all pure Dart packages serially (macOS/Windows CI)
       run: dart test
       exec:
         concurrency: 1
