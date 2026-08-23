@@ -2,7 +2,7 @@
 
 **Status**: Complete
 
-**PR link**: _(none yet)_
+**PR link**: [#79](https://github.com/bettongia/kmdb/pull/79)
 
 > **Provenance.** The single plan-sized gap from the WI-10 / W5 CLI
 > test-adequacy audit (`kmdb-qa`, 2026-08-23). Split from the quick-wins
