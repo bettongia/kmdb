@@ -245,39 +245,36 @@ void main() {
       },
     );
 
-    test(
-      'manifest replays correctly after rename (data accessible on reopen)',
-      () async {
-        // Verifies that the VersionEdit written during reassign is correctly
-        // replayed by CrashRecovery on the next open.
-        final adapter = MemoryStorageAdapter();
-        final dir = _uniqueDir();
-        final store = await _openStore(dir, adapter, deviceId: 'aaaaaaaa');
+    test('manifest replays correctly after rename (data accessible on reopen)', () async {
+      // Verifies that the VersionEdit written during reassign is correctly
+      // replayed by CrashRecovery on the next open.
+      final adapter = MemoryStorageAdapter();
+      final dir = _uniqueDir();
+      final store = await _openStore(dir, adapter, deviceId: 'aaaaaaaa');
 
-        // Write enough records to force at least two SSTables.
-        for (var i = 0; i < 10; i++) {
-          final k = _key('key$i');
-          await store.put('col', k, Uint8List.fromList([i]));
-          await store.flush();
-        }
+      // Write enough records to force at least two SSTables.
+      for (var i = 0; i < 10; i++) {
+        final k = _key('key$i');
+        await store.put('col', k, Uint8List.fromList([i]));
+        await store.flush();
+      }
 
-        await store.reassignDeviceId('ffffffff');
-        await store.close();
+      await store.reassignDeviceId('ffffffff');
+      await store.close();
 
-        // Reopen — CrashRecovery replays the Manifest including the rename edit.
-        final store2 = await _openStore(dir, adapter, deviceId: 'ffffffff');
-        addTearDown(() => store2.close());
+      // Reopen — CrashRecovery replays the Manifest including the rename edit.
+      final store2 = await _openStore(dir, adapter, deviceId: 'ffffffff');
+      addTearDown(() => store2.close());
 
-        for (var i = 0; i < 10; i++) {
-          final k = _key('key$i');
-          expect(
-            await store2.get('col', k),
-            Uint8List.fromList([i]),
-            reason: 'doc $i should be readable after manifest replay',
-          );
-        }
-      },
-    );
+      for (var i = 0; i < 10; i++) {
+        final k = _key('key$i');
+        expect(
+          await store2.get('col', k),
+          Uint8List.fromList([i]),
+          reason: 'doc $i should be readable after manifest replay',
+        );
+      }
+    });
 
     test('peer-owned SSTables are not renamed by reassignDeviceId', () async {
       // Simulate a peer SSTable ingested via pull. Verify that reassignDeviceId

@@ -165,60 +165,55 @@ void main() {
       },
     );
 
-    test(
-      'document with stub vault URI (not hydrated) increments stubsSkipped',
-      () async {
-        // Use a real tmpdir for the vault dir.
-        final tmpDir = io.Directory.systemTemp.createTempSync(
-          'kmdb_dump_stub_',
-        );
-        addTearDown(() => tmpDir.deleteSync(recursive: true));
+    test('document with stub vault URI (not hydrated) increments stubsSkipped', () async {
+      // Use a real tmpdir for the vault dir.
+      final tmpDir = io.Directory.systemTemp.createTempSync('kmdb_dump_stub_');
+      addTearDown(() => tmpDir.deleteSync(recursive: true));
 
-        final adapter = MemoryStorageAdapter();
-        final vault = _TestVaultStore(
-          adapter,
-          '/dump_vault_stub_${_dbCounter++}',
-        );
-        final outSink = _Sink();
-        final errSink = _Sink();
-        final (db, ctx) = await _openCtx(
-          vault: vault,
-          out: outSink,
-          err: errSink,
-        );
-        addTearDown(db.close);
+      final adapter = MemoryStorageAdapter();
+      final vault = _TestVaultStore(
+        adapter,
+        '/dump_vault_stub_${_dbCounter++}',
+      );
+      final outSink = _Sink();
+      final errSink = _Sink();
+      final (db, ctx) = await _openCtx(
+        vault: vault,
+        out: outSink,
+        err: errSink,
+      );
+      addTearDown(db.close);
 
-        // Build a fake vault URI (sha256 not ingested into the vault).
-        // The sha256 must be 64 hex chars for VaultRef to be valid.
-        const fakeSha256 =
-            'aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899';
-        final vaultUri = 'kmdb-vault://sha256/$fakeSha256';
+      // Build a fake vault URI (sha256 not ingested into the vault).
+      // The sha256 must be 64 hex chars for VaultRef to be valid.
+      const fakeSha256 =
+          'aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899';
+      final vaultUri = 'kmdb-vault://sha256/$fakeSha256';
 
-        // Insert a document referencing a stub vault URI (blob not hydrated).
-        // Use db.store.put() to bypass KmdbCollection._writeDocument and the
-        // VaultRefInterceptor, which would try to read/write sha256 as a 64-char
-        // KV key (rejected by LSM engine key validation).
-        const docId = '01900000000070809000000000000050';
-        final doc = {'title': 'doc-with-stub', 'file': vaultUri};
-        await db.store.put(
-          'docs',
-          docId,
-          await ValueCodec.encode(doc, context: ValueContext('docs', docId)),
-        );
+      // Insert a document referencing a stub vault URI (blob not hydrated).
+      // Use db.store.put() to bypass KmdbCollection._writeDocument and the
+      // VaultRefInterceptor, which would try to read/write sha256 as a 64-char
+      // KV key (rejected by LSM engine key validation).
+      const docId = '01900000000070809000000000000050';
+      final doc = {'title': 'doc-with-stub', 'file': vaultUri};
+      await db.store.put(
+        'docs',
+        docId,
+        await ValueCodec.encode(doc, context: ValueContext('docs', docId)),
+      );
 
-        final vaultDir = '${tmpDir.path}/vault_stub_out';
-        final ok = await const DumpCommand().execute(ctx, [], {
-          'vault': true,
-          'vault-dir': vaultDir,
-        });
+      final vaultDir = '${tmpDir.path}/vault_stub_out';
+      final ok = await const DumpCommand().execute(ctx, [], {
+        'vault': true,
+        'vault-dir': vaultDir,
+      });
 
-        // The dump should succeed. The stub URI is not hydrated → stubsSkipped=1.
-        // The output summary should contain packagesWritten=0.
-        expect(ok, isTrue, reason: errSink.toString());
-        // The NDJSON output must contain the document.
-        expect(outSink.toString(), contains('doc-with-stub'));
-      },
-    );
+      // The dump should succeed. The stub URI is not hydrated → stubsSkipped=1.
+      // The output summary should contain packagesWritten=0.
+      expect(ok, isTrue, reason: errSink.toString());
+      // The NDJSON output must contain the document.
+      expect(outSink.toString(), contains('doc-with-stub'));
+    });
 
     test('hydrated vault blob: dump writes a .kvlt package file', () async {
       // Exercises the fully-hydrated vault path in DumpCommand:

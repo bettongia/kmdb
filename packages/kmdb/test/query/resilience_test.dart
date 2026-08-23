@@ -160,46 +160,43 @@ void main() {
   // ── KmdbCollection ────────────────────────────────────────────────────────────
 
   group('KmdbCollection', () {
-    test(
-      'put() with a document that fails schema validation raises SchemaViolationError; '
-      'document is NOT persisted',
-      () async {
-        final db = await KmdbDatabase.open(
-          path: '/db_schema',
-          adapter: MemoryStorageAdapter(),
-          config: KvStoreConfig.forTesting(),
-          schemas: const [
-            CollectionSchema(
-              collection: 'docs',
-              jsonSchema: {
-                'type': 'object',
-                'required': ['name'],
-                'properties': {
-                  'name': {'type': 'string'},
-                },
+    test('put() with a document that fails schema validation raises SchemaViolationError; '
+        'document is NOT persisted', () async {
+      final db = await KmdbDatabase.open(
+        path: '/db_schema',
+        adapter: MemoryStorageAdapter(),
+        config: KvStoreConfig.forTesting(),
+        schemas: const [
+          CollectionSchema(
+            collection: 'docs',
+            jsonSchema: {
+              'type': 'object',
+              'required': ['name'],
+              'properties': {
+                'name': {'type': 'string'},
               },
-            ),
-          ],
-        );
-        addTearDown(db.close);
+            },
+          ),
+        ],
+      );
+      addTearDown(db.close);
 
-        final col = db.rawCollection('docs');
+      final col = db.rawCollection('docs');
 
-        // Valid insert — should succeed.
-        final inserted = await col.insert({'name': 'Alice'});
-        final id = inserted['_id'] as String;
+      // Valid insert — should succeed.
+      final inserted = await col.insert({'name': 'Alice'});
+      final id = inserted['_id'] as String;
 
-        // Invalid put (missing required 'name' field) — should be rejected.
-        await expectLater(
-          col.put({'_id': id, 'body': 'no name field'}),
-          throwsA(isA<SchemaValidationException>()),
-        );
+      // Invalid put (missing required 'name' field) — should be rejected.
+      await expectLater(
+        col.put({'_id': id, 'body': 'no name field'}),
+        throwsA(isA<SchemaValidationException>()),
+      );
 
-        // The original document must still be present unchanged.
-        final doc = await col.get(id);
-        expect(doc?['name'], equals('Alice'));
-      },
-    );
+      // The original document must still be present unchanged.
+      final doc = await col.get(id);
+      expect(doc?['name'], equals('Alice'));
+    });
 
     test('delete() on a key that does not exist is a silent no-op', () async {
       final (db, col) = await _open();
@@ -407,33 +404,30 @@ void main() {
   // ── KmdbDatabase.registerSchema / deregisterSchema / schemaManager ────────────
 
   group('KmdbDatabase schema management helpers', () {
-    test(
-      'registerSchema persists schema and deregisterSchema removes it',
-      () async {
-        final db = await KmdbDatabase.open(
-          path: '/db',
-          adapter: MemoryStorageAdapter(),
-          config: KvStoreConfig.forTesting(),
-        );
-        addTearDown(db.close);
+    test('registerSchema persists schema and deregisterSchema removes it', () async {
+      final db = await KmdbDatabase.open(
+        path: '/db',
+        adapter: MemoryStorageAdapter(),
+        config: KvStoreConfig.forTesting(),
+      );
+      addTearDown(db.close);
 
-        // schemaManager getter (line 1107) must expose a non-null SchemaManager.
-        expect(db.schemaManager, isNotNull);
+      // schemaManager getter (line 1107) must expose a non-null SchemaManager.
+      expect(db.schemaManager, isNotNull);
 
-        // registerSchema (lines 1125-1126) registers via the schema manager.
-        await db.registerSchema(
-          CollectionSchema(
-            collection: 'products',
-            jsonSchema: {
-              'type': 'object',
-              'required': ['sku'],
-            },
-          ),
-        );
+      // registerSchema (lines 1125-1126) registers via the schema manager.
+      await db.registerSchema(
+        CollectionSchema(
+          collection: 'products',
+          jsonSchema: {
+            'type': 'object',
+            'required': ['sku'],
+          },
+        ),
+      );
 
-        // deregisterSchema (lines 1143-1144) removes it; subsequent writes succeed.
-        await db.deregisterSchema('products');
-      },
-    );
+      // deregisterSchema (lines 1143-1144) removes it; subsequent writes succeed.
+      await db.deregisterSchema('products');
+    });
   });
 }

@@ -143,22 +143,19 @@ void main() {
       expect(kek1, isNot(equals(kek2)));
     });
 
-    test(
-      'domain-separated from passphrase path (known-vector sanity)',
-      () async {
-        // Two different derivations from the same 32 bytes of material should
-        // yield different outputs because domain-separation info strings differ.
-        // This test checks that the recovery path and the passphrase path are
-        // not accidentally aliased (not a complete HKDF test vector).
-        final entropy = Uint8List(16)..fillRange(0, 16, 0xAA);
-        final recoveryKek = await KeyDerivation.deriveKekFromRecoveryEntropy(
-          entropy,
-        );
-        // The passphrase KDF uses Argon2id with a salt, so it can't be directly
-        // compared here — this test just verifies the recovery KEK is non-zero.
-        expect(recoveryKek.any((b) => b != 0), isTrue);
-      },
-    );
+    test('domain-separated from passphrase path (known-vector sanity)', () async {
+      // Two different derivations from the same 32 bytes of material should
+      // yield different outputs because domain-separation info strings differ.
+      // This test checks that the recovery path and the passphrase path are
+      // not accidentally aliased (not a complete HKDF test vector).
+      final entropy = Uint8List(16)..fillRange(0, 16, 0xAA);
+      final recoveryKek = await KeyDerivation.deriveKekFromRecoveryEntropy(
+        entropy,
+      );
+      // The passphrase KDF uses Argon2id with a salt, so it can't be directly
+      // compared here — this test just verifies the recovery KEK is non-zero.
+      expect(recoveryKek.any((b) => b != 0), isTrue);
+    });
   });
 
   // ── DEK wrapping/unwrapping ───────────────────────────────────────────────────

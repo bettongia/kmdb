@@ -371,40 +371,36 @@ void main() {
       await store2.close();
     });
 
-    test(
-      'crash mid-flush replays records past a legacy marker (Defect 2)',
-      () async {
-        // Simulate an interrupted flush from an older build: a WAL holding a live
-        // record followed by a flush marker, whose SSTable/VersionEdit never
-        // became durable. The pre-fix `replayFromLastFlush` skipped everything up
-        // to and including the trailing marker, losing the record; full replay
-        // restores it and treats the legacy marker as a no-op.
-        final adapter = _newAdapter();
-        final (store, _) = await _open(adapter);
-        await store.put('ns', _key(1), _bytes('pre-marker'));
-        MemoryStorageAdapter.releaseAllLocks();
+    test('crash mid-flush replays records past a legacy marker (Defect 2)', () async {
+      // Simulate an interrupted flush from an older build: a WAL holding a live
+      // record followed by a flush marker, whose SSTable/VersionEdit never
+      // became durable. The pre-fix `replayFromLastFlush` skipped everything up
+      // to and including the trailing marker, losing the record; full replay
+      // restores it and treats the legacy marker as a no-op.
+      final adapter = _newAdapter();
+      final (store, _) = await _open(adapter);
+      await store.put('ns', _key(1), _bytes('pre-marker'));
+      MemoryStorageAdapter.releaseAllLocks();
 
-        final walPath = _activeWalPath(adapter);
-        final existing = adapter.files[walPath]!;
-        final marker = WalRecord(
-          type: WalRecordType.flushMarker,
-          sequence: const Hlc(1, 0),
-        ).encode();
-        final combined = Uint8List(existing.length + marker.length)
-          ..setAll(0, existing)
-          ..setAll(existing.length, marker);
-        adapter.files[walPath] = combined;
+      final walPath = _activeWalPath(adapter);
+      final existing = adapter.files[walPath]!;
+      final marker = WalRecord(
+        type: WalRecordType.flushMarker,
+        sequence: const Hlc(1, 0),
+      ).encode();
+      final combined = Uint8List(existing.length + marker.length)
+        ..setAll(0, existing)
+        ..setAll(existing.length, marker);
+      adapter.files[walPath] = combined;
 
-        final (store2, _) = await _open(adapter);
-        expect(
-          await store2.get('ns', _key(1)),
-          equals(_bytes('pre-marker')),
-          reason:
-              'records before a trailing flush marker must still be replayed',
-        );
-        await store2.close();
-      },
-    );
+      final (store2, _) = await _open(adapter);
+      expect(
+        await store2.get('ns', _key(1)),
+        equals(_bytes('pre-marker')),
+        reason: 'records before a trailing flush marker must still be replayed',
+      );
+      await store2.close();
+    });
 
     test(
       'truncated active WAL after flush: good records survive and flag set',

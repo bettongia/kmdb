@@ -334,53 +334,47 @@ void main() {
       },
     );
 
-    test(
-      'sanitises an absolute originalName to its basename under an --output directory',
-      () async {
-        final dir = _tempDir('kmdb_vault_export_absolute_');
-        // '/etc/passwd' is a POSIX absolute path; on Windows it is merely a
-        // relative-looking name rooted at '\', so p.basename still isolates
-        // 'passwd' — the sanitisation logic under test is platform-agnostic.
-        final uri = await _ingest(vault, _kBytes, name: '/etc/passwd');
+    test('sanitises an absolute originalName to its basename under an --output directory', () async {
+      final dir = _tempDir('kmdb_vault_export_absolute_');
+      // '/etc/passwd' is a POSIX absolute path; on Windows it is merely a
+      // relative-looking name rooted at '\', so p.basename still isolates
+      // 'passwd' — the sanitisation logic under test is platform-agnostic.
+      final uri = await _ingest(vault, _kBytes, name: '/etc/passwd');
 
-        final ctx = _ctx(db, out: out, err: err);
-        final ok = await VaultExportCommand().execute(
-          ctx,
-          [uri],
-          {'output': dir.path},
-        );
+      final ctx = _ctx(db, out: out, err: err);
+      final ok = await VaultExportCommand().execute(
+        ctx,
+        [uri],
+        {'output': dir.path},
+      );
 
-        expect(ok, isTrue);
-        // Must be contained within dir.path, never write outside it.
-        final expectedPath = p.join(dir.path, 'passwd');
-        expect(io.File(expectedPath).readAsBytesSync(), equals(_kBytes));
-        // Confirm nothing was written to the real absolute path — only
-        // meaningful where '/etc/passwd' actually exists (POSIX systems);
-        // Windows has no such file to accidentally clobber.
-        if (!io.Platform.isWindows) {
-          expect(io.File('/etc/passwd').readAsBytesSync(), isNot(_kBytes));
-        }
-      },
-    );
+      expect(ok, isTrue);
+      // Must be contained within dir.path, never write outside it.
+      final expectedPath = p.join(dir.path, 'passwd');
+      expect(io.File(expectedPath).readAsBytesSync(), equals(_kBytes));
+      // Confirm nothing was written to the real absolute path — only
+      // meaningful where '/etc/passwd' actually exists (POSIX systems);
+      // Windows has no such file to accidentally clobber.
+      if (!io.Platform.isWindows) {
+        expect(io.File('/etc/passwd').readAsBytesSync(), isNot(_kBytes));
+      }
+    });
 
-    test(
-      'sanitises a path-traversal originalName to its basename under an --output directory',
-      () async {
-        final dir = _tempDir('kmdb_vault_export_traversal_');
-        final uri = await _ingest(vault, _kBytes, name: '../../evil');
+    test('sanitises a path-traversal originalName to its basename under an --output directory', () async {
+      final dir = _tempDir('kmdb_vault_export_traversal_');
+      final uri = await _ingest(vault, _kBytes, name: '../../evil');
 
-        final ctx = _ctx(db, out: out, err: err);
-        final ok = await VaultExportCommand().execute(
-          ctx,
-          [uri],
-          {'output': dir.path},
-        );
+      final ctx = _ctx(db, out: out, err: err);
+      final ok = await VaultExportCommand().execute(
+        ctx,
+        [uri],
+        {'output': dir.path},
+      );
 
-        expect(ok, isTrue);
-        final expectedPath = '${dir.path}/evil';
-        expect(io.File(expectedPath).readAsBytesSync(), equals(_kBytes));
-      },
-    );
+      expect(ok, isTrue);
+      final expectedPath = '${dir.path}/evil';
+      expect(io.File(expectedPath).readAsBytesSync(), equals(_kBytes));
+    });
 
     test(
       'falls back to "blob" when originalName is empty or whitespace',

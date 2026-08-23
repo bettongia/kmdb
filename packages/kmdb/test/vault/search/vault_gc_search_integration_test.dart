@@ -360,141 +360,128 @@ void main() {
 
     tearDown(() async => searchStore.close());
 
-    test(
-      'sweep deletes BM25 corpus + extract status + docref entries for GC\'d blob',
-      () async {
-        // Arrange: ingest a blob, seed vault search entries and ref count.
-        final ref = await vaultStore.ingest(
-          bytes: _bytes('machine learning document'),
-          hlcTimestamp: 't1',
-        );
-        final sha256 = ref.sha256;
+    test('sweep deletes BM25 corpus + extract status + docref entries for GC\'d blob', () async {
+      // Arrange: ingest a blob, seed vault search entries and ref count.
+      final ref = await vaultStore.ingest(
+        bytes: _bytes('machine learning document'),
+        hlcTimestamp: 't1',
+      );
+      final sha256 = ref.sha256;
 
-        refCountStore.setRefCount(sha256, 1);
-        await _seedVaultSearchEntries(
+      refCountStore.setRefCount(sha256, 1);
+      await _seedVaultSearchEntries(
+        searchStore,
+        sha256: sha256,
+        docKey: docKey,
+      );
+      await _seedExtractDir(adapter, vaultStore, sha256: sha256);
+
+      // Verify entries are present before GC.
+      expect(
+        await _namespaceHasEntries(
           searchStore,
-          sha256: sha256,
-          docKey: docKey,
-        );
-        await _seedExtractDir(adapter, vaultStore, sha256: sha256);
+          '$kVaultFtsCorpusPrefix$sha256',
+        ),
+        isTrue,
+        reason: 'BM25 corpus sentinel must exist before GC',
+      );
+      expect(
+        await _namespaceHasEntries(searchStore, '$kVaultExtractPrefix$sha256'),
+        isTrue,
+        reason: 'Extract status sentinel must exist before GC',
+      );
+      expect(
+        await _namespaceHasEntries(searchStore, '$kVaultDocRefPrefix$sha256'),
+        isTrue,
+        reason: 'Document reference entry must exist before GC',
+      );
+      expect(
+        adapter.files.keys.where((p) => p.contains('/extract/')),
+        isNotEmpty,
+        reason: 'Extract directory files must exist before GC',
+      );
 
-        // Verify entries are present before GC.
-        expect(
-          await _namespaceHasEntries(
-            searchStore,
-            '$kVaultFtsCorpusPrefix$sha256',
-          ),
-          isTrue,
-          reason: 'BM25 corpus sentinel must exist before GC',
-        );
-        expect(
-          await _namespaceHasEntries(
-            searchStore,
-            '$kVaultExtractPrefix$sha256',
-          ),
-          isTrue,
-          reason: 'Extract status sentinel must exist before GC',
-        );
-        expect(
-          await _namespaceHasEntries(searchStore, '$kVaultDocRefPrefix$sha256'),
-          isTrue,
-          reason: 'Document reference entry must exist before GC',
-        );
-        expect(
-          adapter.files.keys.where((p) => p.contains('/extract/')),
-          isNotEmpty,
-          reason: 'Extract directory files must exist before GC',
-        );
+      // Act: drop the ref count (simulate VaultRefInterceptor decrement)
+      // and tombstone the blob, then run sweep().
+      refCountStore.clearRefCount(sha256);
+      await gc.onZeroRefs(sha256);
+      final result = await gc.sweep();
 
-        // Act: drop the ref count (simulate VaultRefInterceptor decrement)
-        // and tombstone the blob, then run sweep().
-        refCountStore.clearRefCount(sha256);
-        await gc.onZeroRefs(sha256);
-        final result = await gc.sweep();
+      // Assert: GC deleted the blob.
+      expect(result.deleted, equals(1));
+      expect(result.examined, equals(1));
+      expect(await vaultStore.exists(sha256), isFalse);
 
-        // Assert: GC deleted the blob.
-        expect(result.deleted, equals(1));
-        expect(result.examined, equals(1));
-        expect(await vaultStore.exists(sha256), isFalse);
+      // Assert: vault search KV entries are all gone.
+      expect(
+        await _namespaceHasEntries(
+          searchStore,
+          '$kVaultFtsCorpusPrefix$sha256',
+        ),
+        isFalse,
+        reason: 'BM25 corpus sentinel must be deleted by GC',
+      );
 
-        // Assert: vault search KV entries are all gone.
-        expect(
-          await _namespaceHasEntries(
-            searchStore,
-            '$kVaultFtsCorpusPrefix$sha256',
-          ),
-          isFalse,
-          reason: 'BM25 corpus sentinel must be deleted by GC',
-        );
+      // Assert: ALL per-term BM25 entries are also deleted (not just the
+      // corpus sentinel). _seedVaultSearchEntries writes terms "machin" and
+      // "learn"; each gets its own $$vault:fts:{sha256}:{hexTerm} namespace.
+      final machinHex = VaultBm25Writer.termToHex('machin');
+      final learnHex = VaultBm25Writer.termToHex('learn');
+      expect(
+        await _namespaceHasEntries(
+          searchStore,
+          '$kVaultFtsPrefix$sha256:$machinHex',
+        ),
+        isFalse,
+        reason: 'Per-term "machin" BM25 entries must be deleted by GC',
+      );
+      expect(
+        await _namespaceHasEntries(
+          searchStore,
+          '$kVaultFtsPrefix$sha256:$learnHex',
+        ),
+        isFalse,
+        reason: 'Per-term "learn" BM25 entries must be deleted by GC',
+      );
 
-        // Assert: ALL per-term BM25 entries are also deleted (not just the
-        // corpus sentinel). _seedVaultSearchEntries writes terms "machin" and
-        // "learn"; each gets its own $$vault:fts:{sha256}:{hexTerm} namespace.
-        final machinHex = VaultBm25Writer.termToHex('machin');
-        final learnHex = VaultBm25Writer.termToHex('learn');
-        expect(
-          await _namespaceHasEntries(
-            searchStore,
-            '$kVaultFtsPrefix$sha256:$machinHex',
-          ),
-          isFalse,
-          reason: 'Per-term "machin" BM25 entries must be deleted by GC',
-        );
-        expect(
-          await _namespaceHasEntries(
-            searchStore,
-            '$kVaultFtsPrefix$sha256:$learnHex',
-          ),
-          isFalse,
-          reason: 'Per-term "learn" BM25 entries must be deleted by GC',
-        );
+      expect(
+        await _namespaceHasEntries(searchStore, '$kVaultExtractPrefix$sha256'),
+        isFalse,
+        reason: 'Extract status sentinel must be deleted by GC',
+      );
+      expect(
+        await _namespaceHasEntries(searchStore, '$kVaultDocRefPrefix$sha256'),
+        isFalse,
+        reason: 'Document reference entry must be deleted by GC',
+      );
 
-        expect(
-          await _namespaceHasEntries(
-            searchStore,
-            '$kVaultExtractPrefix$sha256',
-          ),
-          isFalse,
-          reason: 'Extract status sentinel must be deleted by GC',
-        );
-        expect(
-          await _namespaceHasEntries(searchStore, '$kVaultDocRefPrefix$sha256'),
-          isFalse,
-          reason: 'Document reference entry must be deleted by GC',
-        );
+      // Assert: extract directory filesystem files are gone.
+      expect(
+        adapter.files.keys.where(
+          (p) => p.contains('/extract/') && p.contains(sha256.substring(0, 8)),
+        ),
+        isEmpty,
+        reason:
+            'extract/ directory files must be deleted by GC sweep for $sha256',
+      );
+    });
 
-        // Assert: extract directory filesystem files are gone.
-        expect(
-          adapter.files.keys.where(
-            (p) =>
-                p.contains('/extract/') && p.contains(sha256.substring(0, 8)),
-          ),
-          isEmpty,
-          reason:
-              'extract/ directory files must be deleted by GC sweep for $sha256',
-        );
-      },
-    );
+    test('sweep with no vault search entries is a no-op — blob dir deleted normally', () async {
+      // A blob that was never indexed (no $$vault: or $vault:docref: entries).
+      // GC must still delete the blob directory without errors.
+      final ref = await vaultStore.ingest(
+        bytes: _bytes('unindexed blob'),
+        hlcTimestamp: 't2',
+      );
+      final sha256 = ref.sha256;
 
-    test(
-      'sweep with no vault search entries is a no-op — blob dir deleted normally',
-      () async {
-        // A blob that was never indexed (no $$vault: or $vault:docref: entries).
-        // GC must still delete the blob directory without errors.
-        final ref = await vaultStore.ingest(
-          bytes: _bytes('unindexed blob'),
-          hlcTimestamp: 't2',
-        );
-        final sha256 = ref.sha256;
+      refCountStore.clearRefCount(sha256);
+      await gc.onZeroRefs(sha256);
+      final result = await gc.sweep();
 
-        refCountStore.clearRefCount(sha256);
-        await gc.onZeroRefs(sha256);
-        final result = await gc.sweep();
-
-        expect(result.deleted, equals(1));
-        expect(await vaultStore.exists(sha256), isFalse);
-      },
-    );
+      expect(result.deleted, equals(1));
+      expect(await vaultStore.exists(sha256), isFalse);
+    });
 
     test('sweep deletes vec index entries when present', () async {
       // Arrange: seed a per-chunk vector index entry ($$vault:vec:idx:{sha256}).
@@ -564,48 +551,45 @@ void main() {
       );
     });
 
-    test(
-      'sweep does not delete vault search entries for a re-referenced blob (TOCTOU guard)',
-      () async {
-        // A tombstone was created when ref=0, but before the sweep ran the blob
-        // was re-referenced. The TOCTOU guard must skip deletion. The vault search
-        // entries for this blob must remain intact.
-        final ref = await vaultStore.ingest(
-          bytes: _bytes('re-referenced blob'),
-          hlcTimestamp: 't5',
-        );
-        final sha256 = ref.sha256;
+    test('sweep does not delete vault search entries for a re-referenced blob (TOCTOU guard)', () async {
+      // A tombstone was created when ref=0, but before the sweep ran the blob
+      // was re-referenced. The TOCTOU guard must skip deletion. The vault search
+      // entries for this blob must remain intact.
+      final ref = await vaultStore.ingest(
+        bytes: _bytes('re-referenced blob'),
+        hlcTimestamp: 't5',
+      );
+      final sha256 = ref.sha256;
 
-        refCountStore.setRefCount(sha256, 1);
-        await _seedVaultSearchEntries(
+      refCountStore.setRefCount(sha256, 1);
+      await _seedVaultSearchEntries(
+        searchStore,
+        sha256: sha256,
+        docKey: docKey,
+      );
+
+      // Tombstone when ref=0, then restore ref before sweep.
+      refCountStore.clearRefCount(sha256);
+      await gc.onZeroRefs(sha256);
+      // Re-reference before sweep (new document pinned the blob).
+      refCountStore.setRefCount(sha256, 1);
+
+      final result = await gc.sweep();
+
+      expect(result.deleted, equals(0));
+      expect(result.skipped, equals(1));
+      expect(await vaultStore.exists(sha256), isTrue);
+
+      // Vault search KV entries must still be present.
+      expect(
+        await _namespaceHasEntries(
           searchStore,
-          sha256: sha256,
-          docKey: docKey,
-        );
-
-        // Tombstone when ref=0, then restore ref before sweep.
-        refCountStore.clearRefCount(sha256);
-        await gc.onZeroRefs(sha256);
-        // Re-reference before sweep (new document pinned the blob).
-        refCountStore.setRefCount(sha256, 1);
-
-        final result = await gc.sweep();
-
-        expect(result.deleted, equals(0));
-        expect(result.skipped, equals(1));
-        expect(await vaultStore.exists(sha256), isTrue);
-
-        // Vault search KV entries must still be present.
-        expect(
-          await _namespaceHasEntries(
-            searchStore,
-            '$kVaultFtsCorpusPrefix$sha256',
-          ),
-          isTrue,
-          reason:
-              'BM25 corpus sentinel must NOT be deleted for re-referenced blob',
-        );
-      },
-    );
+          '$kVaultFtsCorpusPrefix$sha256',
+        ),
+        isTrue,
+        reason:
+            'BM25 corpus sentinel must NOT be deleted for re-referenced blob',
+      );
+    });
   });
 }

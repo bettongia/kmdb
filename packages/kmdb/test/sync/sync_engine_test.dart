@@ -258,35 +258,27 @@ void main() {
       expect(hwm, isNotNull);
     });
 
-    test(
-      'push does not upload peer SSTables that were ingested during pull',
-      () async {
-        // Simulate a peer SSTable that was placed in the local sst/ dir by pull.
-        const peerId = 'peer0001';
-        final peerFilename = SstableInfo.flushName(
-          peerId,
-          const Hlc(1000, 0),
-          const Hlc(1001, 0),
-        );
-        // Write the peer file to local sst/ as if pull had ingested it.
-        await localAdapter.writeFile('$_dbDir/sst/$peerFilename', _buildSst());
+    test('push does not upload peer SSTables that were ingested during pull', () async {
+      // Simulate a peer SSTable that was placed in the local sst/ dir by pull.
+      const peerId = 'peer0001';
+      final peerFilename = SstableInfo.flushName(
+        peerId,
+        const Hlc(1000, 0),
+        const Hlc(1001, 0),
+      );
+      // Write the peer file to local sst/ as if pull had ingested it.
+      await localAdapter.writeFile('$_dbDir/sst/$peerFilename', _buildSst());
 
-        final engine = _makeEngine(
-          store,
-          cloudAdapter,
-          localAdapter,
-          'dev00001',
-        );
-        await engine.push();
+      final engine = _makeEngine(store, cloudAdapter, localAdapter, 'dev00001');
+      await engine.push();
 
-        // The remote sstables dir should NOT contain the peer file.
-        final remoteFiles = await cloudAdapter.list(
-          '$_syncRoot/sstables',
-          extension: '.sst',
-        );
-        expect(remoteFiles, isNot(contains(peerFilename)));
-      },
-    );
+      // The remote sstables dir should NOT contain the peer file.
+      final remoteFiles = await cloudAdapter.list(
+        '$_syncRoot/sstables',
+        extension: '.sst',
+      );
+      expect(remoteFiles, isNot(contains(peerFilename)));
+    });
 
     // ── Local-only SSTable exclusion (WI-0) ─────────────────────────────────
 
@@ -319,64 +311,56 @@ void main() {
       );
     });
 
-    test(
-      'HWM is computed only from syncable SSTables: .local.sst does not advance HWM',
-      () async {
-        // Write a syncable SSTable with a low max HLC (1000 ms).
-        final syncFilename = SstableInfo.flushName(
-          'dev00001',
-          const Hlc(1000, 0),
-          const Hlc(1001, 0),
-        );
-        await localAdapter.writeFile(
-          '$_dbDir/sst/$syncFilename',
-          _buildSst(basePhysical: 1000),
-        );
+    test('HWM is computed only from syncable SSTables: .local.sst does not advance HWM', () async {
+      // Write a syncable SSTable with a low max HLC (1000 ms).
+      final syncFilename = SstableInfo.flushName(
+        'dev00001',
+        const Hlc(1000, 0),
+        const Hlc(1001, 0),
+      );
+      await localAdapter.writeFile(
+        '$_dbDir/sst/$syncFilename',
+        _buildSst(basePhysical: 1000),
+      );
 
-        // Write a .local.sst SSTable with a higher max HLC (9999 ms).
-        // If this file were included in HWM computation, the HWM would jump
-        // to Hlc(9999, …) — use that to detect the bug.
-        final localFilename = SstableInfo.flushName(
-          'dev00001',
-          const Hlc(9999, 0),
-          const Hlc(9999, 9),
-          localOnly: true,
-        );
-        await localAdapter.writeFile(
-          '$_dbDir/sst/$localFilename',
-          _buildSst(basePhysical: 9999),
-        );
+      // Write a .local.sst SSTable with a higher max HLC (9999 ms).
+      // If this file were included in HWM computation, the HWM would jump
+      // to Hlc(9999, …) — use that to detect the bug.
+      final localFilename = SstableInfo.flushName(
+        'dev00001',
+        const Hlc(9999, 0),
+        const Hlc(9999, 9),
+        localOnly: true,
+      );
+      await localAdapter.writeFile(
+        '$_dbDir/sst/$localFilename',
+        _buildSst(basePhysical: 9999),
+      );
 
-        final engine = _makeEngine(
-          store,
-          cloudAdapter,
-          localAdapter,
-          'dev00001',
-        );
-        await engine.push();
+      final engine = _makeEngine(store, cloudAdapter, localAdapter, 'dev00001');
+      await engine.push();
 
-        final hwm = await HighwaterMark.load(
-          '$_syncRoot/highwater/dev00001.hwm',
-          cloudAdapter,
-        );
-        expect(hwm, isNotNull);
-        // The .local.sst file's maxHlc — Hlc(9999, 9) — must not have
-        // contributed to the HWM. This can no longer be asserted as an
-        // absolute upper bound of 1001ms: KvStoreImpl.open() now always
-        // writes one $meta format-version-marker entry (Encryption
-        // confidentiality reconciliation plan, Phase 2/B8-B9), so push()'s
-        // own flush (step 1) legitimately produces an additional syncable
-        // SSTable stamped with the real wall-clock HLC, which is
-        // legitimately the new high-water mark. The invariant this test
-        // actually cares about — that the *local-only* file specifically
-        // never contributes — is what's asserted here instead.
-        expect(
-          hwm!.currentHlc,
-          isNot(equals(const Hlc(9999, 9))),
-          reason: '.local.sst HLC must not contribute to the high-water mark',
-        );
-      },
-    );
+      final hwm = await HighwaterMark.load(
+        '$_syncRoot/highwater/dev00001.hwm',
+        cloudAdapter,
+      );
+      expect(hwm, isNotNull);
+      // The .local.sst file's maxHlc — Hlc(9999, 9) — must not have
+      // contributed to the HWM. This can no longer be asserted as an
+      // absolute upper bound of 1001ms: KvStoreImpl.open() now always
+      // writes one $meta format-version-marker entry (Encryption
+      // confidentiality reconciliation plan, Phase 2/B8-B9), so push()'s
+      // own flush (step 1) legitimately produces an additional syncable
+      // SSTable stamped with the real wall-clock HLC, which is
+      // legitimately the new high-water mark. The invariant this test
+      // actually cares about — that the *local-only* file specifically
+      // never contributes — is what's asserted here instead.
+      expect(
+        hwm!.currentHlc,
+        isNot(equals(const Hlc(9999, 9))),
+        reason: '.local.sst HLC must not contribute to the high-water mark',
+      );
+    });
   });
 
   // ── pull ──────────────────────────────────────────────────────────────────────
@@ -938,41 +922,129 @@ void main() {
     // The test asserts the resurrection scenario both ways to prove the test
     // is correctly wired and not trivially passing.
 
-    test(
-      'returning evicted device does NOT resurrect deleted data when '
-      're-admission check is enabled (full re-sync prevents resurrection)',
-      () async {
-        // ── Phase 1: Set up device A (the live peer). ──
+    test('returning evicted device does NOT resurrect deleted data when '
+        're-admission check is enabled (full re-sync prevents resurrection)', () async {
+      // ── Phase 1: Set up device A (the live peer). ──
+      MemoryStorageAdapter.releaseAllLocks();
+      final adapterA = MemoryStorageAdapter();
+      final (storeA, _) = await KvStoreImpl.open(
+        '/dbA',
+        adapterA,
+        config: KvStoreConfig.forTesting(),
+        deviceId: 'devaaaaa',
+      );
+
+      // Use a short-but-not-vanishing eviction threshold so device B's
+      // ancient (2020) stale HWM is reliably evictable while device A's
+      // *own* HWM — written moments ago by real wall-clock pushes earlier
+      // in this test — is not spuriously treated as stale too. A 1ms
+      // threshold looked "effectively always true" for the manually-dated
+      // stale HWM, but it also raced against the real elapsed wall-clock
+      // time between A's own pushes and B's later eviction check: under
+      // CI load (or with coverage instrumentation) more than 1ms can
+      // elapse between those steps, which would incorrectly exclude A from
+      // the live-peer set and make the re-admission check see no live
+      // peers at all — silently skipping the intended full re-sync. 30s is
+      // comfortably longer than this test can run yet far shorter than the
+      // multi-year gap to the manually-dated stale HWMs below.
+      final shortEviction = const Duration(seconds: 30);
+
+      final engineA = SyncEngine(
+        store: storeA,
+        cloudAdapter: cloudAdapter,
+        localAdapter: adapterA,
+        deviceId: 'devaaaaa',
+        dbDir: '/dbA',
+        syncRoot: _syncRoot,
+        syncNamespaces: {'ns'},
+        config: KvStoreConfig(
+          memtableSizeBytes: 4096,
+          fsyncOnWrite: false,
+          staleDeviceEvictionAfter: shortEviction,
+          tombstoneGraceDuration: Duration.zero,
+        ),
+      );
+
+      try {
+        // Device A: write a record.
+        const resurrectionKey = '00000000000070008dead000000000ab';
+        await storeA.put('ns', resurrectionKey, Uint8List.fromList([42]));
+        await storeA.flush();
+        await engineA.push();
+
+        // ── Phase 2: Device B "appears" — it writes a stale HWM (very old
+        //    lastUpdated) to simulate that it was in the sync topology
+        //    earlier but went offline a long time ago.
+        //    We also place a copy of the record in device B's local store to
+        //    simulate it holding pre-delete data.
         MemoryStorageAdapter.releaseAllLocks();
-        final adapterA = MemoryStorageAdapter();
-        final (storeA, _) = await KvStoreImpl.open(
-          '/dbA',
-          adapterA,
+        final adapterB = MemoryStorageAdapter();
+        final (storeB, _) = await KvStoreImpl.open(
+          '/dbB',
+          adapterB,
           config: KvStoreConfig.forTesting(),
-          deviceId: 'devaaaaa',
+          deviceId: 'devbbbbb',
         );
 
-        // Use a short-but-not-vanishing eviction threshold so device B's
-        // ancient (2020) stale HWM is reliably evictable while device A's
-        // *own* HWM — written moments ago by real wall-clock pushes earlier
-        // in this test — is not spuriously treated as stale too. A 1ms
-        // threshold looked "effectively always true" for the manually-dated
-        // stale HWM, but it also raced against the real elapsed wall-clock
-        // time between A's own pushes and B's later eviction check: under
-        // CI load (or with coverage instrumentation) more than 1ms can
-        // elapse between those steps, which would incorrectly exclude A from
-        // the live-peer set and make the re-admission check see no live
-        // peers at all — silently skipping the intended full re-sync. 30s is
-        // comfortably longer than this test can run yet far shorter than the
-        // multi-year gap to the manually-dated stale HWMs below.
-        final shortEviction = const Duration(seconds: 30);
+        // Artificially inject device B's stale HWM into the sync folder.
+        // lastUpdated: far in the past → B is stale and will be evicted.
+        final staleBHwm = HighwaterMark(
+          deviceId: 'devbbbbb',
+          currentHlc: const Hlc(1, 0), // very low HLC
+          lastUpdated: DateTime.utc(2020, 1, 1), // ancient
+          peers: const {},
+        );
+        await staleBHwm.save('$_syncRoot/highwater/devbbbbb.hwm', cloudAdapter);
 
-        final engineA = SyncEngine(
-          store: storeA,
+        // Device B also writes the key locally (pre-delete copy).
+        await storeB.put('ns', resurrectionKey, Uint8List.fromList([42]));
+        await storeB.flush();
+
+        // ── Phase 3: Device A deletes the record and arranges for the
+        //    tombstone to be GC'd from its local store before B returns.
+        //
+        // The drop is gated by *strict* `tombHlc < horizon`, and the
+        // horizon is read from the cloud HWM at compaction time. Each
+        // flush-triggered compaction runs *before* the matching push has
+        // updated the HWM, so a single delete + flush + push leaves the
+        // tombstone in place even though the next push raises the HWM
+        // above it. We therefore advance the HWM twice: the first extra
+        // push lifts the cloud HWM above the tombstone, and the second
+        // extra push's flush-compaction observes that raised HWM and
+        // drops the tombstone.
+        await storeA.delete('ns', resurrectionKey);
+        await storeA.flush();
+        await engineA.push(); // A pushes its delete SSTable.
+
+        const advanceKey1 = '00000000000070008b00ccc000000001';
+        await storeA.put('ns', advanceKey1, Uint8List.fromList([1]));
+        await storeA.flush();
+        await engineA.push(); // Cloud HWM now > tombHlc.
+
+        const advanceKey2 = '00000000000070008b00ccc000000011';
+        await storeA.put('ns', advanceKey2, Uint8List.fromList([2]));
+        await storeA.flush(); // This flush's _compactAll drops the tombstone.
+        await engineA.push();
+
+        // Verify: device A no longer holds the key.
+        expect(
+          await storeA.get('ns', resurrectionKey),
+          isNull,
+          reason: 'Device A should have dropped the tombstone via compaction',
+        );
+
+        // ── Phase 4: Device B returns with re-admission enabled.
+        //    Full re-sync should detect both conditions:
+        //    (a) B's HLC (1) < A's live HLC (≫1)
+        //    (b) B's lastUpdated is ancient
+        //    → full re-sync: B discards its local SSTables and rebuilds
+        //      from the sync folder.
+        final engineB = SyncEngine(
+          store: storeB,
           cloudAdapter: cloudAdapter,
-          localAdapter: adapterA,
-          deviceId: 'devaaaaa',
-          dbDir: '/dbA',
+          localAdapter: adapterB,
+          deviceId: 'devbbbbb',
+          dbDir: '/dbB',
           syncRoot: _syncRoot,
           syncNamespaces: {'ns'},
           config: KvStoreConfig(
@@ -983,122 +1055,28 @@ void main() {
           ),
         );
 
-        try {
-          // Device A: write a record.
-          const resurrectionKey = '00000000000070008dead000000000ab';
-          await storeA.put('ns', resurrectionKey, Uint8List.fromList([42]));
-          await storeA.flush();
-          await engineA.push();
+        // Push on device B — should trigger full re-sync.
+        await engineB.push();
 
-          // ── Phase 2: Device B "appears" — it writes a stale HWM (very old
-          //    lastUpdated) to simulate that it was in the sync topology
-          //    earlier but went offline a long time ago.
-          //    We also place a copy of the record in device B's local store to
-          //    simulate it holding pre-delete data.
-          MemoryStorageAdapter.releaseAllLocks();
-          final adapterB = MemoryStorageAdapter();
-          final (storeB, _) = await KvStoreImpl.open(
-            '/dbB',
-            adapterB,
-            config: KvStoreConfig.forTesting(),
-            deviceId: 'devbbbbb',
-          );
+        // After full re-sync, device B's local store reflects the current
+        // sync folder state. The key was deleted and the tombstone was
+        // dropped — the key should not be resurrected.
+        //
+        // Device B's new state: it re-downloaded A's SSTables which contain
+        // the delete tombstone at the time of the push. The key is absent.
+        expect(
+          await storeB.get('ns', resurrectionKey),
+          isNull,
+          reason:
+              'Device B must NOT resurrect the deleted key after full re-sync',
+        );
 
-          // Artificially inject device B's stale HWM into the sync folder.
-          // lastUpdated: far in the past → B is stale and will be evicted.
-          final staleBHwm = HighwaterMark(
-            deviceId: 'devbbbbb',
-            currentHlc: const Hlc(1, 0), // very low HLC
-            lastUpdated: DateTime.utc(2020, 1, 1), // ancient
-            peers: const {},
-          );
-          await staleBHwm.save(
-            '$_syncRoot/highwater/devbbbbb.hwm',
-            cloudAdapter,
-          );
-
-          // Device B also writes the key locally (pre-delete copy).
-          await storeB.put('ns', resurrectionKey, Uint8List.fromList([42]));
-          await storeB.flush();
-
-          // ── Phase 3: Device A deletes the record and arranges for the
-          //    tombstone to be GC'd from its local store before B returns.
-          //
-          // The drop is gated by *strict* `tombHlc < horizon`, and the
-          // horizon is read from the cloud HWM at compaction time. Each
-          // flush-triggered compaction runs *before* the matching push has
-          // updated the HWM, so a single delete + flush + push leaves the
-          // tombstone in place even though the next push raises the HWM
-          // above it. We therefore advance the HWM twice: the first extra
-          // push lifts the cloud HWM above the tombstone, and the second
-          // extra push's flush-compaction observes that raised HWM and
-          // drops the tombstone.
-          await storeA.delete('ns', resurrectionKey);
-          await storeA.flush();
-          await engineA.push(); // A pushes its delete SSTable.
-
-          const advanceKey1 = '00000000000070008b00ccc000000001';
-          await storeA.put('ns', advanceKey1, Uint8List.fromList([1]));
-          await storeA.flush();
-          await engineA.push(); // Cloud HWM now > tombHlc.
-
-          const advanceKey2 = '00000000000070008b00ccc000000011';
-          await storeA.put('ns', advanceKey2, Uint8List.fromList([2]));
-          await storeA.flush(); // This flush's _compactAll drops the tombstone.
-          await engineA.push();
-
-          // Verify: device A no longer holds the key.
-          expect(
-            await storeA.get('ns', resurrectionKey),
-            isNull,
-            reason: 'Device A should have dropped the tombstone via compaction',
-          );
-
-          // ── Phase 4: Device B returns with re-admission enabled.
-          //    Full re-sync should detect both conditions:
-          //    (a) B's HLC (1) < A's live HLC (≫1)
-          //    (b) B's lastUpdated is ancient
-          //    → full re-sync: B discards its local SSTables and rebuilds
-          //      from the sync folder.
-          final engineB = SyncEngine(
-            store: storeB,
-            cloudAdapter: cloudAdapter,
-            localAdapter: adapterB,
-            deviceId: 'devbbbbb',
-            dbDir: '/dbB',
-            syncRoot: _syncRoot,
-            syncNamespaces: {'ns'},
-            config: KvStoreConfig(
-              memtableSizeBytes: 4096,
-              fsyncOnWrite: false,
-              staleDeviceEvictionAfter: shortEviction,
-              tombstoneGraceDuration: Duration.zero,
-            ),
-          );
-
-          // Push on device B — should trigger full re-sync.
-          await engineB.push();
-
-          // After full re-sync, device B's local store reflects the current
-          // sync folder state. The key was deleted and the tombstone was
-          // dropped — the key should not be resurrected.
-          //
-          // Device B's new state: it re-downloaded A's SSTables which contain
-          // the delete tombstone at the time of the push. The key is absent.
-          expect(
-            await storeB.get('ns', resurrectionKey),
-            isNull,
-            reason:
-                'Device B must NOT resurrect the deleted key after full re-sync',
-          );
-
-          await storeB.close();
-        } finally {
-          await storeA.close();
-          MemoryStorageAdapter.releaseAllLocks();
-        }
-      },
-    );
+        await storeB.close();
+      } finally {
+        await storeA.close();
+        MemoryStorageAdapter.releaseAllLocks();
+      }
+    });
 
     test('WITHOUT re-admission check, H4-FU3 ingest-side floor still '
         'prevents resurrection (layered defence)', () async {

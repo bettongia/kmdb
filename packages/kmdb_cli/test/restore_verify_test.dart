@@ -157,30 +157,27 @@ void main() {
       expect(result['restored'], equals(1));
     });
 
-    test(
-      'returns false when document appears before collection header',
-      () async {
-        final db = await _openStore();
-        addTearDown(() => db.close());
-        final id1 = _key('r6');
+    test('returns false when document appears before collection header', () async {
+      final db = await _openStore();
+      addTearDown(() => db.close());
+      final id1 = _key('r6');
 
-        final tmp = io.File(
-          '${io.Directory.systemTemp.path}/restore_test4_${_dbCounter++}.ndjson',
-        );
-        addTearDown(() {
-          if (tmp.existsSync()) tmp.deleteSync();
-        });
-        tmp.writeAsStringSync('{"_id":"$id1","x":1}\n');
+      final tmp = io.File(
+        '${io.Directory.systemTemp.path}/restore_test4_${_dbCounter++}.ndjson',
+      );
+      addTearDown(() {
+        if (tmp.existsSync()) tmp.deleteSync();
+      });
+      tmp.writeAsStringSync('{"_id":"$id1","x":1}\n');
 
-        final err = StringBuffer();
-        final ok = await RestoreCommand().execute(_ctx(db, err: err), [], {
-          'input': tmp.path,
-        });
+      final err = StringBuffer();
+      final ok = await RestoreCommand().execute(_ctx(db, err: err), [], {
+        'input': tmp.path,
+      });
 
-        expect(ok, isFalse);
-        expect(err.toString(), contains('before any collection header'));
-      },
-    );
+      expect(ok, isFalse);
+      expect(err.toString(), contains('before any collection header'));
+    });
 
     test('returns false for invalid JSON', () async {
       final db = await _openStore();

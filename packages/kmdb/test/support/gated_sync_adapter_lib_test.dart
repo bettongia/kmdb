@@ -250,20 +250,17 @@ void main() {
       },
     );
 
-    test(
-      'cancelling token while download() is blocked throws SyncCancelledException',
-      () async {
-        final token = CancellationToken();
-        final ctx = SyncContext(cancel: token);
-        gated.holdDownload();
+    test('cancelling token while download() is blocked throws SyncCancelledException', () async {
+      final token = CancellationToken();
+      final ctx = SyncContext(cancel: token);
+      gated.holdDownload();
 
-        final future = gated.download('f', ctx: ctx);
-        await Future<void>.value();
-        token.cancel();
+      final future = gated.download('f', ctx: ctx);
+      await Future<void>.value();
+      token.cancel();
 
-        await expectLater(future, throwsA(isA<SyncCancelledException>()));
-      },
-    );
+      await expectLater(future, throwsA(isA<SyncCancelledException>()));
+    });
 
     test(
       'after cancel wakes the barrier, the delegate is NOT called (no upload)',
@@ -289,20 +286,17 @@ void main() {
       },
     );
 
-    test(
-      'barrier without SyncContext blocks until released (no cancellation path)',
-      () async {
-        gated.holdList();
-        var done = false;
-        final future = gated.list('dir').then((_) => done = true);
+    test('barrier without SyncContext blocks until released (no cancellation path)', () async {
+      gated.holdList();
+      var done = false;
+      final future = gated.list('dir').then((_) => done = true);
 
-        await Future<void>.value();
-        expect(done, isFalse);
+      await Future<void>.value();
+      expect(done, isFalse);
 
-        gated.releaseList();
-        await future;
-        expect(done, isTrue);
-      },
-    );
+      gated.releaseList();
+      await future;
+      expect(done, isTrue);
+    });
   });
 }

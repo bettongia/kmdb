@@ -190,59 +190,54 @@ void main() {
       expect(errSink.toString(), contains('vault'));
     });
 
-    test(
-      'vault export with plain docs (no vault URIs) succeeds, no packages written',
-      () async {
-        // Use real tmpdir so directory creation works.
-        final tmpDir = io.Directory.systemTemp.createTempSync(
-          'kmdb_exp_plain_',
-        );
-        addTearDown(() => tmpDir.deleteSync(recursive: true));
+    test('vault export with plain docs (no vault URIs) succeeds, no packages written', () async {
+      // Use real tmpdir so directory creation works.
+      final tmpDir = io.Directory.systemTemp.createTempSync('kmdb_exp_plain_');
+      addTearDown(() => tmpDir.deleteSync(recursive: true));
 
-        final adapter = MemoryStorageAdapter();
-        final vault = _TestVaultStore(
-          adapter,
-          '/export_vault_plain_${_exportDbCounter++}',
-        );
-        final outSink = _Sink();
-        final errSink = _Sink();
-        final (db, ctx) = await _openCtx(
-          vault: vault,
-          out: outSink,
-          err: errSink,
-        );
-        addTearDown(db.close);
+      final adapter = MemoryStorageAdapter();
+      final vault = _TestVaultStore(
+        adapter,
+        '/export_vault_plain_${_exportDbCounter++}',
+      );
+      final outSink = _Sink();
+      final errSink = _Sink();
+      final (db, ctx) = await _openCtx(
+        vault: vault,
+        out: outSink,
+        err: errSink,
+      );
+      addTearDown(db.close);
 
-        // Insert documents with no vault URIs; one has a list field to exercise
-        // the _scan List<dynamic> branch (lines 228-230).
-        final col = ctx.rawCollection('items');
-        await col.insert({
-          'title': 'plain-1',
-          'tags': ['x', 'y'],
-        });
-        await col.insert({
-          'title': 'plain-2',
-          'nested': {'k': 1},
-        });
+      // Insert documents with no vault URIs; one has a list field to exercise
+      // the _scan List<dynamic> branch (lines 228-230).
+      final col = ctx.rawCollection('items');
+      await col.insert({
+        'title': 'plain-1',
+        'tags': ['x', 'y'],
+      });
+      await col.insert({
+        'title': 'plain-2',
+        'nested': {'k': 1},
+      });
 
-        final outputDir = '${tmpDir.path}/export_plain';
-        final result = await const ExportCommand().execute(
-          ctx,
-          ['items'],
-          {'vault': true, 'output': outputDir},
-        );
+      final outputDir = '${tmpDir.path}/export_plain';
+      final result = await const ExportCommand().execute(
+        ctx,
+        ['items'],
+        {'vault': true, 'output': outputDir},
+      );
 
-        expect(result, isTrue, reason: errSink.toString());
-        // Both plain docs must appear in the NDJSON output.
-        expect(outSink.toString(), contains('plain-1'));
-        expect(outSink.toString(), contains('plain-2'));
-        // No .kvlt files written (no vault URIs → no attachments).
-        final files = io.Directory(
-          outputDir,
-        ).listSync(recursive: true).whereType<io.File>();
-        expect(files, isEmpty, reason: 'no vault URI docs → no packages');
-      },
-    );
+      expect(result, isTrue, reason: errSink.toString());
+      // Both plain docs must appear in the NDJSON output.
+      expect(outSink.toString(), contains('plain-1'));
+      expect(outSink.toString(), contains('plain-2'));
+      // No .kvlt files written (no vault URIs → no attachments).
+      final files = io.Directory(outputDir)
+          .listSync(recursive: true)
+          .whereType<io.File>();
+      expect(files, isEmpty, reason: 'no vault URI docs → no packages');
+    });
 
     test(
       'vault export: document with stub vault URI is skipped (stubsSkipped++)',

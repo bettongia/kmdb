@@ -15,6 +15,7 @@
 import 'package:kmdb/kmdb.dart';
 
 import 'package:kmdb/kmdb_config.dart';
+
 import 'command.dart';
 
 /// The [RemoteConfig] resolved by [SyncHelpers.resolveRemote], paired with

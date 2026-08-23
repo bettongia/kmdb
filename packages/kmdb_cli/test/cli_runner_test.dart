@@ -88,9 +88,8 @@ void main() {
         final dbPath = tmp.file('foreign_dir');
         io.Directory(dbPath).createSync();
         // Plant a foreign file in the directory.
-        io.File(
-          p.join(dbPath, 'existing_file.txt'),
-        ).writeAsStringSync('some existing content');
+        io.File(p.join(dbPath, 'existing_file.txt'))
+            .writeAsStringSync('some existing content');
         final result = await run([dbPath, 'init']);
         expect(result.exitCode, equals(1));
         expect(result.stderr, contains('is not empty'));

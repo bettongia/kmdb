@@ -288,9 +288,8 @@ void main() {
 
   test('prune: corrupt config.json returns an error', () async {
     final localDir = io.Directory('${dbDir.path}/local')..createSync();
-    io.File(
-      '${localDir.path}/config.json',
-    ).writeAsStringSync('{ this is not valid json }');
+    io.File('${localDir.path}/config.json')
+        .writeAsStringSync('{ this is not valid json }');
 
     final ctx = _ctx(db, out: out, err: err);
     final ok = await cmd.execute(

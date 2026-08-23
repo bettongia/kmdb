@@ -295,9 +295,8 @@ void main() {
       // delta epsilon zeta ..."). See test/fixtures/README.md for why
       // kmdb_extractor_pdf's more obvious "01_basic.pdf" (text: "hello")
       // fixture doesn't work here — "hello" is an English stop word.
-      final pdfBytes = await io.File(
-        'test/fixtures/multi_column.pdf',
-      ).readAsBytes();
+      final pdfBytes = await io.File('test/fixtures/multi_column.pdf')
+          .readAsBytes();
       await _ingestAndLink(
         db,
         collection,

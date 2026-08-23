@@ -17,6 +17,7 @@ import 'dart:convert';
 import 'package:kmdb/kmdb.dart';
 
 import 'package:kmdb/kmdb_config.dart';
+
 import 'command.dart';
 
 /// Executes search queries and manages FTS and vector index definitions.
@@ -103,8 +104,7 @@ final class SearchCommand extends CliCommand {
       ..addOption(
         'candidates',
         valueHelp: 'n',
-        help:
-            'Maximum candidate documents for semantic/hybrid search (default: 100)',
+        help: 'Maximum candidate documents for semantic/hybrid search (default: 100)',
       )
       ..addOption(
         'rrf-k',

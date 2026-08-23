@@ -983,40 +983,37 @@ void main() {
       // collection contains more than 200 documents, the intermediate
       // `writeBatch(batch); batch = WriteBatch(); count = 0;` lines
       // (collections_command.dart:167-168) are executed.
-      test(
-        'deletes more than 200 documents using intermediate batch flushes',
-        () async {
-          // Insert 201 documents with distinct 32-hex keys.
-          // We embed the zero-padded counter in the low 6 hex chars to guarantee
-          // uniqueness while keeping the UUIDv7 version (char 12 = '7') and
-          // variant (char 16 = '8') bits valid. The first _putDoc call registers
-          // the namespace so CollectionsCommand can find it via listNamespaces().
-          await _putDoc(db, 'large', {'_id': _key('seed'), 'n': -1});
-          for (var i = 0; i < 201; i++) {
-            final suffix = i.toRadixString(16).padLeft(6, '0');
-            // Build a valid 32-hex UUIDv7 key: version nibble at position 12,
-            // variant nibble at position 16.
-            final key = 'aaaaaaaaaaaa7aaaa8aaaaaaaa$suffix';
-            await db.store.put(
-              'large',
-              key,
-              await ValueCodec.encode({
-                'n': i,
-              }, context: ValueContext('large', key)),
-            );
-          }
-          // 202 total: 1 from _putDoc + 201 from direct put.
-          expect(await db.store.scan('large').toList(), hasLength(202));
-
-          final ctx = _ctx(db, out: out, err: err);
-          final ok = await CollectionsCommand().execute(ctx, [
-            'delete',
+      test('deletes more than 200 documents using intermediate batch flushes', () async {
+        // Insert 201 documents with distinct 32-hex keys.
+        // We embed the zero-padded counter in the low 6 hex chars to guarantee
+        // uniqueness while keeping the UUIDv7 version (char 12 = '7') and
+        // variant (char 16 = '8') bits valid. The first _putDoc call registers
+        // the namespace so CollectionsCommand can find it via listNamespaces().
+        await _putDoc(db, 'large', {'_id': _key('seed'), 'n': -1});
+        for (var i = 0; i < 201; i++) {
+          final suffix = i.toRadixString(16).padLeft(6, '0');
+          // Build a valid 32-hex UUIDv7 key: version nibble at position 12,
+          // variant nibble at position 16.
+          final key = 'aaaaaaaaaaaa7aaaa8aaaaaaaa$suffix';
+          await db.store.put(
             'large',
-          ], {});
-          expect(ok, isTrue);
-          expect(await db.store.scan('large').toList(), isEmpty);
-        },
-      );
+            key,
+            await ValueCodec.encode({
+              'n': i,
+            }, context: ValueContext('large', key)),
+          );
+        }
+        // 202 total: 1 from _putDoc + 201 from direct put.
+        expect(await db.store.scan('large').toList(), hasLength(202));
+
+        final ctx = _ctx(db, out: out, err: err);
+        final ok = await CollectionsCommand().execute(ctx, [
+          'delete',
+          'large',
+        ], {});
+        expect(ok, isTrue);
+        expect(await db.store.scan('large').toList(), isEmpty);
+      });
     });
   });
 
@@ -1778,24 +1775,21 @@ void main() {
       expect(doc['name'], equals('Alice')); // still present
     });
 
-    test(
-      'single-id: does not overwrite _id even when --set contains _id',
-      () async {
-        final ctx = _ctx(db, out: out, err: err);
-        final ok = await UpdateCommand().execute(
-          ctx,
-          ['col', idA],
-          {'set': '{"_id":"injected","status":"done"}'},
-        );
-        expect(ok, isTrue);
+    test('single-id: does not overwrite _id even when --set contains _id', () async {
+      final ctx = _ctx(db, out: out, err: err);
+      final ok = await UpdateCommand().execute(
+        ctx,
+        ['col', idA],
+        {'set': '{"_id":"injected","status":"done"}'},
+      );
+      expect(ok, isTrue);
 
-        // Read back via the Query Layer so _id is injected from the storage key.
-        // After migration, _id is stored as the key, not in value bytes.
-        final doc = await db.rawCollection('col').get(idA);
-        expect(doc, isNotNull);
-        expect(doc!['_id'], equals(idA)); // original _id preserved
-      },
-    );
+      // Read back via the Query Layer so _id is injected from the storage key.
+      // After migration, _id is stored as the key, not in value bytes.
+      final doc = await db.rawCollection('col').get(idA);
+      expect(doc, isNotNull);
+      expect(doc!['_id'], equals(idA)); // original _id preserved
+    });
 
     test('single-id: returns false when document does not exist', () async {
       final ctx = _ctx(db, out: out, err: err);

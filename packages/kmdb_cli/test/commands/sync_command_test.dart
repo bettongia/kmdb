@@ -102,9 +102,8 @@ void main() {
 
   test('returns false when config.json is corrupt', () async {
     final localDir = io.Directory('${dbDir.path}/local')..createSync();
-    io.File(
-      '${localDir.path}/config.json',
-    ).writeAsStringSync('{ this is not valid json }');
+    io.File('${localDir.path}/config.json')
+        .writeAsStringSync('{ this is not valid json }');
 
     final ctx = _ctx(db, out: out, err: err);
     final ok = await syncCmd.execute(ctx, ['origin'], {});

@@ -190,13 +190,16 @@ void main() {
       expect(result, isA<RefCountUndecodable>());
     });
 
-    test('wrong major type (CBOR int, not a map) → RefCountUndecodable', () async {
-      // Phase 12 format: [EncryptionFlag.none 0x00][CompressionFlag.none 0x00][CBOR positive int 1 (0x01)].
-      // CBOR 0x01 is a positive integer, not a map — decode returns int, not Map.
-      kvStore.setRaw(_sha, Uint8List.fromList([0x00, 0x00, 0x01]));
-      final result = await VaultRefCount.read(kvStore, _sha);
-      expect(result, isA<RefCountUndecodable>());
-    });
+    test(
+      'wrong major type (CBOR int, not a map) → RefCountUndecodable',
+      () async {
+        // Phase 12 format: [EncryptionFlag.none 0x00][CompressionFlag.none 0x00][CBOR positive int 1 (0x01)].
+        // CBOR 0x01 is a positive integer, not a map — decode returns int, not Map.
+        kvStore.setRaw(_sha, Uint8List.fromList([0x00, 0x00, 0x01]));
+        final result = await VaultRefCount.read(kvStore, _sha);
+        expect(result, isA<RefCountUndecodable>());
+      },
+    );
 
     test('unknown encryption flag → RefCountUndecodable', () async {
       // 0xEE is not a valid EncryptionFlag; ValueCodec.decode throws.

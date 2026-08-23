@@ -64,8 +64,7 @@ final class ExportCommand extends CliCommand {
       ..addOption(
         'output',
         valueHelp: 'dir',
-        help:
-            'Output directory for vault packages (default: <collection>_vault_export)',
+        help: 'Output directory for vault packages (default: <collection>_vault_export)',
       );
   }
 

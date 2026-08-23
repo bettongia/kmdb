@@ -355,9 +355,8 @@ Uint8List _patchFirstBlockByte(
   final blockChecksum = XxHash64.digest(
     Uint8List.sublistView(blockBytes, 0, blockBytes.length - 8),
   );
-  ByteData.sublistView(
-    patched,
-  ).setInt64(filterOffset - 8, blockChecksum, Endian.big);
+  ByteData.sublistView(patched)
+      .setInt64(filterOffset - 8, blockChecksum, Endian.big);
 
   return _recomputeFooterChecksum(patched);
 }
@@ -367,9 +366,8 @@ Uint8List _patchFirstBlockByte(
 /// chance to patch them).
 int _readFooterField(Uint8List bytes, FooterField field) {
   final footerStart = bytes.length - 48;
-  return ByteData.sublistView(
-    bytes,
-  ).getInt64(footerStart + field.byteOffset, Endian.big);
+  return ByteData.sublistView(bytes)
+      .getInt64(footerStart + field.byteOffset, Endian.big);
 }
 
 /// Recomputes and overwrites the trailing 8-byte footer checksum so [bytes]

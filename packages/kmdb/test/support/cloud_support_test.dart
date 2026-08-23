@@ -324,20 +324,17 @@ void main() {
       expect(files, contains('a.sst'));
     });
 
-    test(
-      'getEtag returns null for a different observer before propagation, non-null after',
-      () async {
-        final observer = CloudSemanticsAdapter(
-          backend: SharedBackendAdapter(backend),
-          profile: CloudProfile.eventual(maxPropagationDelayMs: 100),
-        );
-        await adapter.upload('a.sst', Uint8List.fromList([1]));
-        // Observer has not advanced its cursor — ETag is null.
-        expect(await observer.getEtag('a.sst'), isNull);
-        observer.advancePropagationClock();
-        expect(await observer.getEtag('a.sst'), isNotNull);
-      },
-    );
+    test('getEtag returns null for a different observer before propagation, non-null after', () async {
+      final observer = CloudSemanticsAdapter(
+        backend: SharedBackendAdapter(backend),
+        profile: CloudProfile.eventual(maxPropagationDelayMs: 100),
+      );
+      await adapter.upload('a.sst', Uint8List.fromList([1]));
+      // Observer has not advanced its cursor — ETag is null.
+      expect(await observer.getEtag('a.sst'), isNull);
+      observer.advancePropagationClock();
+      expect(await observer.getEtag('a.sst'), isNotNull);
+    });
 
     test(
       'advancePropagationClockTo partially reveals writes to an observer',
@@ -376,43 +373,40 @@ void main() {
   });
 
   group('Mixed-mode: REST + FS-view front-ends over one backend', () {
-    test(
-      'write via REST front-end is eventually visible to FS-view front-end',
-      () async {
-        final backend = SharedCloudBackend();
+    test('write via REST front-end is eventually visible to FS-view front-end', () async {
+      final backend = SharedCloudBackend();
 
-        // Device 0: REST-style eventual-consistency front-end.
-        final restView = CloudSemanticsAdapter(
-          backend: SharedBackendAdapter(backend, deviceId: 'dev-rest'),
-          profile: CloudProfile.eventual(maxPropagationDelayMs: 100),
-        );
+      // Device 0: REST-style eventual-consistency front-end.
+      final restView = CloudSemanticsAdapter(
+        backend: SharedBackendAdapter(backend, deviceId: 'dev-rest'),
+        profile: CloudProfile.eventual(maxPropagationDelayMs: 100),
+      );
 
-        // Device 1: FS-view front-end (strongly consistent — local-FS semantics).
-        final fsView = SharedBackendAdapter(backend, deviceId: 'dev-fs');
+      // Device 1: FS-view front-end (strongly consistent — local-FS semantics).
+      final fsView = SharedBackendAdapter(backend, deviceId: 'dev-fs');
 
-        // A second REST observer (different device, no clock advance yet).
-        final restObserver = CloudSemanticsAdapter(
-          backend: SharedBackendAdapter(backend, deviceId: 'dev-rest-2'),
-          profile: CloudProfile.eventual(maxPropagationDelayMs: 100),
-        );
+      // A second REST observer (different device, no clock advance yet).
+      final restObserver = CloudSemanticsAdapter(
+        backend: SharedBackendAdapter(backend, deviceId: 'dev-rest-2'),
+        profile: CloudProfile.eventual(maxPropagationDelayMs: 100),
+      );
 
-        final bytes = Uint8List.fromList([1, 2, 3]);
-        await restView.upload('sstables/foo.sst', bytes);
+      final bytes = Uint8List.fromList([1, 2, 3]);
+      await restView.upload('sstables/foo.sst', bytes);
 
-        // FS-view sees it immediately (strong consistency).
-        expect(await fsView.download('sstables/foo.sst'), equals(bytes));
+      // FS-view sees it immediately (strong consistency).
+      expect(await fsView.download('sstables/foo.sst'), equals(bytes));
 
-        // Writer (restView) sees its own write immediately (read-your-writes).
-        expect(await restView.download('sstables/foo.sst'), equals(bytes));
+      // Writer (restView) sees its own write immediately (read-your-writes).
+      expect(await restView.download('sstables/foo.sst'), equals(bytes));
 
-        // A different REST observer has not advanced its cursor — not visible.
-        expect(await restObserver.download('sstables/foo.sst'), isNull);
+      // A different REST observer has not advanced its cursor — not visible.
+      expect(await restObserver.download('sstables/foo.sst'), isNull);
 
-        // After settling, the observer sees it too.
-        restObserver.advancePropagationClock();
-        expect(await restObserver.download('sstables/foo.sst'), equals(bytes));
-      },
-    );
+      // After settling, the observer sees it too.
+      restObserver.advancePropagationClock();
+      expect(await restObserver.download('sstables/foo.sst'), equals(bytes));
+    });
 
     test('write via FS front-end is immediately visible to REST front-end '
         'after propagation', () async {

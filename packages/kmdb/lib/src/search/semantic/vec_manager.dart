@@ -23,8 +23,10 @@ import '../../engine/kvstore/kv_store.dart';
 import '../../engine/kvstore/kv_store_impl.dart';
 import '../../engine/kvstore/meta_store.dart';
 import '../../query/write_augmentor.dart';
+
 import 'package:betto_inferencing/betto_inferencing.dart'
     show EmbeddingKind, EmbeddingModel;
+
 import '../search_result.dart';
 import '../sync_delta.dart';
 import '../vec_index_definition.dart';

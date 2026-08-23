@@ -271,71 +271,68 @@ void main() {
       },
     );
 
-    test(
-      'compaction that overwrites a file in-place evicts the stale cached reader',
-      () async {
-        // Regression test for the bug where an input file whose name is reused
-        // as the compaction output was not evicted from the cache. This caused
-        // reads to serve stale index/filter from the old file while the data
-        // blocks on disk belonged to the new file — resulting in
-        // CorruptedSstableException: Data block checksum mismatch.
-        //
-        // In-place overwrite happens when the compaction output's HLC range
-        // exactly equals an input's range (same min/max HLC → same filename).
-        // This is most reliably triggered via dropAllSstables + ingestSstable,
-        // but the underlying invariant is tested here via normal put/compact.
-        //
-        // The correctness property: reads after any compaction must return
-        // the value from the post-compaction state, never a corrupted value.
-        const config = KvStoreConfig(
-          memtableSizeBytes: 4096,
-          l0CompactionTrigger: 2,
-          l1MaxBytes: 16 * 1024,
-          l2MaxBytes: 64 * 1024,
-          singleFileThresholdBytes: 8 * 1024,
-          fsyncOnWrite: false,
-          tableCacheSize: 64,
+    test('compaction that overwrites a file in-place evicts the stale cached reader', () async {
+      // Regression test for the bug where an input file whose name is reused
+      // as the compaction output was not evicted from the cache. This caused
+      // reads to serve stale index/filter from the old file while the data
+      // blocks on disk belonged to the new file — resulting in
+      // CorruptedSstableException: Data block checksum mismatch.
+      //
+      // In-place overwrite happens when the compaction output's HLC range
+      // exactly equals an input's range (same min/max HLC → same filename).
+      // This is most reliably triggered via dropAllSstables + ingestSstable,
+      // but the underlying invariant is tested here via normal put/compact.
+      //
+      // The correctness property: reads after any compaction must return
+      // the value from the post-compaction state, never a corrupted value.
+      const config = KvStoreConfig(
+        memtableSizeBytes: 4096,
+        l0CompactionTrigger: 2,
+        l1MaxBytes: 16 * 1024,
+        l2MaxBytes: 64 * 1024,
+        singleFileThresholdBytes: 8 * 1024,
+        fsyncOnWrite: false,
+        tableCacheSize: 64,
+      );
+      final store = await _open(MemoryStorageAdapter(), config: config);
+
+      // Write several keys; force flush + compaction so the cache gets
+      // populated with readers before the compaction runs again.
+      final keys = List.generate(5, (i) => _key(i + 1));
+      for (var i = 0; i < keys.length; i++) {
+        await store.put('ns', keys[i], _bytes('v${i + 1}'));
+      }
+      await store.flush();
+      await store.compactAll();
+
+      // Verify correct values before the second round of compaction.
+      for (var i = 0; i < keys.length; i++) {
+        final r = await store.get('ns', keys[i]);
+        expect(r, equals(_bytes('v${i + 1}')));
+      }
+
+      // Write more data and compact again. This may produce a compaction
+      // output whose filename matches the existing L2 file (in-place overwrite).
+      for (var i = 0; i < keys.length; i++) {
+        await store.put('ns', keys[i], _bytes('updated-${i + 1}'));
+      }
+      await store.flush();
+      await store.compactAll();
+
+      // After the second compaction the in-place-updated values must be
+      // returned correctly. If the stale cached reader was served this would
+      // produce a CorruptedSstableException or wrong values.
+      for (var i = 0; i < keys.length; i++) {
+        final r = await store.get('ns', keys[i]);
+        expect(
+          r,
+          equals(_bytes('updated-${i + 1}')),
+          reason: 'key ${keys[i]} should have updated value',
         );
-        final store = await _open(MemoryStorageAdapter(), config: config);
+      }
 
-        // Write several keys; force flush + compaction so the cache gets
-        // populated with readers before the compaction runs again.
-        final keys = List.generate(5, (i) => _key(i + 1));
-        for (var i = 0; i < keys.length; i++) {
-          await store.put('ns', keys[i], _bytes('v${i + 1}'));
-        }
-        await store.flush();
-        await store.compactAll();
-
-        // Verify correct values before the second round of compaction.
-        for (var i = 0; i < keys.length; i++) {
-          final r = await store.get('ns', keys[i]);
-          expect(r, equals(_bytes('v${i + 1}')));
-        }
-
-        // Write more data and compact again. This may produce a compaction
-        // output whose filename matches the existing L2 file (in-place overwrite).
-        for (var i = 0; i < keys.length; i++) {
-          await store.put('ns', keys[i], _bytes('updated-${i + 1}'));
-        }
-        await store.flush();
-        await store.compactAll();
-
-        // After the second compaction the in-place-updated values must be
-        // returned correctly. If the stale cached reader was served this would
-        // produce a CorruptedSstableException or wrong values.
-        for (var i = 0; i < keys.length; i++) {
-          final r = await store.get('ns', keys[i]);
-          expect(
-            r,
-            equals(_bytes('updated-${i + 1}')),
-            reason: 'key ${keys[i]} should have updated value',
-          );
-        }
-
-        await store.close();
-      },
-    );
+      await store.close();
+    });
   });
 
   group('TableCache integration — LRU bound respected', () {

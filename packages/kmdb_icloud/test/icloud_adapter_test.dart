@@ -653,35 +653,32 @@ void main() {
       },
     );
 
-    test(
-      'retries on ICloudRateLimitException (no retryAfterMs) using exponential back-off',
-      () async {
-        // A channel that throws once WITHOUT retryAfterMs, then succeeds.
-        // Exercises the else branch (exponential back-off) in _retryOnRateLimit
-        // (lines 213-217 of icloud_adapter.dart).
-        final channel = _OneShotRateLimitChannel(
-          backend: SharedCloudBackend(),
-          failCount: 1,
-          retryAfterMs: null, // null: uses exponential back-off path
-        );
-        final adapter = ICloudAdapter(
-          channel: channel,
-          syncRoot: 'test',
-          retryConfig: const ICloudRetryConfig(
-            maxAttempts: 3,
-            initialDelayMs: 1,
-            maxDelayMs: 10,
-            jitterMs: 0,
-          ),
-        );
+    test('retries on ICloudRateLimitException (no retryAfterMs) using exponential back-off', () async {
+      // A channel that throws once WITHOUT retryAfterMs, then succeeds.
+      // Exercises the else branch (exponential back-off) in _retryOnRateLimit
+      // (lines 213-217 of icloud_adapter.dart).
+      final channel = _OneShotRateLimitChannel(
+        backend: SharedCloudBackend(),
+        failCount: 1,
+        retryAfterMs: null, // null: uses exponential back-off path
+      );
+      final adapter = ICloudAdapter(
+        channel: channel,
+        syncRoot: 'test',
+        retryConfig: const ICloudRetryConfig(
+          maxAttempts: 3,
+          initialDelayMs: 1,
+          maxDelayMs: 10,
+          jitterMs: 0,
+        ),
+      );
 
-        await expectLater(
-          adapter.upload('path/x.sst', Uint8List.fromList([1])),
-          completes,
-        );
-        expect(channel.callCount, equals(2));
-      },
-    );
+      await expectLater(
+        adapter.upload('path/x.sst', Uint8List.fromList([1])),
+        completes,
+      );
+      expect(channel.callCount, equals(2));
+    });
 
     test('throws after maxAttempts exhausted', () async {
       // A channel that always throws ICloudRateLimitException.
@@ -707,36 +704,39 @@ void main() {
       );
     });
 
-    test('cancellation check fires between retry attempts (pre-sleep)', () async {
-      // Exercises ctx?.throwIfExpired() at line 197 (before sleep).
-      // The token is cancelled BEFORE the back-off sleep starts; the adapter
-      // should detect it at the pre-sleep cancellation check.
-      final cancelToken = CancellationToken();
-      final ctx = SyncContext(cancel: cancelToken);
+    test(
+      'cancellation check fires between retry attempts (pre-sleep)',
+      () async {
+        // Exercises ctx?.throwIfExpired() at line 197 (before sleep).
+        // The token is cancelled BEFORE the back-off sleep starts; the adapter
+        // should detect it at the pre-sleep cancellation check.
+        final cancelToken = CancellationToken();
+        final ctx = SyncContext(cancel: cancelToken);
 
-      final channel = _OneShotRateLimitChannel(
-        backend: SharedCloudBackend(),
-        failCount: 999,
-        retryAfterMs: null,
-        // Cancel SYNCHRONOUSLY on first fail (before any await in _retryOnRateLimit).
-        onFirstFail: cancelToken.cancel,
-      );
-      final adapter = ICloudAdapter(
-        channel: channel,
-        syncRoot: 'test',
-        retryConfig: const ICloudRetryConfig(
-          maxAttempts: 5,
-          initialDelayMs: 1,
-          maxDelayMs: 5,
-          jitterMs: 0,
-        ),
-      );
+        final channel = _OneShotRateLimitChannel(
+          backend: SharedCloudBackend(),
+          failCount: 999,
+          retryAfterMs: null,
+          // Cancel SYNCHRONOUSLY on first fail (before any await in _retryOnRateLimit).
+          onFirstFail: cancelToken.cancel,
+        );
+        final adapter = ICloudAdapter(
+          channel: channel,
+          syncRoot: 'test',
+          retryConfig: const ICloudRetryConfig(
+            maxAttempts: 5,
+            initialDelayMs: 1,
+            maxDelayMs: 5,
+            jitterMs: 0,
+          ),
+        );
 
-      await expectLater(
-        adapter.upload('path/x.sst', Uint8List.fromList([1]), ctx: ctx),
-        throwsA(isA<SyncCancelledException>()),
-      );
-    });
+        await expectLater(
+          adapter.upload('path/x.sst', Uint8List.fromList([1]), ctx: ctx),
+          throwsA(isA<SyncCancelledException>()),
+        );
+      },
+    );
 
     test(
       'cancellation via Future.any (cancelFuture != null) wakes back-off sleep',
@@ -771,9 +771,8 @@ void main() {
         );
 
         // Cancel the token 10ms after the adapter starts its back-off sleep.
-        Future<void>.delayed(
-          const Duration(milliseconds: 10),
-        ).then((_) => cancelToken.cancel());
+        Future<void>.delayed(const Duration(milliseconds: 10))
+            .then((_) => cancelToken.cancel());
 
         await expectLater(
           adapter.upload('path/x.sst', Uint8List.fromList([1]), ctx: ctx),
@@ -858,13 +857,9 @@ void main() {
   // The test is NOT part of per-commit CI; it is registered in the release
   // checklist as RC-13.
   group('iCloud real-service integration', () {
-    test(
-      'placeholder: e2e tests run with ICLOUD_TEST_CONTAINER set',
-      () {
-        // Intentionally empty — the real e2e path is manual (RC-13).
-      },
-      skip: 'Credential-gated; run manually with ICLOUD_TEST_CONTAINER set',
-    );
+    test('placeholder: e2e tests run with ICLOUD_TEST_CONTAINER set', () {
+      // Intentionally empty — the real e2e path is manual (RC-13).
+    }, skip: 'Credential-gated; run manually with ICLOUD_TEST_CONTAINER set');
   }, tags: ['e2e']);
 }
 

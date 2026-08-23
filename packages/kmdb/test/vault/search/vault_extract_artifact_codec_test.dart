@@ -147,27 +147,24 @@ void main() {
       },
     );
 
-    test(
-      'encrypted artifact is prefixed with EncryptionFlag.aesGcm (0x01) on disk',
-      () async {
-        final dek = await KeyDerivation.generateDek();
-        final provider = AesGcmEncryptionProvider(dek);
-        final fx = await _makeFixture(encryption: provider);
-        addTearDown(fx.dispose);
+    test('encrypted artifact is prefixed with EncryptionFlag.aesGcm (0x01) on disk', () async {
+      final dek = await KeyDerivation.generateDek();
+      final provider = AesGcmEncryptionProvider(dek);
+      final fx = await _makeFixture(encryption: provider);
+      addTearDown(fx.dispose);
 
-        const path = '/db/vault/bb/extract/text.txt';
-        final plaintext = _bytes('secret text content');
-        await fx.manager.writeExtractArtifact(path, plaintext);
+      const path = '/db/vault/bb/extract/text.txt';
+      final plaintext = _bytes('secret text content');
+      await fx.manager.writeExtractArtifact(path, plaintext);
 
-        final raw = await fx.adapter.readFile(path);
-        expect(raw[0], equals(EncryptionFlag.aesGcm.byte));
-        // Ciphertext body must not contain the plaintext verbatim.
-        expect(
-          utf8.decode(raw, allowMalformed: true),
-          isNot(contains('secret text content')),
-        );
-      },
-    );
+      final raw = await fx.adapter.readFile(path);
+      expect(raw[0], equals(EncryptionFlag.aesGcm.byte));
+      // Ciphertext body must not contain the plaintext verbatim.
+      expect(
+        utf8.decode(raw, allowMalformed: true),
+        isNot(contains('secret text content')),
+      );
+    });
 
     test('empty artifact file throws FormatException on read', () async {
       final fx = await _makeFixture();

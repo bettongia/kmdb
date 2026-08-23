@@ -182,9 +182,8 @@ void main() {
         _edit(log: 3, seq: 300, added: [_meta('file3.sst', level: 1)]),
       );
 
-      final state = await ManifestReader(
-        adapter: adapter,
-      ).replay(_manifestPath);
+      final state = await ManifestReader(adapter: adapter)
+          .replay(_manifestPath);
       expect(_levelFiles(state, 0), equals(['file2.sst']));
       expect(_levelFiles(state, 1), contains('file3.sst'));
       expect(state.maxLogNumber, equals(3));
@@ -203,18 +202,16 @@ void main() {
       corrupted[corrupted.length - 1] ^= 0xFF;
       adapter.files[_manifestPath] = corrupted;
 
-      final state = await ManifestReader(
-        adapter: adapter,
-      ).replay(_manifestPath);
+      final state = await ManifestReader(adapter: adapter)
+          .replay(_manifestPath);
       // Only the first record should be visible.
       expect(_levelFiles(state, 0), equals(['file1.sst']));
     });
 
     test('returns empty state when file does not exist', () async {
       final adapter = MemoryStorageAdapter();
-      final state = await ManifestReader(
-        adapter: adapter,
-      ).replay('/nonexistent/MANIFEST-00001');
+      final state = await ManifestReader(adapter: adapter)
+          .replay('/nonexistent/MANIFEST-00001');
       expect(state.levels[0], isEmpty);
       expect(state.maxLogNumber, equals(0));
     });
@@ -231,9 +228,8 @@ void main() {
           ],
         ),
       );
-      final state = await ManifestReader(
-        adapter: adapter,
-      ).replay(_manifestPath);
+      final state = await ManifestReader(adapter: adapter)
+          .replay(_manifestPath);
       expect(state.allFiles.toSet(), equals({'l0.sst', 'l1.sst', 'l2.sst'}));
     });
   });
@@ -310,9 +306,8 @@ void main() {
           ),
         );
 
-        final state = await ManifestReader(
-          adapter: adapter,
-        ).replay(_manifestPath);
+        final state = await ManifestReader(adapter: adapter)
+            .replay(_manifestPath);
 
         // The unrelated file must still be present, proving the fold is
         // otherwise intact.
@@ -338,9 +333,8 @@ void main() {
       final adapter = MemoryStorageAdapter();
       // Write 8 bytes — less than the minimum 12-byte header.
       adapter.files[_manifestPath] = Uint8List.fromList(List.filled(8, 0xAB));
-      final state = await ManifestReader(
-        adapter: adapter,
-      ).replay(_manifestPath);
+      final state = await ManifestReader(adapter: adapter)
+          .replay(_manifestPath);
       expect(state.levels[0], isEmpty);
     });
 
@@ -365,9 +359,8 @@ void main() {
         corrupt.setUint32(raw.length + 8, 1000000, Endian.big);
         adapter.files[_manifestPath] = corrupt.buffer.asUint8List();
 
-        final state = await ManifestReader(
-          adapter: adapter,
-        ).replay(_manifestPath);
+        final state = await ManifestReader(adapter: adapter)
+            .replay(_manifestPath);
         // Only the valid first record should contribute.
         expect(_levelFiles(state, 0), contains('good.sst'));
         expect(state.maxLogNumber, equals(1));
@@ -382,9 +375,8 @@ void main() {
       await writer.append(_edit(log: 1, seq: 100, added: [_meta('a.sst')]));
       await writer.append(_edit(log: 2, seq: 200, added: [_meta('b.sst')]));
 
-      final edits = await ManifestReader(
-        adapter: adapter,
-      ).replayEdits(_manifestPath);
+      final edits = await ManifestReader(adapter: adapter)
+          .replayEdits(_manifestPath);
       expect(edits, hasLength(2));
       expect(edits[0].logNumber, equals(1));
       expect(edits[1].logNumber, equals(2));
@@ -392,9 +384,8 @@ void main() {
 
     test('returns empty list for missing file', () async {
       final adapter = MemoryStorageAdapter();
-      final edits = await ManifestReader(
-        adapter: adapter,
-      ).replayEdits('/nonexistent/MANIFEST-00001');
+      final edits = await ManifestReader(adapter: adapter)
+          .replayEdits('/nonexistent/MANIFEST-00001');
       expect(edits, isEmpty);
     });
 
@@ -412,9 +403,8 @@ void main() {
         corrupted[corrupted.length - 1] ^= 0xFF;
         adapter.files[_manifestPath] = corrupted;
 
-        final edits = await ManifestReader(
-          adapter: adapter,
-        ).replayEdits(_manifestPath);
+        final edits = await ManifestReader(adapter: adapter)
+            .replayEdits(_manifestPath);
         expect(edits, hasLength(1));
         expect(edits[0].added.first.filename, equals('ok.sst'));
       },
@@ -431,9 +421,8 @@ void main() {
       withTrail.setAll(0, raw);
       adapter.files[_manifestPath] = withTrail;
 
-      final edits = await ManifestReader(
-        adapter: adapter,
-      ).replayEdits(_manifestPath);
+      final edits = await ManifestReader(adapter: adapter)
+          .replayEdits(_manifestPath);
       expect(edits, hasLength(1));
     });
   });

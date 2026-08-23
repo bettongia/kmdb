@@ -460,26 +460,23 @@ void main() {
       },
     );
 
-    test(
-      'floor encoding is stable: same value reads back identically',
-      () async {
-        // Exercise the full 64-bit range encoding — physical + logical both set.
-        const floor = Hlc(
-          0xABCDEF012,
-          0x1234,
-        ); // large physical, non-zero logical
-        final adapter = MemoryStorageAdapter();
-        final (store, _) = await _open(adapter);
-        await store.meta.setTombstoneFloor(floor);
-        await store.close();
+    test('floor encoding is stable: same value reads back identically', () async {
+      // Exercise the full 64-bit range encoding — physical + logical both set.
+      const floor = Hlc(
+        0xABCDEF012,
+        0x1234,
+      ); // large physical, non-zero logical
+      final adapter = MemoryStorageAdapter();
+      final (store, _) = await _open(adapter);
+      await store.meta.setTombstoneFloor(floor);
+      await store.close();
 
-        final (store2, _) = await _open(adapter);
-        final readBack = await store2.meta.getTombstoneFloor();
-        expect(readBack.physicalMs, equals(floor.physicalMs));
-        expect(readBack.logical, equals(floor.logical));
-        await store2.close();
-      },
-    );
+      final (store2, _) = await _open(adapter);
+      final readBack = await store2.meta.getTombstoneFloor();
+      expect(readBack.physicalMs, equals(floor.physicalMs));
+      expect(readBack.logical, equals(floor.logical));
+      await store2.close();
+    });
 
     test('resetTombstoneFloor reverts to Hlc(0,0)', () async {
       final adapter = MemoryStorageAdapter();

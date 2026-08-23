@@ -238,32 +238,29 @@ void main() {
     // FTS intercept only fires when the index is active (building/current/syncing).
     // So: build first → mutate → compact (without a second ensureBuilt) → overlays.
 
-    test(
-      'compact processes tombstone overlay when index was built before delete',
-      () async {
-        // Build the index with a doc first so the index status becomes current.
-        final db = await _openDb();
-        final col = db.collection(name: 'docs', codec: _codec);
+    test('compact processes tombstone overlay when index was built before delete', () async {
+      // Build the index with a doc first so the index status becomes current.
+      final db = await _openDb();
+      final col = db.collection(name: 'docs', codec: _codec);
 
-        // Seed a doc and build the index so status transitions to current.
-        await col.insert({'body': 'seed content here'});
-        await db.ftsManager!.ensureBuilt('docs', 'body');
+      // Seed a doc and build the index so status transitions to current.
+      await col.insert({'body': 'seed content here'});
+      await db.ftsManager!.ensureBuilt('docs', 'body');
 
-        // Now insert another doc while index is current (intercept fires).
-        final doc = await col.insert({'body': 'to be removed later'});
-        // Delete the doc — intercept fires and writes tombstone overlay.
-        await col.delete(doc['_id'] as String);
+      // Now insert another doc while index is current (intercept fires).
+      final doc = await col.insert({'body': 'to be removed later'});
+      // Delete the doc — intercept fires and writes tombstone overlay.
+      await col.delete(doc['_id'] as String);
 
-        // compact() should process the tombstone overlay and remove base entries.
-        // This exercises compact() lines 825-830 (tombstone branch).
-        await db.ftsManager!.compact('docs', 'body');
+      // compact() should process the tombstone overlay and remove base entries.
+      // This exercises compact() lines 825-830 (tombstone branch).
+      await db.ftsManager!.compact('docs', 'body');
 
-        // The deleted doc must not appear in search results.
-        expect((await col.search('removed', fields: ['body'])).hits, isEmpty);
-        // The seed doc is still findable.
-        expect((await col.search('seed', fields: ['body'])).hits, hasLength(1));
-      },
-    );
+      // The deleted doc must not appear in search results.
+      expect((await col.search('removed', fields: ['body'])).hits, isEmpty);
+      // The seed doc is still findable.
+      expect((await col.search('seed', fields: ['body'])).hits, hasLength(1));
+    });
 
     test(
       'compact processes map overlay when index was built before update',
@@ -483,59 +480,53 @@ void main() {
       },
     );
 
-    test(
-      'applyDelta mid-sync: index enters syncing; queries return pre-delta results',
-      () async {
-        final db = await _openDb();
-        final col = db.collection(name: 'docs', codec: _codec);
+    test('applyDelta mid-sync: index enters syncing; queries return pre-delta results', () async {
+      final db = await _openDb();
+      final col = db.collection(name: 'docs', codec: _codec);
 
-        // Insert and build the index.
-        final doc1 = await col.insert({'body': 'pre-delta document'});
-        await db.ftsManager!.ensureBuilt('docs', 'body');
+      // Insert and build the index.
+      final doc1 = await col.insert({'body': 'pre-delta document'});
+      await db.ftsManager!.ensureBuilt('docs', 'body');
 
-        // Force the index into syncing state before applyDelta runs.
-        await db.ftsManager!.forceStateForTesting(
+      // Force the index into syncing state before applyDelta runs.
+      await db.ftsManager!.forceStateForTesting(
+        'docs',
+        'body',
+        FtsIndexStatus.syncing,
+      );
+
+      // Restore to current to allow applyDelta to proceed.
+      await db.ftsManager!.forceStateForTesting(
+        'docs',
+        'body',
+        FtsIndexStatus.current,
+      );
+
+      // Write a new document and apply a delta to index it.
+      final newId = const UuidV7KeyGenerator().next();
+      final newDoc = {'body': 'delta applied document'};
+      final batch = WriteBatch()
+        ..put(
           'docs',
-          'body',
-          FtsIndexStatus.syncing,
+          newId,
+          await ValueCodec.encode(newDoc, context: ValueContext('docs', newId)),
         );
+      await db.store.writeBatchInternal(batch);
 
-        // Restore to current to allow applyDelta to proceed.
-        await db.ftsManager!.forceStateForTesting(
-          'docs',
-          'body',
-          FtsIndexStatus.current,
-        );
+      await db.ftsManager!.applyDelta(
+        'docs',
+        SyncDelta(
+          namespace: 'docs',
+          changes: [(docId: newId, changeType: DeltaChangeType.added)],
+        ),
+      );
 
-        // Write a new document and apply a delta to index it.
-        final newId = const UuidV7KeyGenerator().next();
-        final newDoc = {'body': 'delta applied document'};
-        final batch = WriteBatch()
-          ..put(
-            'docs',
-            newId,
-            await ValueCodec.encode(
-              newDoc,
-              context: ValueContext('docs', newId),
-            ),
-          );
-        await db.store.writeBatchInternal(batch);
-
-        await db.ftsManager!.applyDelta(
-          'docs',
-          SyncDelta(
-            namespace: 'docs',
-            changes: [(docId: newId, changeType: DeltaChangeType.added)],
-          ),
-        );
-
-        // Both pre-delta and delta docs are now searchable.
-        final result1 = await col.search('pre-delta', fields: ['body']);
-        expect(result1.hits.map((h) => h.id), contains(doc1['_id']));
-        final result2 = await col.search('delta', fields: ['body']);
-        expect(result2.hits.map((h) => h.id), contains(newId));
-      },
-    );
+      // Both pre-delta and delta docs are now searchable.
+      final result1 = await col.search('pre-delta', fields: ['body']);
+      expect(result1.hits.map((h) => h.id), contains(doc1['_id']));
+      final result2 = await col.search('delta', fields: ['body']);
+      expect(result2.hits.map((h) => h.id), contains(newId));
+    });
   });
 
   // ── hasIndex / hasAnyIndex / indexedFieldsFor ────────────────────────────────
@@ -846,124 +837,106 @@ void main() {
   // ── stopWords: true paths ─────────────────────────────────────────────────────
 
   group('stopWords: true', () {
-    test(
-      'insert with stopWords=true indexes content words, filters stop words',
-      () async {
-        // Opens a DB with stopWords: true to cover the `defaultStopwords.listing`
-        // branch in _interceptInsert (line 231) and _interceptUpdate (line 281).
-        final db = await _openDb(stopWords: true);
-        final col = db.collection(name: 'docs', codec: _codec);
+    test('insert with stopWords=true indexes content words, filters stop words', () async {
+      // Opens a DB with stopWords: true to cover the `defaultStopwords.listing`
+      // branch in _interceptInsert (line 231) and _interceptUpdate (line 281).
+      final db = await _openDb(stopWords: true);
+      final col = db.collection(name: 'docs', codec: _codec);
 
-        // Content word should be searchable; stop words ('the', 'a') should not.
-        await col.insert({'body': 'the quick brown fox'});
+      // Content word should be searchable; stop words ('the', 'a') should not.
+      await col.insert({'body': 'the quick brown fox'});
 
-        // 'quick' is a content word → should be findable.
-        expect(
-          (await col.search('quick', fields: ['body'])).hits,
-          hasLength(1),
-        );
-        // 'the' is a stop word → should NOT be indexed.
-        expect((await col.search('the', fields: ['body'])).hits, isEmpty);
-      },
-    );
+      // 'quick' is a content word → should be findable.
+      expect((await col.search('quick', fields: ['body'])).hits, hasLength(1));
+      // 'the' is a stop word → should NOT be indexed.
+      expect((await col.search('the', fields: ['body'])).hits, isEmpty);
+    });
 
-    test(
-      'update with stopWords=true covers the stopWords branch in _interceptUpdate',
-      () async {
-        // Exercises def.stopWords ? defaultStopwords.listing in _interceptUpdate
-        // (line 281) when a document is updated and the field still has content.
-        final db = await _openDb(stopWords: true);
-        final col = db.collection(name: 'docs', codec: _codec);
+    test('update with stopWords=true covers the stopWords branch in _interceptUpdate', () async {
+      // Exercises def.stopWords ? defaultStopwords.listing in _interceptUpdate
+      // (line 281) when a document is updated and the field still has content.
+      final db = await _openDb(stopWords: true);
+      final col = db.collection(name: 'docs', codec: _codec);
 
-        final doc = await col.insert({'body': 'original content here'});
+      final doc = await col.insert({'body': 'original content here'});
 
-        // Update the body — _interceptUpdate is called with stopWords=true.
-        await col.put({...doc, 'body': 'updated content there'});
+      // Update the body — _interceptUpdate is called with stopWords=true.
+      await col.put({...doc, 'body': 'updated content there'});
 
-        // The updated content word must be findable.
-        expect(
-          (await col.search('updated', fields: ['body'])).hits,
-          hasLength(1),
-        );
-        // The old unique word must no longer be ranked.
-        expect((await col.search('original', fields: ['body'])).hits, isEmpty);
-      },
-    );
+      // The updated content word must be findable.
+      expect(
+        (await col.search('updated', fields: ['body'])).hits,
+        hasLength(1),
+      );
+      // The old unique word must no longer be ranked.
+      expect((await col.search('original', fields: ['body'])).hits, isEmpty);
+    });
   });
 
   // ── BM25 search overlay paths ─────────────────────────────────────────────────
 
   group('BM25 search — overlay paths', () {
-    test(
-      'search respects tombstone overlay (deleted doc not returned before compact)',
-      () async {
-        // Exercises the tombstone branch in BM25 scoring (line 748: continue).
-        // A deleted document writes a tombstone overlay; search must skip it
-        // even before compact() is run.
-        final db = await _openDb();
-        final col = db.collection(name: 'docs', codec: _codec);
+    test('search respects tombstone overlay (deleted doc not returned before compact)', () async {
+      // Exercises the tombstone branch in BM25 scoring (line 748: continue).
+      // A deleted document writes a tombstone overlay; search must skip it
+      // even before compact() is run.
+      final db = await _openDb();
+      final col = db.collection(name: 'docs', codec: _codec);
 
-        // Insert and verify findable.
-        final doc = await col.insert({'body': 'ephemeral content'});
-        final id = doc['_id'] as String;
-        expect(
-          (await col.search(
-            'ephemeral',
-            fields: ['body'],
-          )).hits.map((h) => h.id),
-          contains(id),
-        );
+      // Insert and verify findable.
+      final doc = await col.insert({'body': 'ephemeral content'});
+      final id = doc['_id'] as String;
+      expect(
+        (await col.search('ephemeral', fields: ['body'])).hits.map((h) => h.id),
+        contains(id),
+      );
 
-        // Delete — writes a tombstone overlay.
-        await col.delete(id);
+      // Delete — writes a tombstone overlay.
+      await col.delete(id);
 
-        // Search without running compact(): tombstone overlay must suppress hit.
-        final result = await col.search('ephemeral', fields: ['body']);
-        expect(result.hits.map((h) => h.id), isNot(contains(id)));
-      },
-    );
+      // Search without running compact(): tombstone overlay must suppress hit.
+      final result = await col.search('ephemeral', fields: ['body']);
+      expect(result.hits.map((h) => h.id), isNot(contains(id)));
+    });
 
-    test(
-      'search uses overlay tf for updated doc (overlay path, lines 750-752)',
-      () async {
-        // Exercises the Map-overlay branch (lines 750-752) in BM25 scoring.
-        // When a document is updated, _interceptUpdate writes an overlay with
-        // the new term frequencies. The BM25 scorer finds the doc via the BASE
-        // term index, then reads the overlay to get the current tf value.
-        //
-        // To hit lines 750-754: the search term must be present BOTH in the
-        // base index (so the doc is found during the term scan) AND in the
-        // overlay (so the overlay-map branch is taken). This happens when the
-        // doc is updated to a new body that still contains the search term.
-        final db = await _openDb();
-        final col = db.collection(name: 'docs', codec: _codec);
+    test('search uses overlay tf for updated doc (overlay path, lines 750-752)', () async {
+      // Exercises the Map-overlay branch (lines 750-752) in BM25 scoring.
+      // When a document is updated, _interceptUpdate writes an overlay with
+      // the new term frequencies. The BM25 scorer finds the doc via the BASE
+      // term index, then reads the overlay to get the current tf value.
+      //
+      // To hit lines 750-754: the search term must be present BOTH in the
+      // base index (so the doc is found during the term scan) AND in the
+      // overlay (so the overlay-map branch is taken). This happens when the
+      // doc is updated to a new body that still contains the search term.
+      final db = await _openDb();
+      final col = db.collection(name: 'docs', codec: _codec);
 
-        // Insert a doc with 'alpha' — base entry for 'alpha' is written.
-        final doc = await col.insert({'body': 'alpha'});
-        final id = doc['_id'] as String;
-        expect(
-          (await col.search('alpha', fields: ['body'])).hits.map((h) => h.id),
-          contains(id),
-        );
+      // Insert a doc with 'alpha' — base entry for 'alpha' is written.
+      final doc = await col.insert({'body': 'alpha'});
+      final id = doc['_id'] as String;
+      expect(
+        (await col.search('alpha', fields: ['body'])).hits.map((h) => h.id),
+        contains(id),
+      );
 
-        // Update the body — 'alpha' is still present but the overlay is written.
-        // The overlay map includes 'alpha' with tf=2 (repeated in new content).
-        // The base term entry for 'alpha' still exists (compact not run yet).
-        await col.put({...doc, 'body': 'alpha alpha extra'});
+      // Update the body — 'alpha' is still present but the overlay is written.
+      // The overlay map includes 'alpha' with tf=2 (repeated in new content).
+      // The base term entry for 'alpha' still exists (compact not run yet).
+      await col.put({...doc, 'body': 'alpha alpha extra'});
 
-        // Search for 'alpha': the doc is found via the base term scan.
-        // The BM25 scorer reads the overlay (it's a Map) and takes the overlay
-        // tf value for 'alpha' (lines 750-754).
-        final alphaResult = await col.search('alpha', fields: ['body']);
-        expect(alphaResult.hits.map((h) => h.id), contains(id));
+      // Search for 'alpha': the doc is found via the base term scan.
+      // The BM25 scorer reads the overlay (it's a Map) and takes the overlay
+      // tf value for 'alpha' (lines 750-754).
+      final alphaResult = await col.search('alpha', fields: ['body']);
+      expect(alphaResult.hits.map((h) => h.id), contains(id));
 
-        // Also verify tombstone path: delete the doc and search.
-        // The tombstone overlay suppresses the hit (line 748).
-        await col.delete(id);
-        final deletedResult = await col.search('alpha', fields: ['body']);
-        expect(deletedResult.hits.map((h) => h.id), isNot(contains(id)));
-      },
-    );
+      // Also verify tombstone path: delete the doc and search.
+      // The tombstone overlay suppresses the hit (line 748).
+      await col.delete(id);
+      final deletedResult = await col.search('alpha', fields: ['body']);
+      expect(deletedResult.hits.map((h) => h.id), isNot(contains(id)));
+    });
   });
 
   // ── search — empty query ────────────────────────────────────────────────────

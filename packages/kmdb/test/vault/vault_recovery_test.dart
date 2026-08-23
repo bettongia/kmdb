@@ -107,20 +107,17 @@ void main() {
     });
 
     group('hash directory sweep', () {
-      test(
-        'crash after step 3: blob present, no manifest, no KV ref → delete',
-        () async {
-          // Simulate crash after step 3: blob exists in final path, no manifest.
-          final sha256 =
-              'aabbcc1234567890aabbcc1234567890aabbcc1234567890aabbcc1234567890';
-          adapter.files[store.blobPath(sha256)] = Uint8List(20);
-          // No manifest, no KV ref.
+      test('crash after step 3: blob present, no manifest, no KV ref → delete', () async {
+        // Simulate crash after step 3: blob exists in final path, no manifest.
+        final sha256 =
+            'aabbcc1234567890aabbcc1234567890aabbcc1234567890aabbcc1234567890';
+        adapter.files[store.blobPath(sha256)] = Uint8List(20);
+        // No manifest, no KV ref.
 
-          final result = await makeRecovery().recover();
-          expect(result.hashDirsDeleted, equals(1));
-          expect(await store.isHydrated(sha256), isFalse);
-        },
-      );
+        final result = await makeRecovery().recover();
+        expect(result.hashDirsDeleted, equals(1));
+        expect(await store.isHydrated(sha256), isFalse);
+      });
 
       test('crash after step 4: manifest + blob, no KV ref → delete', () async {
         final bytes = Uint8List.fromList('content'.codeUnits);

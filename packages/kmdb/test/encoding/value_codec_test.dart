@@ -158,25 +158,22 @@ void main() {
       expect(await roundTrip(doc), equals(doc));
     });
 
-    test(
-      'nested maps decode as Map<String, dynamic> (regression: CBOR toObject returns Map<dynamic, dynamic>)',
-      () async {
-        // CBOR's toObject() returns Map<dynamic,dynamic> for every level of
-        // nesting. Without the deep-cast in _fromCbor, FieldPath.resolve() would
-        // hit the `is! Map<String,dynamic>` guard and return `missing` for any
-        // path that traverses a nested object (e.g. "name.en").
-        final doc = {
-          'name': {'en': 'McMurdo', 'fr': 'Base McMurdo'},
-          'location': {'latitude': -77.8, 'longitude': 166.7},
-        };
-        final result = await roundTrip(doc);
-        expect(result['name'], isA<Map<String, dynamic>>());
-        expect(result['location'], isA<Map<String, dynamic>>());
-        // Verify FieldPath can traverse the decoded nested maps.
-        expect(FieldPath.resolve('name.en', result), equals('McMurdo'));
-        expect(FieldPath.resolve('location.latitude', result), equals(-77.8));
-      },
-    );
+    test('nested maps decode as Map<String, dynamic> (regression: CBOR toObject returns Map<dynamic, dynamic>)', () async {
+      // CBOR's toObject() returns Map<dynamic,dynamic> for every level of
+      // nesting. Without the deep-cast in _fromCbor, FieldPath.resolve() would
+      // hit the `is! Map<String,dynamic>` guard and return `missing` for any
+      // path that traverses a nested object (e.g. "name.en").
+      final doc = {
+        'name': {'en': 'McMurdo', 'fr': 'Base McMurdo'},
+        'location': {'latitude': -77.8, 'longitude': 166.7},
+      };
+      final result = await roundTrip(doc);
+      expect(result['name'], isA<Map<String, dynamic>>());
+      expect(result['location'], isA<Map<String, dynamic>>());
+      // Verify FieldPath can traverse the decoded nested maps.
+      expect(FieldPath.resolve('name.en', result), equals('McMurdo'));
+      expect(FieldPath.resolve('location.latitude', result), equals(-77.8));
+    });
 
     test(
       'lists containing maps decode inner maps as Map<String, dynamic>',
@@ -209,15 +206,12 @@ void main() {
       },
     );
 
-    test(
-      'small doc (< 64 bytes) has CompressionFlag.none (0x00) at byte 1 when plaintext',
-      () async {
-        final bytes = await ValueCodec.encode({'x': 1}, context: _ctx);
-        // Byte 0 = EncryptionFlag.none; byte 1 = CompressionFlag.
-        expect(bytes[0], equals(EncryptionFlag.none.byte));
-        expect(bytes[1], equals(CompressionFlag.none.byte));
-      },
-    );
+    test('small doc (< 64 bytes) has CompressionFlag.none (0x00) at byte 1 when plaintext', () async {
+      final bytes = await ValueCodec.encode({'x': 1}, context: _ctx);
+      // Byte 0 = EncryptionFlag.none; byte 1 = CompressionFlag.
+      expect(bytes[0], equals(EncryptionFlag.none.byte));
+      expect(bytes[1], equals(CompressionFlag.none.byte));
+    });
 
     test(
       'large doc has CompressionFlag.zstd (0x01) at byte 1 on native and web',
@@ -348,17 +342,14 @@ void main() {
       );
     });
 
-    test(
-      'throws ArgumentError on unknown compression flag byte (inside plaintext)',
-      () async {
-        // Two bytes: EncryptionFlag.none then an unknown CompressionFlag.
-        final bad = Uint8List.fromList([0x00, 0x02, 0xDE, 0xAD]);
-        expect(
-          () async => ValueCodec.decode(bad, context: _ctx),
-          throwsA(isA<ArgumentError>()),
-        );
-      },
-    );
+    test('throws ArgumentError on unknown compression flag byte (inside plaintext)', () async {
+      // Two bytes: EncryptionFlag.none then an unknown CompressionFlag.
+      final bad = Uint8List.fromList([0x00, 0x02, 0xDE, 0xAD]);
+      expect(
+        () async => ValueCodec.decode(bad, context: _ctx),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
 
     test('throws on truncated zstd payload', () async {
       // EncryptionFlag.none, CompressionFlag.zstd (0x01), then garbage.

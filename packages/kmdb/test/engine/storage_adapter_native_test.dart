@@ -87,18 +87,15 @@ void main() {
       expect(await adapter.readFileRange(p('foo'), 1, 2), equals([20, 30]));
     });
 
-    test(
-      'throws StorageException on short read (fewer bytes than requested)',
-      () async {
-        // Write 3 bytes, then request 5 bytes from offset 0 — the file is shorter
-        // than the requested length, triggering the "only N available" error.
-        await adapter.writeFile(p('short'), Uint8List.fromList([1, 2, 3]));
-        await expectLater(
-          adapter.readFileRange(p('short'), 0, 5),
-          throwsA(isA<StorageException>()),
-        );
-      },
-    );
+    test('throws StorageException on short read (fewer bytes than requested)', () async {
+      // Write 3 bytes, then request 5 bytes from offset 0 — the file is shorter
+      // than the requested length, triggering the "only N available" error.
+      await adapter.writeFile(p('short'), Uint8List.fromList([1, 2, 3]));
+      await expectLater(
+        adapter.readFileRange(p('short'), 0, 5),
+        throwsA(isA<StorageException>()),
+      );
+    });
 
     test('throws on out-of-bounds range', () async {
       await adapter.writeFile(p('foo'), Uint8List.fromList([1, 2, 3]));

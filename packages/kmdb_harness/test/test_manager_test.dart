@@ -90,76 +90,56 @@ void main() {
   tearDown(MemoryStorageAdapter.releaseAllLocks);
 
   group('TestManager — lifecycle', () {
-    test(
-      'run completes and returns a HarnessReport',
-      () async {
-        final manager = TestManager(
-          config: _lowVelocityConfig(durationSeconds: 1),
-          seed: 42,
-        );
-        final report = await manager.run();
+    test('run completes and returns a HarnessReport', () async {
+      final manager = TestManager(
+        config: _lowVelocityConfig(durationSeconds: 1),
+        seed: 42,
+      );
+      final report = await manager.run();
 
-        expect(report, isA<HarnessReport>());
-        expect(report.prngseed, equals(42));
-        expect(report.deviceVerdicts, hasLength(2));
-        expect(report.durationMs, greaterThan(0));
-      },
-      timeout: const Timeout(Duration(seconds: 30)),
-    );
+      expect(report, isA<HarnessReport>());
+      expect(report.prngseed, equals(42));
+      expect(report.deviceVerdicts, hasLength(2));
+      expect(report.durationMs, greaterThan(0));
+    }, timeout: const Timeout(Duration(seconds: 30)));
 
-    test(
-      'report contains no-op counts for every device',
-      () async {
-        final manager = TestManager(
-          config: _lowVelocityConfig(deviceCount: 3, durationSeconds: 1),
-          seed: 1,
-        );
-        final report = await manager.run();
+    test('report contains no-op counts for every device', () async {
+      final manager = TestManager(
+        config: _lowVelocityConfig(deviceCount: 3, durationSeconds: 1),
+        seed: 1,
+      );
+      final report = await manager.run();
 
-        expect(report.noOpCounts, hasLength(3));
-        for (final n in report.noOpCounts) {
-          expect(n.count, greaterThanOrEqualTo(0));
-        }
-      },
-      timeout: const Timeout(Duration(seconds: 30)),
-    );
+      expect(report.noOpCounts, hasLength(3));
+      for (final n in report.noOpCounts) {
+        expect(n.count, greaterThanOrEqualTo(0));
+      }
+    }, timeout: const Timeout(Duration(seconds: 30)));
 
-    test(
-      'report seed matches provided seed override',
-      () async {
-        final manager = TestManager(
-          config: _lowVelocityConfig(durationSeconds: 1),
-          seed: 99999,
-        );
-        final report = await manager.run();
-        expect(report.prngseed, equals(99999));
-      },
-      timeout: const Timeout(Duration(seconds: 30)),
-    );
+    test('report seed matches provided seed override', () async {
+      final manager = TestManager(
+        config: _lowVelocityConfig(durationSeconds: 1),
+        seed: 99999,
+      );
+      final report = await manager.run();
+      expect(report.prngseed, equals(99999));
+    }, timeout: const Timeout(Duration(seconds: 30)));
 
-    test(
-      'report seed falls back to config prngseed',
-      () async {
-        final config = _lowVelocityConfig(durationSeconds: 1, seed: 77777);
-        final manager = TestManager(config: config);
-        final report = await manager.run();
-        expect(report.prngseed, equals(77777));
-      },
-      timeout: const Timeout(Duration(seconds: 30)),
-    );
+    test('report seed falls back to config prngseed', () async {
+      final config = _lowVelocityConfig(durationSeconds: 1, seed: 77777);
+      final manager = TestManager(config: config);
+      final report = await manager.run();
+      expect(report.prngseed, equals(77777));
+    }, timeout: const Timeout(Duration(seconds: 30)));
 
-    test(
-      'totalActions is positive after a run',
-      () async {
-        final manager = TestManager(
-          config: _lowVelocityConfig(durationSeconds: 1),
-          seed: 5,
-        );
-        final report = await manager.run();
-        expect(report.totalActions, greaterThan(0));
-      },
-      timeout: const Timeout(Duration(seconds: 30)),
-    );
+    test('totalActions is positive after a run', () async {
+      final manager = TestManager(
+        config: _lowVelocityConfig(durationSeconds: 1),
+        seed: 5,
+      );
+      final report = await manager.run();
+      expect(report.totalActions, greaterThan(0));
+    }, timeout: const Timeout(Duration(seconds: 30)));
 
     test(
       'report includes versionForksChecked matching forkRecords count',
@@ -200,23 +180,19 @@ void main() {
       },
     );
 
-    test(
-      'accepts config when estimated ops are within threshold',
-      () async {
-        // Generous threshold — should always pass for a 1-second run.
-        final adapter = _QuotaAdapter(safeOperationThreshold: 1000000);
-        final config = _lowVelocityConfig(
-          syncAdapter: adapter,
-          durationSeconds: 1,
-        );
-        final manager = TestManager(config: config, seed: 1);
+    test('accepts config when estimated ops are within threshold', () async {
+      // Generous threshold — should always pass for a 1-second run.
+      final adapter = _QuotaAdapter(safeOperationThreshold: 1000000);
+      final config = _lowVelocityConfig(
+        syncAdapter: adapter,
+        durationSeconds: 1,
+      );
+      final manager = TestManager(config: config, seed: 1);
 
-        // Should not throw.
-        final report = await manager.run();
-        expect(report, isA<HarnessReport>());
-      },
-      timeout: const Timeout(Duration(seconds: 30)),
-    );
+      // Should not throw.
+      final report = await manager.run();
+      expect(report, isA<HarnessReport>());
+    }, timeout: const Timeout(Duration(seconds: 30)));
   });
 
   group('TestManager — HarnessConfigException', () {

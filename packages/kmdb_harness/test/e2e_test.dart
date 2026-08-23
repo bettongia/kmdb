@@ -86,27 +86,23 @@ void main() {
       timeout: const Timeout(Duration(seconds: 60)),
     );
 
-    test(
-      'report is JSON serialisable and round-trips correctly',
-      () async {
-        final manager = TestManager(
-          config: _e2eConfig(durationSeconds: 1, seed: 7),
-          seed: 7,
-        );
-        final report = await manager.run();
-        final json = report.toJsonString();
-        final restored = HarnessReport.fromJsonString(json);
+    test('report is JSON serialisable and round-trips correctly', () async {
+      final manager = TestManager(
+        config: _e2eConfig(durationSeconds: 1, seed: 7),
+        seed: 7,
+      );
+      final report = await manager.run();
+      final json = report.toJsonString();
+      final restored = HarnessReport.fromJsonString(json);
 
-        expect(restored.prngseed, equals(report.prngseed));
-        expect(
-          restored.deviceVerdicts.length,
-          equals(report.deviceVerdicts.length),
-        );
-        expect(restored.forkRecords.length, equals(report.forkRecords.length));
-        expect(restored.noOpCounts.length, equals(report.noOpCounts.length));
-      },
-      timeout: const Timeout(Duration(seconds: 30)),
-    );
+      expect(restored.prngseed, equals(report.prngseed));
+      expect(
+        restored.deviceVerdicts.length,
+        equals(report.deviceVerdicts.length),
+      );
+      expect(restored.forkRecords.length, equals(report.forkRecords.length));
+      expect(restored.noOpCounts.length, equals(report.noOpCounts.length));
+    }, timeout: const Timeout(Duration(seconds: 30)));
   });
 
   group('E2E — network partition scenario', () {

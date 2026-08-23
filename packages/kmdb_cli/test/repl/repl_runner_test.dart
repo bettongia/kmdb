@@ -305,30 +305,27 @@ void main() {
       }
     });
 
-    test(
-      'shows the .history command itself when no prior history exists',
-      () async {
-        final db = await _openDb();
-        final out = StringBuffer();
-        final tmpDir = await io.Directory.systemTemp.createTemp('kmdb_hist_');
-        final hist = History(filePath: p.join(tmpDir.path, 'hist'));
+    test('shows the .history command itself when no prior history exists', () async {
+      final db = await _openDb();
+      final out = StringBuffer();
+      final tmpDir = await io.Directory.systemTemp.createTemp('kmdb_hist_');
+      final hist = History(filePath: p.join(tmpDir.path, 'hist'));
 
-        try {
-          // The ReplRunner adds each entered line to history before executing it,
-          // so '.history' will always appear in the output when no prior entries exist.
-          await _run(
-            ['.history'],
-            db,
-            history: hist,
-            out: out,
-            err: StringBuffer(),
-          );
-          expect(out.toString(), contains('.history'));
-        } finally {
-          await tmpDir.delete(recursive: true);
-        }
-      },
-    );
+      try {
+        // The ReplRunner adds each entered line to history before executing it,
+        // so '.history' will always appear in the output when no prior entries exist.
+        await _run(
+          ['.history'],
+          db,
+          history: hist,
+          out: out,
+          err: StringBuffer(),
+        );
+        expect(out.toString(), contains('.history'));
+      } finally {
+        await tmpDir.delete(recursive: true);
+      }
+    });
   });
 
   group('history recall (!n)', () {
@@ -477,23 +474,20 @@ void main() {
   });
 
   group('unhandled errors', () {
-    test(
-      'StdinException from InputReader returns exit code 1 with friendly message',
-      () async {
-        final db = await _openDb();
-        final err = StringBuffer();
-        final ctx = CommandContext(db: db, out: StringBuffer(), err: err);
+    test('StdinException from InputReader returns exit code 1 with friendly message', () async {
+      final db = await _openDb();
+      final err = StringBuffer();
+      final ctx = CommandContext(db: db, out: StringBuffer(), err: err);
 
-        final code = await ReplRunner(
-          ctx: ctx,
-          dbPath: '/testdb',
-          reader: _ThrowingInputReader(),
-        ).run();
+      final code = await ReplRunner(
+        ctx: ctx,
+        dbPath: '/testdb',
+        reader: _ThrowingInputReader(),
+      ).run();
 
-        expect(code, 1);
-        expect(err.toString(), contains('Error:'));
-      },
-    );
+      expect(code, 1);
+      expect(err.toString(), contains('Error:'));
+    });
   });
 
   group('schema validation error pretty-printing', () {

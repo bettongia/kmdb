@@ -67,7 +67,11 @@ cicd_macos:
 	dart pub global activate melos
 	dart pub global activate coverage
 	melos bootstrap
-	melos test_dart --no-select
+	# Serial (concurrency 1): under Dart 3.13 native assets stage to the shared
+	# workspace-root .dart_tool/lib/, and two concurrent codesigns of the same
+	# dylib (libonnxruntime.dylib) collide ("replacing existing signature"). See
+	# the test_dart_serial script in pubspec.yaml. Linux keeps concurrency 2.
+	melos test_dart_serial --no-select
 .PHONY: cicd_macos
 
 # ── Windows ───────────────────────────────────────────────────────────────────
@@ -79,7 +83,11 @@ cicd_windows:
 	dart pub global activate melos
 	dart pub global activate coverage
 	melos bootstrap
-	melos test_dart --no-select
+	# Serial (concurrency 1): under Dart 3.13 native assets stage to the shared
+	# workspace-root .dart_tool/lib/, and Windows cannot delete/restage a DLL
+	# (zstd.dll) held loaded by a concurrent package's test process. See the
+	# test_dart_serial script in pubspec.yaml. Linux keeps concurrency 2.
+	melos test_dart_serial --no-select
 .PHONY: cicd_windows
 
 # ── iCloud Flutter plugin ─────────────────────────────────────────────────────

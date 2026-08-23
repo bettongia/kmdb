@@ -6,7 +6,7 @@ version: 0.1.0
 publish_to: none
 
 environment:
-  sdk: ^3.12.0
+  sdk: ^3.13.0
   flutter: ">=3.29.0"
 
 # Not a workspace member — this package is a Flutter plugin and cannot be part

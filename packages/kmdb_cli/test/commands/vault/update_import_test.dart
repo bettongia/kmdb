@@ -281,39 +281,36 @@ void main() {
 
     // ── Golden path: plain document import (no vault URIs) ───────────────
 
-    test(
-      'golden path: imports a plain-document KVLT package successfully',
-      () async {
-        // A package with no vault URI references and no attachments. This
-        // exercises the full import path (lines 311-365) without triggering
-        // the vault ref-count sha256-key-length guard in the LSM engine.
-        // The existingHashes set is empty; VaultPackage.validate passes;
-        // applyVaultRefCounts is a no-op (no old or new vault URIs).
-        final docJson = {'title': 'plain-updated', 'counter': 42};
-        final packageBytes = VaultPackage.write(documentJson: docJson);
-        final tmpPath =
-            '${io.Directory.systemTemp.path}/kmdb_upd_plain_${DateTime.now().microsecondsSinceEpoch}.kvlt';
-        io.File(tmpPath).writeAsBytesSync(packageBytes);
-        addTearDown(() {
-          try {
-            io.File(tmpPath).deleteSync();
-          } catch (_) {}
-        });
+    test('golden path: imports a plain-document KVLT package successfully', () async {
+      // A package with no vault URI references and no attachments. This
+      // exercises the full import path (lines 311-365) without triggering
+      // the vault ref-count sha256-key-length guard in the LSM engine.
+      // The existingHashes set is empty; VaultPackage.validate passes;
+      // applyVaultRefCounts is a no-op (no old or new vault URIs).
+      final docJson = {'title': 'plain-updated', 'counter': 42};
+      final packageBytes = VaultPackage.write(documentJson: docJson);
+      final tmpPath =
+          '${io.Directory.systemTemp.path}/kmdb_upd_plain_${DateTime.now().microsecondsSinceEpoch}.kvlt';
+      io.File(tmpPath).writeAsBytesSync(packageBytes);
+      addTearDown(() {
+        try {
+          io.File(tmpPath).deleteSync();
+        } catch (_) {}
+      });
 
-        // Seed the target document.
-        const targetId = '01900000000070809000000000000020';
-        await _putSmallDoc(db, 'col', targetId);
+      // Seed the target document.
+      const targetId = '01900000000070809000000000000020';
+      await _putSmallDoc(db, 'col', targetId);
 
-        final ctx = _ctx(db, out: out, err: err);
-        final ok = await UpdateCommand().execute(
-          ctx,
-          ['col', targetId],
-          {'import': tmpPath},
-        );
-        expect(ok, isTrue, reason: 'errors: ${err.toString()}');
-        expect(out.toString(), contains('updated'));
-      },
-    );
+      final ctx = _ctx(db, out: out, err: err);
+      final ok = await UpdateCommand().execute(
+        ctx,
+        ['col', targetId],
+        {'import': tmpPath},
+      );
+      expect(ok, isTrue, reason: 'errors: ${err.toString()}');
+      expect(out.toString(), contains('updated'));
+    });
   });
 
   // ── _merge via --set on a seeded document ────────────────────────────────

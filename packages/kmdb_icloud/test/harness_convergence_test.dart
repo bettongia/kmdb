@@ -86,41 +86,34 @@ void main() {
       timeout: const Timeout(Duration(seconds: 60)),
     );
 
-    test(
-      'three devices converge via the shared iCloud simulator',
-      () async {
-        final manager = TestManager(
-          config: _iCloudSimulatorConfig(
-            deviceCount: 3,
-            durationSeconds: 2,
-            seed: 22222,
-          ),
+    test('three devices converge via the shared iCloud simulator', () async {
+      final manager = TestManager(
+        config: _iCloudSimulatorConfig(
+          deviceCount: 3,
+          durationSeconds: 2,
           seed: 22222,
-        );
-        final report = await manager.run();
-        expect(report.passed, isTrue, reason: report.toString());
-      },
-      timeout: const Timeout(Duration(seconds: 90)),
-    );
+        ),
+        seed: 22222,
+      );
+      final report = await manager.run();
+      expect(report.passed, isTrue, reason: report.toString());
+    }, timeout: const Timeout(Duration(seconds: 90)));
 
-    test(
-      'SimulatorICloudQuotaAdapter.safeOperationThreshold reflects iCloud quota',
-      () {
-        final backend = SharedCloudBackend();
-        final adapter = adapterOverBackend(backend);
-        final quota = SimulatorICloudQuotaAdapter(
-          adapter: adapter,
-          quotaProfile: kICloudProfile.quota,
-        );
+    test('SimulatorICloudQuotaAdapter.safeOperationThreshold reflects iCloud quota', () {
+      final backend = SharedCloudBackend();
+      final adapter = adapterOverBackend(backend);
+      final quota = SimulatorICloudQuotaAdapter(
+        adapter: adapter,
+        quotaProfile: kICloudProfile.quota,
+      );
 
-        // The threshold is 10× the maxOpsPerMinute from the iCloud profile.
-        expect(quota.safeOperationThreshold, greaterThan(0));
-        expect(
-          quota.safeOperationThreshold,
-          equals(kICloudProfile.quota.maxOpsPerMinute! * 10),
-        );
-      },
-    );
+      // The threshold is 10× the maxOpsPerMinute from the iCloud profile.
+      expect(quota.safeOperationThreshold, greaterThan(0));
+      expect(
+        quota.safeOperationThreshold,
+        equals(kICloudProfile.quota.maxOpsPerMinute! * 10),
+      );
+    });
 
     test(
       'SimulatorICloudQuotaAdapter delegates all SyncStorageAdapter methods',

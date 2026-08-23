@@ -68,12 +68,15 @@ void main() {
       }
     });
 
-    test('args list is empty after reset confirms outputSink is null', () async {
-      // Confirm that calling with no args always resets regardless of prior state.
-      state.outputSink = StringBuffer();
-      await const OutputCommand().execute(state, ctx, []);
-      expect(state.outputSink, isNull);
-    });
+    test(
+      'args list is empty after reset confirms outputSink is null',
+      () async {
+        // Confirm that calling with no args always resets regardless of prior state.
+        state.outputSink = StringBuffer();
+        await const OutputCommand().execute(state, ctx, []);
+        expect(state.outputSink, isNull);
+      },
+    );
 
     test('closing previous IOSink when resetting', () async {
       // Open a temp file sink, then reset via no-arg call.

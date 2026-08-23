@@ -400,9 +400,8 @@ final class DriveSimulator extends http.BaseClient {
     final ifMatchEtag = ifMatchRaw?.replaceAll('"', '');
 
     // Determine if this is an update (path has file ID) or a create.
-    final updateMatch = RegExp(
-      r'^/upload/drive/v3/files/([^/?]+)$',
-    ).firstMatch(path);
+    final updateMatch = RegExp(r'^/upload/drive/v3/files/([^/?]+)$')
+        .firstMatch(path);
     final existingFileId = updateMatch?.group(1);
 
     // Validate If-Match for updates.

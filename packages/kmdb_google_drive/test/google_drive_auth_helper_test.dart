@@ -262,30 +262,27 @@ void main() {
       );
     });
 
-    test(
-      'creates parent directories when persisting refreshed credentials',
-      () async {
-        // Credentials path in a subdirectory that does not yet exist.
-        final nestedPath = '${tmpDir.path}/sub/dir/creds.json';
-        final credFile = File(nestedPath);
+    test('creates parent directories when persisting refreshed credentials', () async {
+      // Credentials path in a subdirectory that does not yet exist.
+      final nestedPath = '${tmpDir.path}/sub/dir/creds.json';
+      final credFile = File(nestedPath);
 
-        // Write the expired credentials to the nested file after creating
-        // parent dirs first (simulates what the helper does on first-time save).
-        await credFile.parent.create(recursive: true);
-        credFile.writeAsStringSync(_expiredCredentialsJson());
+      // Write the expired credentials to the nested file after creating
+      // parent dirs first (simulates what the helper does on first-time save).
+      await credFile.parent.create(recursive: true);
+      credFile.writeAsStringSync(_expiredCredentialsJson());
 
-        final client = await GoogleDriveAuthHelper.fromUserConsent(
-          ClientId('fake-client-id', 'fake-secret'),
-          credentialsCachePath: nestedPath,
-          baseClient: _fakeRefreshClient(),
-        );
-        expect(client, isNotNull);
-        client.close();
+      final client = await GoogleDriveAuthHelper.fromUserConsent(
+        ClientId('fake-client-id', 'fake-secret'),
+        credentialsCachePath: nestedPath,
+        baseClient: _fakeRefreshClient(),
+      );
+      expect(client, isNotNull);
+      client.close();
 
-        // Refreshed credentials should have been written back.
-        expect(credFile.existsSync(), isTrue);
-      },
-    );
+      // Refreshed credentials should have been written back.
+      expect(credFile.existsSync(), isTrue);
+    });
 
     test('treats corrupt credentials file as a cache miss (no throw)', () async {
       // A corrupt cache file must not propagate an unhandled exception.

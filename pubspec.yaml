@@ -6,7 +6,7 @@ repository: https://github.com/bettongia/kmdb
 issue_tracker: https://github.com/bettongia/kmdb/issues
 
 environment:
-  sdk: ^3.12.0
+  sdk: ^3.13.0
 
 workspace:
   - packages/kmdb
@@ -42,12 +42,12 @@ dependency_overrides:
   betto_inferencing: ^0.1.0-dev.3
   betto_charset_detector: ^0.1.0-dev.2
   charset: ^2.0.1
-  # Pinned to exactly 0.1.0-dev.3 (not `^`) while CI is on Dart 3.12.2: the
-  # newer 0.1.0-dev.4 declares a 3.13 language version in its native-asset
-  # build hook, which 3.12.2 refuses to compile. The 3.13 adoption work
-  # (plan_dart_3_13_adoption.md) bumps this to dev.4 and un-pins the toolchain
-  # together.
-  betto_pdfium: 0.1.0-dev.3
+  # Bumped to 0.1.0-dev.4 alongside the Dart 3.13.1 / Flutter 3.47.1 toolchain
+  # adoption (plan_dart_3_13_adoption.md). dev.4 fixed a Pub-workspace
+  # native-library resolution gap (betto_pdfium PR #5) and its native-asset
+  # build hook requires Dart 3.13 — it will not compile under 3.12.x, so this
+  # pin and the CI toolchain bump below must land together.
+  betto_pdfium: 0.1.0-dev.4
   betto_lang_detector: ^0.1.0-dev.1
 
 melos:
@@ -87,6 +87,28 @@ melos:
       run: dart test
       exec:
         concurrency: 2
+      packageFilters:
+        dirExists: test
+        flutter: false
+
+    # Serial variant of `test_dart`, used by the macOS and Windows CI jobs.
+    # Under Dart 3.13 native assets stage to the shared *workspace-root*
+    # `.dart_tool/lib/`, so two packages' `dart test` processes (concurrency 2)
+    # race over the same staged native library:
+    #   - Windows: refuses to delete/restage a DLL (`zstd.dll`) that the other
+    #     process still holds loaded → `PathAccessException: ... Access is
+    #     denied`.
+    #   - macOS: two concurrent codesigns of the same dylib
+    #     (`libonnxruntime.dylib`) collide → `Failed to codesign ... replacing
+    #     existing signature`.
+    # Linux is immune (no codesign; a loaded `.so` can be replaced in place), so
+    # its build/coverage job keeps the faster concurrency-2 path. macOS/Windows
+    # serialise so no two package test processes stage the shared lib at once.
+    test_dart_serial:
+      description: Test all pure Dart packages serially (macOS/Windows CI)
+      run: dart test
+      exec:
+        concurrency: 1
       packageFilters:
         dirExists: test
         flutter: false

@@ -332,25 +332,22 @@ void main() {
       expect(info.isConsolidation, isTrue);
     });
 
-    test(
-      'syncable and local-only flushName from same HLC range produce distinct filenames',
-      () {
-        // Both partitions from a single flush share the same HLC range; the
-        // .local.sst suffix is the only distinguisher.
-        final syncName = SstableInfo.flushName(
-          'a1b2c3d4',
-          const Hlc(1000, 0),
-          const Hlc(2000, 0),
-        );
-        final localName = SstableInfo.flushName(
-          'a1b2c3d4',
-          const Hlc(1000, 0),
-          const Hlc(2000, 0),
-          localOnly: true,
-        );
-        expect(syncName, isNot(equals(localName)));
-      },
-    );
+    test('syncable and local-only flushName from same HLC range produce distinct filenames', () {
+      // Both partitions from a single flush share the same HLC range; the
+      // .local.sst suffix is the only distinguisher.
+      final syncName = SstableInfo.flushName(
+        'a1b2c3d4',
+        const Hlc(1000, 0),
+        const Hlc(2000, 0),
+      );
+      final localName = SstableInfo.flushName(
+        'a1b2c3d4',
+        const Hlc(1000, 0),
+        const Hlc(2000, 0),
+        localOnly: true,
+      );
+      expect(syncName, isNot(equals(localName)));
+    });
   });
 
   // ── Phase 3: LsmEngine.flush two-writer split ─────────────────────────────
@@ -380,33 +377,28 @@ void main() {
       await store.close();
     });
 
-    test(
-      'flush with only local-only entries produces one .local.sst file',
-      () async {
-        final adapter = _newAdapter();
-        final (store, _) = await _open(adapter);
+    test('flush with only local-only entries produces one .local.sst file', () async {
+      final adapter = _newAdapter();
+      final (store, _) = await _open(adapter);
 
-        // Write only $$-prefixed entries (internal path required).
-        final k = SequentialKeyGenerator(start: 0).next();
-        await _putInternal(
-          store,
-          r'$$index:users:email',
-          k,
-          Uint8List.fromList([1]),
-        );
-        await store.flush();
+      // Write only $$-prefixed entries (internal path required).
+      final k = SequentialKeyGenerator(start: 0).next();
+      await _putInternal(
+        store,
+        r'$$index:users:email',
+        k,
+        Uint8List.fromList([1]),
+      );
+      await store.flush();
 
-        final files = await adapter.listFiles('$_dbDir/sst');
-        // Exactly one .local.sst file. ($meta written by open() produces a
-        // syncable .sst alongside it, so we assert on the .local.sst count only.)
-        final localFiles = files
-            .where((f) => f.endsWith('.local.sst'))
-            .toList();
-        expect(localFiles.length, equals(1));
+      final files = await adapter.listFiles('$_dbDir/sst');
+      // Exactly one .local.sst file. ($meta written by open() produces a
+      // syncable .sst alongside it, so we assert on the .local.sst count only.)
+      final localFiles = files.where((f) => f.endsWith('.local.sst')).toList();
+      expect(localFiles.length, equals(1));
 
-        await store.close();
-      },
-    );
+      await store.close();
+    });
 
     test(
       'flush with mixed entries produces both .sst and .local.sst files',
@@ -442,63 +434,59 @@ void main() {
       },
     );
 
-    test(
-      'Manifest has one VersionEdit with up to two SstableMeta entries for a mixed flush',
-      () async {
-        final adapter = _newAdapter();
-        final (store, _) = await _open(adapter);
+    test('Manifest has one VersionEdit with up to two SstableMeta entries for a mixed flush', () async {
+      final adapter = _newAdapter();
+      final (store, _) = await _open(adapter);
 
-        // Write both syncable and local-only entries, then flush.
-        final k1 = SequentialKeyGenerator(start: 0).next();
-        final k2 = SequentialKeyGenerator(start: 1).next();
-        await store.put('users', k1, Uint8List.fromList([1]));
-        await _putInternal(
-          store,
-          r'$$vec:users:embedding',
-          k2,
-          Uint8List.fromList([2]),
-        );
-        await store.flush();
+      // Write both syncable and local-only entries, then flush.
+      final k1 = SequentialKeyGenerator(start: 0).next();
+      final k2 = SequentialKeyGenerator(start: 1).next();
+      await store.put('users', k1, Uint8List.fromList([1]));
+      await _putInternal(
+        store,
+        r'$$vec:users:embedding',
+        k2,
+        Uint8List.fromList([2]),
+      );
+      await store.flush();
 
-        // Read the Manifest and verify.
-        final manifestFiles = await adapter.listFiles(_dbDir);
-        final manifestName = manifestFiles.firstWhere(
-          (f) => f.startsWith('MANIFEST-'),
-        );
-        final state = await ManifestReader(
-          adapter: adapter,
-        ).replay('$_dbDir/$manifestName');
+      // Read the Manifest and verify.
+      final manifestFiles = await adapter.listFiles(_dbDir);
+      final manifestName = manifestFiles.firstWhere(
+        (f) => f.startsWith('MANIFEST-'),
+      );
+      final state = await ManifestReader(adapter: adapter)
+          .replay('$_dbDir/$manifestName');
 
-        // Compaction may have moved L0 files to L2 (l0CompactionTrigger=2).
-        // Check all levels for at least one syncable and one local-only SSTable.
-        final allMeta = state.levels.values.expand((l) => l).toList();
-        final addedFiles = allMeta.map((m) => m.filename).toList();
-        final syncAdded = addedFiles
-            .where((f) => !f.endsWith('.local.sst'))
-            .toList();
-        final localAdded = addedFiles
-            .where((f) => f.endsWith('.local.sst'))
-            .toList();
-        expect(
-          syncAdded,
-          isNotEmpty,
-          reason: 'syncable SSTable must be in Manifest',
-        );
-        expect(
-          localAdded,
-          isNotEmpty,
-          reason: 'local-only SSTable must be in Manifest',
-        );
+      // Compaction may have moved L0 files to L2 (l0CompactionTrigger=2).
+      // Check all levels for at least one syncable and one local-only SSTable.
+      final allMeta = state.levels.values.expand((l) => l).toList();
+      final addedFiles = allMeta.map((m) => m.filename).toList();
+      final syncAdded = addedFiles
+          .where((f) => !f.endsWith('.local.sst'))
+          .toList();
+      final localAdded = addedFiles
+          .where((f) => f.endsWith('.local.sst'))
+          .toList();
+      expect(
+        syncAdded,
+        isNotEmpty,
+        reason: 'syncable SSTable must be in Manifest',
+      );
+      expect(
+        localAdded,
+        isNotEmpty,
+        reason: 'local-only SSTable must be in Manifest',
+      );
 
-        // Verify localOnly flags on the meta.
-        final syncMeta = allMeta.firstWhere((m) => !m.localOnly);
-        final localMeta = allMeta.firstWhere((m) => m.localOnly);
-        expect(syncMeta.localOnly, isFalse);
-        expect(localMeta.localOnly, isTrue);
+      // Verify localOnly flags on the meta.
+      final syncMeta = allMeta.firstWhere((m) => !m.localOnly);
+      final localMeta = allMeta.firstWhere((m) => m.localOnly);
+      expect(syncMeta.localOnly, isFalse);
+      expect(localMeta.localOnly, isTrue);
 
-        await store.close();
-      },
-    );
+      await store.close();
+    });
 
     test('local-only entries are readable after flush', () async {
       // Even though the SSTable is local-only, the KvStore must still be able
@@ -700,41 +688,29 @@ void main() {
     });
   });
 
-  group(
-    r'ReclamationPolicyRegistry resolves $$ namespaces to LocalOnlyCollapsePolicy',
-    () {
-      test(r'$$-prefixed namespaces resolve to LocalOnlyCollapsePolicy', () {
-        final registry = ReclamationPolicyRegistry();
-        expect(
-          registry.resolve(r'$$fts:users:body'),
-          isA<LocalOnlyCollapsePolicy>(),
-        );
-        expect(
-          registry.resolve(r'$$vec:docs:emb'),
-          isA<LocalOnlyCollapsePolicy>(),
-        );
-        expect(
-          registry.resolve(r'$$index:users:email'),
-          isA<LocalOnlyCollapsePolicy>(),
-        );
-      });
-
-      test(
-        r'single-$ namespaces do not resolve to LocalOnlyCollapsePolicy',
-        () {
-          final registry = ReclamationPolicyRegistry();
-          expect(
-            registry.resolve(r'$meta'),
-            isNot(isA<LocalOnlyCollapsePolicy>()),
-          );
-          expect(
-            registry.resolve('users'),
-            isNot(isA<LocalOnlyCollapsePolicy>()),
-          );
-        },
+  group(r'ReclamationPolicyRegistry resolves $$ namespaces to LocalOnlyCollapsePolicy', () {
+    test(r'$$-prefixed namespaces resolve to LocalOnlyCollapsePolicy', () {
+      final registry = ReclamationPolicyRegistry();
+      expect(
+        registry.resolve(r'$$fts:users:body'),
+        isA<LocalOnlyCollapsePolicy>(),
       );
-    },
-  );
+      expect(
+        registry.resolve(r'$$vec:docs:emb'),
+        isA<LocalOnlyCollapsePolicy>(),
+      );
+      expect(
+        registry.resolve(r'$$index:users:email'),
+        isA<LocalOnlyCollapsePolicy>(),
+      );
+    });
+
+    test(r'single-$ namespaces do not resolve to LocalOnlyCollapsePolicy', () {
+      final registry = ReclamationPolicyRegistry();
+      expect(registry.resolve(r'$meta'), isNot(isA<LocalOnlyCollapsePolicy>()));
+      expect(registry.resolve('users'), isNot(isA<LocalOnlyCollapsePolicy>()));
+    });
+  });
 
   group('CompactionJob tombstonesDropped counts only syncable drops', () {
     test(
@@ -801,49 +777,46 @@ void main() {
       expect(job.tombstonesDropped, equals(1));
     });
 
-    test(
-      'local-only tombstone in partial compaction is NOT dropped (allLevels=false)',
-      () async {
-        final adapter = _newAdapter();
-        final mWriter = ManifestWriter(path: _manifestPath, adapter: adapter);
-        await adapter.createDirectory(_sstDir);
+    test('local-only tombstone in partial compaction is NOT dropped (allLevels=false)', () async {
+      final adapter = _newAdapter();
+      final mWriter = ManifestWriter(path: _manifestPath, adapter: adapter);
+      await adapter.createDirectory(_sstDir);
 
-        final k1 = _ikey(
-          r'$$index:users:email',
-          '1',
-          const Hlc(50, 0),
-          type: RecordType.delete,
-        );
-        const inputFilename = 'testdev1-0000000000320000-0000000000320000.sst';
-        await _writeSst(adapter, inputFilename, [(k1, _val(0))]);
+      final k1 = _ikey(
+        r'$$index:users:email',
+        '1',
+        const Hlc(50, 0),
+        type: RecordType.delete,
+      );
+      const inputFilename = 'testdev1-0000000000320000-0000000000320000.sst';
+      await _writeSst(adapter, inputFilename, [(k1, _val(0))]);
 
-        final job = CompactionJob(
-          sstDir: _sstDir,
-          deviceId: _deviceId,
-          outputLevel: 1,
-          inputs: [const SstableRef(level: 0, filename: inputFilename)],
-          adapter: adapter,
-          manifestWriter: mWriter,
-          logNumber: 1,
-          nextSeq: 200,
-          allLevels: false, // partial compaction — must NOT drop
-          horizon: const Hlc(9999, 0),
-        );
-        final edit = await job.run();
+      final job = CompactionJob(
+        sstDir: _sstDir,
+        deviceId: _deviceId,
+        outputLevel: 1,
+        inputs: [const SstableRef(level: 0, filename: inputFilename)],
+        adapter: adapter,
+        manifestWriter: mWriter,
+        logNumber: 1,
+        nextSeq: 200,
+        allLevels: false, // partial compaction — must NOT drop
+        horizon: const Hlc(9999, 0),
+      );
+      final edit = await job.run();
 
-        // The tombstone must still be present in the output.
-        expect(edit.added, isNotEmpty);
-        final outFile = edit.added.first.filename;
-        final reader = await SstableReader.open('$_sstDir/$outFile', adapter);
-        final entries = await reader.scan().toList();
-        expect(
-          entries.length,
-          equals(1),
-          reason: 'tombstone must not be dropped in a partial compaction',
-        );
-        expect(job.tombstonesDropped, equals(0));
-      },
-    );
+      // The tombstone must still be present in the output.
+      expect(edit.added, isNotEmpty);
+      final outFile = edit.added.first.filename;
+      final reader = await SstableReader.open('$_sstDir/$outFile', adapter);
+      final entries = await reader.scan().toList();
+      expect(
+        entries.length,
+        equals(1),
+        reason: 'tombstone must not be dropped in a partial compaction',
+      );
+      expect(job.tombstonesDropped, equals(0));
+    });
 
     test(
       r'droppedVersionValues is never populated by $$-namespaced entries',

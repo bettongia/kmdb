@@ -547,25 +547,22 @@ void main() {
       expect(err.toString(), contains('collection name and field required'));
     });
 
-    test(
-      'registers index in config (mutation only, no real disk write)',
-      () async {
-        // We test the config mutation, not the disk save (memory store).
-        final config = KmdbConfig.empty();
-        final ctx = _ctx(db, config: config, out: out, err: err);
+    test('registers index in config (mutation only, no real disk write)', () async {
+      // We test the config mutation, not the disk save (memory store).
+      final config = KmdbConfig.empty();
+      final ctx = _ctx(db, config: config, out: out, err: err);
 
-        // Directly call addFtsIndex to verify the config mutation path.
-        config.addFtsIndex('docs', 'body');
-        expect(config.ftsIndexesForCollection('docs'), hasLength(1));
-        final record = config.ftsIndexesForCollection('docs').first;
-        expect(record.field, equals('body'));
-        expect(record.stopWords, isFalse);
-        expect(record.k1, equals(1.2));
-        expect(record.b, equals(0.75));
-        // ctx is not used in this test (no disk save possible with memory store).
-        expect(ctx.config, isNotNull);
-      },
-    );
+      // Directly call addFtsIndex to verify the config mutation path.
+      config.addFtsIndex('docs', 'body');
+      expect(config.ftsIndexesForCollection('docs'), hasLength(1));
+      final record = config.ftsIndexesForCollection('docs').first;
+      expect(record.field, equals('body'));
+      expect(record.stopWords, isFalse);
+      expect(record.k1, equals(1.2));
+      expect(record.b, equals(0.75));
+      // ctx is not used in this test (no disk save possible with memory store).
+      expect(ctx.config, isNotNull);
+    });
 
     test('--stopwords creates index with stopWords=true', () async {
       final config = KmdbConfig.empty();

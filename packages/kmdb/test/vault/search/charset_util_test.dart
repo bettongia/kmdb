@@ -34,19 +34,16 @@ void main() {
       expect(text, 'Hello, world!');
     });
 
-    test(
-      'Row 2 — UTF-8 with BOM (0xEF 0xBB 0xBF): charset=utf-8, BOM stripped',
-      () {
-        // dart:convert utf8.decode does not strip the UTF-8 BOM; decodeText must.
-        final contentBytes = utf8.encode('Hello');
-        final bytes = Uint8List.fromList([0xEF, 0xBB, 0xBF, ...contentBytes]);
-        final (:charset, :text) = decodeText(bytes);
-        expect(charset, 'utf-8');
-        // Confirm the leading U+FEFF has been stripped.
-        expect(text.startsWith(_bom), isFalse, reason: 'BOM must be stripped');
-        expect(text, 'Hello');
-      },
-    );
+    test('Row 2 — UTF-8 with BOM (0xEF 0xBB 0xBF): charset=utf-8, BOM stripped', () {
+      // dart:convert utf8.decode does not strip the UTF-8 BOM; decodeText must.
+      final contentBytes = utf8.encode('Hello');
+      final bytes = Uint8List.fromList([0xEF, 0xBB, 0xBF, ...contentBytes]);
+      final (:charset, :text) = decodeText(bytes);
+      expect(charset, 'utf-8');
+      // Confirm the leading U+FEFF has been stripped.
+      expect(text.startsWith(_bom), isFalse, reason: 'BOM must be stripped');
+      expect(text, 'Hello');
+    });
 
     test(
       'Row 3 — UTF-16 BE with BOM: decoded correctly, BOM stripped by codec',
@@ -98,29 +95,26 @@ void main() {
       expect(text.contains('€'), isTrue, reason: 'Euro sign should decode');
     });
 
-    test(
-      'Row 6 — ISO-8859-1 (Latin-1 text): decoded correctly via latin1 fallback',
-      () {
-        // 0xE9 = é in ISO-8859-1. Keep ASCII-heavy to avoid CJK promotion.
-        // "Hello é" = 7 bytes, 1 high byte ≈ 14.3% — just under the threshold.
-        final bytes = Uint8List.fromList([
-          0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x20, // "Hello "
-          0xE9, // é
-        ]);
-        final (:charset, :text) = decodeText(bytes);
-        // The detector returns 'iso-8859-1' or 'windows-1252' for these bytes
-        // (both are valid; iso-8859-1 and windows-1252 overlap for bytes < 0x80
-        // and the probe order puts windows-1252 first, but 0xE9 is also valid
-        // in iso-8859-1). The key assertion is that the text decodes to 'é'.
-        expect(
-          charset,
-          anyOf('iso-8859-1', 'windows-1252'),
-          reason: 'detector may return either for this byte sequence',
-        );
-        // 0xE9 → U+00E9 (é) in both iso-8859-1 and windows-1252.
-        expect(text, contains('é'), reason: 'é must decode correctly');
-      },
-    );
+    test('Row 6 — ISO-8859-1 (Latin-1 text): decoded correctly via latin1 fallback', () {
+      // 0xE9 = é in ISO-8859-1. Keep ASCII-heavy to avoid CJK promotion.
+      // "Hello é" = 7 bytes, 1 high byte ≈ 14.3% — just under the threshold.
+      final bytes = Uint8List.fromList([
+        0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x20, // "Hello "
+        0xE9, // é
+      ]);
+      final (:charset, :text) = decodeText(bytes);
+      // The detector returns 'iso-8859-1' or 'windows-1252' for these bytes
+      // (both are valid; iso-8859-1 and windows-1252 overlap for bytes < 0x80
+      // and the probe order puts windows-1252 first, but 0xE9 is also valid
+      // in iso-8859-1). The key assertion is that the text decodes to 'é'.
+      expect(
+        charset,
+        anyOf('iso-8859-1', 'windows-1252'),
+        reason: 'detector may return either for this byte sequence',
+      );
+      // 0xE9 → U+00E9 (é) in both iso-8859-1 and windows-1252.
+      expect(text, contains('é'), reason: 'é must decode correctly');
+    });
 
     test('Row 7 — Shift-JIS: decoded correctly', () {
       const text = '上善若水';
@@ -153,51 +147,45 @@ void main() {
       expect(text, '');
     });
 
-    test(
-      'Row 11 — ASCII-only bytes: charset="utf-8" (ASCII is never returned as own label)',
-      () {
-        // ASCII is a strict UTF-8 subset; the detector never returns "ascii".
-        final bytes = Uint8List.fromList('Hello, world!'.codeUnits);
-        final (:charset, :text) = decodeText(bytes);
-        expect(
-          charset,
-          'utf-8',
-          reason: 'ASCII passes UTF-8 structural validation',
-        );
-        expect(text, 'Hello, world!');
-      },
-    );
+    test('Row 11 — ASCII-only bytes: charset="utf-8" (ASCII is never returned as own label)', () {
+      // ASCII is a strict UTF-8 subset; the detector never returns "ascii".
+      final bytes = Uint8List.fromList('Hello, world!'.codeUnits);
+      final (:charset, :text) = decodeText(bytes);
+      expect(
+        charset,
+        'utf-8',
+        reason: 'ASCII passes UTF-8 structural validation',
+      );
+      expect(text, 'Hello, world!');
+    });
 
-    test(
-      'Row 12 — bytes valid as UTF-8 but authored as Windows-1252: charset="utf-8" (documented limitation)',
-      () {
-        // "Héllo" encoded in Windows-1252: H=0x48, é=0xE9, ...
-        // BUT 0xE9 is also a valid continuation byte in UTF-8 only after
-        // the right lead byte. A simpler case: the Latin-1 supplement range
-        // U+00C0–U+00FF encodes as 2-byte UTF-8 sequences, not single bytes.
-        //
-        // To create a sequence that is valid in both UTF-8 and Windows-1252,
-        // use pure ASCII plus a byte sequence that is simultaneously valid UTF-8
-        // and valid Windows-1252: e.g. 0xC3 0xA9 is "é" in UTF-8 but two
-        // separate characters in Windows-1252 (Ã + ©).
-        //
-        // The plan explicitly records this as an intentional gate: if bytes
-        // pass UTF-8 structural validation, the detector always returns "utf-8"
-        // regardless of authoring encoding.
-        final bytes = Uint8List.fromList(utf8.encode('Héllo'));
-        final (:charset, :text) = decodeText(bytes);
-        expect(
-          charset,
-          'utf-8',
-          reason:
-              'UTF-8 structural validation is a hard gate — bytes valid as '
-              'UTF-8 are always classified as utf-8, even if they were authored '
-              'in Windows-1252 (documented limitation)',
-        );
-        // The text is the UTF-8 decoding, not the Windows-1252 interpretation.
-        expect(text, 'Héllo');
-      },
-    );
+    test('Row 12 — bytes valid as UTF-8 but authored as Windows-1252: charset="utf-8" (documented limitation)', () {
+      // "Héllo" encoded in Windows-1252: H=0x48, é=0xE9, ...
+      // BUT 0xE9 is also a valid continuation byte in UTF-8 only after
+      // the right lead byte. A simpler case: the Latin-1 supplement range
+      // U+00C0–U+00FF encodes as 2-byte UTF-8 sequences, not single bytes.
+      //
+      // To create a sequence that is valid in both UTF-8 and Windows-1252,
+      // use pure ASCII plus a byte sequence that is simultaneously valid UTF-8
+      // and valid Windows-1252: e.g. 0xC3 0xA9 is "é" in UTF-8 but two
+      // separate characters in Windows-1252 (Ã + ©).
+      //
+      // The plan explicitly records this as an intentional gate: if bytes
+      // pass UTF-8 structural validation, the detector always returns "utf-8"
+      // regardless of authoring encoding.
+      final bytes = Uint8List.fromList(utf8.encode('Héllo'));
+      final (:charset, :text) = decodeText(bytes);
+      expect(
+        charset,
+        'utf-8',
+        reason:
+            'UTF-8 structural validation is a hard gate — bytes valid as '
+            'UTF-8 are always classified as utf-8, even if they were authored '
+            'in Windows-1252 (documented limitation)',
+      );
+      // The text is the UTF-8 decoding, not the Windows-1252 interpretation.
+      expect(text, 'Héllo');
+    });
   });
 
   // ---------------------------------------------------------------------------

@@ -391,25 +391,22 @@ void main() {
         expect(cache.length, equals(0));
       });
 
-      test(
-        'corrupt SSTable throws CorruptedSstableException and is not cached',
-        () async {
-          final inner = MemoryStorageAdapter();
-          // Write garbage bytes (not a valid SSTable — too short / bad checksum).
-          await inner.writeFile(
-            '/sst/corrupt.sst',
-            Uint8List.fromList(List.generate(64, (i) => i)),
-          );
-          final adapter = _CountingAdapter(inner);
-          final cache = TableCache(capacity: 8);
+      test('corrupt SSTable throws CorruptedSstableException and is not cached', () async {
+        final inner = MemoryStorageAdapter();
+        // Write garbage bytes (not a valid SSTable — too short / bad checksum).
+        await inner.writeFile(
+          '/sst/corrupt.sst',
+          Uint8List.fromList(List.generate(64, (i) => i)),
+        );
+        final adapter = _CountingAdapter(inner);
+        final cache = TableCache(capacity: 8);
 
-          await expectLater(
-            () => cache.open('/sst/corrupt.sst', adapter),
-            throwsA(isA<CorruptedSstableException>()),
-          );
-          expect(cache.length, equals(0));
-        },
-      );
+        await expectLater(
+          () => cache.open('/sst/corrupt.sst', adapter),
+          throwsA(isA<CorruptedSstableException>()),
+        );
+        expect(cache.length, equals(0));
+      });
     });
   });
 }

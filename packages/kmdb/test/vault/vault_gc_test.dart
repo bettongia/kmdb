@@ -292,25 +292,22 @@ void main() {
         expect(await store.exists(ref.sha256), isTrue);
       });
 
-      test(
-        'deletes a genuinely zero-ref object with an explicit refCount==0 entry',
-        () async {
-          // Distinct from the absent-entry happy path: the entry is present and
-          // decodes to exactly zero, which is a positive determination of zero
-          // references and therefore safe to delete.
-          final ref = await store.ingest(
-            bytes: _bytes('zero ref'),
-            hlcTimestamp: 't1',
-          );
-          kvStore.setRefCount(ref.sha256, 0);
-          await gc.onZeroRefs(ref.sha256);
+      test('deletes a genuinely zero-ref object with an explicit refCount==0 entry', () async {
+        // Distinct from the absent-entry happy path: the entry is present and
+        // decodes to exactly zero, which is a positive determination of zero
+        // references and therefore safe to delete.
+        final ref = await store.ingest(
+          bytes: _bytes('zero ref'),
+          hlcTimestamp: 't1',
+        );
+        kvStore.setRefCount(ref.sha256, 0);
+        await gc.onZeroRefs(ref.sha256);
 
-          final result = await gc.sweep();
-          expect(result.deleted, equals(1));
-          expect(result.retainedUndecodable, equals(0));
-          expect(await store.exists(ref.sha256), isFalse);
-        },
-      );
+        final result = await gc.sweep();
+        expect(result.deleted, equals(1));
+        expect(result.retainedUndecodable, equals(0));
+        expect(await store.exists(ref.sha256), isFalse);
+      });
     });
 
     group('VaultGcResult', () {

@@ -490,46 +490,40 @@ void main() {
       expect(result.metadata.searched, contains('vault:lexical'));
     });
 
-    test(
-      'higher-frequency term blob scores higher than lower-frequency blob',
-      () async {
-        // sha256 'a' has 5 occurrences of "machin" (stemmed "machine") per chunk.
-        // sha256 'b' has 1 occurrence — lower TF → lower BM25 score.
-        final sha256a = _sha256('a');
-        final sha256b = _sha256('b');
+    test('higher-frequency term blob scores higher than lower-frequency blob', () async {
+      // sha256 'a' has 5 occurrences of "machin" (stemmed "machine") per chunk.
+      // sha256 'b' has 1 occurrence — lower TF → lower BM25 score.
+      final sha256a = _sha256('a');
+      final sha256b = _sha256('b');
 
-        await _seedVaultBlob(vaultStore, sha256a);
-        await _seedBm25(kvStore, sha256a, [
-          {'machin': 5, 'other': 1},
-        ]);
-        await _seedDocref(kvStore, sha256a, _docId1, 'file');
+      await _seedVaultBlob(vaultStore, sha256a);
+      await _seedBm25(kvStore, sha256a, [
+        {'machin': 5, 'other': 1},
+      ]);
+      await _seedDocref(kvStore, sha256a, _docId1, 'file');
 
-        await _seedVaultBlob(vaultStore, sha256b);
-        await _seedBm25(kvStore, sha256b, [
-          {'machin': 1, 'other': 1},
-        ]);
-        await _seedDocref(kvStore, sha256b, _docId2, 'file');
+      await _seedVaultBlob(vaultStore, sha256b);
+      await _seedBm25(kvStore, sha256b, [
+        {'machin': 1, 'other': 1},
+      ]);
+      await _seedDocref(kvStore, sha256b, _docId2, 'file');
 
-        final docs = {
-          _docId1: {'id': 'doc1'},
-          _docId2: {'id': 'doc2'},
-        };
-        final searcher = _makeSearcher<Map<String, dynamic>>(
-          manager,
-          fetchDoc: (id) async => docs[id],
-        );
+      final docs = {
+        _docId1: {'id': 'doc1'},
+        _docId2: {'id': 'doc2'},
+      };
+      final searcher = _makeSearcher<Map<String, dynamic>>(
+        manager,
+        fetchDoc: (id) async => docs[id],
+      );
 
-        final result = await searcher.search(
-          'machine',
-          mode: SearchMode.lexical,
-        );
+      final result = await searcher.search('machine', mode: SearchMode.lexical);
 
-        expect(result.hits, hasLength(2));
-        // Blob 'a' (5 occurrences) should rank higher than blob 'b' (1 occurrence).
-        expect(result.hits.first.id, equals(_docId1));
-        expect(result.hits.last.id, equals(_docId2));
-      },
-    );
+      expect(result.hits, hasLength(2));
+      // Blob 'a' (5 occurrences) should rank higher than blob 'b' (1 occurrence).
+      expect(result.hits.first.id, equals(_docId1));
+      expect(result.hits.last.id, equals(_docId2));
+    });
 
     test('blob with no matching terms is not in results', () async {
       final sha256 = _sha256('c');
@@ -572,31 +566,34 @@ void main() {
   // ── Semantic degradation (no model) ───────────────────────────────────────
 
   group('semantic mode without model', () {
-    test('semantic mode degrades to lexical when no model configured', () async {
-      // manager was created without embeddingModel (lexical-only).
-      // "neural" → "neural", "network" → "network" (both survive Porter stemmer).
-      final sha256 = _sha256('e');
-      await _seedVaultBlob(vaultStore, sha256);
-      await _seedBm25(kvStore, sha256, [
-        {'neural': 2, 'network': 1},
-      ]);
-      await _seedDocref(kvStore, sha256, _docId1, 'file');
+    test(
+      'semantic mode degrades to lexical when no model configured',
+      () async {
+        // manager was created without embeddingModel (lexical-only).
+        // "neural" → "neural", "network" → "network" (both survive Porter stemmer).
+        final sha256 = _sha256('e');
+        await _seedVaultBlob(vaultStore, sha256);
+        await _seedBm25(kvStore, sha256, [
+          {'neural': 2, 'network': 1},
+        ]);
+        await _seedDocref(kvStore, sha256, _docId1, 'file');
 
-      final searcher = _makeSearcher<Map<String, dynamic>>(
-        manager,
-        fetchDoc: (_) async => {'doc': true},
-      );
+        final searcher = _makeSearcher<Map<String, dynamic>>(
+          manager,
+          fetchDoc: (_) async => {'doc': true},
+        );
 
-      final result = await searcher.search(
-        'neural network',
-        mode: SearchMode.semantic,
-      );
+        final result = await searcher.search(
+          'neural network',
+          mode: SearchMode.semantic,
+        );
 
-      // Should degrade to lexical and still find results.
-      expect(result.hits, isNotEmpty);
-      expect(result.metadata.searched, contains('vault:lexical'));
-      expect(result.metadata.skipped, contains('vault:semantic'));
-    });
+        // Should degrade to lexical and still find results.
+        expect(result.hits, isNotEmpty);
+        expect(result.metadata.searched, contains('vault:lexical'));
+        expect(result.metadata.skipped, contains('vault:semantic'));
+      },
+    );
 
     test('auto mode without model uses lexical only', () async {
       // "vector" → "vector" (unchanged by Porter stemmer).

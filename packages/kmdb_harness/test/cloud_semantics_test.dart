@@ -99,24 +99,20 @@ void main() {
   // ── Step 1 backward-compat ─────────────────────────────────────────────────
 
   group('Backward compatibility — legacy syncAdapter field', () {
-    test(
-      'existing syncAdapter config still runs without change',
-      () async {
-        final config = HarnessConfig(
-          syncAdapter: MemorySyncAdapter(),
-          deviceCount: 2,
-          preSeededDeviceCount: 1,
-          collectionCount: 2,
-          duration: const Duration(seconds: 2),
-          velocityPreset: VelocityPreset.one,
-          prngseed: 42,
-        );
-        final manager = TestManager(config: config, seed: 42);
-        final report = await manager.run();
-        expect(report.passed, isTrue);
-      },
-      timeout: const Timeout(Duration(seconds: 30)),
-    );
+    test('existing syncAdapter config still runs without change', () async {
+      final config = HarnessConfig(
+        syncAdapter: MemorySyncAdapter(),
+        deviceCount: 2,
+        preSeededDeviceCount: 1,
+        collectionCount: 2,
+        duration: const Duration(seconds: 2),
+        velocityPreset: VelocityPreset.one,
+        prngseed: 42,
+      );
+      final manager = TestManager(config: config, seed: 42);
+      final report = await manager.run();
+      expect(report.passed, isTrue);
+    }, timeout: const Timeout(Duration(seconds: 30)));
 
     test('resolveAdapter returns the same instance for every device index', () {
       final adapter = MemorySyncAdapter();
@@ -172,19 +168,15 @@ void main() {
       expect(seenIndices, equals([0, 1, 2]));
     });
 
-    test(
-      'SharedBackendAdapter factory run completes successfully',
-      () async {
-        final manager = TestManager(
-          config: _sharedBackendConfig(durationSeconds: 1),
-          seed: 42,
-        );
-        final report = await manager.run();
-        expect(report, isA<HarnessReport>());
-        expect(report.passed, isTrue);
-      },
-      timeout: const Timeout(Duration(seconds: 30)),
-    );
+    test('SharedBackendAdapter factory run completes successfully', () async {
+      final manager = TestManager(
+        config: _sharedBackendConfig(durationSeconds: 1),
+        seed: 42,
+      );
+      final report = await manager.run();
+      expect(report, isA<HarnessReport>());
+      expect(report.passed, isTrue);
+    }, timeout: const Timeout(Duration(seconds: 30)));
 
     test('resolveAdapter(0) used for quota check with factory', () {
       // A factory that yields a non-QuotaAware adapter must not throw.
@@ -221,52 +213,40 @@ void main() {
       timeout: const Timeout(Duration(seconds: 30)),
     );
 
-    test(
-      'eventually-consistent run reports no false positives',
-      () async {
-        final manager = TestManager(
-          config: _eventualConsistencyConfig(durationSeconds: 2, seed: 99),
-          seed: 99,
-        );
-        final report = await manager.run();
-        // No device verdict should be failing due to visibility lag.
-        for (final verdict in report.deviceVerdicts) {
-          expect(verdict.passed, isTrue, reason: 'device ${verdict.deviceId}');
-        }
-      },
-      timeout: const Timeout(Duration(seconds: 30)),
-    );
+    test('eventually-consistent run reports no false positives', () async {
+      final manager = TestManager(
+        config: _eventualConsistencyConfig(durationSeconds: 2, seed: 99),
+        seed: 99,
+      );
+      final report = await manager.run();
+      // No device verdict should be failing due to visibility lag.
+      for (final verdict in report.deviceVerdicts) {
+        expect(verdict.passed, isTrue, reason: 'device ${verdict.deviceId}');
+      }
+    }, timeout: const Timeout(Duration(seconds: 30)));
   });
 
   group('Mixed-mode — REST + FS-view front-ends over one backend', () {
-    test(
-      'mixed-mode run converges after settle',
-      () async {
-        final manager = TestManager(
-          config: _mixedModeConfig(durationSeconds: 1),
-          seed: 42,
-        );
-        final report = await manager.run();
-        expect(report.passed, isTrue);
-      },
-      timeout: const Timeout(Duration(seconds: 30)),
-    );
+    test('mixed-mode run converges after settle', () async {
+      final manager = TestManager(
+        config: _mixedModeConfig(durationSeconds: 1),
+        seed: 42,
+      );
+      final report = await manager.run();
+      expect(report.passed, isTrue);
+    }, timeout: const Timeout(Duration(seconds: 30)));
 
-    test(
-      'mixed-mode run produces valid device verdicts',
-      () async {
-        final manager = TestManager(
-          config: _mixedModeConfig(durationSeconds: 2, seed: 77),
-          seed: 77,
-        );
-        final report = await manager.run();
-        expect(report.deviceVerdicts, hasLength(2));
-        for (final verdict in report.deviceVerdicts) {
-          expect(verdict.passed, isTrue, reason: 'device ${verdict.deviceId}');
-        }
-      },
-      timeout: const Timeout(Duration(seconds: 30)),
-    );
+    test('mixed-mode run produces valid device verdicts', () async {
+      final manager = TestManager(
+        config: _mixedModeConfig(durationSeconds: 2, seed: 77),
+        seed: 77,
+      );
+      final report = await manager.run();
+      expect(report.deviceVerdicts, hasLength(2));
+      for (final verdict in report.deviceVerdicts) {
+        expect(verdict.passed, isTrue, reason: 'device ${verdict.deviceId}');
+      }
+    }, timeout: const Timeout(Duration(seconds: 30)));
   });
 
   // ── Step 3 — reconciliation visibility model ───────────────────────────────
@@ -338,47 +318,44 @@ void main() {
       },
     );
 
-    test(
-      'visibleExpectedStateFor includes peer writes once pushed at or below seqHigh',
-      () {
-        final agent = ReconciliationAgent(deviceCount: 2);
+    test('visibleExpectedStateFor includes peer writes once pushed at or below seqHigh', () {
+      final agent = ReconciliationAgent(deviceCount: 2);
 
-        // Device 0 writes.
-        agent.record(
-          const ActionResult(
-            actionId: 1,
-            deviceId: 0,
-            type: ActionType.put,
-            isNoOp: false,
-            key: 'k1',
-            collectionName: 'c',
-            document: {'v': 1},
-          ),
-        );
+      // Device 0 writes.
+      agent.record(
+        const ActionResult(
+          actionId: 1,
+          deviceId: 0,
+          type: ActionType.put,
+          isNoOp: false,
+          key: 'k1',
+          collectionName: 'c',
+          document: {'v': 1},
+        ),
+      );
 
-        // Simulate device 0 completing a sync with seqHigh = 5.
-        // This stamps device 0's pending writes with pushWriteSeq = 5.
-        agent.record(
-          const ActionResult(
-            actionId: 2,
-            deviceId: 0,
-            type: ActionType.sync,
-            isNoOp: false,
-            syncCompleted: true,
-            syncDirection: 'both',
-            visibleWriteSeqHigh: 5,
-          ),
-        );
+      // Simulate device 0 completing a sync with seqHigh = 5.
+      // This stamps device 0's pending writes with pushWriteSeq = 5.
+      agent.record(
+        const ActionResult(
+          actionId: 2,
+          deviceId: 0,
+          type: ActionType.sync,
+          isNoOp: false,
+          syncCompleted: true,
+          syncDirection: 'both',
+          visibleWriteSeqHigh: 5,
+        ),
+      );
 
-        // Device 1 pulls with seqHigh = 5 — should see device 0's write.
-        final visible5 = agent.visibleExpectedStateFor(1, 5);
-        expect(visible5, isNotEmpty);
+      // Device 1 pulls with seqHigh = 5 — should see device 0's write.
+      final visible5 = agent.visibleExpectedStateFor(1, 5);
+      expect(visible5, isNotEmpty);
 
-        // Device 1 pulls with seqHigh = 4 — should NOT see it (seq was 5).
-        final visible4 = agent.visibleExpectedStateFor(1, 4);
-        expect(visible4, isEmpty);
-      },
-    );
+      // Device 1 pulls with seqHigh = 4 — should NOT see it (seq was 5).
+      final visible4 = agent.visibleExpectedStateFor(1, 4);
+      expect(visible4, isEmpty);
+    });
   });
 
   // ── Step 5 — contention test ───────────────────────────────────────────────
@@ -418,42 +395,38 @@ void main() {
   // ── Step 5 — tombstone non-resurrection (unblocks RC-6) ───────────────────
 
   group('Tombstone non-resurrection (RC-6 cross-device companion)', () {
-    test(
-      'deleted key stays absent after peer with older copy syncs',
-      () async {
-        // This test is the in-harness automation of RC-6:
-        // Device A writes a key, then deletes it and syncs.
-        // Device B (joining late) syncs and must converge to the deleted state.
-        // We use SharedBackendAdapter (strong consistency) so the sequence is
-        // deterministic: no tombstone GC is possible in this short run, but
-        // the convergence invariant is verified.
-        final backend = SharedCloudBackend();
-        final manager = TestManager(
-          config: HarnessConfig(
-            syncAdapterFactory: (deviceId) =>
-                SharedBackendAdapter(backend, deviceId: 'dev-$deviceId'),
-            deviceCount: 2,
-            preSeededDeviceCount: 1,
-            collectionCount: 1,
-            duration: const Duration(seconds: 2),
-            velocityPreset: VelocityPreset.one,
-            prngseed: 314,
-          ),
-          seed: 314,
-        );
-        final report = await manager.run();
+    test('deleted key stays absent after peer with older copy syncs', () async {
+      // This test is the in-harness automation of RC-6:
+      // Device A writes a key, then deletes it and syncs.
+      // Device B (joining late) syncs and must converge to the deleted state.
+      // We use SharedBackendAdapter (strong consistency) so the sequence is
+      // deterministic: no tombstone GC is possible in this short run, but
+      // the convergence invariant is verified.
+      final backend = SharedCloudBackend();
+      final manager = TestManager(
+        config: HarnessConfig(
+          syncAdapterFactory: (deviceId) =>
+              SharedBackendAdapter(backend, deviceId: 'dev-$deviceId'),
+          deviceCount: 2,
+          preSeededDeviceCount: 1,
+          collectionCount: 1,
+          duration: const Duration(seconds: 2),
+          velocityPreset: VelocityPreset.one,
+          prngseed: 314,
+        ),
+        seed: 314,
+      );
+      final report = await manager.run();
 
-        // All devices must agree — no key is resurrected.
-        expect(report.passed, isTrue);
-        for (final verdict in report.deviceVerdicts) {
-          expect(
-            verdict.passed,
-            isTrue,
-            reason: 'device ${verdict.deviceId} has mismatches',
-          );
-        }
-      },
-      timeout: const Timeout(Duration(seconds: 30)),
-    );
+      // All devices must agree — no key is resurrected.
+      expect(report.passed, isTrue);
+      for (final verdict in report.deviceVerdicts) {
+        expect(
+          verdict.passed,
+          isTrue,
+          reason: 'device ${verdict.deviceId} has mismatches',
+        );
+      }
+    }, timeout: const Timeout(Duration(seconds: 30)));
   });
 }

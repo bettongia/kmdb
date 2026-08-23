@@ -172,79 +172,73 @@ void main() {
 
     // ── Package with unreferenced attachment ──────────────────────────────
 
-    test(
-      'returns false when package has attachment not referenced in document',
-      () async {
-        // Build a package where document.json does not reference the attachment.
-        final attachBytes = Uint8List.fromList(utf8.encode('extra-file'));
-        final sha256 = VaultStore.computeSha256(attachBytes);
-        final docWithNoRef = {'title': 'no vault refs'};
-        final packageBytes = VaultPackage.write(
-          documentJson: docWithNoRef,
-          attachments: [VaultAttachment(subdirName: '0', bytes: attachBytes)],
-        );
+    test('returns false when package has attachment not referenced in document', () async {
+      // Build a package where document.json does not reference the attachment.
+      final attachBytes = Uint8List.fromList(utf8.encode('extra-file'));
+      final sha256 = VaultStore.computeSha256(attachBytes);
+      final docWithNoRef = {'title': 'no vault refs'};
+      final packageBytes = VaultPackage.write(
+        documentJson: docWithNoRef,
+        attachments: [VaultAttachment(subdirName: '0', bytes: attachBytes)],
+      );
 
-        final tmpPath =
-            '${io.Directory.systemTemp.path}/kmdb_insert_test2_${DateTime.now().microsecondsSinceEpoch}.kvlt';
-        io.File(tmpPath).writeAsBytesSync(packageBytes);
-        addTearDown(() {
-          try {
-            io.File(tmpPath).deleteSync();
-          } catch (_) {}
-        });
+      final tmpPath =
+          '${io.Directory.systemTemp.path}/kmdb_insert_test2_${DateTime.now().microsecondsSinceEpoch}.kvlt';
+      io.File(tmpPath).writeAsBytesSync(packageBytes);
+      addTearDown(() {
+        try {
+          io.File(tmpPath).deleteSync();
+        } catch (_) {}
+      });
 
-        final ctx = _ctx(db, out: out, err: err);
-        final ok = await InsertCommand().execute(
-          ctx,
-          ['col'],
-          {'import': tmpPath},
-        );
-        expect(ok, isFalse);
-        // The package validation should fail because the attachment is not
-        // referenced in the document.
-        expect(err.toString(), isNotEmpty);
-        expect(
-          sha256.length,
-          equals(64),
-        ); // sha256 computed but doc doesn't ref it
-      },
-    );
+      final ctx = _ctx(db, out: out, err: err);
+      final ok = await InsertCommand().execute(
+        ctx,
+        ['col'],
+        {'import': tmpPath},
+      );
+      expect(ok, isFalse);
+      // The package validation should fail because the attachment is not
+      // referenced in the document.
+      expect(err.toString(), isNotEmpty);
+      expect(
+        sha256.length,
+        equals(64),
+      ); // sha256 computed but doc doesn't ref it
+    });
 
     // ── Package with document referencing missing attachment ──────────────
 
-    test(
-      'returns false when document references vault URI not in package',
-      () async {
-        // Build a package where document.json references a vault URI but no
-        // attachment provides it.
-        final missingHash = 'c' * 64; // valid SHA-256 format but not in package
-        final docWithMissingRef = {'file': 'kmdb-vault://sha256/$missingHash'};
-        final packageBytes = VaultPackage.write(
-          documentJson: docWithMissingRef,
-          attachments: [],
-        );
+    test('returns false when document references vault URI not in package', () async {
+      // Build a package where document.json references a vault URI but no
+      // attachment provides it.
+      final missingHash = 'c' * 64; // valid SHA-256 format but not in package
+      final docWithMissingRef = {'file': 'kmdb-vault://sha256/$missingHash'};
+      final packageBytes = VaultPackage.write(
+        documentJson: docWithMissingRef,
+        attachments: [],
+      );
 
-        final tmpPath =
-            '${io.Directory.systemTemp.path}/kmdb_insert_test3_${DateTime.now().microsecondsSinceEpoch}.kvlt';
-        io.File(tmpPath).writeAsBytesSync(packageBytes);
-        addTearDown(() {
-          try {
-            io.File(tmpPath).deleteSync();
-          } catch (_) {}
-        });
+      final tmpPath =
+          '${io.Directory.systemTemp.path}/kmdb_insert_test3_${DateTime.now().microsecondsSinceEpoch}.kvlt';
+      io.File(tmpPath).writeAsBytesSync(packageBytes);
+      addTearDown(() {
+        try {
+          io.File(tmpPath).deleteSync();
+        } catch (_) {}
+      });
 
-        final ctx = _ctx(db, out: out, err: err);
-        final ok = await InsertCommand().execute(
-          ctx,
-          ['col'],
-          {'import': tmpPath},
-        );
-        expect(ok, isFalse);
-        // Package validation fails: vault URI in document not covered by package
-        // or already in vault.
-        expect(err.toString(), isNotEmpty);
-      },
-    );
+      final ctx = _ctx(db, out: out, err: err);
+      final ok = await InsertCommand().execute(
+        ctx,
+        ['col'],
+        {'import': tmpPath},
+      );
+      expect(ok, isFalse);
+      // Package validation fails: vault URI in document not covered by package
+      // or already in vault.
+      expect(err.toString(), isNotEmpty);
+    });
 
     // ── Package with no vault URIs (plain document import) ────────────────
 
@@ -286,39 +280,36 @@ void main() {
       // validation error.
     });
 
-    test(
-      'returns false when package document contains reserved "_"-prefixed field',
-      () async {
-        // Exercises the reserved-field guard in InsertCommand._executeImport
-        // (lines 207-213): a package document with a "_ver" field must be
-        // rejected with a descriptive error.
-        final docWithReserved = {'title': 'ok', '_ver': 42};
-        final packageBytes = VaultPackage.write(
-          documentJson: docWithReserved,
-          attachments: [],
-        );
+    test('returns false when package document contains reserved "_"-prefixed field', () async {
+      // Exercises the reserved-field guard in InsertCommand._executeImport
+      // (lines 207-213): a package document with a "_ver" field must be
+      // rejected with a descriptive error.
+      final docWithReserved = {'title': 'ok', '_ver': 42};
+      final packageBytes = VaultPackage.write(
+        documentJson: docWithReserved,
+        attachments: [],
+      );
 
-        final tmpPath =
-            '${io.Directory.systemTemp.path}'
-            '/kmdb_insert_reserved_${DateTime.now().microsecondsSinceEpoch}.kvlt';
-        io.File(tmpPath).writeAsBytesSync(packageBytes);
-        addTearDown(() {
-          try {
-            io.File(tmpPath).deleteSync();
-          } catch (_) {}
-        });
+      final tmpPath =
+          '${io.Directory.systemTemp.path}'
+          '/kmdb_insert_reserved_${DateTime.now().microsecondsSinceEpoch}.kvlt';
+      io.File(tmpPath).writeAsBytesSync(packageBytes);
+      addTearDown(() {
+        try {
+          io.File(tmpPath).deleteSync();
+        } catch (_) {}
+      });
 
-        final ctx = _ctx(db, out: out, err: err);
-        final result = await InsertCommand().execute(
-          ctx,
-          ['col'],
-          {'import': tmpPath},
-        );
+      final ctx = _ctx(db, out: out, err: err);
+      final result = await InsertCommand().execute(
+        ctx,
+        ['col'],
+        {'import': tmpPath},
+      );
 
-        expect(result, isFalse);
-        expect(err.toString(), contains('reserved'));
-        expect(err.toString(), contains('"_ver"'));
-      },
-    );
+      expect(result, isFalse);
+      expect(err.toString(), contains('reserved'));
+      expect(err.toString(), contains('"_ver"'));
+    });
   });
 }

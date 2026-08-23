@@ -63,10 +63,8 @@ void main() {
         final neverFuture = Completer<void>().future;
         var wakened = false;
 
-        final raceFuture = Future.any([
-          neverFuture,
-          token.whenCancelled,
-        ]).then((_) => wakened = true);
+        final raceFuture = Future.any([neverFuture, token.whenCancelled])
+            .then((_) => wakened = true);
 
         expect(wakened, isFalse);
         token.cancel();
