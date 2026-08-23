@@ -42,7 +42,12 @@ dependency_overrides:
   betto_inferencing: ^0.1.0-dev.3
   betto_charset_detector: ^0.1.0-dev.2
   charset: ^2.0.1
-  betto_pdfium: ^0.1.0-dev.3
+  # Pinned to exactly 0.1.0-dev.3 (not `^`) while CI is on Dart 3.12.2: the
+  # newer 0.1.0-dev.4 declares a 3.13 language version in its native-asset
+  # build hook, which 3.12.2 refuses to compile. The 3.13 adoption work
+  # (plan_dart_3_13_adoption.md) bumps this to dev.4 and un-pins the toolchain
+  # together.
+  betto_pdfium: 0.1.0-dev.3
   betto_lang_detector: ^0.1.0-dev.1
 
 melos:

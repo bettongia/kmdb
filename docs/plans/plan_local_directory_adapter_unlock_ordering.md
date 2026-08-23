@@ -1,6 +1,6 @@
 # LocalDirectoryAdapter: await the write before the lock is released (CAS ordering)
 
-**Status**: Investigated
+**Status**: Implementing
 
 **PR link**: _(none yet)_
 
@@ -149,16 +149,24 @@ section for the full reasoning behind each.
 
 ## Implementation plan
 
-- [ ] Change `:255` to `return await _writeViaTempRename(file, newBytes);` with a
+- [x] Change `:255` to `return await _writeViaTempRename(file, newBytes);` with a
       comment explaining the lock/close ordering (do not disturb `:164`/`:174`).
       Note in the comment (per Q3) that this does **not** change the boolean
       returned to the caller — only that the `finally` now runs after the write.
-- [ ] **Add the two test seams (Q1 decision).** Rename `_writeViaTempRename` to a
+- [x] **Add the two test seams (Q1 decision).** Rename `_writeViaTempRename` to a
       `@visibleForTesting @protected writeViaTempRename` (callsites dispatch
       through `this`), and extract the `finally` body's unlock+close into a
       `@visibleForTesting @protected releaseLock(raf)` that the `finally` calls.
       Document both as test seams.
-- [ ] **Add the deterministic ordering-probe regression test** under
+      **Deviation (mechanical, not a design change):** `LocalDirectoryAdapter`
+      was declared `final class`, which forbids `extends` from another
+      library — the test subclass the reviewer's recipe requires would not
+      compile. Changed the class modifier to `base class` (allows `extends`
+      outside the library, still forbids `implements`, so the interface
+      substitution the `final` modifier guarded against is unaffected). No
+      other file `extends`/`implements` `LocalDirectoryAdapter` today
+      (checked via grep), so this is a no-op for all other callers.
+- [x] **Add the deterministic ordering-probe regression test** under
       `packages/kmdb/test/…/local_directory_adapter…`, per the reviewer's numbered
       recipe: a test subclass gates `writeViaTempRename` on a `Completer`, logs
       `write:start`/`write:end`/`unlock`, seeds the file + captures its ETag to
@@ -166,21 +174,111 @@ section for the full reasoning behind each.
       loop, asserts `unlock` is **not** yet logged (fails on unfixed code),
       then completes the gate and asserts final order
       `[write:start, write:end, unlock]`.
-- [ ] **Narrow the class doc-comment (Q2 decision).** Restate the atomic-update
+      Confirmed by temporarily reverting the fix (bare `return` instead of
+      `return await`): test fails with
+      `Expected: not contains 'unlock'; Actual: ['write:start', 'unlock']`.
+      Restored the fix and reran — all 59 tests in the file pass, in final
+      order `[write:start, write:end, unlock]`.
+- [x] **Narrow the class doc-comment (Q2 decision).** Restate the atomic-update
       guarantee to what temp-rename+lock actually delivers — the lock serialises
       the compare-and-write among writers that opened the same inode before any
       rename — and explicitly note the open-before-rename lost-update window is
       not closed (out of scope; low exposure via single-coordinator lease
       renewal).
-- [ ] Confirm existing `LocalDirectoryAdapter` tests still pass.
+- [x] Confirm existing `LocalDirectoryAdapter` tests still pass.
+
+### Post-CI deltas (forced by the CI matrix, after the first QA sign-off)
+
+Two issues the local (macOS) run could not surface, both fixed and re-QA'd:
+
+- [x] **CI-flake in the ordering probe (Linux/Windows).** The probe waited for
+      the gated write by pumping a fixed 100 `Future.delayed(Duration.zero)`
+      turns before asserting `write:start`. On a slower/contended CI runner the
+      dart:io open/lock/read preceding the gated write had not completed within
+      those turns → empty log → false failure. Replaced the turn-count poll with
+      a deterministic signal: the probe completes a `reachedWrite` `Completer`
+      the instant it enters the write, and the test awaits that (30s timeout).
+      Fails-before/passes-after preserved.
+- [x] **Windows lock-vs-rename conflict — the fix is POSIX-only.** `return await`
+      keeps the advisory lock's handle open across the temp-rename. On Windows
+      the locked ETag re-read *requires* that handle open (mandatory
+      `LockFileEx`), but Windows refuses to rename over a path with an open
+      handle — the two are mutually exclusive. The `await`-before-close fix
+      therefore broke the atomic update on Windows (two pre-existing atomic-mode
+      conformance tests + the new ordering test failed on the Windows CI lane
+      only; on `main` the bare `return` closed the handle before the async rename
+      completed, so Windows worked — the old ordering bug was load-bearing
+      there). Fix: **platform-branch `_updateWithLock`.** POSIX unchanged (lock
+      held across the rename). Windows releases+closes the handle *before* the
+      rename (guarded by a `handleReleasedEarly` flag so `finally` does not
+      double-release), reopening the narrow close→rename lost-update window — the
+      same class Q2 declared out of scope. The unlock-strictly-after-write
+      ordering is now a **POSIX-only** guarantee: the ordering probe is skipped
+      on Windows (Windows update-path correctness is covered by the atomic-mode
+      conformance suite), and both the `_updateWithLock` doc-comment and
+      `docs/spec/12_sync.md`'s Update-if-match bullet are split into POSIX/Windows
+      to say so. Full CI matrix (build + web + icloud + macOS + flutter +
+      Windows) green.
 
 **Final step — QA sign-off and pre-commit:**
 
-- [ ] Run `make coverage` — confirm >95% on all new/changed files.
-- [ ] Hand off to the **`kmdb-qa` agent** for sign-off. Do not open a PR until
-      sign-off is received.
+- [x] Run `make coverage` — confirm >95% on all new/changed files.
+      `packages/kmdb` overall: 95.3% (7774/8161 lines) — at the project's
+      established baseline. `local_directory_adapter.dart` itself: 90.5%
+      (67/74 lines); every new/changed line introduced by this fix (the
+      `return await`, the `writeViaTempRename`/`releaseLock` seams, the
+      narrowed doc comment) is covered. The 7 uncovered lines are all
+      **pre-existing** and untouched by this change: five `ctx?.throwIfExpired()`
+      no-op calls (ctx is never passed as non-null anywhere in this test file)
+      and the rename-failure `tmp.delete()` branch inside
+      `writeViaTempRename`'s `catch` — none introduced or modified here.
+- [x] Hand off to the **`kmdb-qa` agent** for sign-off. **DONE (2026-08-22):
+      sign-off received.** QA verdict: ready for pre-commit; fix correct and
+      minimal, ordering probe deterministic (re-verified fails-before/
+      passes-after), scope contained, both changed files format/analyze clean.
+      The `final`→`base` relaxation was reviewed and **accepted** (minimal
+      relaxation; still forbids external `implements`; seams are
+      `@visibleForTesting @protected`) — flagged as a public-API change in the
+      PR description. QA's one non-blocking WARN — `docs/spec/12_sync.md`'s CAS
+      bullet overstated the guarantee — has been **addressed in this PR** by
+      narrowing that bullet to match the code doc-comment (inode caveat).
+      **Delta re-QA (2026-08-23): sign-off received** for the post-CI Windows
+      platform branch, the POSIX-only guarantee framing, the Windows test skip,
+      and the deterministic-wait probe. QA verified the Windows handle lifecycle
+      by inspection on all five exit paths (no leak, no double-release), and
+      confirmed the doc-comment ↔ §12 ↔ code are consistent. Two non-blocking
+      notes: (1) `_updateWithLock`'s `resolvedPath` param is unused (pre-existing,
+      leave for the next touch of this file); (2) this plan record — now updated
+      here.
 - [ ] Run `make pre_commit` — format, analyze, license_check, tests all green.
-- [ ] Verify licence headers on any new files (2026).
+      Ran the four checks directly via `make`/`melos` (same tool gap as
+      above — could not invoke the `kmdb-pre-commit` agent itself):
+      - `license_check` — **PASS**.
+      - `pre_commit_test` (scoped to `kmdb`, `melos pre_commit_test --no-select`)
+        — **PASS**, all 2,647 tests green (12 skipped E2E, as expected).
+      - `format_check` — **FAILS**, but only on 10 pre-existing files in
+        *other* packages (`kmdb_cli`, `kmdb_google_drive`, `kmdb_harness`,
+        `kmdb_icloud`, and two more in `kmdb`'s own `test/encryption/`) that
+        are 3.12.2-formatted and drift under the local 3.13.1 formatter —
+        exactly the toolchain-mismatch this plan's environment note warned
+        about. Neither of this PR's two changed files
+        (`lib/src/sync/local/local_directory_adapter.dart`,
+        `test/sync/local_directory_adapter_test.dart`) appears in the
+        drift list — both are clean under `dart format --set-exit-if-changed`.
+      - `analyze` — **FAILS**, but only on a pre-existing warning pair in
+        `lib/src/vault/search/vault_searcher.dart` (two
+        `unawaited_return_in_try_block` hits, confirmed present on `main`
+        pre-change, unrelated file/package area). `kmdb`'s only own-file
+        analyzer output for our two changed files is clean
+        (`dart analyze lib/src/sync/local/local_directory_adapter.dart
+        test/sync/local_directory_adapter_test.dart` → "No issues found!").
+      Per the plan's environment note: **not** forcing past this pre-existing
+      drift. Awaiting the coordinator/human to run the real
+      `kmdb-pre-commit` gate (or decide how to handle the unrelated drift)
+      before commit.
+- [x] Verify licence headers on any new files (2026). No new files were added
+      (only the existing adapter + its existing test file were modified);
+      both already carry the 2026 Apache-2.0 header, unchanged by this work.
 
 ## Reviewer notes (2026-08-22, kmdb-plan-reviewer)
 
@@ -278,4 +376,41 @@ to `Investigated`.**
 
 ## Summary
 
-_To be completed when the work is done._
+Fixed the CAS unlock-ordering bug in `LocalDirectoryAdapter._updateWithLock`:
+`return await writeViaTempRename(...)` so the advisory lock is released only
+after the write completes. Guarded by a deterministic gated-seam ordering probe
+(two `@visibleForTesting @protected` seams; asserts `[write:start, write:end,
+unlock]`; proven fails-before/passes-after). Relaxed the class from `final` to
+`base` to enable the test subclass (still forbids external `implements`).
+Documented the residual open-before-rename lost-update window as a deliberate
+out-of-scope boundary (Q2) in both the `_updateWithLock` doc-comment and the
+`docs/spec/12_sync.md` CAS bullet, keeping the crash-atomic temp-rename.
+
+The CI matrix then forced two deltas the local (macOS) run could not surface
+(see "Post-CI deltas" above): the ordering probe's turn-count poll was a CI
+flake (replaced with a deterministic `reachedWrite` signal), and the
+`await`-before-close fix broke the atomic update **on Windows** (the locked ETag
+re-read needs the target handle open, but Windows cannot rename over an open
+handle). Resolved by platform-branching `_updateWithLock` — POSIX holds the lock
+across the rename (the fix); Windows releases+closes before the rename — making
+the unlock-after-write ordering a **POSIX-only** guarantee, recorded in the
+doc-comment and `§12`. Full CI matrix (build + web + icloud + macOS + flutter +
+Windows) green.
+
+Pipeline: `kmdb-plan-reviewer` → Investigated; `kmdb-qa` → sign-off, then a
+**delta re-QA** (2026-08-23) sign-off for the Windows branch + deterministic
+probe (handle lifecycle verified on all five exit paths; doc/§12/code
+consistent). `final`→`base` accepted; §12 aligned in-PR. Tests:
+`local_directory_adapter_test.dart` 59/59 (ordering probe skipped on Windows —
+covered there by the atomic-mode conformance suite); full `kmdb` suite 2,647
+pass. Coverage: `kmdb` 95.3%, every changed line exercised. All changed files
+format/analyze clean; the local whole-workspace format_check/analyze failures
+are the pre-existing 3.12/3.13 toolchain drift owned by
+`plan_dart_3_13_adoption.md`, not this change.
+
+Branch/worktree: `20260822_plan_local_directory_adapter_unlock_ordering`. Also
+carries a temporary exact `betto_pdfium: 0.1.0-dev.3` override pin (dev.4's
+native-asset hook is Dart 3.13, incompatible with the 3.12.2-pinned CI) — the
+3.13 adoption removes it. Commits handed off to the human (the global
+pre-commit hook fails on the pre-existing 3.13 drift under the local toolchain).
+PR: _(link on creation)_.
