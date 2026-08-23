@@ -1,6 +1,6 @@
 # Adopt Dart 3.13.1 / Flutter 3.47.1 across dev and CI
 
-**Status**: Open
+**Status**: Investigated
 
 **PR link**: _(none yet)_
 
@@ -50,15 +50,31 @@ resolved** (see the two ✅ questions below); the remaining work is mechanical.
       `.dart_tool/lib/` on Linux/macOS/Windows. Released as **0.1.0-dev.4**
       (published to pub.dev 2026-08-22). kmdb re-pins to `0.1.0-dev.4`; no kmdb
       code change needed for the loader itself.
-- [ ] **Are other native-asset consumers affected on Linux/3.13.1?**
-      Check `betto_zstd` (native-asset build hook, used everywhere) and
-      `betto_onnxrt` (semantic search) — do their Linux native builds still work
-      under 3.13.1? The `build`/`test-macos`/`test-windows`/`test-web` jobs all
-      passed under 3.13.1 in PR #75's run, so betto_zstd looked fine on those
-      platforms, but confirm Linux + onnxrt explicitly.
-- [ ] **Does Flutter 3.47.1 introduce any other breaks?** `flutter analyze` on
-      `kmdb_flutter` and `kmdb_icloud` was clean under 3.47.1 in PR #75; confirm
-      again after the pdfium fix and re-run the full flutter test jobs.
+- [x] **Are other native-asset consumers affected on Linux/3.13.1?**
+      **RESOLVED (2026-08-23, reviewer).** No.
+      - **`betto_zstd`** — the Linux `build` job *is* the primary gate and runs
+        the entire `kmdb` suite, which exercises `betto_zstd` compression on
+        every write. It went green under 3.13.1 in PR #75's run, so its
+        compile-from-source hook on Linux/3.13.1 is confirmed working. (Its
+        dylib/DLL builds also went green on the macOS and Windows jobs.)
+      - **`betto_onnxrt`** (transitive via `betto_inferencing`, in the root
+        `pubspec.lock`) — **not a Linux/3.13.1 risk to kmdb CI**, for two
+        independent reasons. (1) Its build hook is *download-prebuilt* (fetches
+        the platform ORT binary from GitHub Releases + SHA-256 verify + stage),
+        which is platform-agnostic and already fires and succeeds under 3.13.1 —
+        `libonnxruntime.1.22.0.dylib` is currently staged in the workspace
+        `.dart_tool/lib/` dirs on the local 3.13.1 toolchain. (2) The
+        pdfium-class failure was a *runtime* loader bug, and **no automated kmdb
+        or kmdb_cli test loads a real ORT session** — every semantic/vec/vault
+        test uses a `_FakeEmbeddingModel`/`_StubEmbeddingModel`. Real ORT
+        runtime loading is release-checklist-only, so the runtime-loader class
+        of bug cannot manifest in the automated matrix. The final full-matrix
+        run (below) is the confirmation.
+- [x] **Does Flutter 3.47.1 introduce any other breaks?** **RESOLVED as a
+      verification step.** `flutter analyze` on `kmdb_flutter` and `kmdb_icloud`
+      was clean under 3.47.1 in PR #75, with no anticipated redesign. This is
+      covered mechanically by re-running the `test-icloud` and `test-flutter`
+      jobs after the pins move (final full-matrix step). Not a design decision.
 
 ## Investigation
 
@@ -74,16 +90,24 @@ reverted) — carry these forward so they are not rediscovered:
    (`dart format` the whole workspace and commit) — it may differ as files
    change.
 
-2. **New lint `unawaited_return_in_try_block` (3.13.1).** Fires on 3 sites:
-   - `packages/kmdb/lib/src/sync/local/local_directory_adapter.dart:255` — a
+2. **New lint `unawaited_return_in_try_block` (3.13.1).** Originally 3 sites; 1
+   already fixed, **2 remain**. Re-verified against HEAD on the local 3.13.1
+   toolchain with `dart analyze` on 2026-08-23 (reviewer): the *only* two
+   `unawaited_return_in_try_block` warnings in the entire workspace are the
+   vault_searcher pair below. Every other Dart package (`kmdb_cli`,
+   `kmdb_harness`, `kmdb_google_drive`, the three extractors) analyzes clean.
+   - `packages/kmdb/lib/src/sync/local/local_directory_adapter.dart` — was a
      **genuine crash-safety bug** (a bare `return future()` inside a
-     `try`/`finally` releases the file lock and closes the handle before the
-     write completes). **Being fixed separately** — see
-     `plan_local_directory_adapter_unlock_ordering.md`. This adoption plan should
-     not re-fix it; just confirm the lint is clean after that fix lands.
+     `try`/`finally` releasing the lock before the write completed).
+     **Already fixed and merged in PR #76** (2026-08-23). Confirmed clean by
+     `dart analyze` under 3.13.1 — the `compareAndSwap` path now uses
+     `return await writeViaTempRename(...)` (currently lines ~321 / ~334, with a
+     load-bearing comment). This adoption plan just re-confirms it; no action.
    - `packages/kmdb/lib/src/vault/search/vault_searcher.dart:719` and `:726` —
-     `return _placeholderContext(…)` inside the try; fix with `return await` so
-     the (unlikely) errors route through the enclosing rethrow/catch handlers.
+     `return _placeholderContext(…)` inside the `try` of `_buildChunkContext`;
+     fix each with `return await _placeholderContext(…)` so the (unlikely)
+     errors route through the enclosing `on … rethrow` / `catch (_)` handlers.
+     Line numbers verified accurate against HEAD (2026-08-23).
 
 3. **The blocker — pdfium on Linux — RESOLVED.** Root-caused to a Pub-workspace
    native-library resolution gap (staging at the workspace root, loader probing
@@ -114,6 +138,32 @@ reverted) — carry these forward so they are not rediscovered:
    blocks into `analysis_options.yaml` (kmdb_flutter, kmdb_icloud,
    kmdb_icloud/example) — these are transient and should **not** be committed.
 
+6. **`lcov --ignore-errors empty` — already landed; no action.** Reviewer note
+   (2026-08-23): the lcov 2.0 "empty tracefile" hardening is already present in
+   the root `pubspec.yaml` melos coverage scripts (`coverage:generate` and
+   `coverage:combine` both run `lcov --ignore-errors empty --summary … || true`).
+   The `build` job's separate "Coverage summary" step in `cicd.yml` uses a plain
+   `lcov --summary … || true` (no `--ignore-errors`) but is guarded by `|| true`
+   and cannot fail the build. This is a CI-runner (ubuntu-noble) concern, not a
+   Dart-3.13 one, and requires **no change** for this adoption. Listed only so
+   the implementer does not go looking for missing work.
+
+**Decision — bump the `environment: sdk` floor to `^3.13.0` across all
+packages.** Reviewer + user, 2026-08-23. All 10 pubspec files currently pin
+`sdk: ^3.12.0` (root coordinator + `kmdb`, `kmdb_cli`, `kmdb_harness`,
+`kmdb_google_drive`, `kmdb_extractor_pdf`, `kmdb_extractor_html`,
+`kmdb_extractor_markdown`, `kmdb_flutter`, `kmdb_icloud`). Raise each to
+`^3.13.0`. Rationale: (a) `betto_pdfium` 0.1.0-dev.4's native-asset build hook
+is Dart 3.13 and will not compile under 3.12, so any consumer of
+`kmdb_extractor_pdf` already *requires* 3.13 — advertising `^3.12.0` is now
+false; (b) the workspace uses `resolution: workspace`, so all members resolve
+against one SDK anyway — a uniform floor is the honest and simplest expression;
+(c) CI will only test 3.13.1 after this change, so claiming 3.12 support would be
+untested. Convention here is a minor-level floor (`^3.12.0`, not `^3.12.2`), so
+use `^3.13.0`, not `^3.13.1`. **Leave the two Flutter packages'
+`flutter: ">=3.29.0"` constraint unchanged** — 3.47.1 satisfies it and there is
+no need to raise the Flutter floor.
+
 ## Implementation plan
 
 Sequenced so the blocker is resolved before the pins move.
@@ -124,25 +174,56 @@ Sequenced so the blocker is resolved before the pins move.
       **0.1.0-dev.4** (2026-08-22). Remaining kmdb-side action is the re-pin
       below and the final Linux/3.13.1 verification.
 - [ ] **Re-pin `betto_pdfium` to `0.1.0-dev.4`** in the root `pubspec.yaml`
-      `dependency_overrides` (currently a `git`/older pin) and `dart pub upgrade`.
-      Confirm `packages/kmdb_cli/test/database_opener_test.dart` "lexical hits
-      over … PDF" indexes all 4 fixtures on Linux/3.13.1.
-- [ ] **Delete the diagnostic scaffolding** — the throwaway `diag-313` workflow
-      and the three `[DART313-DIAG]` prints (see Investigation §3). Verify `main`
-      is clean of the marker before adoption.
-- [ ] **Confirm other native consumers on Linux/3.13.1** (betto_zstd,
-      betto_onnxrt) — see open questions.
-- [ ] **Bump CI pins** in `.github/workflows/cicd.yml`: `setup-dart sdk` →
-      `3.13.1` (×4), `flutter-action flutter-version` → `3.47.1` (×2). Update the
-      pin comments accordingly.
-- [ ] **Reformat the workspace** with 3.13.1 (`dart format packages/…` across
-      the build + icloud targets) and commit the whitespace-only churn.
-- [ ] **Confirm the new-lint sites are clean:** `local_directory_adapter.dart`
-      (fixed by its own plan) and `vault_searcher.dart:719,726` (`return await`).
-      Run `dart analyze` across all packages + `flutter analyze` on the two
-      Flutter packages.
-- [ ] **Update any docs** that name the toolchain version (e.g. release
-      checklist / integration guide, if they pin a Dart/Flutter version).
+      `dependency_overrides` (currently pinned to exactly `0.1.0-dev.3`, line 50)
+      and `dart pub upgrade`. Confirm
+      `packages/kmdb_cli/test/database_opener_test.dart` "lexical hits over … PDF"
+      indexes all 4 fixtures on Linux/3.13.1. **Note:** this pin bump and the CI
+      toolchain bump below MUST land together — dev.4's build hook requires Dart
+      3.13, so it will not compile under the current 3.12.2-pinned CI.
+- [x] **Delete the diagnostic scaffolding — DONE (2026-08-22).** The throwaway
+      `diag-313` workflow and the `[DART313-DIAG]` prints were already removed
+      before this adoption began. Re-verified against HEAD on 2026-08-23
+      (reviewer): `.github/workflows/` contains only `cicd.yml`, and there are no
+      `DART313-DIAG` markers anywhere under `packages/`. No action.
+- [x] **Confirm other native consumers on Linux/3.13.1 — RESOLVED (2026-08-23,
+      reviewer).** betto_zstd and betto_onnxrt are both fine — see the answered
+      open question above. The final full-matrix run is the standing confirmation.
+- [ ] **Bump CI pins** in `.github/workflows/cicd.yml`: `setup-dart sdk`
+      `"3.12.2"` → `"3.13.1"` (×4 — the `build`, `test-macos`, `test-windows`,
+      `test-web` jobs) and `flutter-action flutter-version` `"3.44.4"` →
+      `"3.47.1"` (×2 — `test-icloud`, `test-flutter`). Update the (identical,
+      repeated) pin-rationale comment blocks accordingly. Keep
+      `flutter-action`'s `channel: stable` line but rely on the pinned
+      `flutter-version` (do not let it float).
+- [ ] **Bump the `environment: sdk` floor to `^3.13.0`** in all 10 pubspec
+      files (root + 9 packages — see the Decision in Investigation). Leave the
+      `flutter: ">=3.29.0"` constraint in `kmdb_flutter`/`kmdb_icloud` unchanged.
+- [ ] **Reformat the workspace** with 3.13.1 (`dart format packages/`) and commit
+      the whitespace-only churn. The drift set at review time (2026-08-23) was 10
+      files (`kmdb/test/encryption/{encryption_crash,kmdb_database_encryption}_test.dart`,
+      `kmdb_cli/test/config/secret_store/directory_secret_store_test.dart`,
+      `kmdb_cli/test/e2e/cli_session_test.dart`,
+      `kmdb_google_drive/test/harness_convergence_test.dart`,
+      `kmdb_harness/test/{cloud_semantics,e2e,test_manager}_test.dart`,
+      `kmdb_icloud/test/{harness_convergence,icloud_adapter}_test.dart`) —
+      re-derive at implementation time as the set may shift, but expect
+      whitespace/wrapping only.
+- [ ] **Fix the two `vault_searcher.dart` lint sites** (`:719`, `:726`): change
+      `return _placeholderContext(sha256, fieldPath);` to
+      `return await _placeholderContext(sha256, fieldPath);`. Then confirm the
+      new-lint set is clean: `dart analyze` across all packages (expect zero
+      `unawaited_return_in_try_block`) + `flutter analyze` on `kmdb_flutter` and
+      `kmdb_icloud`. `local_directory_adapter.dart` is already clean (PR #76).
+- [ ] **Update docs that name the toolchain version.** Reviewer survey
+      (2026-08-23): the release checklist (`docs/spec/28_release_checklist.md`)
+      and CLAUDE.md do **not** hard-pin a version, so no change there. The only
+      live doc to update is `docs/roadmap/0_10_01.md` — its WI-5 row (line ~65)
+      and Follow-ups section (lines ~629–638, ~768–770) describe the deferred
+      3.12.2 pin and this plan's intent; flip them to reflect the completed
+      adoption. Also honour the roadmap's stated requirement to **state the Dart
+      3.13 minimum in the release notes** (WI-9 gate). Completed plans under
+      `docs/plans/completed/` that mention the old pin are historical — do not
+      edit them.
 - [ ] Roadmap pointer updated in-branch (moves with the PR).
 
 **Final step — QA sign-off and pre-commit:**
@@ -157,6 +238,46 @@ Sequenced so the blocker is resolved before the pins move.
 - [ ] Confirm the **full CI matrix is green under 3.13.1** — this is the whole
       point; the build + all five platform jobs must pass, especially
       `test-icloud` (format) and any job touching pdfium.
+
+## Review (2026-08-23, kmdb-plan-reviewer)
+
+**Verdict: Investigated — ready for mechanical implementation.** Every claim in
+the plan was grounded against HEAD; the residual open questions are resolved.
+
+Verified against the repo at HEAD:
+
+- **betto_pdfium pin** is exactly `0.1.0-dev.3` (`pubspec.yaml:50`) — the bump to
+  dev.4 is real and must land together with the toolchain bump (dev.4's hook is
+  Dart 3.13, won't compile on 3.12.2). ✅
+- **Diagnostic scaffolding** already gone: no `diag-313` workflow (only
+  `cicd.yml` in `.github/workflows/`), no `DART313-DIAG` markers under
+  `packages/`. That checklist item was stale and is now marked done. ✅
+- **CI pin count** correct: 4× `setup-dart sdk: "3.12.2"` (build, test-macos,
+  test-windows, test-web) + 2× `flutter-action flutter-version: "3.44.4"`
+  (test-icloud, test-flutter). ✅
+- **Lint sites** re-derived with the local 3.13.1 `dart analyze`: the **only**
+  two `unawaited_return_in_try_block` warnings in the whole workspace are
+  `vault_searcher.dart:719` and `:726` (line numbers still accurate).
+  `local_directory_adapter.dart` is clean (PR #76 landed `return await`). All
+  other Dart packages analyze clean. ✅
+- **betto_zstd / betto_onnxrt on Linux/3.13.1**: resolved — see the answered
+  open questions. betto_onnxrt's download hook already stages
+  `libonnxruntime.1.22.0.dylib` under 3.13.1 and no automated test loads a real
+  ORT session (all fakes), so the pdfium-class runtime-loader failure cannot
+  recur in CI. ✅
+- **lcov `--ignore-errors empty`** already present in the melos coverage scripts
+  (`pubspec.yaml:132,147`) — not a remaining step. ✅
+- **SDK-constraint bump** was **missing** from the checklist and is the one
+  substantive gap I closed. All 10 pubspec files pin `sdk: ^3.12.0`; the
+  roadmap (`0_10_01.md:629–638`) already states the plan will raise them to
+  `^3.13.0` and declare a Dart 3.13 release floor, so this is recorded as a
+  decision, not an open question. ✅
+
+No open questions remain that would force the implementer to make an
+architecture-level decision. The work is a bounded, mechanical toolchain
+migration: one dependency re-pin, six CI pin edits, ten SDK-constraint edits, a
+whitespace-only reformat, two one-line lint fixes, and doc touch-ups, all gated
+by the existing CI matrix.
 
 ## Summary
 
