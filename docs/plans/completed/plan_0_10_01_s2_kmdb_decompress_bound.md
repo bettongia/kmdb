@@ -2,7 +2,7 @@
 
 **Status**: Complete
 
-**PR link**: _(none yet)_
+**PR link**: [#81](https://github.com/bettongia/kmdb/pull/81)
 
 > **Provenance.** The KMDB-side companion to **WI-8** of the 0.10.01 hardening
 > track. WI-8 added a pre-allocation frame-size cap to `betto_zstd`
