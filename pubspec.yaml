@@ -36,7 +36,12 @@ dependency_overrides:
   web: ^1.1.0
   betto_common: ^0.1.0-dev.2
   betto_schema: ^0.1.0-dev.2
-  betto_zstd: ^0.1.0-dev.3
+  # Bumped to 0.1.0-dev.4 for the S-2 pre-allocation decompress bound
+  # (`decompress(..., {int maxOutputBytes}))`, throwing
+  # `ZstdLimitExceededException` — plan_0_10_01_s2_kmdb_decompress_bound.md).
+  # The new signature does not exist in dev.3, so this pin must move for the
+  # threaded `maxOutputBytes` call to compile.
+  betto_zstd: 0.1.0-dev.4
   betto_mediatype_detector: ^0.1.0-dev.1
   betto_lexical: ^0.1.0-dev.2
   betto_inferencing: ^0.1.0-dev.3

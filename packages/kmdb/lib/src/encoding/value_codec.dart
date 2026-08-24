@@ -18,6 +18,7 @@ library;
 
 import 'dart:typed_data';
 
+import 'package:betto_zstd/betto_zstd.dart' show ZstdLimitExceededException;
 import 'package:cbor/cbor.dart';
 
 import '../encryption/encryption_flag.dart';
@@ -109,17 +110,17 @@ final class ValueCodec {
   ///
   /// ## Two-piece landing (Phase 2 of the sync-trust-boundary hardening plan)
   ///
-  /// `betto_zstd`'s `decompress` has no `maxDecompressedSize` parameter as of
-  /// the currently-published version — adding one is a separate `betto_zstd`
-  /// PR/release. This constant therefore enforces the bound **after**
-  /// decompression completes rather than before the allocation inside
-  /// `decompress` — it stops a survivable-but-oversized bomb from being
-  /// accepted as a document, and callers on the read path
-  /// (`scan`/`dump`/`export`/`verify`) already treat a single failed
-  /// [decode] as a per-document, not per-collection, failure. A frame large
-  /// enough to exhaust memory *during* decompression (rather than merely
-  /// producing an oversized-but-allocatable result) is not caught by this
-  /// check — that requires the upstream `betto_zstd` fix.
+  /// Both pieces have now landed. `betto_zstd` (≥ 0.1.0-dev.4) added a
+  /// pre-allocation `maxOutputBytes` parameter to `decompress` that reads a
+  /// frame's *declared* decompressed size and rejects it, throwing
+  /// `ZstdLimitExceededException`, **before** allocating the destination
+  /// buffer. [decode] passes this constant as that bound (see
+  /// [_decompressBounded]), so an over-limit frame on the zstd path is now
+  /// rejected pre-allocation rather than after a (bounded-but-oversized)
+  /// buffer has already been filled. [_checkDecodedSize] remains: it is the
+  /// **sole** guard on the uncompressed [CompressionFlag.none] path (which has
+  /// no `betto_zstd` involvement to bound), and a cheap defence-in-depth
+  /// backstop on the zstd path.
   static const int kMaxDecodedValueBytes = 1024 * 1024;
 
   // ── Encode ──────────────────────────────────────────────────────────────────
@@ -204,6 +205,13 @@ final class ValueCodec {
   ///
   /// Throws [UnsupportedError] if the flag identifies a compression algorithm
   /// not available on the current platform (e.g. Zstd on web).
+  ///
+  /// Throws [DecodedValueTooLargeException] if the decompressed payload
+  /// exceeds [kMaxDecodedValueBytes] (S-2) — on the zstd path, rejected
+  /// pre-allocation by betto_zstd's bounded `decompress` and mapped from
+  /// [ZstdLimitExceededException]; on the uncompressed
+  /// [CompressionFlag.none] path, rejected post-decode by
+  /// [_checkDecodedSize].
   static Future<Map<String, dynamic>> decode(
     Uint8List bytes, {
     required ValueContext context,
@@ -243,7 +251,7 @@ final class ValueCodec {
       }
       final compressionFlag = CompressionFlag.fromByte(plaintext[0]);
       final payload = plaintext.sublist(1);
-      final cborBytes = decompress(compressionFlag, payload);
+      final cborBytes = _decompressBounded(compressionFlag, payload);
       _checkDecodedSize(cborBytes);
       return _fromCbor(cborBytes);
     }
@@ -263,19 +271,55 @@ final class ValueCodec {
     }
     final compressionFlag = CompressionFlag.fromByte(bytes[1]);
     final payload = bytes.sublist(2);
-    final cborBytes = decompress(compressionFlag, payload);
+    final cborBytes = _decompressBounded(compressionFlag, payload);
     _checkDecodedSize(cborBytes);
     return _fromCbor(cborBytes);
   }
 
   // ── CBOR helpers ────────────────────────────────────────────────────────────
 
+  /// Decompresses [payload] according to [flag], bounding the allocation
+  /// betto_zstd will make for the frame's *declared* decompressed size at
+  /// [kMaxDecodedValueBytes] (S-2, two-piece landing — see
+  /// [kMaxDecodedValueBytes]'s doc comment).
+  ///
+  /// A frame that declares a size larger than [kMaxDecodedValueBytes] is now
+  /// rejected by `betto_zstd` **before** it allocates the oversized buffer —
+  /// [ZstdLimitExceededException] is caught here and re-thrown as
+  /// [DecodedValueTooLargeException] so the exception surface [decode]
+  /// promises stays consistent regardless of which guard rejected the value
+  /// (this pre-allocation reject on the zstd path, or [_checkDecodedSize] on
+  /// the uncompressed [CompressionFlag.none] path). [ZstdLimitExceededException]
+  /// is caught nowhere else in the codebase, so re-throwing here does not
+  /// change behaviour for any existing caller — it only prevents a
+  /// dependency's exception type from leaking out of [ValueCodec]'s documented
+  /// contract.
+  ///
+  /// `e.limit` is guaranteed to equal [kMaxDecodedValueBytes] because that is
+  /// the only bound this codec ever passes as `maxOutputBytes`; using the
+  /// constant directly for [DecodedValueTooLargeException.limit] is
+  /// equivalent and clearer than round-tripping it through the exception.
+  static Uint8List _decompressBounded(CompressionFlag flag, Uint8List payload) {
+    try {
+      return decompress(flag, payload, maxOutputBytes: kMaxDecodedValueBytes);
+    } on ZstdLimitExceededException catch (e) {
+      throw DecodedValueTooLargeException(
+        decodedSize: e.declaredSize,
+        limit: kMaxDecodedValueBytes,
+      );
+    }
+  }
+
   /// Rejects [cborBytes] whose length exceeds [kMaxDecodedValueBytes] (S-2).
   ///
-  /// Called immediately after [decompress] on both the encrypted and
+  /// Called immediately after [_decompressBounded] on both the encrypted and
   /// plaintext branches of [decode], before CBOR-decoding — there is no
   /// reason to spend time decoding a payload that is already known to be
-  /// invalid.
+  /// invalid. It is the **sole** guard on the uncompressed
+  /// [CompressionFlag.none] path (which never reaches betto_zstd's bounded
+  /// `decompress`), and a cheap defence-in-depth backstop on the zstd path,
+  /// where [_decompressBounded]'s pre-allocation reject is now the primary
+  /// guard.
   static void _checkDecodedSize(Uint8List cborBytes) {
     if (cborBytes.length > kMaxDecodedValueBytes) {
       throw DecodedValueTooLargeException(

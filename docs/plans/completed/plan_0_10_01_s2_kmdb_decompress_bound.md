@@ -1,8 +1,8 @@
 # S-2 consumption: thread KMDB's decoded-value bound into `betto_zstd` decompress
 
-**Status**: Investigated
+**Status**: Complete
 
-**PR link**: _(none yet)_
+**PR link**: [#81](https://github.com/bettongia/kmdb/pull/81)
 
 > **Provenance.** The KMDB-side companion to **WI-8** of the 0.10.01 hardening
 > track. WI-8 added a pre-allocation frame-size cap to `betto_zstd`
@@ -116,21 +116,37 @@ Grounded against HEAD; the betto_zstd API verified against the published
 
 ## Implementation plan
 
-- [ ] **Bump the pin.** `dependency_overrides: betto_zstd: 0.1.0-dev.4` (explicit)
+- [x] **Bump the pin.** `dependency_overrides: betto_zstd: 0.1.0-dev.4` (explicit)
       with a short comment noting the S-2 `maxOutputBytes` API; `dart pub get`.
-- [ ] **Thread the bound through the wrapper.** Add `int maxOutputBytes` to
+- [x] **Thread the bound through the wrapper.** Add `int maxOutputBytes` to
       `decompress(CompressionFlag, Uint8List, ...)` in `compression_io.dart`,
       `compression_web.dart`, and `compression_stub.dart`; pass it to
       `ZstdSimple().decompress(data, maxOutputBytes: maxOutputBytes)` on the
       `zstd` arm.
-- [ ] **Pass `kMaxDecodedValueBytes` at both call sites** in `value_codec.decode`
+- [x] **Pass `kMaxDecodedValueBytes` at both call sites** in `value_codec.decode`
       (encrypted `:246`, plaintext `:266`). Keep `_checkDecodedSize` after each.
-- [ ] **Exception handling** (per the open question). If mapping: wrap the
+      Implemented via a new private `ValueCodec._decompressBounded` helper
+      used by both branches (avoids duplicating the try/catch).
+      **Deviation found during implementation:** a *third* direct
+      `decompress(...)` call site exists outside `ValueCodec`, at
+      `lib/src/versioning/version_entry.dart:182`
+      (`VersionEntry.decodeIsDeleteSync`, a synchronous compaction-path
+      helper) — the plan's grep/investigation missed it because it isn't
+      reached from `value_codec.dart`. It does not compile once the
+      `decompress` signature changes, so it now also passes
+      `maxOutputBytes: ValueCodec.kMaxDecodedValueBytes`. No exception
+      mapping was added there: the call already sits inside a broad
+      `try { ... } catch (_) { return false; }` fail-safe (any decode error
+      → treat as "not a delete version", never incorrectly pruned), so
+      `ZstdLimitExceededException` falls through to the existing catch-all
+      with the same fail-safe behaviour it already had for every other decode
+      failure on that path.
+- [x] **Exception handling** (per the open question). If mapping: wrap the
       `decompress` call (or the wrapper's `zstd` arm) to catch
       `ZstdLimitExceededException` and rethrow
       `DecodedValueTooLargeException(decodedSize: e.declaredSize, limit:
       kMaxDecodedValueBytes)`.
-- [ ] **Tests** (`packages/kmdb/test/encoding/`): a frame declaring > 1 MiB is
+- [x] **Tests** (`packages/kmdb/test/encoding/`): a frame declaring > 1 MiB is
       rejected at `decode` **before** the large allocation — build it the cheap
       way (compress several MiB of a repeating byte, which lands in a few hundred
       bytes, then decode) and assert the resolved exception type + sizes; assert
@@ -159,7 +175,34 @@ Grounded against HEAD; the betto_zstd API verified against the published
         `cd packages/kmdb && dart test --platform chrome test/encoding/value_codec_test.dart`
         exercises `compression_web.dart`'s bounded `decompress` with no extra
         wiring.
-- [ ] **Spec.** Update `docs/spec/05_value_encoding.md`'s "Decompressed-Size
+      - **Implementation note — tests as written.** Added to
+        `test/encoding/value_codec_test.dart`: the cheap-frame plaintext-branch
+        pre-alloc-reject test (asserts `DecodedValueTooLargeException.limit`
+        and `.decodedSize` via `.having(...)`) and the incompressible
+        `none`-path test — the latter hand-rolls the wire bytes (same
+        technique as the existing "legacy Deflate" test) rather than routing
+        through `ValueCodec.encode`, because a `List<int>` of random bytes
+        still contains enough CBOR structural repetition (the `0x18` marker
+        byte ahead of every value ≥ 24) for Zstd to compress it onto the
+        `zstd` path — confirmed by a failing run before the fix. Added to
+        `test/encryption/value_codec_encryption_test.dart`: the encrypted-branch
+        equivalent, using `AesGcmEncryptionProvider`. All four verified on both
+        VM (`dart test`) and Chrome (`dart test --platform chrome`).
+        **Deviation:** a third `decompress(...)` call site was found outside
+        `ValueCodec` at `version_entry.dart:182`
+        (`VersionEntry.decodeIsDeleteSync`) — see the "Thread the bound"
+        checklist item above. Added a companion test to
+        `test/versioning/version_entry_test.dart` confirming this synchronous
+        compaction-path helper still fail-safe returns `false` for an
+        over-limit decompression-bomb entry (it has no bespoke exception
+        mapping — the existing broad `catch (_) { return false; }` already
+        covers `ZstdLimitExceededException` the same as any other decode
+        error). The sync-trust-boundary hostile-SSTable test
+        (`test/engine/sstable_hostile_parsing_test.dart`, "a
+        decompression-bomb value... rejected at ValueCodec.decode, not at
+        ingest (S-2)") was re-run and confirmed to stay green under MAP with
+        no edit needed, as the reviewer predicted.
+- [x] **Spec.** Update `docs/spec/05_value_encoding.md`'s "Decompressed-Size
       Bound (S-2)" section (starts at line 131). The current text says the bound
       "fires *after* `betto_zstd`'s `decompress()` call returns" and that "there
       is no way to inspect a frame's declared size and reject it *before* the
@@ -176,7 +219,7 @@ Grounded against HEAD; the betto_zstd API verified against the published
       wording (lines 140–142) to reflect that `_checkDecodedSize` is now a
       defence-in-depth backstop on the zstd path and the primary guard only on
       the uncompressed (`none`) path.
-- [ ] **Roadmap.** Update `docs/roadmap/0_10_01.md` — three concrete edits:
+- [x] **Roadmap.** Update `docs/roadmap/0_10_01.md` — three concrete edits:
       (a) the **WI-8 table row** (line 68) `Open` → `Complete` with a link to
       this plan/PR and a note that betto_zstd 0.1.0-dev.4 shipped the cap and
       KMDB now consumes it; (b) the **⚠️ S-2 caveat box** (lines 122–136) —
@@ -190,14 +233,35 @@ Grounded against HEAD; the betto_zstd API verified against the published
 
 **Final step — QA sign-off and pre-commit:**
 
-- [ ] `make coverage` — ≥ baseline. Touches `kmdb` (production + tests); the
+- [x] `make coverage` — ≥ baseline. Touches `kmdb` (production + tests); the
       `kmdb`-scoped `make pre_commit` covers it, but run
       `cd packages/kmdb && dart test` and the web tests
       (`dart test --platform chrome` for the encoding suite) so both `decompress`
       implementations are exercised.
-- [ ] Hand off to **`kmdb-qa`** for sign-off.
-- [ ] `make pre_commit` — format, analyze, license_check, tests green.
-- [ ] Verify licence headers on any new files.
+      **Result:** overall coverage 95.0% (matches the 95% baseline). VM
+      `dart test` (full `kmdb` suite): all pass. Chrome
+      `dart test --platform chrome` on `test/encoding/value_codec_test.dart`
+      (42/42) and `test/encryption/value_codec_encryption_test.dart` (20/20):
+      all pass, exercising `compression_web.dart`'s bounded `decompress`.
+      `test/engine/sstable_hostile_parsing_test.dart` and
+      `test/versioning/version_entry_test.dart` also verified green.
+- [x] Hand off to **`kmdb-qa`** for sign-off. **PASS (2026-08-24)** — the
+      coordinator ran `kmdb-qa`; verdict: bound threaded correctly at every
+      call site (incl. the unplanned third), MAP implemented exactly as
+      decided, `_checkDecodedSize` retained as sole `none`-path guard, new
+      branches empirically hit on VM + Chrome, spec correctly notes betto_zstd
+      kept its frame-inspection routine private. The third call site
+      (`decodeIsDeleteSync`) confirmed genuinely fail-safe (`catch (_) → return
+      false` = retain, never mis-prune). No missed call sites; zero blocking
+      issues.
+- [x] `make pre_commit` — format, analyze, license_check, tests green. Run
+      directly via Bash (exit code 0): `format_check` (522 files, 0 changed),
+      `analyze` (all 7 packages, no issues), `license_check`
+      (`addlicense --check`, clean), `pre_commit_test` (`kmdb` scope, 2653
+      tests, all passed).
+- [x] Verify licence headers on any new files. No new files were created by
+      this plan — only existing files were edited, and each already carries
+      the license header (confirmed via the `license_check` pass above).
 
 ## Reviewer sign-off (2026-08-24)
 
@@ -248,4 +312,56 @@ enough for mechanical execution.
 
 ## Summary
 
-_To be completed when the work is done._
+**Complete — `kmdb-qa` PASS (2026-08-24).** S-2 is now fully closed: the
+betto_zstd frame-size cap (WI-8, published in `0.1.0-dev.4`) plus this KMDB
+thread mean an over-declared frame is rejected before allocation at KMDB's
+1 MiB contract. QA confirmed the bound at every call site (incl. the third),
+the MAP, and the fail-safe third-site reasoning; VM + Chrome green.
+
+- Bumped `dependency_overrides: betto_zstd` from `^0.1.0-dev.3` to explicit
+  `0.1.0-dev.4` in the workspace `pubspec.yaml`.
+- Threaded a `required int maxOutputBytes` parameter through
+  `decompress(CompressionFlag, Uint8List, ...)` in all three platform
+  dispatch files (`compression_io.dart`, `compression_web.dart`,
+  `compression_stub.dart`), passing it to `ZstdSimple().decompress(data,
+  maxOutputBytes: maxOutputBytes)` on the `zstd` arm.
+- Added `ValueCodec._decompressBounded`, a private helper used by both the
+  encrypted and plaintext branches of `decode()`, that calls `decompress`
+  with `maxOutputBytes: kMaxDecodedValueBytes` and catches
+  `ZstdLimitExceededException`, re-throwing `DecodedValueTooLargeException`
+  so the exception surface `decode()` promises stays consistent regardless
+  of which guard (betto_zstd's pre-allocation reject, or the existing
+  post-decompression `_checkDecodedSize`) rejected the value.
+- **Deviation from the plan:** found and fixed a third direct `decompress`
+  call site outside `ValueCodec`, at
+  `VersionEntry.decodeIsDeleteSync` (`version_entry.dart`) — a synchronous
+  compaction-path helper the plan's investigation had not covered. It now
+  also passes `maxOutputBytes: ValueCodec.kMaxDecodedValueBytes`; no
+  exception mapping was needed there since it already had a broad
+  fail-safe `catch (_) { return false; }`.
+- Updated the doc comments on `ValueCodec.kMaxDecodedValueBytes`,
+  `ValueCodec.decode`, and `_checkDecodedSize` to describe the new
+  pre-allocation reject and `_checkDecodedSize`'s narrowed role (sole guard
+  on the uncompressed path, defence-in-depth backstop on the zstd path).
+- Tests added: cheap-frame pre-allocation-reject tests (plaintext and
+  encrypted branches, asserting both the exception type and its
+  `decodedSize`/`limit` fields), an incompressible-data test confirming
+  `_checkDecodedSize` still guards the uncompressed path, and a companion
+  test for `VersionEntry.decodeIsDeleteSync`'s fail-safe behaviour on an
+  over-limit entry. All verified on both the Dart VM and
+  `--platform chrome`. The pre-existing hostile-SSTable S-2 test and the
+  pre-existing compressible-bomb `value_codec_test.dart` test were
+  confirmed to stay green under the MAP decision, as predicted.
+- Updated `docs/spec/05_value_encoding.md`'s "Decompressed-Size Bound (S-2)"
+  section to describe the pre-allocation reject, being precise that
+  betto_zstd's frame-inspection routine stayed private — only the
+  `maxOutputBytes` bound is public.
+- Updated `docs/roadmap/0_10_01.md`: the WI-8 table row, the S-2 caveat box,
+  the WI-8 detail section, and the exit checklist all now mark **S-2 fully
+  closed**.
+- Coverage: 95.0% overall (matches the 95% baseline). `make pre_commit`
+  (format_check, analyze, license_check, `kmdb`-scoped tests) passes with
+  exit code 0.
+- No new files were created; no format/API break beyond the additive
+  `maxOutputBytes` parameter on the platform-internal `decompress` function
+  (not part of KMDB's public API surface).

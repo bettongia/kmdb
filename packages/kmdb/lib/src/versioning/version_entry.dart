@@ -179,7 +179,18 @@ final class VersionEntry {
     try {
       final compressionFlag = CompressionFlag.fromByte(rest[0]);
       final payload = rest.sublist(1);
-      final cborBytes = decompress(compressionFlag, payload);
+      // Same bound as ValueCodec.decode (0.10.01 S-2 companion): pass
+      // ValueCodec.kMaxDecodedValueBytes so an over-limit frame is rejected
+      // by betto_zstd before the large allocation, not just after. The
+      // resulting ZstdLimitExceededException (like any other decode error
+      // here) falls through to the catch-all below, which already returns
+      // `false` fail-safe — this path never had a bespoke exception mapping,
+      // so none is added here.
+      final cborBytes = decompress(
+        compressionFlag,
+        payload,
+        maxOutputBytes: ValueCodec.kMaxDecodedValueBytes,
+      );
       final decoded = cbor.decode(cborBytes);
       final map = CborMap.of(decoded as CborMap).toObject();
       if (map is! Map) return false;

@@ -210,6 +210,35 @@ void main() {
       final corrupt = Uint8List.fromList([0x00, 0xFF, 0xAB, 0xCD]);
       expect(VersionEntry.decodeIsDeleteSync(corrupt), isFalse);
     });
+
+    test('decodeIsDeleteSync returns false (fail-safe) for an over-limit '
+        'decompression-bomb entry (0.10.01 S-2 companion)', () async {
+      // decodeIsDeleteSync's own decompress(...) call is a separate call
+      // site from ValueCodec.decode, discovered while threading
+      // maxOutputBytes through this codebase (plan
+      // plan_0_10_01_s2_kmdb_decompress_bound.md). It now threads the same
+      // ValueCodec.kMaxDecodedValueBytes bound, so an over-limit frame is
+      // rejected by betto_zstd via ZstdLimitExceededException before the
+      // large allocation. This method has no bespoke mapping for that
+      // exception — it falls into the existing catch-all, which already
+      // fail-safe returns `false` (never incorrectly treat an
+      // undecodable entry as a delete) for any other decode error on this
+      // synchronous compaction-path helper.
+      //
+      // A zero-filled encodedValue is highly compressible, so the whole
+      // VersionEntry map compresses down to a tiny on-disk blob even
+      // though it declares a decompressed size well over the 1 MiB bound.
+      final bombEncodedValue = Uint8List(
+        ValueCodec.kMaxDecodedValueBytes + 4096,
+      );
+      final entry = VersionEntry(
+        hlc: const Hlc(1, 0),
+        encodedValue: bombEncodedValue,
+      );
+      final bytes = await entry.encode(context: _ctx);
+
+      expect(VersionEntry.decodeIsDeleteSync(bytes), isFalse);
+    });
   });
 
   group('DocumentVersion', () {
