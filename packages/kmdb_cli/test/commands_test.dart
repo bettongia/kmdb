@@ -2460,12 +2460,27 @@ void main() {
         final listLine = builtOut.toString();
         expect(listLine, contains('current'));
         expect(listLine, isNot(contains('gen=0')));
-        // `builtAt` is a discovered gap (see plan's Investigation notes for
-        // #4): unlike FtsManager/VecManager, IndexManager._buildIndex never
-        // stamps `IndexState.builtAt` on completion, so it stays empty ('-')
-        // even for a `current` index. Assert the real, current behaviour
-        // rather than the non-empty value the original recipe expected.
-        expect(listLine, contains('builtAt=-'));
+        // `builtAt` was a discovered gap (W5 #4; see the "builtAt stamp"
+        // plan, docs/plans/completed/plan_index_builtat_stamp.md, for the
+        // production fix): IndexManager._buildIndex now stamps
+        // `IndexState.builtAt` on its `current` completion transition, so
+        // `index list` renders a real ISO-8601 UTC timestamp instead of the
+        // empty-value placeholder `builtAt=-`. Note the placeholder check
+        // deliberately isn't "hyphen-free" — an ISO-8601 UTC timestamp
+        // (`2026-08-24T...Z`) contains hyphens; the discriminator is the
+        // bare placeholder token immediately after `=`.
+        expect(listLine, isNot(contains('builtAt=-')));
+        final listBuiltAtMatch = RegExp(r'builtAt=(\S+)').firstMatch(listLine);
+        expect(
+          listBuiltAtMatch,
+          isNotNull,
+          reason: 'expected a builtAt=... field in: $listLine',
+        );
+        // Must parse as a real timestamp, not just be non-empty.
+        expect(
+          () => DateTime.parse(listBuiltAtMatch!.group(1)!),
+          returnsNormally,
+        );
 
         final infoOut = StringBuffer();
         final infoCtx = CommandContext(
@@ -2483,9 +2498,21 @@ void main() {
         final infoText = infoOut.toString();
         expect(infoText, contains('status:       current'));
         expect(infoText, isNot(contains('builtThrough: (not built)')));
-        // See the `builtAt=-` note above — `info` renders the same never-set
-        // field as "(not built)" even though the index is current.
-        expect(infoText, contains('builtAt:      (not built)'));
+        // See the note above the `list` assertions — `info` now renders the
+        // same real timestamp instead of the "(not built)" placeholder that
+        // was previously shown for a `current` index.
+        expect(infoText, isNot(contains('(not built)')));
+        final infoBuiltAtMatch = RegExp(r'builtAt:\s+(\S+)')
+            .firstMatch(infoText);
+        expect(
+          infoBuiltAtMatch,
+          isNotNull,
+          reason: 'expected a builtAt: ... field in: $infoText',
+        );
+        expect(
+          () => DateTime.parse(infoBuiltAtMatch!.group(1)!),
+          returnsNormally,
+        );
       });
     });
   });

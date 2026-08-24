@@ -109,7 +109,8 @@ final class IndexState {
   /// Namespace generation counter at the time of the last successful build.
   final int builtThrough;
 
-  /// HLC timestamp string recorded when the build completed (diagnostics only).
+  /// ISO-8601 UTC timestamp string recorded when the build last completed.
+  /// Empty when not yet built. Informational only.
   final String builtAt;
 
   /// How index-entry namespace tokens were computed as of the last build.
@@ -498,6 +499,7 @@ final class IndexManager implements WriteAugmentor {
         path: definition.path,
         status: IndexStatus.current,
         builtThrough: endGen,
+        builtAt: DateTime.now().toUtc().toIso8601String(),
         tokenMode: _currentTokenMode,
       );
       await _persistState(currentState);
