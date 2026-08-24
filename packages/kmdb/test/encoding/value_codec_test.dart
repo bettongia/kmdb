@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:betto_zstd/betto_zstd.dart' show ZstdSimple;
@@ -415,6 +416,75 @@ void main() {
       final decoded = await ValueCodec.decode(encoded, context: _ctx);
       expect(decoded['text'], equals('well under the limit'));
     });
+  });
+
+  // ── betto_zstd pre-allocation reject (0.10.01 S-2 companion) ────────────────
+
+  group('ValueCodec pre-allocation reject via betto_zstd maxOutputBytes', () {
+    test('decode() rejects an over-limit frame before the large allocation, '
+        'reporting the declared and limit sizes (plaintext branch)', () async {
+      // Cheap to build: a highly compressible payload compresses down to a
+      // few hundred bytes, so the *encoded* value is tiny even though it
+      // declares a multi-MiB decompressed size. The reject must happen
+      // before betto_zstd allocates a buffer for that declared size, not
+      // after — this is exactly what threading maxOutputBytes verifies.
+      final huge = {'bomb': 'A' * (ValueCodec.kMaxDecodedValueBytes + 4096)};
+      final encoded = await ValueCodec.encode(huge, context: _ctx);
+      // Confirm this landed on the zstd path — otherwise the assertion
+      // below would silently exercise _checkDecodedSize instead of the
+      // pre-allocation reject this test targets.
+      expect(encoded[1], equals(CompressionFlag.zstd.byte));
+
+      await expectLater(
+        ValueCodec.decode(encoded, context: _ctx),
+        throwsA(
+          isA<DecodedValueTooLargeException>()
+              .having((e) => e.limit, 'limit', ValueCodec.kMaxDecodedValueBytes)
+              .having(
+                (e) => e.decodedSize,
+                'decodedSize',
+                greaterThan(ValueCodec.kMaxDecodedValueBytes),
+              ),
+        ),
+      );
+    });
+
+    test(
+      'an incompressible over-limit payload still throws via '
+      '_checkDecodedSize (uncompressed / CompressionFlag.none path)',
+      () async {
+        // Building this via ValueCodec.encode() would leave the outcome
+        // hostage to tryCompress's heuristic: CBOR's own encoding of a
+        // List<int> of random bytes injects a regular structural marker byte
+        // (0x18) ahead of every element >= 24, which is repetitive enough for
+        // Zstd to still find a compression win — landing this on the zstd
+        // path instead of `none`, and so silently testing the pre-allocation
+        // reject instead of `_checkDecodedSize`. Hand-rolling the wire bytes
+        // (same technique as the "legacy Deflate" test above) pins this
+        // value to CompressionFlag.none unconditionally: a raw CBOR byte
+        // string (CborBytes) of genuinely random bytes, wrapped directly in
+        // `[EncryptionFlag.none][CompressionFlag.none][payload]` with no
+        // Zstd involved at all.
+        final rng = Random(20260824);
+        final noise = Uint8List.fromList(
+          List<int>.generate(
+            ValueCodec.kMaxDecodedValueBytes + 4096,
+            (_) => rng.nextInt(256),
+          ),
+        );
+        final cborBytes = Uint8List.fromList(cbor.encode(CborBytes(noise)));
+
+        final stored = Uint8List(2 + cborBytes.length);
+        stored[0] = EncryptionFlag.none.byte;
+        stored[1] = CompressionFlag.none.byte;
+        stored.setAll(2, cborBytes);
+
+        await expectLater(
+          ValueCodec.decode(stored, context: _ctx),
+          throwsA(isA<DecodedValueTooLargeException>()),
+        );
+      },
+    );
   });
 
   // ── idempotency ──────────────────────────────────────────────────────────────

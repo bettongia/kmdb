@@ -386,6 +386,39 @@ void main() {
       },
     );
 
+    test('decode() rejects an over-limit frame before the large allocation on '
+        'the encrypted branch (0.10.01 S-2 companion)', () async {
+      // Same shape as the plaintext-branch test in value_codec_test.dart,
+      // but routed through the encrypted branch of decode() — the
+      // compression flag (and therefore the pre-allocation reject) lives
+      // inside the ciphertext here, so this exercises the
+      // _decompressBounded call at the `encFlag == EncryptionFlag.aesGcm`
+      // branch specifically.
+      final dek = await KeyDerivation.generateDek();
+      final provider = AesGcmEncryptionProvider(dek);
+      final huge = {'bomb': 'A' * (ValueCodec.kMaxDecodedValueBytes + 4096)};
+
+      final encoded = await ValueCodec.encode(
+        huge,
+        context: _ctx,
+        encryption: provider,
+      );
+      expect(encoded[0], equals(EncryptionFlag.aesGcm.byte));
+
+      await expectLater(
+        ValueCodec.decode(encoded, context: _ctx, encryption: provider),
+        throwsA(
+          isA<DecodedValueTooLargeException>()
+              .having((e) => e.limit, 'limit', ValueCodec.kMaxDecodedValueBytes)
+              .having(
+                (e) => e.decodedSize,
+                'decodedSize',
+                greaterThan(ValueCodec.kMaxDecodedValueBytes),
+              ),
+        ),
+      );
+    });
+
     test('plaintext value decoded with provider still works (flag=0x00 path)', () async {
       // An unencrypted value (flag=0x00) decoded with an encryption provider
       // should still return the correct document. The provider is only invoked

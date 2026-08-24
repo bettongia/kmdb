@@ -139,11 +139,10 @@ can expand to ~256 MB on decode with no cap anywhere in the stack.
 
 `ValueCodec.decode` enforces `kMaxDecodedValueBytes` (1 MiB) on the
 decompressed-but-not-yet-CBOR-decoded payload, on both the encrypted and
-plaintext branches, immediately after `decompress()` returns and before any
-CBOR decoding is attempted. §02's documented workload profile puts an average
-document at 1–4 KB with a 64 KB documented upper bound; 1 MiB gives 16×
-headroom over that maximum while still stopping a multi-hundred-MB bomb from
-being accepted as a document. A violation throws
+plaintext branches, before any CBOR decoding is attempted. §02's documented
+workload profile puts an average document at 1–4 KB with a 64 KB documented
+upper bound; 1 MiB gives 16× headroom over that maximum while still stopping
+a multi-hundred-MB bomb from being accepted as a document. A violation throws
 `DecodedValueTooLargeException` — a distinct type from `FormatException`, so
 callers performing a multi-document operation (`scan`, `dump`, `export`,
 `verify`) can catch it per-document rather than aborting the whole operation.
@@ -153,18 +152,34 @@ This bound is a `static const` on `ValueCodec`, not a `KvStoreConfig` field:
 seam, and `KvStoreConfig` sits *below* `ValueCodec` in the stack (values are
 decoded by callers above `KvStore`, not by the storage engine itself).
 
-**What this bound does not cover.** It fires *after* `betto_zstd`'s
-`decompress()` call returns — as of the currently-published `betto_zstd`,
-there is no way to inspect a frame's declared size and reject it *before*
-the corresponding allocation, because that internal frame-inspection function
-is not part of the package's public API. So a frame whose declared size is
-large enough to exhaust memory *during* decompression (rather than merely
-producing an oversized-but-allocatable result) is not caught by this bound —
-closing that gap requires an upstream `betto_zstd` change (tracked
-separately, not yet landed). Vault blobs are **not** compressed by this codec
-at all and are bounded separately and much more generously
-(`VaultSearchConfig.maxBlobBytes`, §24) — they are attachments, and a 50 MB
-PDF is a legitimate size that a document-sized bound would incorrectly reject.
+**Pre-allocation reject (0.10.01, betto_zstd ≥ 0.1.0-dev.4).** `betto_zstd`
+exposes a bounded `decompress(data, {int maxOutputBytes})`: it reads the
+frame's *declared* decompressed size from the header and rejects it —
+throwing `ZstdLimitExceededException(declaredSize, limit)` — **before**
+allocating a destination buffer for that size, if the declared size exceeds
+`maxOutputBytes`. `ValueCodec.decode` passes `kMaxDecodedValueBytes` as this
+bound on both branches, so an over-limit Zstd frame is now rejected
+pre-allocation rather than after a multi-hundred-MB buffer has already been
+filled. `ValueCodec` catches `ZstdLimitExceededException` and re-throws
+`DecodedValueTooLargeException(decodedSize: e.declaredSize, limit:
+kMaxDecodedValueBytes)`, so the exception surface `decode` promises stays the
+same regardless of which guard rejected the value.
+
+`betto_zstd` keeps the underlying frame-inspection routine (which reads the
+declared size out of the frame header) **private** — it did not make that
+function part of its public API. What it added instead is the `maxOutputBytes`
+bound itself: callers state their own ceiling and get a pre-allocation reject
+for free, without needing to inspect frame headers themselves.
+
+The post-decompression `kMaxDecodedValueBytes` check (`_checkDecodedSize`)
+remains in place. It is the **sole** guard on the uncompressed
+(`CompressionFlag.none`) path, which never reaches `betto_zstd` and so has no
+pre-allocation guard to rely on, and it is a cheap defence-in-depth backstop
+on the Zstd path, where the pre-allocation reject above is now the primary
+guard. Vault blobs are **not** compressed by this codec at all and are bounded
+separately and much more generously (`VaultSearchConfig.maxBlobBytes`, §24) —
+they are attachments, and a 50 MB PDF is a legitimate size that a
+document-sized bound would incorrectly reject.
 
 ## Cross-Platform Reads
 

@@ -19,6 +19,9 @@
 // before any call to tryCompress or decompress — call ZstdSimple.init() once in
 // KmdbDatabase.open() before any I/O begins.
 
+/// @docImport 'package:betto_zstd/betto_zstd.dart';
+library;
+
 import 'dart:typed_data';
 
 import 'package:betto_zstd/betto_zstd.dart' show ZstdSimple;
@@ -45,9 +48,23 @@ import 'compression_flag.dart';
 /// The WASM module must have been initialised via [ZstdSimple.init] before
 /// calling this function (guaranteed by [KmdbDatabase.open]).
 ///
+/// [maxOutputBytes] bounds the buffer `betto_zstd` will allocate for the
+/// frame's *declared* decompressed size — the bound is enforced **before**
+/// that allocation happens, so a frame declaring a size greater than
+/// [maxOutputBytes] is rejected with [ZstdLimitExceededException] rather than
+/// allocated. It has no effect on [CompressionFlag.none], which returns
+/// [data] unchanged with no `betto_zstd` involvement.
+///
 /// Throws [UnsupportedError] for unrecognised flags (guarded upstream by
 /// [CompressionFlag.fromByte]).
-Uint8List decompress(CompressionFlag flag, Uint8List data) => switch (flag) {
+Uint8List decompress(
+  CompressionFlag flag,
+  Uint8List data, {
+  required int maxOutputBytes,
+}) => switch (flag) {
   CompressionFlag.none => data,
-  CompressionFlag.zstd => ZstdSimple().decompress(data),
+  CompressionFlag.zstd => ZstdSimple().decompress(
+    data,
+    maxOutputBytes: maxOutputBytes,
+  ),
 };
