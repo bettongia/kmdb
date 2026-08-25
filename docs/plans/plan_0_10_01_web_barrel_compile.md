@@ -206,7 +206,7 @@ Add a barrel-compile smoke to `make cicd_web` (`make_cicd.mk:161-166`), already
 run by the `test-web` job (`.github/workflows/cicd.yml:263`, Chrome + pinned SDK
 in place — no new job needed): compile `import 'package:kmdb/kmdb.dart'; void
 main() {}` with `dart compile wasm` (the real regression fence for the ffi/io
-seam) and, **subject to Open Question 2**, `dart compile js`. Also wire the
+seam; wasm-only per Q2 — no `dart compile js` guard). Also wire the
 **SAHPool web adapter test** (`test/engine/storage_adapter_sahpool_test.dart`,
 `@TestOn('browser')`) into `cicd_web` — today it runs in **no** lane
 (release-ninja #2), so §19's "web LSM ✓/Sync ✓" rests on an adapter CI never
@@ -214,23 +214,20 @@ executes.
 
 ## Open questions
 
-- [ ] **Q1 — Web storage default: SAHPool factory vs. throwing stub.** The
-      architect recommends defaulting web to `StorageAdapterSahPool()` via a
-      `defaultLocalStorageAdapter()` factory (since web is a supported platform,
-      `open()` should work out-of-the-box on web, not throw unless the caller
-      supplies an adapter). Alternative: default to a throwing stub and require
-      web callers to pass `StorageAdapterSahPool()` explicitly. **Recommendation:
-      SAHPool factory.** Reviewer to confirm.
-- [ ] **Q2 — Is `dart compile js` a supported 0.1.0 web target, or is wasm the
-      sole supported web compiler?** `make_cicd.mk:147-153` shows dart2js already
-      rejects xxhash 64-bit int-literal paths, and the barrel reaches XXH64 — so
-      the JS target may fail independently of this fix. Either (a) commit to
-      wasm-only for web, guard `dart compile wasm` in CI, and state "web =
-      WASM" in §19/README; or (b) additionally resolve the xxhash JS reach and
-      guard both. **Recommendation: wasm-only** (matches the existing
-      `--compiler dart2wasm` posture in `cicd_web`), with §19/README wording to
-      match. Reviewer to confirm; this decision changes both the CI guard and the
-      platform-matrix wording.
+Both resolved by the maintainer (2026-08-26) before the reviewer pass.
+
+- [x] **Q1 — Web storage default: SAHPool factory vs. throwing stub.**
+      **Decision: SAHPool factory.** Default web to `StorageAdapterSahPool()`
+      via a conditional `defaultLocalStorageAdapter()` factory so
+      `KmdbDatabase.open()` works out-of-the-box on web; native still defaults to
+      `StorageAdapterNative()`.
+- [x] **Q2 — `dart compile js` supported, or wasm-only?** **Decision: WASM
+      only.** dart2wasm is the sole supported web compiler for 0.1.0 — it matches
+      the existing `--compiler dart2wasm` posture in `cicd_web` and sidesteps the
+      dart2js rejection of xxhash's 64-bit int literals (`make_cicd.mk:147-153`),
+      which would otherwise require extra engine work. Consequences threaded
+      below: the CI guard fences `dart compile wasm` only, and §19/README state
+      "web = WASM".
 
 ## Implementation plan
 
@@ -263,8 +260,8 @@ make the docs/CI tell the truth._
 
 **Phase C — prove it and fence it:**
 
-- [ ] Verify `dart compile wasm` (and `dart compile js` per Q2) of a one-line
-      barrel-import fixture succeeds from inside `packages/kmdb`.
+- [ ] Verify `dart compile wasm` of a one-line barrel-import fixture succeeds
+      from inside `packages/kmdb` (wasm-only per Q2).
 - [ ] Add the barrel-compile smoke to `make cicd_web` (`make_cicd.mk:161`).
 - [ ] Wire `test/engine/storage_adapter_sahpool_test.dart` into `cicd_web`
       (release-ninja #2).
