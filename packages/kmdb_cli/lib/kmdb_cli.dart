@@ -15,4 +15,4 @@
 /// Command-line interface for the KMDB database engine.
 library;
 
-export 'src/cli_runner.dart';
+export 'src/cli_runner.dart' show KmdbCli;

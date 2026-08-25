@@ -60,5 +60,6 @@
 /// ```
 library;
 
-export 'src/flutter_biometric_kek_provider.dart';
-export 'src/kmdb_flutter_init.dart';
+export 'src/flutter_biometric_kek_provider.dart'
+    show FlutterBiometricKekProvider;
+export 'src/kmdb_flutter_init.dart' show KmdbFlutter;

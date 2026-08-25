@@ -21,9 +21,14 @@ for the full feature list, design notes, and worked examples, and the
 - **Filter DSL** with nested dot-paths, array fan-out, and boolean composition.
 - **Secondary indexes** with lazy build and live maintenance.
 - **Cloud sync** with Last-Write-Wins resolution via HLC timestamps.
-- **Cache layer** with namespace-generation invalidation and persisted views.
+- **Cache layer** — session object cache with namespace-generation
+  invalidation.
 - **Full-text search** — BM25 lexical, BGE-Small-En-v1.5 semantic, and RRF
   hybrid modes via `KmdbCollection.search()`.
+- **Encryption** — optional AES-256-GCM value-level encryption with an
+  Argon2id-derived key and a recovery code.
+- **Authenticated sync** — synced artefacts are authenticated so a second
+  device can detect a tampered or forged file.
 - **Vault** — content-addressable blob store with ref-counted GC.
 - **Collection schemas** — optional JSON Schema validation as an admission gate.
 - **UUIDv7 keys** — time-ordered identifiers with index locality.
