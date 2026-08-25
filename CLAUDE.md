@@ -157,6 +157,8 @@ External Bettongia packages — all published to pub.dev, pinned in
 `pubspec.yaml` `dependency_overrides`:
   betto_common              — shared Bettongia Dart utilities
   betto_schema              — JSON schema validation
+  betto_abnf                — ABNF grammar parsing; reaches core kmdb
+                              transitively via betto_schema (documented per O-1)
   betto_zstd                — Zstd FFI/WASM compression provider
   betto_mediatype_detector  — MIME type detection via FreeDesktop shared-mime-info
                               (replaced the former `betto_registry`)
@@ -170,6 +172,8 @@ External Bettongia packages — all published to pub.dev, pinned in
                               used by FTS (https://github.com/bettongia/lexical)
   betto_inferencing         — ONNX Runtime inference and embedding models for dense
                               text retrieval (https://github.com/bettongia/inferencing)
+  betto_charset_detector    — character-set detection for text extraction
+  betto_lang_detector       — language detection; feeds BM25 tokenizer routing
   betto_pdfium              — PDFium FFI/WASM wrapper: PdfDocument.extractPlainText(),
                               consumed by kmdb_extractor_pdf
                               (https://github.com/bettongia/pdfium)
