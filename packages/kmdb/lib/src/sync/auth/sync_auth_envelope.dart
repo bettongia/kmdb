@@ -108,7 +108,7 @@ final class SyncAuthEnvelope {
   /// decorator's detection is uniform even though callers apply different
   /// *dispositions* (quarantine-and-continue vs. propagate) depending on
   /// which call site is affected — see
-  /// `docs/spec/32_sync_authentication.md`'s rejection-policy table.
+  /// `docs/spec/34_sync_authentication.md`'s rejection-policy table.
   static Future<Uint8List> unwrap(
     Uint8List bytes,
     SyncAuthenticator authenticator, {

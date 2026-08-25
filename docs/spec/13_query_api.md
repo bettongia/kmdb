@@ -617,9 +617,17 @@ protocol. The public API surface:
 | Method | Signature | Description |
 | ------ | --------- | ----------- |
 | `ensureDeviceId` | `Future<String> ensureDeviceId()` | Load or generate the stable device identifier. Call once after `open()` on production devices before the first `push()`. |
-| `sync` | `Future<void> sync({required SyncStorageAdapter syncAdapter, String syncRoot, Set<String>? syncNamespaces, StorageAdapter? localAdapter, ConsolidationConfig consolidationConfig, CancellationToken? cancel, Duration? timeout})` | Flush, push, then pull in one step. **Native-only.** |
+| `sync` | `Future<SyncResult> sync({required SyncStorageAdapter syncAdapter, String syncRoot, Set<String>? syncNamespaces, StorageAdapter? localAdapter, ConsolidationConfig consolidationConfig, CancellationToken? cancel, Duration? timeout})` | Flush, push, then pull in one step. **Native-only.** Returns a `SyncResult` carrying the embedded `PullResult`. |
 | `push` | `Future<void> push({required SyncStorageAdapter syncAdapter, String syncRoot, Set<String>? syncNamespaces, StorageAdapter? localAdapter, ConsolidationConfig consolidationConfig, CancellationToken? cancel, Duration? timeout})` | Flush and upload local SSTables. **Native-only.** |
-| `pull` | `Future<void> pull({required SyncStorageAdapter syncAdapter, String syncRoot, Set<String>? syncNamespaces, StorageAdapter? localAdapter, ConsolidationConfig consolidationConfig, CancellationToken? cancel, Duration? timeout})` | Download and ingest peer SSTables. **Native-only.** |
+| `pull` | `Future<PullResult> pull({required SyncStorageAdapter syncAdapter, String syncRoot, Set<String>? syncNamespaces, StorageAdapter? localAdapter, ConsolidationConfig consolidationConfig, CancellationToken? cancel, Duration? timeout})` | Download and ingest peer SSTables. **Native-only.** Returns a `PullResult`. |
+
+Both `pull` and `sync` return a `PullResult` (directly, or via `SyncResult`)
+whose `quarantined` (`List<QuarantinedSstable>`) and `deferred`
+(`List<DeferredSstable>`) fields report peer SSTables that were **not** ingested
+— rejected as unauthenticated/forged (§34 sync authentication) or corrupt (§12
+robustness), or deferred pending a dependency. Callers should inspect these
+rather than discarding the result: they are the only surface through which a
+rejected peer artefact becomes visible. See §12 for the full semantics.
 
 All three sync methods default `syncNamespaces` to all registered user (non-`$`)
 collections when omitted. System namespaces are always excluded from sync

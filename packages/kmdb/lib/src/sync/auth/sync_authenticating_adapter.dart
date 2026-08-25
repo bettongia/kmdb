@@ -32,7 +32,7 @@ import 'sync_authenticator.dart';
 /// wrapping the adapter once at construction time covers every one of their
 /// call sites automatically — no changes are needed inside those classes to
 /// apply the envelope; they only need to react to the [SyncAuthException]
-/// this decorator throws (see `docs/spec/32_sync_authentication.md`'s
+/// this decorator throws (see `docs/spec/34_sync_authentication.md`'s
 /// per-site rejection-policy table).
 ///
 /// ## Method coverage

@@ -38,7 +38,7 @@ library;
 ///
 /// Callers that need to distinguish "propagate as a hard failure" from
 /// "skip this one artefact and continue" apply that policy themselves at
-/// the call site — see `docs/spec/32_sync_authentication.md`'s per-site
+/// the call site — see `docs/spec/34_sync_authentication.md`'s per-site
 /// rejection-policy table. [SyncAuthException] itself carries no such
 /// distinction; it is a uniform detection signal.
 final class SyncAuthException implements Exception {
