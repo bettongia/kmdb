@@ -23,15 +23,20 @@ released, e.g. [`0.1.0-dev.1.md`](0.1.0-dev.1.md).
 | `kmdb_icloud` | Yes, but **hand-published** | Non-workspace Flutter package. See _Hand-publishing the Flutter packages_ below. |
 | `kmdb_harness` | **Never** | Internal multi-device test harness, permanently `publish_to: none`. Not part of any release. |
 
-The `betto_*` packages (`betto_common`, `betto_schema`, `betto_zstd`,
-`betto_mediatype_detector`, `betto_lexical`, `betto_inferencing`,
-`betto_charset_detector`, `betto_lang_detector`, and their own transitive
-`betto_icu`/`betto_builder_tools`/`betto_onnxrt` dependencies) are published
-independently, in their own repositories, ahead of any KMDB release — they are
-not part of this process. Check that the versions pinned in the root
-`pubspec.yaml`'s `dependency_overrides` are still the versions actually
-published on pub.dev before starting a release; if a `betto_*` package needs a
-fresh version, that happens in its own repo first.
+The `betto_*` packages (`betto_common`, `betto_schema`, `betto_abnf`,
+`betto_zstd`, `betto_mediatype_detector`, `betto_lexical`, `betto_icu`,
+`betto_inferencing`, `betto_onnxrt`, `betto_charset_detector`, `betto_pdfium`,
+`betto_lang_detector`, and their own transitive `betto_builder_tools`
+dev-dependency) are published independently, in their own repositories, ahead
+of any KMDB release — they are not part of this process. Since WI-9, the root
+`pubspec.yaml`'s `dependency_overrides` no longer pins `betto_*` (those
+entries were removed because `dependency_overrides` is consumer-local and
+never reaches a pub.dev consumer of `kmdb`); the real pins are each member
+package's own `dependencies:` block. Check that the `betto_*` constraints in
+`packages/kmdb/pubspec.yaml` (and the other members that depend on `betto_*`
+directly) are still the versions actually published on pub.dev before
+starting a release; if a `betto_*` package needs a fresh version, that
+happens in its own repo first.
 
 ## Publish process
 
@@ -63,9 +68,13 @@ For each of the six Dart-publishable workspace members (`kmdb`, `kmdb_cli`,
    `any`, which `dart pub publish` only warns about (not a hard error), but
    it's bad practice and should be fixed before
    publishing. Member-to-member constraints should point at the version being
-   released for that member (e.g. `kmdb: ^0.1.0-dev.1`); member-to-`betto_*`
-   constraints should copy the exact range already pinned in the root
-   `pubspec.yaml`'s `dependency_overrides`.
+   released for that member (e.g. `kmdb: ^0.1.0`); member-to-`betto_*`
+   constraints are the real, load-bearing pin — a consumer resolves `kmdb`
+   purely from each member's own `dependencies:` block (`dependency_overrides`
+   is consumer-local and never reaches a pub.dev consumer of `kmdb`), so keep
+   these pointed at the exact published `betto_*` versions, not at whatever
+   happens to be in the root `pubspec.yaml`'s `dependency_overrides` (which,
+   since WI-9, holds only non-`betto_*` transitive-unification pins).
 6. Confirm the package version matches the version being released (see
    _Version-bump rules_ below).
 
@@ -156,10 +165,15 @@ neither currently has a `LICENSE` file.
 The workspace's coordinator `pubspec.yaml` (`kmdb_workspace`, itself never
 published — `publish_to: none`) is not required to move in lockstep with
 every member on every release, but for this first release **all publishable
-members and the root coordinator are versioned identically**:
-`0.1.0-dev.1`, a prerelease matching the convention already used by the
-`betto_*` ecosystem KMDB depends on. This sidesteps the awkwardness of a
-"stable" package depending on prerelease `betto_*` constraints.
+members and the root coordinator are versioned identically**: `0.1.0`. WI-9
+(`docs/plans/completed/plan_0_10_01_wi9_release_gate.md`) promoted the entire
+`betto_*` closure to a suffix-free `0.1.0` and, in turn, promoted every
+member's own `betto_*`/inter-`kmdb`-package `dependencies:` constraints from
+`^0.1.0-dev.x` to `^0.1.0` — so KMDB `0.1.0` ships depending on stable
+`betto_*` releases, not prereleases. (Earlier drafts of this document staged
+the first release at `0.1.0-dev.1` specifically to sidestep a stable package
+depending on prerelease `betto_*` constraints; that premise no longer holds
+now that the whole closure — KMDB included — is stable.)
 
 For future releases, packages may diverge on **minor/patch** versions
 (e.g. a patch release of `kmdb_cli` alone doesn't require bumping `kmdb`),
@@ -196,5 +210,7 @@ For each release:
    each Stage 1 prep item and each Stage 2 publish step as completed.
 4. Commit the completed checklist file alongside the version bump.
 
-See [`0.1.0-dev.1.md`](0.1.0-dev.1.md) for a worked example against the
-current `§28` state.
+See [`0.1.0-dev.1.md`](0.1.0-dev.1.md) for the checklist worked against the
+prerelease dry-run, and [`0.1.0.md`](0.1.0.md) for the first real release —
+the one that promotes the `betto_*` closure and every member constraint to
+stable `0.1.0` per WI-9.
