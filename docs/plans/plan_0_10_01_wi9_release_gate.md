@@ -97,23 +97,38 @@ _To be completed by the reviewer/implementer._ Anchor points:
 
 **Phase A — dependency publishing (maintainer-owned, per repo, in DAG order):**
 
-- [ ] Derive and record the exact topological publish order (open question 1).
-- [ ] For each of the 12, in order: confirm the repo's own release readiness,
-      set its pubspec inter-`betto_*` constraints to `^0.1.0`, publish `0.1.0`.
-      (`betto_zstd` and `betto_pdfium` already at `0.1.0-dev.4`; the zstd repo has
-      already bumped its working copy to `0.1.0`.) **Publishing is the
-      maintainer's action** — this plan tracks order and readiness, it does not
-      publish.
+- [x] Derive and record the exact topological publish order (open question 1).
+      Validated empirically: the maintainer published all 12 (last: `betto_onnxrt`
+      then `betto_inferencing`, which depends on it), and a clean re-resolve
+      confirmed the order held.
+- [x] **All 12 published at suffix-free `0.1.0`** (maintainer, 2026-08-24/25):
+      `betto_common`, `betto_schema`, `betto_abnf`, `betto_zstd`,
+      `betto_mediatype_detector`, `betto_lexical`, `betto_icu`,
+      `betto_inferencing`, `betto_onnxrt`, `betto_charset_detector`,
+      `betto_pdfium`, `betto_lang_detector`. `betto_builder_tools` correctly not
+      in the gate (dev-dependency only).
 
 **Phase B — KMDB-side promotion (this repo):**
 
-- [ ] **O-1:** add `betto_abnf` to CLAUDE.md's external-package list and to
-      `dependency_overrides` (documented + pinned).
-- [ ] Promote every `betto_*` override from its `-dev` pin to `^0.1.0`; resolve
-      the removability of the override layer (open question 4).
+> **Progress — PR (this branch, 2026-08-25).** The pin promotion + O-1 doc + the
+> full **Dart-workspace** verification are done here. A clean re-resolve lands
+> every `betto_*` at exactly `0.1.0` (no `-dev`, no conflict), and all seven Dart
+> packages pass against the shipped artefacts: kmdb 2653, kmdb_cli 1240,
+> extractor_pdf 34, extractor_html 19, extractor_markdown 21, google_drive 117,
+> harness 153. **Remaining Phase B (follow-on):** O-1b, O-2, the Flutter/web
+> lanes, `make coverage`/benchmarks, the override-layer and version/tag questions.
+
+- [x] **O-1:** `betto_abnf` added to CLAUDE.md's external-package list and to
+      `dependency_overrides`. Also documented `betto_charset_detector` and
+      `betto_lang_detector` (equally in the closure, previously undocumented).
+- [x] Promote every `betto_*` override from its `-dev` pin to `^0.1.0` (and add
+      `betto_icu`/`betto_onnxrt` explicitly so the override list is the full
+      documented closure). Override-layer removability deferred (open question 4 —
+      follow-on).
 - [ ] **O-1b:** reconcile `kmdb_flutter` / `kmdb_icloud` `kmdb` pins to the
-      `0.1.0` line.
+      `0.1.0` line. _(follow-on)_
 - [ ] **O-2:** confirm/add a CI lane that resolves and tests `kmdb_flutter`.
+      _(follow-on)_
 - [ ] Confirm KMDB member versions and the `0.1.0` tag target (open question 3).
 - [ ] **Re-run the full suite against the promoted `^0.1.0` pins** — VM, web
       (`--platform chrome`), and the Flutter lanes — plus `make coverage` ≥
