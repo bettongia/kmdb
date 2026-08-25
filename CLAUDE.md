@@ -153,8 +153,11 @@ packages/
                          text/markdown blobs, wraps the markdown package
                          (pure Dart, optional, opt-in)
 
-External Bettongia packages — all published to pub.dev, pinned in
-`pubspec.yaml` `dependency_overrides`:
+External Bettongia packages — all published to pub.dev at `0.1.0`, resolved
+via each member package's own `dependencies:` constraint (WI-9 removed the
+former root `pubspec.yaml` `dependency_overrides` betto_* pins — they were
+consumer-local and didn't describe how a pub.dev consumer of `kmdb` actually
+resolves this closure):
   betto_common              — shared Bettongia Dart utilities
   betto_schema              — JSON schema validation
   betto_abnf                — ABNF grammar parsing; reaches core kmdb

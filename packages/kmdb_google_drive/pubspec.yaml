@@ -1,7 +1,7 @@
 name: kmdb_google_drive
 description: Google Drive sync adapter for KMDB — connects the SyncStorageAdapter
   interface to the Google Drive REST API (Drive v3).
-version: 0.1.0-dev.1
+version: 0.1.0
 repository: https://github.com/bettongia/kmdb
 
 environment:
@@ -10,7 +10,7 @@ environment:
 resolution: workspace
 
 dependencies:
-  kmdb: ^0.1.0-dev.1
+  kmdb: ^0.1.0
   googleapis: ^14.0.0
   googleapis_auth: ^2.0.0
   http: ^1.0.0

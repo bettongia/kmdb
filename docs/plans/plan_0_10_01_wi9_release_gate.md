@@ -1,6 +1,15 @@
 # WI-9: Release dependency gate — promote the `betto_*` closure to `0.1.0` and tag KMDB
 
-**Status**: Investigated
+**Status**: Implementing
+
+> **Phase B member-side status (2026-08-25).** Member `dependencies:` promotion,
+> root override removal, member+root version bumps, and `docs/releasing/` updates
+> are done, **`kmdb-qa` PASS**, and shipped as a PR. QA independently deleted the
+> lock and re-resolved with the `betto_*` overrides gone: all 12 `betto_*` land
+> at hosted `0.1.0` from the member constraints alone (zero `-dev`, none via
+> override) — the real pub.dev-consumer resolution path. Suites green against the
+> override-free tree. **Phases C (W6 sweep) and D (tag) remain** — status stays
+> `Implementing`.
 
 **PR link**: _(none yet)_
 
@@ -210,6 +219,22 @@ _To be completed by the reviewer/implementer._ Anchor points:
 > the six member versions + root to `0.1.0`, update `docs/releasing/`, then re-run
 > the full CI matrix (VM + `test-web`/Chrome + Flutter lanes) with `make
 > coverage`/benchmarks against the promoted, override-free tree.
+>
+> **Progress — follow-up PR (this branch, 2026-08-25).** The remaining Phase B
+> member-side work is done here: every member `dependencies:` betto_*/inter-kmdb
+> constraint promoted to `^0.1.0`, the root `betto_*` overrides removed (only
+> `meta`/`uuid`/`cbor`/`web`/`charset` remain), the six publishable members plus
+> the root coordinator bumped to `0.1.0` (`kmdb_harness`/`kmdb_flutter`/
+> `kmdb_icloud` confirmed already at `0.1.0`, untouched), and
+> `docs/releasing/README.md` + a new `docs/releasing/0.1.0.md` updated to drop
+> the now-false "stay at -dev.1" premise. A clean `dart pub get` at the
+> workspace root — with the betto_* overrides gone — lands all 12 `betto_*` at
+> exactly `0.1.0` via the member constraints alone, and all seven pure-Dart
+> package suites re-run clean against that resolution at the same counts as the
+> prior PR (kmdb 2653, kmdb_cli 1240, extractor_pdf 34, extractor_html 19,
+> extractor_markdown 21, google_drive 117, harness 153). The web/Flutter CI
+> lanes, `make coverage`, and the §18 benchmarks are left for the Phase C (W6)
+> sweep, per this implementation slice's explicit scope boundary.
 
 - [x] **O-1:** `betto_abnf` added to CLAUDE.md's external-package list and to
       `dependency_overrides`. Also documented `betto_charset_detector` and
@@ -228,7 +253,7 @@ _To be completed by the reviewer/implementer._ Anchor points:
 - [x] **O-2:** confirmed — a `test-flutter` CI lane (`make cicd_flutter`: format,
       analyze, `flutter test` + ≥90% coverage) and a `test-icloud` lane already
       exist in `.github/workflows/cicd.yml` (macOS runners). No new lane needed.
-- [ ] **Q4 — promote member `dependencies:` constraints from `^0.1.0-dev.x` to
+- [x] **Q4 — promote member `dependencies:` constraints from `^0.1.0-dev.x` to
       `^0.1.0`** (the load-bearing fix; overrides do not reach pub.dev
       consumers). Exact edits:
       - `packages/kmdb/pubspec.yaml`: `betto_schema`, `betto_zstd`,
@@ -245,7 +270,7 @@ _To be completed by the reviewer/implementer._ Anchor points:
       - `packages/kmdb_extractor_markdown/pubspec.yaml`: `kmdb` → `^0.1.0`.
       - Leave `kmdb_harness`'s blank `kmdb:`/`uuid:` constraints as-is
         (`publish_to: none`, never published).
-- [ ] **Q4 — remove the betto_* entries from the root `dependency_overrides`**
+- [x] **Q4 — remove the betto_* entries from the root `dependency_overrides`**
       (`pubspec.yaml` lines 42–54: `betto_common`, `betto_schema`, `betto_abnf`,
       `betto_zstd`, `betto_mediatype_detector`, `betto_lexical`, `betto_icu`,
       `betto_inferencing`, `betto_onnxrt`, `betto_charset_detector`,
@@ -257,12 +282,13 @@ _To be completed by the reviewer/implementer._ Anchor points:
       `kmdb_flutter`/`kmdb_icloud` pubspecs (redundant once `kmdb`'s own
       `dependencies:` are `^0.1.0`; they resolve `betto_*` transitively). Lower
       priority — both are `publish_to: none` and hand-published.
-- [ ] **Q3 — bump member `version:` `0.1.0-dev.1 → 0.1.0`** in the six
+- [x] **Q3 — bump member `version:` `0.1.0-dev.1 → 0.1.0`** in the six
       publishable members (`kmdb`, `kmdb_cli`, `kmdb_google_drive`,
       `kmdb_extractor_pdf`, `kmdb_extractor_html`, `kmdb_extractor_markdown`) and
       the root coordinator `pubspec.yaml` (cosmetic, release-train label).
-      `kmdb_harness`/`kmdb_flutter`/`kmdb_icloud` already at `0.1.0`.
-- [ ] **Update `docs/releasing/README.md`** — the "Version-bump rules" section
+      `kmdb_harness`/`kmdb_flutter`/`kmdb_icloud` confirmed already at `0.1.0`
+      — no change needed.
+- [x] **Update `docs/releasing/README.md`** — the "Version-bump rules" section
       no longer needs to justify staying at `0.1.0-dev.1` (the prerelease-`betto_*`
       premise is gone); update it and the Stage 1 step-5 member-to-member example
       (`kmdb: ^0.1.0-dev.1` → `^0.1.0`) to the stable line. Create
@@ -275,6 +301,19 @@ _To be completed by the reviewer/implementer._ Anchor points:
       verification: with betto_* overrides gone, a clean re-resolve must land
       every `betto_*` at exactly `0.1.0` (no `-dev`, no conflict) via the member
       constraints alone, and every package must stay green.
+      **Partially done in this PR (2026-08-25):** a clean `dart pub get` at the
+      workspace root confirmed every `betto_*` resolves to exactly `0.1.0` (no
+      `-dev`, no conflict) purely from the member `dependencies:` constraints,
+      with the root `betto_*` overrides gone. All 7 pure-Dart package suites
+      re-run against that override-free resolution and matched the pre-change
+      baselines exactly: kmdb 2653, kmdb_cli 1240, kmdb_extractor_pdf 34,
+      kmdb_extractor_html 19, kmdb_extractor_markdown 21, kmdb_google_drive
+      117, kmdb_harness 153 (all "All tests passed!", no regressions).
+      **Not yet run** (left for the coordinator, per the WI-9 hand-off scope):
+      the `test-web`/Chrome lane, the `test-flutter`/`test-icloud` Flutter
+      lanes, `make coverage`, and the §18 benchmarks — these require the full
+      CI matrix / Flutter toolchain and are bundled with the Phase C (W6) final
+      readiness sweep.
 
 **Phase C — W6 final readiness sweep (the re-sequenced gate):**
 
