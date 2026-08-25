@@ -11,6 +11,18 @@
 > override-free tree. **Phases C (W6 sweep) and D (tag) remain** — status stays
 > `Implementing`.
 
+> **Phase C progress (2026-08-26).** The **W6 sweep is done**: the `kmdb-qa`
+> full-codebase readiness audit ran, its findings were fixed and merged as
+> [PR #85](https://github.com/bettongia/kmdb/pull/85) (CHANGELOG/A5 across all
+> 8 published packages, `kmdb_flutter` README, barrel `show` clauses, 3 dead-file
+> deletions, `kmdb` README fix, roadmap reconciliation). The **`kmdb-spec-auditor`
+> pass** also ran (otherwise clean); its two triaged fixes — §13 sync return
+> types and the §34 cross-references — landed direct-to-`main` as `c0b8666`. The
+> full CI matrix (VM + web/Chrome + Flutter lanes) went green on the W6 tree via
+> PR #85's CICD. **Still remaining in Phase C:** an independent release review
+> (`bettongia:release-ninja` and/or `/code-review ultra`) and the applicable
+> §28 RC-items; then Phase D (tag). Status stays `Implementing`.
+
 **PR link**: _(none yet)_
 
 > **Provenance.** WI-9 of the 0.10.01 hardening track — **the last item, and the
@@ -309,21 +321,31 @@ _To be completed by the reviewer/implementer._ Anchor points:
       baselines exactly: kmdb 2653, kmdb_cli 1240, kmdb_extractor_pdf 34,
       kmdb_extractor_html 19, kmdb_extractor_markdown 21, kmdb_google_drive
       117, kmdb_harness 153 (all "All tests passed!", no regressions).
-      **Not yet run** (left for the coordinator, per the WI-9 hand-off scope):
-      the `test-web`/Chrome lane, the `test-flutter`/`test-icloud` Flutter
-      lanes, `make coverage`, and the §18 benchmarks — these require the full
-      CI matrix / Flutter toolchain and are bundled with the Phase C (W6) final
-      readiness sweep.
+      **Now run (2026-08-26, Phase C):** the full CI matrix — VM, `test-web`/
+      Chrome, and the `test-flutter`/`test-icloud` Flutter lanes — went green on
+      the W6 tree via [PR #85](https://github.com/bettongia/kmdb/pull/85)'s CICD
+      (run `32897490101`), and `make coverage` (95.0%) + the §18 benchmarks
+      (10/10) were verified against the promoted, override-free tree. This box
+      stays unchecked only because **Phase D requires a final matrix re-run on
+      the exact tagged commit** — the tag must sit on top of all B+C edits,
+      including the independent-review fixes still to land.
 
 **Phase C — W6 final readiness sweep (the re-sequenced gate):**
 
-- [ ] Run **W6** (WI-10 code-health remainder) against the promoted tree:
+- [x] Run **W6** (WI-10 code-health remainder) against the promoted tree:
       public-API surface audit, dead-code sweep, doc-comment audit, and CHANGELOG
       accuracy (incl. **A5** — the `ConsolidationCoordinator` required-`dbDir` and
       vault-envelope breaking-change notes, and the R-5 sync-root re-push upgrade
-      note, which the CHANGELOG still omits). Coordinate a **`kmdb-spec-auditor`**
-      pass (spec-vs-code truth) and a full **`kmdb-qa`** audit as part of this
-      sweep.
+      note). **Done 2026-08-26** — `kmdb-qa` full-codebase audit → findings fixed
+      and merged in [PR #85](https://github.com/bettongia/kmdb/pull/85) (all 8
+      published packages now carry real `0.1.0` CHANGELOGs with the breaking-change
+      list; A5/R-5 covered). The **`kmdb-spec-auditor`** spec-vs-code truth pass
+      ran too (otherwise clean) — its two fixes (§13 sync return types, §34
+      cross-references) landed as `c0b8666`.
+- [ ] **Independent release review** — `bettongia:release-ninja` (cross-platform
+      / CI / release-posture) and/or a user-triggered `/code-review ultra`
+      (correctness depth) against the post-W6 `main`. Triage and land any
+      must-fix findings before the tag.
 - [ ] Run the applicable `docs/spec/28_release_checklist.md` RC-items, including
       **RC-3** (Windows, covers A6) and **RC-25**.
 
