@@ -28,7 +28,8 @@ dev_dependencies:
 
 # Mirror the workspace-level overrides so transitive betto_* deps resolve to
 # the same versions used by the rest of the repo.  Keep in sync with the root
-# pubspec.yaml dependency_overrides block.
+# pubspec.yaml dependency_overrides block — except betto_pdfium, which is pulled
+# only by kmdb_extractor_pdf and is not in this package's dependency graph.
 dependency_overrides:
   kmdb:
     path: ../kmdb
@@ -36,12 +37,18 @@ dependency_overrides:
   uuid: ^4.5.3
   cbor: ^6.5.1
   web: ^1.1.0
-  betto_common: ^0.1.0-dev.1
-  betto_schema: ^0.1.0-dev.1
-  betto_zstd: ^0.1.0-dev.3
-  betto_mediatype_detector: ^0.1.0-dev.1
-  betto_lexical: ^0.1.0-dev.1
-  betto_inferencing: ^0.1.0-dev.1
+  betto_common: ^0.1.0
+  betto_schema: ^0.1.0
+  betto_abnf: ^0.1.0
+  betto_zstd: ^0.1.0
+  betto_mediatype_detector: ^0.1.0
+  betto_lexical: ^0.1.0
+  betto_icu: ^0.1.0
+  betto_inferencing: ^0.1.0
+  betto_onnxrt: ^0.1.0
+  betto_charset_detector: ^0.1.0
+  betto_lang_detector: ^0.1.0
+  charset: ^2.0.1
 
 flutter:
   plugin:

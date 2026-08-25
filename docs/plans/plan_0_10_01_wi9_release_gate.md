@@ -115,8 +115,11 @@ _To be completed by the reviewer/implementer._ Anchor points:
 > every `betto_*` at exactly `0.1.0` (no `-dev`, no conflict), and all seven Dart
 > packages pass against the shipped artefacts: kmdb 2653, kmdb_cli 1240,
 > extractor_pdf 34, extractor_html 19, extractor_markdown 21, google_drive 117,
-> harness 153. **Remaining Phase B (follow-on):** O-1b, O-2, the Flutter/web
-> lanes, `make coverage`/benchmarks, the override-layer and version/tag questions.
+> harness 153. **O-1b + O-2 landed in a follow-up PR** (Flutter override
+> reconciliation + CI-lane confirmation; `kmdb_flutter` 9 / `kmdb_icloud` 128
+> green at `0.1.0`). **Remaining Phase B:** web (`--platform chrome`) lane,
+> `make coverage`/benchmarks against the promoted pins, and the override-layer +
+> version/tag questions.
 
 - [x] **O-1:** `betto_abnf` added to CLAUDE.md's external-package list and to
       `dependency_overrides`. Also documented `betto_charset_detector` and
@@ -125,10 +128,16 @@ _To be completed by the reviewer/implementer._ Anchor points:
       `betto_icu`/`betto_onnxrt` explicitly so the override list is the full
       documented closure). Override-layer removability deferred (open question 4 —
       follow-on).
-- [ ] **O-1b:** reconcile `kmdb_flutter` / `kmdb_icloud` `kmdb` pins to the
-      `0.1.0` line. _(follow-on)_
-- [ ] **O-2:** confirm/add a CI lane that resolves and tests `kmdb_flutter`.
-      _(follow-on)_
+- [x] **O-1b:** reconciled `kmdb_flutter` / `kmdb_icloud` `dependency_overrides`
+      betto_* blocks (were stale at `^0.1.0-dev.1/dev.3` and missing packages) to
+      mirror the root's promoted `^0.1.0` closure. Both use `kmdb` via `path`, so
+      `kmdb` already tracks local source — the drift was the betto_* overrides.
+      `betto_pdfium` intentionally omitted (neither Flutter package depends on the
+      pdf extractor). Verified with Flutter: both resolve every betto_* to exactly
+      `0.1.0` and pass — `kmdb_flutter` 9, `kmdb_icloud` 128.
+- [x] **O-2:** confirmed — a `test-flutter` CI lane (`make cicd_flutter`: format,
+      analyze, `flutter test` + ≥90% coverage) and a `test-icloud` lane already
+      exist in `.github/workflows/cicd.yml` (macOS runners). No new lane needed.
 - [ ] Confirm KMDB member versions and the `0.1.0` tag target (open question 3).
 - [ ] **Re-run the full suite against the promoted `^0.1.0` pins** — VM, web
       (`--platform chrome`), and the Flutter lanes — plus `make coverage` ≥
