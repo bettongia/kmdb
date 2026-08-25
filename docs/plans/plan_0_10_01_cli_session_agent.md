@@ -1,8 +1,18 @@
 # CLI session agent — unlock once, reuse across commands
 
-**Status**: Draft (needs investigation → `kmdb-plan-reviewer`)
+**Status**: Draft — **deferred to a post-`0.1.0` release** (decision 2026-08-26)
 
 **PR link**: _(none yet)_
+
+> **Deferred out of `0.1.0` (2026-08-26).** This is a CLI ergonomics
+> improvement, not a correctness item: it does **not** close SC-1 (WI-5 already
+> did, [PR #75](https://github.com/bettongia/kmdb/pull/75)), and it introduces
+> the single highest-risk new subsystem in the track (a new place a DEK lives).
+> Shipping it under release time-pressure is exactly the wrong trade. `0.1.0`
+> ships without a CLI DEK session cache — every encrypted-DB command re-runs
+> Argon2id, which is acceptable for the REPL. This plan stays Draft and is
+> picked up in a future release, when it can go through the full
+> reviewer → implement → QA pipeline unhurried.
 
 > **Provenance.** Split out of `plan_0_10_01_unlock_policy.md` (WI-5) on
 > 2026-08-11 on the reviewer's recommendation: the CLI session agent is a
