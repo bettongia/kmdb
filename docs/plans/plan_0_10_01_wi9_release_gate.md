@@ -1,6 +1,6 @@
 # WI-9: Release dependency gate — promote the `betto_*` closure to `0.1.0` and tag KMDB
 
-**Status**: Open
+**Status**: Investigated
 
 **PR link**: _(none yet)_
 
@@ -46,33 +46,114 @@ all consumers and never reaches a consumer's resolution.
 
 ## Open questions
 
-- [ ] **Exact topological publish order.** Packages must publish bottom-up: a
-      package cannot go to `0.1.0` while any dependency it declares is still an
-      unpublished `0.1.0`. The precise order must be **derived from each
-      package's own pubspec** (their inter-`betto_*` dependency declarations),
-      not guessed. Known edges from CLAUDE.md (partial, to confirm):
-      `betto_icu → betto_lexical`; `betto_onnxrt → betto_inferencing`;
-      `betto_abnf → betto_schema`; `betto_pdfium → kmdb_extractor_pdf`. Likely
-      leaves: `betto_common`, `betto_zstd`, `betto_abnf`, `betto_icu`,
-      `betto_onnxrt`, `betto_pdfium`, `betto_mediatype_detector`. **Decision
-      needed:** the full ordered list, produced by reading the 12 pubspecs.
-- [ ] **Per-repo release readiness.** Each `betto_*` repo may have its own
-      release bar before `0.1.0` (e.g. the maintainer flagged wanting "a more
-      comprehensive release check on `betto_pdfium`" before its `0.1.0`; the zstd
-      repo has already bumped its working copy to `0.1.0`). **Decision needed:**
-      is each repo's own release process a prerequisite this plan just gates on,
-      or does WI-9 only cover the KMDB-side promotion and assume each repo is
-      independently released? (Recommended: WI-9 lists the order + the readiness
-      bar, and treats each publish as a maintainer-owned per-repo step; the KMDB
-      plan's implementable work is steps 2–5 below.)
-- [ ] **KMDB's own version.** The workspace is `0.1.0-dev.1` (`pubspec.yaml:3`).
-      Confirm the tag target is `0.1.0` and whether member package pubspecs carry
-      independent versions that also need promoting.
-- [ ] **Do the promoted deps stay in `dependency_overrides`, or move to real
-      `dependencies`?** Overrides exist to pin `-dev`/path builds; once the deps
-      are hosted `^0.1.0`, the override layer may be removable in favour of
-      ordinary version constraints in each member pubspec. **Decision needed** —
-      affects whether the final artefact resolves the way pub.dev consumers will.
+- [x] **Exact topological publish order.** **Resolved empirically** — the
+      maintainer published all 12 bottom-up and a clean re-resolve confirmed the
+      order held (last: `betto_onnxrt` → `betto_inferencing`). See Phase A.
+- [x] **Per-repo release readiness.** **Moot** — all 12 `betto_*` are now
+      published at `0.1.0`. Each repo's own release bar was a maintainer-owned
+      per-repo prerequisite that has been satisfied; WI-9's KMDB-side work is
+      steps 2–5.
+- [x] **KMDB's own version + tag target.** **Resolved (2026-08-25 reviewer pass
+      — see "Reviewer decisions" below).** Tag target is stable suffix-free
+      **`0.1.0`**. Six publishable members carry independent `0.1.0-dev.1`
+      versions that must move to `0.1.0`; the root coordinator's `version:` is
+      cosmetic (`publish_to: none`) but bumps too as the release-train label.
+- [x] **Do the promoted deps stay in `dependency_overrides`, or move to real
+      `dependencies`?** **Resolved (2026-08-25 reviewer pass — see below).** The
+      load-bearing fix is promoting each **member `dependencies:`** constraint
+      from `^0.1.0-dev.x` to `^0.1.0`; `dependency_overrides` is consumer-local
+      and does **not** describe how a pub.dev consumer of `kmdb` resolves. After
+      member promotion the root betto_* override entries are redundant and are
+      **removed**, so the workspace resolves the same way a consumer does.
+
+## Reviewer decisions (2026-08-25)
+
+Both remaining live questions are resolved, grounded in the member pubspecs on
+HEAD.
+
+### Q4 — member `dependencies:` promotion is the real fix; the override layer is removed
+
+`dependency_overrides` is a **consumer-local** mechanism: pub.dev ignores it
+when `kmdb` is pulled in as a dependency. So the root override block does **not**
+describe how a pub.dev consumer of `kmdb` resolves `betto_*` — the member
+`dependencies:` blocks do. On HEAD those are still `-dev`:
+
+- `packages/kmdb/pubspec.yaml` declares 8 betto_* deps at `^0.1.0-dev.x`
+  (`betto_schema` dev.2, `betto_zstd` dev.3, `betto_mediatype_detector` dev.1,
+  `betto_common` dev.2, `betto_lexical` dev.2, `betto_inferencing` dev.3,
+  `betto_charset_detector` dev.2, `betto_lang_detector` dev.1).
+- `packages/kmdb_cli/pubspec.yaml`: `kmdb`, `kmdb_google_drive`,
+  `kmdb_extractor_{html,markdown,pdf}`, `betto_inferencing` — all `^0.1.0-dev.x`.
+- `packages/kmdb_google_drive/pubspec.yaml`: `kmdb: ^0.1.0-dev.1`.
+- `packages/kmdb_extractor_pdf/pubspec.yaml`: `kmdb: ^0.1.0-dev.1`,
+  `betto_pdfium: ^0.1.0-dev.3`.
+- `packages/kmdb_extractor_html/pubspec.yaml`: `kmdb: ^0.1.0-dev.1`.
+- `packages/kmdb_extractor_markdown/pubspec.yaml`: `kmdb: ^0.1.0-dev.1`.
+
+A caret range on a prerelease (`^0.1.0-dev.2` ⇒ `>=0.1.0-dev.2 <0.2.0`) does
+technically *admit* `0.1.0`, so a consumer would not hard-fail — but it still
+advertises a prerelease floor, still permits `-dev` `betto_*` to be pulled into a
+consumer's resolution, and makes `dart pub publish` emit the "packages dependent
+on a pre-release should themselves be published as a pre-release" warning. All
+three are wrong for a clean stable `0.1.0`. **Decision:** promote every member
+`dependencies:` betto_*/inter-kmdb constraint from `^0.1.0-dev.x` to `^0.1.0`
+(exact file list in the Phase B checklist below). `kmdb_harness`'s blank
+`kmdb:`/`uuid:` constraints stay blank — it is permanently `publish_to: none` and
+never reaches a consumer's resolution.
+
+**Override layer — removed, not kept.** Once member constraints are `^0.1.0` and
+`0.1.0` is the only published `betto_*`, the root `dependency_overrides` betto_*
+entries are redundant *for resolution*. Keeping them would mask the member
+constraints — a workspace green run would then not be evidence about how a
+consumer resolves (exactly the trap the problem statement's step 3 warns
+against). **Decision:** delete the betto_* entries from the root
+`dependency_overrides` (lines 42–54, i.e. `betto_common`, `betto_schema`,
+`betto_abnf`, `betto_zstd`, `betto_mediatype_detector`, `betto_lexical`,
+`betto_icu`, `betto_inferencing`, `betto_onnxrt`, `betto_charset_detector`,
+`betto_pdfium`, `betto_lang_detector`) so the workspace resolves via the member
+constraints — the same path a pub.dev consumer takes. This makes the Phase B
+full-suite re-run load-bearing. Keep the **non-betto** overrides (`meta`, `uuid`,
+`cbor`, `web`, `charset`) — they are workspace-wide transitive unification pins,
+outside WI-9's scope; do not churn them here. `betto_icu`/`betto_onnxrt` need no
+explicit entry once removed — they are transitive via `betto_lexical` /
+`betto_inferencing` and resolve to `0.1.0` from those direct constraints.
+
+The Flutter packages (`kmdb_flutter`, `kmdb_icloud`) carry their own mirrored
+betto_* overrides and consume `kmdb` via `path:`. Once `kmdb`'s own
+`dependencies:` are `^0.1.0`, those betto_* resolve to `0.1.0` transitively, so
+their mirrored overrides also become redundant. Removing them is a consistency
+tidy-up (it retires the "keep in sync with root" burden the pubspec comments
+describe) but is **optional and lower priority** — both packages are
+`publish_to: none` and hand-published outside the Dart pipeline; their real
+publish-time pubspec surgery is already documented in
+`docs/releasing/README.md`'s hand-publish appendix.
+
+### Q3 — versions to promote and the tag target
+
+- **Tag target: `0.1.0`** (stable, suffix-free) — this is the whole premise of
+  WI-9 (drop `-dev`).
+- **Root coordinator `version:` (`pubspec.yaml:3`, `0.1.0-dev.1`)** — cosmetic
+  (`publish_to: none`, consumed by nobody), but `docs/releasing/README.md`
+  treats it as the release-train label and versions all members to match. Bump
+  it to `0.1.0` for consistency; it is not load-bearing.
+- **Member `version:` bumps `0.1.0-dev.1 → 0.1.0` (six publishable members):**
+  `packages/kmdb/pubspec.yaml` (**the load-bearing one — what consumers depend
+  on**), `packages/kmdb_cli/pubspec.yaml`,
+  `packages/kmdb_google_drive/pubspec.yaml`,
+  `packages/kmdb_extractor_pdf/pubspec.yaml`,
+  `packages/kmdb_extractor_html/pubspec.yaml`,
+  `packages/kmdb_extractor_markdown/pubspec.yaml`.
+- **No change:** `kmdb_harness` (`0.1.0`, `publish_to: none`, never published),
+  `kmdb_flutter` / `kmdb_icloud` (`0.1.0`, `publish_to: none`, hand-published).
+
+**Consequential doc work (surfaced by Q3/Q4).** `docs/releasing/README.md`'s
+"Version-bump rules" section currently *justifies* the first release staying at
+`0.1.0-dev.1` precisely "to sidestep a stable package depending on prerelease
+`betto_*` constraints." WI-9 removes that premise, so that paragraph and the
+Stage 1 step-5 guidance ("member-to-member constraints ... `kmdb:
+^0.1.0-dev.1`") must be updated to the `0.1.0` line, and a new per-release
+checklist `docs/releasing/0.1.0.md` created from `TEMPLATE.md` (the existing one
+is `0.1.0-dev.1.md`). These are added as Phase B/C checklist items below.
 
 ## Investigation
 
@@ -117,9 +198,18 @@ _To be completed by the reviewer/implementer._ Anchor points:
 > extractor_pdf 34, extractor_html 19, extractor_markdown 21, google_drive 117,
 > harness 153. **O-1b + O-2 landed in a follow-up PR** (Flutter override
 > reconciliation + CI-lane confirmation; `kmdb_flutter` 9 / `kmdb_icloud` 128
-> green at `0.1.0`). **Remaining Phase B:** web (`--platform chrome`) lane,
-> `make coverage`/benchmarks against the promoted pins, and the override-layer +
-> version/tag questions.
+> green at `0.1.0`).
+>
+> **Reviewer update (2026-08-25):** the override-layer + version/tag questions
+> are now resolved (see "Reviewer decisions"), and they surfaced **required
+> member-side work that the earlier "pin promotion" did not cover**: the member
+> `dependencies:` blocks still declare `betto_* ^0.1.0-dev.x` (the root
+> overrides masked this), and six member `version:` fields are still
+> `0.1.0-dev.1`. **Remaining Phase B** is therefore: promote member
+> `dependencies:` to `^0.1.0`, remove the redundant root betto_* overrides, bump
+> the six member versions + root to `0.1.0`, update `docs/releasing/`, then re-run
+> the full CI matrix (VM + `test-web`/Chrome + Flutter lanes) with `make
+> coverage`/benchmarks against the promoted, override-free tree.
 
 - [x] **O-1:** `betto_abnf` added to CLAUDE.md's external-package list and to
       `dependency_overrides`. Also documented `betto_charset_detector` and
@@ -138,11 +228,53 @@ _To be completed by the reviewer/implementer._ Anchor points:
 - [x] **O-2:** confirmed — a `test-flutter` CI lane (`make cicd_flutter`: format,
       analyze, `flutter test` + ≥90% coverage) and a `test-icloud` lane already
       exist in `.github/workflows/cicd.yml` (macOS runners). No new lane needed.
-- [ ] Confirm KMDB member versions and the `0.1.0` tag target (open question 3).
-- [ ] **Re-run the full suite against the promoted `^0.1.0` pins** — VM, web
-      (`--platform chrome`), and the Flutter lanes — plus `make coverage` ≥
-      baseline and the §18 benchmarks. This is the load-bearing verification: it
-      is the first run against the actual shipped dependency artefacts.
+- [ ] **Q4 — promote member `dependencies:` constraints from `^0.1.0-dev.x` to
+      `^0.1.0`** (the load-bearing fix; overrides do not reach pub.dev
+      consumers). Exact edits:
+      - `packages/kmdb/pubspec.yaml`: `betto_schema`, `betto_zstd`,
+        `betto_mediatype_detector`, `betto_common`, `betto_lexical`,
+        `betto_inferencing`, `betto_charset_detector`, `betto_lang_detector`
+        → `^0.1.0`.
+      - `packages/kmdb_cli/pubspec.yaml`: `kmdb`, `kmdb_google_drive`,
+        `kmdb_extractor_html`, `kmdb_extractor_markdown`, `kmdb_extractor_pdf`,
+        `betto_inferencing` → `^0.1.0`.
+      - `packages/kmdb_google_drive/pubspec.yaml`: `kmdb` → `^0.1.0`.
+      - `packages/kmdb_extractor_pdf/pubspec.yaml`: `kmdb`, `betto_pdfium`
+        → `^0.1.0`.
+      - `packages/kmdb_extractor_html/pubspec.yaml`: `kmdb` → `^0.1.0`.
+      - `packages/kmdb_extractor_markdown/pubspec.yaml`: `kmdb` → `^0.1.0`.
+      - Leave `kmdb_harness`'s blank `kmdb:`/`uuid:` constraints as-is
+        (`publish_to: none`, never published).
+- [ ] **Q4 — remove the betto_* entries from the root `dependency_overrides`**
+      (`pubspec.yaml` lines 42–54: `betto_common`, `betto_schema`, `betto_abnf`,
+      `betto_zstd`, `betto_mediatype_detector`, `betto_lexical`, `betto_icu`,
+      `betto_inferencing`, `betto_onnxrt`, `betto_charset_detector`,
+      `betto_pdfium`, `betto_lang_detector`). Keep the non-betto overrides
+      (`meta`, `uuid`, `cbor`, `web`, `charset`). This makes the workspace
+      resolve the way a pub.dev consumer resolves `kmdb`, so the re-run below is
+      real evidence about the shipped artefact.
+- [ ] _(Optional, consistency)_ Remove the mirrored betto_* overrides from
+      `kmdb_flutter`/`kmdb_icloud` pubspecs (redundant once `kmdb`'s own
+      `dependencies:` are `^0.1.0`; they resolve `betto_*` transitively). Lower
+      priority — both are `publish_to: none` and hand-published.
+- [ ] **Q3 — bump member `version:` `0.1.0-dev.1 → 0.1.0`** in the six
+      publishable members (`kmdb`, `kmdb_cli`, `kmdb_google_drive`,
+      `kmdb_extractor_pdf`, `kmdb_extractor_html`, `kmdb_extractor_markdown`) and
+      the root coordinator `pubspec.yaml` (cosmetic, release-train label).
+      `kmdb_harness`/`kmdb_flutter`/`kmdb_icloud` already at `0.1.0`.
+- [ ] **Update `docs/releasing/README.md`** — the "Version-bump rules" section
+      no longer needs to justify staying at `0.1.0-dev.1` (the prerelease-`betto_*`
+      premise is gone); update it and the Stage 1 step-5 member-to-member example
+      (`kmdb: ^0.1.0-dev.1` → `^0.1.0`) to the stable line. Create
+      `docs/releasing/0.1.0.md` from `TEMPLATE.md` for this release.
+- [ ] **Re-run the full suite against the promoted `^0.1.0` pins with the
+      overrides removed** — the existing CI lanes: VM (`test_dart`), web
+      (`test-web` / `make cicd_web`, Chrome), and the Flutter lanes
+      (`test-flutter` / `make cicd_flutter`, `test-icloud`) — plus `make
+      coverage` ≥ baseline and the §18 benchmarks. This is the load-bearing
+      verification: with betto_* overrides gone, a clean re-resolve must land
+      every `betto_*` at exactly `0.1.0` (no `-dev`, no conflict) via the member
+      constraints alone, and every package must stay green.
 
 **Phase C — W6 final readiness sweep (the re-sequenced gate):**
 
@@ -158,7 +290,10 @@ _To be completed by the reviewer/implementer._ Anchor points:
 
 **Phase D — tag:**
 
-- [ ] Tag KMDB `0.1.0` once A–C are green. **Irreversible; last.**
+- [ ] Tag KMDB `0.1.0` once A–C are green. **Irreversible; last.** If W6
+      (Phase C) changed any code, re-run the Phase B CI matrix so the tagged
+      commit is the one with a green run against the promoted, override-free
+      tree — the tag must sit on top of all B+C edits, not on the pre-W6 run.
 
 ## Summary
 
