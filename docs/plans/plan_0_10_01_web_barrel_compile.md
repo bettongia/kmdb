@@ -1,8 +1,60 @@
 # Make `package:kmdb/kmdb.dart` compile for web (0.1.0 release blocker)
 
-**Status**: Questions
+**Status**: Investigated
 
 **PR link**: _(none yet)_
+
+> **Review note (2026-08-29).** The `kmdb-plan-reviewer` agent hit an account
+> session limit before starting, so this review was performed inline by the main
+> session (Opus). It was not a rubber-stamp: it **empirically corrected the
+> architect's scoping** (see "Reviewer findings" below) and de-scoped an
+> unnecessary piece. A fresh independent `kmdb-plan-reviewer` pass can be run
+> post-reset before implementation if extra assurance is wanted; the plan is
+> otherwise ready to implement.
+
+## Reviewer findings (inline, 2026-08-29)
+
+1. **Only ONE of the two claimed blockers is a compile blocker.** The architect
+   listed `dart:ffi` (via `betto_inferencing`) **and** `dart:io` (via the native
+   storage adapter). Direct compilation on this repo's toolchain (Dart 3.13)
+   shows **`dart:io` compiles cleanly on both `dart compile wasm` and `dart
+   compile js`** — a bare `import 'dart:io'` returns EXIT=0 on both, and
+   `package:kmdb/kmdb_config.dart` (which unconditionally exports the
+   `dart:io`-backed `IoKmdbConfigStore`) compiles to wasm with no error. So
+   `dart:io` is **not** a web-compile blocker here; the sole compile blocker is
+   `dart:ffi`, reached only through `betto_inferencing` → `betto_onnxrt` (the
+   barrel's wasm error implicated only `betto_onnxrt`/`package:ffi` files — no
+   other `betto_*` dep contributes a `dart:ffi` chain; `betto_zstd` is web-safe
+   via its conditional WASM build).
+2. **Consequence — Phase A simplifies.** The `EmbeddingModel`/`betto_inferencing`
+   seam (Phase B) is the **required compile fix**. The storage-adapter *stub*
+   (`storage_adapter_native_stub.dart`) is **not needed for compilation** — the
+   native adapter compiles on web. What web still needs is a **working default
+   at runtime**: `StorageAdapterNative`'s `dart:io` operations throw at runtime
+   in a browser, so the `defaultLocalStorageAdapter()` factory returning
+   `StorageAdapterSahPool()` on web (Q1) stays in scope as a **runtime**
+   correctness item, not a compile fix. Gating the `kmdb.dart:42` native export
+   behind a stub is now **optional polish** (avoids shipping a class that throws
+   at runtime on web), not a blocker requirement.
+3. **Freeze-safety: confirmed sound.** No public signature is removed or renamed;
+   the `_native` indirection must **re-export** betto_inferencing's types
+   (identity preserved) so `OnnxEmbeddingModel` still satisfies signatures on
+   native — the plan states this correctly as the core constraint.
+4. **Test adequacy: adequate, with one addition** — add an explicit test that a
+   **web** build calling `open()` with non-empty `vecIndexes` throws a clear
+   `UnsupportedError` (per the risk note), alongside the VM regression (proves
+   native type identity), the wasm barrel-compile smoke, and wiring the
+   currently-unrun SAHPool browser test into `cicd_web`.
+5. **Scope cut: endorsed.** Bundling release-ninja #2 (SAHPool CI) and #5
+   (README↔§19) with the compile fix is right; deferring #3 (Flutter native
+   build CI) and #4 (publish dry-run gate) to a separate slice is right.
+6. **Residual risk (bounded):** a hidden *second* `dart:ffi` reach via another
+   `betto_*` dep would only surface at compile time — caught by Phase C's
+   `dart compile wasm` verify gate before the work can be called done. Evidence
+   says there is none (see finding 1), but the gate is the backstop.
+
+The two open questions (below) are resolved; the approach is de-risked and
+concrete. **Status → Investigated.**
 
 > **Provenance.** Release-blocker #1 from the pre-0.1.0 `bettongia:release-ninja`
 > audit (2026-08-26, HEAD `e7dec55`), verified by direct compile, and scoped by
@@ -130,12 +182,14 @@ EmbeddingKind` import needs rerouting.
 
 ### Blast radius
 
-New files (5): `lib/src/search/semantic/embedding_model.dart` (indirection),
-`embedding_model_native.dart`, `embedding_model_stub.dart`,
-`lib/src/engine/platform/storage_adapter_native_stub.dart`, and (recommended)
-`lib/src/engine/platform/default_local_adapter.dart`.
+New files (4 required + 1 optional): `lib/src/search/semantic/embedding_model.dart`
+(indirection), `embedding_model_native.dart`, `embedding_model_stub.dart`, and
+`lib/src/engine/platform/default_local_adapter.dart` (the web SAHPool default).
+`lib/src/engine/platform/storage_adapter_native_stub.dart` is **optional polish**
+only (Reviewer finding 2 — `dart:io` is not a compile blocker on this toolchain).
 
-Modified files (5): `lib/kmdb.dart` (`:42-43`, `:116`),
+Modified files (up to 5): `lib/kmdb.dart` (`:116` required; `:42-43` only if the
+optional native-export gating is done),
 `lib/src/query/kmdb_database.dart` (`:32`, `:36`, `:1136`),
 `lib/src/search/semantic/vec_manager.dart` (`:27`),
 `lib/src/vault/search/vault_search_manager.dart` (`:41`),
@@ -235,18 +289,23 @@ _Checklists to be executed by `kmdb-plan-implement` on a dated branch + worktree
 once this plan is `Investigated`. Order: land the seam, prove the compile, then
 make the docs/CI tell the truth._
 
-**Phase A — the `dart:io` storage-adapter seam (simpler; lands first):**
+**Phase A — the web storage default (runtime, not a compile fix — see Reviewer
+finding 2):**
 
-- [ ] Create `lib/src/engine/platform/storage_adapter_native_stub.dart` — a
-      `StorageAdapterNative` stub (no `dart:io`) whose members throw
-      `UnsupportedError`, mirroring `web_sync_authenticator_stub.dart`.
 - [ ] Create `lib/src/engine/platform/default_local_adapter.dart` — conditional
       `defaultLocalStorageAdapter()` factory (native → `StorageAdapterNative()`,
-      web → `StorageAdapterSahPool()`), per Q1.
-- [ ] `kmdb.dart:42-43` → conditional export of the native adapter behind the
-      stub; `kmdb_database.dart:32` → reroute; `:1136` → call the factory.
-- [ ] Add an explicit `UnsupportedError` in `open()` when web + non-empty
-      `vecIndexes`.
+      web → `StorageAdapterSahPool()`), per Q1. Wire it at
+      `kmdb_database.dart:1136` (replacing the bare `StorageAdapterNative()`
+      default). This is the **required** part of Phase A — it makes `open()`
+      actually work on web.
+- [ ] Add an explicit `UnsupportedError` in `open()` when running on web with
+      non-empty `vecIndexes` (clear failure instead of an implicit
+      can't-construct-model null path — `kmdb_database.dart:505`).
+- [ ] _(Optional polish)_ Gate the `kmdb.dart:42-43` native-adapter export and
+      the `kmdb_database.dart:32` import behind a `storage_adapter_native_stub.dart`
+      so web never exposes a class that throws at runtime. Not required for the
+      compile (native adapter compiles on web) — decide during implementation
+      whether the tidiness is worth the extra stub.
 
 **Phase B — the semantic / `EmbeddingModel` seam:**
 
@@ -265,6 +324,8 @@ make the docs/CI tell the truth._
 - [ ] Add the barrel-compile smoke to `make cicd_web` (`make_cicd.mk:161`).
 - [ ] Wire `test/engine/storage_adapter_sahpool_test.dart` into `cicd_web`
       (release-ninja #2).
+- [ ] Add a web test asserting `open()` with non-empty `vecIndexes` throws a
+      clear `UnsupportedError` (Reviewer finding 4).
 - [ ] Full regression: VM suite (`kmdb` 2653+ tests must stay green — native
       type identity preserved), `make cicd_web`, `make coverage` ≥ baseline.
       Native semantic-search tests must be unaffected.
