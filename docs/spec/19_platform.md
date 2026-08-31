@@ -2,16 +2,43 @@
 
 ## Conditional Exports
 
-The package uses Dart conditional exports to select the correct platform adapter
-at compile time. `dart.library.js_interop` is tested (not the deprecated
-`dart.library.html`) for correct WASM targeting:
+The package uses Dart conditional exports to select platform-appropriate
+implementations at compile time. `dart.library.js_interop` is tested (not the
+deprecated `dart.library.html`) for correct WASM targeting.
+
+**`StorageAdapterNative` needs no conditional gating.** It is exported
+unconditionally from the public barrel (`kmdb.dart`) because `dart:io`
+compiles cleanly for every kmdb-supported target, including `dart2wasm` —
+verified directly during the 0.10.01 WI-9 Phase C release-blocker fix (see
+`docs/plans/completed/plan_0_10_01_web_barrel_compile.md`). Constructing one
+on web still throws `UnsupportedError` at the first real file operation, as
+`dart:io`'s actual I/O primitives are unavailable there at runtime — the
+compile-time/runtime distinction matters: the *type* compiles everywhere, the
+*behaviour* does not.
+
+The web storage adapter, `StorageAdapterSahPool` (below), is not itself
+re-exported from the public barrel today. What *is* selected conditionally is
+the platform-appropriate **default** local adapter used internally by
+`KmdbDatabase.sync`/`push`/`pull` when a caller omits `localAdapter`:
 
 ```dart
-// packages/kmdb/lib/src/engine/platform/storage_adapter.dart
-export 'storage_adapter_impl.dart'
-    if (dart.library.io) 'storage_adapter_native.dart'
-    if (dart.library.js_interop) 'storage_adapter_sahpool.dart';
+// packages/kmdb/lib/src/engine/platform/default_local_adapter.dart
+export 'default_local_adapter_native.dart'
+    if (dart.library.js_interop) 'default_local_adapter_web.dart';
 ```
+
+`default_local_adapter_native.dart` returns `StorageAdapterNative()`;
+`default_local_adapter_web.dart` returns `StorageAdapterSahPool()`. This is
+the same conditional-export shape used by every other platform-specific seam
+in the package — `LocalDirectoryAdapter`, `WebSyncAuthenticator`, and the
+`EmbeddingModel`/`EmbeddingKind` seam (§22) all follow it, each picking its
+own default/conditional polarity depending on which platform's compile-time
+`dart analyze` resolution needs to match its runtime-common case (see the
+`EmbeddingModel` seam's doc comment in
+`lib/src/search/semantic/embedding_model.dart` for why polarity choice is not
+arbitrary: `dart analyze` always resolves a conditional export to its
+*unconditional* branch, regardless of which `dart.library.*` condition would
+actually be true at runtime).
 
 ## Native Platforms (iOS, Android, macOS, Windows, Linux)
 
@@ -171,9 +198,9 @@ releasing the lock handle — the handle is released by the Worker's termination
 | Core LSM engine     | ✓                                        | ✓                                          |
 | Zstd compression    | ✓ (FFI via betto_zstd)                   | ✓ (WASM via betto_zstd; init at open time) |
 | Sync                | ✓                                        | ✓                                          |
-| Lexical text search | ✓                                        | ✗ (deferred)                               |
-| Semantic search     | ✓ (ONNX via betto_inferencing)           | ✗ (deferred)                               |
-| Vault               | ✓                                        | ✗ (deferred)                               |
+| Lexical text search | ✓                                        | ✓ (via `Intl.Segmenter`; see §20)          |
+| Semantic search     | ✓ (ONNX via betto_inferencing)           | ✗ (compile-time excluded, see §22)         |
+| Vault               | ✓                                        | ✗ (deferred, see §24)                      |
 | Biometric unlock (`KEKSource.biometric`) | ✓ iOS/macOS/Android (biometric-gated); Windows/Linux: no biometric-gating primitive available, secure-storage-only fallback (see §31 "Platform Support") | ✗ (deferred — WebAuthn-PRF follow-up, see §31) |
 
 ## Package Structure
@@ -226,16 +253,9 @@ workspace (which is Dart-only). See §22 for details.
 
 ### Conditional Export Pattern
 
-The platform adapter is selected at compile time via Dart conditional exports:
-
-```dart
-// packages/kmdb/lib/src/engine/platform/storage_adapter.dart
-export 'storage_adapter_impl.dart'
-    if (dart.library.io) 'storage_adapter_native.dart'
-    if (dart.library.js_interop) 'storage_adapter_sahpool.dart';
-```
-
-`dart.library.js_interop` is tested (not the deprecated `dart.library.html`) for
-correct WASM targeting. The default stub re-exports
-`storage_adapter_sahpool.dart` for platforms where neither `dart:io` nor
-`dart:js_interop` is available — in practice this should never be reached.
+See "Conditional Exports" at the top of this document for the actual
+mechanism and code sample — the platform-appropriate default local
+`StorageAdapter` (native vs. `StorageAdapterSahPool`) is selected via
+`default_local_adapter.dart`'s conditional export, tested on
+`dart.library.js_interop` (not the deprecated `dart.library.html`) for
+correct WASM targeting.

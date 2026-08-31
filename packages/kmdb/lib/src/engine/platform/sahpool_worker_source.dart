@@ -226,6 +226,17 @@ async function opList(dirPath, extension) {
 
 // delete(path) — removes the file. If path is the held lock file, closes the
 // lock handle first to allow deletion.
+//
+// No-op if the file does not exist — this must also cover the case where an
+// *ancestor directory* of path was never created, matching
+// StorageAdapter.deleteFile's documented no-op-when-missing contract (see
+// StorageAdapterNative's ENOENT/ERROR_PATH_NOT_FOUND handling, which treats
+// both "file missing" and "parent directory missing" as no-op). _resolve()
+// with create=false throws NotFoundError in the latter case, so it must be
+// inside the same try block as removeEntry() — a prior version wrapped only
+// removeEntry(), leaving a real, reachable bug: deleting a path whose
+// directory was never created (e.g. a namespace/hash-bucket sub-directory
+// that happens to not exist yet) threw instead of no-op'ing.
 async function opDelete(path) {
   // Close the lock handle if we're deleting the lock file.
   if (_lockPath === path && _lockHandle !== null) {
@@ -234,11 +245,11 @@ async function opDelete(path) {
     _lockHandle = null;
     _lockPath = null;
   }
-  const [dir, name] = await _resolve(path, false);
   try {
+    const [dir, name] = await _resolve(path, false);
     await dir.removeEntry(name);
   } catch (_) {
-    // No-op if already gone.
+    // No-op if already gone (file or an ancestor directory).
   }
 }
 

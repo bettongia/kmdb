@@ -219,8 +219,8 @@ final class StorageAdapterSahPool implements StorageAdapter {
   /// Sends an operation message to the Worker and awaits its response.
   ///
   /// [msgMap] must contain at least `'op'`. The `'id'` field is added by this
-  /// method. If [transferBytes] is provided, the underlying buffer is
-  /// transferred (zero-copy) to the Worker.
+  /// method. If [transferBytes] is provided, its bytes are sent to the
+  /// Worker via a *transferred* (zero-copy) `ArrayBuffer`.
   ///
   /// Throws [StorageException] if the Worker returns `ok: false`.
   Future<JSAny?> _send(
@@ -238,10 +238,25 @@ final class StorageAdapterSahPool implements StorageAdapter {
     final jsMsg = fullMap.jsify()! as JSObject;
 
     if (transferBytes != null) {
-      // Transfer the underlying ArrayBuffer to the Worker without copying.
-      // Attach the bytes to the message object as a 'bytes' property using
-      // setProperty from dart:js_interop_unsafe.
-      final jsBytes = transferBytes.toJS;
+      // `postMessage`'s transfer list *detaches* the transferred
+      // `ArrayBuffer` in this (the sending) context — its length becomes 0
+      // and it can never be read again. Transferring [transferBytes]'s own
+      // backing buffer directly would silently invalidate the caller's
+      // `Uint8List` the moment this method returns, which
+      // `StorageAdapter.writeFile`/`appendFile` neither documents nor
+      // permits — a caller that reuses its buffer afterwards (e.g. a second
+      // write with the same content, or a post-write checksum) would read
+      // back a zero-length view with no error raised. This is exactly the
+      // failure mode `test/engine/storage_adapter_sahpool_test.dart`'s
+      // "appendFile appends large chunks correctly" test caught once wired
+      // into CI (0.10.01 WI-9 Phase C) — reachable under `dart2js`, though
+      // not currently under `dart2wasm` (kmdb's only supported web
+      // compiler), whose `Uint8List.toJS` necessarily copies across the
+      // Wasm/JS heap boundary. Copying defensively here costs one extra
+      // `memcpy` per write/append but removes the hazard regardless of
+      // compiler backend.
+      final ownedCopy = Uint8List.fromList(transferBytes);
+      final jsBytes = ownedCopy.toJS;
       jsMsg.setProperty('bytes'.toJS, jsBytes);
       // Retrieve the backing ArrayBuffer via unsafe property access since
       // JSTypedArray doesn't expose .buffer directly in dart:js_interop.

@@ -49,6 +49,24 @@ The `betto_onnxrt` build hook eliminates all three problems.
 | iOS      | Supported (opt-in) — the consumer Flutter app adds the `betto_onnxrt_ios` plugin (`^0.1.0-dev.1`, requires Flutter ≥ 3.27.0), which SPM-links the ORT 1.24.2 XCFramework and statically links it; `OnnxRuntime.load()` then resolves symbols via `DynamicLibrary.process()` (no CocoaPods, no separate dylib). The ORT framework adds ~10–15 MB post-thinning, so semantic search is opt-in on iOS; the model downloads on first use. |
 | Web      | Excluded — semantic search is not supported on web (§20) |
 
+**The web exclusion is enforced at compile time, not merely by convention**
+(0.10.01 WI-9 Phase C). `package:kmdb`'s public `EmbeddingModel`/
+`EmbeddingKind` types are declared behind a kmdb-owned conditional-export
+seam (`lib/src/search/semantic/embedding_model.dart`): on native it
+re-exports `betto_inferencing`'s real types (preserving type identity so
+`OnnxEmbeddingModel` still satisfies `KmdbDatabase.open`'s
+`embeddingModel` parameter), while on web it substitutes a pure-Dart stub
+declaring the same interface shape — this is what keeps
+`package:betto_inferencing`'s `dart:ffi`-via-`betto_onnxrt` reach out of
+the web compile graph entirely (a front-end resolution error, not
+something tree-shaking could remove, since the unconditional barrel
+`export` in `betto_inferencing` pulls in `betto_onnxrt` even for a
+`show EmbeddingKind` import). No concrete `EmbeddingModel` is registered
+against the stub, so `KmdbDatabase.open` additionally throws a clear
+`UnsupportedError` if a web caller supplies a non-empty `vecIndexes` list,
+regardless of whether an `embeddingModel` is also supplied — this is a
+documented platform exclusion, not merely an unmet-dependency error.
+
 ### Workspace wiring
 
 `betto_onnxrt` is published to pub.dev and follows the same workspace wiring

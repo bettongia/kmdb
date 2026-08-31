@@ -11,6 +11,16 @@ layer, the typed query API with secondary indexes and reactive `watch()`, text
 search (lexical BM25, semantic, and hybrid), the content-addressable vault,
 document versioning, and optional AES-256-GCM value encryption.
 
+### Web platform support
+
+`package:kmdb/kmdb.dart` — the public API barrel — now compiles for web via
+`dart2wasm` (the only supported web compiler; `dart2js` is not supported).
+Core LSM, sync, and Zstd compression all work on web; semantic search is
+unsupported there and `KmdbDatabase.open` throws a clear `UnsupportedError`
+if a non-empty `vecIndexes` list is supplied on web. This is not a breaking
+change — the barrel never compiled for web in any published build, so there
+is nothing an existing consumer's web build could have depended on.
+
 ### Breaking changes since the pre-release (`0.1.0-dev`) builds
 
 These change on-disk formats, sync-wire formats, or public API signatures.

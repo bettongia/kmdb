@@ -158,12 +158,39 @@ cicd_flutter:
 # design record. It includes a known-answer-vector cross-check against
 # DefaultSyncAuthenticator's native derivation (see
 # default_sync_authenticator_test.dart's matching KAT test).
+#
+# The barrel-compile smoke (0.10.01 WI-9 Phase C, release-blocker #1) proves
+# `package:kmdb/kmdb.dart` — the public API barrel — actually compiles for
+# web via the `embedding_model.dart` seam. It, like the vault KAT test, must
+# use `--compiler dart2wasm`: the barrel transitively includes the storage
+# engine (XXH64), which hits the same dart2js int-literal rejection noted
+# above. wasm-only per the plan's Q2 decision (dart2wasm is the sole
+# supported web compiler for 0.1.0).
+#
+# The SAHPool adapter test (release-ninja #2) was, before this plan, never
+# executed in any CI lane despite backing every "web LSM ✓ / Sync ✓" claim in
+# §19 — wiring it in here is what makes those claims CI-verified rather than
+# aspirational. Run under both the dart2js default and `--compiler
+# dart2wasm`: a prior version of `_send`'s zero-copy buffer transfer silently
+# detached the *caller's* own `Uint8List` after `writeFile`/`appendFile`
+# under dart2js (not reachable under the wasm-only supported target, but
+# cheap to guard defensively either way — see `storage_adapter_sahpool.dart`'s
+# `_send` doc comment), so both compilers are kept here as a belt-and-braces
+# regression fence.
+#
+# The web-platform-exclusion test asserts `KmdbDatabase.open` throws a clear
+# `UnsupportedError` on web when `vecIndexes` is non-empty (semantic search
+# is compile-time excluded on web — see docs/spec/22_semantic_search.md).
 cicd_web:
 	dart pub global activate melos
 	melos bootstrap
 	cd packages/kmdb && dart test --platform chrome test/encoding/value_codec_test.dart
 	cd packages/kmdb && dart test --platform chrome --compiler dart2wasm test/vault/vault_hash_kat_test.dart
 	cd packages/kmdb && dart test --platform chrome test/sync/auth/web_sync_authenticator_test.dart
+	cd packages/kmdb && dart test --platform chrome --compiler dart2wasm test/web/kmdb_barrel_wasm_smoke_test.dart
+	cd packages/kmdb && dart test --platform chrome test/engine/storage_adapter_sahpool_test.dart
+	cd packages/kmdb && dart test --platform chrome --compiler dart2wasm test/engine/storage_adapter_sahpool_test.dart
+	cd packages/kmdb && dart test --platform chrome --compiler dart2wasm test/query/kmdb_database_web_platform_test.dart
 .PHONY: cicd_web
 
 # ── Container (Podman) ─────────────────────────────────────────────────────────
