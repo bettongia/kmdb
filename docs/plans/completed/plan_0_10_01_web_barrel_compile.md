@@ -1,8 +1,8 @@
 # Make `package:kmdb/kmdb.dart` compile for web (0.1.0 release blocker)
 
-**Status**: Implementing
+**Status**: Complete
 
-**PR link**: _(none yet)_
+**PR link**: [#86](https://github.com/bettongia/kmdb/pull/86) (squash-merged 2026-09-01)
 
 > **Review note (2026-08-29).** The `kmdb-plan-reviewer` agent hit an account
 > session limit before starting, so an initial review was performed inline by the
