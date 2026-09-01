@@ -113,7 +113,7 @@ export 'src/search/search_mode.dart' show SearchMode;
 export 'src/search/search_result.dart'
     show SearchResult, SearchMetadata, SearchHit;
 
-export 'package:betto_inferencing/betto_inferencing.dart'
+export 'src/search/semantic/embedding_model.dart'
     show EmbeddingModel, EmbeddingKind;
 
 export 'src/search/fts_index_definition.dart' show FtsIndexDefinition;

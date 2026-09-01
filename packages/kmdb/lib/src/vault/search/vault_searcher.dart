@@ -23,7 +23,8 @@ import 'dart:convert' show json, utf8;
 import 'dart:math' show log;
 import 'dart:typed_data';
 
-import 'package:betto_inferencing/betto_inferencing.dart' show EmbeddingKind;
+import '../../search/semantic/embedding_model.dart' show EmbeddingKind;
+
 import 'package:betto_lexical/betto_lexical.dart' show createDefaultTokenizer;
 
 import '../../encoding/value_codec.dart';
@@ -105,10 +106,15 @@ final class VaultSearcher<T> {
   final KvStoreImpl _kvStore;
   final VaultStore _vaultStore;
   final Object? _embeddingModel; // EmbeddingModel? — kept as Object? to avoid
-  // pulling in betto_inferencing's generated model *class* into this file's
-  // type graph. Cast is done inline only when calling embed(). Importing the
-  // EmbeddingKind enum above is deliberately fine — it is a lightweight enum
-  // with no ORT/FFI weight, not the model class this seam is built to avoid.
+  // pulling betto_inferencing's generated model *class* into this file's type
+  // graph. Cast is done inline only when calling embed(). The `EmbeddingKind`
+  // import above goes through the kmdb-owned `embedding_model.dart` seam
+  // (0.10.01 WI-9 Phase C), not `package:betto_inferencing` directly — that
+  // matters on web/WASM, where even a `show EmbeddingKind` import of the raw
+  // betto_inferencing barrel would drag in `betto_onnxrt`'s unconditional
+  // `dart:ffi` reach at compile time (a front-end resolution error, not
+  // something tree-shaking can remove). The seam's web variant redeclares the
+  // enum as pure Dart, so this file compiles on every platform.
 
   /// The collection namespace. Not used in query logic directly — candidate
   /// sha256 resolution uses [_fetchDoc] to scope results to this collection.

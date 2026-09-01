@@ -28,16 +28,18 @@ import '../encryption/value_context.dart';
 import '../engine/kvstore/kv_store.dart';
 import '../engine/kvstore/kv_store_impl.dart';
 import '../engine/kvstore/quarantine.dart';
+import '../engine/platform/default_local_adapter.dart';
 import '../engine/platform/storage_adapter_interface.dart';
 import '../engine/platform/storage_adapter_native.dart';
 import '../secret/secret_key.dart';
 import '../secret/secret_store.dart';
 
-import 'package:betto_inferencing/betto_inferencing.dart';
 import 'package:betto_zstd/betto_zstd.dart' show ZstdSimple;
 
 import '../search/fts_index_definition.dart';
 import '../search/lexical/fts_manager.dart';
+import '../search/semantic/embedding_model.dart'
+    show EmbeddingModel, kSemanticSearchAvailable;
 import '../search/semantic/vec_manager.dart';
 import '../search/vec_index_definition.dart';
 import '../sync/consolidation_config.dart';
@@ -276,6 +278,11 @@ final class KmdbDatabase {
   /// lazily by `VecManager` (implemented in plan 3). Requires [embeddingModel]
   /// to be non-null when this list is non-empty. Defaults to empty.
   ///
+  /// **Unsupported on web.** Semantic search requires ONNX Runtime, which is
+  /// unavailable on web/WASM (see `docs/spec/22_semantic_search.md`). Throws
+  /// [UnsupportedError] on web if [vecIndexes] is non-empty, regardless of
+  /// [embeddingModel].
+  ///
   /// [embeddingModel] is the text-to-vector embedding model used by
   /// `VecManager`. Must be supplied when [vecIndexes] is non-empty.
   /// Throws [ArgumentError] if [vecIndexes] is non-empty and this is null.
@@ -402,6 +409,25 @@ final class KmdbDatabase {
     await ZstdSimple.init(
       wasmUrl: wasmUrl ?? 'assets/packages/betto_zstd/assets/zstd.wasm',
     );
+
+    // Semantic search is compile-time excluded on web (0.10.01 WI-9 Phase C
+    // — see docs/spec/22_semantic_search.md): the embedding_model.dart seam
+    // has no concrete EmbeddingModel implementation there, only a type-level
+    // stub so VecManager still compiles. Fail fast and explicitly rather
+    // than let a web caller discover this via an implicit
+    // can't-construct-model null path further down. This check is
+    // deliberately unconditional on [embeddingModel] — even a caller who
+    // manages to hand-roll their own web-compatible EmbeddingModel
+    // implementation against the stub interface is rejected, since semantic
+    // search is a documented platform exclusion, not merely an
+    // ONNX-Runtime-availability gap.
+    if (vecIndexes.isNotEmpty && !kSemanticSearchAvailable) {
+      throw UnsupportedError(
+        'Semantic search (vecIndexes) is not supported on this platform. '
+        'ONNX Runtime inference is unavailable on web/WASM — see '
+        'docs/spec/22_semantic_search.md.',
+      );
+    }
 
     // Validate that an embedding model is provided when vector indexes are
     // requested. We check this before any I/O so the error is immediate.
@@ -954,20 +980,23 @@ final class KmdbDatabase {
   /// correct for single-database setups). [syncNamespaces] restricts which user
   /// collections participate in sync; when `null`, all registered user
   /// collections (non-`$` namespaces) are included. [localAdapter] overrides
-  /// the local [StorageAdapter] used to read local SSTables; when `null`, a
-  /// [StorageAdapterNative] is constructed automatically. [consolidationConfig]
-  /// controls the peer-file consolidation threshold and lease parameters;
-  /// defaults to production values. [cancel] is an optional imperative
-  /// cancellation signal; [timeout] is an optional maximum duration for the
-  /// entire sync run (converted to an absolute deadline inside the engine so
-  /// that back-off comparisons are consistent across the full run).
+  /// the local [StorageAdapter] used to read local SSTables; when `null`, the
+  /// platform-appropriate default is constructed automatically
+  /// ([StorageAdapterNative] on native, `StorageAdapterSahPool` on web —
+  /// this should normally match whatever adapter was passed to [open], since
+  /// sync reads the same local SSTable files that adapter wrote).
+  /// [consolidationConfig] controls the peer-file consolidation threshold and
+  /// lease parameters; defaults to production values. [cancel] is an optional
+  /// imperative cancellation signal; [timeout] is an optional maximum
+  /// duration for the entire sync run (converted to an absolute deadline
+  /// inside the engine so that back-off comparisons are consistent across the
+  /// full run).
   ///
   /// Equivalent to calling [push] then [pull] in sequence.
   ///
-  /// **Native-only.** Sync requires direct SSTable file access via [dart:io].
-  /// On web this method throws [UnsupportedError] at the point where the
-  /// [StorageAdapterNative] is constructed (or immediately if [localAdapter] is
-  /// supplied but is itself unsupported on web).
+  /// Works on both native and web, provided [syncAdapter] (the remote/cloud
+  /// side) itself supports the current platform — see the chosen
+  /// [SyncStorageAdapter] implementation's own platform notes.
   ///
   /// Returns a [SyncResult] wrapping the pull half's [PullResult] — see
   /// [SyncEngine.sync] and [PullResult] for what is reported and the
@@ -1013,10 +1042,8 @@ final class KmdbDatabase {
 
   /// Flushes and uploads local SSTables to [syncAdapter].
   ///
-  /// See [sync] for full parameter documentation (including [cancel] and
-  /// [timeout]).
-  ///
-  /// **Native-only.** See [sync] for web behaviour.
+  /// See [sync] for full parameter documentation (including [cancel],
+  /// [timeout], and platform support).
   Future<void> push({
     required SyncStorageAdapter syncAdapter,
     String syncRoot = '',
@@ -1047,7 +1074,7 @@ final class KmdbDatabase {
   /// permanently quarantined or transiently deferred — see [SyncEngine.pull]
   /// for the crash-safety ordering guarantee and the cancellation contract.
   ///
-  /// **Native-only.** See [sync] for web behaviour.
+  /// See [sync] for platform support.
   Future<PullResult> pull({
     required SyncStorageAdapter syncAdapter,
     String syncRoot = '',
@@ -1101,10 +1128,9 @@ final class KmdbDatabase {
   /// When [syncNamespaces] is `null`, all registered user namespaces (those not
   /// starting with `$`) are resolved via [KvStore.listNamespaces].
   ///
-  /// When [localAdapter] is `null`, a [StorageAdapterNative] is constructed.
-  /// This construction throws [UnsupportedError] on web, which propagates to
-  /// the caller as-is — making [sync], [push], and [pull] effectively
-  /// native-only in the same way that [SyncEngine] itself is native-only.
+  /// When [localAdapter] is `null`, `defaultLocalStorageAdapter()` is used to
+  /// construct the platform-appropriate default ([StorageAdapterNative] on
+  /// native, `StorageAdapterSahPool` on web).
   ///
   /// The [cancel] and [timeout] parameters are combined into a single
   /// [SyncContext] and passed to the engine constructor so every adapter call
@@ -1130,10 +1156,12 @@ final class KmdbDatabase {
     // Retrieve the database directory and stable device ID from the store.
     final info = await _store.storeInfo();
 
-    // Resolve local adapter: default to StorageAdapterNative (native-only).
-    // On web, StorageAdapterNative() throws UnsupportedError, which bubbles up
-    // to the caller of sync/push/pull — the intended behaviour.
-    final resolvedLocalAdapter = localAdapter ?? StorageAdapterNative();
+    // Resolve local adapter: default to the platform-appropriate adapter
+    // (StorageAdapterNative on native, StorageAdapterSahPool on web) via the
+    // defaultLocalStorageAdapter() seam (0.10.01 WI-9 Phase C) — this should
+    // normally match whatever adapter the caller passed to `open()`, since
+    // sync reads the same local SSTable files that adapter wrote.
+    final resolvedLocalAdapter = localAdapter ?? defaultLocalStorageAdapter();
 
     // Build the per-sync-run context. Convert timeout to an absolute deadline
     // once here so all subsequent comparisons use the same reference point.

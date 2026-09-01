@@ -38,7 +38,7 @@ import 'dart:async';
 import 'dart:convert' show json, utf8;
 import 'dart:typed_data';
 
-import 'package:betto_inferencing/betto_inferencing.dart'
+import '../../search/semantic/embedding_model.dart'
     show EmbeddingKind, EmbeddingModel;
 
 // ignore_for_file: prefer_initializing_formals
