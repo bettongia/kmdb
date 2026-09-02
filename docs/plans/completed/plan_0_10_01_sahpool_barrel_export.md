@@ -1,16 +1,13 @@
 # Export `StorageAdapterSahPool` from the public barrel (web persistence via the public API)
 
-**Status**: Implementing (branch
-`20260902_plan_0_10_01_sahpool_barrel_export`, started 2026-09-02) —
-precondition satisfied: PR #86 merged to `main` 2026-09-01. All implementation
-steps, tests, docs, and the mechanical `make pre_commit` gate are done (see the
-Implementation plan checklist). **`kmdb-qa` sign-off: ✅ PASS (2026-09-02)** —
-zero findings; seam verified implemented exactly as pinned (stub throws in
+**Status**: **Complete** — shipped in [PR #88](https://github.com/bettongia/kmdb/pull/88)
+(squash-merged to `main` 2026-09-02 as `d9a55c8`, CI green). `kmdb-qa` signed
+off with zero findings (seam verified exactly as pinned: stub throws in
 constructor, full public surface incl. non-interface `close()`, correct
-polarity); analyze/format/native+web tests/full VM suite (2657/0) independently
-reproduced. Proceeding to commit + PR.
+polarity; analyze/format/native+web tests/full VM suite 2657/0 independently
+reproduced). Closes release-ninja finding #2.
 
-**PR link**: _(none yet)_
+**PR link**: [#88](https://github.com/bettongia/kmdb/pull/88)
 
 > **✅ Precondition satisfied (2026-09-01): PR #86 is merged to `main`.** This
 > plan's premises hold only against the post-#86 tree — the precedent seams
