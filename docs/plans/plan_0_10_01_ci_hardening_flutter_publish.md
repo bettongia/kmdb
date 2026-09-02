@@ -1,10 +1,27 @@
 # CI hardening: Flutter native build + publish dry-run gate (release-ninja #3 + #4)
 
-**Status**: Investigated (reviewer pass 2026-09-01 resolved Q2/Q3 empirically;
-Q1/Q1b resolved by the maintainer 2026-09-01 — macOS-only build, defer iOS,
-touch no README)
+**Status**: Implementing — **scope narrowed to #4 only** (2026-09-02). #3 split
+out after CI exposed a real defect (see the split note below).
 
-**PR link**: _(none yet)_
+**PR link**: [#87](https://github.com/bettongia/kmdb/pull/87) — publish dry-run
+gate (#4) only.
+
+> **Split (2026-09-02): #3 deferred to its own follow-up.** PR #87 initially
+> carried both. On its first CI run the new `flutter build macos --debug` step
+> **failed** in `test-icloud` with `error: unable to resolve module dependency:
+> 'Flutter'` in `ICloudSyncPlugin.swift` — the `kmdb_icloud` macOS plugin does
+> not resolve `FlutterFramework` in a fresh SPM build (its `Package.swift`
+> references `../FlutterFramework`, which only exists as Flutter's gitignored
+> *ephemeral* generated package under `example/macos/Flutter/ephemeral/`, absent
+> on a clean checkout). This is exactly the blind spot #3 was meant to expose —
+> `kmdb_flutter` has no macOS native code, so `cicd_flutter` never built native
+> — but it is a **real remediation task, not a CI line**, and may be a genuine
+> `kmdb_icloud` 0.1.0 macOS build defect. Decision (maintainer, 2026-09-02):
+> **revert the `flutter build macos` step from PR #87 so it ships only the clean,
+> passing publish-dryrun gate (#4)**, and move the macOS build + the
+> `FlutterFramework` fix to
+> `plan_0_10_01_kmdb_icloud_macos_build.md`. `publish-dryrun`, `build`,
+> `test-flutter`, and `test-web` all passed on that run.
 
 > **Provenance.** Release-blocker-adjacent findings **#3** and **#4** from the
 > pre-0.1.0 `bettongia:release-ninja` audit (2026-08-26). Both are CI/workflow
@@ -158,7 +175,7 @@ claim is qualified instead.
 
 **#3 — Flutter native build:**
 
-- [ ] Add `cd packages/kmdb_icloud/example && flutter build macos --debug` to
+- [x] Add `cd packages/kmdb_icloud/example && flutter build macos --debug` to
       `cicd_icloud` (`make_cicd.mk`, after the existing `flutter test` step) so
       the Swift plugin + `Package.swift` compile end-to-end. Keep SPM-only (no
       `Podfile`, no Pods xcconfig — CLAUDE.md / `plan_icloud_spm.md`). **Use
@@ -169,21 +186,33 @@ claim is qualified instead.
       hits a codesigning wall on `macos-latest`, that is the one genuine
       unknown here — see the QA note below; it must be confirmed green on the
       real runner, not just locally.
-- [ ] Per **Q1 (maintainer)**: only if the maintainer picks option (a), create
+      **DEFERRED (2026-09-02) — reverted from PR #87.** The step was added and
+      hit CI: `flutter build macos --debug` failed in `test-icloud` with
+      `unable to resolve module dependency: 'Flutter'` (the `kmdb_icloud` macOS
+      plugin's `../FlutterFramework` SPM path is absent on a clean checkout).
+      Moved to `plan_0_10_01_kmdb_icloud_macos_build.md`; the step is removed
+      from `cicd_icloud` and that lane stays Dart-only for now. See the split
+      note at the top.
+- [x] Per **Q1 (maintainer)**: only if the maintainer picks option (a), create
       the SPM-based `ios/` Runner and add `flutter build ios --no-codesign`.
       Under the recommended option (b) this checklist item is a no-op for the
       tag.
-- [ ] Per **Q1b (maintainer)**: do **not** edit `packages/kmdb/README.md` under
+      No-op confirmed — option (b) was chosen; no `ios/` runner created.
+- [x] Per **Q1b (maintainer)**: do **not** edit `packages/kmdb/README.md` under
       the recommended answer. If the maintainer chooses to record CI status,
       add the note to `packages/kmdb_icloud/README.md` only.
-- [ ] Confirm the `test-icloud` job (`.github/workflows/cicd.yml:162`) invokes
+      No-op confirmed — option (i) was chosen; no README edited.
+- [x] Confirm the `test-icloud` job (`.github/workflows/cicd.yml:162`) invokes
       the updated `cicd_icloud` and passes on the `macos-latest` runner. No
       workflow YAML change is needed for #3 — the job already calls
       `make cicd_icloud`; only the make target gains a step.
+      Confirmed by inspection: `test-icloud` job's only step is
+      `- run: make cicd_icloud` — no YAML change needed. Real green-on-CI
+      confirmation deferred to the PR's CI run.
 
 **#4 — publish dry-run gate:**
 
-- [ ] Add a `cicd_publish_dryrun` target to `make_cicd.mk` that iterates the six
+- [x] Add a `cicd_publish_dryrun` target to `make_cicd.mk` that iterates the six
       auto-published package dirs (`kmdb`, `kmdb_cli`, `kmdb_google_drive`,
       `kmdb_extractor_pdf`, `kmdb_extractor_html`, `kmdb_extractor_markdown`) and
       applies the **Q3 contract exactly**: fail on non-zero exit, and fail if the
@@ -195,15 +224,26 @@ claim is qualified instead.
       needs no `melos bootstrap`: `dart pub publish --dry-run` resolves the
       workspace itself; a `dart pub get` at the workspace root first is optional
       for determinism but not required.
-- [ ] Add a **new `publish-dryrun` job** to `.github/workflows/cicd.yml`:
+      Done — ran locally against all six packages (network to pub.dev, no
+      auth): all six report `Package has 0 warnings and 5 hints.` and exit 0,
+      target exits 0. Also sanity-checked the parsing regex against
+      synthetic `Package has N warning(s) and M hint(s).` lines (2/0/1
+      warnings, singular/plural, and an absent-summary-line case) to confirm
+      the fail path triggers correctly — a real warning could not be
+      produced locally without deliberately breaking a package's metadata.
+- [x] Add a **new `publish-dryrun` job** to `.github/workflows/cicd.yml`:
       `runs-on: ubuntu-latest`, `needs: build`, `actions/checkout@v6`,
       `dart-lang/setup-dart@v1` with `sdk: "3.13.1"`, the pub cache step, then
       `- run: make cicd_publish_dryrun`. Do **not** fold it into the `build`
       job (Q2 rationale).
-- [ ] Document the lane in `docs/releasing/0.1.0.md` (Stage 2) as the automated
+      Done — mirrors `test-web`'s shape. Confirmed the YAML parses (via a
+      scratch Dart script using `package:yaml`) and lists all 8 jobs
+      including the new `publish-dryrun`.
+- [x] Document the lane in `docs/releasing/0.1.0.md` (Stage 2) as the automated
       pre-publish check — a sentence noting that `publish-dryrun` gates every
       push/PR so Stage 2's real `dart pub publish` calls should never be the
       first time a validation error is seen.
+      Done.
 
 **Then:** `kmdb-qa` → `kmdb-pre-commit` → PR. (Mostly workflow YAML + `make`
 targets; the main verification is that the new CI steps actually run green on the

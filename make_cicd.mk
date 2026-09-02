@@ -99,6 +99,14 @@ cicd_windows:
 # Requires the Flutter SDK — run on macOS only.
 # License check is intentionally omitted: addlicense covers the full repo in
 # cicd_linux_base (it runs from the workspace root).
+#
+# NOTE: a `flutter build macos` step to compile the Swift/SPM plugin
+# end-to-end (release-ninja #3) is deliberately NOT here yet. When it was
+# first added, it revealed that the kmdb_icloud macOS plugin does not resolve
+# `FlutterFramework` in a fresh SPM build (`import Flutter` fails), so the
+# native build + that fix were split into their own follow-up
+# (plan_0_10_01_kmdb_icloud_macos_build.md). This lane stays Dart-only until
+# that lands.
 cicd_icloud:
 	cd packages/kmdb_icloud && flutter pub get
 	cd packages/kmdb_icloud/example && flutter pub get
@@ -192,6 +200,63 @@ cicd_web:
 	cd packages/kmdb && dart test --platform chrome --compiler dart2wasm test/engine/storage_adapter_sahpool_test.dart
 	cd packages/kmdb && dart test --platform chrome --compiler dart2wasm test/query/kmdb_database_web_platform_test.dart
 .PHONY: cicd_web
+
+# ── Publish dry-run gate ──────────────────────────────────────────────────────
+#
+# Runs `dart pub publish --dry-run` for every auto-published package
+# (release-ninja #4, 0.10.01) so a future path-dependency slip, metadata
+# error, or constraint regression is caught in CI instead of only when a
+# human runs the real `dart pub publish` at release time. Mirrors
+# docs/releasing/0.1.0.md Stage 2's six auto-published packages;
+# `kmdb_flutter`/`kmdb_icloud` are `publish_to: none` (hand-published) and
+# `kmdb_harness` is never published, so none of the three are in this matrix.
+#
+# Pass/fail contract (verified empirically against a real dry-run,
+# 2026-09-01 — see the plan's Q3):
+#   - Fail if the command's exit code is non-zero (genuine validation errors,
+#     resolution/network failure).
+#   - Also fail if the trailing summary line, `Package has N warnings and M
+#     hints.`, reports a warnings count > 0 — warnings do NOT affect the exit
+#     code, so exit-code-only checking would silently let them through.
+#   - Ignore the hint count entirely. The root pubspec.yaml's
+#     `dependency_overrides` (meta/uuid/cbor/web/charset) produce expected,
+#     per-package "Non-dev dependencies are overridden" hints (not always 5 —
+#     only overrides that participate in that package's own resolution are
+#     reported) that must NOT fail the lane.
+#   - If the summary line is absent (e.g. the command aborted before
+#     validation), the non-zero exit code from the first bullet already
+#     covers that case.
+#
+# No `melos bootstrap` needed: `dart pub publish --dry-run` resolves each
+# package's own workspace member on its own.
+cicd_publish_dryrun:
+	@status=0; \
+	for pkg in kmdb kmdb_cli kmdb_google_drive kmdb_extractor_pdf kmdb_extractor_html kmdb_extractor_markdown; do \
+		echo "── dart pub publish --dry-run: $$pkg ──────────────────────────"; \
+		out=$$(cd packages/$$pkg && dart pub publish --dry-run 2>&1); \
+		code=$$?; \
+		echo "$$out"; \
+		if [ $$code -ne 0 ]; then \
+			echo "FAIL: $$pkg — dart pub publish --dry-run exited $$code"; \
+			status=1; \
+			continue; \
+		fi; \
+		warnings=$$(echo "$$out" | grep -oE 'Package has [0-9]+ warnings? and [0-9]+ hints?\.' \
+			| grep -oE '[0-9]+' | head -1); \
+		if [ -z "$$warnings" ]; then \
+			echo "FAIL: $$pkg — could not find the 'Package has N warnings and M hints.' summary line"; \
+			status=1; \
+			continue; \
+		fi; \
+		if [ "$$warnings" -gt 0 ]; then \
+			echo "FAIL: $$pkg — $$warnings warning(s) reported"; \
+			status=1; \
+		else \
+			echo "OK: $$pkg — 0 warnings"; \
+		fi; \
+	done; \
+	exit $$status
+.PHONY: cicd_publish_dryrun
 
 # ── Container (Podman) ─────────────────────────────────────────────────────────
 #
