@@ -100,15 +100,13 @@ cicd_windows:
 # License check is intentionally omitted: addlicense covers the full repo in
 # cicd_linux_base (it runs from the workspace root).
 #
-# The final `flutter build macos --debug` step (release-ninja #3, 0.10.01)
-# compiles the example app's macOS runner, which links the Swift plugin +
-# Package.swift SPM manifest — the only lane that actually builds the native
-# Swift surface end-to-end (`flutter test` above only exercises Dart against
-# a fake channel). `--debug` is deliberate: `flutter build macos` has no
-# `--no-codesign` flag (iOS-only), and a debug build uses "Sign to Run
-# Locally" (ad-hoc) signing, which succeeds on an unprovisioned CI runner
-# where a release build's distribution-identity requirement would not. Stays
-# SPM-only per CLAUDE.md — no Podfile/Pods xcconfig is introduced.
+# NOTE: a `flutter build macos` step to compile the Swift/SPM plugin
+# end-to-end (release-ninja #3) is deliberately NOT here yet. When it was
+# first added, it revealed that the kmdb_icloud macOS plugin does not resolve
+# `FlutterFramework` in a fresh SPM build (`import Flutter` fails), so the
+# native build + that fix were split into their own follow-up
+# (plan_0_10_01_kmdb_icloud_macos_build.md). This lane stays Dart-only until
+# that lands.
 cicd_icloud:
 	cd packages/kmdb_icloud && flutter pub get
 	cd packages/kmdb_icloud/example && flutter pub get
@@ -117,7 +115,6 @@ cicd_icloud:
 	cd packages/kmdb_icloud && flutter analyze
 	cd packages/kmdb_icloud/example && flutter analyze
 	cd packages/kmdb_icloud && flutter test
-	cd packages/kmdb_icloud/example && flutter build macos --debug
 .PHONY: cicd_icloud
 
 # ── kmdb_flutter package ──────────────────────────────────────────────────────
