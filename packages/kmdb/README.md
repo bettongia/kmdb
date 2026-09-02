@@ -90,7 +90,7 @@ package's own SemVer commitments.
 | :----------------------------- | :------------------------------------------------------------------------------------- |
 | macOS, Linux, Windows (native) | Full support                                                                           |
 | iOS, Android (Flutter)         | Full support                                                                           |
-| Web (Wasm — dart2wasm only)    | The barrel compiles for web and the engine — Core LSM, sync, and Zstd compression (via WASM) — works. **Persistent web storage is a fast-follow:** the OPFS adapter (`StorageAdapterSahPool`) is not yet exported from this barrel, so today a web caller must pass their own `StorageAdapter` to `open()` (`MemoryStorageAdapter` is non-persistent). Semantic search is excluded at compile time (see §22); Vault is deferred (see §24). |
+| Web (Wasm — dart2wasm only)    | The barrel compiles for web and the engine — Core LSM, sync, and Zstd compression (via WASM) — works. Persistent web storage is available: the OPFS adapter (`StorageAdapterSahPool`) is exported from this barrel, so a web caller can pass it to `open()` for durable storage (`MemoryStorageAdapter` remains available for non-persistent/in-memory use). Semantic search is excluded at compile time (see §22); Vault is deferred (see §24). |
 
 ## Documentation
 

@@ -1,7 +1,14 @@
 # Export `StorageAdapterSahPool` from the public barrel (web persistence via the public API)
 
-**Status**: Investigated (see "Reviewer findings", 2026-09-01) — precondition
-satisfied: PR #86 merged to `main` 2026-09-01.
+**Status**: Implementing (branch
+`20260902_plan_0_10_01_sahpool_barrel_export`, started 2026-09-02) —
+precondition satisfied: PR #86 merged to `main` 2026-09-01. All implementation
+steps, tests, docs, and the mechanical `make pre_commit` gate are done (see the
+Implementation plan checklist). **`kmdb-qa` sign-off: ✅ PASS (2026-09-02)** —
+zero findings; seam verified implemented exactly as pinned (stub throws in
+constructor, full public surface incl. non-interface `close()`, correct
+polarity); analyze/format/native+web tests/full VM suite (2657/0) independently
+reproduced. Proceeding to commit + PR.
 
 **PR link**: _(none yet)_
 
@@ -185,10 +192,11 @@ Both **resolved** by the reviewer (2026-09-01) against the actual codebase — s
 
 ## Implementation plan
 
-- [ ] **Precondition:** confirm PR #86 is merged to `main` and base this branch on
+- [x] **Precondition:** confirm PR #86 is merged to `main` and base this branch on
       post-#86 `main` (see the boxed precondition at the top). Do not proceed
-      otherwise.
-- [ ] Create `lib/src/engine/platform/storage_adapter_sahpool_stub.dart` — native
+      otherwise. — confirmed: branch created from `main` @ `47fb40d` (2026-09-02),
+      which contains PR #86.
+- [x] Create `lib/src/engine/platform/storage_adapter_sahpool_stub.dart` — native
       stub `final class StorageAdapterSahPool implements StorageAdapter`. **Throw
       `UnsupportedError` in the constructor** (per resolved OQ1 / the
       `local_directory_adapter_stub.dart` precedent), and give a throwing body to all
@@ -196,19 +204,29 @@ Both **resolved** by the reviewer (2026-09-01) against the actual codebase — s
       concrete public surface matches the web class. Import `dart:typed_data` only —
       no `dart:js_interop`, no `package:web`. License header + doc comments;
       `// coverage:ignore-file` (matches the sibling stubs — the throwing bodies are
-      unreachable on the platform where the file compiles).
-- [ ] Create `lib/src/engine/platform/storage_adapter_sahpool_export.dart` —
+      unreachable on the platform where the file compiles). — done; verified via
+      `dart run` from inside `packages/kmdb` (a scratch fixture importing
+      `package:kmdb/kmdb.dart`, deleted afterward) that on native the import
+      resolves to this stub and `StorageAdapterSahPool()` throws
+      `UnsupportedError` while `StorageAdapterNative()` still constructs fine
+      (`dart compile exe` itself doesn't support betto_zstd's native-asset build
+      hook in this SDK — `dart run` was used instead, same resolution semantics).
+- [x] Create `lib/src/engine/platform/storage_adapter_sahpool_export.dart` —
       conditional export, **stub as the unconditional/default branch**, real adapter
       behind `if (dart.library.js_interop)` (polarity confirmed correct — see
       Reviewer findings; this is the dual of the existing `local_directory_adapter`
       seam at `kmdb.dart:57-59`):
-      `export 'storage_adapter_sahpool_stub.dart' if (dart.library.js_interop) 'storage_adapter_sahpool.dart' show StorageAdapterSahPool;`
-- [ ] Add `export 'src/engine/platform/storage_adapter_sahpool_export.dart' show StorageAdapterSahPool;`
-      to `kmdb.dart` alongside the other adapter exports (`kmdb.dart:37-43`).
-- [ ] **Tests:**
+      `export 'storage_adapter_sahpool_stub.dart' if (dart.library.js_interop) 'storage_adapter_sahpool.dart' show StorageAdapterSahPool;` — done.
+- [x] Add `export 'src/engine/platform/storage_adapter_sahpool_export.dart' show StorageAdapterSahPool;`
+      to `kmdb.dart` alongside the other adapter exports (`kmdb.dart:37-43`). — done;
+      `dart analyze lib/` is clean.
+- [x] **Tests:**
       - Native (VM): assert `StorageAdapterSahPool` is importable from
         `package:kmdb/kmdb.dart` and that `StorageAdapterSahPool.new` throws
         `UnsupportedError` (e.g. `expect(StorageAdapterSahPool.new, throwsUnsupportedError)`).
+        — done: `test/engine/storage_adapter_sahpool_barrel_export_test.dart`
+        (also asserts `StorageAdapterNative` still coexists). Passes under
+        `dart test`.
       - Web (`@TestOn('browser')`, wired into `cicd_web`): construct
         `StorageAdapterSahPool` **through the public barrel** and
         `KmdbDatabase.open(path:..., adapter: StorageAdapterSahPool())`, write a
@@ -218,13 +236,32 @@ Both **resolved** by the reviewer (2026-09-01) against the actual codebase — s
         what actually proves durable persistence through the public API — that is the
         whole point of the plan. No release-checklist (RC) entry is needed: both tests
         run in automated CI; the un-automatable cross-tab exclusion case is already
-        RC-10 (per PR #86).
-- [ ] **Docs:** remove the "fast-follow" caveat from `README.md`'s web row (web is
+        RC-10 (per PR #86). — done:
+        `test/query/storage_adapter_sahpool_web_persistence_test.dart`. Must run
+        with `--compiler dart2wasm` (same reason as the barrel smoke/vault KAT
+        tests — transitively imports xxhash.dart's 64-bit int literals, which
+        dart2js's front end rejects). Verified passing locally with
+        `dart test --platform chrome --compiler dart2wasm
+        test/query/storage_adapter_sahpool_web_persistence_test.dart`; wired
+        into `make_cicd.mk`'s `cicd_web` target.
+- [x] **Docs:** remove the "fast-follow" caveat from `README.md`'s web row (web is
       now fully usable persistently via the public API); update `docs/spec/19_platform.md`'s
       note that `StorageAdapterSahPool` "is not re-exported from the public barrel
-      today" — it now is.
-- [ ] Verify `dart compile wasm` barrel smoke still passes and the VM suite stays
-      green; then `kmdb-qa` → `kmdb-pre-commit` → PR.
+      today" — it now is. — done: `packages/kmdb/README.md`'s platform table and
+      `docs/spec/19_platform.md`'s "Conditional Exports" section both updated.
+- [x] Verify `dart compile wasm` barrel smoke still passes and the VM suite stays
+      green; then `kmdb-qa` → `kmdb-pre-commit` → PR. — done: wasm barrel smoke
+      (`test/web/kmdb_barrel_wasm_smoke_test.dart`) and the new web persistence
+      test both pass under `--compiler dart2wasm`; full VM suite
+      (`cd packages/kmdb && dart test`) passes (2657 tests, 12 e2e skipped);
+      `melos run analyze` and `melos format` are clean workspace-wide; `make
+      pre_commit` (format_check, analyze, license_check, `pre_commit_test`)
+      is green. **This session's toolset has no Agent/Task tool**, so
+      `kmdb-qa` sign-off could not be invoked directly — the mechanical
+      `make pre_commit` gate was run directly instead (see above), but the
+      substantive `kmdb-qa` judgment call is still outstanding and must be
+      obtained by the coordinator before this is committed/PR'd (per this
+      agent's operating instructions: never fabricate that sign-off).
 
 ## Summary
 

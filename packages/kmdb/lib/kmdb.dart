@@ -41,6 +41,8 @@ export 'src/engine/platform/storage_adapter_memory.dart'
     show MemoryStorageAdapter;
 export 'src/engine/platform/storage_adapter_native.dart'
     show StorageAdapterNative;
+export 'src/engine/platform/storage_adapter_sahpool_export.dart'
+    show StorageAdapterSahPool;
 
 // ── Sync ──────────────────────────────────────────────────────────────────────
 export 'src/sync/hlc_clock.dart' show HlcClock, ClockSkewException;
