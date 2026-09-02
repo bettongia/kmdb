@@ -189,6 +189,15 @@ cicd_flutter:
 # The web-platform-exclusion test asserts `KmdbDatabase.open` throws a clear
 # `UnsupportedError` on web when `vecIndexes` is non-empty (semantic search
 # is compile-time excluded on web — see docs/spec/22_semantic_search.md).
+#
+# The `StorageAdapterSahPool` barrel-export persistence test (0.10.01 WI-9
+# Phase C, release-ninja finding #2) proves — through the public barrel
+# import only — that a document written via `KmdbDatabase.open(adapter:
+# StorageAdapterSahPool())` survives `close()` and reopen with a freshly
+# constructed adapter at the same OPFS path. Must use `--compiler dart2wasm`
+# for the same reason as the barrel smoke and vault KAT tests above: it
+# transitively imports the storage engine (XXH64), which dart2js's front end
+# rejects outright on the 64-bit prime int literals.
 cicd_web:
 	dart pub global activate melos
 	melos bootstrap
@@ -199,6 +208,7 @@ cicd_web:
 	cd packages/kmdb && dart test --platform chrome test/engine/storage_adapter_sahpool_test.dart
 	cd packages/kmdb && dart test --platform chrome --compiler dart2wasm test/engine/storage_adapter_sahpool_test.dart
 	cd packages/kmdb && dart test --platform chrome --compiler dart2wasm test/query/kmdb_database_web_platform_test.dart
+	cd packages/kmdb && dart test --platform chrome --compiler dart2wasm test/query/storage_adapter_sahpool_web_persistence_test.dart
 .PHONY: cicd_web
 
 # ── Publish dry-run gate ──────────────────────────────────────────────────────

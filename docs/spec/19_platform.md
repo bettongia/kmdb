@@ -16,9 +16,23 @@ on web still throws `UnsupportedError` at the first real file operation, as
 compile-time/runtime distinction matters: the *type* compiles everywhere, the
 *behaviour* does not.
 
-The web storage adapter, `StorageAdapterSahPool` (below), is not itself
-re-exported from the public barrel today. What *is* selected conditionally is
-the platform-appropriate **default** local adapter used internally by
+The web storage adapter, `StorageAdapterSahPool` (below), **is** re-exported
+from the public barrel (0.10.01 WI-9 Phase C, release-ninja finding #2) via
+its own native-stub conditional-export seam
+(`storage_adapter_sahpool_export.dart`), the same shape used elsewhere in this
+file: the pure-Dart stub (`storage_adapter_sahpool_stub.dart`, throws
+`UnsupportedError` in its constructor and on every member — mirroring
+`local_directory_adapter_stub.dart`) is the unconditional/default branch, and
+the real adapter sits behind `if (dart.library.js_interop)`. This lets a web
+caller construct persistent storage directly through
+`import 'package:kmdb/kmdb.dart'`, closing the gap left when the barrel was
+first made to compile for web (`docs/plans/completed/plan_0_10_01_web_barrel_compile.md`)
+— before this, the only importable adapters were `MemoryStorageAdapter`
+(non-persistent) and `StorageAdapterNative` (throws at the first file op on
+web).
+
+Separately, and selected conditionally by its own seam, is the
+platform-appropriate **default** local adapter used internally by
 `KmdbDatabase.sync`/`push`/`pull` when a caller omits `localAdapter`:
 
 ```dart
@@ -30,7 +44,8 @@ export 'default_local_adapter_native.dart'
 `default_local_adapter_native.dart` returns `StorageAdapterNative()`;
 `default_local_adapter_web.dart` returns `StorageAdapterSahPool()`. This is
 the same conditional-export shape used by every other platform-specific seam
-in the package — `LocalDirectoryAdapter`, `WebSyncAuthenticator`, and the
+in the package — `LocalDirectoryAdapter`, `WebSyncAuthenticator`, the
+`StorageAdapterSahPool` barrel seam itself (above), and the
 `EmbeddingModel`/`EmbeddingKind` seam (§22) all follow it, each picking its
 own default/conditional polarity depending on which platform's compile-time
 `dart analyze` resolution needs to match its runtime-common case (see the
