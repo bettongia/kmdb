@@ -1,7 +1,7 @@
 # CI hardening: Flutter native build + publish dry-run gate (release-ninja #3 + #4)
 
-**Status**: Implementing — **scope narrowed to #4 only** (2026-09-02). #3 split
-out after CI exposed a real defect (see the split note below).
+**Status**: Complete — #4 (publish dry-run gate) shipped in PR #87 (squash-merged
+2026-09-02, CI green). #3 split into `plan_0_20_kmdb_icloud_macos_build.md`.
 
 **PR link**: [#87](https://github.com/bettongia/kmdb/pull/87) — publish dry-run
 gate (#4) only.
@@ -20,7 +20,7 @@ gate (#4) only.
 > **revert the `flutter build macos` step from PR #87 so it ships only the clean,
 > passing publish-dryrun gate (#4)**, and move the macOS build + the
 > `FlutterFramework` fix to
-> `plan_0_10_01_kmdb_icloud_macos_build.md`. `publish-dryrun`, `build`,
+> `plan_0_20_kmdb_icloud_macos_build.md`. `publish-dryrun`, `build`,
 > `test-flutter`, and `test-web` all passed on that run.
 
 > **Provenance.** Release-blocker-adjacent findings **#3** and **#4** from the
@@ -190,7 +190,7 @@ claim is qualified instead.
       hit CI: `flutter build macos --debug` failed in `test-icloud` with
       `unable to resolve module dependency: 'Flutter'` (the `kmdb_icloud` macOS
       plugin's `../FlutterFramework` SPM path is absent on a clean checkout).
-      Moved to `plan_0_10_01_kmdb_icloud_macos_build.md`; the step is removed
+      Moved to `plan_0_20_kmdb_icloud_macos_build.md`; the step is removed
       from `cicd_icloud` and that lane stays Dart-only for now. See the split
       note at the top.
 - [x] Per **Q1 (maintainer)**: only if the maintainer picks option (a), create

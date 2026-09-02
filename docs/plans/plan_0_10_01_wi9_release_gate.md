@@ -342,10 +342,35 @@ _To be completed by the reviewer/implementer._ Anchor points:
       list; A5/R-5 covered). The **`kmdb-spec-auditor`** spec-vs-code truth pass
       ran too (otherwise clean) — its two fixes (§13 sync return types, §34
       cross-references) landed as `c0b8666`.
-- [ ] **Independent release review** — `bettongia:release-ninja` (cross-platform
-      / CI / release-posture) and/or a user-triggered `/code-review ultra`
-      (correctness depth) against the post-W6 `main`. Triage and land any
-      must-fix findings before the tag.
+- [x] **Independent release review** — `bettongia:release-ninja` ran against the
+      post-W6 `main` (2026-09-02) and returned six findings. Dispositions:
+      - **#1 (🔴 barrel won't compile for web)** — ✅ fixed in
+        [PR #86](https://github.com/bettongia/kmdb/pull/86)
+        ([plan](completed/plan_0_10_01_web_barrel_compile.md)): `kmdb.dart` now
+        compiles under `dart2wasm` via the `EmbeddingModel` conditional-export
+        seam; CI gained a wasm barrel-compile smoke.
+      - **#4 (no publish dry-run gate)** — ✅ fixed in
+        [PR #87](https://github.com/bettongia/kmdb/pull/87)
+        ([plan](completed/plan_0_10_01_ci_hardening_flutter_publish.md)): the
+        `publish-dryrun` CI job runs `make cicd_publish_dryrun` over the 6
+        auto-published packages, failing on any warning.
+      - **#5 (README ↔ §19 web contradiction)** — ✅ resolved: both the `kmdb`
+        README platform table and `docs/spec/19_platform.md` now describe
+        WASM-only web with `StorageAdapterSahPool` not yet exported from the
+        barrel (reconciled during the #86 web-barrel work).
+      - **#2 (SAHPool web adapter has no barrel export / CI)** — 📋 in progress:
+        [plan_0_10_01_sahpool_barrel_export.md](plan_0_10_01_sahpool_barrel_export.md)
+        (Investigated; precondition #86 met) exports `StorageAdapterSahPool` via a
+        native-stub triad. Next to implement.
+      - **#3 (kmdb_icloud Swift never built in CI)** — ➡️ **deferred to v0.2.0**
+        (2026-09-02). Not a tag blocker: the plugin compiles as shipped; only CI
+        build-verification is missing, blocked by the iCloud example's
+        entitlements wall — the same class of work as standing up mobile/iCloud
+        device CI, which the pipeline does not do. See
+        [docs/roadmap/0_20.md](../roadmap/0_20.md) and
+        [plan_0_20_kmdb_icloud_macos_build.md](plan_0_20_kmdb_icloud_macos_build.md).
+      - **#6 (RC-4 / RC-6 remain manual gates)** — tracked as the RC-items box
+        below (`docs/spec/28_release_checklist.md`); maintainer-run at release.
 - [ ] Run the applicable `docs/spec/28_release_checklist.md` RC-items, including
       **RC-3** (Windows, covers A6) and **RC-25**.
 

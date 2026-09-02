@@ -1,8 +1,20 @@
 # kmdb_icloud macOS SPM build: fix `FlutterFramework` resolution + gate it in CI
 
-**Status**: Draft (needs investigation → `kmdb-architect` then `kmdb-plan-reviewer`)
+**Status**: **Deferred to v0.2.0** (2026-09-02) — investigation recorded below;
+needs `kmdb-architect` on the CI-build approach → `kmdb-plan-reviewer` before
+implementation. See [docs/roadmap/0_20.md](../roadmap/0_20.md).
 
 **PR link**: _(none yet)_
+
+> **Deferral (2026-09-02).** Moved off the `0.1.0` release gate to the
+> [v0.2.0 roadmap](../roadmap/0_20.md). The plugin compiles as shipped (Finding 1
+> below); the only gap is CI *build-verification* of its native Swift compile,
+> which is blocked by the example's entitlements wall (Finding 2) and is the same
+> class of work as standing up mobile/iCloud device CI — something the pipeline
+> does not do today (it has no access to Apple devices, simulated or otherwise,
+> nor an Apple Developer ID). Not release-blocking for the first tag; better
+> scoped as its own post-`0.1.0` effort. The "potentially 0.1.0-blocking" framing
+> in the provenance note below predates this decision and is superseded.
 
 > **Provenance.** Split out of the CI-hardening slice
 > (`plan_0_10_01_ci_hardening_flutter_publish.md`, release-ninja #3) on
