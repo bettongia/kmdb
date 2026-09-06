@@ -1,6 +1,6 @@
 # Library Integration Guide + sample Flutter to-do app
 
-**Status**: Investigated
+**Status**: Implementing
 
 > This plan was promoted to `Investigated` on 2026-07-17, but several
 > subsystems it pins have changed on `main` since. A refresh pass on
