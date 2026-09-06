@@ -739,6 +739,17 @@ guide's **completeness and accuracy**, so it must be a genuine cold read.
       dropped, and that `kmdb_icloud/example`'s stale betto_* block is an
       anti-pattern, not a template.
 
+> **Session paused here, 2026-09-07 — no Agent/Task tool available.** All
+> implementation work above is done, committed, and passing (`flutter test`,
+> `flutter analyze`, `make cicd_example_todo` all green; `packages/kmdb` and
+> `packages/kmdb_cli` each independently re-verified green — see the Summary
+> section for the kmdb_cli flake note). This session's tool set has no way to
+> invoke the `kmdb-qa` or `kmdb-pre-commit` agents (no Agent/Task-style
+> invocation tool), so the two items below could not be completed — per
+> CLAUDE.md, sign-off from both is mandatory and must never be fabricated.
+> A session with agent-invocation available must run them before a commit/PR
+> is made from this branch.
+
 **Final step — QA sign-off and pre-commit:**
 
 - [x] Run the package's own `flutter test --coverage` — confirm
@@ -1220,4 +1231,80 @@ the guide-prose step, since the guide cites post-review spec section numbers.
 
 ## Summary
 
-{To be completed once implemented.}
+**Status as of 2026-09-07: implementation complete, awaiting `kmdb-qa` and
+`kmdb-pre-commit` sign-off (blocked — see note above the "Final step"
+checklist) and the B2 cold-read gate (deliberately deferred to a post-merge,
+main-session-orchestrated run).**
+
+- Scaffolded `packages/kmdb_example_todo/` as a non-workspace Flutter package
+  (macOS/Linux/Windows runners), path-overriding only the three unpublished
+  locals (`kmdb`, `kmdb_extractor_html`, `kmdb_extractor_markdown`) per
+  finding 3 — no betto_\* override block.
+- Implemented the full data layer per the pinned design: `Project`/`Task`/
+  `TaskComment` models + codecs, JSON Schema admission (`db/schemas.dart`),
+  `AppDatabase.open()` (indexes, FTS, vault search, encryption, and a
+  two-phase device-ID open — see the finding below), and five repositories
+  (`project`, `task`, `comment`, `attachment`, `sync_service`).
+- Implemented all six screens (Unlock/Create, Project list, Task list, Task
+  detail/edit, Search, Sync/Settings) using `watch()`/`watchKey` only — no
+  third-party state management — marked `// coverage:ignore-file`.
+- Wrote the full enumerated data-layer test list (CRUD, schema admission,
+  secondary index + `QueryPlan`, vault round-trip/ref-counting/dedup/vault
+  search, sync convergence + negative-auth + non-resurrection, encryption
+  bootstrap incl. wrong-passphrase/recovery-code) — **47 tests, 100.0% line
+  coverage** on the measured surface (`repositories/`, `codecs/`, `db/`,
+  `models/`).
+- Added `make cicd_example_todo` and the `test-example-todo` macOS CI job.
+- Wrote the Integration Guide (`docs/integration_guide/README.md`), the B1
+  Friction Log template + `friction_logs/` directory, and cross-linked both
+  from `docs/spec/00_index.md` and the repo root `README.md`.
+
+**Deviations / findings during implementation:**
+
+1. **Two-phase device-ID open was not in the original plan text and had to
+   be added.** The plan's pinned `AppDatabase.open()` design opened
+   `KmdbDatabase` once and called `ensureDeviceId()` afterwards — this leaves
+   every instance on the `'00000000'` sentinel forever, since
+   `ensureDeviceId()` cannot retroactively change the device ID already
+   baked into the running `LsmEngine`/SSTable naming. This was caught by the
+   sync convergence tests (device-ID/HWM-filename collisions between the two
+   demo instances) and fixed by mirroring `kmdb_cli`'s `DatabaseOpener`
+   two-phase pattern (open minimal, `ensureDeviceId()`, close-without-flush
+   if it changed, reopen full). Documented in `AppDatabase.open()`'s doc
+   comment and the Integration Guide's "Open and close a database" section.
+2. **Core-library finding (out of scope, not fixed): `KmdbDatabase.close()`
+   can throw an uncaught `SyncAuthException`.** See the annotation under
+   "Write the enumerated data-layer tests" above for the full detail — a
+   flushing `close()` can trigger a background compaction that reads every
+   peer's `.hwm` file via the tombstone-GC-horizon provider, with no
+   `SyncAuthException` handling at that call site (unlike the five call
+   sites catalogued in §34's rejection-policy table). Worked around in the
+   sample app's test teardown; flagged for `kmdb-qa`/`kmdb-architect` to
+   decide whether it needs its own hardening plan.
+3. **`bettongia:inclusivity` skill review could not be run.** This
+   implementer session's tool set has no Skill-invocation capability and no
+   discoverable skill file to self-apply. Accessibility best practices were
+   applied manually while building each screen (semantic labels on every
+   icon-only control — verified by grep, dark high-contrast chip colours
+   with a `Semantics` label, `liveRegion` error announcements, stock-widget
+   keyboard navigation) but this is **not** a substitute for the real skill
+   review. Left unchecked in the implementation plan; flagged for whoever
+   picks up QA.
+4. **`kmdb_cli`'s full test suite failed once under `make test`'s
+   parallel/melos run, but passed cleanly (1240 tests, 3 e2e skips) when run
+   directly and in isolation** (`cd packages/kmdb_cli && dart test`). Given
+   this plan touches nothing under `packages/kmdb_cli/`, and the direct run
+   is clean, this looks like a resource-contention flake in the parallel
+   melos run (kmdb_cli's encryption tests spawn real subprocesses) rather
+   than a regression — but it was not re-run under `make test` a second time
+   to confirm, given the ~50+ minute cost of a full workspace run. Worth a
+   second look before merge if `kmdb-pre-commit`'s own run reproduces it.
+5. **Two vault spec-section mis-citations were introduced and then
+   corrected**: several early comments cited §24 (vault content-addressable
+   store) for what is actually §32 (vault *search*) — fixed throughout
+   `lib/` and `test/` before the guide was written, so the guide itself
+   cites correctly from the start.
+
+**Not done, by design (see the note above the "Final step" checklist):**
+`kmdb-qa` sign-off, `kmdb-pre-commit`'s mechanical gate, and the B2 cold-read
+guide-validation run.
