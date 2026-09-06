@@ -580,25 +580,25 @@ guide's **completeness and accuracy**, so it must be a genuine cold read.
 
 ## Implementation plan
 
-- [ ] Scaffold `packages/kmdb_example_todo/` per the pinned file layout:
+- [x] Scaffold `packages/kmdb_example_todo/` per the pinned file layout:
       `pubspec.yaml` (`publish_to: none`, `flutter` + path deps on `kmdb`,
       `kmdb_extractor_html`, `kmdb_extractor_markdown`; `dependency_overrides`
       = **path overrides of those three unpublished locals only** — NOT a
       betto_* mirror, and do NOT copy `kmdb_icloud/example`'s stale betto_*
       block; see "Package file layout" finding 3), `macos/`/`linux/`/`windows/`
       runners only, `analysis_options.yaml`.
-- [ ] Add the data model + codecs: `Project`, `Task`, `TaskComment` classes
+- [x] Add the data model + codecs: `Project`, `Task`, `TaskComment` classes
       and their `KmdbCodec<T>` implementations per the pinned field lists
       (`DateTime` fields via ISO-8601).
-- [ ] Add `db/schemas.dart`: JSON Schema (§25) definitions for `projects`,
+- [x] Add `db/schemas.dart`: JSON Schema (§25) definitions for `projects`,
       `tasks` (with `priority`/`status` enums, `additionalProperties: false`),
       and `taskComments`.
-- [ ] Add `db/app_database.dart`: `KmdbDatabase.open()` wrapper wiring
+- [x] Add `db/app_database.dart`: `KmdbDatabase.open()` wrapper wiring
       `indexes` (`tasks.projectId`, `taskComments.taskId`), `ftsIndexes`
       (`tasks.title`, `tasks.description`, `taskComments.body`),
       `vaultSearch` (`HtmlTextExtractor`, `MarkdownTextExtractor`),
       `encryptionConfig` (create-vs-unlock branch), and `ensureDeviceId()`.
-- [ ] Add `repositories/`: `project_repository.dart`, `task_repository.dart`
+- [x] Add `repositories/`: `project_repository.dart`, `task_repository.dart`
       (incl. the `where(projectId)` query), `comment_repository.dart`,
       `attachment_repository.dart` (wraps `VaultStore.ingest`/`getBlob` and
       `attachmentUris` bookkeeping), `sync_service.dart` (wraps
@@ -607,6 +607,9 @@ guide's **completeness and accuracy**, so it must be a genuine cold read.
       DefaultSyncAuthenticator(rootKey)))` — the adapter MUST be
       authenticator-wrapped with a shared root key, per finding 2; inspect the
       returned `SyncResult`/`PullResult` for quarantined artefacts).
+      Data-layer tests for project/task/comment/attachment repositories and
+      schema admission are written and passing (see below); `sync_service.dart`
+      and encryption bootstrap still need their tests (next checklist item).
 - [ ] Add the six screens from the pinned screen inventory (Unlock/Create,
       Project list, Task list, Task detail/edit, Search, Sync/Settings),
       using `KmdbCollection.watch()`/`watchKey` for reactivity — no
