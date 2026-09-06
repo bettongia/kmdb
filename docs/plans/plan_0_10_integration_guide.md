@@ -743,12 +743,18 @@ guide's **completeness and accuracy**, so it must be a genuine cold read.
 > implementation work above is done, committed, and passing (`flutter test`,
 > `flutter analyze`, `make cicd_example_todo` all green; `packages/kmdb` and
 > `packages/kmdb_cli` each independently re-verified green — see the Summary
-> section for the kmdb_cli flake note). This session's tool set has no way to
-> invoke the `kmdb-qa` or `kmdb-pre-commit` agents (no Agent/Task-style
-> invocation tool), so the two items below could not be completed — per
-> CLAUDE.md, sign-off from both is mandatory and must never be fabricated.
-> A session with agent-invocation available must run them before a commit/PR
-> is made from this branch.
+> section for the kmdb_cli flake note). The **mechanical** pre-commit gate
+> was run directly (`make pre_commit` — format_check, analyze, license_check,
+> the `kmdb`-scoped `pre_commit_test`) and is **green** (one real finding
+> fixed along the way: `addlicense_config.txt` was missing ignore patterns
+> for the Linux/Windows generated-plugin-registrant files this repo's first
+> non-macOS-only Flutter package produces — see that commit). What remains
+> blocked is the **substantive** `kmdb-qa` judgement call: this session's
+> tool set has no way to invoke the `kmdb-qa` agent (no Agent/Task-style
+> invocation tool), and per CLAUDE.md that sign-off is mandatory and must
+> never be fabricated. A session with agent-invocation available must run
+> `kmdb-qa` (and re-run `kmdb-pre-commit` for its independent confirmation)
+> before a commit/PR is made from this branch.
 
 **Final step — QA sign-off and pre-commit:**
 
@@ -764,11 +770,23 @@ guide's **completeness and accuracy**, so it must be a genuine cold read.
       `bettongia:inclusivity` accessibility pass above was actually done, not
       just planned). Resolve every blocking item before proceeding. Do not
       open a PR until sign-off is received.
-- [ ] Run `make pre_commit` — format, analyze, license_check, tests all green
+- [x] Run `make pre_commit` — format, analyze, license_check, tests all green
       (note: this package is non-workspace, so confirm its own analyze/format
       run separately, per CLAUDE.md's note that `make pre_commit`'s test step
-      is `kmdb`-only).
-- [ ] Verify licence headers on all new files (2026).
+      is `kmdb`-only). **Confirmed green** — run directly via Bash (the
+      mechanical gate, not the `kmdb-qa` judgement call); this package's own
+      `flutter analyze`/`flutter test --coverage` were also run separately and
+      are green (see above). One real fix required:
+      `addlicense_config.txt` needed new ignore patterns for the Linux/
+      Windows generated-plugin-registrant files (this repo's first non-
+      macOS-only Flutter package).
+- [x] Verify licence headers on all new files (2026). All hand-written
+      `.dart` files carry the 2026 Apache header; the Flutter-generated
+      Runner boilerplate (Swift/C++) was headered to match the
+      `kmdb_icloud/example` precedent; pure build-config generated files
+      (CMakeLists.txt, generated_plugin_registrant.*, generated_plugins.cmake)
+      are exempted via `addlicense_config.txt`, matching how
+      `Flutter/GeneratedPluginRegistrant.swift` is already exempted.
 
 **Final acceptance gate — cold-read guide validation (B2), distinct from
 `kmdb-qa`:**
@@ -1306,5 +1324,6 @@ main-session-orchestrated run).**
    cites correctly from the start.
 
 **Not done, by design (see the note above the "Final step" checklist):**
-`kmdb-qa` sign-off, `kmdb-pre-commit`'s mechanical gate, and the B2 cold-read
-guide-validation run.
+`kmdb-qa`'s substantive sign-off, and the B2 cold-read guide-validation run.
+The **mechanical** pre-commit gate (`make pre_commit`, run directly) is
+green — see the checklist above.
