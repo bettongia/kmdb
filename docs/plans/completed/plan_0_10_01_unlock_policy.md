@@ -1,8 +1,11 @@
 # Unlock policy — close SC-1 with a wrapped-copy DEK model and re-auth
 
 > The CLI session agent originally in this plan is split into
-> `plan_0_10_01_cli_session_agent.md` (reviewer round 2). This plan is the
-> SC-1-closing unit: wrapped-copy DEK + native biometric + headless opt-out.
+> `plan_0_10_01_cli_session_agent.md` (reviewer round 2) — since renamed to
+> [`plan_0_20_cli_session_agent.md`](../plan_0_20_cli_session_agent.md) when it
+> was deferred to [v0.2.0](../../roadmap/0_20.md); later references below use
+> the original name. This plan is the SC-1-closing unit: wrapped-copy DEK +
+> native biometric + headless opt-out.
 
 **Status**: **Complete** (merged 2026-08-22, [PR #75](https://github.com/bettongia/kmdb/pull/75)) — all 6 phases landed; SC-1 closed (`DekCache` removed, authenticated wrapped-DEK unwrap); biometric KEK, default-on `ReauthPolicy`, and headless hook shipped. Q1–Q7 resolved and verified against the code during planning.
 

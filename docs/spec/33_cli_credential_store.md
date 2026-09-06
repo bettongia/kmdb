@@ -316,7 +316,9 @@ session) — is **not** addressed by this `SecretStore`-backed credential
 store. It is a distinct subsystem (new IPC transport, wire protocol, and a
 Windows named-pipe/ACL story this store's POSIX-permission model does not
 cover) split out of the original 0.10.01 WI-5 unlock-policy plan into its own,
-not-yet-`Investigated` plan: `docs/plans/plan_0_10_01_cli_session_agent.md`.
+not-yet-`Investigated` plan: `docs/plans/plan_0_20_cli_session_agent.md`,
+**deferred to v0.2.0** (it is a CLI ergonomics improvement, not a correctness
+item — `0.1.0` ships without a CLI DEK session cache).
 It is sequenced after the unlock-policy work this section's core
 `SecretStore` seam now also serves (see "Key scoping" above and §31 "Unlock
 Policy").

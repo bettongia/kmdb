@@ -517,8 +517,8 @@ by a KMS/HSM or a mounted-secret file, paired with
 `ReauthPolicy.headlessSession()`. See `ReauthPolicy.headlessSession`'s doc
 comment for the full pattern, including non-interactive passphrase injection
 from `$CREDENTIALS_DIRECTORY`/`/run/secrets`/Kubernetes secret mounts. The
-CLI session agent (a separate subsystem — see
-`docs/plans/plan_0_10_01_cli_session_agent.md`) is the interactive-CLI
+CLI session agent (a separate subsystem, deferred to v0.2.0 — see
+`docs/plans/plan_0_20_cli_session_agent.md`) is the interactive-CLI
 analogue; it is not part of this section.
 
 ### Limitations

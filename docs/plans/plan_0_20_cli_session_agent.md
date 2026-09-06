@@ -1,18 +1,23 @@
 # CLI session agent — unlock once, reuse across commands
 
-**Status**: Draft — **deferred to a post-`0.1.0` release** (decision 2026-08-26)
+**Status**: Draft — **Deferred to v0.2.0** (decision 2026-08-26; filed to the
+v0.2.0 roadmap 2026-09-06). See [docs/roadmap/0_20.md](../roadmap/0_20.md).
 
 **PR link**: _(none yet)_
 
-> **Deferred out of `0.1.0` (2026-08-26).** This is a CLI ergonomics
+> **Deferred out of `0.1.0` (2026-08-26; recorded on the
+> [v0.2.0 roadmap](../roadmap/0_20.md) 2026-09-06).** This is a CLI ergonomics
 > improvement, not a correctness item: it does **not** close SC-1 (WI-5 already
 > did, [PR #75](https://github.com/bettongia/kmdb/pull/75)), and it introduces
 > the single highest-risk new subsystem in the track (a new place a DEK lives).
 > Shipping it under release time-pressure is exactly the wrong trade. `0.1.0`
 > ships without a CLI DEK session cache — every encrypted-DB command re-runs
 > Argon2id, which is acceptable for the REPL. This plan stays Draft and is
-> picked up in a future release, when it can go through the full
+> picked up in `0.2.0`, when it can go through the full
 > reviewer → implement → QA pipeline unhurried.
+>
+> This file was renamed from `plan_0_10_01_cli_session_agent.md` on 2026-09-06
+> to match its target release.
 
 > **Provenance.** Split out of `plan_0_10_01_unlock_policy.md` (WI-5) on
 > 2026-08-11 on the reviewer's recommendation: the CLI session agent is a
@@ -20,7 +25,8 @@
 > lives), and — unlike the rest of WI-5 — **does not close SC-1**. It addresses
 > the separate CLI ergonomics finding (proposal §2.3 / §4.4). Sequenced **after**
 > WI-5, since it depends on WI-5's wrapped-DEK model and the core `SecretStore`
-> seam. Part of the [0.10.01 hardening track](../roadmap/0_10_01.md), WI-5 family.
+> seam. Originated in the [0.10.01 hardening track](../roadmap/0_10_01.md)
+> (WI-5 family); now carried on the [v0.2.0 roadmap](../roadmap/0_20.md).
 
 ## Problem statement
 
