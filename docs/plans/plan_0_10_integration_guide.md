@@ -630,6 +630,36 @@ guide's **completeness and accuracy**, so it must be a genuine cold read.
       language keeps the reference app small), **not** an engine limitation.
       Note i18n findings as a "going further" callout in the guide rather than
       fixing them in this plan.
+
+      **BLOCKED, 2026-09-07 — tool unavailable in this implementer session.**
+      This session's tool set has no way to invoke a named skill (no
+      Skill-invocation tool, and no `bettongia:inclusivity` file discoverable
+      under `~/.claude` or the repo to read and self-apply). I did **not**
+      fabricate a pass. What I did instead, manually, while building each
+      screen (not a substitute for the real skill review, but recorded here
+      so `kmdb-qa` knows exactly what was and wasn't done):
+      - Icon-only controls (attach file, sync-now, search-mode segments,
+        delete/remove/send icons) all carry `tooltip`/`Semantics` labels —
+        grepped for every bare `IconButton`/`Icon`-only control across the
+        six screens to confirm none is unlabelled.
+      - Status/priority chips (`lib/src/ui/widgets/status_priority_chips.dart`)
+        use "900"-shade Material colours (dark backgrounds) with white text —
+        chosen for comfortable WCAG AA margin, but **not run through an
+        actual contrast-ratio checker or the `bettongia:design` palette** —
+        and carry a `Semantics` label so the value is never colour-only.
+      - Error states (`badCredentials`, the attach-file `FileSystemException`
+        path) are wrapped in `Semantics(liveRegion: true)`.
+      - Keyboard navigation relies entirely on stock Material widgets
+        (`TextField`, `FilledButton`, `SegmentedButton`, `ListTile`,
+        `DropdownButtonFormField`) and their default focus traversal — no
+        custom focus/keyboard handling was added or verified against.
+      - i18n: not addressed, per the plan's decision (v1 is deliberately
+        English-only; noted as "going further" in the guide).
+
+      **This checklist item is left unchecked and must be completed by an
+      agent/session that has `bettongia:inclusivity` available**, or by a
+      human reviewer running it manually, before this plan is considered
+      fully done. Flagging for `kmdb-qa` and the user.
 - [x] Write the enumerated data-layer tests (CRUD, schema admission, index,
       vault round-trip, sync convergence via two `LocalDirectoryAdapter`
       instances, encryption bootstrap incl. wrong-passphrase and recovery-code
@@ -673,7 +703,7 @@ guide's **completeness and accuracy**, so it must be a genuine cold read.
       verification left as a "going further" callout per the reviewer's
       "acceptable latitude" note. Verified locally: `make cicd_example_todo`
       passes with 100% coverage.
-- [ ] Write the Integration Guide at `docs/integration_guide/README.md`,
+- [x] Write the Integration Guide at `docs/integration_guide/README.md`,
       structured around the sample app: open/close a database (incl.
       encryption bootstrap), define collections and schemas, CRUD + queries,
       the secondary index, vault ingest/get/export, both search surfaces
@@ -690,9 +720,9 @@ guide's **completeness and accuracy**, so it must be a genuine cold read.
       must have landed on `main` before this step). Note hybrid/semantic
       search and `PdfTextExtractor` as "going further" callouts, not demoed
       paths.
-- [ ] Cross-link the guide from `docs/spec/00_index.md` and the repo root
+- [x] Cross-link the guide from `docs/spec/00_index.md` and the repo root
       `README.md`.
-- [ ] **(B1)** Create the Friction Log template at
+- [x] **(B1)** Create the Friction Log template at
       `docs/integration_guide/friction_log_template.md` with the pinned fields
       (section ref, said/happened, severity, self-resolvable+how, time lost,
       root cause, suggested fix, environment) and the per-copy header block.
@@ -700,7 +730,7 @@ guide's **completeness and accuracy**, so it must be a genuine cold read.
       use it, and note it is filled into a fresh dated copy per run (never the
       template itself). Create the `docs/integration_guide/friction_logs/`
       directory (with a `.gitkeep` or a short `README.md`) to hold run copies.
-- [ ] Add an explicit note (in the guide's README or the package's own
+- [x] Add an explicit note (in the guide's README or the package's own
       README) flagging the maintenance liability of the package's
       `dependency_overrides` **path pins on the three unpublished locals**
       (`kmdb`, `kmdb_extractor_html`, `kmdb_extractor_markdown`) — re-aimed
