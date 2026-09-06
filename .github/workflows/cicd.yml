@@ -229,6 +229,49 @@ jobs:
 
       - run: make cicd_flutter
 
+  # ── kmdb_example_todo sample app (0.10 Integration Guide) ─────────────────────
+  #
+  # Bootstraps the Integration Guide's companion sample app with the Flutter
+  # SDK, then runs format check, flutter analyze, flutter test with coverage,
+  # and enforces the >= 90% line-coverage threshold on the measured surface
+  # (repositories/, codecs/, db/schemas.dart). Requires the Flutter SDK — run
+  # on macOS only (same lane as test-icloud/test-flutter), per the sample
+  # app's desktop-only (macOS/Linux/Windows) v1 scope: macOS is the stated CI
+  # minimum; Linux/Windows build verification is a "going further" callout,
+  # not wired into CI here.
+  test-example-todo:
+    runs-on: macos-latest
+    needs: build
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: subosito/flutter-action@v2
+        with:
+          # Pinned to Flutter 3.47.1 (bundles Dart 3.13.1), matching the
+          # pinned dart-lang/setup-dart SDK. Adopted 2026-08-23
+          # (plan_dart_3_13_adoption.md) once the betto_pdfium native-asset
+          # break on Linux was fixed upstream (0.1.0-dev.4). Kept
+          # version-pinned rather than a floating `channel: stable` so CI
+          # cannot drift ahead of the workspace's reformat + lint fixes again.
+          flutter-version: "3.47.1"
+          channel: stable
+
+      - name: Install lcov
+        run: brew install lcov
+
+      - name: Cache pub dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.pub-cache
+          key:
+            ${{ runner.os }}-flutter-pub-${{
+            hashFiles('packages/kmdb_example_todo/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-flutter-pub-
+
+      - run: make cicd_example_todo
+
   # ── Web: WASM compression codec tests in Chrome ──────────────────────────────
   #
   # Verifies that betto_zstd's WASM path compresses and decompresses correctly

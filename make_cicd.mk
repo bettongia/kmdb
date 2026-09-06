@@ -143,6 +143,35 @@ cicd_flutter:
 	  'BEGIN { if (p+0 < 95) { printf "WARN: %.1f%% is below the 95%% target\n", p+0 } }'
 .PHONY: cicd_flutter
 
+# ── kmdb_example_todo sample app (0.10 Integration Guide) ─────────────────────
+#
+# Verifies the Integration Guide's companion sample app: bootstraps, format-
+# checks Dart sources, analyzes, runs unit tests with coverage, and enforces
+# the >= 90% line-coverage threshold on the measured surface
+# (repositories/, codecs/, db/schemas.dart — lib/src/ui/** and main.dart are
+# `// coverage:ignore-file`, per the plan's coverage-scope decision).
+# Requires the Flutter SDK — run on macOS only (same lane as cicd_icloud/
+# cicd_flutter), per the sample app's desktop-only (macOS/Linux/Windows) v1
+# scope: macOS is the stated CI minimum; a Linux/Windows *build* verification
+# is left as a "going further" callout, not wired into CI here.
+# License check is intentionally omitted: addlicense covers the full repo in
+# cicd_linux_base (it runs from the workspace root).
+cicd_example_todo:
+	cd packages/kmdb_example_todo && flutter pub get
+	dart format --output=none --set-exit-if-changed \
+		packages/kmdb_example_todo/lib packages/kmdb_example_todo/test
+	cd packages/kmdb_example_todo && flutter analyze
+	cd packages/kmdb_example_todo && flutter test --coverage
+	@pct=$$(lcov --summary packages/kmdb_example_todo/coverage/lcov.info 2>&1 \
+	  | grep 'lines\.\.\.\.' | grep -oE '[0-9]+\.[0-9]+' | head -1); \
+	echo "kmdb_example_todo line coverage: $${pct:-unknown}%"; \
+	if [ -z "$$pct" ]; then \
+	  echo "ERROR: could not parse line coverage"; exit 1; \
+	fi; \
+	awk -v p="$$pct" \
+	  'BEGIN { if (p+0 < 90) { printf "FAIL: %.1f%% < 90%% minimum\n", p+0; exit 1 } }'
+.PHONY: cicd_example_todo
+
 # ── Web / Chrome ───────────────────────────────────────────────────────────────
 #
 # Runs the WASM compression codec tests in Chrome, plus the vault SHA-256/

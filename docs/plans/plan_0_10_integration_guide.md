@@ -607,7 +607,7 @@ guide's **completeness and accuracy**, so it must be a genuine cold read.
       DefaultSyncAuthenticator(rootKey)))` — the adapter MUST be
       authenticator-wrapped with a shared root key, per finding 2; inspect the
       returned `SyncResult`/`PullResult` for quarantined artefacts).
-- [ ] Add the six screens from the pinned screen inventory (Unlock/Create,
+- [x] Add the six screens from the pinned screen inventory (Unlock/Create,
       Project list, Task list, Task detail/edit, Search, Sync/Settings),
       using `KmdbCollection.watch()`/`watchKey` for reactivity — no
       third-party state-management dependency. Mark `lib/src/ui/**` and
@@ -663,11 +663,16 @@ guide's **completeness and accuracy**, so it must be a genuine cold read.
       code comment there) rather than by fixing the core library, which is
       out of this plan's scope. Flagged for `kmdb-qa`/`kmdb-architect` to
       decide whether this needs its own hardening plan.
-- [ ] Add a dedicated CI job for the package (analyze/format/test on the
+- [x] Add a dedicated CI job for the package (analyze/format/test on the
       macOS runner at minimum, per the desktop-only Q3 scope — confirm
       whether Linux/Windows runners are also needed for the full
       macOS/Linux/Windows target), modelled on the existing `make
-      cicd_flutter`/iCloud jobs in `.github/workflows/cicd.yml`.
+      cicd_flutter`/iCloud jobs in `.github/workflows/cicd.yml`. Added
+      `make cicd_example_todo` (format/analyze/test+coverage, >=90% gate)
+      and the `test-example-todo` macOS job; Linux/Windows build
+      verification left as a "going further" callout per the reviewer's
+      "acceptable latitude" note. Verified locally: `make cicd_example_todo`
+      passes with 100% coverage.
 - [ ] Write the Integration Guide at `docs/integration_guide/README.md`,
       structured around the sample app: open/close a database (incl.
       encryption bootstrap), define collections and schemas, CRUD + queries,
