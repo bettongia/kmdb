@@ -741,9 +741,13 @@ guide's **completeness and accuracy**, so it must be a genuine cold read.
 
 **Final step — QA sign-off and pre-commit:**
 
-- [ ] Run the package's own `flutter test --coverage` — confirm
+- [x] Run the package's own `flutter test --coverage` — confirm
       `repositories/`, `codecs/`, and `db/schemas.dart` meet the project's
       coverage bar (UI is excluded via `coverage:ignore-file`, not measured).
+      **Result: 100.0% line coverage** (214/214 lines) across the 13 measured
+      source files (`repositories/`, `codecs/`, `db/`, `models/`) — verified
+      via `lcov --summary` against `coverage/lcov.info`, and again through
+      `make cicd_example_todo`'s >=90% gate.
 - [ ] Hand off to the **`kmdb-qa` agent** for sign-off (spec alignment, doc
       comments, test coverage/adequacy, code health, and that the
       `bettongia:inclusivity` accessibility pass above was actually done, not
@@ -757,6 +761,15 @@ guide's **completeness and accuracy**, so it must be a genuine cold read.
 
 **Final acceptance gate — cold-read guide validation (B2), distinct from
 `kmdb-qa`:**
+
+> **Intentionally left unchecked by the implementer.** Per the coordinating
+> session's explicit scope boundary, B2 is a **post-merge, main-session-
+> orchestrated acceptance step** — it must be run by a separate, KMDB-naïve
+> general-purpose agent in an isolated worktree walled off from this PR's own
+> reference implementation (the whole point is fresh eyes that never saw it).
+> The kmdb-plan-implement agent that wrote this guide/sample app must not be
+> the one that also validates it. Do not check these off, fill in a friction
+> log, or run B2 as part of this implementation pass.
 
 - [ ] **(B2)** Run the cold-read guide-validation per the "Guide-validation
       additions" design above: an **isolated worktree/clone** stripped of
