@@ -42,11 +42,28 @@ abstract final class AppDatabase {
   /// an encrypted database with `encryptionConfig: null`) — see the guide's
   /// "Handle faults" section.
   ///
-  /// Calls [KmdbDatabase.ensureDeviceId] before returning: every SSTable this
-  /// device flushes must carry a stable device ID for sync and consolidation
-  /// to work correctly (spec §4), and the default `'00000000'` sentinel
-  /// device ID `KmdbDatabase.open` otherwise uses is only meaningful for
-  /// tests that never sync.
+  /// ## Two-phase device-ID establishment
+  ///
+  /// The stable device ID must be known **before** the full [KmdbDatabase]
+  /// (and the [LsmEngine] beneath it) is constructed, because every SSTable
+  /// this device flushes is named `{deviceId}-{minHlc}-{maxHlc}.sst` — the ID
+  /// baked in at construction time, not something [KmdbDatabase.ensureDeviceId]
+  /// can retroactively change once the store is already open. This method
+  /// therefore mirrors `kmdb_cli`'s `DatabaseOpener` two-phase pattern:
+  ///
+  /// 1. Open a minimal [KvStoreImpl] with the default `'00000000'` sentinel
+  ///    device ID.
+  /// 2. Call `ensureDeviceId()` to read (or generate) the persisted stable ID.
+  /// 3. If it differs from the default, close the store **without flushing**
+  ///    — any writes from phase 1 (just the device-ID persistence itself)
+  ///    replay from the WAL when the full database opens with the correct ID.
+  /// 4. Open the full [KmdbDatabase] with that stable device ID.
+  ///
+  /// Skipping this (i.e. calling `KmdbDatabase.open()` once and then
+  /// `ensureDeviceId()` afterwards) leaves every instance permanently on the
+  /// `'00000000'` sentinel — harmless for a single, never-synced database,
+  /// but fatal once two instances sync: they collide on the same per-device
+  /// high-water-mark filename and SSTable name prefix.
   ///
   /// [adapter] defaults to [StorageAdapterNative] — the real filesystem. Data
   /// -layer tests that don't exercise vault or sync (CRUD, schema admission,
@@ -63,15 +80,25 @@ abstract final class AppDatabase {
     final resolvedAdapter = adapter ?? StorageAdapterNative();
     await resolvedAdapter.createDirectory(path);
 
+    // ── Phase 1: establish the stable device ID ───────────────────────────
+    const defaultDeviceId = '00000000';
+    var (minimalStore, _) = await KvStoreImpl.open(path, resolvedAdapter);
+    final deviceId = await minimalStore.ensureDeviceId();
+    if (deviceId != defaultDeviceId) {
+      await minimalStore.close(flush: false);
+    }
+
     // A VaultStore is constructed unconditionally so every screen can attach
     // files to a task — vault ref counting and GC then run automatically
     // for every KmdbCollection write that references a `kmdb-vault://` URI
     // (see AttachmentRepository and VaultRefInterceptor).
     final vaultStore = VaultStore(dbDir: path, adapter: resolvedAdapter);
 
+    // ── Phase 2: open the full KmdbDatabase with the stable device ID ─────
     final db = await KmdbDatabase.open(
       path: path,
       adapter: resolvedAdapter,
+      deviceId: deviceId,
       encryptionConfig: encryptionConfig,
       schemas: AppSchemas.all,
       // Secondary indexes power the project -> tasks and task -> comments
@@ -102,7 +129,6 @@ abstract final class AppDatabase {
       ),
     );
 
-    await db.ensureDeviceId();
     return db;
   }
 }

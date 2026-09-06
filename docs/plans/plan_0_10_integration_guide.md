@@ -607,9 +607,6 @@ guide's **completeness and accuracy**, so it must be a genuine cold read.
       DefaultSyncAuthenticator(rootKey)))` — the adapter MUST be
       authenticator-wrapped with a shared root key, per finding 2; inspect the
       returned `SyncResult`/`PullResult` for quarantined artefacts).
-      Data-layer tests for project/task/comment/attachment repositories and
-      schema admission are written and passing (see below); `sync_service.dart`
-      and encryption bootstrap still need their tests (next checklist item).
 - [ ] Add the six screens from the pinned screen inventory (Unlock/Create,
       Project list, Task list, Task detail/edit, Search, Sync/Settings),
       using `KmdbCollection.watch()`/`watchKey` for reactivity — no
@@ -633,10 +630,39 @@ guide's **completeness and accuracy**, so it must be a genuine cold read.
       language keeps the reference app small), **not** an engine limitation.
       Note i18n findings as a "going further" callout in the guide rather than
       fixing them in this plan.
-- [ ] Write the enumerated data-layer tests (CRUD, schema admission, index,
+- [x] Write the enumerated data-layer tests (CRUD, schema admission, index,
       vault round-trip, sync convergence via two `LocalDirectoryAdapter`
       instances, encryption bootstrap incl. wrong-passphrase and recovery-code
-      paths) per the pinned list above.
+      paths) per the pinned list above. All 42 tests pass
+      (`test/codecs/`, `test/db/`, `test/repositories/`).
+
+      **Finding surfaced while writing the negative-auth sync test (out of
+      scope for this plan — recorded for a follow-up core-library
+      investigation, not fixed here):** `KmdbDatabase.close()`'s default
+      `flush: true` can trigger a background compaction that consults the
+      registered tombstone-GC-horizon provider
+      (`SyncEngine`'s `_computeTombstoneHorizon` /
+      `HighwaterMark.minCurrentHlcAcrossDevices`), which re-reads **every**
+      peer's `.hwm` file with **no** `SyncAuthException` handling — unlike
+      the catalogued call sites in
+      `docs/spec/34_sync_authentication.md`'s "Per-site rejection policy"
+      table (`SyncEngine.pull`, `_fullResync`, `_checkAndHandleEviction`,
+      `HighwaterMark.load` of the own file, lease CAS). Once a device has
+      ever synced against a peer whose `.hwm` it can no longer authenticate
+      (e.g. after a legitimate negative-auth pull like the sample app's
+      test), a **subsequent flushing `close()`** throws an uncaught
+      `SyncAuthException` instead of degrading gracefully — even though the
+      `sync()`/`pull()` call that first encountered the mismatch behaved
+      exactly as documented (quarantined, not applied). Confirmed by
+      instrumenting `sync_service_test.dart`'s negative-auth test: the
+      `sync()` call's own assertions all pass; the exception surfaces later,
+      attributed by the async stack trace to the test's `await
+      syncB.syncNow()` line even though that call had already returned. The
+      sample app's test works around this by closing with `flush: false` in
+      `tearDown` (a reasonable choice for test cleanup regardless — see the
+      code comment there) rather than by fixing the core library, which is
+      out of this plan's scope. Flagged for `kmdb-qa`/`kmdb-architect` to
+      decide whether this needs its own hardening plan.
 - [ ] Add a dedicated CI job for the package (analyze/format/test on the
       macOS runner at minimum, per the desktop-only Q3 scope — confirm
       whether Linux/Windows runners are also needed for the full
