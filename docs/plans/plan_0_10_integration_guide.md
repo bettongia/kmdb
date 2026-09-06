@@ -1,6 +1,6 @@
 # Library Integration Guide + sample Flutter to-do app
 
-**Status**: Investigating (refresh pass — 2026-09-02)
+**Status**: Investigated
 
 > This plan was promoted to `Investigated` on 2026-07-17, but several
 > subsystems it pins have changed on `main` since. A refresh pass on
@@ -186,7 +186,7 @@ otherwise) and only JSON-compatible scalars — `DateTime` fields serialize via
 Schema (§25), not the codec.
 
 **Comments representation — sub-collection, not a free choice.** Verified
-`fts_manager.dart:1483` (`_extractFieldValue`): FTS field extraction walks
+`fts_manager.dart:1565` (`_extractFieldValue`): FTS field extraction walks
 `field.split('.')` into Maps only and returns a value only if it is a
 non-empty `String` — it does **not** fan out arrays or concatenate array
 elements (unlike secondary indexes, which do support `tags[]`-style fan-out).
@@ -210,7 +210,7 @@ and uses `explainedGet`/`QueryPlan` to show the index is used once built (§16
 lazy build).
 
 **Search — two distinct surfaces, both demonstrated:**
-- **`KmdbCollection.search()`** over task fields (`kmdb_collection.dart:470`):
+- **`KmdbCollection.search()`** over task fields (`kmdb_collection.dart:552`):
   `tasks.search(query, fields: ['title', 'description'], mode:
   SearchMode.lexical, limit: 20)`, requiring `ftsIndexes:
   [FtsIndexDefinition(collection: 'tasks', field: 'title'),
@@ -220,7 +220,7 @@ lazy build).
   embedding model download plus native-asset setup, extra dependency weight
   the guide doesn't need for v1; mention hybrid/semantic as a "going further"
   callout, not a demoed path.
-- **`KmdbCollection.searchVault()`** (`kmdb_collection.dart:707`) — searches
+- **`KmdbCollection.searchVault()`** (`kmdb_collection.dart:790`) — searches
   *extracted text of attached files*, a separate index from field FTS.
   **Decision: include, using pure-Dart extractors only** —
   `vaultSearch: VaultSearchConfig(extractors: [HtmlTextExtractor(),
@@ -231,12 +231,12 @@ lazy build).
   reference for wiring extractors.
 
 **Vault (attachments):** `VaultStore.ingest(bytes: ..., hlcTimestamp: ...,
-originalName: ...)` (all **named** parameters, verified `vault_store.dart:202`;
+originalName: ...)` (all **named** parameters, verified `vault_store.dart:205`;
 `explicitMediaType` is an optional fourth) returns a `VaultRef`
 (`kmdb-vault://sha256/<64hex>`);
 `getBlob()` retrieves it. Storing the URI string in `Task.attachmentUris` and
 writing the Task in the same batch is what makes ref-counting automatic via
-`VaultRefInterceptor` (`kmdb_database.dart:196`).
+`VaultRefInterceptor` (`kmdb_database.dart:175`).
 
 **Encryption bootstrap** (§31 API, verified `encryption_config.dart` +
 `kmdb_database.dart` — refreshed 2026-09-02: `open()` is now at line 321,
@@ -1047,6 +1047,99 @@ updated to match):
       and `kmdb_flutter`'s `BiometricKekProvider` and links to §31 for detail —
       **no code**. Keeps the desktop-only v1 guide focused and leaves §31 as the
       source of truth. See the encryption-bootstrap subsection above.
+
+## Review notes — refresh confirmation pass (kmdb-plan-reviewer, 2026-09-02)
+
+**Status re-promoted to `Investigated`.** I re-verified the refresh's
+load-bearing claims directly against current `main` (reading the source, not
+taking the architect's word), confirmed no internal contradictions were
+introduced, and judged the Part B additions concrete enough to execute. The
+refresh is sound.
+
+**Findings 1–3 (the substantive changes) all verified accurate, with exact
+line numbers matching:**
+
+- **Finding 2 (sync-auth) — the most important, fully confirmed.** `DekCache`
+  is gone; a raw `LocalDirectoryAdapter` is no longer sufficient. All wrapping
+  primitives exist and are exported from `kmdb.dart`: `SyncAuthenticator`
+  (`:66`), `DefaultSyncAuthenticator` (`:67-68`), `SyncAuthenticatingAdapter`
+  (`:71`), plus `SyncResult`/`PullResult`/`DeferredSstable` (`:52-53`) and
+  `QuarantineReason`/`QuarantinedSstable` (`:33-35`). Signatures match the
+  plan: `sync()` → `Future<SyncResult>` (`kmdb_database.dart:1022`), `pull()` →
+  `Future<PullResult>` (`:1078`), `quarantinedSstables()` (`:1109`),
+  `clearQuarantineLog()` (`:1123`). `PullResult.quarantined` is
+  `List<QuarantinedSstable>` and `.deferred` is `List<DeferredSstable>`
+  (`pull_result.dart:95,99`). The CLI reference wiring
+  `SyncAuthenticatingAdapter(inner, DefaultSyncAuthenticator(key.rootKey))` is
+  present at `remote_config.dart:109`, and the two-engine convergence test
+  `sync_auth_sync_engine_integration_test.dart` exists. §12 documents the
+  quarantine surface (§12:125 "Quarantine reporting").
+- **Finding 1 (unlock model) — confirmed.** `grep` finds zero `DekCache`/
+  `dekCache` hits in `kmdb/lib`. `SecretStore`/`InMemorySecretStore` exist
+  (`secret/secret_store.dart`, exported `kmdb.dart:187`); `open()` at `:321`
+  takes `SecretStore? secretStore` at `:384`, defaults to `InMemorySecretStore()`
+  at `:450`. `KEKSource`/`ReauthPolicy`/`BiometricKekProvider` exported
+  (`kmdb.dart:180-181,172`). `enableBiometricUnlock` (`:1597`),
+  `disableBiometricUnlock` (`:1628`), `lock()` (`:1570`) match. The
+  bad-passphrase lock-release path is real: `open()`'s `catch` at `:715` calls
+  `store.close()` (`:719`) and `rethrow`s (`:723`), so retry-after-wrong-
+  passphrase is safe as claimed. §31 documents `KEKSource` (§31:392).
+- **Finding 3 (`dependency_overrides`) — confirmed.** Root `pubspec.yaml` has
+  **no** betto_* override block — only `meta`/`uuid`/`cbor`/`web`/`charset`
+  transitive pins, with a comment explicitly recording that WI-9 removed the
+  betto_* block. `kmdb`, `kmdb_extractor_html`, `kmdb_extractor_markdown` are
+  all `version: 0.1.0` (unpublished locals → must resolve by path). The stale
+  betto_* `dev.1`/`dev.3` block in `kmdb_icloud/example/pubspec.yaml` (the
+  documented anti-pattern trap) is present as described.
+- **Finding 4 (multilingual) — confirmed** against CLAUDE.md / §20: lexical is
+  multilingual (stop-words English-only); semantic has a `multilingual-e5-small`
+  opt-in. The English-only-v1 *choice* rests correctly on scope minimisation,
+  not an engine limit.
+
+**Comments-as-sub-collection forcing function re-confirmed at the code level.**
+`_extractFieldValue` (`fts_manager.dart:1565`) still walks `field.split('.')`
+through Maps only (`if (current is! Map) return null`) and returns only a
+non-empty `String` — no array fan-out. An embedded `List<Comment>` genuinely
+cannot be FTS-indexed, so the sub-collection is forced, not a preference.
+
+**No internal contradictions introduced by the refresh.** Checked the three the
+brief called out: (a) desktop-only scope vs. the softened web note — the plan
+keeps desktop-only v1 and reframes web as "a natural v2 extension," a rationale
+change, not a scope change; consistent. (b) the sample's no-`secretStore`/no-
+biometric v1 decision vs. the biometric "going further" note — the note is an
+explicit out-of-demoed-path brief pointer (RQ-C, no code); consistent. (c) the
+fixed-demo-key (RQ-A) vs. the negative-auth test giving B a *different* key —
+consistent.
+
+**B2 cold-read gate is concrete enough to execute.** The isolation steps name
+exactly what to strip (`packages/kmdb_example_todo/`, `docs/spec/`,
+`docs/primer.md`, `CLAUDE.md`, `docs/plans/`, `docs/proposals/`), what to keep
+(the guide, an empty app dir, `kmdb` via path dep), who drives it (a
+general-purpose, non-`kmdb-*` agent), the allowed/forbidden read rule (public
+API allowed; reference app + spec + plan/primer forbidden), the deliverable
+path, and the pass criterion (no blocker friction, repeatable). Soft enforcement
+is accepted by design (RQ-B) and correctly acknowledged as the best achievable —
+this is a validation activity, not production code, so that latitude is fine.
+
+**Corrections I made this pass (cosmetic line-number drift only — no design
+change):** the refresh claimed to refresh drifted file/line refs but a few
+predated it or were missed. Fixed in the live design section:
+`kmdb_collection.dart:470`→`:552` (`search()`), `:707`→`:790` (`searchVault()`),
+`vault_store.dart:202`→`:205` (`ingest`), `kmdb_database.dart:196`→`:175`
+(`VaultRefInterceptor` wiring), `fts_manager.dart:1483`→`:1565`
+(`_extractFieldValue`). In every case the symbol name, signature, and behaviour
+were correct — only the line pointer had drifted, so none of these forced an
+implementer design decision. The dated 2026-07-17 review notes below retain
+their original (now-historical) line citations on purpose.
+
+**Verdict: implementation-ready.** The data model, codecs, schemas, indexes,
+both search surfaces, the encryption bootstrap, the authenticated sync wiring,
+the screen inventory, the non-workspace package layout, the enumerated test list
+(including the new negative-auth and non-resurrection cases), and the Part B B1/
+B2 additions are all pinned concretely enough for mechanical execution. No open
+questions remain (RQ-A/B/C are decided). Prerequisite reminder for the
+implementer: `plan_0_09_spec_review_and_primer_fold.md` must be on `main` before
+the guide-prose step, since the guide cites post-review spec section numbers.
 
 ## Summary
 
