@@ -282,7 +282,13 @@ the encryption unlock helper spans ~lines 786-960):
     bootstrap only. **Biometric unlock (via `KEKSource.biometric` +
     `kmdb_flutter`'s `BiometricKekProvider`) and a persistent `SecretStore`
     become a "going further" callout**, replacing the old (now-nonexistent)
-    `FlutterSecureDekCache` note.
+    `FlutterSecureDekCache` note. **DECIDED (RQ-C, 2026-09-02): the "going
+    further" note is a brief pointer only** — it names `KEKSource.biometric` and
+    `kmdb_flutter`'s `BiometricKekProvider` and links to §31 for detail, with
+    **no code example**. This keeps the desktop-only v1 guide focused and leaves
+    §31 as the source of truth (a worked biometric mini-example was considered
+    and rejected — it would pull in Flutter-plugin/mobile surface the
+    desktop-only sample doesn't otherwise use).
 
 **Screen inventory** (minimum set that lets every guide section cite real
 code — no third-party state-management dependency, use the collections' own
@@ -422,11 +428,16 @@ enrolled `SyncSetKey`; the primitives are in
 `DefaultSyncAuthenticator(key)` and drives a two-engine convergence is
 `packages/kmdb/test/sync/auth/sync_auth_sync_engine_integration_test.dart`.
 
-**Where the shared 32-byte key comes from — decide and document in the guide.**
-For the *sample app* a fixed demo key (a hard-coded 32-byte constant, or one
-derived deterministically for the demo) is acceptable and keeps the two-instance
-demo self-contained — but the guide must **not** present that as the real-world
-model. The guide should explain the real enrolment story alongside it:
+**Where the shared 32-byte key comes from — DECIDED (RQ-A, 2026-09-02): fixed
+demo constant.** The *sample app* uses a hard-coded 32-byte constant shared by
+both demo instances, which keeps the two-instance demo self-contained. It MUST
+carry a prominent **"DEMO ONLY — never hard-code a sync root key in
+production"** warning in both the code and the guide prose, and the guide must
+**not** present it as the real-world model. (Generating + persisting the key in
+a `SecretStore` was considered and rejected for v1 — extra surface whose realism
+is illusory anyway, since the "out-of-band transfer" between two co-located demo
+instances is artificial regardless.) The guide should explain the real enrolment
+story alongside the demo constant:
 - At the **CLI level**, `remote add` mints a key automatically for the first
   device; a second device joins via `remote pair show <name>` (prints a pairing
   code on an enrolled device) → `remote pair import <name> <code>` on the new
@@ -536,8 +547,10 @@ guide's **completeness and accuracy**, so it must be a genuine cold read.
 - **Mechanism (pinned):** run the validation in an **isolated worktree/clone**
   that contains only what a real consumer has — the guide as a standalone
   artifact (copy `docs/integration_guide/` in), an empty app directory to build
-  in, and the `kmdb` package to compile against (via pub.dev if published, else a
-  path/git dep). **Remove or make absent** from that workspace:
+  in, and the `kmdb` package to compile against via a **path dep** (RQ-B
+  decision, 2026-09-02: 0.1.0 is not on pub.dev until after the tag, which
+  post-dates this gate, so a path dep is the only option available when this
+  gate runs). **Remove or make absent** from that workspace:
   `packages/kmdb_example_todo/`, `docs/spec/`, `docs/primer.md` (if still
   present), `CLAUDE.md`, `docs/plans/`, and `docs/proposals/`. Drive the run with
   a **general-purpose / cold agent — explicitly NOT any `kmdb-*` agent**
@@ -1004,23 +1017,36 @@ post-WI-2 / §31-rewrite versions and already document the auth/quarantine and
   checklist items added as a final acceptance gate, explicitly distinct from
   `kmdb-qa`.
 
-**New open questions surfaced for the reviewer:**
+**New open questions — RESOLVED by the user 2026-09-02** (recorded here so the
+reviewer inherits decisions, not open questions; the design sections above are
+updated to match):
 
-- **RQ-A (shared sync key in the sample).** The demo needs a concrete source for
-  the shared 32-byte root key. A fixed demo constant is proposed; the reviewer
-  should confirm that is acceptable for a shipped sample (vs. generating +
-  persisting one in a `SecretStore`, which pulls in more surface) and that the
-  guide's real-world-enrolment framing is sufficient.
-- **RQ-B (B2 isolation mechanism).** The wall-off relies on removing paths from
-  an isolated worktree/clone. The reviewer should confirm the exact mechanism
-  (which agent type, how the guide is handed over, how `kmdb` is provided —
-  pub.dev vs. path) and accept the residual "reading `kmdb` `lib/src` is
-  technically possible" tension, which is mitigated by explicit instruction +
-  reviewer inspection rather than hard enforcement.
-- **RQ-C (biometric/`SecretStore` "going further" depth).** With `DekCache`
-  gone, decide how much of the `KEKSource.biometric` / `kmdb_flutter`
-  `BiometricKekProvider` story the guide should sketch in its "going further"
-  note vs. leave to §31.
+- [x] **RQ-A (shared sync key in the sample) — DECISION: fixed demo constant.**
+      The sample uses a hard-coded 32-byte constant shared by both demo
+      instances, carrying a prominent **"DEMO ONLY — never hard-code a sync root
+      key in production"** warning, with the real enrolment story (`remote pair`
+      / out-of-band app-level key transfer) explained in the guide's prose. A
+      generated-and-persisted-in-`SecretStore` key was considered and rejected
+      for v1 as extra surface whose realism is illusory anyway (the "out-of-band
+      transfer" between two co-located demo instances is artificial regardless).
+      See the "Where the shared 32-byte key comes from" subsection above.
+- [x] **RQ-B (B2 isolation mechanism) — DECISION: path-dep + soft wall.** The
+      cold read runs in an isolated worktree with `kmdb` provided via a **path
+      dep** (0.1.0 is not on pub.dev until after the tag, which post-dates this
+      gate); the forbidden paths (`packages/kmdb_example_todo/`, `docs/spec/`,
+      `docs/primer.md`, `CLAUDE.md`, `docs/plans/`, `docs/proposals/`) are
+      removed from that workspace; the "public API allowed / internals + spec +
+      reference app forbidden" rule is stated explicitly to the cold
+      general-purpose agent; and the reviewer inspects the friction log for
+      signs it leaned on internals. **Soft enforcement is accepted as
+      unavoidable** — a truly hard wall is not achievable (even a pub.dev dep
+      exposes `lib/src` in the pub cache). See the B2 "Mechanism (pinned)"
+      subsection above.
+- [x] **RQ-C (biometric/`SecretStore` "going further" depth) — DECISION: brief
+      pointer.** The guide's "going further" note names `KEKSource.biometric`
+      and `kmdb_flutter`'s `BiometricKekProvider` and links to §31 for detail —
+      **no code**. Keeps the desktop-only v1 guide focused and leaves §31 as the
+      source of truth. See the encryption-bootstrap subsection above.
 
 ## Summary
 
