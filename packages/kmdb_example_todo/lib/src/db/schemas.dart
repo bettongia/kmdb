@@ -61,14 +61,8 @@ abstract final class AppSchemas {
         'projectId': {'type': 'string', 'minLength': 1},
         'title': {'type': 'string', 'minLength': 1},
         'description': {'type': 'string'},
-        'priority': {
-          'type': 'string',
-          'enum': TaskPriority.values,
-        },
-        'status': {
-          'type': 'string',
-          'enum': TaskStatus.values,
-        },
+        'priority': {'type': 'string', 'enum': TaskPriority.values},
+        'status': {'type': 'string', 'enum': TaskStatus.values},
         'attachmentUris': {
           'type': 'array',
           'items': {'type': 'string'},

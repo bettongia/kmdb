@@ -43,7 +43,10 @@ import 'package:kmdb/kmdb.dart';
 ///   *something* to share without building a real enrolment UI, which would
 ///   be artificial anyway for two processes on the same machine.
 final Uint8List kDemoSyncRootKey = Uint8List.fromList(
-  List<int>.generate(32, (i) => i), // 0x00, 0x01, ..., 0x1f — a fixed, non-secret demo value.
+  List<int>.generate(
+    32,
+    (i) => i,
+  ), // 0x00, 0x01, ..., 0x1f — a fixed, non-secret demo value.
 );
 
 /// Wraps `KmdbDatabase.sync`/`pull` against a shared local directory (see
@@ -52,11 +55,8 @@ final Uint8List kDemoSyncRootKey = Uint8List.fromList(
 class SyncService {
   /// Creates a [SyncService] that syncs [db] through [sharedSyncDir], using
   /// [rootKey] to authenticate artefacts (defaults to [kDemoSyncRootKey]).
-  SyncService(
-    this._db,
-    this._sharedSyncDir, {
-    Uint8List? rootKey,
-  }) : _rootKey = rootKey ?? kDemoSyncRootKey;
+  SyncService(this._db, this._sharedSyncDir, {Uint8List? rootKey})
+    : _rootKey = rootKey ?? kDemoSyncRootKey;
 
   final KmdbDatabase _db;
   final String _sharedSyncDir;

@@ -23,7 +23,10 @@ void main() {
   late TaskRepository tasks;
 
   setUp(() async {
-    db = await AppDatabase.open(path: '/mem/db', adapter: MemoryStorageAdapter());
+    db = await AppDatabase.open(
+      path: '/mem/db',
+      adapter: MemoryStorageAdapter(),
+    );
     tasks = TaskRepository(db);
   });
 
@@ -105,23 +108,26 @@ void main() {
       );
     });
 
-    test('an unknown field is rejected (additionalProperties: false)', () async {
-      final raw = db.rawCollection('tasks');
-      final base = validTask();
-      await expectLater(
-        raw.insert({
-          'projectId': base.projectId,
-          'title': base.title,
-          'description': base.description,
-          'priority': base.priority,
-          'status': base.status,
-          'attachmentUris': base.attachmentUris,
-          'createdAt': base.createdAt.toIso8601String(),
-          'updatedAt': base.updatedAt.toIso8601String(),
-          'unexpectedField': 'surprise',
-        }),
-        throwsA(isA<SchemaValidationException>()),
-      );
-    });
+    test(
+      'an unknown field is rejected (additionalProperties: false)',
+      () async {
+        final raw = db.rawCollection('tasks');
+        final base = validTask();
+        await expectLater(
+          raw.insert({
+            'projectId': base.projectId,
+            'title': base.title,
+            'description': base.description,
+            'priority': base.priority,
+            'status': base.status,
+            'attachmentUris': base.attachmentUris,
+            'createdAt': base.createdAt.toIso8601String(),
+            'updatedAt': base.updatedAt.toIso8601String(),
+            'unexpectedField': 'surprise',
+          }),
+          throwsA(isA<SchemaValidationException>()),
+        );
+      },
+    );
   });
 }

@@ -23,7 +23,10 @@ void main() {
   late ProjectRepository repo;
 
   setUp(() async {
-    db = await AppDatabase.open(path: '/mem/db', adapter: MemoryStorageAdapter());
+    db = await AppDatabase.open(
+      path: '/mem/db',
+      adapter: MemoryStorageAdapter(),
+    );
     repo = ProjectRepository(db);
   });
 
@@ -53,22 +56,25 @@ void main() {
       expect(fetched.createdAt, created.createdAt);
     });
 
-    test('update() on a missing key throws DocumentNotFoundException', () async {
-      // A well-formed (valid UUIDv7) key that was never written, so the
-      // failure exercises DocumentNotFoundException rather than the key
-      // validator.
-      final missingKey = const UuidV7KeyGenerator().next();
-      final ghost = Project(
-        id: missingKey,
-        name: 'n',
-        description: 'd',
-        createdAt: DateTime.utc(2026),
-      );
-      await expectLater(
-        repo.update(ghost),
-        throwsA(isA<DocumentNotFoundException>()),
-      );
-    });
+    test(
+      'update() on a missing key throws DocumentNotFoundException',
+      () async {
+        // A well-formed (valid UUIDv7) key that was never written, so the
+        // failure exercises DocumentNotFoundException rather than the key
+        // validator.
+        final missingKey = const UuidV7KeyGenerator().next();
+        final ghost = Project(
+          id: missingKey,
+          name: 'n',
+          description: 'd',
+          createdAt: DateTime.utc(2026),
+        );
+        await expectLater(
+          repo.update(ghost),
+          throwsA(isA<DocumentNotFoundException>()),
+        );
+      },
+    );
 
     test('delete() then get() returns null', () async {
       final created = await repo.create(
@@ -85,10 +91,20 @@ void main() {
 
     test('listAll() returns every project ordered by createdAt', () async {
       final p1 = await repo.create(
-        Project(id: '', name: 'A', description: '', createdAt: DateTime.utc(2026, 1, 1)),
+        Project(
+          id: '',
+          name: 'A',
+          description: '',
+          createdAt: DateTime.utc(2026, 1, 1),
+        ),
       );
       final p2 = await repo.create(
-        Project(id: '', name: 'B', description: '', createdAt: DateTime.utc(2026, 1, 2)),
+        Project(
+          id: '',
+          name: 'B',
+          description: '',
+          createdAt: DateTime.utc(2026, 1, 2),
+        ),
       );
 
       final all = await repo.listAll();
@@ -101,7 +117,12 @@ void main() {
       final sub = stream.listen((projects) => emissions.add(projects.length));
 
       await repo.create(
-        Project(id: '', name: 'A', description: '', createdAt: DateTime.utc(2026)),
+        Project(
+          id: '',
+          name: 'A',
+          description: '',
+          createdAt: DateTime.utc(2026),
+        ),
       );
 
       // watch() debounces at 50ms (spec §14) — give it time to fire.

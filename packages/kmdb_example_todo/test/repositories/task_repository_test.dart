@@ -35,7 +35,10 @@ void main() {
   late TaskRepository repo;
 
   setUp(() async {
-    db = await AppDatabase.open(path: '/mem/db', adapter: MemoryStorageAdapter());
+    db = await AppDatabase.open(
+      path: '/mem/db',
+      adapter: MemoryStorageAdapter(),
+    );
     repo = TaskRepository(db);
   });
 
@@ -96,6 +99,42 @@ void main() {
       expect(plan.strategy, ScanStrategy.indexScan);
       expect(plan.filters, isNotEmpty);
       expect(plan.filters.first.indexUsed, isTrue);
+    });
+  });
+
+  group('TaskRepository reactivity', () {
+    test('watchByProject() re-emits after a write', () async {
+      final emissions = <int>[];
+      final sub = repo
+          .watchByProject('proj1')
+          .listen((tasks) => emissions.add(tasks.length));
+
+      await repo.create(_task('proj1', 'A'));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+
+      expect(emissions, isNotEmpty);
+      expect(emissions.last, 1);
+      await sub.cancel();
+    });
+
+    test('watchTask() emits the current value, then updates, then null '
+        'after delete', () async {
+      final created = await repo.create(_task('proj1', 'Watched'));
+      final emissions = <String?>[];
+      final sub = repo
+          .watchTask(created.id)
+          .listen((task) => emissions.add(task?.title));
+
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await repo.update(created.copyWith(title: 'Renamed'));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await repo.delete(created.id);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+
+      expect(emissions, contains('Watched'));
+      expect(emissions, contains('Renamed'));
+      expect(emissions.last, isNull);
+      await sub.cancel();
     });
   });
 }

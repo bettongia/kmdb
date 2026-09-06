@@ -59,115 +59,118 @@ void main() {
   });
 
   group('AttachmentRepository', () {
+    test('attach() returns a kmdb-vault://sha256/<64hex> URI and getBlob() '
+        'round-trips identical bytes', () async {
+      final task = await tasks.create(_newTask('proj1', 'With attachment'));
+      final bytes = Uint8List.fromList('hello world'.codeUnits);
+
+      final updated = await attachments.attach(
+        task: task,
+        bytes: bytes,
+        originalName: 'hello.txt',
+      );
+
+      expect(updated.attachmentUris, hasLength(1));
+      final uri = updated.attachmentUris.single;
+      expect(
+        RegExp(r'^kmdb-vault://sha256/[0-9a-f]{64}$').hasMatch(uri),
+        isTrue,
+      );
+
+      final roundTripped = await attachments.getBlob(uri);
+      expect(roundTripped, bytes);
+    });
+
     test(
-      'attach() returns a kmdb-vault://sha256/<64hex> URI and getBlob() '
-      'round-trips identical bytes',
+      'ingesting identical bytes from two tasks dedupes to one vault object',
       () async {
-        final task = await tasks.create(_newTask('proj1', 'With attachment'));
-        final bytes = Uint8List.fromList('hello world'.codeUnits);
+        final bytes = Uint8List.fromList('shared content'.codeUnits);
+        final taskA = await tasks.create(_newTask('proj1', 'A'));
+        final taskB = await tasks.create(_newTask('proj1', 'B'));
 
-        final updated = await attachments.attach(
-          task: task,
+        final updatedA = await attachments.attach(
+          task: taskA,
           bytes: bytes,
-          originalName: 'hello.txt',
+          originalName: 'shared.txt',
+        );
+        final updatedB = await attachments.attach(
+          task: taskB,
+          bytes: bytes,
+          originalName: 'shared.txt',
         );
 
-        expect(updated.attachmentUris, hasLength(1));
-        final uri = updated.attachmentUris.single;
-        expect(
-          RegExp(r'^kmdb-vault://sha256/[0-9a-f]{64}$').hasMatch(uri),
-          isTrue,
-        );
-
-        final roundTripped = await attachments.getBlob(uri);
-        expect(roundTripped, bytes);
+        expect(updatedA.attachmentUris.single, updatedB.attachmentUris.single);
       },
     );
 
-    test('ingesting identical bytes from two tasks dedupes to one vault object', () async {
+    test('a shared vault object survives while any task still references it, '
+        'and is only swept once the last reference is removed', () async {
       final bytes = Uint8List.fromList('shared content'.codeUnits);
-      final taskA = await tasks.create(_newTask('proj1', 'A'));
-      final taskB = await tasks.create(_newTask('proj1', 'B'));
+      var taskA = await tasks.create(_newTask('proj1', 'A'));
+      var taskB = await tasks.create(_newTask('proj1', 'B'));
 
-      final updatedA = await attachments.attach(
+      taskA = await attachments.attach(
         task: taskA,
         bytes: bytes,
         originalName: 'shared.txt',
       );
-      final updatedB = await attachments.attach(
+      taskB = await attachments.attach(
         task: taskB,
         bytes: bytes,
         originalName: 'shared.txt',
       );
+      final sha256 = VaultRef(taskA.attachmentUris.single).sha256;
 
-      expect(updatedA.attachmentUris.single, updatedB.attachmentUris.single);
+      final vaultStore = db.vaultStore!;
+      final gc = VaultGc(store: vaultStore, kvStore: db.store);
+
+      // Removing task A's reference leaves task B's reference intact —
+      // the object must survive a GC sweep.
+      taskA = await attachments.detach(
+        task: taskA,
+        uri: taskA.attachmentUris.single,
+      );
+      await gc.sweep();
+      expect(await vaultStore.exists(sha256), isTrue);
+
+      // Removing the last reference (task B's) makes the object eligible
+      // for collection — the next sweep deletes it.
+      taskB = await attachments.detach(
+        task: taskB,
+        uri: taskB.attachmentUris.single,
+      );
+      await gc.sweep();
+      expect(await vaultStore.exists(sha256), isFalse);
     });
 
     test(
-      'a shared vault object survives while any task still references it, '
-      'and is only swept once the last reference is removed',
+      'attachment content search (searchVault) finds the hosting task',
       () async {
-        final bytes = Uint8List.fromList('shared content'.codeUnits);
-        var taskA = await tasks.create(_newTask('proj1', 'A'));
-        var taskB = await tasks.create(_newTask('proj1', 'B'));
-
-        taskA = await attachments.attach(
-          task: taskA,
-          bytes: bytes,
-          originalName: 'shared.txt',
+        final task = await tasks.create(_newTask('proj1', 'Quarterly report'));
+        final markdown =
+            '# Report\n\nRevenue grew substantially this quarter.\n';
+        await attachments.attach(
+          task: task,
+          bytes: Uint8List.fromList(markdown.codeUnits),
+          originalName: 'report.md',
         );
-        taskB = await attachments.attach(
-          task: taskB,
-          bytes: bytes,
-          originalName: 'shared.txt',
-        );
-        final sha256 = VaultRef(taskA.attachmentUris.single).sha256;
 
-        final vaultStore = db.vaultStore!;
-        final gc = VaultGc(store: vaultStore, kvStore: db.store);
-
-        // Removing task A's reference leaves task B's reference intact —
-        // the object must survive a GC sweep.
-        taskA = await attachments.detach(
-          task: taskA,
-          uri: taskA.attachmentUris.single,
-        );
-        await gc.sweep();
-        expect(await vaultStore.exists(sha256), isTrue);
-
-        // Removing the last reference (task B's) makes the object eligible
-        // for collection — the next sweep deletes it.
-        taskB = await attachments.detach(
-          task: taskB,
-          uri: taskB.attachmentUris.single,
-        );
-        await gc.sweep();
-        expect(await vaultStore.exists(sha256), isFalse);
+        // Vault content extraction/indexing runs asynchronously in a
+        // background isolate queue (spec §24 "Vault Search") — poll until the
+        // hit appears rather than assuming a fixed delay is always enough.
+        var found = false;
+        for (var i = 0; i < 100 && !found; i++) {
+          final result = await tasks.collection.searchVault(
+            'revenue',
+            mode: SearchMode.lexical,
+          );
+          found = result.hits.any((h) => h.id == task.id);
+          if (!found) {
+            await Future<void>.delayed(const Duration(milliseconds: 50));
+          }
+        }
+        expect(found, isTrue);
       },
     );
-
-    test('attachment content search (searchVault) finds the hosting task', () async {
-      final task = await tasks.create(_newTask('proj1', 'Quarterly report'));
-      final markdown = '# Report\n\nRevenue grew substantially this quarter.\n';
-      await attachments.attach(
-        task: task,
-        bytes: Uint8List.fromList(markdown.codeUnits),
-        originalName: 'report.md',
-      );
-
-      // Vault content extraction/indexing runs asynchronously in a
-      // background isolate queue (spec §24 "Vault Search") — poll until the
-      // hit appears rather than assuming a fixed delay is always enough.
-      var found = false;
-      for (var i = 0; i < 100 && !found; i++) {
-        final result = await tasks.collection.searchVault(
-          'revenue',
-          mode: SearchMode.lexical,
-        );
-        found = result.hits.any((h) => h.id == task.id);
-        if (!found) await Future<void>.delayed(const Duration(milliseconds: 50));
-      }
-      expect(found, isTrue);
-    });
   });
 }

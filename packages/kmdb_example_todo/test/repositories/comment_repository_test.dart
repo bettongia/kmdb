@@ -23,7 +23,10 @@ void main() {
   late CommentRepository repo;
 
   setUp(() async {
-    db = await AppDatabase.open(path: '/mem/db', adapter: MemoryStorageAdapter());
+    db = await AppDatabase.open(
+      path: '/mem/db',
+      adapter: MemoryStorageAdapter(),
+    );
     repo = CommentRepository(db);
   });
 
@@ -40,19 +43,36 @@ void main() {
   );
 
   group('CommentRepository secondary index (taskComments.taskId)', () {
-    test('listByTask returns only that task\'s comments, oldest first', () async {
-      final c1 = await repo.add(comment('task1', 'first'));
-      await repo.add(comment('task2', 'other task'));
-      final c3 = await repo.add(comment('task1', 'second'));
+    test(
+      'listByTask returns only that task\'s comments, oldest first',
+      () async {
+        final c1 = await repo.add(comment('task1', 'first'));
+        await repo.add(comment('task2', 'other task'));
+        final c3 = await repo.add(comment('task1', 'second'));
 
-      final task1Comments = await repo.listByTask('task1');
-      expect(task1Comments.map((c) => c.id), [c1.id, c3.id]);
-    });
+        final task1Comments = await repo.listByTask('task1');
+        expect(task1Comments.map((c) => c.id), [c1.id, c3.id]);
+      },
+    );
 
     test('delete() removes a comment', () async {
       final c = await repo.add(comment('task1', 'to be deleted'));
       await repo.delete(c.id);
       expect(await repo.listByTask('task1'), isEmpty);
+    });
+
+    test('watchByTask() re-emits after a write', () async {
+      final emissions = <int>[];
+      final sub = repo
+          .watchByTask('task1')
+          .listen((comments) => emissions.add(comments.length));
+
+      await repo.add(comment('task1', 'first'));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+
+      expect(emissions, isNotEmpty);
+      expect(emissions.last, 1);
+      await sub.cancel();
     });
   });
 }

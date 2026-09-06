@@ -31,6 +31,10 @@ dependencies:
   kmdb_extractor_markdown: ^0.1.0
 
   cupertino_icons: ^1.0.8
+  # Resolves a per-user, per-OS application-support directory for the demo
+  # database + the Sync/Settings screen's second-local-instance demo (Q4).
+  path_provider: ^2.1.6
+  path: ^1.9.0
 
 dev_dependencies:
   flutter_test:

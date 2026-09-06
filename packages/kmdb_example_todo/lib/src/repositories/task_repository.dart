@@ -23,7 +23,10 @@ import '../models/task.dart';
 class TaskRepository {
   /// Creates a [TaskRepository] backed by [db].
   TaskRepository(KmdbDatabase db)
-    : _collection = db.collection<Task>(name: 'tasks', codec: const TaskCodec());
+    : _collection = db.collection<Task>(
+        name: 'tasks',
+        codec: const TaskCodec(),
+      );
 
   final KmdbCollection<Task> _collection;
 
@@ -75,4 +78,11 @@ class TaskRepository {
       .where(Field('projectId').equals(projectId))
       .orderBy('createdAt')
       .watch();
+
+  /// Reactive stream of a single task by [id] — emits `null` if deleted.
+  ///
+  /// Uses `KmdbCollection.watchKey`, which is cheaper than [watchByProject]
+  /// for a single-document detail screen: it re-fetches only the one key on
+  /// every write to `tasks`, rather than re-running a filtered scan.
+  Stream<Task?> watchTask(String id) => _collection.watchKey(id);
 }

@@ -71,114 +71,120 @@ void main() {
   });
 
   group('SyncService — happy path convergence', () {
-    test('A writes, A.sync() then B.sync() — B reads A\'s task (LWW)', () async {
-      final tasksA = TaskRepository(dbA);
-      final tasksB = TaskRepository(dbB);
-      final syncA = SyncService(dbA, sharedSyncDir.path);
-      final syncB = SyncService(dbB, sharedSyncDir.path);
-
-      final created = await tasksA.create(_newTask('Write the guide'));
-
-      final resultA = await syncA.syncNow();
-      expect(resultA, isA<SyncResult>());
-      expect(resultA.pull.quarantined, isEmpty);
-      expect(resultA.pull.deferred, isEmpty);
-
-      final resultB = await syncB.syncNow();
-      expect(resultB, isA<SyncResult>());
-      expect(resultB.pull.quarantined, isEmpty);
-
-      final fetched = await tasksB.get(created.id);
-      expect(fetched, isNotNull);
-      expect(fetched!.title, 'Write the guide');
-    });
-
-    test('concurrent edits to the same task resolve by HLC (last write wins)', () async {
-      final tasksA = TaskRepository(dbA);
-      final tasksB = TaskRepository(dbB);
-      final syncA = SyncService(dbA, sharedSyncDir.path);
-      final syncB = SyncService(dbB, sharedSyncDir.path);
-
-      // Both devices start from the same document.
-      final created = await tasksA.create(_newTask('Original'));
-      await syncA.syncNow();
-      await syncB.syncNow();
-
-      // A edits first...
-      final onA = (await tasksA.get(created.id))!;
-      await tasksA.update(onA.copyWith(title: 'Edited by A'));
-      await syncA.syncNow();
-
-      // ...then B edits strictly later (higher HLC) — B's write must win
-      // once both sides have seen both edits.
-      final onB = (await tasksB.get(created.id))!;
-      await tasksB.update(onB.copyWith(title: 'Edited by B'));
-      await syncB.syncNow(); // push B's edit, pull A's (older) edit
-      await syncA.syncNow(); // pull B's (newer) edit
-
-      expect((await tasksA.get(created.id))!.title, 'Edited by B');
-      expect((await tasksB.get(created.id))!.title, 'Edited by B');
-    });
-
-    test('a deleted task stays deleted after a re-sync (non-resurrection)', () async {
-      final tasksA = TaskRepository(dbA);
-      final tasksB = TaskRepository(dbB);
-      final syncA = SyncService(dbA, sharedSyncDir.path);
-      final syncB = SyncService(dbB, sharedSyncDir.path);
-
-      final created = await tasksA.create(_newTask('Temporary'));
-      await syncA.syncNow();
-      await syncB.syncNow();
-      expect(await tasksB.get(created.id), isNotNull);
-
-      await tasksA.delete(created.id);
-      await syncA.syncNow();
-      await syncB.syncNow();
-      expect(await tasksB.get(created.id), isNull);
-
-      // Re-sync again (e.g. a stray re-consolidation or repeated pull) must
-      // not resurrect the tombstoned document on either side.
-      await syncA.syncNow();
-      await syncB.syncNow();
-      expect(await tasksA.get(created.id), isNull);
-      expect(await tasksB.get(created.id), isNull);
-    });
-
     test(
-      r'$$fts:/$$vec:/$$index: local-only namespaces are absent from the '
-      'shared sync directory',
+      'A writes, A.sync() then B.sync() — B reads A\'s task (LWW)',
       () async {
         final tasksA = TaskRepository(dbA);
+        final tasksB = TaskRepository(dbB);
         final syncA = SyncService(dbA, sharedSyncDir.path);
+        final syncB = SyncService(dbB, sharedSyncDir.path);
 
-        // Populate a task so the always-on secondary index and FTS indexes
-        // (AppDatabase.open) have local-only derived data to write.
-        final created = await tasksA.create(_newTask('Searchable title'));
-        await tasksA.explainListByProject(created.projectId); // build index
+        final created = await tasksA.create(_newTask('Write the guide'));
 
-        await syncA.syncNow();
+        final resultA = await syncA.syncNow();
+        expect(resultA, isA<SyncResult>());
+        expect(resultA.pull.quarantined, isEmpty);
+        expect(resultA.pull.deferred, isEmpty);
 
-        // The local sst/ directory has `.local.sst` files (derived index/FTS
-        // data) — proof local-only data was written at all.
-        final localSstDir = Directory('${dirA.path}/sst');
-        final localFiles = localSstDir
-            .listSync()
-            .map((f) => f.path.split(Platform.pathSeparator).last)
-            .toList();
-        expect(localFiles.any((f) => f.endsWith('.local.sst')), isTrue);
+        final resultB = await syncB.syncNow();
+        expect(resultB, isA<SyncResult>());
+        expect(resultB.pull.quarantined, isEmpty);
 
-        // None of those `.local.sst` files were uploaded to the shared sync
-        // folder — spec §20's sync-exclusion guarantee.
-        final syncedSstDir = Directory('${sharedSyncDir.path}/sstables');
-        final syncedFiles = syncedSstDir.existsSync()
-            ? syncedSstDir
-                  .listSync()
-                  .map((f) => f.path.split(Platform.pathSeparator).last)
-                  .toList()
-            : <String>[];
-        expect(syncedFiles.any((f) => f.endsWith('.local.sst')), isFalse);
+        final fetched = await tasksB.get(created.id);
+        expect(fetched, isNotNull);
+        expect(fetched!.title, 'Write the guide');
       },
     );
+
+    test(
+      'concurrent edits to the same task resolve by HLC (last write wins)',
+      () async {
+        final tasksA = TaskRepository(dbA);
+        final tasksB = TaskRepository(dbB);
+        final syncA = SyncService(dbA, sharedSyncDir.path);
+        final syncB = SyncService(dbB, sharedSyncDir.path);
+
+        // Both devices start from the same document.
+        final created = await tasksA.create(_newTask('Original'));
+        await syncA.syncNow();
+        await syncB.syncNow();
+
+        // A edits first...
+        final onA = (await tasksA.get(created.id))!;
+        await tasksA.update(onA.copyWith(title: 'Edited by A'));
+        await syncA.syncNow();
+
+        // ...then B edits strictly later (higher HLC) — B's write must win
+        // once both sides have seen both edits.
+        final onB = (await tasksB.get(created.id))!;
+        await tasksB.update(onB.copyWith(title: 'Edited by B'));
+        await syncB.syncNow(); // push B's edit, pull A's (older) edit
+        await syncA.syncNow(); // pull B's (newer) edit
+
+        expect((await tasksA.get(created.id))!.title, 'Edited by B');
+        expect((await tasksB.get(created.id))!.title, 'Edited by B');
+      },
+    );
+
+    test(
+      'a deleted task stays deleted after a re-sync (non-resurrection)',
+      () async {
+        final tasksA = TaskRepository(dbA);
+        final tasksB = TaskRepository(dbB);
+        final syncA = SyncService(dbA, sharedSyncDir.path);
+        final syncB = SyncService(dbB, sharedSyncDir.path);
+
+        final created = await tasksA.create(_newTask('Temporary'));
+        await syncA.syncNow();
+        await syncB.syncNow();
+        expect(await tasksB.get(created.id), isNotNull);
+
+        await tasksA.delete(created.id);
+        await syncA.syncNow();
+        await syncB.syncNow();
+        expect(await tasksB.get(created.id), isNull);
+
+        // Re-sync again (e.g. a stray re-consolidation or repeated pull) must
+        // not resurrect the tombstoned document on either side.
+        await syncA.syncNow();
+        await syncB.syncNow();
+        expect(await tasksA.get(created.id), isNull);
+        expect(await tasksB.get(created.id), isNull);
+      },
+    );
+
+    test(r'$$fts:/$$vec:/$$index: local-only namespaces are absent from the '
+        'shared sync directory', () async {
+      final tasksA = TaskRepository(dbA);
+      final syncA = SyncService(dbA, sharedSyncDir.path);
+
+      // Populate a task so the always-on secondary index and FTS indexes
+      // (AppDatabase.open) have local-only derived data to write.
+      final created = await tasksA.create(_newTask('Searchable title'));
+      await tasksA.explainListByProject(created.projectId); // build index
+
+      await syncA.syncNow();
+
+      // The local sst/ directory has `.local.sst` files (derived index/FTS
+      // data) — proof local-only data was written at all.
+      final localSstDir = Directory('${dirA.path}/sst');
+      final localFiles = localSstDir
+          .listSync()
+          .map((f) => f.path.split(Platform.pathSeparator).last)
+          .toList();
+      expect(localFiles.any((f) => f.endsWith('.local.sst')), isTrue);
+
+      // None of those `.local.sst` files were uploaded to the shared sync
+      // folder — spec §20's sync-exclusion guarantee.
+      final syncedSstDir = Directory('${sharedSyncDir.path}/sstables');
+      final syncedFiles = syncedSstDir.existsSync()
+          ? syncedSstDir
+                .listSync()
+                .map((f) => f.path.split(Platform.pathSeparator).last)
+                .toList()
+          : <String>[];
+      expect(syncedFiles.any((f) => f.endsWith('.local.sst')), isFalse);
+    });
   });
 
   group('SyncService — negative authentication', () {
@@ -208,6 +214,11 @@ void main() {
 
         // The durable quarantine log records it too.
         expect(await syncB.quarantinedSstables(), isNotEmpty);
+
+        // The host application's acknowledge mechanism: clearing the log
+        // discards the historical record without un-quarantining the file.
+        await syncB.clearQuarantineLog();
+        expect(await syncB.quarantinedSstables(), isEmpty);
       },
     );
   });

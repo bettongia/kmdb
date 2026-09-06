@@ -43,7 +43,12 @@ void main() {
 
       final repo = ProjectRepository(created);
       await repo.create(
-        Project(id: '', name: 'p', description: '', createdAt: DateTime.utc(2026)),
+        Project(
+          id: '',
+          name: 'p',
+          description: '',
+          createdAt: DateTime.utc(2026),
+        ),
       );
       await created.close();
 
@@ -60,40 +65,45 @@ void main() {
       await reopened.close();
     });
 
-    test('a wrong passphrase throws badCredentials, and a subsequent open '
-        'with the correct passphrase still succeeds (the lock was released)', () async {
-      final adapter = MemoryStorageAdapter();
-      final setup = await EncryptionConfig.createResult(passphrase: 'right-pass');
-      final db = await AppDatabase.open(
-        path: '/mem/db',
-        adapter: adapter,
-        encryptionConfig: setup.config,
-      );
-      await db.close();
-
-      await expectLater(
-        AppDatabase.open(
+    test(
+      'a wrong passphrase throws badCredentials, and a subsequent open '
+      'with the correct passphrase still succeeds (the lock was released)',
+      () async {
+        final adapter = MemoryStorageAdapter();
+        final setup = await EncryptionConfig.createResult(
+          passphrase: 'right-pass',
+        );
+        final db = await AppDatabase.open(
           path: '/mem/db',
           adapter: adapter,
-          encryptionConfig: EncryptionConfig(passphrase: 'wrong-pass'),
-        ),
-        throwsA(
-          isA<EncryptionError>().having(
-            (e) => e.code,
-            'code',
-            EncryptionErrorCode.badCredentials,
-          ),
-        ),
-      );
+          encryptionConfig: setup.config,
+        );
+        await db.close();
 
-      // The failed open above must have released the database lock.
-      final retried = await AppDatabase.open(
-        path: '/mem/db',
-        adapter: adapter,
-        encryptionConfig: EncryptionConfig(passphrase: 'right-pass'),
-      );
-      await retried.close();
-    });
+        await expectLater(
+          AppDatabase.open(
+            path: '/mem/db',
+            adapter: adapter,
+            encryptionConfig: EncryptionConfig(passphrase: 'wrong-pass'),
+          ),
+          throwsA(
+            isA<EncryptionError>().having(
+              (e) => e.code,
+              'code',
+              EncryptionErrorCode.badCredentials,
+            ),
+          ),
+        );
+
+        // The failed open above must have released the database lock.
+        final retried = await AppDatabase.open(
+          path: '/mem/db',
+          adapter: adapter,
+          encryptionConfig: EncryptionConfig(passphrase: 'right-pass'),
+        );
+        await retried.close();
+      },
+    );
 
     test('opening an encrypted database with no encryptionConfig throws '
         'databaseIsEncrypted', () async {
@@ -141,7 +151,12 @@ void main() {
       final adapter = MemoryStorageAdapter();
       final db = await AppDatabase.open(path: '/mem/db', adapter: adapter);
       await ProjectRepository(db).create(
-        Project(id: '', name: 'p', description: '', createdAt: DateTime.utc(2026)),
+        Project(
+          id: '',
+          name: 'p',
+          description: '',
+          createdAt: DateTime.utc(2026),
+        ),
       );
       await db.close();
 
