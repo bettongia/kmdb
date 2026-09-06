@@ -175,7 +175,8 @@ void main() {
       expect(localFiles.any((f) => f.endsWith('.local.sst')), isTrue);
 
       // None of those `.local.sst` files were uploaded to the shared sync
-      // folder — spec §20's sync-exclusion guarantee.
+      // folder — the local-only system-namespace sync-exclusion guarantee
+      // (spec §16 secondary indexes, §20 text search).
       final syncedSstDir = Directory('${sharedSyncDir.path}/sstables');
       final syncedFiles = syncedSstDir.existsSync()
           ? syncedSstDir

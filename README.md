@@ -222,6 +222,13 @@ Supported JSON Schema keywords: `type`, `required`, `properties`,
 
 ## Additional information
 
+New to `kmdb` as a library? Start with the
+[Integration Guide](docs/integration_guide/README.md) — a task-oriented
+walk-through (open/close, collections, schemas, indexes, search, vault,
+sync, fault handling) built around a real sample Flutter to-do app
+(`packages/kmdb_example_todo/`). For the `kmdb` CLI tool, see the
+[CLI User Guide](docs/user_guide/README.md) instead.
+
 Refer to [docs](docs/index.md) for the full specification. See
 [docs/releasing](docs/releasing/README.md) for how KMDB packages are
 published.

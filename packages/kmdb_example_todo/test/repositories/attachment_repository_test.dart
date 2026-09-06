@@ -156,7 +156,7 @@ void main() {
         );
 
         // Vault content extraction/indexing runs asynchronously in a
-        // background isolate queue (spec §24 "Vault Search") — poll until the
+        // background isolate queue (spec §32 "Vault Search") — poll until the
         // hit appears rather than assuming a fixed delay is always enough.
         var found = false;
         for (var i = 0; i < 100 && !found; i++) {

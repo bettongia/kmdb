@@ -118,7 +118,7 @@ abstract final class AppDatabase {
         FtsIndexDefinition(collection: 'taskComments', field: 'body'),
       ],
       vaultStore: vaultStore,
-      // Attachment-*content* search (spec §24 "Vault Search") — a separate
+      // Attachment-*content* search (spec §32 "Vault Search") — a separate
       // index from the field FTS above, searching the extracted text of
       // attached files rather than task/comment fields. Pure-Dart extractors
       // only: HtmlTextExtractor and MarkdownTextExtractor. PdfTextExtractor

@@ -32,7 +32,7 @@ enum _SearchTarget {
 
 /// Screen 5 of 6 — "Search".
 ///
-/// Demonstrates both text-search surfaces from spec §20–24: field FTS
+/// Demonstrates both text-search surfaces from spec §20–23 and §32: field FTS
 /// (`TaskRepository.collection.search`) and attachment-content search
 /// (`TaskRepository.collection.searchVault`), both using
 /// [SearchMode.lexical] — see the guide's "going further" callout for
