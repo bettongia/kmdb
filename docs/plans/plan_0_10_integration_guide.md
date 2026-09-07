@@ -780,11 +780,24 @@ guide's **completeness and accuracy**, so it must be a genuine cold read.
       source files (`repositories/`, `codecs/`, `db/`, `models/`) — verified
       via `lcov --summary` against `coverage/lcov.info`, and again through
       `make cicd_example_todo`'s >=90% gate.
-- [ ] Hand off to the **`kmdb-qa` agent** for sign-off (spec alignment, doc
+- [x] Hand off to the **`kmdb-qa` agent** for sign-off (spec alignment, doc
       comments, test coverage/adequacy, code health, and that the
       `bettongia:inclusivity` accessibility pass above was actually done, not
       just planned). Resolve every blocking item before proceeding. Do not
-      open a PR until sign-off is received.
+      open a PR until sign-off is received. **DONE 2026-09-07 — verdict: PASS,
+      no blockers on the deliverable.** 50/50 tests, 100% coverage on the
+      measured surface, analyze/format clean, doc comments thorough, all settled
+      decisions honoured; the two-phase device-ID fix (finding #1) verified
+      correct and genuinely exercised; the added `accessibility_test.dart`
+      confirmed. Three non-blocking follow-ups routed by the main session:
+      (i) **finding #2** — the pre-existing core `close(flush:true)` →
+      uncaught `SyncAuthException` bug (foreign/mismatched peer `.hwm` on the
+      tombstone-GC-horizon path) — the **user chose to fix it before the 0.1.0
+      tag**, so it gets its own core hardening plan + PR (not this one);
+      (ii) the **§34** rejection-policy-table gap (the compaction/
+      `minCurrentHlcAcrossDevices` call site is unlisted) → `kmdb-architect`;
+      (iii) the CLAUDE.md repo-layout list now includes `kmdb_example_todo/`
+      (fixed in this branch).
 - [x] Run `make pre_commit` — format, analyze, license_check, tests all green
       (note: this package is non-workspace, so confirm its own analyze/format
       run separately, per CLAUDE.md's note that `make pre_commit`'s test step

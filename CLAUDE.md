@@ -152,6 +152,10 @@ packages/
   kmdb_extractor_markdown/ — MarkdownTextExtractor: VaultTextExtractor for
                          text/markdown blobs, wraps the markdown package
                          (pure Dart, optional, opt-in)
+  kmdb_example_todo/   — sample Flutter to-do app for the Integration Guide
+                         (docs/integration_guide/); desktop-only, non-workspace
+                         (Flutter), path-deps on kmdb + the html/markdown
+                         extractors; its own test-example-todo CI job
 
 External Bettongia packages — all published to pub.dev at `0.1.0`, resolved
 via each member package's own `dependencies:` constraint (WI-9 removed the
