@@ -28,6 +28,20 @@ abstract: |
   Overview, absorbing the former standalone primer.
 ...
 
+## Companion documents
+
+This is the normative reference for maintainers and integrators needing
+on-disk formats and protocol detail. Two task-oriented companions sit
+outside this spec, for a different audience:
+
+- **[Integration Guide](../integration_guide/README.md)** — for Dart/Flutter
+  application developers integrating `kmdb` as a library: opening/closing a
+  database, collections and schemas, indexes, search, the vault, sync, and
+  fault handling, built around a real sample Flutter to-do app
+  (`packages/kmdb_example_todo/`).
+- **[CLI User Guide](../user_guide/README.md)** — for users of the `kmdb`
+  command-line tool.
+
 ## Contents by Part
 
 Spec sections keep their original numbers as they were added (see each

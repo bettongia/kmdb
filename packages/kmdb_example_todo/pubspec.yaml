@@ -1,0 +1,81 @@
+name: kmdb_example_todo
+description: >-
+  Sample Flutter to-do app demonstrating kmdb library integration —
+  companion code for the Integration Guide (docs/integration_guide/).
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+  flutter: ">=3.29.0"
+
+# Not a workspace member — this is a Flutter application, and the root
+# pubspec.yaml's `workspace:` list deliberately excludes `flutter: sdk:
+# flutter` packages so that pure-Dart Linux/Windows CI runners keep
+# resolving `dart pub get` without the Flutter SDK. This package is
+# bootstrapped separately (`flutter pub get` from this directory) and has
+# its own dedicated CI job, modelled on the existing kmdb_icloud/example
+# precedent. See docs/integration_guide/README.md and the plan at
+# docs/plans/completed/plan_0_10_integration_guide.md for the full
+# rationale.
+#
+# Desktop-only (macOS/Linux/Windows) for v1 — see the Integration Guide's
+# "Platform scope" section. No mobile or web runner is included.
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  kmdb: ^0.1.0
+  kmdb_extractor_html: ^0.1.0
+  kmdb_extractor_markdown: ^0.1.0
+
+  cupertino_icons: ^1.0.8
+  # Resolves a per-user, per-OS application-support directory for the demo
+  # database + the Sync/Settings screen's second-local-instance demo (Q4).
+  path_provider: ^2.1.6
+  path: ^1.9.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+# ── dependency_overrides ────────────────────────────────────────────────────
+#
+# Path-overrides ONLY the three *unpublished* local packages this app
+# path-depends on transitively resolving through their own version
+# constraints above (`kmdb`, `kmdb_extractor_html`, `kmdb_extractor_markdown`
+# are all `version: 0.1.0` in their own pubspec.yaml and are not yet
+# published to pub.dev). Every other transitive dependency — including the
+# whole betto_* closure (betto_common, betto_schema, betto_zstd,
+# betto_mediatype_detector, betto_lexical, betto_inferencing,
+# betto_charset_detector, betto_lang_detector, etc.) — resolves from
+# pub.dev via `kmdb`'s own `dependencies:` block
+# (packages/kmdb/pubspec.yaml), exactly as a real pub.dev consumer of
+# `kmdb` would resolve it. WI-9 Phase B removed the workspace root's
+# betto_* override block for precisely this reason: keeping such a block
+# here would mask what a real consumer experiences and isn't needed to
+# make this package resolve.
+#
+# MAINTENANCE LIABILITY: once `kmdb`, `kmdb_extractor_html`, and
+# `kmdb_extractor_markdown` are published to pub.dev, these path overrides
+# should be dropped and the version constraints above tightened to the
+# published version. Until then, this package can only be built from a
+# clone of the `kmdb` repository, not as a standalone pub.dev consumer.
+#
+# TRAP — do NOT copy packages/kmdb_icloud/example/pubspec.yaml's override
+# block here. That file still carries a stale betto_* `dev.1`/`dev.3` pin
+# block that predates WI-9's removal of the root override block. It is an
+# anti-pattern, not a template — see the plan's "Package file layout"
+# section (finding 3) for the full explanation.
+dependency_overrides:
+  kmdb:
+    path: ../kmdb
+  kmdb_extractor_html:
+    path: ../kmdb_extractor_html
+  kmdb_extractor_markdown:
+    path: ../kmdb_extractor_markdown
+
+flutter:
+  uses-material-design: true

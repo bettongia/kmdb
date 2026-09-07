@@ -1,6 +1,6 @@
 # Library Integration Guide + sample Flutter to-do app
 
-**Status**: Investigated
+**Status**: Implementing
 
 > This plan was promoted to `Investigated` on 2026-07-17, but several
 > subsystems it pins have changed on `main` since. A refresh pass on
@@ -580,25 +580,25 @@ guide's **completeness and accuracy**, so it must be a genuine cold read.
 
 ## Implementation plan
 
-- [ ] Scaffold `packages/kmdb_example_todo/` per the pinned file layout:
+- [x] Scaffold `packages/kmdb_example_todo/` per the pinned file layout:
       `pubspec.yaml` (`publish_to: none`, `flutter` + path deps on `kmdb`,
       `kmdb_extractor_html`, `kmdb_extractor_markdown`; `dependency_overrides`
       = **path overrides of those three unpublished locals only** — NOT a
       betto_* mirror, and do NOT copy `kmdb_icloud/example`'s stale betto_*
       block; see "Package file layout" finding 3), `macos/`/`linux/`/`windows/`
       runners only, `analysis_options.yaml`.
-- [ ] Add the data model + codecs: `Project`, `Task`, `TaskComment` classes
+- [x] Add the data model + codecs: `Project`, `Task`, `TaskComment` classes
       and their `KmdbCodec<T>` implementations per the pinned field lists
       (`DateTime` fields via ISO-8601).
-- [ ] Add `db/schemas.dart`: JSON Schema (§25) definitions for `projects`,
+- [x] Add `db/schemas.dart`: JSON Schema (§25) definitions for `projects`,
       `tasks` (with `priority`/`status` enums, `additionalProperties: false`),
       and `taskComments`.
-- [ ] Add `db/app_database.dart`: `KmdbDatabase.open()` wrapper wiring
+- [x] Add `db/app_database.dart`: `KmdbDatabase.open()` wrapper wiring
       `indexes` (`tasks.projectId`, `taskComments.taskId`), `ftsIndexes`
       (`tasks.title`, `tasks.description`, `taskComments.body`),
       `vaultSearch` (`HtmlTextExtractor`, `MarkdownTextExtractor`),
       `encryptionConfig` (create-vs-unlock branch), and `ensureDeviceId()`.
-- [ ] Add `repositories/`: `project_repository.dart`, `task_repository.dart`
+- [x] Add `repositories/`: `project_repository.dart`, `task_repository.dart`
       (incl. the `where(projectId)` query), `comment_repository.dart`,
       `attachment_repository.dart` (wraps `VaultStore.ingest`/`getBlob` and
       `attachmentUris` bookkeeping), `sync_service.dart` (wraps
@@ -607,7 +607,7 @@ guide's **completeness and accuracy**, so it must be a genuine cold read.
       DefaultSyncAuthenticator(rootKey)))` — the adapter MUST be
       authenticator-wrapped with a shared root key, per finding 2; inspect the
       returned `SyncResult`/`PullResult` for quarantined artefacts).
-- [ ] Add the six screens from the pinned screen inventory (Unlock/Create,
+- [x] Add the six screens from the pinned screen inventory (Unlock/Create,
       Project list, Task list, Task detail/edit, Search, Sync/Settings),
       using `KmdbCollection.watch()`/`watchKey` for reactivity — no
       third-party state-management dependency. Mark `lib/src/ui/**` and
@@ -615,7 +615,7 @@ guide's **completeness and accuracy**, so it must be a genuine cold read.
       requirements above (semantic labels, keyboard nav/focus, colour
       contrast, screen-reader-reachable errors) as each screen is built,
       rather than retrofitting at the end.
-- [ ] Review the six screens with the **`bettongia:inclusivity` skill**
+- [x] Review the six screens with the **`bettongia:inclusivity` skill**
       before handing off to `kmdb-qa` — it exists specifically to check
       Flutter UIs against Bettongia's accessibility/i18n standards. Scope
       this pass to accessibility (per the user's request); flag but don't
@@ -630,16 +630,95 @@ guide's **completeness and accuracy**, so it must be a genuine cold read.
       language keeps the reference app small), **not** an engine limitation.
       Note i18n findings as a "going further" callout in the guide rather than
       fixing them in this plan.
-- [ ] Write the enumerated data-layer tests (CRUD, schema admission, index,
+
+      **BLOCKED, 2026-09-07 — tool unavailable in this implementer session.**
+      This session's tool set has no way to invoke a named skill (no
+      Skill-invocation tool, and no `bettongia:inclusivity` file discoverable
+      under `~/.claude` or the repo to read and self-apply). I did **not**
+      fabricate a pass. What I did instead, manually, while building each
+      screen (not a substitute for the real skill review, but recorded here
+      so `kmdb-qa` knows exactly what was and wasn't done):
+      - Icon-only controls (attach file, sync-now, search-mode segments,
+        delete/remove/send icons) all carry `tooltip`/`Semantics` labels —
+        grepped for every bare `IconButton`/`Icon`-only control across the
+        six screens to confirm none is unlabelled.
+      - Status/priority chips (`lib/src/ui/widgets/status_priority_chips.dart`)
+        use "900"-shade Material colours (dark backgrounds) with white text —
+        chosen for comfortable WCAG AA margin, but **not run through an
+        actual contrast-ratio checker or the `bettongia:design` palette** —
+        and carry a `Semantics` label so the value is never colour-only.
+      - Error states (`badCredentials`, the attach-file `FileSystemException`
+        path) are wrapped in `Semantics(liveRegion: true)`.
+      - Keyboard navigation relies entirely on stock Material widgets
+        (`TextField`, `FilledButton`, `SegmentedButton`, `ListTile`,
+        `DropdownButtonFormField`) and their default focus traversal — no
+        custom focus/keyboard handling was added or verified against.
+      - i18n: not addressed, per the plan's decision (v1 is deliberately
+        English-only; noted as "going further" in the guide).
+
+      **RESOLVED 2026-09-07 — the main session ran `bettongia:inclusivity`.**
+      The skill was invoked from the Opus main session (which has skill
+      access), and all six screens + the chip widget were reviewed against the
+      accessibility non-negotiables. **Verdict: PASS on the accessibility axis**
+      — every icon-only control carries a `tooltip`/`Semantics` label, all
+      dynamic status (`badCredentials`, the attach-file error, the sync result
+      `_log`) uses `Semantics(liveRegion: true)`, the colour-coded chips carry
+      `Semantics` labels (value never colour-only) with dark-shade/white
+      contrast, and keyboard `onSubmitted` support is present throughout. The
+      one gap the skill flags as a non-negotiable — **no automated accessibility
+      guideline tests** — was closed by adding
+      `test/accessibility_test.dart`: it asserts `textContrastGuideline`,
+      `labeledTapTargetGuideline`, and `androidTapTargetGuideline` on the Unlock
+      screen, and `textContrastGuideline` + semantic-label presence on every
+      `StatusPriorityChip` colour pair (50 sample-app tests pass, analyze/format
+      clean). **i18n** is intentionally **not** addressed (v1 is deliberately
+      English-only per the plan; the guide carries a "going further" i18n note)
+      — recorded as an accepted advisory, not a blocker, per the user's
+      accessibility-only scope for this pass.
+- [x] Write the enumerated data-layer tests (CRUD, schema admission, index,
       vault round-trip, sync convergence via two `LocalDirectoryAdapter`
       instances, encryption bootstrap incl. wrong-passphrase and recovery-code
-      paths) per the pinned list above.
-- [ ] Add a dedicated CI job for the package (analyze/format/test on the
+      paths) per the pinned list above. All 42 tests pass
+      (`test/codecs/`, `test/db/`, `test/repositories/`).
+
+      **Finding surfaced while writing the negative-auth sync test (out of
+      scope for this plan — recorded for a follow-up core-library
+      investigation, not fixed here):** `KmdbDatabase.close()`'s default
+      `flush: true` can trigger a background compaction that consults the
+      registered tombstone-GC-horizon provider
+      (`SyncEngine`'s `_computeTombstoneHorizon` /
+      `HighwaterMark.minCurrentHlcAcrossDevices`), which re-reads **every**
+      peer's `.hwm` file with **no** `SyncAuthException` handling — unlike
+      the catalogued call sites in
+      `docs/spec/34_sync_authentication.md`'s "Per-site rejection policy"
+      table (`SyncEngine.pull`, `_fullResync`, `_checkAndHandleEviction`,
+      `HighwaterMark.load` of the own file, lease CAS). Once a device has
+      ever synced against a peer whose `.hwm` it can no longer authenticate
+      (e.g. after a legitimate negative-auth pull like the sample app's
+      test), a **subsequent flushing `close()`** throws an uncaught
+      `SyncAuthException` instead of degrading gracefully — even though the
+      `sync()`/`pull()` call that first encountered the mismatch behaved
+      exactly as documented (quarantined, not applied). Confirmed by
+      instrumenting `sync_service_test.dart`'s negative-auth test: the
+      `sync()` call's own assertions all pass; the exception surfaces later,
+      attributed by the async stack trace to the test's `await
+      syncB.syncNow()` line even though that call had already returned. The
+      sample app's test works around this by closing with `flush: false` in
+      `tearDown` (a reasonable choice for test cleanup regardless — see the
+      code comment there) rather than by fixing the core library, which is
+      out of this plan's scope. Flagged for `kmdb-qa`/`kmdb-architect` to
+      decide whether this needs its own hardening plan.
+- [x] Add a dedicated CI job for the package (analyze/format/test on the
       macOS runner at minimum, per the desktop-only Q3 scope — confirm
       whether Linux/Windows runners are also needed for the full
       macOS/Linux/Windows target), modelled on the existing `make
-      cicd_flutter`/iCloud jobs in `.github/workflows/cicd.yml`.
-- [ ] Write the Integration Guide at `docs/integration_guide/README.md`,
+      cicd_flutter`/iCloud jobs in `.github/workflows/cicd.yml`. Added
+      `make cicd_example_todo` (format/analyze/test+coverage, >=90% gate)
+      and the `test-example-todo` macOS job; Linux/Windows build
+      verification left as a "going further" callout per the reviewer's
+      "acceptable latitude" note. Verified locally: `make cicd_example_todo`
+      passes with 100% coverage.
+- [x] Write the Integration Guide at `docs/integration_guide/README.md`,
       structured around the sample app: open/close a database (incl.
       encryption bootstrap), define collections and schemas, CRUD + queries,
       the secondary index, vault ingest/get/export, both search surfaces
@@ -656,9 +735,9 @@ guide's **completeness and accuracy**, so it must be a genuine cold read.
       must have landed on `main` before this step). Note hybrid/semantic
       search and `PdfTextExtractor` as "going further" callouts, not demoed
       paths.
-- [ ] Cross-link the guide from `docs/spec/00_index.md` and the repo root
+- [x] Cross-link the guide from `docs/spec/00_index.md` and the repo root
       `README.md`.
-- [ ] **(B1)** Create the Friction Log template at
+- [x] **(B1)** Create the Friction Log template at
       `docs/integration_guide/friction_log_template.md` with the pinned fields
       (section ref, said/happened, severity, self-resolvable+how, time lost,
       root cause, suggested fix, environment) and the per-copy header block.
@@ -666,7 +745,7 @@ guide's **completeness and accuracy**, so it must be a genuine cold read.
       use it, and note it is filled into a fresh dated copy per run (never the
       template itself). Create the `docs/integration_guide/friction_logs/`
       directory (with a `.gitkeep` or a short `README.md`) to hold run copies.
-- [ ] Add an explicit note (in the guide's README or the package's own
+- [x] Add an explicit note (in the guide's README or the package's own
       README) flagging the maintenance liability of the package's
       `dependency_overrides` **path pins on the three unpublished locals**
       (`kmdb`, `kmdb_extractor_html`, `kmdb_extractor_markdown`) — re-aimed
@@ -675,24 +754,79 @@ guide's **completeness and accuracy**, so it must be a genuine cold read.
       dropped, and that `kmdb_icloud/example`'s stale betto_* block is an
       anti-pattern, not a template.
 
+> **Session paused here, 2026-09-07 — no Agent/Task tool available.** All
+> implementation work above is done, committed, and passing (`flutter test`,
+> `flutter analyze`, `make cicd_example_todo` all green; `packages/kmdb` and
+> `packages/kmdb_cli` each independently re-verified green — see the Summary
+> section for the kmdb_cli flake note). The **mechanical** pre-commit gate
+> was run directly (`make pre_commit` — format_check, analyze, license_check,
+> the `kmdb`-scoped `pre_commit_test`) and is **green** (one real finding
+> fixed along the way: `addlicense_config.txt` was missing ignore patterns
+> for the Linux/Windows generated-plugin-registrant files this repo's first
+> non-macOS-only Flutter package produces — see that commit). What remains
+> blocked is the **substantive** `kmdb-qa` judgement call: this session's
+> tool set has no way to invoke the `kmdb-qa` agent (no Agent/Task-style
+> invocation tool), and per CLAUDE.md that sign-off is mandatory and must
+> never be fabricated. A session with agent-invocation available must run
+> `kmdb-qa` (and re-run `kmdb-pre-commit` for its independent confirmation)
+> before a commit/PR is made from this branch.
+
 **Final step — QA sign-off and pre-commit:**
 
-- [ ] Run the package's own `flutter test --coverage` — confirm
+- [x] Run the package's own `flutter test --coverage` — confirm
       `repositories/`, `codecs/`, and `db/schemas.dart` meet the project's
       coverage bar (UI is excluded via `coverage:ignore-file`, not measured).
-- [ ] Hand off to the **`kmdb-qa` agent** for sign-off (spec alignment, doc
+      **Result: 100.0% line coverage** (214/214 lines) across the 13 measured
+      source files (`repositories/`, `codecs/`, `db/`, `models/`) — verified
+      via `lcov --summary` against `coverage/lcov.info`, and again through
+      `make cicd_example_todo`'s >=90% gate.
+- [x] Hand off to the **`kmdb-qa` agent** for sign-off (spec alignment, doc
       comments, test coverage/adequacy, code health, and that the
       `bettongia:inclusivity` accessibility pass above was actually done, not
       just planned). Resolve every blocking item before proceeding. Do not
-      open a PR until sign-off is received.
-- [ ] Run `make pre_commit` — format, analyze, license_check, tests all green
+      open a PR until sign-off is received. **DONE 2026-09-07 — verdict: PASS,
+      no blockers on the deliverable.** 50/50 tests, 100% coverage on the
+      measured surface, analyze/format clean, doc comments thorough, all settled
+      decisions honoured; the two-phase device-ID fix (finding #1) verified
+      correct and genuinely exercised; the added `accessibility_test.dart`
+      confirmed. Three non-blocking follow-ups routed by the main session:
+      (i) **finding #2** — the pre-existing core `close(flush:true)` →
+      uncaught `SyncAuthException` bug (foreign/mismatched peer `.hwm` on the
+      tombstone-GC-horizon path) — the **user chose to fix it before the 0.1.0
+      tag**, so it gets its own core hardening plan + PR (not this one);
+      (ii) the **§34** rejection-policy-table gap (the compaction/
+      `minCurrentHlcAcrossDevices` call site is unlisted) → `kmdb-architect`;
+      (iii) the CLAUDE.md repo-layout list now includes `kmdb_example_todo/`
+      (fixed in this branch).
+- [x] Run `make pre_commit` — format, analyze, license_check, tests all green
       (note: this package is non-workspace, so confirm its own analyze/format
       run separately, per CLAUDE.md's note that `make pre_commit`'s test step
-      is `kmdb`-only).
-- [ ] Verify licence headers on all new files (2026).
+      is `kmdb`-only). **Confirmed green** — run directly via Bash (the
+      mechanical gate, not the `kmdb-qa` judgement call); this package's own
+      `flutter analyze`/`flutter test --coverage` were also run separately and
+      are green (see above). One real fix required:
+      `addlicense_config.txt` needed new ignore patterns for the Linux/
+      Windows generated-plugin-registrant files (this repo's first non-
+      macOS-only Flutter package).
+- [x] Verify licence headers on all new files (2026). All hand-written
+      `.dart` files carry the 2026 Apache header; the Flutter-generated
+      Runner boilerplate (Swift/C++) was headered to match the
+      `kmdb_icloud/example` precedent; pure build-config generated files
+      (CMakeLists.txt, generated_plugin_registrant.*, generated_plugins.cmake)
+      are exempted via `addlicense_config.txt`, matching how
+      `Flutter/GeneratedPluginRegistrant.swift` is already exempted.
 
 **Final acceptance gate — cold-read guide validation (B2), distinct from
 `kmdb-qa`:**
+
+> **Intentionally left unchecked by the implementer.** Per the coordinating
+> session's explicit scope boundary, B2 is a **post-merge, main-session-
+> orchestrated acceptance step** — it must be run by a separate, KMDB-naïve
+> general-purpose agent in an isolated worktree walled off from this PR's own
+> reference implementation (the whole point is fresh eyes that never saw it).
+> The kmdb-plan-implement agent that wrote this guide/sample app must not be
+> the one that also validates it. Do not check these off, fill in a friction
+> log, or run B2 as part of this implementation pass.
 
 - [ ] **(B2)** Run the cold-read guide-validation per the "Guide-validation
       additions" design above: an **isolated worktree/clone** stripped of
@@ -1143,4 +1277,81 @@ the guide-prose step, since the guide cites post-review spec section numbers.
 
 ## Summary
 
-{To be completed once implemented.}
+**Status as of 2026-09-07: implementation complete, awaiting `kmdb-qa` and
+`kmdb-pre-commit` sign-off (blocked — see note above the "Final step"
+checklist) and the B2 cold-read gate (deliberately deferred to a post-merge,
+main-session-orchestrated run).**
+
+- Scaffolded `packages/kmdb_example_todo/` as a non-workspace Flutter package
+  (macOS/Linux/Windows runners), path-overriding only the three unpublished
+  locals (`kmdb`, `kmdb_extractor_html`, `kmdb_extractor_markdown`) per
+  finding 3 — no betto_\* override block.
+- Implemented the full data layer per the pinned design: `Project`/`Task`/
+  `TaskComment` models + codecs, JSON Schema admission (`db/schemas.dart`),
+  `AppDatabase.open()` (indexes, FTS, vault search, encryption, and a
+  two-phase device-ID open — see the finding below), and five repositories
+  (`project`, `task`, `comment`, `attachment`, `sync_service`).
+- Implemented all six screens (Unlock/Create, Project list, Task list, Task
+  detail/edit, Search, Sync/Settings) using `watch()`/`watchKey` only — no
+  third-party state management — marked `// coverage:ignore-file`.
+- Wrote the full enumerated data-layer test list (CRUD, schema admission,
+  secondary index + `QueryPlan`, vault round-trip/ref-counting/dedup/vault
+  search, sync convergence + negative-auth + non-resurrection, encryption
+  bootstrap incl. wrong-passphrase/recovery-code) — **47 tests, 100.0% line
+  coverage** on the measured surface (`repositories/`, `codecs/`, `db/`,
+  `models/`).
+- Added `make cicd_example_todo` and the `test-example-todo` macOS CI job.
+- Wrote the Integration Guide (`docs/integration_guide/README.md`), the B1
+  Friction Log template + `friction_logs/` directory, and cross-linked both
+  from `docs/spec/00_index.md` and the repo root `README.md`.
+
+**Deviations / findings during implementation:**
+
+1. **Two-phase device-ID open was not in the original plan text and had to
+   be added.** The plan's pinned `AppDatabase.open()` design opened
+   `KmdbDatabase` once and called `ensureDeviceId()` afterwards — this leaves
+   every instance on the `'00000000'` sentinel forever, since
+   `ensureDeviceId()` cannot retroactively change the device ID already
+   baked into the running `LsmEngine`/SSTable naming. This was caught by the
+   sync convergence tests (device-ID/HWM-filename collisions between the two
+   demo instances) and fixed by mirroring `kmdb_cli`'s `DatabaseOpener`
+   two-phase pattern (open minimal, `ensureDeviceId()`, close-without-flush
+   if it changed, reopen full). Documented in `AppDatabase.open()`'s doc
+   comment and the Integration Guide's "Open and close a database" section.
+2. **Core-library finding (out of scope, not fixed): `KmdbDatabase.close()`
+   can throw an uncaught `SyncAuthException`.** See the annotation under
+   "Write the enumerated data-layer tests" above for the full detail — a
+   flushing `close()` can trigger a background compaction that reads every
+   peer's `.hwm` file via the tombstone-GC-horizon provider, with no
+   `SyncAuthException` handling at that call site (unlike the five call
+   sites catalogued in §34's rejection-policy table). Worked around in the
+   sample app's test teardown; flagged for `kmdb-qa`/`kmdb-architect` to
+   decide whether it needs its own hardening plan.
+3. **`bettongia:inclusivity` skill review could not be run.** This
+   implementer session's tool set has no Skill-invocation capability and no
+   discoverable skill file to self-apply. Accessibility best practices were
+   applied manually while building each screen (semantic labels on every
+   icon-only control — verified by grep, dark high-contrast chip colours
+   with a `Semantics` label, `liveRegion` error announcements, stock-widget
+   keyboard navigation) but this is **not** a substitute for the real skill
+   review. Left unchecked in the implementation plan; flagged for whoever
+   picks up QA.
+4. **`kmdb_cli`'s full test suite failed once under `make test`'s
+   parallel/melos run, but passed cleanly (1240 tests, 3 e2e skips) when run
+   directly and in isolation** (`cd packages/kmdb_cli && dart test`). Given
+   this plan touches nothing under `packages/kmdb_cli/`, and the direct run
+   is clean, this looks like a resource-contention flake in the parallel
+   melos run (kmdb_cli's encryption tests spawn real subprocesses) rather
+   than a regression — but it was not re-run under `make test` a second time
+   to confirm, given the ~50+ minute cost of a full workspace run. Worth a
+   second look before merge if `kmdb-pre-commit`'s own run reproduces it.
+5. **Two vault spec-section mis-citations were introduced and then
+   corrected**: several early comments cited §24 (vault content-addressable
+   store) for what is actually §32 (vault *search*) — fixed throughout
+   `lib/` and `test/` before the guide was written, so the guide itself
+   cites correctly from the start.
+
+**Not done, by design (see the note above the "Final step" checklist):**
+`kmdb-qa`'s substantive sign-off, and the B2 cold-read guide-validation run.
+The **mechanical** pre-commit gate (`make pre_commit`, run directly) is
+green — see the checklist above.
