@@ -264,8 +264,41 @@ artefact controls:
 | `ConsolidationCoordinator.consolidate` (input download) | Skip that one input, like the existing `CorruptedSstableException` branch — the surviving legitimate inputs still get consolidated |
 | `HighwaterMark.load` of this device's **own** HWM | Propagate — a tampered own file must not be silently ignored |
 | Peer HWM load in `_checkAndHandleEviction` | Skip that one peer's contribution, not fatal to the whole re-admission check |
+| Peer HWM load in `_computeTombstoneHorizon` → `HighwaterMark.minCurrentHlcAcrossDevices` (all-levels `_compactAll`, reachable from `close(flush: true)` and from ingest-triggered compaction) | **Defer GC** — the horizon computation catches `SyncAuthException` and returns the conservative `Hlc(0, 0)` (block *all* tombstone drops this round; the same value the existing "no live devices" fallback returns). **Never propagate** (an uncaught throw here escapes `close()` before it releases the LOCK — a LOCK-leak) and, distinct from the `_checkAndHandleEviction` row above, **never skip the peer's contribution** — see the note below |
 | Lease download / CAS (`ConsolidationCoordinator.acquireLease`) | Propagate — abort this consolidation round rather than act on a forged lease |
 | Consolidated-output upload | N/A — the envelope is applied automatically on upload, there is nothing to reject |
+
+The horizon row and the `_checkAndHandleEviction` row respond to the *same*
+failure (an unauthenticated peer HWM) with *opposite* dispositions — skip
+there, block here — because the two sites feed the peer `min` into decisions
+with opposite safety gradients:
+
+- **`_checkAndHandleEviction`** asks "is *this* device behind every live
+  peer?" Dropping a peer from that `min` makes the check *less* likely to
+  fire, whose worst case is a merely-incremental sync instead of a full
+  re-sync — no data-safety consequence. Skipping is safe.
+- **`_computeTombstoneHorizon`** asks "below which HLC has *every* device
+  synced, so a tombstone may be dropped?" The horizon *is* `min(currentHlc)`
+  across included devices, and dropping a peer from a `min` can only *raise*
+  it. A raised horizon drops tombstones a genuinely-behind peer has not yet
+  observed → resurrection on that peer. Under T1 the attacker chooses which
+  peer's HWM to forge, so "skip the failed-auth peer" would hand a mere
+  write-access adversary a premature-GC / resurrection primitive — precisely
+  the class of harm this section exists to close. Blocking GC for the round
+  is the only safe direction: it can never resurrect, its sole cost is
+  deferred reclamation (tombstones accumulate until the bad HWM is removed or
+  the sync set re-enrolled), and it self-heals. This differs from the
+  stale-device eviction that `minCurrentHlcAcrossDevices` *does* perform,
+  which is licensed by an explicit "presumed permanently gone after
+  `staleDeviceEvictionAfter`" policy — an auth failure carries no such
+  presumption of absence (the peer may be perfectly live; only its HWM *file*
+  was forged or is a pre-enrollment legacy artefact, R-5).
+
+No new durable record is written for this skip: the horizon computation is a
+read-only, idempotent step that repeats on every `_compactAll`, and the
+authoritative "peer X is unauthenticated" signal already surfaces on the sync
+path (`pull` quarantines X's SSTables under `unauthenticated`; `push`/`sync`
+raise `SyncAuthException`). The catch is therefore silent.
 
 ## Q1: Quarantine Composition
 
