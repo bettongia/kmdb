@@ -615,7 +615,7 @@ guide's **completeness and accuracy**, so it must be a genuine cold read.
       requirements above (semantic labels, keyboard nav/focus, colour
       contrast, screen-reader-reachable errors) as each screen is built,
       rather than retrofitting at the end.
-- [ ] Review the six screens with the **`bettongia:inclusivity` skill**
+- [x] Review the six screens with the **`bettongia:inclusivity` skill**
       before handing off to `kmdb-qa` — it exists specifically to check
       Flutter UIs against Bettongia's accessibility/i18n standards. Scope
       this pass to accessibility (per the user's request); flag but don't
@@ -656,10 +656,25 @@ guide's **completeness and accuracy**, so it must be a genuine cold read.
       - i18n: not addressed, per the plan's decision (v1 is deliberately
         English-only; noted as "going further" in the guide).
 
-      **This checklist item is left unchecked and must be completed by an
-      agent/session that has `bettongia:inclusivity` available**, or by a
-      human reviewer running it manually, before this plan is considered
-      fully done. Flagging for `kmdb-qa` and the user.
+      **RESOLVED 2026-09-07 — the main session ran `bettongia:inclusivity`.**
+      The skill was invoked from the Opus main session (which has skill
+      access), and all six screens + the chip widget were reviewed against the
+      accessibility non-negotiables. **Verdict: PASS on the accessibility axis**
+      — every icon-only control carries a `tooltip`/`Semantics` label, all
+      dynamic status (`badCredentials`, the attach-file error, the sync result
+      `_log`) uses `Semantics(liveRegion: true)`, the colour-coded chips carry
+      `Semantics` labels (value never colour-only) with dark-shade/white
+      contrast, and keyboard `onSubmitted` support is present throughout. The
+      one gap the skill flags as a non-negotiable — **no automated accessibility
+      guideline tests** — was closed by adding
+      `test/accessibility_test.dart`: it asserts `textContrastGuideline`,
+      `labeledTapTargetGuideline`, and `androidTapTargetGuideline` on the Unlock
+      screen, and `textContrastGuideline` + semantic-label presence on every
+      `StatusPriorityChip` colour pair (50 sample-app tests pass, analyze/format
+      clean). **i18n** is intentionally **not** addressed (v1 is deliberately
+      English-only per the plan; the guide carries a "going further" i18n note)
+      — recorded as an accepted advisory, not a blocker, per the user's
+      accessibility-only scope for this pass.
 - [x] Write the enumerated data-layer tests (CRUD, schema admission, index,
       vault round-trip, sync convergence via two `LocalDirectoryAdapter`
       instances, encryption bootstrap incl. wrong-passphrase and recovery-code
