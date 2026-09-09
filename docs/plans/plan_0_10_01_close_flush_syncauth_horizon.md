@@ -1,8 +1,9 @@
 # Harden `close(flush:true)` against `SyncAuthException` on the tombstone-GC-horizon path
 
-**Status**: Draft — grounded by `kmdb-architect` (chain re-verified on `main` @
-`a813f37`, disposition changed from *skip* to *defer* with reasoning, call-site
-audit complete, §34 row + rationale added) → ready for `kmdb-plan-reviewer`
+**Status**: Investigated — reviewed by `kmdb-plan-reviewer` on `main` @ `b846430`
+(2026-09-10). Failure chain, disposition, call-site audit, §34 agreement, and
+fault-injection test plan all independently re-verified against current code; see
+the review note at the end. Ready for `kmdb-plan-implement`.
 
 **PR link**: _(none yet)_
 
@@ -171,12 +172,13 @@ been updated with the `defer` disposition and the skip-vs-block rationale.
   see the Disposition section.
 - `docs/spec/34_sync_authentication.md` — rejection-policy table (row **added**;
   now at ~267, with the skip-vs-block rationale beneath the table).
-- `packages/kmdb/test/sync/` (co-located with `sync_engine_*_test.dart`) — where
-  the regression test belongs. The existing WI-4 auth tests
-  (`sync_engine_auth_*` / the `MemorySyncAdapter` + `SyncAuthenticatingAdapter`
-  wiring used by them) are the closest precedent; `MemorySyncAdapter` is
-  sufficient to reproduce this (a MAC failure needs a key mismatch, not a disk
-  fault — see Testing).
+- `packages/kmdb/test/sync/auth/` (co-located with
+  `sync_auth_sync_engine_integration_test.dart` and
+  `sync_authenticating_adapter_test.dart`) — where the regression test belongs.
+  Those WI-4 auth tests (the `MemorySyncAdapter` + `DefaultSyncAuthenticator` +
+  `SyncAuthenticatingAdapter` wiring used by them) are the closest precedent;
+  `MemorySyncAdapter` is sufficient to reproduce this (a MAC failure needs a key
+  mismatch, not a disk fault — see Testing).
 
 ## Call-site audit — every peer-HWM / `HighwaterMark.load` fold
 
@@ -241,13 +243,21 @@ assert the horizon now advances to the authenticated `min(currentHlc)` and an
 eligible tombstone is dropped — proving the defer is transient and self-healing,
 and that the healthy horizon/GC path is unbroken.
 
-**T4 — unit test at the fix site.** A focused test that the horizon provider
-closure returns `Hlc(0, 0)` when `minCurrentHlcAcrossDevices` throws
-`SyncAuthException`, without touching `close`/compaction — fast coverage of the
-catch, independent of the LSM plumbing.
+**T4 (optional) — direct unit test at the fix site.** *Note (reviewer):* there is
+**no public getter** for the registered horizon provider (`KvStore` exposes only
+the `setTombstoneHorizonProvider` **setter**; `_computeTombstoneHorizon` and
+`_tombstoneHorizonProvider` are private), so the production closure cannot be
+grabbed and invoked directly from a test without a new seam. Do **one** of:
+(a) skip T4 — the catch branch and its `Hlc(0, 0)` return are already fully
+exercised end-to-end by **T1** (no-throw + LOCK released) and **T2** (defer, not
+skip); or (b) if a focused unit test is still wanted, add a narrow
+`@visibleForTesting` accessor/method on `SyncEngine` that returns the horizon and
+assert it yields `Hlc(0, 0)` under a mismatched-key adapter. Prefer (a) unless
+coverage measurement shows the branch is otherwise unhit — do not invent a
+public getter for the provider.
 
-**Coverage:** keep ≥90%. The new catch branch and its log are both exercised by
-T1/T4.
+**Coverage:** keep ≥90%. The new catch branch is exercised by T1 (and asserted
+behaviourally by T2); there is no log to cover.
 
 ## Implementation plan
 
@@ -258,8 +268,10 @@ call-site audit confirms the fix is localised to the horizon provider.
    `packages/kmdb/lib/src/sync/sync_engine.dart:127-135`. Wrap the
    `minCurrentHlcAcrossDevices` call in `try` / `on SyncAuthException`, returning
    the conservative `const Hlc(0, 0)` on catch (the same value the `min ?? …`
-   fallback already returns), and emit a `fine`/`warning` diagnostic naming the
-   remote/HWM dir. Shape:
+   fallback already returns, and also the `CompactionJob.horizon` default —
+   `compaction_job.dart:72` — so it reliably means "drop no tombstones"). **No
+   log** (see sub-question 1 — `packages/kmdb` has no logging facility); the
+   catch carries only an explanatory comment. Shape:
 
    ```dart
    _store.setTombstoneHorizonProvider(() async {
@@ -309,9 +321,13 @@ call-site audit confirms the fix is localised to the horizon provider.
    skip-vs-block rationale. Regenerate the HTML site (`make doc_site_html`)
    after the spec change lands.
 
-5. **Tests** — add T1–T4 above under `packages/kmdb/test/sync/` next to the
-   existing `SyncAuthenticatingAdapter` tests; reuse their key-pair /
-   two-engine harness setup.
+5. **Tests** — add T1–T3 (T4 optional, see Testing) under
+   `packages/kmdb/test/sync/auth/` next to the existing
+   `sync_auth_sync_engine_integration_test.dart` /
+   `sync_authenticating_adapter_test.dart`; reuse their harness
+   (`MemorySyncAdapter` + `DefaultSyncAuthenticator(_key(n))` +
+   `SyncAuthenticatingAdapter`). A mismatched-key device is `_key(2)` vs
+   `_key(1)`.
 
 6. **Verify** — `cd packages/kmdb && dart test` (native-asset hooks fire from
    the package dir), then `make coverage` for the ≥90% gate, then
@@ -326,6 +342,70 @@ call-site audit confirms the fix is localised to the horizon provider.
   own context.
 - A durable HWM-quarantine record — none exists and none is warranted
   (sub-question 1).
+
+## Review note — `kmdb-plan-reviewer`, 2026-09-10 (`main` @ `b846430`)
+
+**Verdict: Investigated.** The plan clears the implementation-readiness bar — the
+production fix is a single, precisely-located, unambiguous change, the
+disposition is verified correct against current code, and the test plan is
+fault-injected and concrete. Independently re-verified:
+
+1. **Failure chain — accurate.** All cited line refs match current `main`:
+   provider registration `sync_engine.dart:127-135` (uncaught closure);
+   `minCurrentHlcAcrossDevices` at `highwater.dart:132-163`, unguarded per-file
+   `HighwaterMark.load` at `:143` inside the fold; `_computeTombstoneHorizon`
+   `lsm_engine.dart:266-273` (uncaught `provider()` at `:268`); single-file
+   shortcut `_compactIfNeeded:916-920`; `_compactAll` horizon call `:1077`;
+   `close` → `flush` at `:1591` (throws here) **before** `_tableCache.clear()`
+   (`:1594`) / `releaseLock` (`:1595`) — confirming the LOCK-leak, not data loss.
+2. **Defer-not-skip disposition — sound, and `Hlc(0,0)` is provably safe.** The
+   horizon threads only into `CompactionJob.dropTombstone`
+   (`compaction_job.dart:314-319`); its default is `const Hlc(0,0)` (`:72`), which
+   means "drop no tombstones." So the defer value is the existing "no live
+   devices" fallback (`sync_engine.dart:134`) **and** the CompactionJob default —
+   no caller treats the horizon specially, and version reclamation is a separate
+   policy path unaffected. The architect's `min`-monotonicity argument holds:
+   skip raises the `min` → premature GC → resurrection under §34 T1; defer holds
+   it down → safe, cost is only deferred (self-healing) reclamation. Endorsed.
+   The fix makes `close(flush:true)` total and releases the LOCK.
+3. **Call-site audit — complete and accurate.** Grepped every
+   `HighwaterMark.load` / `minCurrentHlcAcrossDevices` caller in
+   `packages/kmdb/lib` and `packages/kmdb_cli/lib`. Exactly one unguarded peer-HWM
+   *horizon* fold (#1, the fix site). #2 (`_checkAndHandleEviction:368`) already
+   guarded with `on SyncAuthException { continue; }` (`:372-379`). #3–#5
+   (`:339`/`:274`/`:617`) are the three own-HWM loads §34 deliberately propagates.
+   No other horizon caller left unguarded. `SyncAuthException` is **already
+   imported** at `sync_engine.dart:23` — no new import needed.
+4. **§34 agreement — confirmed.** The rejection-policy row exists at
+   `34_sync_authentication.md:267` with the **Defer GC / `Hlc(0,0)`** disposition
+   and "never skip the peer's contribution," plus the skip-vs-block asymmetry
+   rationale at `:271-298`. Matches the plan's disposition exactly. The row also
+   correctly notes reachability from **ingest-triggered compaction**, not only
+   `close(flush:true)` — the fix covers both since it sits at the provider.
+5. **Test plan — concrete and fault-injected.** The `test/sync/auth/` harness the
+   plan reuses exists (`MemorySyncAdapter` + `DefaultSyncAuthenticator(_key(n))`
+   + `SyncAuthenticatingAdapter`); a mismatched-key device is `_key(2)` vs
+   `_key(1)`. The "fault" is a MAC key mismatch, not a disk fault, so
+   `MemorySyncAdapter` genuinely reproduces the bug; T1 must throw pre-fix and
+   complete post-fix (with a fresh `open()` proving LOCK release) — non-golden-path.
+
+**Edits I made to the plan (no code touched):**
+- Removed an internal contradiction: implementation step 1 said "emit a
+  `fine`/`warning` diagnostic" while sub-question 1 and the code shape resolve to
+  **silent, no log** (verified: no `package:logging`/`Logger`/`dart:developer` in
+  `sync/` or `engine/kvstore/`). Aligned step 1 and the Coverage note to "no log."
+- Corrected the test path from `test/sync/` to `test/sync/auth/` (two places).
+- **Reframed T4 as optional.** There is no public getter for the registered
+  horizon provider (only the `setTombstoneHorizonProvider` setter;
+  `_computeTombstoneHorizon`/`_tombstoneHorizonProvider` are private), so T4 as
+  originally worded ("the closure returns `Hlc(0,0)`") is not reachable without a
+  new seam and is redundant with T1/T2. The plan now says prefer to skip T4, or
+  add a narrow `@visibleForTesting` accessor if a direct unit test is wanted — do
+  not invent a public provider getter. This was the only spot that could have
+  forced an on-the-fly design decision; it is now explicitly resolved.
+
+None of these were blocking for the core fix; they removed residual ambiguity
+before handoff.
 
 ## Summary
 
