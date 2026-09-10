@@ -1,9 +1,9 @@
 # Harden `close(flush:true)` against `SyncAuthException` on the tombstone-GC-horizon path
 
-**Status**: Investigated — reviewed by `kmdb-plan-reviewer` on `main` @ `b846430`
-(2026-09-10). Failure chain, disposition, call-site audit, §34 agreement, and
-fault-injection test plan all independently re-verified against current code; see
-the review note at the end. Ready for `kmdb-plan-implement`.
+**Status**: Implementing — `kmdb-plan-implement` started 2026-09-10 on
+branch `20260910_plan_0_10_01_close_flush_syncauth_horizon`, worktree
+`.worktrees/20260910_plan_0_10_01_close_flush_syncauth_horizon`, base `main` @
+`996fa65`.
 
 **PR link**: _(none yet)_
 
@@ -333,6 +333,38 @@ call-site audit confirms the fix is localised to the horizon provider.
    the package dir), then `make coverage` for the ≥90% gate, then
    `make pre_commit`. No `kmdb_cli` change is expected; if the fix is confined
    to `packages/kmdb` the `pre_commit` `kmdb`-scoped test run covers it.
+
+### Implementation checklist
+
+- [x] Step 1 — fix the horizon provider closure in `sync_engine.dart` (try/on
+      `SyncAuthException` → `const Hlc(0, 0)`, no log).
+- [x] Step 2 — augment `HighwaterMark.minCurrentHlcAcrossDevices` doc comment
+      re: `SyncAuthException` propagation + horizon-caller defer.
+- [x] Step 3 — confirm no provider-lifecycle clearing added (verified: no
+      `setTombstoneHorizonProvider(null)` added anywhere).
+- [x] Step 4 — confirmed §34 spec already has the row at
+      `34_sync_authentication.md:267` (Defer GC / `Hlc(0,0)`, never skip);
+      matches the fix exactly, no spec edit needed.
+- [x] Step 5 — wrote T1, T2, T3 fault-injection tests plus 2 happy-path
+      sanity tests under
+      `packages/kmdb/test/sync/auth/close_flush_syncauth_horizon_test.dart`.
+      Confirmed T1 fails on pre-fix code (temporarily reverted
+      `sync_engine.dart`, ran `dart test -n "T1"`, observed the exact
+      `SyncAuthException` chain from the plan's failure-chain section
+      escaping at `storeB.close(flush: true)`; restored the fix, all 5
+      tests pass). T4 skipped per plan (optional; fully covered by T1+T2).
+- [x] Step 6 — `cd packages/kmdb && dart test`: full suite green (2662
+      passed, 12 skipped E2E). `make coverage` / `make pre_commit` to follow
+      after QA sign-off.
+
+**Final step — QA sign-off and pre-commit:**
+
+- [ ] Run `make coverage` — confirm >95% on all new files.
+- [ ] Hand off to the `kmdb-qa` agent for sign-off. Resolve every blocking item
+      before proceeding. Do not open a PR until sign-off is received.
+- [ ] Run `make pre_commit` — format, analyze, license_check, tests all green
+      (via `kmdb-pre-commit` agent).
+- [ ] Verify licence headers on all new files (2026).
 
 ### Out of scope / explicitly not doing
 
