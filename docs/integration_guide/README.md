@@ -27,8 +27,13 @@ with multiple projects, each containing tasks (title, description, priority,
 status, file attachments, and comments). It exercises every subsystem this
 guide covers — schema admission, the secondary index, both search surfaces,
 the vault, authenticated sync, and encryption — end to end, with a full data-
-layer test suite. If a snippet below looks incomplete, the full context is in
-that package.
+layer test suite. **The data-layer code you need to build a working app is
+printed in full in this guide** — models, codecs, schemas, and the
+`AppDatabase.open()` wrapper. The sample app additionally provides the runnable
+Flutter UI (its six screens) and the thin repository layer, which this guide
+points to rather than reprints; those pointers assume you have
+`packages/kmdb_example_todo/` checked out alongside this guide (it ships in the
+same repository).
 
 ```
 packages/kmdb_example_todo/
@@ -75,6 +80,13 @@ dependencies:
   kmdb_extractor_markdown: ^0.1.0
 ```
 
+**Note:** the `AppDatabase.open()` wrapper this guide builds (under
+["Putting it together"](#putting-it-together-appdatabaseopen)) wires attachment
+-content search unconditionally, so following this guide *verbatim* needs both
+extractor packages. If you don't want attachment-content search, drop the
+`vaultSearch:` argument from that wrapper and the two extractor imports — then
+these dependencies are genuinely optional.
+
 `import 'package:kmdb/kmdb.dart';` gives you the full public API surface used
 throughout this guide.
 
@@ -82,6 +94,12 @@ throughout this guide.
 
 `kmdb` stores documents as `Map<String, dynamic>`; your typed model classes
 never touch that map directly. A `KmdbCodec<T>` bridges the two.
+
+> The code blocks below omit their `import` lines for brevity. Every codec and
+> schema file needs `import 'package:kmdb/kmdb.dart';` (for `KmdbCodec`,
+> `VaultRef`, `CollectionSchema`, …) plus a relative import of its model file
+> (e.g. `import '../models/task.dart';`); model files need no `kmdb` import at
+> all. The `AppDatabase.open()` wrapper later on shows a full import header.
 
 ## The model
 
@@ -442,7 +460,29 @@ abstract final class AppSchemas {
     },
   );
 
-  static final CollectionSchema tasks = /* the tasks schema shown above */;
+  static final CollectionSchema tasks = CollectionSchema(
+    collection: 'tasks',
+    jsonSchema: {
+      'required': [
+        'projectId', 'title', 'description', 'priority', 'status',
+        'attachmentUris', 'createdAt', 'updatedAt',
+      ],
+      'properties': {
+        'projectId': {'type': 'string', 'minLength': 1},
+        'title': {'type': 'string', 'minLength': 1},
+        'description': {'type': 'string'},
+        'priority': {'type': 'string', 'enum': TaskPriority.values},
+        'status': {'type': 'string', 'enum': TaskStatus.values},
+        'attachmentUris': {
+          'type': 'array',
+          'items': {'type': 'string'},
+        },
+        'createdAt': {'type': 'string', 'format': 'date-time'},
+        'updatedAt': {'type': 'string', 'format': 'date-time'},
+      },
+      'additionalProperties': false,
+    },
+  );
 
   static final CollectionSchema taskComments = CollectionSchema(
     collection: 'taskComments',
@@ -779,6 +819,8 @@ final db = await KmdbDatabase.open(
 );
 
 // Ingest, then attach the URI to a document in the SAME write.
+// `db.store` is the underlying KvStore; storeInfo().currentHlc is the current
+// HLC timestamp the vault needs to stamp the ingested blob.
 final info = await db.store.storeInfo();
 final ref = await vaultStore.ingest(
   bytes: fileBytes,
