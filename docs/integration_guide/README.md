@@ -111,6 +111,28 @@ class Task {
   final List<String> attachmentUris; // 'kmdb-vault://sha256/<64hex>'
   final DateTime createdAt;
   final DateTime updatedAt;
+
+  /// Returns a copy with the given fields replaced. `updatedAt` is always
+  /// refreshed (used by the vault section below). Add the equivalent
+  /// `copyWith` to your own models — the "attach a file" flow relies on it.
+  Task copyWith({
+    String? title,
+    String? description,
+    String? priority,
+    String? status,
+    List<String>? attachmentUris,
+    DateTime? now,
+  }) => Task(
+    id: id,
+    projectId: projectId,
+    title: title ?? this.title,
+    description: description ?? this.description,
+    priority: priority ?? this.priority,
+    status: status ?? this.status,
+    attachmentUris: attachmentUris ?? this.attachmentUris,
+    createdAt: createdAt,
+    updatedAt: now ?? DateTime.now(),
+  );
 }
 ```
 
@@ -173,8 +195,15 @@ class TaskCodec implements KmdbCodec<Task> {
 }
 ```
 
-Three contract rules to internalise (spec §13):
+Four contract rules to internalise (spec §13):
 
+- **`keyOf()` returns the document key, or an empty string / `null` for an
+  unsaved value.** The sample's models carry `id` as a plain `String` that is
+  `''` until the document is first inserted, and `keyOf` returns it directly
+  (`=> value.id`). `insert()`/`put()` treat an empty-string (or `null`) key as
+  "keyless" and mint a fresh UUIDv7; a non-empty key is taken as the document's
+  identity. Keys are always framework-minted 32-char lowercase-hex UUIDv7s —
+  never construct one yourself.
 - **`encode()` must not emit any top-level `_`-prefixed key.** The `_id` field
   is reserved for the framework-managed key; if your `encode()` includes one,
   every write throws `ReservedFieldException`.
@@ -185,7 +214,7 @@ Three contract rules to internalise (spec §13):
   serialization.** `toIso8601String()`/`DateTime.parse()` is the pattern used
   throughout this guide.
 
-There is a fourth, less obvious rule the `TaskCodec` above demonstrates:
+There is one more, less obvious rule the `TaskCodec` above demonstrates:
 **vault URI strings may arrive as wired `VaultRef` objects, not plain
 strings.** `KmdbCollection.decodeDoc` walks the raw document map *before*
 calling your `decode()` and replaces every `kmdb-vault://` URI it finds — at
@@ -199,6 +228,145 @@ element back to its bare URI string regardless of which shape it arrives in
 — the `e is VaultRef ? e.uri : e as String` line above is that
 normalisation, and it is easy to miss if you only test against a
 vault-less database.
+
+## The other two models: Project and TaskComment
+
+The sample app has three collections. `Task`/`TaskCodec` above is the pattern;
+`Project` and `TaskComment` follow it exactly. Both are shown here in full so
+this guide stands alone — every model/codec you need to compile the sections
+below is on this page.
+
+```dart
+// lib/src/models/project.dart
+class Project {
+  const Project({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.createdAt,
+  });
+
+  final String id;            // '' before insert(), a UUIDv7 after
+  final String name;
+  final String description;
+  final DateTime createdAt;
+
+  Project copyWith({String? name, String? description}) => Project(
+    id: id,
+    name: name ?? this.name,
+    description: description ?? this.description,
+    createdAt: createdAt,
+  );
+}
+
+// lib/src/codecs/project_codec.dart
+class ProjectCodec implements KmdbCodec<Project> {
+  const ProjectCodec();
+
+  @override
+  String? keyOf(Project value) => value.id;
+
+  @override
+  Project withKey(Project value, String key) => Project(
+    id: key,
+    name: value.name,
+    description: value.description,
+    createdAt: value.createdAt,
+  );
+
+  @override
+  Map<String, dynamic> encode(Project value) => {
+    'name': value.name,
+    'description': value.description,
+    'createdAt': value.createdAt.toIso8601String(),
+  };
+
+  @override
+  Project decode(Map<String, dynamic> json) => Project(
+    id: json['_id'] as String,
+    name: json['name'] as String,
+    description: json['description'] as String,
+    createdAt: DateTime.parse(json['createdAt'] as String),
+  );
+}
+```
+
+`TaskComment` lives in its own `taskComments` collection rather than as an
+embedded list on `Task` — see ["Comments: a sub-collection"](#comments-a-sub-collection-not-an-embedded-list)
+below for why. Its model and codec are the same shape again:
+
+```dart
+// lib/src/models/task_comment.dart
+class TaskComment {
+  const TaskComment({
+    required this.id,
+    required this.taskId,      // FK -> Task.id
+    required this.author,
+    required this.body,        // indexed for full-text search
+    required this.createdAt,
+  });
+
+  final String id;             // '' before insert(), a UUIDv7 after
+  final String taskId;
+  final String author;
+  final String body;
+  final DateTime createdAt;
+}
+
+// lib/src/codecs/task_comment_codec.dart
+class TaskCommentCodec implements KmdbCodec<TaskComment> {
+  const TaskCommentCodec();
+
+  @override
+  String? keyOf(TaskComment value) => value.id;
+
+  @override
+  TaskComment withKey(TaskComment value, String key) => TaskComment(
+    id: key,
+    taskId: value.taskId,
+    author: value.author,
+    body: value.body,
+    createdAt: value.createdAt,
+  );
+
+  @override
+  Map<String, dynamic> encode(TaskComment value) => {
+    'taskId': value.taskId,
+    'author': value.author,
+    'body': value.body,
+    'createdAt': value.createdAt.toIso8601String(),
+  };
+
+  @override
+  TaskComment decode(Map<String, dynamic> json) => TaskComment(
+    id: json['_id'] as String,
+    taskId: json['taskId'] as String,
+    author: json['author'] as String,
+    body: json['body'] as String,
+    createdAt: DateTime.parse(json['createdAt'] as String),
+  );
+}
+```
+
+The allowed `priority`/`status` value sets `Task` refers to are plain `String`
+constants (enforced by the schema, not the codec — see below):
+
+```dart
+// lib/src/models/task.dart
+abstract final class TaskPriority {
+  static const String high = 'high';
+  static const String medium = 'medium';
+  static const String low = 'low';
+  static const List<String> values = [high, medium, low];
+}
+
+abstract final class TaskStatus {
+  static const String backlog = 'backlog';
+  static const String inProgress = 'in-progress';
+  static const String done = 'done';
+  static const List<String> values = [backlog, inProgress, done];
+}
+```
 
 # Define collections and schemas
 
@@ -247,6 +415,51 @@ try {
   for (final v in e.violations) {
     print('${v.path}: ${v.message}'); // every violation, reported together
   }
+}
+```
+
+## The full schema set
+
+`KmdbDatabase.open()` takes a `List<CollectionSchema>`, and **every collection
+you write to needs an entry** — with `additionalProperties: false`, a write to
+a collection that has *no* registered schema is fine, but a write whose fields
+don't match a schema that *is* registered is rejected. The sample app gathers
+all three into an `AppSchemas.all` aggregate (`lib/src/db/schemas.dart`), which
+is what every `open()` call passes:
+
+```dart
+abstract final class AppSchemas {
+  static final CollectionSchema projects = CollectionSchema(
+    collection: 'projects',
+    jsonSchema: {
+      'required': ['name', 'description', 'createdAt'],
+      'properties': {
+        'name': {'type': 'string', 'minLength': 1},
+        'description': {'type': 'string'},
+        'createdAt': {'type': 'string', 'format': 'date-time'},
+      },
+      'additionalProperties': false,
+    },
+  );
+
+  static final CollectionSchema tasks = /* the tasks schema shown above */;
+
+  static final CollectionSchema taskComments = CollectionSchema(
+    collection: 'taskComments',
+    jsonSchema: {
+      'required': ['taskId', 'author', 'body', 'createdAt'],
+      'properties': {
+        'taskId': {'type': 'string', 'minLength': 1},
+        'author': {'type': 'string', 'minLength': 1},
+        'body': {'type': 'string', 'minLength': 1},
+        'createdAt': {'type': 'string', 'format': 'date-time'},
+      },
+      'additionalProperties': false,
+    },
+  );
+
+  /// All three, in the order passed to `KmdbDatabase.open(schemas: ...)`.
+  static final List<CollectionSchema> all = [projects, tasks, taskComments];
 }
 ```
 
@@ -394,6 +607,81 @@ try {
 }
 ```
 
+## Putting it together: `AppDatabase.open()`
+
+The fragments above — the two-phase device-ID open, the schemas, indexes,
+FTS indexes, the vault store, vault search, and the encryption branch — compose
+into one wrapper the rest of the app calls. Here it is in full
+(`lib/src/db/app_database.dart`); every later section (`db.collection(...)`,
+sync, search) assumes the database was opened this way:
+
+```dart
+import 'package:kmdb/kmdb.dart';
+// The extractor types below are NOT in the kmdb barrel — each ships in its
+// own package (added to pubspec.yaml in "Install kmdb"):
+import 'package:kmdb_extractor_html/kmdb_extractor_html.dart';
+import 'package:kmdb_extractor_markdown/kmdb_extractor_markdown.dart';
+
+import 'schemas.dart';
+
+abstract final class AppDatabase {
+  /// Opens (or creates) the database at [path], wiring every subsystem this
+  /// guide covers. [encryptionConfig] is `null` for a plaintext database, an
+  /// `EncryptionConfig(passphrase:/recoveryCode:)` to unlock an existing
+  /// encrypted one, or `(await EncryptionConfig.createResult(...)).config` to
+  /// provision a new one. [adapter] defaults to the real filesystem.
+  static Future<KmdbDatabase> open({
+    required String path,
+    EncryptionConfig? encryptionConfig,
+    StorageAdapter? adapter,
+  }) async {
+    final resolvedAdapter = adapter ?? StorageAdapterNative();
+    await resolvedAdapter.createDirectory(path);
+
+    // Phase 1 — establish the stable device ID (see "two-phase open" above).
+    const defaultDeviceId = '00000000';
+    var (minimalStore, _) = await KvStoreImpl.open(path, resolvedAdapter);
+    final deviceId = await minimalStore.ensureDeviceId();
+    if (deviceId != defaultDeviceId) {
+      await minimalStore.close(flush: false); // only the device-ID write; replays from WAL
+    }
+
+    // Always construct a VaultStore so attachments + automatic ref-counting
+    // work for every collection write (see "Vault: attachments").
+    final vaultStore = VaultStore(dbDir: path, adapter: resolvedAdapter);
+
+    // Phase 2 — open the full database with the stable device ID.
+    return KmdbDatabase.open(
+      path: path,
+      adapter: resolvedAdapter,
+      deviceId: deviceId,
+      encryptionConfig: encryptionConfig,
+      schemas: AppSchemas.all,
+      indexes: [
+        IndexDefinition('tasks', 'projectId'),
+        IndexDefinition('taskComments', 'taskId'),
+      ],
+      ftsIndexes: [
+        FtsIndexDefinition(collection: 'tasks', field: 'title'),
+        FtsIndexDefinition(collection: 'tasks', field: 'description'),
+        FtsIndexDefinition(collection: 'taskComments', field: 'body'),
+      ],
+      vaultStore: vaultStore,
+      vaultSearch: VaultSearchConfig(
+        extractors: [HtmlTextExtractor(), MarkdownTextExtractor()],
+      ),
+    );
+  }
+}
+```
+
+`adapter`, `encryptionConfig`, `schemas`, `indexes`, `ftsIndexes`,
+`vaultStore`, and `vaultSearch` are all optional parameters of
+`KmdbDatabase.open` — omit any subsystem you don't use. This wrapper wires all
+of them because the sample app exercises all of them; a simpler app can pass
+far fewer. Once opened, reach the vault store back via `db.vaultStore` (below)
+rather than constructing a second `VaultStore` for the same directory.
+
 # CRUD and queries (spec §13)
 
 `KmdbCollection<T>` gives you `insert`/`get`/`replace`/`put`/`delete`, plus a
@@ -419,6 +707,13 @@ Pick `insert` when you want to *guarantee* a fresh document (it throws
 `ArgumentError` if the value already carries a key); pick `put` for a normal
 save-this-document call whether it is new or existing; pick `replace` when
 you specifically want "this key must already exist."
+
+The "no-op" / `DocumentNotFoundException` behaviours above assume a
+**well-formed key** — a 32-char lowercase-hex UUIDv7, i.e. one the framework
+minted. Passing a malformed string (e.g. `'deadbeef'`) throws `FormatException`
+("version 7 required") *before* the lookup, not a silent no-op. In normal use
+you only ever pass keys you got back from `insert`/`put`/`get`, so this is
+mostly a guard against hand-constructed keys.
 
 # The secondary index (spec §16)
 
@@ -492,6 +787,21 @@ final ref = await vaultStore.ingest(
 );
 final updated = task.copyWith(attachmentUris: [...task.attachmentUris, ref.uri]);
 await tasks.put(updated); // writes the doc AND the ref-count increment atomically
+```
+
+The snippet above constructs the `VaultStore` inline for clarity, but in an
+assembled app `AppDatabase.open()` owns it (see
+["Putting it together"](#putting-it-together-appdatabaseopen) above). At an
+ingest call site, reach that same instance via **`db.vaultStore`** — do **not**
+construct a second `VaultStore` for the same directory, as the two would not
+share in-memory state:
+
+```dart
+final ref = await db.vaultStore!.ingest(
+  bytes: fileBytes,
+  hlcTimestamp: (await db.store.storeInfo()).currentHlc,
+  originalName: 'report.md',
+);
 ```
 
 ## Ref counting is automatic — if you write through KmdbCollection
@@ -583,8 +893,10 @@ for (final hit in result.hits) {
 ```
 
 The sample app registers only pure-Dart extractors (`HtmlTextExtractor`,
-`MarkdownTextExtractor`) to keep its native-asset footprint minimal — see
-["Going further"](#going-further) for `PdfTextExtractor`. Vault content
+`MarkdownTextExtractor` — imported from `package:kmdb_extractor_html/…` and
+`package:kmdb_extractor_markdown/…`, **not** the `kmdb` barrel) to keep its
+native-asset footprint minimal — see ["Going further"](#going-further) for
+`PdfTextExtractor`. Vault content
 extraction and indexing run asynchronously in a background isolate queue, so
 a `searchVault()` call immediately after `ingest()` may not yet see the new
 content; poll or wait briefly if you need read-your-writes for a test.
