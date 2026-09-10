@@ -129,6 +129,22 @@ final class HighwaterMark {
   /// HWM files that fail to parse throw [FormatException] — the horizon
   /// must reflect every visible live device, so a corrupt HWM is a hard
   /// error rather than a silent omission.
+  ///
+  /// ## Authentication failures
+  ///
+  /// Likewise, if [adapter] wraps a `SyncAuthenticatingAdapter` and a peer's
+  /// `.hwm` file cannot be authenticated (a forged, rotated-key, or
+  /// pre-enrollment legacy artefact), the underlying `SyncAuthException`
+  /// **propagates out of this method** — it is not swallowed here. This
+  /// method has no way to know whether skipping the failed peer is safe;
+  /// that determination is caller-specific (see the "Per-site rejection
+  /// policy" table in `docs/spec/34_sync_authentication.md`). The
+  /// tombstone-GC-horizon caller (`SyncEngine`'s
+  /// `setTombstoneHorizonProvider` closure) catches it there and *defers* GC
+  /// by returning `Hlc(0, 0)` rather than skipping the peer's contribution —
+  /// skipping would raise the `min` and risk tombstone resurrection under a
+  /// forged `.hwm`. A future caller of this method must not assume the
+  /// exception is swallowed here.
   static Future<Hlc?> minCurrentHlcAcrossDevices(
     String hwmDir,
     SyncStorageAdapter adapter, {

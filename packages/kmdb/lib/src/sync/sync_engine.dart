@@ -125,13 +125,27 @@ final class SyncEngine {
     // behaviour for a freshly-configured sync folder or a temporarily
     // quiescent topology.
     _store.setTombstoneHorizonProvider(() async {
-      final min = await HighwaterMark.minCurrentHlcAcrossDevices(
-        _remoteHwmDir,
-        _cloudAdapter,
-        localDeviceId: _deviceId,
-        evictAfter: _config.staleDeviceEvictionAfter,
-      );
-      return min ?? const Hlc(0, 0);
+      try {
+        final min = await HighwaterMark.minCurrentHlcAcrossDevices(
+          _remoteHwmDir,
+          _cloudAdapter,
+          localDeviceId: _deviceId,
+          evictAfter: _config.staleDeviceEvictionAfter,
+        );
+        return min ?? const Hlc(0, 0);
+      } on SyncAuthException {
+        // A peer `.hwm` in the sync folder failed authentication (§34 T1 /
+        // R-5). We cannot know that peer's true sync position, so we
+        // conservatively block ALL tombstone GC this round rather than
+        // advance the horizon past a peer of unknown position (skipping it
+        // would RAISE the min and hand a write-access attacker a
+        // premature-GC/resurrection primitive — see §34's per-site rejection
+        // policy). Deferring GC is a benign availability cost; the sync path
+        // already recorded the peer's unauthenticated status. This also
+        // keeps close(flush:true)'s compaction total, so the LOCK is
+        // released even when a forged/legacy HWM is present.
+        return const Hlc(0, 0);
+      }
     });
   }
 
