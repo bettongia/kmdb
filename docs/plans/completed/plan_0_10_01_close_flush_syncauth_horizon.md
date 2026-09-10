@@ -1,11 +1,13 @@
 # Harden `close(flush:true)` against `SyncAuthException` on the tombstone-GC-horizon path
 
-**Status**: Implementing — `kmdb-plan-implement` started 2026-09-10 on
-branch `20260910_plan_0_10_01_close_flush_syncauth_horizon`, worktree
-`.worktrees/20260910_plan_0_10_01_close_flush_syncauth_horizon`, base `main` @
-`996fa65`.
+**Status**: **Complete** — shipped in [PR #90](https://github.com/bettongia/kmdb/pull/90)
+(squash-merged to `main` 2026-09-10 as `38d26d6`, CI green). `kmdb-qa` signed
+off with zero blocking issues; the defer-not-skip disposition and its
+fault-injection tests (T1 chain-repro + LOCK-release, T2 defer-not-skip proof,
+T3 transient-defer) were independently verified. §34's rejection-policy table
+row landed with the grounding pass. Closes finding #2.
 
-**PR link**: _(none yet)_
+**PR link**: [#90](https://github.com/bettongia/kmdb/pull/90)
 
 > **Provenance.** Found by `kmdb-qa` during the 0.1.0 integration-guide review
 > (2026-09-07, [PR #89](https://github.com/bettongia/kmdb/pull/89)) as its
