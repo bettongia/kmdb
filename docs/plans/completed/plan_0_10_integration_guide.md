@@ -1,6 +1,10 @@
 # Library Integration Guide + sample Flutter to-do app
 
-**Status**: Implementing
+**Status**: **Complete** — integration guide + sample app shipped in
+[PR #89](https://github.com/bettongia/kmdb/pull/89) (merged `b846430`);
+`kmdb-qa` PASS; the B2 cold-read acceptance gate passed on run 2 (0 blocker /
+0 major) after the run-1 gaps were fixed (`e2ed4f6`) and the run-2 minors
+closed (`50b59dd`). This is the closing `0_10.md` (0.1.0) deliverable.
 
 > This plan was promoted to `Investigated` on 2026-07-17, but several
 > subsystems it pins have changed on `main` since. A refresh pass on
@@ -828,21 +832,23 @@ guide's **completeness and accuracy**, so it must be a genuine cold read.
 > the one that also validates it. Do not check these off, fill in a friction
 > log, or run B2 as part of this implementation pass.
 
-- [ ] **(B2)** Run the cold-read guide-validation per the "Guide-validation
-      additions" design above: an **isolated worktree/clone** stripped of
-      `packages/kmdb_example_todo/`, `docs/spec/`, `docs/primer.md`,
-      `CLAUDE.md`, `docs/plans/`, and `docs/proposals/`, containing only the
-      guide + an empty app dir + the `kmdb` package to compile against. Drive
-      it with a **general-purpose / cold agent (NOT a `kmdb-*` agent)**, which
-      builds the sample app **following only the guide**, allowed to read
-      `kmdb`'s public API but **not** the reference sample app, spec, or this
-      plan/primer.
-- [ ] **(B2)** Collect the completed friction-log copy at
-      `docs/integration_guide/friction_logs/YYYY-MM-DD_run-N.md`; the main
-      session reviews it. **Pass criterion:** a working app built end-to-end
-      with **no `blocker`-severity friction**. If any blocker occurred, fix the
-      guide and **re-run** (fresh copy) until a run passes. This repeatable gate
-      is the **last step before the guide is considered done**.
+- [x] **(B2)** Ran the cold-read guide-validation per the design above (main
+      session, post-merge, 2026-09-11): a general-purpose (non-`kmdb-*`)
+      KMDB-naïve agent in an isolated worktree stripped of the reference app,
+      spec, plans, proposals, reviews, roadmap, primer, and CLAUDE.md, building
+      the app from `docs/integration_guide/README.md` alone. **Run 2 (fresh
+      agent, on the fixed guide): PASS — 0 blocker, 0 major, 5 minor.**
+- [x] **(B2)** Collected + reviewed both friction-log copies. **Run 1**
+      (`friction_logs/2026-09-11_run-1.md`): 0 blocker, 4 major, 4 minor — a
+      working data-layer app built end-to-end, but key code (`AppDatabase.open()`,
+      the `Project`/`TaskComment` models+codecs, `Task.copyWith`, the full schema
+      set) was referenced-but-never-printed. Fixed in [PR #89 follow-up commit
+      `e2ed4f6`] and the 5 run-2 minors in `50b59dd`. **Run 2**
+      (`friction_logs/2026-09-11_run-2.md`): the majors are confirmed resolved
+      (8-test headless suite passes, `dart analyze` clean); the 5 minors were all
+      closed. **Pass criterion met** — a working app builds end-to-end with no
+      blocker-severity friction. Guide validated; no re-run required (the run-2
+      fixes are prose + a verbatim-from-reference schema block).
 
 ## Review notes (kmdb-plan-reviewer, 2026-07-17)
 
